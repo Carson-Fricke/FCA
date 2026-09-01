@@ -1,0 +1,46 @@
+{
+  "taskId": "T030",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "workflow-syntax-and-expressions",
+      "status": "passed",
+      "commands": [
+        "actionlint .github/workflows/publish-image.yml",
+        "action-validator .github/workflows/publish-image.yml"
+      ],
+      "result": "actionlint 1.7.12, with ShellCheck 0.11.0 available, and action-validator 0.6.0 reported no errors"
+    },
+    {
+      "name": "ghcr-authentication-and-least-privilege",
+      "status": "passed",
+      "result": "The publish job grants only contents: read and packages: write, logs in only to ghcr.io as github.actor, and uses the automatically generated secrets.GITHUB_TOKEN; no PAT, Azure permission, deployment, or secret input is present"
+    },
+    {
+      "name": "single-immutable-image-contract",
+      "status": "passed",
+      "result": "One build-push step publishes ghcr.io/<lowercase-owner>/<lowercase-repository>:<full GITHUB_SHA>, and workflow outputs expose that tag, the registry digest, and the digest-addressed image reference for caller jobs"
+    },
+    {
+      "name": "pinned-action-revisions",
+      "status": "passed",
+      "command": "git ls-remote against each action repository and referenced release tag",
+      "result": "All four action references are full 40-character commit SHAs matching checkout v4.2.2, setup-buildx v3.12.0, login v3.6.0, and build-push v6.19.0"
+    },
+    {
+      "name": "shared-api-and-ingest-entrypoints",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_package_entrypoints.py",
+      "result": "7 tests passed; the single Dockerfile package entrypoint dispatches both lake api and lake ingest commands"
+    }
+  ],
+  "limitations": [
+    "Docker is unavailable locally, so no local image build or runtime command execution was performed",
+    "GHCR authentication, package creation, SHA-tag publication, and emitted registry digest values require a GitHub-hosted run; this reusable workflow has no direct trigger and was not invoked or pushed",
+    "The future caller owned by T031 must grant packages: write because reusable workflows cannot elevate the caller GITHUB_TOKEN permissions"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "taskId": "T016",
+  "numTotalTests": 3,
+  "numPassedTests": 3,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bicep-build",
+      "status": "passed",
+      "command": "az bicep build --file infra/modules/storage.bicep --stdout",
+      "result": "Storage module compiled without diagnostics using Bicep 0.46.1"
+    },
+    {
+      "name": "secure-storage-defaults",
+      "status": "passed",
+      "result": "HNS and OAuth defaults are enabled while shared keys, public blobs, local users, SFTP, NFS, and versioning are disabled"
+    },
+    {
+      "name": "lifecycle-and-data-services",
+      "status": "passed",
+      "result": "Lake container, catalog tables, backfill queues, and enabled Hot-to-Cool lifecycle policy are declared"
+    }
+  ]
+}

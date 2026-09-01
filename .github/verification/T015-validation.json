@@ -1,0 +1,49 @@
+{
+  "taskId": "T015",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "yaml-syntax-and-version",
+      "status": "passed",
+      "command": "uv run --isolated --no-project --python 3.12 --with PyYAML python -c <YAML syntax and schema-version assertions>",
+      "result": "uv installed PyYAML into an isolated Python 3.12 environment and parsed all 3 files as schema_version 1 mappings"
+    },
+    {
+      "name": "documented-knob-coverage",
+      "status": "passed",
+      "command": "uv run --isolated --no-project --python 3.12 --with PyYAML python -c <market-lake configuration assertions>",
+      "result": "Assertions passed for AAPL/SPY SIP raw trades and quotes with separate history valves; daily nearest-two OPRA expirations and spot-relative strike window; SPY/QQQ/AAPL rolling two-year option soak and disabled expansion toward ten; BTC/USD and ETH/USD trades and quotes with disabled approximately twenty-pair rollout and explicit shared-quota priority; XNYS holidays and half-days plus continuous UTC days; and documented provider, storage, backfill, queue, API, SAS, SQL, lifecycle, budget, logging, and reporting controls"
+    },
+    {
+      "name": "credential-value-scan",
+      "status": "passed",
+      "command": "uv run --isolated --no-project --python 3.12 --with PyYAML python -c <parsed YAML credential-value scan>",
+      "result": "A recursive key-aware YAML scan found no non-empty credential-bearing keys; raw text scans found no AWS access IDs, private-key headers, URL userinfo, signed-query parameters, or bearer-token values"
+    },
+    {
+      "name": "version-control-eligibility",
+      "status": "passed",
+      "command": "git check-ignore config/market-lake/calendars.yaml config/market-lake/settings.yaml config/market-lake/universes.yaml",
+      "result": "Exit code 1: none of the versioned YAML files are ignored"
+    },
+    {
+      "name": "diff-quality",
+      "status": "passed",
+      "command": "git diff --no-index --check -- NUL <scoped-file> (for each of the 4 untracked T015 files)",
+      "result": "Each file returned the expected no-index difference exit code with no whitespace diagnostics; an ASCII decode and trailing-whitespace scan also passed"
+    }
+  ],
+  "assumptions": [
+    "T015 is market-lake configuration; quant-harness configuration remains owned by its later roadmap tasks",
+    "The task export fixes behavior and selected values but leaves several numeric bounds open, so clearly commented conservative defaults are supplied for T026 to validate",
+    "The two initial crypto pairs are examples for validation; rollout remains disabled until T060 approves the approximately twenty-pair universe"
+  ],
+  "limitations": [
+    "No application loader was run because typed YAML and environment override loading belongs to T026",
+    "PyYAML was installed only in a uv-isolated verification environment; no project dependency was added"
+  ]
+}

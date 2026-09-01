@@ -1,0 +1,60 @@
+# Credentials are intentionally absent; T026 will load them from the
+# environment or Key Vault.
+# Numeric policy values not fixed by the task export are conservative defaults.
+schema_version: 1
+
+equities:
+  soak:
+    symbols:
+      - AAPL
+      - SPY
+    data_types:
+      - trades
+      - quotes
+    feed: sip
+    adjustment: raw
+    history:
+      trades:
+        policy: all_available
+        maximum_liquidity_rank: null
+      quotes:
+        policy: all_available
+        maximum_liquidity_rank: null
+    backfill_order: newest_first
+
+options:
+  feed: opra
+  data_types:
+    - trades
+    - quotes
+  selection:
+    frequency: daily
+    persist_front_set: true
+    expiration_order: nearest
+    expiration_count: 2
+    strike_window:
+      basis: underlying_spot
+      percent_below: 10
+      percent_above: 10
+  soak:
+    underlyings:
+      - SPY
+      - QQQ
+      - AAPL
+    lookback_years: 2
+  expansion:
+    enabled: false
+    maximum_underlyings: 10
+
+crypto:
+  pairs:
+    - BTC/USD
+    - ETH/USD
+  data_types:
+    - trades
+    - quotes
+  rollout:
+    enabled: false
+    target_pair_count: 20
+    scheduling_priority: after_equities_and_options
+    quota_policy: shared_backfill_quota

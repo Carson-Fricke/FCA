@@ -1,0 +1,49 @@
+{
+  "taskId": "T018",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bicep-build-and-lint",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/modules/container-apps.bicep --stdout",
+        "az bicep lint --file infra/modules/container-apps.bicep"
+      ],
+      "result": "The resource-group module compiled and linted without diagnostics using Bicep 0.46.1"
+    },
+    {
+      "name": "observability-and-consumption-environment",
+      "status": "passed",
+      "result": "Compiled ARM assertions found exactly one Log Analytics workspace, one Azure Monitor diagnostic route for all environment logs, and one Container Apps environment with only the Consumption workload profile. Log Analytics local authentication and public ingestion are disabled; public query access is opt-in, while diagnostic settings use the secure Microsoft routing channel. Environment public network access is also opt-in, and internal peer traffic enables mTLS and encryption"
+    },
+    {
+      "name": "api-scale-identity-and-ingress",
+      "status": "passed",
+      "result": "Compiled ARM assertions found one API Container App on the Consumption profile with only the supplied runtime user-assigned identity, identity availability limited to main containers, HTTPS-only ingress, public exposure disabled by default, and HTTP scaling bounded from zero to two replicas"
+    },
+    {
+      "name": "scheduled-and-manual-ingest",
+      "status": "passed",
+      "result": "Compiled ARM assertions found one scheduled Container Apps job with a parameterized five-field UTC cron expression, one replica per execution, bounded timeout and retries, and an output exposing its job name and resource ID. Azure Container Apps supports starting scheduled jobs on demand through the job start operation without changing the schedule"
+    },
+    {
+      "name": "shared-image-entrypoint-and-secret-free-boundary",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/modules/container-apps.bicep --stdout | jq -e <compiled ARM property assertions>",
+        "PowerShell static assertion comparing Dockerfile ENTRYPOINT with Container Apps args"
+      ],
+      "result": "Both workloads use the same sharedImageReference. Dockerfile ENTRYPOINT is [\"lake\"]; the app supplies args [\"api\"] and the job supplies args [\"ingest\"] without overriding command, producing lake api and lake ingest. No secret, shared-key, account-key, registry-password, or secret-reference property exists in the compiled module"
+    }
+  ],
+  "limitations": [
+    "No Azure login, deployment, what-if, job execution, or data-plane operation was run; verification was limited to offline Bicep compilation, linting, and static inspection of the compiled ARM template",
+    "T020 owns the root composition and environment parameter files and must supply names, the runtime identity resource and client IDs, the immutable shared image digest reference, and any explicit public API or Log Analytics query access decision",
+    "The API command boundary exists in the shared image, but the listening FastAPI implementation and HTTP health route are owned by later task T040; TCP startup, readiness, and liveness probes avoid assuming that future route path",
+    "Pulling a private GHCR package requires separate registry authentication design; this module intentionally includes no registry credential, token, or secret reference"
+  ]
+}

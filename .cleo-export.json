@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-01T18:52:04.967Z",
+    "exportedAt": "2026-09-01T20:34:22.107Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 138
     },
-    "checksum": "ebb32adc73cc44bb",
+    "checksum": "9905d392caf13f29",
     "taskCount": 137,
     "exportMode": "full"
   },
@@ -174,21 +174,21 @@
     "T013": {
       "type": "task",
       "title": "E0.1 Repository tree, gitignore, and README map",
-      "status": "pending",
+      "status": "done",
       "parentId": "T003",
       "depends": []
     },
     "T016": {
       "type": "task",
       "title": "E1.1 Storage data services and blob lifecycle",
-      "status": "pending",
+      "status": "done",
       "parentId": "T004",
       "depends": []
     },
     "T021": {
       "type": "task",
       "title": "E2.1 Partition paths and stable PyArrow schemas",
-      "status": "pending",
+      "status": "done",
       "parentId": "T005",
       "depends": [
         "T014"
@@ -373,14 +373,14 @@
     "T003": {
       "type": "epic",
       "title": "E0 Repository and Python foundation",
-      "status": "pending",
+      "status": "done",
       "parentId": "T001",
       "depends": []
     },
     "T014": {
       "type": "task",
       "title": "E0.2 Python package, tooling, and container entrypoints",
-      "status": "pending",
+      "status": "done",
       "parentId": "T003",
       "depends": [
         "T013"
@@ -389,7 +389,7 @@
     "T017": {
       "type": "task",
       "title": "E1.2 Managed identities, RBAC, Key Vault, and OIDC",
-      "status": "pending",
+      "status": "done",
       "parentId": "T004",
       "depends": [
         "T016"
@@ -593,7 +593,7 @@
     "T015": {
       "type": "task",
       "title": "E0.3 Universe, calendar, and settings YAML",
-      "status": "pending",
+      "status": "done",
       "parentId": "T003",
       "depends": [
         "T013"
@@ -602,7 +602,7 @@
     "T018": {
       "type": "task",
       "title": "E1.3 Container Apps environment, API, and ingest job",
-      "status": "pending",
+      "status": "done",
       "parentId": "T004",
       "depends": [
         "T014",
@@ -613,7 +613,7 @@
     "T023": {
       "type": "task",
       "title": "E2.3 XNYS sessions and crypto UTC days",
-      "status": "pending",
+      "status": "done",
       "parentId": "T005",
       "depends": [
         "T014"
@@ -622,7 +622,7 @@
     "T030": {
       "type": "task",
       "title": "E3.3 GHCR image build and immutable tagging",
-      "status": "pending",
+      "status": "done",
       "parentId": "T006",
       "depends": [
         "T014"
@@ -1695,7 +1695,7 @@
     {
       "id": "T013",
       "title": "E0.1 Repository tree, gitignore, and README map",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T003",
@@ -1706,25 +1706,125 @@
       "labels": [
         "foundation"
       ],
+      "notes": [
+        "2026-09-01 20:03:39 UTC: Implemented tracked repository layout, ignore policy, and architecture map; updated status to reflect the package, image, and foundational Bicep modules now present."
+      ],
       "acceptance": [
         "Tracked repository layout and README match the approved service architecture"
       ],
       "createdAt": "2026-09-01T03:20:45.048Z",
-      "updatedAt": "2026-09-01T03:41:16.169Z",
+      "updatedAt": "2026-09-01T20:03:43.747Z",
+      "completedAt": "2026-09-01T20:03:38.178Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:03:21.929Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:20:45.048Z"
+        "initializedAt": "2026-09-01T03:20:45.048Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".gitignore",
+                    "sha256": "08239aadebf9a9b105e2efecca3129f9198067993418529ddc8117d41997b7ec"
+                  },
+                  {
+                    "path": "README.md",
+                    "sha256": "d758ea1662a86ea6e08b5ee8ed5c104671999ffe9a110777a3b819a8d968685b"
+                  },
+                  {
+                    "path": ".github/architecture/repository.md",
+                    "sha256": "7e1cbc80ae1d7d7cf404f1eb278f9a77dfa0c244713798c2c79120f6e06b24bd"
+                  },
+                  {
+                    "path": ".github/workflows/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  {
+                    "path": "config/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  {
+                    "path": "infra/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  {
+                    "path": "src/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  {
+                    "path": "strategies/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  {
+                    "path": "tests/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T013",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "daa836e2-c4e5-564f-813a-7d06a07e4b0f"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree implementation; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:02:54.098Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T013-validation.json",
+                "sha256": "5297714409b81696a73316f1d3b936a8268326ed9f78196af6d8ecfd7c2b9083",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:03:07.533Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:03:22.320Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "local",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -1732,7 +1832,7 @@
     {
       "id": "T016",
       "title": "E1.1 Storage data services and blob lifecycle",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T004",
@@ -1744,25 +1844,92 @@
         "bicep",
         "storage"
       ],
+      "notes": [
+        "2026-09-01 20:04:47 UTC: Implemented idempotent HNS-enabled LRS storage with lake container, catalog tables, backfill queues, OAuth defaults, and Hot-to-Cool lifecycle management."
+      ],
       "acceptance": [
         "Storage is idempotently provisioned with versioning off and the day-zero lifecycle policy enabled"
       ],
       "createdAt": "2026-09-01T03:20:56.594Z",
-      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "updatedAt": "2026-09-01T20:04:51.367Z",
+      "completedAt": "2026-09-01T20:04:46.662Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:04:31.802Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:20:56.594Z"
+        "initializedAt": "2026-09-01T03:20:56.594Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/storage.bicep",
+                    "sha256": "66c3cd0e1dd798eac41a38307b445a7dc125bff128e051770c49c36a63d96aa7"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T016",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "a8128cb7-4815-5485-8b68-6cf0f1f02ec0"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors the content-hashed working-tree storage module; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:04:07.791Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T016-validation.json",
+                "sha256": "11d03a66cf6534922041fe9ca86bde707b3a8ebc3f9afba7b1feea6a006d86af",
+                "passCount": 3,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:04:19.691Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:04:31.904Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -1770,7 +1937,7 @@
     {
       "id": "T021",
       "title": "E2.1 Partition paths and stable PyArrow schemas",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T005",
@@ -1782,6 +1949,9 @@
         "parquet",
         "schema"
       ],
+      "notes": [
+        "2026-09-01 20:30:59 UTC: Implemented stable date-first Hive partition paths, deterministic symbol filenames, and versioned PyArrow schemas for equity, option, and crypto trades and quotes."
+      ],
       "acceptance": [
         "Every supported asset and data type maps to the documented path and stable schema"
       ],
@@ -1789,21 +1959,93 @@
         "T014"
       ],
       "createdAt": "2026-09-01T03:21:15.021Z",
-      "updatedAt": "2026-09-01T03:25:00.028Z",
+      "updatedAt": "2026-09-01T20:31:04.093Z",
+      "completedAt": "2026-09-01T20:30:59.632Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:30:45.215Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:15.021Z"
+        "initializedAt": "2026-09-01T03:21:15.021Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/partition_paths.py",
+                    "sha256": "7acd3d7ce272d2cf503d6a167e455cc4ef8ed6cae5629a1025c25e99010af434"
+                  },
+                  {
+                    "path": "src/lake/pyarrow_schemas.py",
+                    "sha256": "eca8f7a95bedef73c40a4a503d0e880213def5bf0923cd3026d8761b15338511"
+                  },
+                  {
+                    "path": "tests/test_lake_data_contracts.py",
+                    "sha256": "45df8c210fba6b4cca2349c8dfad5e1489a18fad08dea086262bce4e3da40cbb"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T021",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "70b9877a-f6c8-504d-b270-f482caad74ea"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree path and schema contracts; no commit was created yet"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:30:04.395Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T021-validation.json",
+                "sha256": "e646a4a08965b63e237511be4d69e4404332fbad94bd204e700e83f4e63871c4",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:30:17.768Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:30:45.538Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -2628,7 +2870,7 @@
     {
       "id": "T003",
       "title": "E0 Repository and Python foundation",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -2652,8 +2894,9 @@
         "Complete child T067: E0.4 Publish reconciled CLEO state"
       ],
       "createdAt": "2026-09-01T03:15:21.616Z",
-      "updatedAt": "2026-09-01T03:53:49.111Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-01T20:28:31.066Z",
+      "completedAt": "2026-09-01T20:28:31.066Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -2661,7 +2904,7 @@
     {
       "id": "T014",
       "title": "E0.2 Python package, tooling, and container entrypoints",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T003",
@@ -2673,6 +2916,9 @@
         "python",
         "foundation"
       ],
+      "notes": [
+        "2026-09-01 20:07:58 UTC: Implemented Python 3.12 packaging and a locked uv-built image with api and ingest command boundaries. Standardized development on uv, Ruff, ty, and pytest; MyPy is not configured."
+      ],
       "acceptance": [
         "The package installs and exposes working api and ingest entrypoints",
         "Ruff and pytest are configured"
@@ -2681,21 +2927,127 @@
         "T013"
       ],
       "createdAt": "2026-09-01T03:20:48.889Z",
-      "updatedAt": "2026-09-01T03:41:16.169Z",
+      "updatedAt": "2026-09-01T20:08:02.870Z",
+      "completedAt": "2026-09-01T20:07:57.662Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:07:43.485Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:20:48.889Z"
+        "initializedAt": "2026-09-01T03:20:48.889Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "pyproject.toml",
+                    "sha256": "953a6d953020202451c7df28c0686b37e68a22bfbdd63da20fe2e7d43986520c"
+                  },
+                  {
+                    "path": "uv.lock",
+                    "sha256": "9859fe4a3ddfe70d94e298d266e4892259bccc5ab69f01392245164f96643ab6"
+                  },
+                  {
+                    "path": "Dockerfile",
+                    "sha256": "a2cd0889dd4e5d0ffac5c1f38275b99bcf15339430cd917e9cd1ea14d12187f6"
+                  },
+                  {
+                    "path": ".dockerignore",
+                    "sha256": "4812aca127feffcfde9394c76ea546231780bd5fba14edfafa5ef4b9fffb3479"
+                  },
+                  {
+                    "path": "src/lake/__init__.py",
+                    "sha256": "201096a5715c66c537fb3f51f4e1cb77bb22261e3a14deca5ebd014bab9df9cc"
+                  },
+                  {
+                    "path": "src/lake/__main__.py",
+                    "sha256": "31f1d17f7b42d2af822aa86232c26d0bac58f94bb06ee0e5aa839ff44dc1df1a"
+                  },
+                  {
+                    "path": "src/lake/cli.py",
+                    "sha256": "a66811774f13cd024c6d4c9535a432c53ae1a0585044e48b8bac22b3d0973122"
+                  },
+                  {
+                    "path": "src/lake/api.py",
+                    "sha256": "9ef60c8cb31ea3b1c240ab2b6606b2b7075ac987fcc4d0830d3571a000ad2e44"
+                  },
+                  {
+                    "path": "src/lake/ingest.py",
+                    "sha256": "bb9e3e4def8813830e66f653f8fadc721c28947a4ed4ce82893a3a2030440b55"
+                  },
+                  {
+                    "path": "tests/test_package_entrypoints.py",
+                    "sha256": "5efb4f62192ac28843d51a461c70ce1b322acc5d745b6de7cc70c728522858e8"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T014",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "f8b51f65-af7d-5028-8f19-bb84a44c1cba"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T014",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "5070cc96-5c6f-5378-9c18-d3f28af3eac1"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree packaging and entrypoint implementation; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:07:18.913Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T014-validation.json",
+                "sha256": "450888d420032357615a6206ca14c3f72fb759707eefd63e0e4d2835081940da",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:07:31.115Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:07:43.585Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -2703,7 +3055,7 @@
     {
       "id": "T017",
       "title": "E1.2 Managed identities, RBAC, Key Vault, and OIDC",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T004",
@@ -2716,6 +3068,9 @@
         "identity",
         "security"
       ],
+      "notes": [
+        "2026-09-01 20:09:12 UTC: Implemented separate runtime and GitHub deployer identities, environment-scoped immutable GitHub OIDC federation, RBAC-only Key Vault, and least-privilege storage/secret role assignments."
+      ],
       "acceptance": [
         "Runtime accesses storage, queue, tables, and secrets without account keys",
         "GitHub can deploy through federated OIDC"
@@ -2724,21 +3079,103 @@
         "T016"
       ],
       "createdAt": "2026-09-01T03:21:00.207Z",
-      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "updatedAt": "2026-09-01T20:09:16.467Z",
+      "completedAt": "2026-09-01T20:09:11.826Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:08:56.997Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:00.207Z"
+        "initializedAt": "2026-09-01T03:21:00.207Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/identities.bicep",
+                    "sha256": "26917c588ccc135418ec2fba40ffc91f314420eed8b1ff635734612c324bf49d"
+                  },
+                  {
+                    "path": "infra/modules/key-vault.bicep",
+                    "sha256": "6172c9f25ae8e50145424be72b2181e1b266a002026b4c54c5cc39f766cc265c"
+                  },
+                  {
+                    "path": "infra/modules/access.bicep",
+                    "sha256": "79fa32088ac5c797bf7608cda4615d78985228fe488cfd7f6adb7c797060c1d6"
+                  },
+                  {
+                    "path": "infra/modules/storage.bicep",
+                    "sha256": "66c3cd0e1dd798eac41a38307b445a7dc125bff128e051770c49c36a63d96aa7"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T017",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "3d4db260-8752-5605-b610-f1a7139e345c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T017",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "f56d57c9-c67b-531a-b56a-a75c3642aa5d"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree identity and access implementation; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:08:30.306Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T017-validation.json",
+                "sha256": "109843856d4e349fea10bb263e42f1c27d0359a44cf373be54f0fef4fbdfffc8",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:08:44.347Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:08:57.099Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3685,7 +4122,7 @@
     {
       "id": "T015",
       "title": "E0.3 Universe, calendar, and settings YAML",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T003",
@@ -3696,6 +4133,9 @@
       "labels": [
         "configuration"
       ],
+      "notes": [
+        "2026-09-01 20:28:31 UTC: Added versioned non-secret market-lake universe, calendar, provider, storage, ingestion, API, lifecycle, budget, and reporting defaults."
+      ],
       "acceptance": [
         "YAML files cover every documented configuration knob without embedding secrets"
       ],
@@ -3703,21 +4143,93 @@
         "T013"
       ],
       "createdAt": "2026-09-01T03:20:52.772Z",
-      "updatedAt": "2026-09-01T03:41:16.169Z",
+      "updatedAt": "2026-09-01T20:28:35.094Z",
+      "completedAt": "2026-09-01T20:28:31.066Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:28:13.729Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:20:52.772Z"
+        "initializedAt": "2026-09-01T03:20:52.772Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "config/market-lake/universes.yaml",
+                    "sha256": "78c0ea1f4c983afed280c4b27aa3b21078239472847dc86709e06ed566db0aac"
+                  },
+                  {
+                    "path": "config/market-lake/calendars.yaml",
+                    "sha256": "74cdc6710b1dd5b42c310e141df8e26a486dd93461d69740a5737a78f852a909"
+                  },
+                  {
+                    "path": "config/market-lake/settings.yaml",
+                    "sha256": "dcb9b4115d7516ac1ab70fca08b6b5cb9219f914094b7cc51b0a51f4655f43cb"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T015",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "0119f390-fb8d-5acc-82c8-730d21eda0b0"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree market-lake configuration; no commit was created yet"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:27:48.618Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T015-validation.json",
+                "sha256": "c97916c4f8a1cadeb59aec0be5e7906629efc28a7b846fa68ecaf266966a5083",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:28:01.857Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:28:14.111Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3725,7 +4237,7 @@
     {
       "id": "T018",
       "title": "E1.3 Container Apps environment, API, and ingest job",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T004",
@@ -3737,6 +4249,9 @@
         "bicep",
         "container-apps"
       ],
+      "notes": [
+        "2026-09-01 20:29:40 UTC: Defined keyless Log Analytics, a consumption Container Apps environment, a managed-identity API app scaling 0-2, and a scheduled/manually startable ingest job using the shared image."
+      ],
       "acceptance": [
         "API scales from zero to at most two replicas",
         "Ingest supports cron and manual execution using the shared image"
@@ -3747,21 +4262,91 @@
         "T017"
       ],
       "createdAt": "2026-09-01T03:21:03.835Z",
-      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "updatedAt": "2026-09-01T20:29:44.794Z",
+      "completedAt": "2026-09-01T20:29:40.666Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:29:25.273Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:03.835Z"
+        "initializedAt": "2026-09-01T03:21:03.835Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/container-apps.bicep",
+                    "sha256": "5b93f4629e0fc6d5e267a70a0713d76243c4537d95ae6ccb447b4bd498d7d9e3"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T018",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "048fd629-e357-5058-be5f-8e951b23ccf3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T018",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "7be43f69-aa41-5392-af1f-aaa2b62d35b2"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree Container Apps implementation; no commit was created yet"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:28:59.632Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T018-validation.json",
+                "sha256": "9588cbbc1dbc39e27909a6b0065b0b9c5766168f746cc68582fe9a7d65184e18",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:29:12.037Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:29:25.592Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3769,7 +4354,7 @@
     {
       "id": "T023",
       "title": "E2.3 XNYS sessions and crypto UTC days",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T005",
@@ -3780,6 +4365,9 @@
       "labels": [
         "calendar"
       ],
+      "notes": [
+        "2026-09-01 20:32:07 UTC: Implemented inclusive XNYS sessions with UTC open/close boundaries and continuous inclusive crypto UTC-day ranges."
+      ],
       "acceptance": [
         "Calendar tests exclude closed equity dates and include every crypto UTC date"
       ],
@@ -3787,21 +4375,89 @@
         "T014"
       ],
       "createdAt": "2026-09-01T03:21:22.455Z",
-      "updatedAt": "2026-09-01T03:25:15.185Z",
+      "updatedAt": "2026-09-01T20:32:11.664Z",
+      "completedAt": "2026-09-01T20:32:07.081Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:31:49.474Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:22.455Z"
+        "initializedAt": "2026-09-01T03:21:22.455Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/session_ranges.py",
+                    "sha256": "db657fa9876d50841b4c11386268e87914179438c50dc6216f8a80ffe110a65d"
+                  },
+                  {
+                    "path": "tests/test_session_ranges.py",
+                    "sha256": "526d360af2b7e66122c363d94290a58f12523c8dffe89d1df4f4a4242f98ab28"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T023",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "fae66d4e-e99e-5165-b016-0c2b87381274"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree session range implementation; no commit was created yet"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:31:23.609Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T023-validation.json",
+                "sha256": "23e8d91efbd9f5dd4c4f44a89e8cbe1133b5d927134878c6ec3f8ab334e66861",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:31:37.675Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:31:49.804Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3809,7 +4465,7 @@
     {
       "id": "T030",
       "title": "E3.3 GHCR image build and immutable tagging",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T006",
@@ -3821,6 +4477,9 @@
         "github-actions",
         "ghcr"
       ],
+      "notes": [
+        "2026-09-01 20:33:17 UTC: Added a least-privilege reusable GHCR workflow that publishes one full-SHA-tagged shared image and exposes digest-addressed outputs."
+      ],
       "acceptance": [
         "The workflow publishes one image usable by both API and ingest runtimes"
       ],
@@ -3828,21 +4487,93 @@
         "T014"
       ],
       "createdAt": "2026-09-01T03:21:48.485Z",
-      "updatedAt": "2026-09-01T03:26:08.155Z",
+      "updatedAt": "2026-09-01T20:33:20.947Z",
+      "completedAt": "2026-09-01T20:33:16.976Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T20:33:00.195Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:48.485Z"
+        "initializedAt": "2026-09-01T03:21:48.485Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3486af8ae368eee1f894c776912996246b74cf44",
+                "shortSha": "3486af8"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/workflows/publish-image.yml",
+                    "sha256": "7f6adccf9070b82b4e9684a5d4d0d5bea96fb40a260a51ea8ca05322387ae989"
+                  },
+                  {
+                    "path": "Dockerfile",
+                    "sha256": "a2cd0889dd4e5d0ffac5c1f38275b99bcf15339430cd917e9cd1ea14d12187f6"
+                  },
+                  {
+                    "path": ".dockerignore",
+                    "sha256": "4812aca127feffcfde9394c76ea546231780bd5fba14edfafa5ef4b9fffb3479"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T030",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "e29fa8e8-10c1-5fda-ba31-bcfe88aedbd9"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree GHCR publication workflow; no commit was created yet"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:32:30.199Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T030-validation.json",
+                "sha256": "6e16dcbe9e5de1e9a6a47b41e479d1fa6b13ce083027c4d7c0f14f5ecd2e6720",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T20:32:44.492Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T20:33:00.299Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []

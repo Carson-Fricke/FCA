@@ -1,0 +1,63 @@
+# This file contains non-secret defaults only. Runtime credentials and the API
+# bearer value must come from the environment or Key Vault.
+# Numeric bounds not fixed by the task export are conservative defaults.
+schema_version: 1
+
+provider:
+  name: alpaca
+  request:
+    max_concurrency: 4
+    timeout_seconds: 30
+    retry:
+      max_attempts: 5
+      honor_retry_after: true
+
+storage:
+  parquet:
+    compression: zstd
+    file_granularity: symbol_session_data_type
+  capacity_bytes: 1099511627776
+  pause_enqueue_at_capacity: true
+  pause_ingest_at_capacity: true
+  lifecycle:
+    enabled: true
+    cool_after_days: 14
+    cold:
+      enabled: false
+      minimum_age_days: 365
+
+ingest:
+  backfill:
+    max_replicas: 1
+    order: newest_first
+    liquidity_rank_tiebreaker: true
+    asset_priority:
+      - equity_catch_up
+      - equity_backfill
+      - options_backfill
+      - crypto_backfill
+  queue:
+    visibility_timeout_seconds: 300
+    visibility_renewal_seconds: 60
+    max_delivery_attempts: 5
+    dead_letter_on_exhaustion: true
+
+api:
+  ensure_wait_deadline_seconds: 20
+  catalog:
+    max_range_days: 366
+  sas:
+    ttl_seconds: 900
+    read_only: true
+    object_scoped: true
+  sql:
+    max_scan_bytes: 1073741824
+    max_result_bytes: 33554432
+    authorized_force_override_default: false
+
+operations:
+  monthly_budget_alerts_usd:
+    - 40
+    - 70
+  log_retention_days: 7
+  daily_coverage_report: true

@@ -1,0 +1,24 @@
+schema_version: 1
+
+equities:
+  calendar: XNYS
+  timezone: America/New_York
+  range: exchange_sessions
+  include_half_days: true
+  include_holidays: false
+  catch_up_completed_sessions_only: true
+
+options:
+  calendar: XNYS
+  timezone: America/New_York
+  range: exchange_sessions
+  include_half_days: true
+  include_holidays: false
+
+crypto:
+  calendar: UTC_24_7
+  timezone: UTC
+  range: continuous_utc_days
+  day_start: "00:00:00"
+  include_all_dates: true
+  refresh_current_day: true

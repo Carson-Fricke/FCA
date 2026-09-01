@@ -1,0 +1,45 @@
+{
+  "taskId": "T014",
+  "numTotalTests": 6,
+  "numPassedTests": 6,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "python-312-package-and-entrypoints",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_package_entrypoints.py",
+      "result": "Python 3.12.14 installed fca in the uv-managed project environment; 7 tests passed"
+    },
+    {
+      "name": "ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "30 files already formatted"
+    },
+    {
+      "name": "ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "shared-image-entrypoint",
+      "status": "passed",
+      "command": "uv lock --check; uv build --python 3.12 --wheel --force-pep517 --out-dir <temporary-dir> --clear --no-create-gitignore .; install the wheel with uv in isolated environments and run lake api --help and lake ingest --help",
+      "result": "The lockfile is current, the wheel built successfully, and both isolated installed entrypoints ran successfully. Dockerfile uses pinned uv with uv.lock to build one production environment and dispatch api or ingest through the lake console script; Docker was unavailable for an image build"
+    },
+    {
+      "name": "generated-artifact-ignore-policy",
+      "status": "passed",
+      "result": "Git and Docker ignore Python caches, bytecode, package metadata, and build outputs"
+    }
+  ]
+}

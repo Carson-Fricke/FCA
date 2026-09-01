@@ -1,0 +1,52 @@
+{
+  "taskId": "T021",
+  "timestamp": "2026-09-01T20:18:33Z",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-data-contract-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_data_contracts.py",
+      "result": "21 tests passed in 0.64s"
+    },
+    {
+      "name": "ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "35 files already formatted"
+    },
+    {
+      "name": "ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "full-pytest-suite",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "34 tests passed in 1.63s"
+    }
+  ],
+  "decisions": [
+    "The path contract is date=YYYY-MM-DD/asset_class=<asset>/data_type=<type>/<symbol>.parquet for all six supported asset and data type pairs.",
+    "Symbols are trimmed, uppercased, validated, and percent-encoded as one filename component; BTC/USD is BTC%2FUSD.parquet while compact OSI symbols remain readable.",
+    "All event timestamps are UTC nanoseconds, prices and fractional crypto quantities are decimal128(38, 18), and provider integer sizes and IDs retain unsigned or signed integer types as applicable.",
+    "Each immutable registry entry carries lake.schema and lake.schema.version metadata; nullability is limited to provider-optional equity updates and crypto identifiers, venue codes, or taker sides that vary by feed."
+  ],
+  "limitations": [
+    "CLEO export and RCASD records specify the six datasets and storage invariants but contain no attached field-by-field schema document; schema version 1 therefore makes the Alpaca SIP, OPRA, and crypto payload contract explicit in code and exhaustive tests.",
+    "Parquet writing and object replacement are intentionally deferred to T022."
+  ],
+  "blockers": []
+}

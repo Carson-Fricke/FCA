@@ -1,0 +1,64 @@
+name: Publish container image
+
+on:
+  workflow_call:
+    outputs:
+      image-reference:
+        description: Immutable GHCR image reference
+        value: ${{ jobs.publish.outputs.image-reference }}
+      image-digest:
+        description: Published image digest
+        value: ${{ jobs.publish.outputs.image-digest }}
+      image-tag:
+        description: Full commit SHA image tag
+        value: ${{ jobs.publish.outputs.image-tag }}
+
+jobs:
+  publish:
+    name: Build and publish shared image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-reference: ${{ format('{0}@{1}', steps.image.outputs.name, steps.build.outputs.digest) }}
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.image.outputs.tag }}
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Resolve image name and tag
+        id: image
+        shell: bash
+        run: |
+          image_name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf 'name=%s\n' "$image_name" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s:%s\n' "$image_name" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish shared image
+        id: build
+        uses: docker/build-push-action@ee4ca427a2f43b6a16632044ca514c076267da23 # v6.19.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.tag }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

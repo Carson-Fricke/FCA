@@ -1,0 +1,49 @@
+{
+  "taskId": "T017",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bicep-build-and-lint",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/modules/identities.bicep --stdout",
+        "az bicep build --file infra/modules/key-vault.bicep --stdout",
+        "az bicep build --file infra/modules/access.bicep --stdout",
+        "az bicep lint --file infra/modules/identities.bicep",
+        "az bicep lint --file infra/modules/key-vault.bicep",
+        "az bicep lint --file infra/modules/access.bicep"
+      ],
+      "result": "All three resource-group modules compiled and linted without diagnostics using Bicep 0.46.1"
+    },
+    {
+      "name": "runtime-data-plane-access",
+      "status": "passed",
+      "result": "The runtime managed identity receives only Storage Blob Data Contributor, Storage Queue Data Contributor, and Storage Table Data Contributor on the named storage account plus Key Vault Secrets User on the named RBAC-enabled vault; no account-key permission is assigned and the storage module disables shared-key access"
+    },
+    {
+      "name": "github-federated-oidc",
+      "status": "passed",
+      "command": "gh api repos/Carson-Fricke/FCA/actions/oidc/customization/sub",
+      "result": "The deployer is a separate user-assigned managed identity with an environment-scoped federated credential using GitHub issuer, AzureADTokenExchange audience, and this repository's immutable owner/repository ID subject format; GitHub reported sub_claim_prefix repo:Carson-Fricke@48462838/FCA@1347935926"
+    },
+    {
+      "name": "deployer-least-privilege",
+      "status": "passed",
+      "result": "The optional one-time bootstrap grants Contributor only at resource-group scope and conditioned Role Based Access Control Administrator only on the target storage account and vault; its conditions permit only the four runtime data roles and only for the runtime principal"
+    },
+    {
+      "name": "secret-free-module-boundary",
+      "status": "passed",
+      "result": "The modules accept only names, public GitHub metadata, resource IDs, principal IDs, tags, location, and booleans; no secret values or account keys are parameters or outputs. Root composition and environment parameters are intentionally deferred to T020, which depends on T017, T018, and T019"
+    }
+  ],
+  "limitations": [
+    "No Azure deployment, what-if, data-plane call, or federated login was run because Azure credentials and deployed resources are not available",
+    "With the Key Vault module's secure public-network-disabled default, T020 must compose private connectivity or explicitly enable public network access before the runtime can reach the vault",
+    "The later deployment workflow must request id-token: write and use the exact GitHub Environment supplied to the identity module"
+  ]
+}

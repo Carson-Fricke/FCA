@@ -1,1 +1,92 @@
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.hypothesis/
+.pyre/
+.pytype/
+.ipynb_checkpoints/
+.dmypy.json
+dmypy.json
+
+# Virtual environments
 .venv/
+venv/
+env/
+ENV/
+.direnv/
+
+# Packaging and build output
+build/
+dist/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# Tests, coverage, and generated reports
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit.xml
+test-results/
+/reports/
+
+# Local environment and secret material
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials.json
+*.credentials.json
+/secrets/
+/.secrets/
+/config/**/*.local.yaml
+/config/**/*.local.yml
+/config/**/credentials.yaml
+/config/**/credentials.yml
+/config/**/secrets.yaml
+/config/**/secrets.yml
+!/config/**/*.example.yaml
+!/config/**/*.example.yml
+
+# Generated local data and runtime output
+/.cache/
+/.local/
+/artifacts/
+/data/
+/logs/
+/outputs/
+/results/
+/scratch/
+/tmp/
+*.log
+*.pid
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# CLEO runtime data is governed by .cleo/.gitignore. Keep the portable
+# .cleo-export.json and allow-listed .cleo project artifacts tracked.
