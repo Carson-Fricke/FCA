@@ -46,6 +46,9 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - Use `cleo complete`, not `cleo update --status done`.
 - Completion requires acceptance-criterion evidence bindings. Verification gates alone may not satisfy old free-text acceptance rows.
 - `cleo verify --all` enforces gate-specific evidence. `testsPassed` requires recognized test evidence and `qaPassed` requires a recognized tool or PR; an unknown project type may have no resolvable default test command.
+- Structured `test-run:` evidence uses Jest-style summary keys in this CLEO version: `numTotalTests`, `numPassedTests`, `numFailedTests`, `numPendingTests`, and `numTodoTests`. A generic `totalTests` field is ignored.
+- Keep `test-run:` evidence under a repository-relative path when it will be exported. Absolute temp paths are retained verbatim in `.cleo-export.json` and make the package machine-specific.
+- This repository configures `audit.command` in `.cleo/project-context.json` to run `.github/scripts/validate-cleo-export.mjs`. Use `tool:audit` as repeatable QA evidence for portable export changes.
 - For a pre-existing task that demonstrably predates evidence bindings, use an explicit audited `--waive-ac ... --waive-reason ...` only when repository evidence independently proves completion.
 - Completing the final pending child can auto-complete its epic or saga. Add planned siblings before completing a placeholder child, or immediately verify parent status, lifecycle, verification, and timestamps.
 - `cleo complete` may warn that `task/<id>` does not exist during worktree integration. This warning does not negate a successful task-state mutation when no task branch was expected.
@@ -65,6 +68,9 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - `cleo checkpoint` does not persist the database; it checkpoints allow-listed CLEO documents such as ADRs and RCASD artifacts.
 - Use `cleo backup add` for SQLite and runtime-state recovery snapshots.
 - Confirm database recovery with `cleo backup verify --json`. In this repository, a healthy `tasks` snapshot is authoritative; missing optional or legacy-role databases do not mean task state is missing.
+- Publish portable task state with `cleo export-tasks T001 --subtree --include-deps -o .cleo-export.json`. In this CLI, the long `--output` flag is intercepted as a renderer mode; use short `-o` for the export file path.
+- Validate the export with `node .github/scripts/validate-cleo-export.mjs` and `cleo import-tasks .cleo-export.json --dry-run --on-conflict skip --on-missing-dep fail`.
+- Do not run `cleo push` while its isolated checkpoint remote points to the application repository's `master`. The histories are unrelated, the canonical database is excluded anyway, and a force push could replace application history. Use normal Git plus `.cleo-export.json`, or configure a genuinely separate CLEO remote or branch.
 - Project Git tracks `.cleo/rcasd/**`. Task creation can generate RCASD research stubs that appear as untracked files; inspect and include them when committing the task decomposition.
 - Do not manually edit `.cleo/cleo.db` unless repairing an unrepresentable CLI state as described above.
 
@@ -85,7 +91,7 @@ cleo plan --json
 Expected current state after the reconciliation and publication task were created:
 
 - `67` total tasks: one root saga, `11` epics including completed initialization, and `55` implementation tasks.
-- `T002` is done; all service implementation work is pending.
+- `T002` and publication task `T067` are done; all service implementation work is pending.
 - Dependency cycles are absent, schema and coherence checks pass, and the ID sequence ends at `T067`.
 - The only full-graph dependency-validator finding is the known `T001` root-saga `E_ORPHAN` defect.
 
@@ -96,4 +102,5 @@ Expected current state after the reconciliation and publication task were create
 - `cleo check task <existing-id>` currently reports that the ID already exists as a uniqueness violation, so it is not useful for validating an existing task in this version.
 - `cleo deps validate --epic` reports valid external dependencies as missing references. Use full-graph validation and inspect its complete issue list.
 - CLEO may emit non-fatal warnings when no LLM provider is provisioned. Core task mutations still succeed; use each command's success envelope as the result.
+- On Windows, CLEO's evidence runner cannot directly spawn the npm PowerShell `cleo` shim for a configured tool. Configure repository audit commands as directly executable `node <script>` commands instead.
 - The global `~/.agents/AGENTS.md` currently references `~/.cleo/templates/CLEO-INJECTION.md`, which is absent on this machine. This project guide is therefore referenced directly from the repository `AGENTS.md` and must not rely on that global template being present.

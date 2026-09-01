@@ -4,5 +4,8 @@
   "projectTypes": [
     "unknown"
   ],
-  "monorepo": false
+  "monorepo": false,
+  "audit": {
+    "command": "node .github/scripts/validate-cleo-export.mjs"
+  }
 }

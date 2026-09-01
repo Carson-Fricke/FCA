@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-01T15:39:33.405Z",
+    "exportedAt": "2026-09-01T15:53:46.353Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 68
     },
-    "checksum": "35e9a2f7b8537302",
+    "checksum": "fbc12a968d774763",
     "taskCount": 67,
     "exportMode": "subtree"
   },
@@ -444,7 +444,7 @@
     "T067": {
       "type": "task",
       "title": "E0.4 Publish reconciled CLEO state",
-      "status": "pending",
+      "status": "done",
       "parentId": "T003",
       "depends": []
     },
@@ -2565,7 +2565,7 @@
     {
       "id": "T067",
       "title": "E0.4 Publish reconciled CLEO state",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T003",
@@ -2578,27 +2578,120 @@
         "documentation",
         "repository"
       ],
+      "notes": [
+        "2026-09-01 15:50:01 UTC: Published commit e994032ea70a11593200f23c134cf206e02b2bda to origin/master and verified the authenticated remote ref.",
+        "[2026-09-01T15:52:13.879Z] completion-history: completedAt=2026-09-01T15:50:01.109Z",
+        "[2026-09-01T15:52:13.879Z] Reopened from done: Replace machine-local test evidence with repository-relative portable evidence before final export publication",
+        "2026-09-01 15:53:31 UTC: Recompleted after replacing machine-local verification evidence with repository-relative .github/verification/T067-validation.json."
+      ],
       "acceptance": [
         "A portable export contains the complete reconciled CLEO graph",
         "Project-scoped CLEO guidance and generated RCASD artifacts are committed",
         "The commit is pushed to the tracked project branch and remote state is verified"
       ],
       "createdAt": "2026-09-01T03:53:49.111Z",
-      "updatedAt": "2026-09-01T03:54:02.362Z",
+      "updatedAt": "2026-09-01T15:53:34.858Z",
+      "completedAt": "2026-09-01T15:53:30.896Z",
       "verification": {
-        "passed": false,
-        "round": 1,
+        "passed": true,
+        "round": 0,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
-        "failureLog": [],
-        "initializedAt": "2026-09-01T03:53:49.111Z"
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e994032ea70a11593200f23c134cf206e02b2bda",
+                "shortSha": "e994032"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".cleo-export.json",
+                    "sha256": "12f5404df3619329bfbc756c065202d8db03700f833d12902d1ddce7abdf8651"
+                  },
+                  {
+                    "path": ".github/instructions/cleo.instructions.md",
+                    "sha256": "4fdea1c053325936ecf71734c2aee095acf04ff705b62a9f87825dbd42d1b88a"
+                  },
+                  {
+                    "path": "AGENTS.md",
+                    "sha256": "ee6ed04ed5e1d58509f6ba435f4e9759e45aadf9badb0ee252395d344d2b2fb0"
+                  },
+                  {
+                    "path": ".cleo/rcasd/T003/research/T003-research.md",
+                    "sha256": "3349f7148b4c72255ab839ec16a99e44ca6969e730d8003f69f43a041c312e18"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T067",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "b603a3a7-e928-55a5-9b62-ddc0f6b1b523"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T067",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "15d4c7e8-9ec9-5216-b112-db1783bfc3d6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T067",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "f122a5b6-fcb0-5a29-81b5-25dd3d32210b"
+              },
+              {
+                "kind": "note",
+                "note": "Authenticated git ls-remote confirmed origin/master equals e994032ea70a11593200f23c134cf206e02b2bda"
+              }
+            ],
+            "capturedAt": "2026-09-01T15:52:44.901Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T067-validation.json",
+                "sha256": "eb5046d3b76d8523d5ed60afd8dc1e49387c2dfda67663b1c7ffa0467f02f456",
+                "passCount": 3,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T15:53:00.081Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 67 CLEO tasks through T67.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T15:53:15.953Z",
+            "capturedBy": "opencode"
+          }
+        },
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T15:53:15.551Z",
+        "failureLog": []
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "assignee": "local",
       "kind": "work",
       "scope": "unit",

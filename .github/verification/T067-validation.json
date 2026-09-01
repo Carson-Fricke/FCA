@@ -1,0 +1,29 @@
+{
+  "taskId": "T067",
+  "timestamp": "2026-09-01T15:42:00Z",
+  "numTotalTests": 3,
+  "numPassedTests": 3,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "portable-export-import-dry-run",
+      "status": "passed",
+      "command": "cleo import-tasks .cleo-export.json --dry-run --on-conflict skip --on-missing-dep fail",
+      "result": "67 tasks parsed; 67 expected conflicts skipped; no missing dependency failures"
+    },
+    {
+      "name": "cleo-state-validation",
+      "status": "passed",
+      "command": "cleo check schema todo --json; cleo check coherence --json; cleo sequence check --json; cleo deps cycles --json",
+      "result": "schema valid; coherence passed; sequence T067 valid; no dependency cycles"
+    },
+    {
+      "name": "remote-sha-verification",
+      "status": "passed",
+      "command": "git ls-remote origin refs/heads/master",
+      "result": "origin/master=e994032ea70a11593200f23c134cf206e02b2bda"
+    }
+  ]
+}
