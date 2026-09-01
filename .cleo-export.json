@@ -1,0 +1,3889 @@
+{
+  "$schema": "https://cleo-dev.com/schemas/v1/export-package.schema.json",
+  "_meta": {
+    "format": "cleo-export",
+    "version": "1.0.0",
+    "exportedAt": "2026-09-01T15:39:33.405Z",
+    "source": {
+      "project": "unknown",
+      "cleo_version": "0.95.0",
+      "nextId": 68
+    },
+    "checksum": "35e9a2f7b8537302",
+    "taskCount": 67,
+    "exportMode": "subtree"
+  },
+  "selection": {
+    "mode": "subtree",
+    "rootTaskIds": [
+      "T001"
+    ],
+    "includeChildren": true
+  },
+  "idMap": {
+    "T001": {
+      "type": "saga",
+      "title": "On-demand Azure market-data lake",
+      "status": "pending",
+      "parentId": null,
+      "depends": []
+    },
+    "T002": {
+      "type": "epic",
+      "title": "Initialize CLEO in FCA",
+      "status": "done",
+      "parentId": "T001",
+      "depends": []
+    },
+    "T013": {
+      "type": "task",
+      "title": "E0.1 Repository tree, gitignore, and README map",
+      "status": "pending",
+      "parentId": "T003",
+      "depends": []
+    },
+    "T016": {
+      "type": "task",
+      "title": "E1.1 Storage data services and blob lifecycle",
+      "status": "pending",
+      "parentId": "T004",
+      "depends": []
+    },
+    "T021": {
+      "type": "task",
+      "title": "E2.1 Partition paths and stable PyArrow schemas",
+      "status": "pending",
+      "parentId": "T005",
+      "depends": [
+        "T014"
+      ]
+    },
+    "T028": {
+      "type": "task",
+      "title": "E3.1 Path-filtered Python and Bicep CI",
+      "status": "pending",
+      "parentId": "T006",
+      "depends": [
+        "T014",
+        "T020"
+      ]
+    },
+    "T033": {
+      "type": "task",
+      "title": "E4.1 Async Alpaca client pagination and 429 handling",
+      "status": "pending",
+      "parentId": "T007",
+      "depends": [
+        "T026"
+      ]
+    },
+    "T040": {
+      "type": "task",
+      "title": "E5.1 FastAPI health, bearer auth, and request models",
+      "status": "pending",
+      "parentId": "T008",
+      "depends": [
+        "T014",
+        "T026"
+      ]
+    },
+    "T047": {
+      "type": "task",
+      "title": "E6.1 Deploy the complete dev slice",
+      "status": "pending",
+      "parentId": "T009",
+      "depends": [
+        "T020",
+        "T031",
+        "T039",
+        "T046"
+      ]
+    },
+    "T052": {
+      "type": "task",
+      "title": "E7.1 Option chain selector and contracts catalog",
+      "status": "pending",
+      "parentId": "T010",
+      "depends": [
+        "T024",
+        "T033"
+      ]
+    },
+    "T057": {
+      "type": "task",
+      "title": "E8.1 Crypto trades and quotes client",
+      "status": "pending",
+      "parentId": "T011",
+      "depends": [
+        "T023",
+        "T033"
+      ]
+    },
+    "T061": {
+      "type": "task",
+      "title": "E9.1 Thin Python lakeclient",
+      "status": "pending",
+      "parentId": "T012",
+      "depends": [
+        "T032",
+        "T043"
+      ]
+    },
+    "T003": {
+      "type": "epic",
+      "title": "E0 Repository and Python foundation",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": []
+    },
+    "T014": {
+      "type": "task",
+      "title": "E0.2 Python package, tooling, and container entrypoints",
+      "status": "pending",
+      "parentId": "T003",
+      "depends": [
+        "T013"
+      ]
+    },
+    "T017": {
+      "type": "task",
+      "title": "E1.2 Managed identities, RBAC, Key Vault, and OIDC",
+      "status": "pending",
+      "parentId": "T004",
+      "depends": [
+        "T016"
+      ]
+    },
+    "T022": {
+      "type": "task",
+      "title": "E2.2 Idempotent Parquet writer and metadata",
+      "status": "pending",
+      "parentId": "T005",
+      "depends": [
+        "T021"
+      ]
+    },
+    "T029": {
+      "type": "task",
+      "title": "E3.2 Reusable Azure OIDC and Bicep deployment steps",
+      "status": "pending",
+      "parentId": "T006",
+      "depends": [
+        "T017",
+        "T020"
+      ]
+    },
+    "T034": {
+      "type": "task",
+      "title": "E4.2 Equity symbol-day ingest transaction",
+      "status": "pending",
+      "parentId": "T007",
+      "depends": [
+        "T022",
+        "T024",
+        "T027",
+        "T033"
+      ]
+    },
+    "T041": {
+      "type": "task",
+      "title": "E5.2 Catalog coverage endpoint",
+      "status": "pending",
+      "parentId": "T008",
+      "depends": [
+        "T024",
+        "T040"
+      ]
+    },
+    "T048": {
+      "type": "task",
+      "title": "E6.2 Dev API and ingest smoke tests",
+      "status": "pending",
+      "parentId": "T009",
+      "depends": [
+        "T047"
+      ]
+    },
+    "T053": {
+      "type": "task",
+      "title": "E7.2 OPRA trades and quotes client",
+      "status": "pending",
+      "parentId": "T010",
+      "depends": [
+        "T033",
+        "T052"
+      ]
+    },
+    "T058": {
+      "type": "task",
+      "title": "E8.2 Crypto UTC-day worker integration",
+      "status": "pending",
+      "parentId": "T011",
+      "depends": [
+        "T035",
+        "T057"
+      ]
+    },
+    "T062": {
+      "type": "task",
+      "title": "E9.2 Blob leases for symbol-day writes",
+      "status": "pending",
+      "parentId": "T012",
+      "depends": [
+        "T027",
+        "T034",
+        "T035"
+      ]
+    },
+    "T004": {
+      "type": "epic",
+      "title": "E1 Azure infrastructure and budget controls",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T003"
+      ]
+    },
+    "T015": {
+      "type": "task",
+      "title": "E0.3 Universe, calendar, and settings YAML",
+      "status": "pending",
+      "parentId": "T003",
+      "depends": [
+        "T013"
+      ]
+    },
+    "T018": {
+      "type": "task",
+      "title": "E1.3 Container Apps environment, API, and ingest job",
+      "status": "pending",
+      "parentId": "T004",
+      "depends": [
+        "T014",
+        "T016",
+        "T017"
+      ]
+    },
+    "T023": {
+      "type": "task",
+      "title": "E2.3 XNYS sessions and crypto UTC days",
+      "status": "pending",
+      "parentId": "T005",
+      "depends": [
+        "T014"
+      ]
+    },
+    "T030": {
+      "type": "task",
+      "title": "E3.3 GHCR image build and immutable tagging",
+      "status": "pending",
+      "parentId": "T006",
+      "depends": [
+        "T014"
+      ]
+    },
+    "T035": {
+      "type": "task",
+      "title": "E4.3 Durable queue worker loop",
+      "status": "pending",
+      "parentId": "T007",
+      "depends": [
+        "T034"
+      ]
+    },
+    "T042": {
+      "type": "task",
+      "title": "E5.3 Ensure requests and job polling",
+      "status": "pending",
+      "parentId": "T008",
+      "depends": [
+        "T025",
+        "T035",
+        "T040"
+      ]
+    },
+    "T049": {
+      "type": "task",
+      "title": "E6.3 Full-history AAPL and SPY soak",
+      "status": "pending",
+      "parentId": "T009",
+      "depends": [
+        "T048"
+      ]
+    },
+    "T054": {
+      "type": "task",
+      "title": "E7.3 Options symbol-day worker integration",
+      "status": "pending",
+      "parentId": "T010",
+      "depends": [
+        "T035",
+        "T053"
+      ]
+    },
+    "T059": {
+      "type": "task",
+      "title": "E8.3 Crypto ensure and query API coverage",
+      "status": "pending",
+      "parentId": "T011",
+      "depends": [
+        "T043",
+        "T058"
+      ]
+    },
+    "T063": {
+      "type": "task",
+      "title": "E9.3 Dead-letter queue and failure recovery",
+      "status": "pending",
+      "parentId": "T012",
+      "depends": [
+        "T035"
+      ]
+    },
+    "T005": {
+      "type": "epic",
+      "title": "E2 Lake core library",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T003"
+      ]
+    },
+    "T019": {
+      "type": "task",
+      "title": "E1.4 Budget alerts and runtime cost guards",
+      "status": "pending",
+      "parentId": "T004",
+      "depends": [
+        "T018"
+      ]
+    },
+    "T024": {
+      "type": "task",
+      "title": "E2.4 Catalog protocols and memory or Azure Table adapters",
+      "status": "pending",
+      "parentId": "T005",
+      "depends": [
+        "T021",
+        "T023"
+      ]
+    },
+    "T031": {
+      "type": "task",
+      "title": "E3.4 Main-branch deploy workflow and health smoke",
+      "status": "pending",
+      "parentId": "T006",
+      "depends": [
+        "T028",
+        "T029",
+        "T030"
+      ]
+    },
+    "T036": {
+      "type": "task",
+      "title": "E4.4 Previous-session equities catch-up",
+      "status": "pending",
+      "parentId": "T007",
+      "depends": [
+        "T023",
+        "T025",
+        "T035"
+      ]
+    },
+    "T043": {
+      "type": "task",
+      "title": "E5.4 File query mode with short-lived SAS",
+      "status": "pending",
+      "parentId": "T008",
+      "depends": [
+        "T027",
+        "T042"
+      ]
+    },
+    "T050": {
+      "type": "task",
+      "title": "E6.4 Cost projection and equity rollout decision",
+      "status": "pending",
+      "parentId": "T009",
+      "depends": [
+        "T049"
+      ]
+    },
+    "T055": {
+      "type": "task",
+      "title": "E7.4 Options ensure and query API coverage",
+      "status": "pending",
+      "parentId": "T010",
+      "depends": [
+        "T043",
+        "T054"
+      ]
+    },
+    "T060": {
+      "type": "task",
+      "title": "E8.4 Validate and roll out configured crypto pairs",
+      "status": "pending",
+      "parentId": "T011",
+      "depends": [
+        "T050",
+        "T056",
+        "T059"
+      ]
+    },
+    "T064": {
+      "type": "task",
+      "title": "E9.4 Daily coverage and budget report",
+      "status": "pending",
+      "parentId": "T012",
+      "depends": [
+        "T024",
+        "T038",
+        "T050"
+      ]
+    },
+    "T067": {
+      "type": "task",
+      "title": "E0.4 Publish reconciled CLEO state",
+      "status": "pending",
+      "parentId": "T003",
+      "depends": []
+    },
+    "T006": {
+      "type": "epic",
+      "title": "E3 CI/CD and GitHub OIDC",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T003",
+        "T004"
+      ]
+    },
+    "T020": {
+      "type": "task",
+      "title": "E1.5 Main Bicep, parameters, naming, and dev what-if",
+      "status": "pending",
+      "parentId": "T004",
+      "depends": [
+        "T016",
+        "T017",
+        "T018",
+        "T019"
+      ]
+    },
+    "T025": {
+      "type": "task",
+      "title": "E2.5 Coverage gaps, empty days, and partial sessions",
+      "status": "pending",
+      "parentId": "T005",
+      "depends": [
+        "T023",
+        "T024"
+      ]
+    },
+    "T032": {
+      "type": "task",
+      "title": "E3.5 GitHub Environments and OIDC bootstrap documentation",
+      "status": "pending",
+      "parentId": "T006",
+      "depends": [
+        "T017",
+        "T031"
+      ]
+    },
+    "T037": {
+      "type": "task",
+      "title": "E4.5 Newest-first equity backfill planning",
+      "status": "pending",
+      "parentId": "T007",
+      "depends": [
+        "T025",
+        "T035"
+      ]
+    },
+    "T044": {
+      "type": "task",
+      "title": "E5.5 Raw objects endpoint",
+      "status": "pending",
+      "parentId": "T008",
+      "depends": [
+        "T043"
+      ]
+    },
+    "T051": {
+      "type": "task",
+      "title": "E6.5 Expand equity universe and controlled backfill",
+      "status": "pending",
+      "parentId": "T009",
+      "depends": [
+        "T038",
+        "T050"
+      ]
+    },
+    "T056": {
+      "type": "task",
+      "title": "E7.5 Three-underlying two-year soak and expansion gate",
+      "status": "pending",
+      "parentId": "T010",
+      "depends": [
+        "T050",
+        "T055"
+      ]
+    },
+    "T065": {
+      "type": "task",
+      "title": "E9.5 Evaluate and configure cold-tier policy",
+      "status": "pending",
+      "parentId": "T012",
+      "depends": [
+        "T019",
+        "T050"
+      ]
+    },
+    "T007": {
+      "type": "epic",
+      "title": "E4 Equities SIP ingest",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T004",
+        "T005"
+      ]
+    },
+    "T026": {
+      "type": "task",
+      "title": "E2.6 Typed settings and universe loaders",
+      "status": "pending",
+      "parentId": "T005",
+      "depends": [
+        "T015"
+      ]
+    },
+    "T038": {
+      "type": "task",
+      "title": "E4.6 Storage-cap pause and history valve",
+      "status": "pending",
+      "parentId": "T007",
+      "depends": [
+        "T019",
+        "T024",
+        "T037"
+      ]
+    },
+    "T045": {
+      "type": "task",
+      "title": "E5.6 Bounded DuckDB SQL query mode",
+      "status": "pending",
+      "parentId": "T008",
+      "depends": [
+        "T043"
+      ]
+    },
+    "T066": {
+      "type": "task",
+      "title": "E9.6 End-to-end validation and operations guide",
+      "status": "pending",
+      "parentId": "T012",
+      "depends": [
+        "T051",
+        "T056",
+        "T060",
+        "T061",
+        "T062",
+        "T063",
+        "T064",
+        "T065"
+      ]
+    },
+    "T008": {
+      "type": "epic",
+      "title": "E5 HTTP ensure and query API",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T003",
+        "T005",
+        "T007"
+      ]
+    },
+    "T027": {
+      "type": "task",
+      "title": "E2.7 Blob, queue, SAS, and job storage adapters",
+      "status": "pending",
+      "parentId": "T005",
+      "depends": [
+        "T024"
+      ]
+    },
+    "T039": {
+      "type": "task",
+      "title": "E4.7 Equity client, writer, worker, and coverage tests",
+      "status": "pending",
+      "parentId": "T007",
+      "depends": [
+        "T033",
+        "T034",
+        "T035",
+        "T036",
+        "T037",
+        "T038"
+      ]
+    },
+    "T046": {
+      "type": "task",
+      "title": "E5.7 API authentication, ensure, and query tests",
+      "status": "pending",
+      "parentId": "T008",
+      "depends": [
+        "T040",
+        "T041",
+        "T042",
+        "T043",
+        "T044",
+        "T045"
+      ]
+    },
+    "T009": {
+      "type": "epic",
+      "title": "E6 Dev deployment and equities soak gate",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T004",
+        "T006",
+        "T007",
+        "T008"
+      ]
+    },
+    "T010": {
+      "type": "epic",
+      "title": "E7 Options front-set OPRA",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T005",
+        "T007",
+        "T008",
+        "T009"
+      ]
+    },
+    "T011": {
+      "type": "epic",
+      "title": "E8 Crypto pairs",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T005",
+        "T007",
+        "T008",
+        "T009",
+        "T010"
+      ]
+    },
+    "T012": {
+      "type": "epic",
+      "title": "E9 Client, operations, and hardening",
+      "status": "pending",
+      "parentId": "T001",
+      "depends": [
+        "T004",
+        "T005",
+        "T006",
+        "T007",
+        "T008",
+        "T009",
+        "T010",
+        "T011"
+      ]
+    }
+  },
+  "tasks": [
+    {
+      "id": "T001",
+      "title": "On-demand Azure market-data lake",
+      "status": "pending",
+      "priority": "high",
+      "type": "saga",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Build the FCA service that lazily caches Alpaca equities SIP, OPRA options, and crypto ticks as Parquet in Azure, exposes authenticated ensure and query APIs, and stays within the documented monthly budget.",
+      "labels": [
+        "market-data",
+        "azure",
+        "alpaca"
+      ],
+      "notes": [
+        "2026-09-01 03:38:53 UTC: Repository reconciliation on 2026-08-31 found only CLEO scaffolding and README.md; every service epic and task remains pending. The contribution pipeline_stage value was inherited by descendants during a transient automatic saga close when T002 was the only child; lifecycle and verification were reset, so that field is not implementation evidence."
+      ],
+      "acceptance": [
+        "Equities SIP trades and NBBO quotes can be cached by symbol-session and queried through the HTTP API",
+        "Daily catch-up and newest-first backfill are durable and idempotent",
+        "Options front-set and configured crypto pairs use the same catalog and query surface",
+        "Azure resources and deployments use managed identities, GitHub OIDC, and scale-to-zero compute",
+        "Storage, retrieval, compute, logging, and egress controls keep the service within the documented budget gates",
+        "CI, smoke tests, soak measurements, and operational hardening satisfy the plan success criteria",
+        "Complete child T003: E0 Repository and Python foundation",
+        "Complete child T004: E1 Azure infrastructure and budget controls",
+        "Complete child T005: E2 Lake core library",
+        "Complete child T006: E3 CI/CD and GitHub OIDC",
+        "Complete child T007: E4 Equities SIP ingest",
+        "Complete child T008: E5 HTTP ensure and query API",
+        "Complete child T009: E6 Dev deployment and equities soak gate",
+        "Complete child T010: E7 Options front-set OPRA",
+        "Complete child T011: E8 Crypto pairs",
+        "Complete child T012: E9 Client, operations, and hardening"
+      ],
+      "createdAt": "2026-08-27T02:21:23.975Z",
+      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "verification": {
+        "passed": false,
+        "round": 0,
+        "gates": {},
+        "evidence": {},
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": []
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "project",
+      "relates": []
+    },
+    {
+      "id": "T002",
+      "title": "Initialize CLEO in FCA",
+      "status": "done",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "small",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Set up CLEO project state and configuration in the FCA repository, excluding CLEO-specific GitHub issue templates.",
+      "notes": [
+        "2026-09-01 03:12:45 UTC: Repository and CLEO state were initialized in commit c4382da945ad83f87a4b44fdcb0af32c7c4bf8d6, present on origin/master. cleo status --json confirms active initialized project state."
+      ],
+      "acceptance": [
+        "CLEO is initialized in FCA",
+        "CLEO task is recorded",
+        "CLEO state is checkpointed and pushed"
+      ],
+      "createdAt": "2026-08-27T02:21:37.247Z",
+      "updatedAt": "2026-09-01T03:41:11.391Z",
+      "completedAt": "2026-09-01T03:12:45.570Z",
+      "verification": {
+        "passed": false,
+        "round": 0,
+        "gates": {
+          "implemented": true
+        },
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c4382da945ad83f87a4b44fdcb0af32c7c4bf8d6",
+                "shortSha": "c4382da"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".cleo/config.json",
+                    "sha256": "7db797954714b619d28a78c501cd4e0f426a3cb55cfe66c0f19483cc5dcf4423"
+                  },
+                  {
+                    "path": ".cleo/cleo.db",
+                    "sha256": "23ce9833d1c4ab45d7c31b823bbead3fa63771730d50c8c33d5e7d67eca38d5c"
+                  },
+                  {
+                    "path": "AGENTS.md",
+                    "sha256": "0ade7842c49547bf1f0b8eda93d69ddc749a74669dcffcd19396e870de0bd8fa"
+                  },
+                  {
+                    "path": ".worktreeinclude",
+                    "sha256": "6de33306441f22c8ff572f2c85a9322cd8ce22dcf62c0f7ac2c2216f3accc8a1"
+                  }
+                ]
+              },
+              {
+                "kind": "note",
+                "note": "CLEO initialization implementation is present in the repository"
+              }
+            ],
+            "capturedAt": "2026-09-01T03:11:31.042Z",
+            "capturedBy": "opencode"
+          }
+        },
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T03:11:30.267Z",
+        "failureLog": []
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "project",
+      "relates": []
+    },
+    {
+      "id": "T013",
+      "title": "E0.1 Repository tree, gitignore, and README map",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T003",
+      "size": "small",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Create the planned infra, config, source, test, and workflow directories and document how the single service is organized.",
+      "labels": [
+        "foundation"
+      ],
+      "acceptance": [
+        "Tracked repository layout and README match the approved service architecture"
+      ],
+      "createdAt": "2026-09-01T03:20:45.048Z",
+      "updatedAt": "2026-09-01T03:41:16.169Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:20:45.048Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T016",
+      "title": "E1.1 Storage data services and blob lifecycle",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T004",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Define HNS-enabled LRS storage, lake containers, coverage jobs and contracts tables, backfill queue, and hot-to-cool lifecycle policy.",
+      "labels": [
+        "bicep",
+        "storage"
+      ],
+      "acceptance": [
+        "Storage is idempotently provisioned with versioning off and the day-zero lifecycle policy enabled"
+      ],
+      "createdAt": "2026-09-01T03:20:56.594Z",
+      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:20:56.594Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T021",
+      "title": "E2.1 Partition paths and stable PyArrow schemas",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T005",
+      "size": "small",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Implement date-first Hive paths and typed equity, option, and crypto trade and quote schemas with deterministic symbol filenames.",
+      "labels": [
+        "parquet",
+        "schema"
+      ],
+      "acceptance": [
+        "Every supported asset and data type maps to the documented path and stable schema"
+      ],
+      "depends": [
+        "T014"
+      ],
+      "createdAt": "2026-09-01T03:21:15.021Z",
+      "updatedAt": "2026-09-01T03:25:00.028Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:15.021Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T028",
+      "title": "E3.1 Path-filtered Python and Bicep CI",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T006",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Run Ruff, pytest, package build checks, Bicep build, and relevant path filters for pull requests and main pushes.",
+      "labels": [
+        "github-actions",
+        "ci"
+      ],
+      "acceptance": [
+        "CI fails on Python quality, test, package, or Bicep validation errors"
+      ],
+      "depends": [
+        "T014",
+        "T020"
+      ],
+      "createdAt": "2026-09-01T03:21:41.026Z",
+      "updatedAt": "2026-09-01T03:25:52.896Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:41.026Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T033",
+      "title": "E4.1 Async Alpaca client pagination and 429 handling",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T007",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Implement pooled httpx requests, next-page tokens, explicit SIP feed and raw adjustment parameters, bounded concurrency, and Retry-After handling.",
+      "labels": [
+        "alpaca",
+        "httpx"
+      ],
+      "acceptance": [
+        "Recorded multi-page and rate-limit responses are fetched without duplicate or lost rows"
+      ],
+      "depends": [
+        "T026"
+      ],
+      "createdAt": "2026-09-01T03:21:59.705Z",
+      "updatedAt": "2026-09-01T03:26:30.757Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:59.705Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T040",
+      "title": "E5.1 FastAPI health, bearer auth, and request models",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T008",
+      "size": "small",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Create the FastAPI application, liveness route, constant-time single-bearer authentication, validation models, and consistent error responses.",
+      "labels": [
+        "fastapi",
+        "security"
+      ],
+      "acceptance": [
+        "Health supports platform probing and protected routes reject missing or invalid credentials"
+      ],
+      "depends": [
+        "T014",
+        "T026"
+      ],
+      "createdAt": "2026-09-01T03:22:23.459Z",
+      "updatedAt": "2026-09-01T03:27:23.284Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:23.459Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T047",
+      "title": "E6.1 Deploy the complete dev slice",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T009",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Use the main deployment workflow to provision dev and release the shared API and ingest image with seeded Key Vault secrets.",
+      "labels": [
+        "dev",
+        "deployment"
+      ],
+      "acceptance": [
+        "Dev API and ingest job revisions are healthy and use managed identities"
+      ],
+      "depends": [
+        "T020",
+        "T031",
+        "T039",
+        "T046"
+      ],
+      "createdAt": "2026-09-01T03:22:47.454Z",
+      "updatedAt": "2026-09-01T03:28:18.591Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:47.454Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T052",
+      "title": "E7.1 Option chain selector and contracts catalog",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T010",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Select the nearest two expirations and configured strike window from underlying spot and persist the daily OSI front set for reproducibility.",
+      "labels": [
+        "options",
+        "contracts"
+      ],
+      "acceptance": [
+        "Deterministic tests cover expiry and strike boundaries and contracts are queryable by underlying date"
+      ],
+      "depends": [
+        "T024",
+        "T033"
+      ],
+      "createdAt": "2026-09-01T03:23:04.328Z",
+      "updatedAt": "2026-09-01T03:28:59.120Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:04.328Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T057",
+      "title": "E8.1 Crypto trades and quotes client",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T011",
+      "size": "small",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Extend the Alpaca transport for configured crypto pair trades and quotes while normalizing pair symbols and feed-specific nullable fields.",
+      "labels": [
+        "crypto",
+        "alpaca"
+      ],
+      "acceptance": [
+        "Recorded crypto responses paginate into stable shared trade and quote schemas"
+      ],
+      "depends": [
+        "T023",
+        "T033"
+      ],
+      "createdAt": "2026-09-01T03:23:21.713Z",
+      "updatedAt": "2026-09-01T03:29:40.765Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:21.713Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T061",
+      "title": "E9.1 Thin Python lakeclient",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T012",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Provide authenticated ensure, job polling, and Polars or DuckDB file-reading helpers that consume API SAS responses without calling Alpaca.",
+      "labels": [
+        "client",
+        "python"
+      ],
+      "acceptance": [
+        "A local snippet can ensure and compute one-day AAPL NBBO spread through the API"
+      ],
+      "depends": [
+        "T032",
+        "T043"
+      ],
+      "createdAt": "2026-09-01T03:23:35.503Z",
+      "updatedAt": "2026-09-01T03:30:13.827Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:35.503Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T003",
+      "title": "E0 Repository and Python foundation",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "small",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Establish the documented single-service repository layout, Python package, configuration files, and contributor-facing architecture map.",
+      "labels": [
+        "foundation",
+        "phase.0"
+      ],
+      "notes": [
+        "2026-09-01 03:31:57 UTC: Repository inspection on 2026-08-31 found no service implementation files; status remains pending. Pipeline stage was inherited from a transient auto-closed root saga and is not evidence of implementation."
+      ],
+      "acceptance": [
+        "Repository layout matches the service plan",
+        "Python tooling and configuration stubs support subsequent implementation",
+        "Complete child T013: E0.1 Repository tree, gitignore, and README map",
+        "Complete child T014: E0.2 Python package, tooling, and container entrypoints",
+        "Complete child T015: E0.3 Universe, calendar, and settings YAML",
+        "Complete child T067: E0.4 Publish reconciled CLEO state"
+      ],
+      "createdAt": "2026-09-01T03:15:21.616Z",
+      "updatedAt": "2026-09-01T03:53:49.111Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T014",
+      "title": "E0.2 Python package, tooling, and container entrypoints",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T003",
+      "size": "small",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Configure Python 3.12 packaging, runtime and development dependencies, linting, tests, and one image with api and ingest commands.",
+      "labels": [
+        "python",
+        "foundation"
+      ],
+      "acceptance": [
+        "The package installs and exposes working api and ingest entrypoints",
+        "Ruff and pytest are configured"
+      ],
+      "depends": [
+        "T013"
+      ],
+      "createdAt": "2026-09-01T03:20:48.889Z",
+      "updatedAt": "2026-09-01T03:41:16.169Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:20:48.889Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T017",
+      "title": "E1.2 Managed identities, RBAC, Key Vault, and OIDC",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T004",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Define least-privilege workload and GitHub deployer identities, role assignments, Key Vault references, and a GitHub federated credential.",
+      "labels": [
+        "bicep",
+        "identity",
+        "security"
+      ],
+      "acceptance": [
+        "Runtime accesses storage, queue, tables, and secrets without account keys",
+        "GitHub can deploy through federated OIDC"
+      ],
+      "depends": [
+        "T016"
+      ],
+      "createdAt": "2026-09-01T03:21:00.207Z",
+      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:00.207Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T022",
+      "title": "E2.2 Idempotent Parquet writer and metadata",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T005",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Normalize records and write one zstd-compressed file per symbol, session, and data type with rows, bytes, and checksum metadata.",
+      "labels": [
+        "parquet"
+      ],
+      "acceptance": [
+        "Repeated writes replace the same object and preserve schema",
+        "Golden round trips validate compression and metadata"
+      ],
+      "depends": [
+        "T021"
+      ],
+      "createdAt": "2026-09-01T03:21:18.614Z",
+      "updatedAt": "2026-09-01T03:25:07.629Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:18.614Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T029",
+      "title": "E3.2 Reusable Azure OIDC and Bicep deployment steps",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T006",
+      "size": "small",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Create reusable workflow steps for environment-scoped Azure login and validated subscription or resource-group Bicep deployment.",
+      "labels": [
+        "github-actions",
+        "oidc"
+      ],
+      "acceptance": [
+        "Deployment authentication uses no stored Azure client secret"
+      ],
+      "depends": [
+        "T017",
+        "T020"
+      ],
+      "createdAt": "2026-09-01T03:21:44.819Z",
+      "updatedAt": "2026-09-01T03:26:00.666Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:44.819Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T034",
+      "title": "E4.2 Equity symbol-day ingest transaction",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T007",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Fetch one equity trade or quote session, normalize it, atomically replace Parquet, and record complete empty partial or error catalog metadata.",
+      "labels": [
+        "equities",
+        "ingest"
+      ],
+      "acceptance": [
+        "A repeated symbol-day ingest is idempotent across blob and catalog state"
+      ],
+      "depends": [
+        "T022",
+        "T024",
+        "T027",
+        "T033"
+      ],
+      "createdAt": "2026-09-01T03:22:03.182Z",
+      "updatedAt": "2026-09-01T03:26:38.304Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:03.182Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T041",
+      "title": "E5.2 Catalog coverage endpoint",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T008",
+      "size": "small",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Expose filtered coverage records by asset class, data type, symbol, and bounded date range using partition-key queries.",
+      "labels": [
+        "api",
+        "catalog"
+      ],
+      "acceptance": [
+        "Catalog requests return only authorized, validated, range-filtered coverage metadata"
+      ],
+      "depends": [
+        "T024",
+        "T040"
+      ],
+      "createdAt": "2026-09-01T03:22:26.946Z",
+      "updatedAt": "2026-09-01T03:27:30.825Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:26.946Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T048",
+      "title": "E6.2 Dev API and ingest smoke tests",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T009",
+      "size": "small",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Exercise health, bearer auth, one missing AAPL session, job completion, catalog state, and returned Parquet through the deployed dev service.",
+      "labels": [
+        "dev",
+        "smoke-test"
+      ],
+      "acceptance": [
+        "A first-time dev query writes data and a cached repeat returns files without refetching"
+      ],
+      "depends": [
+        "T047"
+      ],
+      "createdAt": "2026-09-01T03:22:50.839Z",
+      "updatedAt": "2026-09-01T03:28:26.611Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:50.839Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T053",
+      "title": "E7.2 OPRA trades and quotes client",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T010",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Extend the Alpaca transport for historical option trades and quotes across selected OSI symbols with pagination and normalized option fields.",
+      "labels": [
+        "options",
+        "alpaca"
+      ],
+      "acceptance": [
+        "Recorded OPRA responses preserve OSI, underlying, expiry, strike, and call or put metadata"
+      ],
+      "depends": [
+        "T033",
+        "T052"
+      ],
+      "createdAt": "2026-09-01T03:23:07.849Z",
+      "updatedAt": "2026-09-01T03:29:07.369Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:07.849Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T058",
+      "title": "E8.2 Crypto UTC-day worker integration",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T011",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Plan and ingest continuous UTC pair-days through the durable queue without XNYS holidays or close assumptions.",
+      "labels": [
+        "crypto",
+        "worker"
+      ],
+      "acceptance": [
+        "Crypto worker covers every requested UTC day and safely refreshes the current partial day"
+      ],
+      "depends": [
+        "T035",
+        "T057"
+      ],
+      "createdAt": "2026-09-01T03:23:25.376Z",
+      "updatedAt": "2026-09-01T03:29:49.113Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:25.376Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T062",
+      "title": "E9.2 Blob leases for symbol-day writes",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T012",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Acquire scoped leases or equivalent locks around symbol-day replacement and catalog commit to prevent concurrent writers from clobbering each other.",
+      "labels": [
+        "hardening",
+        "concurrency"
+      ],
+      "acceptance": [
+        "Concurrency tests prove only one writer commits a symbol-day at a time"
+      ],
+      "depends": [
+        "T027",
+        "T034",
+        "T035"
+      ],
+      "createdAt": "2026-09-01T03:23:39.260Z",
+      "updatedAt": "2026-09-01T03:30:21.691Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:39.260Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T004",
+      "title": "E1 Azure infrastructure and budget controls",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Provision the market-lake storage, identity, secrets, observability, Container Apps, and cost-control resources as one Bicep deployment.",
+      "labels": [
+        "azure",
+        "iac",
+        "phase.0"
+      ],
+      "acceptance": [
+        "Bicep defines all Azure resources required by the service",
+        "Lifecycle, scale-to-zero, logging, and budget controls are enabled",
+        "Complete child T016: E1.1 Storage data services and blob lifecycle",
+        "Complete child T017: E1.2 Managed identities, RBAC, Key Vault, and OIDC",
+        "Complete child T018: E1.3 Container Apps environment, API, and ingest job",
+        "Complete child T019: E1.4 Budget alerts and runtime cost guards",
+        "Complete child T020: E1.5 Main Bicep, parameters, naming, and dev what-if"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-01T03:15:24.964Z",
+      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T015",
+      "title": "E0.3 Universe, calendar, and settings YAML",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T003",
+      "size": "small",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Add versioned settings and universe sources for the two-symbol equity soak, options policy, crypto pairs, and calendar configuration.",
+      "labels": [
+        "configuration"
+      ],
+      "acceptance": [
+        "YAML files cover every documented configuration knob without embedding secrets"
+      ],
+      "depends": [
+        "T013"
+      ],
+      "createdAt": "2026-09-01T03:20:52.772Z",
+      "updatedAt": "2026-09-01T03:41:16.169Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:20:52.772Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T018",
+      "title": "E1.3 Container Apps environment, API, and ingest job",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T004",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Define Log Analytics, a consumption Container Apps environment, scale-to-zero FastAPI app, and scheduled plus manually executable ingest job.",
+      "labels": [
+        "bicep",
+        "container-apps"
+      ],
+      "acceptance": [
+        "API scales from zero to at most two replicas",
+        "Ingest supports cron and manual execution using the shared image"
+      ],
+      "depends": [
+        "T014",
+        "T016",
+        "T017"
+      ],
+      "createdAt": "2026-09-01T03:21:03.835Z",
+      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:03.835Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T023",
+      "title": "E2.3 XNYS sessions and crypto UTC days",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T005",
+      "size": "small",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement exchange-calendar session ranges including holidays and half-days plus continuous UTC-day ranges for crypto.",
+      "labels": [
+        "calendar"
+      ],
+      "acceptance": [
+        "Calendar tests exclude closed equity dates and include every crypto UTC date"
+      ],
+      "depends": [
+        "T014"
+      ],
+      "createdAt": "2026-09-01T03:21:22.455Z",
+      "updatedAt": "2026-09-01T03:25:15.185Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:22.455Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T030",
+      "title": "E3.3 GHCR image build and immutable tagging",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T006",
+      "size": "small",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Build the shared image, authenticate with GITHUB_TOKEN, push a commit-addressed GHCR tag, and expose its immutable reference.",
+      "labels": [
+        "github-actions",
+        "ghcr"
+      ],
+      "acceptance": [
+        "The workflow publishes one image usable by both API and ingest runtimes"
+      ],
+      "depends": [
+        "T014"
+      ],
+      "createdAt": "2026-09-01T03:21:48.485Z",
+      "updatedAt": "2026-09-01T03:26:08.155Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:48.485Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T035",
+      "title": "E4.3 Durable queue worker loop",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T007",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Consume idempotent backfill messages, extend visibility for long work, checkpoint catalog outcomes, and isolate message failures.",
+      "labels": [
+        "queue",
+        "worker"
+      ],
+      "acceptance": [
+        "Worker restart or duplicate delivery cannot create duplicate objects or false completion"
+      ],
+      "depends": [
+        "T034"
+      ],
+      "createdAt": "2026-09-01T03:22:06.528Z",
+      "updatedAt": "2026-09-01T03:26:45.724Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:06.528Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T042",
+      "title": "E5.3 Ensure requests and job polling",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T008",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Compute gaps, enqueue deduplicated tasks, persist job counters, wait to a bounded deadline, and expose polling with remaining work.",
+      "labels": [
+        "api",
+        "jobs"
+      ],
+      "acceptance": [
+        "Ensure returns complete data or a stable 202 job identifier without blocking beyond the deadline"
+      ],
+      "depends": [
+        "T025",
+        "T035",
+        "T040"
+      ],
+      "createdAt": "2026-09-01T03:22:30.424Z",
+      "updatedAt": "2026-09-01T03:27:38.321Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:30.424Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T049",
+      "title": "E6.3 Full-history AAPL and SPY soak",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T009",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Backfill trades and quotes for AAPL and SPY over available SIP history while recording sessions, rows, bytes, pages, duration, and Azure costs.",
+      "labels": [
+        "soak",
+        "equities"
+      ],
+      "acceptance": [
+        "Soak completes or resumes safely and produces auditable per-session volume measurements"
+      ],
+      "depends": [
+        "T048"
+      ],
+      "createdAt": "2026-09-01T03:22:54.229Z",
+      "updatedAt": "2026-09-01T03:28:34.689Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:54.229Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "experiment",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T054",
+      "title": "E7.3 Options symbol-day worker integration",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T010",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Add option front-set planning and OSI symbol-day ingestion to the durable worker while preserving empty illiquid sessions as terminal coverage.",
+      "labels": [
+        "options",
+        "worker"
+      ],
+      "acceptance": [
+        "Option work is idempotent, resumable, and cataloged through shared worker semantics"
+      ],
+      "depends": [
+        "T035",
+        "T053"
+      ],
+      "createdAt": "2026-09-01T03:23:11.357Z",
+      "updatedAt": "2026-09-01T03:29:15.962Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:11.357Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T059",
+      "title": "E8.3 Crypto ensure and query API coverage",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T011",
+      "size": "small",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Support crypto pairs in catalog, ensure, file query, and bounded SQL routes with 24/7 coverage tests.",
+      "labels": [
+        "crypto",
+        "api"
+      ],
+      "acceptance": [
+        "Crypto API results use UTC partitions and the same authenticated response contract"
+      ],
+      "depends": [
+        "T043",
+        "T058"
+      ],
+      "createdAt": "2026-09-01T03:23:28.730Z",
+      "updatedAt": "2026-09-01T03:29:57.451Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:28.730Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T063",
+      "title": "E9.3 Dead-letter queue and failure recovery",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T012",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Bound retry attempts, move poison messages to a dead-letter queue, preserve actionable error metadata, and document replay procedures.",
+      "labels": [
+        "hardening",
+        "queue"
+      ],
+      "acceptance": [
+        "Permanent failures stop retrying indefinitely and can be diagnosed and replayed"
+      ],
+      "depends": [
+        "T035"
+      ],
+      "createdAt": "2026-09-01T03:23:42.807Z",
+      "updatedAt": "2026-09-01T03:30:29.546Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:42.807Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T005",
+      "title": "E2 Lake core library",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Implement typed partitioning, Parquet, calendars, coverage, catalog, settings, and Azure storage adapters shared by every asset class.",
+      "labels": [
+        "lake-core",
+        "phase.1"
+      ],
+      "acceptance": [
+        "Core library computes stable symbol-day objects and missing sessions",
+        "Memory-backed tests and Azure adapters share explicit protocols",
+        "Complete child T021: E2.1 Partition paths and stable PyArrow schemas",
+        "Complete child T022: E2.2 Idempotent Parquet writer and metadata",
+        "Complete child T023: E2.3 XNYS sessions and crypto UTC days",
+        "Complete child T024: E2.4 Catalog protocols and memory or Azure Table adapters",
+        "Complete child T025: E2.5 Coverage gaps, empty days, and partial sessions",
+        "Complete child T026: E2.6 Typed settings and universe loaders",
+        "Complete child T027: E2.7 Blob, queue, SAS, and job storage adapters"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-01T03:15:28.244Z",
+      "updatedAt": "2026-09-01T03:32:48.401Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T019",
+      "title": "E1.4 Budget alerts and runtime cost guards",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T004",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Apply short log retention, forty and seventy dollar alerts, a storage-cap setting, one-replica backfill, and bounded SQL scan settings.",
+      "labels": [
+        "bicep",
+        "cost-control"
+      ],
+      "acceptance": [
+        "Infrastructure encodes the plan's storage, compute, logging, and query guardrails"
+      ],
+      "depends": [
+        "T018"
+      ],
+      "createdAt": "2026-09-01T03:21:07.550Z",
+      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:07.550Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T024",
+      "title": "E2.4 Catalog protocols and memory or Azure Table adapters",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T005",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Define catalog, job, and contract repository protocols with deterministic in-memory implementations and Azure Table implementations.",
+      "labels": [
+        "catalog",
+        "azure-table"
+      ],
+      "acceptance": [
+        "Coverage statuses and job state round-trip through memory and Azure-compatible entity mappings"
+      ],
+      "depends": [
+        "T021",
+        "T023"
+      ],
+      "createdAt": "2026-09-01T03:21:25.939Z",
+      "updatedAt": "2026-09-01T03:25:22.707Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:25.939Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T031",
+      "title": "E3.4 Main-branch deploy workflow and health smoke",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T006",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Orchestrate infrastructure deployment, image publication, app and job revision updates, and an authenticated or probe-safe health smoke on main.",
+      "labels": [
+        "github-actions",
+        "deployment"
+      ],
+      "acceptance": [
+        "A successful workflow fully deploys a selected environment and verifies health",
+        "No alternate production mutation path is documented"
+      ],
+      "depends": [
+        "T028",
+        "T029",
+        "T030"
+      ],
+      "createdAt": "2026-09-01T03:21:52.178Z",
+      "updatedAt": "2026-09-01T03:26:15.710Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:52.178Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T036",
+      "title": "E4.4 Previous-session equities catch-up",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T007",
+      "size": "small",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Enqueue trades and quotes for the latest completed XNYS session across the configured equity watchlist and replace prior partial data.",
+      "labels": [
+        "equities",
+        "catchup"
+      ],
+      "acceptance": [
+        "A scheduled run leaves no unexplained watchlist holes for the prior completed session"
+      ],
+      "depends": [
+        "T023",
+        "T025",
+        "T035"
+      ],
+      "createdAt": "2026-09-01T03:22:09.837Z",
+      "updatedAt": "2026-09-01T03:26:53.183Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:09.837Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T043",
+      "title": "E5.4 File query mode with short-lived SAS",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T008",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Implement POST v1 query file mode that optionally ensures coverage and returns catalog metadata plus read-only object-scoped SAS URLs.",
+      "labels": [
+        "api",
+        "sas"
+      ],
+      "acceptance": [
+        "Cached queries return only requested complete files and expiring read-only URLs"
+      ],
+      "depends": [
+        "T027",
+        "T042"
+      ],
+      "createdAt": "2026-09-01T03:22:33.889Z",
+      "updatedAt": "2026-09-01T03:27:45.907Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:33.889Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T050",
+      "title": "E6.4 Cost projection and equity rollout decision",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T009",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Extrapolate measured storage, transactions, retrieval, compute, and egress for the proposed watchlist and record approval or the ranked quote-history valve.",
+      "labels": [
+        "budget-gate",
+        "decision"
+      ],
+      "acceptance": [
+        "A documented decision prevents broad backfill unless projected Cool storage and total monthly costs meet the plan gates"
+      ],
+      "depends": [
+        "T049"
+      ],
+      "createdAt": "2026-09-01T03:22:57.624Z",
+      "updatedAt": "2026-09-01T03:28:42.885Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:57.624Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T055",
+      "title": "E7.4 Options ensure and query API coverage",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T010",
+      "size": "small",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Support option underlyings and selected contracts in catalog, ensure, file query, and bounded SQL paths with API tests.",
+      "labels": [
+        "options",
+        "api"
+      ],
+      "acceptance": [
+        "Options use the same authenticated job and retrieval contract as equities"
+      ],
+      "depends": [
+        "T043",
+        "T054"
+      ],
+      "createdAt": "2026-09-01T03:23:14.898Z",
+      "updatedAt": "2026-09-01T03:29:24.427Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:14.898Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T060",
+      "title": "E8.4 Validate and roll out configured crypto pairs",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T011",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Run dev smoke and volume checks, then enable the approved approximately twenty-pair universe without competing with equity or option backfill quota.",
+      "labels": [
+        "crypto",
+        "rollout"
+      ],
+      "acceptance": [
+        "Configured pairs ingest and query successfully under an explicit scheduling and quota policy"
+      ],
+      "depends": [
+        "T050",
+        "T056",
+        "T059"
+      ],
+      "createdAt": "2026-09-01T03:23:32.087Z",
+      "updatedAt": "2026-09-01T03:30:05.597Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:32.087Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T064",
+      "title": "E9.4 Daily coverage and budget report",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T012",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Report prior-session holes, errors, queue age, stored bytes, projected cap use, and paused states through an inexpensive alertable channel.",
+      "labels": [
+        "operations",
+        "reporting"
+      ],
+      "acceptance": [
+        "Operators receive a concise daily view of freshness, failures, and budget pressure"
+      ],
+      "depends": [
+        "T024",
+        "T038",
+        "T050"
+      ],
+      "createdAt": "2026-09-01T03:23:46.380Z",
+      "updatedAt": "2026-09-01T03:30:37.354Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:46.380Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T067",
+      "title": "E0.4 Publish reconciled CLEO state",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T003",
+      "size": "small",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Export the reconciled task graph and publish its agent guidance and RCASD artifacts to the project remote in one traceable commit.",
+      "labels": [
+        "cleo",
+        "documentation",
+        "repository"
+      ],
+      "acceptance": [
+        "A portable export contains the complete reconciled CLEO graph",
+        "Project-scoped CLEO guidance and generated RCASD artifacts are committed",
+        "The commit is pushed to the tracked project branch and remote state is verified"
+      ],
+      "createdAt": "2026-09-01T03:53:49.111Z",
+      "updatedAt": "2026-09-01T03:54:02.362Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:53:49.111Z"
+      },
+      "pipelineStage": "implementation",
+      "assignee": "local",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T006",
+      "title": "E3 CI/CD and GitHub OIDC",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Automate validation and the sole production deployment path through GitHub Actions, GHCR, Azure OIDC, and environment controls.",
+      "labels": [
+        "github-actions",
+        "deployment",
+        "phase.0"
+      ],
+      "acceptance": [
+        "Pull requests run Python and Bicep validation",
+        "Main-branch deployment uses OIDC, GHCR, Bicep, app updates, and a smoke check",
+        "Complete child T028: E3.1 Path-filtered Python and Bicep CI",
+        "Complete child T029: E3.2 Reusable Azure OIDC and Bicep deployment steps",
+        "Complete child T030: E3.3 GHCR image build and immutable tagging",
+        "Complete child T031: E3.4 Main-branch deploy workflow and health smoke",
+        "Complete child T032: E3.5 GitHub Environments and OIDC bootstrap documentation"
+      ],
+      "depends": [
+        "T003",
+        "T004"
+      ],
+      "createdAt": "2026-09-01T03:15:31.494Z",
+      "updatedAt": "2026-09-01T03:32:56.318Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T020",
+      "title": "E1.5 Main Bicep, parameters, naming, and dev what-if",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T004",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Compose the modules into a single market-lake deployment with westus2 dev parameters, documented naming, validation, and a reviewed what-if.",
+      "labels": [
+        "bicep",
+        "validation"
+      ],
+      "acceptance": [
+        "Bicep build succeeds",
+        "Dev what-if contains only intended resources and role assignments"
+      ],
+      "depends": [
+        "T016",
+        "T017",
+        "T018",
+        "T019"
+      ],
+      "createdAt": "2026-09-01T03:21:11.410Z",
+      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:11.410Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T025",
+      "title": "E2.5 Coverage gaps, empty days, and partial sessions",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T005",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Compute missing symbol sessions from calendars and catalog status while treating empty as terminal and current sessions as replaceable partial coverage.",
+      "labels": [
+        "coverage"
+      ],
+      "acceptance": [
+        "Coverage math correctly handles holidays, empty outcomes, errors, and today's partial session"
+      ],
+      "depends": [
+        "T023",
+        "T024"
+      ],
+      "createdAt": "2026-09-01T03:21:29.711Z",
+      "updatedAt": "2026-09-01T03:25:30.336Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:29.711Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T032",
+      "title": "E3.5 GitHub Environments and OIDC bootstrap documentation",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T006",
+      "size": "small",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Document one-time environment variables, approvals, package permissions, federated subject configuration, and Key Vault secret seeding.",
+      "labels": [
+        "documentation",
+        "oidc"
+      ],
+      "acceptance": [
+        "A maintainer can bootstrap dev and prod without committing secrets"
+      ],
+      "depends": [
+        "T017",
+        "T031"
+      ],
+      "createdAt": "2026-09-01T03:21:56.283Z",
+      "updatedAt": "2026-09-01T03:26:23.206Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:56.283Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T037",
+      "title": "E4.5 Newest-first equity backfill planning",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T007",
+      "size": "small",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Generate resumable backfill work ordered by recent session and liquidity rank while skipping terminal catalog entries.",
+      "labels": [
+        "equities",
+        "backfill"
+      ],
+      "acceptance": [
+        "Planning always prioritizes newer missing sessions and safely resumes from catalog state"
+      ],
+      "depends": [
+        "T025",
+        "T035"
+      ],
+      "createdAt": "2026-09-01T03:22:13.245Z",
+      "updatedAt": "2026-09-01T03:27:00.636Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:13.245Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T044",
+      "title": "E5.5 Raw objects endpoint",
+      "status": "pending",
+      "priority": "low",
+      "type": "task",
+      "parentId": "T008",
+      "size": "small",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Expose read-only SAS metadata for already known and authorized lake paths without triggering ensure work.",
+      "labels": [
+        "api",
+        "sas"
+      ],
+      "acceptance": [
+        "Unknown, malformed, or out-of-scope paths cannot receive SAS credentials"
+      ],
+      "depends": [
+        "T043"
+      ],
+      "createdAt": "2026-09-01T03:22:37.125Z",
+      "updatedAt": "2026-09-01T03:27:53.908Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:37.125Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T051",
+      "title": "E6.5 Expand equity universe and controlled backfill",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T009",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Populate the approved 200-plus symbol universe and begin one-replica newest-first history backfill under the recorded budget valve.",
+      "labels": [
+        "equities",
+        "backfill",
+        "budget-gate"
+      ],
+      "acceptance": [
+        "Broad backfill uses the approved universe and history policy and pauses at every configured budget guard"
+      ],
+      "depends": [
+        "T038",
+        "T050"
+      ],
+      "createdAt": "2026-09-01T03:23:01.036Z",
+      "updatedAt": "2026-09-01T03:28:50.981Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:01.036Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T056",
+      "title": "E7.5 Three-underlying two-year soak and expansion gate",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T010",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Backfill SPY, QQQ, and AAPL option front sets for the rolling two-year window, measure cost and quota use, then decide whether to expand toward ten underlyings.",
+      "labels": [
+        "options",
+        "soak",
+        "budget-gate"
+      ],
+      "acceptance": [
+        "Measured OPRA volume and cost support an explicit approved or constrained options universe"
+      ],
+      "depends": [
+        "T050",
+        "T055"
+      ],
+      "createdAt": "2026-09-01T03:23:18.435Z",
+      "updatedAt": "2026-09-01T03:29:32.531Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:18.435Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "experiment",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T065",
+      "title": "E9.5 Evaluate and configure cold-tier policy",
+      "status": "pending",
+      "priority": "low",
+      "type": "task",
+      "parentId": "T012",
+      "size": "small",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Use measured historical access patterns to decide whether objects older than one year should move to Cold and update lifecycle plus retrieval documentation accordingly.",
+      "labels": [
+        "cost-control",
+        "lifecycle"
+      ],
+      "acceptance": [
+        "Lifecycle policy and documentation reflect an explicit retrieval-cost decision rather than an assumed Cold transition"
+      ],
+      "depends": [
+        "T019",
+        "T050"
+      ],
+      "createdAt": "2026-09-01T03:23:49.887Z",
+      "updatedAt": "2026-09-01T03:30:45.260Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:49.887Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T007",
+      "title": "E4 Equities SIP ingest",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Fetch Alpaca SIP trades and NBBO quotes, persist idempotent symbol-session Parquet, and run catch-up plus newest-first backfill workers.",
+      "labels": [
+        "equities",
+        "alpaca",
+        "phase.1"
+      ],
+      "acceptance": [
+        "Equity trades and SIP quotes are paginated with rate-limit handling",
+        "Queue workers resume safely and catalog every terminal symbol-day outcome",
+        "Complete child T033: E4.1 Async Alpaca client pagination and 429 handling",
+        "Complete child T034: E4.2 Equity symbol-day ingest transaction",
+        "Complete child T035: E4.3 Durable queue worker loop",
+        "Complete child T036: E4.4 Previous-session equities catch-up",
+        "Complete child T037: E4.5 Newest-first equity backfill planning",
+        "Complete child T038: E4.6 Storage-cap pause and history valve",
+        "Complete child T039: E4.7 Equity client, writer, worker, and coverage tests"
+      ],
+      "depends": [
+        "T004",
+        "T005"
+      ],
+      "createdAt": "2026-09-01T03:15:34.634Z",
+      "updatedAt": "2026-09-01T03:33:04.189Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T026",
+      "title": "E2.6 Typed settings and universe loaders",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T005",
+      "size": "small",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Load YAML defaults and environment overrides into validated settings and normalized equity, option, and crypto universes.",
+      "labels": [
+        "configuration"
+      ],
+      "acceptance": [
+        "Invalid settings fail fast and secrets are accepted only through environment or Key Vault references"
+      ],
+      "depends": [
+        "T015"
+      ],
+      "createdAt": "2026-09-01T03:21:33.617Z",
+      "updatedAt": "2026-09-01T03:25:37.832Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:33.617Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T038",
+      "title": "E4.6 Storage-cap pause and history valve",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T007",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Estimate current storage, pause enqueue and ingest at the configured cap, surface an alertable state, and honor ranked quote-history limits when approved.",
+      "labels": [
+        "backfill",
+        "cost-control"
+      ],
+      "acceptance": [
+        "Backfill cannot silently pass the configured storage ceiling",
+        "Trade and quote history valves are explicit and testable"
+      ],
+      "depends": [
+        "T019",
+        "T024",
+        "T037"
+      ],
+      "createdAt": "2026-09-01T03:22:16.722Z",
+      "updatedAt": "2026-09-01T03:27:08.432Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:16.722Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T045",
+      "title": "E5.6 Bounded DuckDB SQL query mode",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T008",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Execute restricted SQL only over ensured request files, estimate scanned bytes, enforce the configured scan and 32 MB result caps, and return Arrow or JSON.",
+      "labels": [
+        "api",
+        "duckdb",
+        "cost-control"
+      ],
+      "acceptance": [
+        "SQL cannot reference arbitrary storage or exceed caps without an explicit authorized force option"
+      ],
+      "depends": [
+        "T043"
+      ],
+      "createdAt": "2026-09-01T03:22:40.656Z",
+      "updatedAt": "2026-09-01T03:28:01.997Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:40.656Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T066",
+      "title": "E9.6 End-to-end validation and operations guide",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T012",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Validate success criteria across assets, performance, recovery, security, and cost, and publish runbooks for deployment, catch-up, backfill, query, egress, and incidents.",
+      "labels": [
+        "validation",
+        "documentation",
+        "operations"
+      ],
+      "acceptance": [
+        "All applicable plan success criteria have recorded evidence",
+        "Maintainers can operate and recover the service without undocumented steps"
+      ],
+      "depends": [
+        "T051",
+        "T056",
+        "T060",
+        "T061",
+        "T062",
+        "T063",
+        "T064",
+        "T065"
+      ],
+      "createdAt": "2026-09-01T03:23:53.363Z",
+      "updatedAt": "2026-09-01T03:30:53.187Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:23:53.363Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T008",
+      "title": "E5 HTTP ensure and query API",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "large",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Expose authenticated health, catalog, ensure, job, object, file-query, and bounded DuckDB query endpoints through FastAPI.",
+      "labels": [
+        "api",
+        "fastapi",
+        "phase.1"
+      ],
+      "acceptance": [
+        "Missing sessions can be enqueued and polled through the API",
+        "Cached data is returned as short-lived SAS files or size-capped SQL results",
+        "Complete child T040: E5.1 FastAPI health, bearer auth, and request models",
+        "Complete child T041: E5.2 Catalog coverage endpoint",
+        "Complete child T042: E5.3 Ensure requests and job polling",
+        "Complete child T043: E5.4 File query mode with short-lived SAS",
+        "Complete child T044: E5.5 Raw objects endpoint",
+        "Complete child T045: E5.6 Bounded DuckDB SQL query mode",
+        "Complete child T046: E5.7 API authentication, ensure, and query tests"
+      ],
+      "depends": [
+        "T003",
+        "T005",
+        "T007"
+      ],
+      "createdAt": "2026-09-01T03:15:38.157Z",
+      "updatedAt": "2026-09-01T03:33:12.176Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T027",
+      "title": "E2.7 Blob, queue, SAS, and job storage adapters",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T005",
+      "size": "medium",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Implement managed-identity blob replacement, queue messaging, short-lived read-only SAS issuance, and job storage operations behind testable interfaces.",
+      "labels": [
+        "azure-storage",
+        "security"
+      ],
+      "acceptance": [
+        "Azure adapters avoid account keys and expose only the minimum read or write capability required"
+      ],
+      "depends": [
+        "T024"
+      ],
+      "createdAt": "2026-09-01T03:21:37.177Z",
+      "updatedAt": "2026-09-01T03:25:45.469Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:21:37.177Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T039",
+      "title": "E4.7 Equity client, writer, worker, and coverage tests",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T007",
+      "size": "medium",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Add recorded HTTP fixtures, golden Parquet round trips, calendar coverage cases, retry cases, and duplicate-delivery tests for AAPL and SPY.",
+      "labels": [
+        "tests",
+        "equities"
+      ],
+      "acceptance": [
+        "Core equities pipeline behavior is reproducible without live Alpaca or Azure access"
+      ],
+      "depends": [
+        "T033",
+        "T034",
+        "T035",
+        "T036",
+        "T037",
+        "T038"
+      ],
+      "createdAt": "2026-09-01T03:22:20.113Z",
+      "updatedAt": "2026-09-01T03:27:15.873Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:20.113Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T046",
+      "title": "E5.7 API authentication, ensure, and query tests",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T008",
+      "size": "medium",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Test authentication boundaries, coverage filtering, synchronous completion, 202 polling, SAS scoping, SQL limits, and validation failures with in-memory adapters.",
+      "labels": [
+        "api",
+        "tests"
+      ],
+      "acceptance": [
+        "API tests cover happy paths and security or cost-control rejection paths without Azure"
+      ],
+      "depends": [
+        "T040",
+        "T041",
+        "T042",
+        "T043",
+        "T044",
+        "T045"
+      ],
+      "createdAt": "2026-09-01T03:22:44.054Z",
+      "updatedAt": "2026-09-01T03:28:10.340Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T03:22:44.054Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T009",
+      "title": "E6 Dev deployment and equities soak gate",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "medium",
+      "position": 8,
+      "positionVersion": 0,
+      "description": "Deploy the first complete slice to dev, smoke the API, measure AAPL and SPY history, and gate broad equity rollout on projected cost.",
+      "labels": [
+        "deployment",
+        "soak",
+        "budget-gate",
+        "phase.1"
+      ],
+      "acceptance": [
+        "Dev deployment runs both API and ingest commands successfully",
+        "Measured storage economics explicitly approve or constrain the 200-symbol rollout",
+        "Complete child T047: E6.1 Deploy the complete dev slice",
+        "Complete child T048: E6.2 Dev API and ingest smoke tests",
+        "Complete child T049: E6.3 Full-history AAPL and SPY soak",
+        "Complete child T050: E6.4 Cost projection and equity rollout decision",
+        "Complete child T051: E6.5 Expand equity universe and controlled backfill"
+      ],
+      "depends": [
+        "T004",
+        "T006",
+        "T007",
+        "T008"
+      ],
+      "createdAt": "2026-09-01T03:15:41.837Z",
+      "updatedAt": "2026-09-01T03:33:20.061Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T010",
+      "title": "E7 Options front-set OPRA",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "large",
+      "position": 9,
+      "positionVersion": 0,
+      "description": "Select reproducible front-window option contracts and ingest OPRA trades and quotes through the shared worker and API paths.",
+      "labels": [
+        "options",
+        "opra",
+        "phase.3"
+      ],
+      "acceptance": [
+        "Daily front sets persist the chosen OSI contracts",
+        "Three-underlying backfill is validated before expansion toward ten",
+        "Complete child T052: E7.1 Option chain selector and contracts catalog",
+        "Complete child T053: E7.2 OPRA trades and quotes client",
+        "Complete child T054: E7.3 Options symbol-day worker integration",
+        "Complete child T055: E7.4 Options ensure and query API coverage",
+        "Complete child T056: E7.5 Three-underlying two-year soak and expansion gate"
+      ],
+      "depends": [
+        "T005",
+        "T007",
+        "T008",
+        "T009"
+      ],
+      "createdAt": "2026-09-01T03:15:45.072Z",
+      "updatedAt": "2026-09-01T03:33:28.015Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T011",
+      "title": "E8 Crypto pairs",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "medium",
+      "position": 10,
+      "positionVersion": 0,
+      "description": "Add Alpaca crypto trades and quotes with UTC-day coverage to the existing worker, catalog, and query interfaces.",
+      "labels": [
+        "crypto",
+        "phase.4"
+      ],
+      "acceptance": [
+        "Crypto uses 24/7 UTC partitions without equity-calendar assumptions",
+        "Configured pairs are covered by ingest and API tests before rollout",
+        "Complete child T057: E8.1 Crypto trades and quotes client",
+        "Complete child T058: E8.2 Crypto UTC-day worker integration",
+        "Complete child T059: E8.3 Crypto ensure and query API coverage",
+        "Complete child T060: E8.4 Validate and roll out configured crypto pairs"
+      ],
+      "depends": [
+        "T005",
+        "T007",
+        "T008",
+        "T009",
+        "T010"
+      ],
+      "createdAt": "2026-09-01T03:15:48.150Z",
+      "updatedAt": "2026-09-01T03:33:36.160Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T012",
+      "title": "E9 Client, operations, and hardening",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T001",
+      "size": "large",
+      "position": 11,
+      "positionVersion": 0,
+      "description": "Finish the local file-query client, concurrency safety, failure handling, reporting, operational documentation, and end-to-end validation.",
+      "labels": [
+        "hardening",
+        "operations",
+        "phase.5"
+      ],
+      "acceptance": [
+        "Concurrent and failed jobs cannot corrupt cached partitions",
+        "Client, reporting, documentation, and end-to-end checks satisfy the service success criteria",
+        "Complete child T061: E9.1 Thin Python lakeclient",
+        "Complete child T062: E9.2 Blob leases for symbol-day writes",
+        "Complete child T063: E9.3 Dead-letter queue and failure recovery",
+        "Complete child T064: E9.4 Daily coverage and budget report",
+        "Complete child T065: E9.5 Evaluate and configure cold-tier policy",
+        "Complete child T066: E9.6 End-to-end validation and operations guide"
+      ],
+      "depends": [
+        "T004",
+        "T005",
+        "T006",
+        "T007",
+        "T008",
+        "T009",
+        "T010",
+        "T011"
+      ],
+      "createdAt": "2026-09-01T03:15:51.500Z",
+      "updatedAt": "2026-09-01T03:33:44.044Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    }
+  ],
+  "relationshipGraph": {
+    "hierarchy": {
+      "T001": [
+        "T002",
+        "T003",
+        "T004",
+        "T005",
+        "T006",
+        "T007",
+        "T008",
+        "T009",
+        "T010",
+        "T011",
+        "T012"
+      ],
+      "T003": [
+        "T013",
+        "T014",
+        "T015",
+        "T067"
+      ],
+      "T004": [
+        "T016",
+        "T017",
+        "T018",
+        "T019",
+        "T020"
+      ],
+      "T005": [
+        "T021",
+        "T022",
+        "T023",
+        "T024",
+        "T025",
+        "T026",
+        "T027"
+      ],
+      "T006": [
+        "T028",
+        "T029",
+        "T030",
+        "T031",
+        "T032"
+      ],
+      "T007": [
+        "T033",
+        "T034",
+        "T035",
+        "T036",
+        "T037",
+        "T038",
+        "T039"
+      ],
+      "T008": [
+        "T040",
+        "T041",
+        "T042",
+        "T043",
+        "T044",
+        "T045",
+        "T046"
+      ],
+      "T009": [
+        "T047",
+        "T048",
+        "T049",
+        "T050",
+        "T051"
+      ],
+      "T010": [
+        "T052",
+        "T053",
+        "T054",
+        "T055",
+        "T056"
+      ],
+      "T011": [
+        "T057",
+        "T058",
+        "T059",
+        "T060"
+      ],
+      "T012": [
+        "T061",
+        "T062",
+        "T063",
+        "T064",
+        "T065",
+        "T066"
+      ]
+    },
+    "dependencies": {
+      "T021": [
+        "T014"
+      ],
+      "T028": [
+        "T014",
+        "T020"
+      ],
+      "T033": [
+        "T026"
+      ],
+      "T040": [
+        "T014",
+        "T026"
+      ],
+      "T047": [
+        "T020",
+        "T031",
+        "T039",
+        "T046"
+      ],
+      "T052": [
+        "T024",
+        "T033"
+      ],
+      "T057": [
+        "T023",
+        "T033"
+      ],
+      "T061": [
+        "T032",
+        "T043"
+      ],
+      "T014": [
+        "T013"
+      ],
+      "T017": [
+        "T016"
+      ],
+      "T022": [
+        "T021"
+      ],
+      "T029": [
+        "T017",
+        "T020"
+      ],
+      "T034": [
+        "T022",
+        "T024",
+        "T027",
+        "T033"
+      ],
+      "T041": [
+        "T024",
+        "T040"
+      ],
+      "T048": [
+        "T047"
+      ],
+      "T053": [
+        "T033",
+        "T052"
+      ],
+      "T058": [
+        "T035",
+        "T057"
+      ],
+      "T062": [
+        "T027",
+        "T034",
+        "T035"
+      ],
+      "T004": [
+        "T003"
+      ],
+      "T015": [
+        "T013"
+      ],
+      "T018": [
+        "T014",
+        "T016",
+        "T017"
+      ],
+      "T023": [
+        "T014"
+      ],
+      "T030": [
+        "T014"
+      ],
+      "T035": [
+        "T034"
+      ],
+      "T042": [
+        "T025",
+        "T035",
+        "T040"
+      ],
+      "T049": [
+        "T048"
+      ],
+      "T054": [
+        "T035",
+        "T053"
+      ],
+      "T059": [
+        "T043",
+        "T058"
+      ],
+      "T063": [
+        "T035"
+      ],
+      "T005": [
+        "T003"
+      ],
+      "T019": [
+        "T018"
+      ],
+      "T024": [
+        "T021",
+        "T023"
+      ],
+      "T031": [
+        "T028",
+        "T029",
+        "T030"
+      ],
+      "T036": [
+        "T023",
+        "T025",
+        "T035"
+      ],
+      "T043": [
+        "T027",
+        "T042"
+      ],
+      "T050": [
+        "T049"
+      ],
+      "T055": [
+        "T043",
+        "T054"
+      ],
+      "T060": [
+        "T050",
+        "T056",
+        "T059"
+      ],
+      "T064": [
+        "T024",
+        "T038",
+        "T050"
+      ],
+      "T006": [
+        "T003",
+        "T004"
+      ],
+      "T020": [
+        "T016",
+        "T017",
+        "T018",
+        "T019"
+      ],
+      "T025": [
+        "T023",
+        "T024"
+      ],
+      "T032": [
+        "T017",
+        "T031"
+      ],
+      "T037": [
+        "T025",
+        "T035"
+      ],
+      "T044": [
+        "T043"
+      ],
+      "T051": [
+        "T038",
+        "T050"
+      ],
+      "T056": [
+        "T050",
+        "T055"
+      ],
+      "T065": [
+        "T019",
+        "T050"
+      ],
+      "T007": [
+        "T004",
+        "T005"
+      ],
+      "T026": [
+        "T015"
+      ],
+      "T038": [
+        "T019",
+        "T024",
+        "T037"
+      ],
+      "T045": [
+        "T043"
+      ],
+      "T066": [
+        "T051",
+        "T056",
+        "T060",
+        "T061",
+        "T062",
+        "T063",
+        "T064",
+        "T065"
+      ],
+      "T008": [
+        "T003",
+        "T005",
+        "T007"
+      ],
+      "T027": [
+        "T024"
+      ],
+      "T039": [
+        "T033",
+        "T034",
+        "T035",
+        "T036",
+        "T037",
+        "T038"
+      ],
+      "T046": [
+        "T040",
+        "T041",
+        "T042",
+        "T043",
+        "T044",
+        "T045"
+      ],
+      "T009": [
+        "T004",
+        "T006",
+        "T007",
+        "T008"
+      ],
+      "T010": [
+        "T005",
+        "T007",
+        "T008",
+        "T009"
+      ],
+      "T011": [
+        "T005",
+        "T007",
+        "T008",
+        "T009",
+        "T010"
+      ],
+      "T012": [
+        "T004",
+        "T005",
+        "T006",
+        "T007",
+        "T008",
+        "T009",
+        "T010",
+        "T011"
+      ]
+    },
+    "roots": [
+      "T001"
+    ]
+  }
+}
