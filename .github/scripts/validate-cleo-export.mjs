@@ -5,6 +5,21 @@ const exportPath = resolve(process.cwd(), ".cleo-export.json");
 const data = JSON.parse(readFileSync(exportPath, "utf8"));
 const tasks = data.tasks;
 
+const serialized = JSON.stringify(data);
+const machineSpecificPathPatterns = [
+  { name: "Windows drive path", pattern: /(?:^|[^A-Za-z])[A-Za-z]:[\\/]/ },
+  { name: "UNC path", pattern: /\\\\[^\\/]+[\\/][^\\/]+/ },
+  { name: "macOS home path", pattern: /\/Users\/[^/]+\// },
+  { name: "Linux home path", pattern: /\/home\/[^/]+\// },
+  { name: "temporary path", pattern: /(?:\/tmp\/|\/var\/tmp\/)/ },
+];
+
+for (const { name, pattern } of machineSpecificPathPatterns) {
+  if (pattern.test(serialized)) {
+    throw new Error(`${name} found in CLEO export; persist repository-relative paths only`);
+  }
+}
+
 if (data?._meta?.format !== "cleo-export" || !Array.isArray(tasks)) {
   throw new Error("Invalid CLEO export package");
 }

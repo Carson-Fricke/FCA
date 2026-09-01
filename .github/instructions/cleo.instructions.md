@@ -6,11 +6,22 @@ applyTo: "**"
 
 These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before changing task state.
 
-## Project Location
+## Repository Discovery
 
-- The FCA repository is `C:\Users\csfri\source\repos\FCA`.
-- `C:\Users\csfri\source\fca` is an empty directory and is not the repository.
-- Run every `cleo` and repository `git` command with the actual repository as the working directory. CLEO discovers project state from the current directory.
+- Never encode or assume a workstation-specific FCA checkout path. Resolve the repository root from Git with `git rev-parse --show-toplevel` when already inside the checkout.
+- When the current directory is not a Git checkout, locate the FCA checkout by its `origin` URL or CLEO project registration, not by a fixed drive, home directory, username, or parent folder.
+- Confirm the selected checkout with `git remote get-url origin`; its repository name must be `FCA` before mutating Git or CLEO state.
+- Run every `cleo` and repository `git` command with the resolved repository root as the tool working directory. Prefer the tool's `workdir` option over changing directories inside a shell command.
+- In PowerShell, capture a discovered root with `$repoRoot = git rev-parse --show-toplevel`. In POSIX shells, use `repo_root="$(git rev-parse --show-toplevel)"`. Do not persist the resulting absolute value.
+
+## Portable Paths
+
+- Paths persisted in tasks, acceptance criteria, notes, evidence, configuration, generated artifacts, or `.cleo-export.json` must be relative to the repository root and use `/` separators.
+- Use paths such as `.github/verification/T067-validation.json`, never drive-letter paths, UNC paths, `/Users/<name>/...`, `/home/<name>/...`, or temporary-directory paths.
+- Pass repository-relative values to `--files`, `test-run:`, `--params-file`, `--file`, and `-o` whenever the path can be retained in CLEO state or an export.
+- Temporary files may be used for transient command input only. Do not reference them in CLEO evidence, task metadata, configuration, or committed output.
+- Do not write the resolved checkout root into instructions, scripts, task descriptions, notes, or verification records. Use `<repo-root>` only in explanatory prose.
+- Before publishing an export, run `node .github/scripts/validate-cleo-export.mjs`; it rejects common machine-specific filesystem paths.
 
 ## Inspect Before Mutating
 
@@ -88,12 +99,14 @@ cleo tree T001 --withDeps
 cleo plan --json
 ```
 
-Expected current state after the reconciliation and publication task were created:
+Expected current state after the lake and quant-harness plans were reconciled:
 
-- `67` total tasks: one root saga, `11` epics including completed initialization, and `55` implementation tasks.
+- `137` total tasks: two root sagas, `20` epics, and `115` tasks.
+- The lake saga is `T001`; the quant-harness saga is `T068` with milestone epics `T069` through `T077`, implementation tasks `T078` through `T136`, and roadmap publication task `T137`.
+- Original harness source task identities are retained as `harness.h001` through `harness.h058` labels; `T121` is an added OPRA WebSocket plan-gap task.
 - `T002` and publication task `T067` are done; all service implementation work is pending.
-- Dependency cycles are absent, schema and coherence checks pass, and the ID sequence ends at `T067`.
-- The only full-graph dependency-validator finding is the known `T001` root-saga `E_ORPHAN` defect.
+- Dependency cycles are absent, schema and coherence checks pass, and the ID sequence ends at `T137`.
+- The only full-graph dependency-validator findings are the known root-saga `E_ORPHAN` defects for `T001` and `T068`.
 
 ## Known CLEO Diagnostics
 

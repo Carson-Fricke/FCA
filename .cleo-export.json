@@ -3,22 +3,158 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-01T15:53:46.353Z",
+    "exportedAt": "2026-09-01T18:47:56.401Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 68
+      "nextId": 138
     },
-    "checksum": "fbc12a968d774763",
-    "taskCount": 67,
-    "exportMode": "subtree"
+    "checksum": "cc4796c8d3a5ff55",
+    "taskCount": 137,
+    "exportMode": "full"
   },
   "selection": {
-    "mode": "subtree",
+    "mode": "full",
     "rootTaskIds": [
-      "T001"
+      "T001",
+      "T002",
+      "T013",
+      "T016",
+      "T021",
+      "T028",
+      "T033",
+      "T040",
+      "T047",
+      "T052",
+      "T057",
+      "T061",
+      "T069",
+      "T078",
+      "T088",
+      "T098",
+      "T103",
+      "T112",
+      "T115",
+      "T122",
+      "T128",
+      "T132",
+      "T003",
+      "T014",
+      "T017",
+      "T022",
+      "T029",
+      "T034",
+      "T041",
+      "T048",
+      "T053",
+      "T058",
+      "T062",
+      "T068",
+      "T070",
+      "T079",
+      "T089",
+      "T099",
+      "T104",
+      "T113",
+      "T116",
+      "T123",
+      "T129",
+      "T133",
+      "T004",
+      "T015",
+      "T018",
+      "T023",
+      "T030",
+      "T035",
+      "T042",
+      "T049",
+      "T054",
+      "T059",
+      "T063",
+      "T071",
+      "T080",
+      "T090",
+      "T100",
+      "T105",
+      "T114",
+      "T117",
+      "T124",
+      "T130",
+      "T134",
+      "T005",
+      "T019",
+      "T024",
+      "T031",
+      "T036",
+      "T043",
+      "T050",
+      "T055",
+      "T060",
+      "T064",
+      "T067",
+      "T072",
+      "T081",
+      "T091",
+      "T101",
+      "T106",
+      "T118",
+      "T125",
+      "T131",
+      "T135",
+      "T006",
+      "T020",
+      "T025",
+      "T032",
+      "T037",
+      "T044",
+      "T051",
+      "T056",
+      "T065",
+      "T073",
+      "T082",
+      "T092",
+      "T102",
+      "T107",
+      "T119",
+      "T126",
+      "T136",
+      "T007",
+      "T026",
+      "T038",
+      "T045",
+      "T066",
+      "T074",
+      "T083",
+      "T093",
+      "T108",
+      "T120",
+      "T127",
+      "T008",
+      "T027",
+      "T039",
+      "T046",
+      "T077",
+      "T084",
+      "T094",
+      "T109",
+      "T121",
+      "T009",
+      "T075",
+      "T085",
+      "T095",
+      "T110",
+      "T010",
+      "T076",
+      "T086",
+      "T096",
+      "T111",
+      "T011",
+      "T087",
+      "T097",
+      "T012",
+      "T137"
     ],
-    "includeChildren": true
+    "includeChildren": false
   },
   "idMap": {
     "T001": {
@@ -129,6 +265,111 @@
         "T043"
       ]
     },
+    "T069": {
+      "type": "epic",
+      "title": "H1 M0 Foundations and contracts",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T003"
+      ]
+    },
+    "T078": {
+      "type": "task",
+      "title": "H1.1 Extend FCA scaffold for quant-harness",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T014"
+      ]
+    },
+    "T088": {
+      "type": "task",
+      "title": "H2.1 Market-lake access adapter",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T021",
+        "T023",
+        "T046",
+        "T048",
+        "T079"
+      ]
+    },
+    "T098": {
+      "type": "task",
+      "title": "H3.1 Streaming recorder and audit trail",
+      "status": "pending",
+      "parentId": "T071",
+      "depends": [
+        "T080",
+        "T094"
+      ]
+    },
+    "T103": {
+      "type": "task",
+      "title": "H4.1 Alpaca SIP WebSocket feed",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T079",
+        "T080",
+        "T086"
+      ]
+    },
+    "T112": {
+      "type": "task",
+      "title": "H5.1 Extend Bicep for quant runtime",
+      "status": "pending",
+      "parentId": "T073",
+      "depends": [
+        "T020",
+        "T102",
+        "T107"
+      ]
+    },
+    "T115": {
+      "type": "task",
+      "title": "H6.1 Point-in-time option contract universe",
+      "status": "pending",
+      "parentId": "T074",
+      "depends": [
+        "T055",
+        "T088"
+      ]
+    },
+    "T122": {
+      "type": "task",
+      "title": "H7.1 AlpacaVenue equities",
+      "status": "pending",
+      "parentId": "T075",
+      "depends": [
+        "T082",
+        "T107"
+      ]
+    },
+    "T128": {
+      "type": "task",
+      "title": "H8.1 Reproducible parameter sweep runner",
+      "status": "pending",
+      "parentId": "T076",
+      "depends": [
+        "T096",
+        "T102"
+      ]
+    },
+    "T132": {
+      "type": "task",
+      "title": "H9.1 SecurityMaster and listings-aware lake coverage",
+      "status": "pending",
+      "parentId": "T077",
+      "depends": [
+        "T024",
+        "T025",
+        "T034",
+        "T088"
+      ]
+    },
     "T003": {
       "type": "epic",
       "title": "E0 Repository and Python foundation",
@@ -235,6 +476,111 @@
         "T035"
       ]
     },
+    "T068": {
+      "type": "saga",
+      "title": "Deterministic strategy harness and trading runtime",
+      "status": "pending",
+      "parentId": null,
+      "depends": []
+    },
+    "T070": {
+      "type": "epic",
+      "title": "H2 M1 Equities backtest engine",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T005",
+        "T008",
+        "T009",
+        "T069"
+      ]
+    },
+    "T079": {
+      "type": "task",
+      "title": "H1.2 Core domain types and deterministic IDs",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T078"
+      ]
+    },
+    "T089": {
+      "type": "task",
+      "title": "H2.2 Streaming LakeReplayFeed",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T080",
+        "T088"
+      ]
+    },
+    "T099": {
+      "type": "task",
+      "title": "H3.2 Standard metrics and attribution",
+      "status": "pending",
+      "parentId": "T071",
+      "depends": [
+        "T098"
+      ]
+    },
+    "T104": {
+      "type": "task",
+      "title": "H4.2 Alpaca crypto WebSocket feed",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T103"
+      ]
+    },
+    "T113": {
+      "type": "task",
+      "title": "H5.2 Extend OIDC deployment and smoke workflow",
+      "status": "pending",
+      "parentId": "T073",
+      "depends": [
+        "T031",
+        "T078",
+        "T112"
+      ]
+    },
+    "T116": {
+      "type": "task",
+      "title": "H6.2 Atomic multi-leg orders and OMS groups",
+      "status": "pending",
+      "parentId": "T074",
+      "depends": [
+        "T079",
+        "T081"
+      ]
+    },
+    "T123": {
+      "type": "task",
+      "title": "H7.2 AlpacaVenue crypto",
+      "status": "pending",
+      "parentId": "T075",
+      "depends": [
+        "T104",
+        "T122"
+      ]
+    },
+    "T129": {
+      "type": "task",
+      "title": "H8.2 Performance and memory budgets",
+      "status": "pending",
+      "parentId": "T076",
+      "depends": [
+        "T096"
+      ]
+    },
+    "T133": {
+      "type": "task",
+      "title": "H9.2 Alpaca delisted-history coverage sweep",
+      "status": "pending",
+      "parentId": "T077",
+      "depends": [
+        "T033"
+      ]
+    },
     "T004": {
       "type": "epic",
       "title": "E1 Azure infrastructure and budget controls",
@@ -338,6 +684,110 @@
       "parentId": "T012",
       "depends": [
         "T035"
+      ]
+    },
+    "T071": {
+      "type": "epic",
+      "title": "H3 M1 Results, reports, and query API",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T069",
+        "T070"
+      ]
+    },
+    "T080": {
+      "type": "task",
+      "title": "H1.3 Clock, event bus, and ordering contract",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T079"
+      ]
+    },
+    "T090": {
+      "type": "task",
+      "title": "H2.3 Bars, simulated scheduler, and sessions",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T080",
+        "T083"
+      ]
+    },
+    "T100": {
+      "type": "task",
+      "title": "H3.3 Offline static HTML report",
+      "status": "pending",
+      "parentId": "T071",
+      "depends": [
+        "T099"
+      ]
+    },
+    "T105": {
+      "type": "task",
+      "title": "H4.3 Live event recorder in lake schema",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T021",
+        "T027",
+        "T103"
+      ]
+    },
+    "T114": {
+      "type": "task",
+      "title": "H5.3 Trader supervisor and operator runbook",
+      "status": "pending",
+      "parentId": "T073",
+      "depends": [
+        "T107",
+        "T109",
+        "T110",
+        "T112"
+      ]
+    },
+    "T117": {
+      "type": "task",
+      "title": "H6.3 MidTouch and multi-leg matching",
+      "status": "pending",
+      "parentId": "T074",
+      "depends": [
+        "T091",
+        "T116"
+      ]
+    },
+    "T124": {
+      "type": "task",
+      "title": "H7.3 AlpacaVenue options and capability matrix",
+      "status": "pending",
+      "parentId": "T075",
+      "depends": [
+        "T116",
+        "T121",
+        "T122"
+      ]
+    },
+    "T130": {
+      "type": "task",
+      "title": "H8.3 Strategy authoring and architecture guide",
+      "status": "pending",
+      "parentId": "T076",
+      "depends": [
+        "T097",
+        "T120",
+        "T135"
+      ]
+    },
+    "T134": {
+      "type": "task",
+      "title": "H9.3 Delisting and rename events with settlement",
+      "status": "pending",
+      "parentId": "T077",
+      "depends": [
+        "T083",
+        "T094",
+        "T132"
       ]
     },
     "T005": {
@@ -448,6 +898,100 @@
       "parentId": "T003",
       "depends": []
     },
+    "T072": {
+      "type": "epic",
+      "title": "H4 M2 Live data and paper runtime",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T005",
+        "T008",
+        "T069",
+        "T070",
+        "T071"
+      ]
+    },
+    "T081": {
+      "type": "task",
+      "title": "H1.4 Single-leg OMS state machine",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T079"
+      ]
+    },
+    "T091": {
+      "type": "task",
+      "title": "H2.4 Matching engine and SimpleTouch fills",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T082"
+      ]
+    },
+    "T101": {
+      "type": "task",
+      "title": "H3.4 Backtest results store and catalog",
+      "status": "pending",
+      "parentId": "T071",
+      "depends": [
+        "T096",
+        "T098"
+      ]
+    },
+    "T106": {
+      "type": "task",
+      "title": "H4.4 Live feed gap healing through market lake",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T042",
+        "T043",
+        "T088",
+        "T105"
+      ]
+    },
+    "T118": {
+      "type": "task",
+      "title": "H6.4 Option expiry, exercise, and assignment",
+      "status": "pending",
+      "parentId": "T074",
+      "depends": [
+        "T094",
+        "T116"
+      ]
+    },
+    "T125": {
+      "type": "task",
+      "title": "H7.4 Continuous and boot reconciler",
+      "status": "pending",
+      "parentId": "T075",
+      "depends": [
+        "T108",
+        "T122"
+      ]
+    },
+    "T131": {
+      "type": "task",
+      "title": "H8.4 Timeboxed post-v1 realism spikes",
+      "status": "pending",
+      "parentId": "T076",
+      "depends": [
+        "T117",
+        "T122"
+      ]
+    },
+    "T135": {
+      "type": "task",
+      "title": "H9.4 Point-in-time UniverseView and dynamic subscriptions",
+      "status": "pending",
+      "parentId": "T077",
+      "depends": [
+        "T083",
+        "T089",
+        "T132"
+      ]
+    },
     "T006": {
       "type": "epic",
       "title": "E3 CI/CD and GitHub OIDC",
@@ -539,6 +1083,94 @@
         "T050"
       ]
     },
+    "T073": {
+      "type": "epic",
+      "title": "H5 M2 Azure trader deployment",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T004",
+        "T006",
+        "T069",
+        "T071",
+        "T072"
+      ]
+    },
+    "T082": {
+      "type": "task",
+      "title": "H1.5 ExecutionVenue protocol and ScriptedVenue",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T079",
+        "T080",
+        "T081"
+      ]
+    },
+    "T092": {
+      "type": "task",
+      "title": "H2.5 Pessimistic latency and trade-through fills",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T091"
+      ]
+    },
+    "T102": {
+      "type": "task",
+      "title": "H3.5 Backtest query API and job launcher",
+      "status": "pending",
+      "parentId": "T071",
+      "depends": [
+        "T101"
+      ]
+    },
+    "T107": {
+      "type": "task",
+      "title": "H4.5 PaperShell shared simulation runtime",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T086",
+        "T091",
+        "T092",
+        "T096",
+        "T103"
+      ]
+    },
+    "T119": {
+      "type": "task",
+      "title": "H6.5 Options replay and collateral checks",
+      "status": "pending",
+      "parentId": "T074",
+      "depends": [
+        "T056",
+        "T089",
+        "T095",
+        "T115"
+      ]
+    },
+    "T126": {
+      "type": "task",
+      "title": "H7.5 Shadow mode and enforced go-live gate",
+      "status": "pending",
+      "parentId": "T075",
+      "depends": [
+        "T111",
+        "T125",
+        "T135"
+      ]
+    },
+    "T136": {
+      "type": "task",
+      "title": "H9.5 Conditional supplemental listings dataset",
+      "status": "pending",
+      "parentId": "T077",
+      "depends": [
+        "T132",
+        "T133"
+      ]
+    },
     "T007": {
       "type": "epic",
       "title": "E4 Equities SIP ingest",
@@ -594,6 +1226,70 @@
         "T065"
       ]
     },
+    "T074": {
+      "type": "epic",
+      "title": "H6 M3 Options and atomic multi-leg",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T010",
+        "T069",
+        "T070",
+        "T072"
+      ]
+    },
+    "T083": {
+      "type": "task",
+      "title": "H1.6 Strategy contract and context facade",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T080",
+        "T082"
+      ]
+    },
+    "T093": {
+      "type": "task",
+      "title": "H2.6 Fee and commission models",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T079"
+      ]
+    },
+    "T108": {
+      "type": "task",
+      "title": "H4.6 StateStore snapshots and restore",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T094",
+        "T107"
+      ]
+    },
+    "T120": {
+      "type": "task",
+      "title": "H6.6 Reference short-put-spread strategy",
+      "status": "pending",
+      "parentId": "T074",
+      "depends": [
+        "T096",
+        "T107",
+        "T117",
+        "T119",
+        "T121"
+      ]
+    },
+    "T127": {
+      "type": "task",
+      "title": "H7.6 Go-live ramp, rollback, and alerts",
+      "status": "pending",
+      "parentId": "T075",
+      "depends": [
+        "T114",
+        "T126"
+      ]
+    },
     "T008": {
       "type": "epic",
       "title": "E5 HTTP ensure and query API",
@@ -642,6 +1338,57 @@
         "T045"
       ]
     },
+    "T077": {
+      "type": "epic",
+      "title": "H9 M3b Point-in-time equity universes",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T005",
+        "T007",
+        "T069",
+        "T070"
+      ]
+    },
+    "T084": {
+      "type": "task",
+      "title": "H1.7 HistoricalView look-ahead guard",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T080",
+        "T083"
+      ]
+    },
+    "T094": {
+      "type": "task",
+      "title": "H2.7 Virtual books and PortfolioHub",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T079",
+        "T081"
+      ]
+    },
+    "T109": {
+      "type": "task",
+      "title": "H4.7 Recovery policies and chaos tests",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T108"
+      ]
+    },
+    "T121": {
+      "type": "task",
+      "title": "H6.7 Alpaca OPRA WebSocket feed",
+      "status": "pending",
+      "parentId": "T074",
+      "depends": [
+        "T103",
+        "T115"
+      ]
+    },
     "T009": {
       "type": "epic",
       "title": "E6 Dev deployment and equities soak gate",
@@ -652,6 +1399,48 @@
         "T006",
         "T007",
         "T008"
+      ]
+    },
+    "T075": {
+      "type": "epic",
+      "title": "H7 M4 Live broker integration",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T069",
+        "T072",
+        "T073",
+        "T074",
+        "T077"
+      ]
+    },
+    "T085": {
+      "type": "task",
+      "title": "H1.8 Strategy sandbox lint",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T083"
+      ]
+    },
+    "T095": {
+      "type": "task",
+      "title": "H2.8 Risk pipeline and core rules",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T083",
+        "T094"
+      ]
+    },
+    "T110": {
+      "type": "task",
+      "title": "H4.8 Global kill switch",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T095",
+        "T107"
       ]
     },
     "T010": {
@@ -666,6 +1455,53 @@
         "T009"
       ]
     },
+    "T076": {
+      "type": "epic",
+      "title": "H8 M5 Hardening, sweeps, and authoring",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T070",
+        "T071",
+        "T074",
+        "T075",
+        "T077"
+      ]
+    },
+    "T086": {
+      "type": "task",
+      "title": "H1.9 Typed harness configuration and hashes",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T079"
+      ]
+    },
+    "T096": {
+      "type": "task",
+      "title": "H2.9 Backtest runner and reproducibility manifest",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T086",
+        "T087",
+        "T089",
+        "T091",
+        "T094",
+        "T095"
+      ]
+    },
+    "T111": {
+      "type": "task",
+      "title": "H4.9 Paper-to-backtest parity harness",
+      "status": "pending",
+      "parentId": "T072",
+      "depends": [
+        "T096",
+        "T105",
+        "T107"
+      ]
+    },
     "T011": {
       "type": "epic",
       "title": "E8 Crypto pairs",
@@ -677,6 +1513,26 @@
         "T008",
         "T009",
         "T010"
+      ]
+    },
+    "T087": {
+      "type": "task",
+      "title": "H1.10 Determinism golden harness",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": [
+        "T082",
+        "T083"
+      ]
+    },
+    "T097": {
+      "type": "task",
+      "title": "H2.10 Reference equity strategies and integration tests",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T090",
+        "T096"
       ]
     },
     "T012": {
@@ -694,6 +1550,13 @@
         "T010",
         "T011"
       ]
+    },
+    "T137": {
+      "type": "task",
+      "title": "H1.11 Publish combined FCA roadmap",
+      "status": "pending",
+      "parentId": "T069",
+      "depends": []
     }
   },
   "tasks": [
@@ -1241,6 +2104,528 @@
       "relates": []
     },
     {
+      "id": "T069",
+      "title": "H1 M0 Foundations and contracts",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Establish the quant-harness package, immutable domain contracts, deterministic event kernel interfaces, OMS, strategy API, configuration, sandbox, and golden harness.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "contracts"
+      ],
+      "acceptance": [
+        "A toy strategy executes through the deterministic contracts with byte-stable artifacts and CI-enforced strategy boundaries",
+        "Complete child T078: H1.1 Extend FCA scaffold for quant-harness",
+        "Complete child T079: H1.2 Core domain types and deterministic IDs",
+        "Complete child T080: H1.3 Clock, event bus, and ordering contract",
+        "Complete child T081: H1.4 Single-leg OMS state machine",
+        "Complete child T082: H1.5 ExecutionVenue protocol and ScriptedVenue",
+        "Complete child T083: H1.6 Strategy contract and context facade",
+        "Complete child T084: H1.7 HistoricalView look-ahead guard",
+        "Complete child T085: H1.8 Strategy sandbox lint",
+        "Complete child T086: H1.9 Typed harness configuration and hashes",
+        "Complete child T087: H1.10 Determinism golden harness",
+        "Complete child T137: H1.11 Publish combined FCA roadmap"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-01T17:55:19.941Z",
+      "updatedAt": "2026-09-01T18:47:12.026Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T078",
+      "title": "H1.1 Extend FCA scaffold for quant-harness",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Extend the shared FCA Python repository with the src/harness package, strategies and configuration namespaces, Typer command groups, three runtime image commands, and path-filtered quality gates without creating a separate repository or duplicating shared infrastructure.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h001",
+        "foundation"
+      ],
+      "acceptance": [
+        "A fresh checkout installs the development package and passes pytest plus Ruff",
+        "The shared image exposes api, backtest-job, and trader commands and harness --help lists planned groups",
+        "Repository structure preserves the existing market-lake product boundaries",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "pyproject.toml",
+        "Dockerfile",
+        "src/harness",
+        "strategies",
+        "config",
+        "tests"
+      ],
+      "depends": [
+        "T014"
+      ],
+      "createdAt": "2026-09-01T17:59:58.623Z",
+      "updatedAt": "2026-09-01T18:23:27.683Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T17:59:58.623Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T088",
+      "title": "H2.1 Market-lake access adapter",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Consume the actual FCA lake catalog, ensure, job, file-SAS, and direct managed-identity storage contracts, resolving XNYS or UTC sessions and refusing to call Alpaca historical endpoints from the harness.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h011",
+        "lake-integration"
+      ],
+      "acceptance": [
+        "Mocked missing coverage follows ensure, poll, and load before a run starts",
+        "A dev integration loads two symbols across five sessions including half-days",
+        "Local reads warn before a configurable projected egress threshold",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/lake.py"
+      ],
+      "depends": [
+        "T021",
+        "T023",
+        "T046",
+        "T048",
+        "T079"
+      ],
+      "createdAt": "2026-09-01T18:00:38.596Z",
+      "updatedAt": "2026-09-01T18:34:09.413Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:38.596Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T098",
+      "title": "H3.1 Streaming recorder and audit trail",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T071",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Stream orders, fills, strategy actions, emissions, state markers, risk decisions, equity snapshots, position transitions, and optional full events into referentially linked, bounded-memory Parquet artifacts.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h021",
+        "recorder"
+      ],
+      "acceptance": [
+        "A scripted run produces every required artifact with complete action-to-order-to-fill links",
+        "A one-million-event run remains memory bounded",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/results/recorder.py"
+      ],
+      "depends": [
+        "T080",
+        "T094"
+      ],
+      "createdAt": "2026-09-01T18:01:20.144Z",
+      "updatedAt": "2026-09-01T18:26:18.843Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:20.144Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T103",
+      "title": "H4.1 Alpaca SIP WebSocket feed",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T072",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Normalize Alpaca SIP equity quotes and trades to the lake-compatible domain schema through an async shell and synchronous kernel inbox with deployment-driven subscriptions, backoff reconnects, stale watchdogs, and timestamp sanity checks.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h026",
+        "websocket",
+        "equities"
+      ],
+      "acceptance": [
+        "A mock server verifies subscription, reception, disconnect recovery, and stale-symbol detection",
+        "Produced events are schema-identical to replay events",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/alpaca_ws.py"
+      ],
+      "depends": [
+        "T079",
+        "T080",
+        "T086"
+      ],
+      "createdAt": "2026-09-01T18:01:40.756Z",
+      "updatedAt": "2026-09-01T18:27:01.993Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:40.756Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T112",
+      "title": "H5.1 Extend Bicep for quant runtime",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T073",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Extend shared FCA Bicep modules with scheduled RTH trader, optional always-on crypto trader, scale-to-zero quant API, backtest job, results and state storage, kill-switch table, separate paper and live secrets, managed identities, log caps, and additive budget alerts.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h035",
+        "bicep",
+        "azure"
+      ],
+      "acceptance": [
+        "Deployment from an empty dev resource group is idempotent and a repeat what-if is clean",
+        "RTH scaling transitions on schedule and crypto compute is absent unless enabled",
+        "Infrastructure records explicit additive cost controls without duplicating lake resources",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "infra"
+      ],
+      "depends": [
+        "T020",
+        "T102",
+        "T107"
+      ],
+      "createdAt": "2026-09-01T18:02:19.009Z",
+      "updatedAt": "2026-09-01T18:28:19.287Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:19.009Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T115",
+      "title": "H6.1 Point-in-time option contract universe",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T074",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Load date-specific option contract selections from the market-lake contracts catalog with front-set, static OSI, and DTE, strike, or moneyness filters plus underlying joins and expiry-aware symbol indexing.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3",
+        "harness.h038",
+        "options",
+        "point-in-time"
+      ],
+      "acceptance": [
+        "An expiry-week fixture resolves and retires the correct daily contracts",
+        "Static and front-set modes have explicit, tested differences and never use future contract membership",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/options_universe.py"
+      ],
+      "depends": [
+        "T055",
+        "T088"
+      ],
+      "createdAt": "2026-09-01T18:02:32.542Z",
+      "updatedAt": "2026-09-01T18:28:45.533Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:32.542Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T122",
+      "title": "H7.1 AlpacaVenue equities",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T075",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Map single-leg equity submit, cancel, and replace commands to Alpaca, convert streaming execution reports back into kernel events, and generate strategy-tagged UUID7 client IDs only at this live boundary.",
+      "labels": [
+        "quant-harness",
+        "milestone.m4",
+        "harness.h044",
+        "alpaca",
+        "equities"
+      ],
+      "acceptance": [
+        "Cassette and mock-stream tests cover acknowledgement, partial fill, fill, rejection, cancellation, and replacement",
+        "A one-share SPY paper-account round trip reconciles to the correct virtual book",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/venues/alpaca/equities.py"
+      ],
+      "depends": [
+        "T082",
+        "T107"
+      ],
+      "createdAt": "2026-09-01T18:03:03.195Z",
+      "updatedAt": "2026-09-01T18:29:46.058Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:03.195Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T128",
+      "title": "H8.1 Reproducible parameter sweep runner",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T076",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Run deduplicated grid or seeded random strategy parameter sets across parallel Container Apps Jobs, catalog results by sweep ID, and compare ranking plus parameter sensitivity through reports and APIs.",
+      "labels": [
+        "quant-harness",
+        "milestone.m5",
+        "harness.h050",
+        "sweeps"
+      ],
+      "acceptance": [
+        "A fifty-configuration sweep completes with all runs queryable",
+        "Duplicate hashes are skipped and comparison ranking is deterministic",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/runtime/sweep.py",
+        "src/harness/results/sweeps.py"
+      ],
+      "depends": [
+        "T096",
+        "T102"
+      ],
+      "createdAt": "2026-09-01T18:03:27.807Z",
+      "updatedAt": "2026-09-01T18:30:39.329Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:27.807Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T132",
+      "title": "H9.1 SecurityMaster and listings-aware lake coverage",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T077",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Add a shared SecurityMaster and listings table with entity identity, listing and delisting dates and types, final prices, rename chains, a distinct delisted coverage status, and historical ticker mapping without duplicate entities.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3b",
+        "harness.h054",
+        "security-master",
+        "lake-extension"
+      ],
+      "acceptance": [
+        "Post-delisting sessions report delisted rather than missing while pre-delisting sessions remain ensureable",
+        "A rename fixture resolves historical symbols through one entity with no duplicate coverage",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/security_master.py",
+        "config/security_master",
+        "src/lake/catalog.py",
+        "src/lake/coverage.py"
+      ],
+      "depends": [
+        "T024",
+        "T025",
+        "T034",
+        "T088"
+      ],
+      "createdAt": "2026-09-01T18:03:44.075Z",
+      "updatedAt": "2026-09-01T18:34:25.501Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:44.075Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
       "id": "T003",
       "title": "E0 Repository and Python foundation",
       "status": "pending",
@@ -1696,6 +3081,573 @@
       "relates": []
     },
     {
+      "id": "T068",
+      "title": "Deterministic strategy harness and trading runtime",
+      "status": "pending",
+      "priority": "high",
+      "type": "saga",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Build the quant-harness product inside FCA: one deterministic strategy contract spanning historical backtests, live-data paper simulation, and risk-controlled Alpaca deployment over the market-data lake.",
+      "labels": [
+        "quant-harness",
+        "backtest",
+        "paper-trading",
+        "live-trading"
+      ],
+      "notes": [
+        "2026-09-01 17:53:59 UTC: Reconciled from harness-plan.md and harness-cleo-tasks.md. This saga is planned work in the existing FCA repository; the market-data lake is also pending, so lake integrations carry explicit cross-saga dependencies.",
+        "2026-09-01 18:38:35 UTC: Reconciliation decisions: keep quant-harness in the existing FCA repository; do not assume the lake is deployed; reuse shared Python, Docker, Bicep, OIDC, storage, and auth patterns; gate lake access on T021/T023/T046/T048, options on T055/T056, and survivorship extensions on T024/T025/T034; add T121 for missing OPRA WebSocket coverage; use deterministic engine IDs and UUID7 only at the live broker boundary; order M3b before live eligibility."
+      ],
+      "acceptance": [
+        "The same strategy implementation runs in deterministic backtest, paper, shadow, and live shells without mode-specific strategy code",
+        "Backtests are look-ahead guarded, reproducible, in-region, artifact-complete, and queryable through an authenticated API",
+        "Paper trading reuses the backtest matching engine on live feeds and passes recorded-stream parity, recovery, and kill-switch drills",
+        "Options support point-in-time contracts, atomic multi-leg execution, collateral, expiry, exercise, and pessimistic assignment semantics",
+        "Equity universes and held positions handle listings, renames, and delistings without survivorship leakage",
+        "Live routing is capability-gated, continuously reconciled, shadow-qualified, and protected by explicit go-live and risk controls",
+        "Azure deployment extends shared FCA infrastructure patterns and meets documented performance, security, operations, and additive cost controls",
+        "Complete child T069: H1 M0 Foundations and contracts",
+        "Complete child T070: H2 M1 Equities backtest engine",
+        "Complete child T071: H3 M1 Results, reports, and query API",
+        "Complete child T072: H4 M2 Live data and paper runtime",
+        "Complete child T073: H5 M2 Azure trader deployment",
+        "Complete child T074: H6 M3 Options and atomic multi-leg",
+        "Complete child T075: H7 M4 Live broker integration",
+        "Complete child T076: H8 M5 Hardening, sweeps, and authoring",
+        "Complete child T077: H9 M3b Point-in-time equity universes"
+      ],
+      "createdAt": "2026-09-01T17:53:59.152Z",
+      "updatedAt": "2026-09-01T18:38:35.844Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T17:53:59.152Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "project",
+      "relates": []
+    },
+    {
+      "id": "T070",
+      "title": "H2 M1 Equities backtest engine",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Implement lake replay, simulation, fees, virtual books, risk, orchestration, bars, schedulers, and reference equity strategies for deterministic single-leg backtests.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "backtest"
+      ],
+      "acceptance": [
+        "A repeatable SPY and QQQ backtest runs over lake data with pessimistic fills, exact accounting, bounded memory, and no look-ahead",
+        "Complete child T088: H2.1 Market-lake access adapter",
+        "Complete child T089: H2.2 Streaming LakeReplayFeed",
+        "Complete child T090: H2.3 Bars, simulated scheduler, and sessions",
+        "Complete child T091: H2.4 Matching engine and SimpleTouch fills",
+        "Complete child T092: H2.5 Pessimistic latency and trade-through fills",
+        "Complete child T093: H2.6 Fee and commission models",
+        "Complete child T094: H2.7 Virtual books and PortfolioHub",
+        "Complete child T095: H2.8 Risk pipeline and core rules",
+        "Complete child T096: H2.9 Backtest runner and reproducibility manifest",
+        "Complete child T097: H2.10 Reference equity strategies and integration tests"
+      ],
+      "depends": [
+        "T005",
+        "T008",
+        "T009",
+        "T069"
+      ],
+      "createdAt": "2026-09-01T17:55:23.154Z",
+      "updatedAt": "2026-09-01T18:34:01.363Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T079",
+      "title": "H1.2 Core domain types and deterministic IDs",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Implement immutable Decimal-safe symbols, events, single and multi-leg orders, reports, fills, positions, books, account snapshots, Parquet codecs, and a seeded deterministic engine ID source; reserve UUID7 generation for the live broker adapter boundary.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h002",
+        "contracts"
+      ],
+      "acceptance": [
+        "Property tests round-trip at least 50 real OSI symbols and every event schema through Parquet",
+        "Accounting prices and quantities never use float and Decimal scale survives serialization",
+        "Repeated simulated runs generate identical IDs while live client order IDs remain globally unique",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/core/types.py",
+        "src/harness/core/symbols.py",
+        "src/harness/core/ids.py"
+      ],
+      "depends": [
+        "T078"
+      ],
+      "createdAt": "2026-09-01T18:00:02.555Z",
+      "updatedAt": "2026-09-01T18:23:36.294Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:02.555Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T089",
+      "title": "H2.2 Streaming LakeReplayFeed",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "K-way merge per-symbol quote and trade Parquet streams by timestamp and feed sequence, one session-day at a time, while exposing stable file and row fingerprints for reproducibility.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h012",
+        "replay"
+      ],
+      "acceptance": [
+        "Adversarial same-timestamp streams merge in deterministic feed order",
+        "One year of SPY and QQQ quotes plus trades stays below 1.5 GiB RSS",
+        "Repeated loads produce stable data fingerprints",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/replay.py"
+      ],
+      "depends": [
+        "T080",
+        "T088"
+      ],
+      "createdAt": "2026-09-01T18:00:42.945Z",
+      "updatedAt": "2026-09-01T18:25:03.222Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:42.945Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T099",
+      "title": "H3.2 Standard metrics and attribution",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T071",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Compute return, CAGR, Sharpe, Sortino, drawdown and duration, hit rate, profit factor, turnover, trade PnL, slippage, fees, latency, order outcomes, and per-strategy attribution with documented conventions.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h022",
+        "metrics"
+      ],
+      "acceptance": [
+        "Hand-computed vectors cover every metric including pathological drawdowns",
+        "Slippage aggregates reconcile to fill-ledger costs within numeric tolerance",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/results/metrics.py"
+      ],
+      "depends": [
+        "T098"
+      ],
+      "createdAt": "2026-09-01T18:01:24.406Z",
+      "updatedAt": "2026-09-01T18:26:27.344Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:24.406Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T104",
+      "title": "H4.2 Alpaca crypto WebSocket feed",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T072",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Extend live feed resilience and normalization to fractional crypto quotes and trades with continuous UTC-day semantics and deployment-managed pair subscriptions.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h027",
+        "websocket",
+        "crypto"
+      ],
+      "acceptance": [
+        "Mock reconnection spans a UTC-day boundary without loss or duplication",
+        "Fractional price and size values remain exact Decimal values",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/alpaca_ws.py"
+      ],
+      "depends": [
+        "T103"
+      ],
+      "createdAt": "2026-09-01T18:01:45.030Z",
+      "updatedAt": "2026-09-01T18:27:10.570Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:45.030Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T113",
+      "title": "H5.2 Extend OIDC deployment and smoke workflow",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T073",
+      "size": "small",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Extend shared GitHub OIDC, Bicep, GHCR, digest-pinned update, health, and harness-status workflow steps to deploy the quant API, jobs, and trader apps through the existing production path.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h036",
+        "github-actions",
+        "oidc"
+      ],
+      "acceptance": [
+        "A main-branch deployment updates every selected quant runtime by immutable image reference",
+        "Health and harness status failures fail the workflow without introducing Azure client secrets",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        ".github/workflows",
+        ".github/actions"
+      ],
+      "depends": [
+        "T031",
+        "T078",
+        "T112"
+      ],
+      "createdAt": "2026-09-01T18:02:23.322Z",
+      "updatedAt": "2026-09-01T18:28:27.922Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:23.322Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T116",
+      "title": "H6.2 Atomic multi-leg orders and OMS groups",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T074",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Implement net-debit, net-credit, and market multi-leg group lifecycle, ratios and actions, all-or-nothing v1 fills, cancellation and expiry propagation, and exact per-leg accounting.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3",
+        "harness.h039",
+        "options",
+        "oms"
+      ],
+      "acceptance": [
+        "Group transition tests cover rejection, cancellation during evaluation, expiry, and no partial group fills",
+        "A filled vertical creates exact leg positions and net cash including fees",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/oms/groups.py"
+      ],
+      "depends": [
+        "T079",
+        "T081"
+      ],
+      "createdAt": "2026-09-01T18:02:37.008Z",
+      "updatedAt": "2026-09-01T18:28:54.029Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:37.008Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T123",
+      "title": "H7.2 AlpacaVenue crypto",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T075",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Extend the broker venue to fractional, continuous crypto execution and reconcile configured maker-taker fees against venue-reported charges.",
+      "labels": [
+        "quant-harness",
+        "milestone.m4",
+        "harness.h045",
+        "alpaca",
+        "crypto"
+      ],
+      "acceptance": [
+        "A fractional paper round trip maps reports and positions exactly",
+        "The local fee ledger matches venue-reported fees",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/venues/alpaca/crypto.py"
+      ],
+      "depends": [
+        "T104",
+        "T122"
+      ],
+      "createdAt": "2026-09-01T18:03:07.163Z",
+      "updatedAt": "2026-09-01T18:29:55.124Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:07.163Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T129",
+      "title": "H8.2 Performance and memory budgets",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T076",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Benchmark replay throughput, matching cost, risk latency, artifact writes, and memory across supported job profiles, publish baselines, and report regressions greater than twenty percent.",
+      "labels": [
+        "quant-harness",
+        "milestone.m5",
+        "harness.h051",
+        "performance"
+      ],
+      "acceptance": [
+        "Baseline throughput and memory guidance covers universe-width tiers",
+        "CI emits a focused report when a benchmark regresses beyond budget",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "tests/performance",
+        ".github/performance.md"
+      ],
+      "depends": [
+        "T096"
+      ],
+      "createdAt": "2026-09-01T18:03:31.865Z",
+      "updatedAt": "2026-09-01T18:30:47.895Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:31.865Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T133",
+      "title": "H9.2 Alpaca delisted-history coverage sweep",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T077",
+      "size": "small",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Probe approximately thirty representative delisted or reused equity tickers through the lake-side Alpaca tooling, recording served ranges, rows, gaps, acquisition and bankruptcy cases, and the implications for supplemental data.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3b",
+        "harness.h055",
+        "research",
+        "delistings"
+      ],
+      "acceptance": [
+        "A repository research memo records per-symbol results and reproducible probe inputs",
+        "The memo makes an explicit go or no-go recommendation for supplemental listings data",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        ".github/research/alpaca-delisted-coverage.md",
+        "src/lake/tools/delisted_probe.py"
+      ],
+      "depends": [
+        "T033"
+      ],
+      "createdAt": "2026-09-01T18:03:48.200Z",
+      "updatedAt": "2026-09-01T18:31:22.194Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:48.200Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "unit",
+      "relates": []
+    },
+    {
       "id": "T004",
       "title": "E1 Azure infrastructure and budget controls",
       "status": "pending",
@@ -2139,6 +4091,519 @@
         "lastUpdated": null,
         "failureLog": [],
         "initializedAt": "2026-09-01T03:23:42.807Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T071",
+      "title": "H3 M1 Results, reports, and query API",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Persist complete run audit trails, calculate reproducible metrics, render offline reports, catalog artifacts, and expose backtest launch and query APIs.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "results",
+        "api"
+      ],
+      "acceptance": [
+        "Backtest jobs produce queryable Parquet, metrics, manifests, and self-contained reports with authenticated lifecycle APIs",
+        "Complete child T098: H3.1 Streaming recorder and audit trail",
+        "Complete child T099: H3.2 Standard metrics and attribution",
+        "Complete child T100: H3.3 Offline static HTML report",
+        "Complete child T101: H3.4 Backtest results store and catalog",
+        "Complete child T102: H3.5 Backtest query API and job launcher"
+      ],
+      "depends": [
+        "T069",
+        "T070"
+      ],
+      "createdAt": "2026-09-01T17:55:26.350Z",
+      "updatedAt": "2026-09-01T18:22:25.322Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T080",
+      "title": "H1.3 Clock, event bus, and ordering contract",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement SimClock and WallClock behind a Clock protocol plus a single-threaded event queue ordered by timestamp, sequence, and class priority with feed-order preservation and scheduled venue responses.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h003",
+        "determinism"
+      ],
+      "acceptance": [
+        "Same-timestamp quote, trade, and fill floods dispatch deterministically",
+        "SimClock rejects events older than its head",
+        "Ten thousand synthetic events produce the same dispatch hash across three runs",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/core/clock.py",
+        "src/harness/core/events.py"
+      ],
+      "depends": [
+        "T079"
+      ],
+      "createdAt": "2026-09-01T18:00:06.380Z",
+      "updatedAt": "2026-09-01T18:23:45.020Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:06.380Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T090",
+      "title": "H2.3 Bars, simulated scheduler, and sessions",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Derive configurable bars from ticks, schedule absolute, recurring, and session-relative callbacks on SimClock, and emit open, close, pre-open, and half-day session events.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h013",
+        "bars",
+        "scheduler"
+      ],
+      "acceptance": [
+        "Golden bars reconcile exactly to underlying trades",
+        "New York scheduled callbacks fire once across normal, half-day, and DST sessions",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/bars.py",
+        "src/harness/core/scheduler.py"
+      ],
+      "depends": [
+        "T080",
+        "T083"
+      ],
+      "createdAt": "2026-09-01T18:00:47.050Z",
+      "updatedAt": "2026-09-01T18:25:11.643Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:47.050Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T100",
+      "title": "H3.3 Offline static HTML report",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T071",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Render a self-contained report with manifest header, equity and drawdown charts, trade and position timelines, risk events, and slippage distributions without external network assets.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h023",
+        "reporting"
+      ],
+      "acceptance": [
+        "The report renders in a sandbox with no network access",
+        "A five-year report stays below five megabytes under documented downsampling",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/results/report.py"
+      ],
+      "depends": [
+        "T099"
+      ],
+      "createdAt": "2026-09-01T18:01:28.520Z",
+      "updatedAt": "2026-09-01T18:26:35.652Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:28.520Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T105",
+      "title": "H4.3 Live event recorder in lake schema",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T072",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Persist incoming live events below live/{deployment} using exact market-lake schemas, safe session rotation, flush-on-shutdown, and readable partial files for parity and incident replay.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h028",
+        "recording"
+      ],
+      "acceptance": [
+        "A thirty-minute recording replays without schema conversion warnings",
+        "Rotation, graceful flush, and crash-readable partial output are tested",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/live_recorder.py"
+      ],
+      "depends": [
+        "T021",
+        "T027",
+        "T103"
+      ],
+      "createdAt": "2026-09-01T18:01:49.107Z",
+      "updatedAt": "2026-09-01T18:27:19.199Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:49.107Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T114",
+      "title": "H5.3 Trader supervisor and operator runbook",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T073",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Supervise configuration, restore and recovery, feed connection, subscriptions, market wait, heartbeats, graceful termination, restart-loop halts, status output, and operator procedures in repository documentation.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h037",
+        "operations"
+      ],
+      "acceptance": [
+        "A dev paper deployment survives a mid-session container restart under its configured policy",
+        "harness status reports phase, watermark age, and book summary",
+        "Deployment, restart, kill, state inspection, and common failure procedures are executable from the runbook",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/runtime/trader.py",
+        ".github/runbooks/trader.md"
+      ],
+      "depends": [
+        "T107",
+        "T109",
+        "T110",
+        "T112"
+      ],
+      "createdAt": "2026-09-01T18:02:28.052Z",
+      "updatedAt": "2026-09-01T18:28:36.678Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:28.052Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T117",
+      "title": "H6.3 MidTouch and multi-leg matching",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T074",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement pessimistic option fills constrained by midpoint ticks, adverse touch, displayed size, maximum spread, net limits, and atomic all-leg fillability on constituent quote updates.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3",
+        "harness.h040",
+        "options",
+        "fill-model"
+      ],
+      "acceptance": [
+        "Spread, tick, size, and net-limit scenario matrices cover single and multi-leg orders",
+        "Staggered quotes never partially fill a group",
+        "Default fills are never better than the documented adverse midpoint rule",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/fills/mid_touch.py",
+        "src/harness/venues/options_matching.py"
+      ],
+      "depends": [
+        "T091",
+        "T116"
+      ],
+      "createdAt": "2026-09-01T18:02:41.552Z",
+      "updatedAt": "2026-09-01T18:29:02.609Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:41.552Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T124",
+      "title": "H7.3 AlpacaVenue options and capability matrix",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T075",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Route supported option limits and net debit or credit spreads, map leg reports, and reject unsupported extended-hours, fractional, bracket, or OTO combinations before broker submission through a versioned capability matrix.",
+      "labels": [
+        "quant-harness",
+        "milestone.m4",
+        "harness.h046",
+        "alpaca",
+        "options"
+      ],
+      "acceptance": [
+        "Every unsupported combination has a capability rejection test",
+        "A recorded or paper-equivalent one-lot SPY vertical updates each virtual-book leg exactly",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/venues/alpaca/options.py",
+        "src/harness/venues/capabilities.py"
+      ],
+      "depends": [
+        "T116",
+        "T121",
+        "T122"
+      ],
+      "createdAt": "2026-09-01T18:03:11.414Z",
+      "updatedAt": "2026-09-01T18:30:03.964Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:11.414Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T130",
+      "title": "H8.3 Strategy authoring and architecture guide",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T076",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Document subscriptions, context boundaries, deterministic testing, fixture packs, golden and parity diffs, point-in-time universes, and the backtest-to-paper-to-live porting contract in Copilot-compatible repository guidance.",
+      "labels": [
+        "quant-harness",
+        "milestone.m5",
+        "harness.h052",
+        "documentation"
+      ],
+      "acceptance": [
+        "An independent author can add a strategy that passes CI and runs in every shell without harness changes",
+        "Built architecture documentation matches the implemented strategy contract",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        ".github/instructions/strategy-authoring.instructions.md",
+        ".github/architecture/quant-harness.md"
+      ],
+      "depends": [
+        "T097",
+        "T120",
+        "T135"
+      ],
+      "createdAt": "2026-09-01T18:03:35.913Z",
+      "updatedAt": "2026-09-01T18:36:28.897Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:35.913Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T134",
+      "title": "H9.3 Delisting and rename events with settlement",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T077",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Deliver listing lifecycle events through the strategy corporate-action hook; cancel orders, pessimistically settle acquisition or bankruptcy positions, retire symbols, and migrate renamed positions, trackers, subscriptions, and books.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3b",
+        "harness.h056",
+        "corporate-actions"
+      ],
+      "acceptance": [
+        "Acquisition and bankruptcy fixtures settle exact cash and PnL and cancel all open orders",
+        "Rename fixtures preserve quantity and average cost without orphaned trackers or subscriptions",
+        "All lifecycle events appear in artifacts",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/core/corporate_actions.py",
+        "src/harness/portfolio/listing_lifecycle.py"
+      ],
+      "depends": [
+        "T083",
+        "T094",
+        "T132"
+      ],
+      "createdAt": "2026-09-01T18:03:52.219Z",
+      "updatedAt": "2026-09-01T18:34:33.509Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:52.219Z"
       },
       "pipelineStage": "implementation",
       "kind": "work",
@@ -2698,6 +5163,464 @@
       "relates": []
     },
     {
+      "id": "T072",
+      "title": "H4 M2 Live data and paper runtime",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Normalize Alpaca live feeds into the kernel, run the same simulation venue in paper mode, record and heal data, persist state, recover from crashes, and enforce parity plus kill-switch behavior.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "paper-trading",
+        "live-data"
+      ],
+      "acceptance": [
+        "Paper sessions survive feed and process faults while replaying to equivalent backtest ledgers under the same strategy and fill configuration",
+        "Complete child T103: H4.1 Alpaca SIP WebSocket feed",
+        "Complete child T104: H4.2 Alpaca crypto WebSocket feed",
+        "Complete child T105: H4.3 Live event recorder in lake schema",
+        "Complete child T106: H4.4 Live feed gap healing through market lake",
+        "Complete child T107: H4.5 PaperShell shared simulation runtime",
+        "Complete child T108: H4.6 StateStore snapshots and restore",
+        "Complete child T109: H4.7 Recovery policies and chaos tests",
+        "Complete child T110: H4.8 Global kill switch",
+        "Complete child T111: H4.9 Paper-to-backtest parity harness"
+      ],
+      "depends": [
+        "T005",
+        "T008",
+        "T069",
+        "T070",
+        "T071"
+      ],
+      "createdAt": "2026-09-01T17:55:29.643Z",
+      "updatedAt": "2026-09-01T18:22:34.598Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T081",
+      "title": "H1.4 Single-leg OMS state machine",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Implement market, limit, stop, and stop-limit lifecycle handling with Day, GTC, and IOC time-in-force, partial fills, cancellation, atomic replace tracking, and execution reports as the sole mutation path.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h004",
+        "oms"
+      ],
+      "acceptance": [
+        "Exhaustive transition tests reject illegal state changes",
+        "Partial fills and cancellation preserve exact quantity and average price ledgers",
+        "IOC expiry and GTC session carry-over are covered",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/oms"
+      ],
+      "depends": [
+        "T079"
+      ],
+      "createdAt": "2026-09-01T18:00:10.315Z",
+      "updatedAt": "2026-09-01T18:23:53.578Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:10.315Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T091",
+      "title": "H2.4 Matching engine and SimpleTouch fills",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Implement the simulated venue resting-order engine and a basic market, limit, stop, and stop-limit fill plugin with decision-price and triggering-market snapshots; schedule outcomes through the bus rather than inline.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h014",
+        "matching-engine"
+      ],
+      "acceptance": [
+        "Buy and sell scenario matrices cover crossing, resting, stop arming, partial, and non-fill outcomes",
+        "Worsening quotes never improve fills",
+        "Latency responses preserve event ordering",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/venues/sim.py",
+        "src/harness/fills/simple_touch.py"
+      ],
+      "depends": [
+        "T082"
+      ],
+      "createdAt": "2026-09-01T18:00:50.998Z",
+      "updatedAt": "2026-09-01T18:25:20.218Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:50.998Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T101",
+      "title": "H3.4 Backtest results store and catalog",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T071",
+      "size": "small",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Write run artifacts below backtests/{run_id}, maintain a fast Azure Table catalog of status, strategy, range, hashes, and headline metrics, and delete blob prefixes with their catalog rows.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h024",
+        "results-store"
+      ],
+      "acceptance": [
+        "A run can be listed and fetched by ID after artifact upload",
+        "Cleanup removes the complete blob prefix and metadata row together",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/results/store.py"
+      ],
+      "depends": [
+        "T096",
+        "T098"
+      ],
+      "createdAt": "2026-09-01T18:01:32.618Z",
+      "updatedAt": "2026-09-01T18:26:44.125Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:32.618Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T106",
+      "title": "H4.4 Live feed gap healing through market lake",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T072",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "On detected staleness or sequence gaps, mark intervals dirty, ensure the current partial lake session, replay the missing slice before resuming live flow, deduplicate seam events, and audit healed intervals.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h029",
+        "gap-healing"
+      ],
+      "acceptance": [
+        "A two-minute injected quote outage heals to continuous ordered data",
+        "No event is duplicated at the historical-to-live seam and the action trail records the interval",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/gap_healing.py"
+      ],
+      "depends": [
+        "T042",
+        "T043",
+        "T088",
+        "T105"
+      ],
+      "createdAt": "2026-09-01T18:01:53.164Z",
+      "updatedAt": "2026-09-01T18:27:27.737Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:53.164Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T118",
+      "title": "H6.4 Option expiry, exercise, and assignment",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T074",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Settle long exercise, pessimistic one-hundred-percent ITM short assignment, worthless expiry, pin handling, DTE events, cash effects, and contract retirement with future configurability for stochastic assignment.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3",
+        "harness.h041",
+        "options",
+        "expiry"
+      ],
+      "acceptance": [
+        "An ITM short put spread produces exact assignment, exercise, positions, and cash",
+        "Expired contracts reject new orders and retire cleanly from books",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/portfolio/options_lifecycle.py"
+      ],
+      "depends": [
+        "T094",
+        "T116"
+      ],
+      "createdAt": "2026-09-01T18:02:46.130Z",
+      "updatedAt": "2026-09-01T18:29:11.227Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:46.130Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T125",
+      "title": "H7.4 Continuous and boot reconciler",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T075",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Periodically and at boot compare broker positions, orders, cash, and tolerances against virtual books, store diff artifacts, and invoke the default halt policy or configured recovery action.",
+      "labels": [
+        "quant-harness",
+        "milestone.m4",
+        "harness.h047",
+        "reconciliation"
+      ],
+      "acceptance": [
+        "Injected divergence triggers the selected policy within one interval",
+        "Clean comparisons produce empty diff artifacts and resume-reconcile consumes the same implementation",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/portfolio/reconciler.py"
+      ],
+      "depends": [
+        "T108",
+        "T122"
+      ],
+      "createdAt": "2026-09-01T18:03:15.642Z",
+      "updatedAt": "2026-09-01T18:30:12.774Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:15.642Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T131",
+      "title": "H8.4 Timeboxed post-v1 realism spikes",
+      "status": "pending",
+      "priority": "low",
+      "type": "task",
+      "parentId": "T076",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Investigate queue-position simulation, an Alpaca paper venue adapter, split and dividend adjustment data, and Greeks-based risk as bounded research with prototypes and explicit recommendations.",
+      "labels": [
+        "quant-harness",
+        "milestone.m5",
+        "harness.h053",
+        "post-v1"
+      ],
+      "acceptance": [
+        "Each spike has scope, prototype or evidence, cost-benefit analysis, and recommendation",
+        "The corporate-action spike demonstrates unadjusted versus adjusted divergence on a known split",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        ".github/research"
+      ],
+      "depends": [
+        "T117",
+        "T122"
+      ],
+      "createdAt": "2026-09-01T18:03:40.113Z",
+      "updatedAt": "2026-09-01T18:31:05.178Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:40.113Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T135",
+      "title": "H9.4 Point-in-time UniverseView and dynamic subscriptions",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T077",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Expose clock-guarded universe membership and metadata plus runtime subscribe and unsubscribe operations honored identically by replay and live feeds, and record universe-cleanliness provenance in manifests.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3b",
+        "harness.h057",
+        "universe"
+      ],
+      "acceptance": [
+        "A monthly rotation strategy receives only then-listed names",
+        "Dynamic subscriptions produce equivalent event streams in replay and mock live",
+        "Every run declares whether its universe is survivorship-clean",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/strategy/universe.py",
+        "src/harness/data/subscriptions.py"
+      ],
+      "depends": [
+        "T083",
+        "T089",
+        "T132"
+      ],
+      "createdAt": "2026-09-01T18:03:56.262Z",
+      "updatedAt": "2026-09-01T18:31:39.329Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:56.262Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
       "id": "T006",
       "title": "E3 CI/CD and GitHub OIDC",
       "status": "pending",
@@ -3073,6 +5996,414 @@
       "relates": []
     },
     {
+      "id": "T073",
+      "title": "H5 M2 Azure trader deployment",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Extend FCA Azure infrastructure and deployment automation with scheduled trader apps, backtest jobs, quant API, managed identities, state storage, monitoring, supervision, and operator runbooks.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "azure",
+        "deployment"
+      ],
+      "acceptance": [
+        "The dev runtime deploys idempotently, scales by trading schedule, restores safely, reports health, and stays within explicit additive cost controls",
+        "Complete child T112: H5.1 Extend Bicep for quant runtime",
+        "Complete child T113: H5.2 Extend OIDC deployment and smoke workflow",
+        "Complete child T114: H5.3 Trader supervisor and operator runbook"
+      ],
+      "depends": [
+        "T004",
+        "T006",
+        "T069",
+        "T071",
+        "T072"
+      ],
+      "createdAt": "2026-09-01T17:55:32.747Z",
+      "updatedAt": "2026-09-01T18:33:53.088Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T082",
+      "title": "H1.5 ExecutionVenue protocol and ScriptedVenue",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "small",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Define fire-and-forget venue submission, cancellation, replacement, and position snapshots with all outcomes re-entering the event bus; provide a deterministic scripted venue for lifecycle tests.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h005",
+        "venue"
+      ],
+      "acceptance": [
+        "A toy submit, acknowledgement, partial fill, fill, and callback sequence has verified ordering",
+        "Scripted scenarios cover rejection, expiry, immediate fill, cancellation, and replacement",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/venues/base.py",
+        "src/harness/venues/scripted.py"
+      ],
+      "depends": [
+        "T079",
+        "T080",
+        "T081"
+      ],
+      "createdAt": "2026-09-01T18:00:14.197Z",
+      "updatedAt": "2026-09-01T18:24:02.724Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:14.197Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T092",
+      "title": "H2.5 Pessimistic latency and trade-through fills",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Add the default latency and displayed-size constrained fill model, partial fills across quotes, cancel-or-rest remainder policy, pessimistic resting-limit trade-through behavior, and a stricter standalone TradeThrough model.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h015",
+        "fill-model"
+      ],
+      "acceptance": [
+        "A three-hundred-share order against one-hundred displayed shares fills and handles the remainder exactly under each policy",
+        "Inside-spread resting limits require qualifying prints by default",
+        "YAML parameter changes produce distinct expected outcomes",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/fills/latency_size.py",
+        "src/harness/fills/trade_through.py"
+      ],
+      "depends": [
+        "T091"
+      ],
+      "createdAt": "2026-09-01T18:00:55.107Z",
+      "updatedAt": "2026-09-01T18:25:28.493Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:55.107Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T102",
+      "title": "H3.5 Backtest query API and job launcher",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T071",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Expose authenticated backtest launch, listing, manifest, metrics, paginated equity, orders, fills, actions, risk, artifact SAS, and deletion endpoints, launching Container Apps Jobs by managed identity.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h025",
+        "api"
+      ],
+      "acceptance": [
+        "Contract tests cover every endpoint, authentication, filtering, pagination, SAS scope, and deletion",
+        "A dev launch completes and becomes queryable end to end",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/results/api.py"
+      ],
+      "depends": [
+        "T101"
+      ],
+      "createdAt": "2026-09-01T18:01:36.805Z",
+      "updatedAt": "2026-09-01T18:26:53.493Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:36.805Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T107",
+      "title": "H4.5 PaperShell shared simulation runtime",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T072",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Run live feeds with WallClock, the same SimVenue and fill models as backtests, virtual books, risk, recorder, optional extra latency, market-session boot and shutdown policies, and multi-strategy routing.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h030",
+        "paper-trading"
+      ],
+      "acceptance": [
+        "A three-hour mock-live session exits cleanly with intact books and artifacts",
+        "Identical event streams and fill configuration produce equivalent paper and backtest ledgers",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/runtime/paper.py"
+      ],
+      "depends": [
+        "T086",
+        "T091",
+        "T092",
+        "T096",
+        "T103"
+      ],
+      "createdAt": "2026-09-01T18:01:57.398Z",
+      "updatedAt": "2026-09-01T18:27:36.405Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:57.398Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T119",
+      "title": "H6.5 Options replay and collateral checks",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T074",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Replay daily option contract churn with underlying data and enforce defined-risk collateral, per-contract exposure, and default rejection of naked short options.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3",
+        "harness.h042",
+        "options",
+        "buying-power"
+      ],
+      "acceptance": [
+        "A two-year SPY front-set run remains day-bounded in memory",
+        "Vertical and iron-condor collateral properties are exact and naked shorts are rejected by default",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/options_replay.py",
+        "src/harness/risk/options.py"
+      ],
+      "depends": [
+        "T056",
+        "T089",
+        "T095",
+        "T115"
+      ],
+      "createdAt": "2026-09-01T18:02:50.285Z",
+      "updatedAt": "2026-09-01T18:29:19.864Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:50.285Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T126",
+      "title": "H7.5 Shadow mode and enforced go-live gate",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T075",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Run live market data with observe-only broker routing and side-by-side simulation, compare would-be outcomes, and enforce ten consecutive clean paper sessions, parity evidence, universe cleanliness, and risk-veto sanity before live eligibility.",
+      "labels": [
+        "quant-harness",
+        "milestone.m4",
+        "harness.h048",
+        "shadow",
+        "go-live-gate"
+      ],
+      "acceptance": [
+        "Shadow reports compare every broker-intent and simulated outcome",
+        "The gate CLI returns evidence-linked pass or fail and deployment validation rejects ineligible live strategies",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/runtime/shadow.py",
+        "src/harness/cli/gate.py"
+      ],
+      "depends": [
+        "T111",
+        "T125",
+        "T135"
+      ],
+      "createdAt": "2026-09-01T18:03:19.628Z",
+      "updatedAt": "2026-09-01T18:30:21.735Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:19.628Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T136",
+      "title": "H9.5 Conditional supplemental listings dataset",
+      "status": "pending",
+      "priority": "low",
+      "type": "task",
+      "parentId": "T077",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Only when the delisted-history sweep or selected strategy scope justifies it, ingest a chosen exchange, SEC, constituent-history, or paid reference into SecurityMaster with delisting returns and effective dates.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3b",
+        "harness.h058",
+        "conditional",
+        "reference-data"
+      ],
+      "acceptance": [
+        "The task records the evidence that triggered implementation rather than remaining unconditional",
+        "Imported row counts reconcile to the source and a known delisting return flows through settlement exactly",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/listings_import.py",
+        "config/security_master"
+      ],
+      "depends": [
+        "T132",
+        "T133"
+      ],
+      "createdAt": "2026-09-01T18:04:00.354Z",
+      "updatedAt": "2026-09-01T18:34:41.529Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:04:00.354Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "unit",
+      "relates": []
+    },
+    {
       "id": "T007",
       "title": "E4 Equities SIP ingest",
       "status": "pending",
@@ -3287,6 +6618,310 @@
       "relates": []
     },
     {
+      "id": "T074",
+      "title": "H6 M3 Options and atomic multi-leg",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 2,
+      "description": "Add point-in-time option universes, OPRA live feeds, atomic multi-leg OMS and matching, collateral checks, expiry and assignment, and a reference spread strategy.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3",
+        "options",
+        "multi-leg"
+      ],
+      "acceptance": [
+        "Options backtest and paper paths use reproducible contract sets and pessimistic atomic spread execution with exact lifecycle accounting",
+        "Complete child T115: H6.1 Point-in-time option contract universe",
+        "Complete child T116: H6.2 Atomic multi-leg orders and OMS groups",
+        "Complete child T117: H6.3 MidTouch and multi-leg matching",
+        "Complete child T118: H6.4 Option expiry, exercise, and assignment",
+        "Complete child T119: H6.5 Options replay and collateral checks",
+        "Complete child T120: H6.6 Reference short-put-spread strategy",
+        "Complete child T121: H6.7 Alpaca OPRA WebSocket feed"
+      ],
+      "depends": [
+        "T010",
+        "T069",
+        "T070",
+        "T072"
+      ],
+      "createdAt": "2026-09-01T17:55:36.134Z",
+      "updatedAt": "2026-09-01T18:41:36.618Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T083",
+      "title": "H1.6 Strategy contract and context facade",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Implement the mode-independent Strategy callbacks and a constrained StrategyContext exposing clock, books, account, orders, point-in-time data, scheduler, state, structured logging, emissions, seeded random, universe, and dynamic subscriptions.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h006",
+        "strategy-api"
+      ],
+      "acceptance": [
+        "A reference strategy exercises every callback in documented order",
+        "Portfolio state mutates immediately before on_fill delivery",
+        "Multiple strategies receive only subscribed events and bind from class plus parameters",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/strategy"
+      ],
+      "depends": [
+        "T080",
+        "T082"
+      ],
+      "createdAt": "2026-09-01T18:00:18.219Z",
+      "updatedAt": "2026-09-01T18:24:12.461Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:18.219Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T093",
+      "title": "H2.6 Fee and commission models",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T070",
+      "size": "small",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Apply YAML-selected equity regulatory, option per-contract, and crypto maker-taker schedules to fills and aggregate fees by strategy, asset class, and run.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h016",
+        "fees"
+      ],
+      "acceptance": [
+        "Fixtures calculate each asset-class schedule to the cent",
+        "Fee changes require configuration only and remain separate from strategy logic",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/fills/fees.py",
+        "config/fees"
+      ],
+      "depends": [
+        "T079"
+      ],
+      "createdAt": "2026-09-01T18:00:59.214Z",
+      "updatedAt": "2026-09-01T18:25:37.246Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:59.214Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T108",
+      "title": "H4.6 StateStore snapshots and restore",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T072",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Atomically snapshot and restore books, open orders, strategy state, event watermark, and random state to deployment-scoped blob storage plus a local mirror with version checks.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h031",
+        "state"
+      ],
+      "acceptance": [
+        "Periodic, session-end, and stop snapshots round-trip to deep-equal runtime state",
+        "Interrupted writes cannot replace the last valid snapshot",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/runtime/state.py"
+      ],
+      "depends": [
+        "T094",
+        "T107"
+      ],
+      "createdAt": "2026-09-01T18:02:01.511Z",
+      "updatedAt": "2026-09-01T18:27:45.086Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:01.511Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T120",
+      "title": "H6.6 Reference short-put-spread strategy",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T074",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Provide a point-in-time short-put-spread example with DTE, entry, net-limit, profit, stop, managed-exit, and expiry behavior as the end-to-end options contract test.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3",
+        "harness.h043",
+        "options",
+        "examples"
+      ],
+      "acceptance": [
+        "The strategy runs over packaged options fixtures in CI",
+        "Entry, exit, cancellation, collateral, and assignment chains are complete and referentially consistent",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "strategies/harness_examples/short_put_spread.py",
+        "tests/integration/options"
+      ],
+      "depends": [
+        "T096",
+        "T107",
+        "T117",
+        "T119",
+        "T121"
+      ],
+      "createdAt": "2026-09-01T18:02:54.548Z",
+      "updatedAt": "2026-09-01T18:34:17.409Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:54.548Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T127",
+      "title": "H7.6 Go-live ramp, rollback, and alerts",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T075",
+      "size": "small",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Document and drill preflight secrets, kill switch, recovery, universe cleanliness, alerting, stepped risk-size ramp, halt criteria, rollback, restart-loop, watchdog, reconciler, kill, and daily-loss alerts.",
+      "labels": [
+        "quant-harness",
+        "milestone.m4",
+        "harness.h049",
+        "operations",
+        "alerts"
+      ],
+      "acceptance": [
+        "The complete checklist passes against dev",
+        "Every alert reaches the configured channel during a test drill",
+        "Rollback and size-ramp procedures are executable without undocumented steps",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        ".github/runbooks/go-live.md",
+        "infra"
+      ],
+      "depends": [
+        "T114",
+        "T126"
+      ],
+      "createdAt": "2026-09-01T18:03:23.780Z",
+      "updatedAt": "2026-09-01T18:30:30.586Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:23.780Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "pending",
@@ -3459,6 +7094,251 @@
       "relates": []
     },
     {
+      "id": "T077",
+      "title": "H9 M3b Point-in-time equity universes",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 7,
+      "positionVersion": 2,
+      "description": "Remove survivorship leakage with a SecurityMaster, listings-aware lake coverage, rename and delisting events, point-in-time universe selection, dynamic subscriptions, and conditional supplemental data.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3b",
+        "survivorship",
+        "security-master"
+      ],
+      "acceptance": [
+        "Historical universes contain only then-listed names and held delisted or renamed positions settle and migrate under explicit pessimistic rules",
+        "Complete child T132: H9.1 SecurityMaster and listings-aware lake coverage",
+        "Complete child T133: H9.2 Alpaca delisted-history coverage sweep",
+        "Complete child T134: H9.3 Delisting and rename events with settlement",
+        "Complete child T135: H9.4 Point-in-time UniverseView and dynamic subscriptions",
+        "Complete child T136: H9.5 Conditional supplemental listings dataset"
+      ],
+      "depends": [
+        "T005",
+        "T007",
+        "T069",
+        "T070"
+      ],
+      "createdAt": "2026-09-01T17:55:45.717Z",
+      "updatedAt": "2026-09-01T18:41:36.618Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T084",
+      "title": "H1.7 HistoricalView look-ahead guard",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "medium",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Provide bounded per-subscription ring buffers and point-in-time quote, trade, last-N, window, and aggregate reads that hard-clip every query to the engine clock.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h007",
+        "lookahead"
+      ],
+      "acceptance": [
+        "A one-nanosecond future query raises LookaheadError and a canary strategy never receives future data",
+        "Last-one-thousand quote retrieval is amortized constant time under benchmark",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/history.py"
+      ],
+      "depends": [
+        "T080",
+        "T083"
+      ],
+      "createdAt": "2026-09-01T18:00:22.213Z",
+      "updatedAt": "2026-09-01T18:24:20.800Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:22.213Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T094",
+      "title": "H2.7 Virtual books and PortfolioHub",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Maintain Decimal-exact strategy cash, positions, average cost, realized and unrealized PnL, position markers, and a shared-account aggregate across multiple virtual books.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h017",
+        "portfolio"
+      ],
+      "acceptance": [
+        "Ten thousand generated fill sequences preserve cash and position conservation",
+        "Two strategies sharing a symbol retain correct independent PnL and global position totals",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/portfolio"
+      ],
+      "depends": [
+        "T079",
+        "T081"
+      ],
+      "createdAt": "2026-09-01T18:01:03.351Z",
+      "updatedAt": "2026-09-01T18:25:45.520Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:03.351Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T109",
+      "title": "H4.7 Recovery policies and chaos tests",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T072",
+      "size": "large",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Implement resume-reconcile, flatten-halt, and halt-only boot policies, cancel-all sequencing, broker-versus-book adoption or halt behavior, and randomized process-kill recovery tests.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h032",
+        "recovery",
+        "chaos"
+      ],
+      "acceptance": [
+        "Twenty randomized kill and restore cycles reach the uninterrupted simulated end state",
+        "Injected broker divergence follows both adopt and halt policies with complete diff artifacts",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/runtime/recovery.py",
+        "tests/chaos"
+      ],
+      "depends": [
+        "T108"
+      ],
+      "createdAt": "2026-09-01T18:02:05.524Z",
+      "updatedAt": "2026-09-01T18:27:53.652Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:05.524Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T121",
+      "title": "H6.7 Alpaca OPRA WebSocket feed",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T074",
+      "size": "large",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Close the source plan gap by adding live OPRA quote and trade subscriptions for point-in-time selected contracts, sharing reconnect and watchdog machinery while joining underlying equity events and normalizing to replay schemas.",
+      "labels": [
+        "quant-harness",
+        "milestone.m3",
+        "harness.plan-gap.opra-ws",
+        "options",
+        "websocket"
+      ],
+      "acceptance": [
+        "Mock OPRA streams subscribe and rotate contract sets without duplicate or future contracts",
+        "Reconnect, stale-contract detection, underlying joins, and schema parity are covered",
+        "Paper options strategies receive the same option event types as replay",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/data/alpaca_ws_options.py"
+      ],
+      "depends": [
+        "T103",
+        "T115"
+      ],
+      "createdAt": "2026-09-01T18:02:58.845Z",
+      "updatedAt": "2026-09-01T18:29:37.220Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:58.845Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
       "id": "T009",
       "title": "E6 Dev deployment and equities soak gate",
       "status": "pending",
@@ -3495,6 +7375,201 @@
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T075",
+      "title": "H7 M4 Live broker integration",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 8,
+      "positionVersion": 1,
+      "description": "Route equities, crypto, and options through Alpaca behind venue capabilities, continuously reconcile shared-account state, qualify strategies in shadow mode, and enforce a controlled go-live ramp.",
+      "labels": [
+        "quant-harness",
+        "milestone.m4",
+        "live-trading",
+        "alpaca"
+      ],
+      "acceptance": [
+        "Only paper-qualified strategies can route supported orders live, with reconciliation, alerts, kill controls, and auditable rollback procedures",
+        "Complete child T122: H7.1 AlpacaVenue equities",
+        "Complete child T123: H7.2 AlpacaVenue crypto",
+        "Complete child T124: H7.3 AlpacaVenue options and capability matrix",
+        "Complete child T125: H7.4 Continuous and boot reconciler",
+        "Complete child T126: H7.5 Shadow mode and enforced go-live gate",
+        "Complete child T127: H7.6 Go-live ramp, rollback, and alerts"
+      ],
+      "depends": [
+        "T069",
+        "T072",
+        "T073",
+        "T074",
+        "T077"
+      ],
+      "createdAt": "2026-09-01T17:55:39.133Z",
+      "updatedAt": "2026-09-01T18:36:29.238Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T085",
+      "title": "H1.8 Strategy sandbox lint",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T069",
+      "size": "small",
+      "position": 8,
+      "positionVersion": 0,
+      "description": "Add an AST checker for strategies that rejects wall-clock reads, sleeping, networking, subprocesses, unseeded random, asyncio, and concurrency outside the provided context interfaces.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h008",
+        "sandbox"
+      ],
+      "acceptance": [
+        "Clean strategies pass and every prohibited pattern has a failing fixture with an actionable diagnostic",
+        "The sandbox checker runs in CI",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/strategy/lint.py",
+        "tests/strategy_lint"
+      ],
+      "depends": [
+        "T083"
+      ],
+      "createdAt": "2026-09-01T18:00:26.105Z",
+      "updatedAt": "2026-09-01T18:24:29.171Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:26.105Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T095",
+      "title": "H2.8 Risk pipeline and core rules",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 8,
+      "positionVersion": 0,
+      "description": "Implement synchronous allow, reduce, or reject evaluation with ordered YAML rules for gross and net exposure, size, count, and daily-loss halts plus per-strategy overrides and complete decision auditing.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h018",
+        "risk"
+      ],
+      "acceptance": [
+        "Every rule has exact allow, reduce, and reject boundary tests",
+        "Reduced orders are rechecked and veto reasons are recorded",
+        "Twenty-position core checks benchmark below one millisecond",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/risk"
+      ],
+      "depends": [
+        "T083",
+        "T094"
+      ],
+      "createdAt": "2026-09-01T18:01:07.452Z",
+      "updatedAt": "2026-09-01T18:25:53.864Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:07.452Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T110",
+      "title": "H4.8 Global kill switch",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T072",
+      "size": "small",
+      "position": 8,
+      "positionVersion": 0,
+      "description": "Poll an atomic Azure Table risk flag and expose authenticated CLI and API controls for halt-new-orders or flatten-and-halt with audited trips, releases, cancellations, and flatten orders.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h033",
+        "kill-switch"
+      ],
+      "acceptance": [
+        "A trip rejects new orders within poll interval plus two seconds",
+        "Flatten mode closes simulated positions and records the complete control action",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/risk/kill_switch.py",
+        "src/harness/cli/kill.py"
+      ],
+      "depends": [
+        "T095",
+        "T107"
+      ],
+      "createdAt": "2026-09-01T18:02:10.138Z",
+      "updatedAt": "2026-09-01T18:28:02.225Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:10.138Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
       "relates": []
     },
     {
@@ -3536,6 +7611,205 @@
       "relates": []
     },
     {
+      "id": "T076",
+      "title": "H8 M5 Hardening, sweeps, and authoring",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 9,
+      "positionVersion": 1,
+      "description": "Add reproducible parameter sweeps, performance and memory budgets, strategy-authoring documentation, and timeboxed post-v1 realism research.",
+      "labels": [
+        "quant-harness",
+        "milestone.m5",
+        "hardening",
+        "documentation"
+      ],
+      "acceptance": [
+        "Reference strategies are reproducibly sweepable, performance regressions are visible, and new authors can target every shell without harness changes",
+        "Complete child T128: H8.1 Reproducible parameter sweep runner",
+        "Complete child T129: H8.2 Performance and memory budgets",
+        "Complete child T130: H8.3 Strategy authoring and architecture guide",
+        "Complete child T131: H8.4 Timeboxed post-v1 realism spikes"
+      ],
+      "depends": [
+        "T070",
+        "T071",
+        "T074",
+        "T075",
+        "T077"
+      ],
+      "createdAt": "2026-09-01T17:55:42.409Z",
+      "updatedAt": "2026-09-01T18:36:29.238Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T086",
+      "title": "H1.9 Typed harness configuration and hashes",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "medium",
+      "position": 9,
+      "positionVersion": 0,
+      "description": "Define Pydantic schemas for backtests, strategy instances, risk pipelines, fees, and deployments with canonical cross-machine hashing and examples for every execution shell.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h009",
+        "configuration"
+      ],
+      "acceptance": [
+        "All example YAML validates and invalid fixtures identify precise fields",
+        "Equivalent configuration produces the same hash across machines and map ordering",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/config.py",
+        "config"
+      ],
+      "depends": [
+        "T079"
+      ],
+      "createdAt": "2026-09-01T18:00:30.244Z",
+      "updatedAt": "2026-09-01T18:24:37.690Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:30.244Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T096",
+      "title": "H2.9 Backtest runner and reproducibility manifest",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 9,
+      "positionVersion": 0,
+      "description": "Orchestrate preflight data assurance, feed, engine, strategies, risk, simulation venue, recorder, teardown policy, error taxonomy, and a manifest carrying configuration, code, seed, engine, and data fingerprints.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h019",
+        "backtest-runner"
+      ],
+      "acceptance": [
+        "A one-month SPY run is artifact-identical across repeated execution",
+        "Every reproducibility input is present and changes affect the manifest hash",
+        "Abort and per-strategy halt exception policies are tested",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/runtime/backtest.py",
+        "src/harness/cli/backtest.py"
+      ],
+      "depends": [
+        "T086",
+        "T087",
+        "T089",
+        "T091",
+        "T094",
+        "T095"
+      ],
+      "createdAt": "2026-09-01T18:01:11.600Z",
+      "updatedAt": "2026-09-01T18:26:02.172Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:11.600Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T111",
+      "title": "H4.9 Paper-to-backtest parity harness",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T072",
+      "size": "medium",
+      "position": 9,
+      "positionVersion": 0,
+      "description": "Replay a recorded live session through BacktestShell, compare paper and replay orders, fills, positions, actions, and equity under timestamp tolerance, and emit a parity report for CI and nightly jobs.",
+      "labels": [
+        "quant-harness",
+        "milestone.m2",
+        "harness.h034",
+        "parity"
+      ],
+      "acceptance": [
+        "The reference recording is parity-clean",
+        "A kernel behavior change that diverges paper and replay fails CI with a focused diff",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "src/harness/testing/parity.py",
+        "tests/parity"
+      ],
+      "depends": [
+        "T096",
+        "T105",
+        "T107"
+      ],
+      "createdAt": "2026-09-01T18:02:14.507Z",
+      "updatedAt": "2026-09-01T18:28:10.811Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:02:14.507Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
       "id": "T011",
       "title": "E8 Crypto pairs",
       "status": "pending",
@@ -3570,6 +7844,110 @@
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T087",
+      "title": "H1.10 Determinism golden harness",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "medium",
+      "position": 10,
+      "positionVersion": 0,
+      "description": "Build a reusable synthetic feed, scripted venue, toy strategy, artifact canonicalizer, and manifest hash comparison that becomes the deterministic CI gate for engine changes.",
+      "labels": [
+        "quant-harness",
+        "milestone.m0",
+        "harness.h010",
+        "golden-test"
+      ],
+      "acceptance": [
+        "Two consecutive runs produce byte-identical artifact hashes",
+        "Intentionally introduced set-order, clock, random, or ID nondeterminism fails the gate",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "tests/golden",
+        "src/harness/testing"
+      ],
+      "depends": [
+        "T082",
+        "T083"
+      ],
+      "createdAt": "2026-09-01T18:00:34.507Z",
+      "updatedAt": "2026-09-01T18:24:46.078Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:00:34.507Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T097",
+      "title": "H2.10 Reference equity strategies and integration tests",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 10,
+      "positionVersion": 0,
+      "description": "Ship buy-and-hold, intraday momentum, and mean-reversion examples as packaged-fixture integration tests covering timers, market orders, limits, partial fills, cancel-replace, and flat-at-close behavior.",
+      "labels": [
+        "quant-harness",
+        "milestone.m1",
+        "harness.h020",
+        "examples"
+      ],
+      "acceptance": [
+        "All examples run in CI over a small two-symbol fixture",
+        "Momentum is flat at every close and mean reversion exercises cancellation, replacement, and partial filling",
+        "Ruff and pytest pass with focused tests for changed behavior",
+        "Core engine code passes strict type checking and introduces no wall-clock, unseeded random, or network access inside the synchronous kernel",
+        "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
+      ],
+      "files": [
+        "strategies/harness_examples",
+        "tests/integration/strategies"
+      ],
+      "depends": [
+        "T090",
+        "T096"
+      ],
+      "createdAt": "2026-09-01T18:01:15.694Z",
+      "updatedAt": "2026-09-01T18:26:10.542Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:01:15.694Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "unit",
       "relates": []
     },
     {
@@ -3613,6 +7991,49 @@
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T137",
+      "title": "H1.11 Publish combined FCA roadmap",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T069",
+      "size": "small",
+      "position": 11,
+      "positionVersion": 0,
+      "description": "Publish the reconciled market-lake and quant-harness CLEO roadmap, machine-agnostic agent guidance, portable full-project export, validator changes, and milestone RCASD artifacts to the tracked project branch.",
+      "labels": [
+        "quant-harness",
+        "cleo",
+        "repository",
+        "roadmap"
+      ],
+      "acceptance": [
+        "The portable export contains both sagas and every reconciled harness task through the publication task",
+        "Machine-agnostic CLEO guidance, export validation, and harness milestone RCASD artifacts are committed",
+        "Publication commits are pushed to origin/master and the authenticated remote ref is verified"
+      ],
+      "createdAt": "2026-09-01T18:47:12.026Z",
+      "updatedAt": "2026-09-01T18:47:30.024Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:47:12.026Z"
+      },
+      "pipelineStage": "implementation",
+      "assignee": "local",
+      "kind": "work",
+      "scope": "unit",
       "relates": []
     }
   ],
@@ -3705,6 +8126,95 @@
         "T064",
         "T065",
         "T066"
+      ],
+      "T068": [
+        "T069",
+        "T070",
+        "T071",
+        "T072",
+        "T073",
+        "T074",
+        "T077",
+        "T075",
+        "T076"
+      ],
+      "T069": [
+        "T078",
+        "T079",
+        "T080",
+        "T081",
+        "T082",
+        "T083",
+        "T084",
+        "T085",
+        "T086",
+        "T087",
+        "T137"
+      ],
+      "T070": [
+        "T088",
+        "T089",
+        "T090",
+        "T091",
+        "T092",
+        "T093",
+        "T094",
+        "T095",
+        "T096",
+        "T097"
+      ],
+      "T071": [
+        "T098",
+        "T099",
+        "T100",
+        "T101",
+        "T102"
+      ],
+      "T072": [
+        "T103",
+        "T104",
+        "T105",
+        "T106",
+        "T107",
+        "T108",
+        "T109",
+        "T110",
+        "T111"
+      ],
+      "T073": [
+        "T112",
+        "T113",
+        "T114"
+      ],
+      "T074": [
+        "T115",
+        "T116",
+        "T117",
+        "T118",
+        "T119",
+        "T120",
+        "T121"
+      ],
+      "T075": [
+        "T122",
+        "T123",
+        "T124",
+        "T125",
+        "T126",
+        "T127"
+      ],
+      "T076": [
+        "T128",
+        "T129",
+        "T130",
+        "T131"
+      ],
+      "T077": [
+        "T132",
+        "T133",
+        "T134",
+        "T135",
+        "T136"
       ]
     },
     "dependencies": {
@@ -3739,6 +8249,51 @@
       "T061": [
         "T032",
         "T043"
+      ],
+      "T069": [
+        "T003"
+      ],
+      "T078": [
+        "T014"
+      ],
+      "T088": [
+        "T021",
+        "T023",
+        "T046",
+        "T048",
+        "T079"
+      ],
+      "T098": [
+        "T080",
+        "T094"
+      ],
+      "T103": [
+        "T079",
+        "T080",
+        "T086"
+      ],
+      "T112": [
+        "T020",
+        "T102",
+        "T107"
+      ],
+      "T115": [
+        "T055",
+        "T088"
+      ],
+      "T122": [
+        "T082",
+        "T107"
+      ],
+      "T128": [
+        "T096",
+        "T102"
+      ],
+      "T132": [
+        "T024",
+        "T025",
+        "T034",
+        "T088"
       ],
       "T014": [
         "T013"
@@ -3779,6 +8334,44 @@
         "T034",
         "T035"
       ],
+      "T070": [
+        "T005",
+        "T008",
+        "T009",
+        "T069"
+      ],
+      "T079": [
+        "T078"
+      ],
+      "T089": [
+        "T080",
+        "T088"
+      ],
+      "T099": [
+        "T098"
+      ],
+      "T104": [
+        "T103"
+      ],
+      "T113": [
+        "T031",
+        "T078",
+        "T112"
+      ],
+      "T116": [
+        "T079",
+        "T081"
+      ],
+      "T123": [
+        "T104",
+        "T122"
+      ],
+      "T129": [
+        "T096"
+      ],
+      "T133": [
+        "T033"
+      ],
       "T004": [
         "T003"
       ],
@@ -3817,6 +8410,50 @@
       ],
       "T063": [
         "T035"
+      ],
+      "T071": [
+        "T069",
+        "T070"
+      ],
+      "T080": [
+        "T079"
+      ],
+      "T090": [
+        "T080",
+        "T083"
+      ],
+      "T100": [
+        "T099"
+      ],
+      "T105": [
+        "T021",
+        "T027",
+        "T103"
+      ],
+      "T114": [
+        "T107",
+        "T109",
+        "T110",
+        "T112"
+      ],
+      "T117": [
+        "T091",
+        "T116"
+      ],
+      "T124": [
+        "T116",
+        "T121",
+        "T122"
+      ],
+      "T130": [
+        "T097",
+        "T120",
+        "T135"
+      ],
+      "T134": [
+        "T083",
+        "T094",
+        "T132"
       ],
       "T005": [
         "T003"
@@ -3859,6 +8496,46 @@
         "T038",
         "T050"
       ],
+      "T072": [
+        "T005",
+        "T008",
+        "T069",
+        "T070",
+        "T071"
+      ],
+      "T081": [
+        "T079"
+      ],
+      "T091": [
+        "T082"
+      ],
+      "T101": [
+        "T096",
+        "T098"
+      ],
+      "T106": [
+        "T042",
+        "T043",
+        "T088",
+        "T105"
+      ],
+      "T118": [
+        "T094",
+        "T116"
+      ],
+      "T125": [
+        "T108",
+        "T122"
+      ],
+      "T131": [
+        "T117",
+        "T122"
+      ],
+      "T135": [
+        "T083",
+        "T089",
+        "T132"
+      ],
       "T006": [
         "T003",
         "T004"
@@ -3896,6 +8573,46 @@
         "T019",
         "T050"
       ],
+      "T073": [
+        "T004",
+        "T006",
+        "T069",
+        "T071",
+        "T072"
+      ],
+      "T082": [
+        "T079",
+        "T080",
+        "T081"
+      ],
+      "T092": [
+        "T091"
+      ],
+      "T102": [
+        "T101"
+      ],
+      "T107": [
+        "T086",
+        "T091",
+        "T092",
+        "T096",
+        "T103"
+      ],
+      "T119": [
+        "T056",
+        "T089",
+        "T095",
+        "T115"
+      ],
+      "T126": [
+        "T111",
+        "T125",
+        "T135"
+      ],
+      "T136": [
+        "T132",
+        "T133"
+      ],
       "T007": [
         "T004",
         "T005"
@@ -3921,6 +8638,34 @@
         "T064",
         "T065"
       ],
+      "T074": [
+        "T010",
+        "T069",
+        "T070",
+        "T072"
+      ],
+      "T083": [
+        "T080",
+        "T082"
+      ],
+      "T093": [
+        "T079"
+      ],
+      "T108": [
+        "T094",
+        "T107"
+      ],
+      "T120": [
+        "T096",
+        "T107",
+        "T117",
+        "T119",
+        "T121"
+      ],
+      "T127": [
+        "T114",
+        "T126"
+      ],
       "T008": [
         "T003",
         "T005",
@@ -3945,11 +8690,50 @@
         "T044",
         "T045"
       ],
+      "T077": [
+        "T005",
+        "T007",
+        "T069",
+        "T070"
+      ],
+      "T084": [
+        "T080",
+        "T083"
+      ],
+      "T094": [
+        "T079",
+        "T081"
+      ],
+      "T109": [
+        "T108"
+      ],
+      "T121": [
+        "T103",
+        "T115"
+      ],
       "T009": [
         "T004",
         "T006",
         "T007",
         "T008"
+      ],
+      "T075": [
+        "T069",
+        "T072",
+        "T073",
+        "T074",
+        "T077"
+      ],
+      "T085": [
+        "T083"
+      ],
+      "T095": [
+        "T083",
+        "T094"
+      ],
+      "T110": [
+        "T095",
+        "T107"
       ],
       "T010": [
         "T005",
@@ -3957,12 +8741,43 @@
         "T008",
         "T009"
       ],
+      "T076": [
+        "T070",
+        "T071",
+        "T074",
+        "T075",
+        "T077"
+      ],
+      "T086": [
+        "T079"
+      ],
+      "T096": [
+        "T086",
+        "T087",
+        "T089",
+        "T091",
+        "T094",
+        "T095"
+      ],
+      "T111": [
+        "T096",
+        "T105",
+        "T107"
+      ],
       "T011": [
         "T005",
         "T007",
         "T008",
         "T009",
         "T010"
+      ],
+      "T087": [
+        "T082",
+        "T083"
+      ],
+      "T097": [
+        "T090",
+        "T096"
       ],
       "T012": [
         "T004",
@@ -3976,7 +8791,8 @@
       ]
     },
     "roots": [
-      "T001"
+      "T001",
+      "T068"
     ]
   }
 }
