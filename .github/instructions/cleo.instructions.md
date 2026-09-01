@@ -104,7 +104,7 @@ Expected current state after the lake and quant-harness plans were reconciled:
 - `137` total tasks: two root sagas, `20` epics, and `115` tasks.
 - The lake saga is `T001`; the quant-harness saga is `T068` with milestone epics `T069` through `T077`, implementation tasks `T078` through `T136`, and roadmap publication task `T137`.
 - Original harness source task identities are retained as `harness.h001` through `harness.h058` labels; `T121` is an added OPRA WebSocket plan-gap task.
-- `T002` and publication task `T067` are done; all service implementation work is pending.
+- `T002` and publication tasks `T067` and `T137` are done; all service implementation work is pending.
 - Dependency cycles are absent, schema and coherence checks pass, and the ID sequence ends at `T137`.
 - The only full-graph dependency-validator findings are the known root-saga `E_ORPHAN` defects for `T001` and `T068`.
 

@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-01T18:47:56.401Z",
+    "exportedAt": "2026-09-01T18:52:04.967Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 138
     },
-    "checksum": "cc4796c8d3a5ff55",
+    "checksum": "ebb32adc73cc44bb",
     "taskCount": 137,
     "exportMode": "full"
   },
@@ -1554,7 +1554,7 @@
     "T137": {
       "type": "task",
       "title": "H1.11 Publish combined FCA roadmap",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": []
     }
@@ -7996,7 +7996,7 @@
     {
       "id": "T137",
       "title": "H1.11 Publish combined FCA roadmap",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -8010,27 +8010,118 @@
         "repository",
         "roadmap"
       ],
+      "notes": [
+        "2026-09-01 18:51:41 UTC: Published commit cec1102921259e0f7da5b68dc0a965cc433cd378 to origin/master and verified the authenticated remote ref."
+      ],
       "acceptance": [
         "The portable export contains both sagas and every reconciled harness task through the publication task",
         "Machine-agnostic CLEO guidance, export validation, and harness milestone RCASD artifacts are committed",
         "Publication commits are pushed to origin/master and the authenticated remote ref is verified"
       ],
       "createdAt": "2026-09-01T18:47:12.026Z",
-      "updatedAt": "2026-09-01T18:47:30.024Z",
+      "updatedAt": "2026-09-01T18:51:45.210Z",
+      "completedAt": "2026-09-01T18:51:41.039Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T18:51:24.915Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:47:12.026Z"
+        "initializedAt": "2026-09-01T18:47:12.026Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "cec1102921259e0f7da5b68dc0a965cc433cd378",
+                "shortSha": "cec1102"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".cleo-export.json",
+                    "sha256": "ae0c735636cd8e9db8cda10b0b04d31c2ccc2fd37d6ab31f4ee849e82bc2b0eb"
+                  },
+                  {
+                    "path": ".github/instructions/cleo.instructions.md",
+                    "sha256": "96085968bace91d333851258fdf7167434ab7101beca3355de810d1882a796e8"
+                  },
+                  {
+                    "path": ".github/scripts/validate-cleo-export.mjs",
+                    "sha256": "2b4a2b0fc89b20f4a1f8fa7c693b4123743613d62e6979f80783e6c838fa3fbf"
+                  },
+                  {
+                    "path": ".cleo/rcasd/T069/research/T069-research.md",
+                    "sha256": "1b2219aa9c62726ea0da7ca66000eaea00d41a719d851017441833c4e45d9f06"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T137",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "d12b84b3-811e-5b90-bdf7-591417b55348"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T137",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "6a909d12-22c6-5262-a3e3-484b26e5b03f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T137",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "ff8d2cc0-eec3-535c-b52c-918693f298d8"
+              },
+              {
+                "kind": "note",
+                "note": "Authenticated git ls-remote confirmed origin/master equals cec1102921259e0f7da5b68dc0a965cc433cd378"
+              }
+            ],
+            "capturedAt": "2026-09-01T18:50:54.423Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T137-validation.json",
+                "sha256": "5c86cf4e14e5b0c05db6ff8889f900bc11054ee2ff1063e2fd1b37e73998640e",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T18:51:09.325Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T18:51:25.086Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "assignee": "local",
       "kind": "work",
       "scope": "unit",

@@ -1,0 +1,35 @@
+{
+  "taskId": "T137",
+  "timestamp": "2026-09-01T18:50:00Z",
+  "numTotalTests": 4,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "portable-export-validation",
+      "status": "passed",
+      "command": "node .github/scripts/validate-cleo-export.mjs",
+      "result": "137 tasks validated through T137 with no machine-specific paths"
+    },
+    {
+      "name": "portable-export-import-dry-run",
+      "status": "passed",
+      "command": "cleo import-tasks .cleo-export.json --dry-run --on-conflict skip --on-missing-dep fail",
+      "result": "137 tasks parsed; 137 expected conflicts skipped; no missing dependency failures"
+    },
+    {
+      "name": "cleo-state-validation",
+      "status": "passed",
+      "command": "cleo check schema todo --json; cleo check coherence --json; cleo sequence check --json; cleo deps cycles --json",
+      "result": "schema valid; coherence passed; sequence T137 valid; no dependency cycles"
+    },
+    {
+      "name": "remote-sha-verification",
+      "status": "passed",
+      "command": "git ls-remote origin refs/heads/master",
+      "result": "origin/master=cec1102921259e0f7da5b68dc0a965cc433cd378"
+    }
+  ]
+}
