@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from lake.app import create_app
+from lake.catalog import InMemoryContractRepository
+from lake.catalog.front_sets import InMemoryDailyFrontSetRepository
 from lake.http.auth import BearerAuthenticator, authenticate_bearer
 from lake.http.models import CoverageRequest, EnsureRequest
 
@@ -98,6 +100,20 @@ def test_app_reads_the_runtime_token_from_environment(
     )
 
     assert response.status_code == 200
+
+
+def test_app_preserves_injected_option_catalog_repositories() -> None:
+    contracts = InMemoryContractRepository()
+    front_sets = InMemoryDailyFrontSetRepository()
+
+    application = create_app(
+        bearer_token="test-secret",
+        contract_repository=contracts,
+        front_set_repository=front_sets,
+    )
+
+    assert application.state.contract_repository is contracts
+    assert application.state.front_set_repository is front_sets
 
 
 def test_request_models_reject_unknown_fields_and_malformed_values() -> None:

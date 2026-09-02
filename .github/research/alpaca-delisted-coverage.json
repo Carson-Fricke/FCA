@@ -1,0 +1,806 @@
+{
+  "inputs": {
+    "adjustment": "raw",
+    "data_type": "trades",
+    "end": "2025-01-01T00:00:00Z",
+    "feed": "sip",
+    "limit": 100,
+    "max_records": 1,
+    "max_symbols": 30,
+    "start": "2010-01-01T00:00:00Z",
+    "symbols": [
+      {
+        "cohort": "acquisition",
+        "event_year": 2020,
+        "symbol": "AGN"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2021,
+        "symbol": "ALXN"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2023,
+        "symbol": "ATVI"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2023,
+        "symbol": "BBBYQ"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2017,
+        "symbol": "BCR"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2019,
+        "symbol": "CELG"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2017,
+        "symbol": "CHKAQ"
+      },
+      {
+        "cohort": "delisted",
+        "event_year": 2021,
+        "symbol": "CHL"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2022,
+        "symbol": "CTXS"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2016,
+        "symbol": "DNDNQ"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2001,
+        "symbol": "ENRNQ"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2018,
+        "symbol": "ESRX"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2020,
+        "symbol": "FTR"
+      },
+      {
+        "cohort": "reused",
+        "event_year": 2009,
+        "symbol": "GM"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2020,
+        "symbol": "HTZ"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2020,
+        "symbol": "JCPNQ"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2008,
+        "symbol": "LEHMQ"
+      },
+      {
+        "cohort": "reused",
+        "event_year": 2022,
+        "symbol": "META"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2018,
+        "symbol": "MON"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2020,
+        "symbol": "MYL"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2020,
+        "symbol": "NBL"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2019,
+        "symbol": "RHT"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2023,
+        "symbol": "SIVBQ"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2024,
+        "symbol": "SPLK"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2021,
+        "symbol": "TIF"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2022,
+        "symbol": "TWTR"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2008,
+        "symbol": "WAMUQ"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2002,
+        "symbol": "WCOMQ"
+      },
+      {
+        "cohort": "acquisition",
+        "event_year": 2021,
+        "symbol": "WORK"
+      },
+      {
+        "cohort": "bankruptcy",
+        "event_year": 2023,
+        "symbol": "YRCWQ"
+      }
+    ]
+  },
+  "probe": "alpaca-delisted-history",
+  "recommendation": "go",
+  "recommendation_reason": "At least one symbol was empty or errored. Supplemental listings data should provide lifecycle and identity evidence instead of inferring delisting from market-data absence.",
+  "results": [
+    {
+      "cohort": "acquisition",
+      "event_year": 2020,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.098700Z",
+        "last_timestamp": "2015-12-01T14:30:00.098700Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "AGN"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2021,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.449700Z",
+        "last_timestamp": "2015-12-01T14:30:00.449700Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "ALXN"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2023,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.379100Z",
+        "last_timestamp": "2015-12-01T14:30:00.379100Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "ATVI"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2023,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.796700Z",
+        "last_timestamp": "2015-12-01T14:30:00.796700Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "BBBYQ"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2017,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:33:08.373800Z",
+        "last_timestamp": "2015-12-01T14:33:08.373800Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "BCR"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2019,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.635000Z",
+        "last_timestamp": "2015-12-01T14:30:00.635000Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "CELG"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2017,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": null,
+        "last_timestamp": null,
+        "record_count": 0,
+        "status": "empty"
+      },
+      "symbol": "CHKAQ"
+    },
+    {
+      "cohort": "delisted",
+      "event_year": 2021,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.209500Z",
+        "last_timestamp": "2015-12-01T14:30:00.209500Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "CHL"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2022,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.584000Z",
+        "last_timestamp": "2015-12-01T14:30:00.584000Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "CTXS"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2016,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": null,
+        "last_timestamp": null,
+        "record_count": 0,
+        "status": "empty"
+      },
+      "symbol": "DNDNQ"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2001,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": null,
+        "last_timestamp": null,
+        "record_count": 0,
+        "status": "empty"
+      },
+      "symbol": "ENRNQ"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2018,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.719400Z",
+        "last_timestamp": "2015-12-01T14:30:00.719400Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "ESRX"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2020,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.624000Z",
+        "last_timestamp": "2015-12-01T14:30:00.624000Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "FTR"
+    },
+    {
+      "cohort": "reused",
+      "event_year": 2009,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.089100Z",
+        "last_timestamp": "2015-12-01T14:30:00.089100Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "GM"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2020,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2021-11-09T17:14:20.761000Z",
+        "last_timestamp": "2021-11-09T17:14:20.761000Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "HTZ"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2020,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": null,
+        "last_timestamp": null,
+        "record_count": 0,
+        "status": "empty"
+      },
+      "symbol": "JCPNQ"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2008,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": null,
+        "last_timestamp": null,
+        "record_count": 0,
+        "status": "empty"
+      },
+      "symbol": "LEHMQ"
+    },
+    {
+      "cohort": "reused",
+      "event_year": 2022,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.464900Z",
+        "last_timestamp": "2015-12-01T14:30:00.464900Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "META"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2018,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:51.233400Z",
+        "last_timestamp": "2015-12-01T14:30:51.233400Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "MON"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2020,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.405700Z",
+        "last_timestamp": "2015-12-01T14:30:00.405700Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "MYL"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2020,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.544000Z",
+        "last_timestamp": "2015-12-01T14:30:00.544000Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "NBL"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2019,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.608400Z",
+        "last_timestamp": "2015-12-01T14:30:00.608400Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "RHT"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2023,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.629500Z",
+        "last_timestamp": "2015-12-01T14:30:00.629500Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "SIVBQ"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2024,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.704600Z",
+        "last_timestamp": "2015-12-01T14:30:00.704600Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "SPLK"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2021,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:00.760100Z",
+        "last_timestamp": "2015-12-01T14:30:00.760100Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "TIF"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2022,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2015-12-01T14:30:04.034900Z",
+        "last_timestamp": "2015-12-01T14:30:04.034900Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "TWTR"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2008,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": null,
+        "last_timestamp": null,
+        "record_count": 0,
+        "status": "empty"
+      },
+      "symbol": "WAMUQ"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2002,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": null,
+        "last_timestamp": null,
+        "record_count": 0,
+        "status": "empty"
+      },
+      "symbol": "WCOMQ"
+    },
+    {
+      "cohort": "acquisition",
+      "event_year": 2021,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": "2019-06-20T16:08:20.739275Z",
+        "last_timestamp": "2019-06-20T16:08:20.739275Z",
+        "record_count": 1,
+        "status": "records"
+      },
+      "symbol": "WORK"
+    },
+    {
+      "cohort": "bankruptcy",
+      "event_year": 2023,
+      "inputs": {
+        "adjustment": "raw",
+        "data_type": "trades",
+        "end": "2025-01-01T00:00:00Z",
+        "feed": "sip",
+        "limit": 100,
+        "max_records": 1,
+        "start": "2010-01-01T00:00:00Z"
+      },
+      "result": {
+        "error_code": null,
+        "first_timestamp": null,
+        "last_timestamp": null,
+        "record_count": 0,
+        "status": "empty"
+      },
+      "symbol": "YRCWQ"
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "empty": 8,
+    "errors": 0,
+    "records": 22,
+    "symbols": 30
+  }
+}

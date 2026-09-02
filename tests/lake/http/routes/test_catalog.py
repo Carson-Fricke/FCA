@@ -1,10 +1,19 @@
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
 
 from lake.app import create_app
-from lake.catalog import CoverageRecord, CoverageStatus, InMemoryCatalogRepository
+from lake.catalog import (
+    ContractRecord,
+    CoverageRecord,
+    CoverageStatus,
+    InMemoryCatalogRepository,
+    InMemoryContractRepository,
+    OptionType,
+)
+from lake.catalog.front_sets import DailyFrontSet, InMemoryDailyFrontSetRepository
 from lake.contracts import AssetClass, DataType
 from lake.coverage import CoverageState
 
@@ -42,8 +51,10 @@ def _client(
     *,
     as_of: datetime,
     max_range_days: int = 366,
+    contracts: InMemoryContractRepository | None = None,
+    front_sets: InMemoryDailyFrontSetRepository | None = None,
 ) -> TestClient:
-    return TestClient(
+    client = TestClient(
         create_app(
             bearer_token=TOKEN,
             catalog_repository=repository,
@@ -51,6 +62,11 @@ def _client(
             coverage_clock=lambda: as_of,
         )
     )
+    if contracts is not None:
+        client.app.state.contract_repository = contracts
+    if front_sets is not None:
+        client.app.state.front_set_repository = front_sets
+    return client
 
 
 def _get(client: TestClient, **params: object):
@@ -186,6 +202,81 @@ def test_coverage_endpoint_requires_authentication() -> None:
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
     assert response.json()["error"]["code"] == "unauthorized"
+
+
+def test_option_coverage_returns_selected_contracts_and_osi_partition_metadata() -> (
+    None
+):
+    contract = ContractRecord(
+        symbol="SPY240119C00500000",
+        underlying="SPY",
+        expiration_date=date(2024, 1, 19),
+        strike_price=Decimal("500"),
+        option_type=OptionType.CALL,
+    )
+    repository = InMemoryCatalogRepository(
+        [
+            _record(
+                symbol=contract.symbol,
+                data_type=DataType.TRADE,
+                session_date=date(2024, 1, 19),
+                status=CoverageStatus.COMPLETE,
+                asset_class=AssetClass.OPTION,
+            )
+        ]
+    )
+
+    response = _get(
+        _client(
+            repository,
+            as_of=datetime(2024, 1, 22, tzinfo=UTC),
+            contracts=InMemoryContractRepository([contract]),
+        ),
+        asset_class="option",
+        data_type="trade",
+        underlying="spy",
+        contract_symbols=contract.symbol,
+        start_date="2024-01-19",
+        end_date="2024-01-19",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["underlying"] == "SPY"
+    assert body["contracts"] == [contract.symbol]
+    assert body["entries"][0]["contract_symbol"] == contract.symbol
+    assert body["entries"][0]["status"] == "complete"
+
+
+def test_option_underlying_coverage_uses_the_persisted_daily_front_set() -> None:
+    contract = ContractRecord(
+        symbol="SPY240119P00450000",
+        underlying="SPY",
+        expiration_date=date(2024, 1, 19),
+        strike_price=Decimal("450"),
+        option_type=OptionType.PUT,
+    )
+    response = _get(
+        _client(
+            InMemoryCatalogRepository(),
+            as_of=datetime(2024, 1, 22, tzinfo=UTC),
+            contracts=InMemoryContractRepository([contract]),
+            front_sets=InMemoryDailyFrontSetRepository(
+                [DailyFrontSet("SPY", date(2024, 1, 19), (contract,))]
+            ),
+        ),
+        asset_class="option",
+        data_type="quote",
+        underlying="spy",
+        start_date="2024-01-19",
+        end_date="2024-01-19",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["contracts"] == [contract.symbol]
+    assert body["entries"][0]["contract_symbol"] == contract.symbol
+    assert body["entries"][0]["status"] == "missing"
 
 
 @pytest.mark.parametrize(

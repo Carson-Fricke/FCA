@@ -13,8 +13,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from lake.catalog.memory import InMemoryCatalogRepository, InMemoryJobRepository
-from lake.catalog.ports import CatalogRepository, JobRepository
+from lake.catalog.front_sets import DailyFrontSetRepository
+from lake.catalog.memory import (
+    InMemoryCatalogRepository,
+    InMemoryContractRepository,
+    InMemoryJobRepository,
+)
+from lake.catalog.ports import CatalogRepository, ContractRepository, JobRepository
 from lake.configuration import load_settings
 from lake.http.auth import BearerAuthenticator
 from lake.http.models import AuthCheckResponse, ErrorResponse, HealthResponse
@@ -58,6 +63,8 @@ def create_app(
     *,
     bearer_token: str | None = None,
     catalog_repository: CatalogRepository | None = None,
+    contract_repository: ContractRepository | None = None,
+    front_set_repository: DailyFrontSetRepository | None = None,
     job_repository: JobRepository | None = None,
     job_launcher: EnsureJobLauncher | None = None,
     catalog_max_range_days: int | None = None,
@@ -87,6 +94,12 @@ def create_app(
         if catalog_repository is None
         else catalog_repository
     )
+    application.state.contract_repository = (
+        InMemoryContractRepository()
+        if contract_repository is None
+        else contract_repository
+    )
+    application.state.front_set_repository = front_set_repository
     application.state.job_repository = (
         InMemoryJobRepository() if job_repository is None else job_repository
     )

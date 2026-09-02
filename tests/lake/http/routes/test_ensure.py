@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from threading import Event
 from time import monotonic
 
@@ -9,12 +11,15 @@ from fastapi.testclient import TestClient
 
 from lake.app import create_app
 from lake.catalog import (
+    ContractRecord,
     CoverageRecord,
     CoverageStatus,
     InMemoryCatalogRepository,
+    InMemoryContractRepository,
     InMemoryJobRepository,
     JobRecord,
     JobState,
+    OptionType,
 )
 from lake.contracts import AssetClass, DataType
 from lake.http.models import EnsureRequest
@@ -60,7 +65,7 @@ def _client(
     )
 
 
-def _post(client: TestClient, body: dict[str, str]):
+def _post(client: TestClient, body: Mapping[str, object]):
     return client.post(
         "/v1/catalog/ensure",
         json=body,
@@ -105,6 +110,42 @@ def test_satisfied_ensure_returns_coverage_without_launching() -> None:
         "complete",
     ]
     assert launched == []
+
+
+def test_option_ensure_uses_selected_osi_contracts_and_stable_authenticated_job() -> (
+    None
+):
+    symbol = "SPY240119C00500000"
+    contract = ContractRecord(
+        symbol=symbol,
+        underlying="SPY",
+        expiration_date=date(2024, 1, 19),
+        strike_price=Decimal("500"),
+        option_type=OptionType.CALL,
+    )
+    catalog = InMemoryCatalogRepository()
+    jobs = InMemoryJobRepository()
+    launched: list[EnsureJob] = []
+    client = _client(catalog, jobs, launcher=launched.append)
+    client.app.state.contract_repository = InMemoryContractRepository([contract])
+    body = {
+        "asset_class": "option",
+        "data_type": "trade",
+        "contract_symbols": [symbol],
+        "start_date": "2024-01-19",
+        "end_date": "2024-01-19",
+    }
+
+    first = _post(client, body)
+    second = _post(client, body)
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json() == second.json()
+    assert len(launched) == 1
+    assert launched[0].request.symbol == symbol
+    assert [gap.symbol for gap in launched[0].gaps] == [symbol]
+    assert launched[0].job_id == first.json()["job_id"] + f"-{symbol}"
 
 
 def test_missing_ensure_persists_stable_job_invokes_launcher_and_polls() -> None:

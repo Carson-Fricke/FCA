@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from decimal import Decimal
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from lake.app import create_app
-from lake.catalog import CoverageRecord, CoverageStatus, InMemoryCatalogRepository
+from lake.catalog import (
+    ContractRecord,
+    CoverageRecord,
+    CoverageStatus,
+    InMemoryCatalogRepository,
+    InMemoryContractRepository,
+    OptionType,
+)
 from lake.contracts import AssetClass, DataType, partition_path
 from lake.http.models import EnsureRequest
 from lake.http.routes.query import EnsureCallback
-from lake.storage import SasIssuer
+from lake.storage import LocalFilesystemStore, ParquetWriter, SasIssuer
 
 TOKEN = "test-secret"
 AS_OF = datetime(2024, 1, 22, 12, tzinfo=UTC)
@@ -86,6 +95,40 @@ def _request(**overrides: object) -> dict[str, object]:
     return body
 
 
+def _option_contract() -> ContractRecord:
+    return ContractRecord(
+        symbol="SPY240119C00500000",
+        underlying="SPY",
+        expiration_date=date(2024, 1, 19),
+        strike_price=Decimal("500"),
+        option_type=OptionType.CALL,
+    )
+
+
+def _option_record(
+    contract: ContractRecord,
+    *,
+    data_type: DataType = DataType.TRADE,
+    byte_size: int = 3456,
+) -> CoverageRecord:
+    return CoverageRecord(
+        asset_class=AssetClass.OPTION,
+        data_type=data_type,
+        symbol=contract.symbol,
+        session_date=date(2024, 1, 19),
+        status=CoverageStatus.COMPLETE,
+        object_path=partition_path(
+            session_date=date(2024, 1, 19),
+            asset_class=AssetClass.OPTION,
+            data_type=data_type,
+            symbol=contract.symbol,
+        ),
+        row_count=1,
+        byte_size=byte_size,
+        checksum="option-checksum",
+    )
+
+
 def _post(client: TestClient, body: dict[str, object]):
     return client.post(
         "/v1/query",
@@ -148,6 +191,32 @@ def test_cached_file_query_returns_only_complete_files_and_catalog_metadata() ->
         }
     ]
     assert issuer.paths == [complete_path]
+
+
+def test_option_file_query_returns_selected_osi_file_with_authentication() -> None:
+    contract = _option_contract()
+    issuer = RecordingSasIssuer()
+    catalog = InMemoryCatalogRepository([_option_record(contract)])
+    client = _client(catalog, issuer)
+    client.app.state.contract_repository = InMemoryContractRepository([contract])
+
+    response = _post(
+        client,
+        _request(
+            asset_class="option",
+            data_type="trade",
+            symbol=None,
+            underlying="SPY",
+            contract_symbols=[contract.symbol],
+            start_date="2024-01-19",
+            end_date="2024-01-19",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["files"][0]["asset_class"] == "option"
+    assert response.json()["files"][0]["symbol"] == contract.symbol
+    assert issuer.paths == [_option_record(contract).object_path]
 
 
 def test_file_query_requires_authentication_and_rejects_sql_fields() -> None:
@@ -252,3 +321,54 @@ def test_file_query_rejects_bounds_and_malformed_complete_catalog_paths() -> Non
     assert malformed.status_code == 409
     assert malformed.json()["error"]["code"] == "coverage_incomplete"
     assert issuer.paths == []
+
+
+def test_option_sql_query_uses_only_selected_local_parquet(tmp_path: Path) -> None:
+    contract = _option_contract()
+    ParquetWriter(LocalFilesystemStore(tmp_path)).write(
+        [
+            {
+                "timestamp": "2024-01-19T14:31:00Z",
+                "symbol": contract.symbol,
+                "exchange": "XOPR",
+                "price": "5.25",
+                "size": 2,
+                "condition": "@",
+            }
+        ],
+        session_date=date(2024, 1, 19),
+        asset_class=AssetClass.OPTION,
+        data_type=DataType.TRADE,
+        symbol=contract.symbol,
+    )
+    catalog = InMemoryCatalogRepository([_option_record(contract)])
+    client = TestClient(
+        create_app(
+            bearer_token=TOKEN,
+            catalog_repository=catalog,
+            coverage_clock=lambda: AS_OF,
+            query_file_root=tmp_path,
+        )
+    )
+    client.app.state.contract_repository = InMemoryContractRepository([contract])
+
+    response = _post(
+        client,
+        _request(
+            mode="sql",
+            asset_class="option",
+            data_type="trade",
+            symbol=None,
+            underlying="SPY",
+            contract_symbols=[contract.symbol],
+            start_date="2024-01-19",
+            end_date="2024-01-19",
+            sql="SELECT symbol, price FROM data",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["rows"] == [
+        {"symbol": contract.symbol, "price": "5.250000000000000000"}
+    ]
+    assert response.json()["forced"] is False
