@@ -191,10 +191,12 @@ class AlpacaClient:
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
         limit: int = 10_000,
+        max_records: int | None = None,
     ) -> tuple[NormalizedTrade, ...]:
-        """Fetch all pages of trades for each symbol without duplicate requests."""
+        """Fetch trades, optionally stopping after a bounded record count."""
         symbol_list = _normalize_symbols(symbols)
         _validate_query_options(feed, adjustment, limit)
+        _validate_max_records(max_records)
         pages = await self._fetch_many(
             symbol_list,
             data_type="trades",
@@ -204,6 +206,7 @@ class AlpacaClient:
             adjustment=adjustment,
             limit=limit,
             parser=_normalize_trade,
+            max_records=max_records,
         )
         return tuple(record for page in pages for record in page)
 
@@ -216,10 +219,12 @@ class AlpacaClient:
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
         limit: int = 10_000,
+        max_records: int | None = None,
     ) -> tuple[NormalizedQuote, ...]:
-        """Fetch all pages of quotes for each symbol without duplicate requests."""
+        """Fetch quotes, optionally stopping after a bounded record count."""
         symbol_list = _normalize_symbols(symbols)
         _validate_query_options(feed, adjustment, limit)
+        _validate_max_records(max_records)
         pages = await self._fetch_many(
             symbol_list,
             data_type="quotes",
@@ -229,6 +234,7 @@ class AlpacaClient:
             adjustment=adjustment,
             limit=limit,
             parser=_normalize_quote,
+            max_records=max_records,
         )
         return tuple(record for page in pages for record in page)
 
@@ -241,6 +247,7 @@ class AlpacaClient:
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
         limit: int = 10_000,
+        max_records: int | None = None,
     ) -> tuple[NormalizedTrade, ...]:
         """Fetch trades for one symbol."""
         return await self.fetch_trades(
@@ -250,6 +257,7 @@ class AlpacaClient:
             feed=feed,
             adjustment=adjustment,
             limit=limit,
+            max_records=max_records,
         )
 
     async def get_quotes(
@@ -261,6 +269,7 @@ class AlpacaClient:
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
         limit: int = 10_000,
+        max_records: int | None = None,
     ) -> tuple[NormalizedQuote, ...]:
         """Fetch quotes for one symbol."""
         return await self.fetch_quotes(
@@ -270,6 +279,7 @@ class AlpacaClient:
             feed=feed,
             adjustment=adjustment,
             limit=limit,
+            max_records=max_records,
         )
 
     async def fetch_option_trades(
@@ -422,6 +432,7 @@ class AlpacaClient:
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
         parser: Callable[[Mapping[str, object], str], RecordT],
+        max_records: int | None = None,
     ) -> list[list[RecordT]]:
         tasks = [
             asyncio.create_task(
@@ -435,6 +446,7 @@ class AlpacaClient:
                     feed=feed,
                     adjustment=adjustment,
                     parser=parser,
+                    max_records=max_records,
                 )
             )
             for symbol in symbols
@@ -463,6 +475,7 @@ class AlpacaClient:
         feed: Literal["sip"],
         adjustment: Literal["raw"],
         parser: Callable[[Mapping[str, object], str], RecordT],
+        max_records: int | None = None,
     ) -> list[RecordT]:
         page_token: str | None = None
         seen_tokens: set[str] = set()
@@ -489,7 +502,12 @@ class AlpacaClient:
             response = await self._request(path, params)
             payload = response.json()
             rows, next_page_token = _page_rows(payload, data_type, symbol)
+            if max_records is not None:
+                rows = rows[: max_records - len(records)]
             records.extend(parser(row, symbol) for row in rows)
+
+            if max_records is not None and len(records) >= max_records:
+                return records
 
             if not next_page_token:
                 return records
@@ -663,6 +681,15 @@ def _validate_limit(limit: int) -> None:
         or not 1 <= limit <= 10_000
     ):
         raise ValueError("limit must be an integer from 1 through 10000")
+
+
+def _validate_max_records(max_records: int | None) -> None:
+    if max_records is not None and (
+        not isinstance(max_records, int)
+        or isinstance(max_records, bool)
+        or not 1 <= max_records <= 100_000
+    ):
+        raise ValueError("max_records must be an integer from 1 through 100000")
 
 
 def _validate_option_query_options(feed: str, limit: int) -> None:

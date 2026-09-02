@@ -60,6 +60,11 @@ param ingestCronExpression string = '0 1 * * *'
 @description('Maximum seconds allowed for one ingest job replica execution.')
 param ingestReplicaTimeoutSeconds int = 3600
 
+@description('Maximum Alpaca records fetched per data type for one bounded ingest execution.')
+@minValue(1)
+@maxValue(100000)
+param ingestMaxRecords int = 1000
+
 var normalizedPrefix = toLower(resourceNamePrefix)
 var normalizedEnvironment = toLower(environmentName)
 var namePrefix = '${normalizedPrefix}-${normalizedEnvironment}'
@@ -162,6 +167,7 @@ module containerApps './modules/container-apps.bicep' = {
     logRetentionDays: logRetentionDays
     ingestCronExpression: ingestCronExpression
     ingestReplicaTimeoutSeconds: ingestReplicaTimeoutSeconds
+    ingestMaxRecords: ingestMaxRecords
     allowPublicLogQuery: false
     enableExternalApiIngress: enableExternalApiIngress
   }

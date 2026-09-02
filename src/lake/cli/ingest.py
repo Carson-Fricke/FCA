@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 from azure.data.tables import TableClient
@@ -18,13 +19,18 @@ from lake.coverage import CoverageSession, equity_sessions
 from lake.ingestion.azure import AzureAtomicIngestCommitter
 from lake.ingestion.equities.transaction import EquityIngestTransaction
 from lake.ingestion.leased import LeasedAtomicIngestCommitter
-from lake.providers.alpaca import AlpacaClient
+from lake.providers.alpaca import (
+    AlpacaClient,
+    NormalizedQuote,
+    NormalizedTrade,
+)
 from lake.storage import AzureBlobStore
 from lake.storage.leases import AzureBlobLeaseProvider
 
 _DEFAULT_COVERAGE_TABLE = "coverage"
 _DEFAULT_LOOKBACK_DAYS = 31
 _DEFAULT_STORAGE_CONTAINER = "lake"
+_DEFAULT_MAX_RECORDS = 1_000
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -77,7 +83,8 @@ async def run_ingest(
         )
 
     now = datetime.now(UTC)
-    session = _select_session(session_date, now)
+    max_records = _max_records_from_environment()
+    session = replace(_select_session(session_date, now), is_partial=True)
     storage_account = os.environ.get("LAKE_STORAGE_ACCOUNT_NAME")
     if not storage_account:
         raise RuntimeError("LAKE_STORAGE_ACCOUNT_NAME is required for Azure ingest")
@@ -109,7 +116,10 @@ async def run_ingest(
     )
     client = AlpacaClient.from_settings(settings.provider)
     try:
-        transaction = EquityIngestTransaction(client=client, committer=committer)
+        transaction = EquityIngestTransaction(
+            client=_BoundedAlpacaClient(client, max_records),
+            committer=committer,
+        )
         ingest_result = await transaction.run(selected_symbol, session)
     finally:
         await client.aclose()
@@ -129,7 +139,49 @@ async def run_ingest(
         ],
         "session_date": ingest_result.session_date.isoformat(),
         "symbol": ingest_result.symbol,
+        "bounded_records_per_data_type": max_records,
     }
+
+
+class _BoundedAlpacaClient:
+    """Expose the transaction client contract with an explicit fetch bound."""
+
+    def __init__(self, client: AlpacaClient, max_records: int) -> None:
+        self._client = client
+        self._max_records = max_records
+
+    async def get_trades(
+        self,
+        symbol: str,
+        start: date | datetime | str,
+        end: date | datetime | str,
+    ) -> tuple[NormalizedTrade, ...]:
+        return await self._client.fetch_trades(
+            symbol, start, end, max_records=self._max_records
+        )
+
+    async def get_quotes(
+        self,
+        symbol: str,
+        start: date | datetime | str,
+        end: date | datetime | str,
+    ) -> tuple[NormalizedQuote, ...]:
+        return await self._client.fetch_quotes(
+            symbol, start, end, max_records=self._max_records
+        )
+
+
+def _max_records_from_environment() -> int:
+    raw_value = os.environ.get("LAKE_INGEST_MAX_RECORDS")
+    if raw_value is None:
+        return _DEFAULT_MAX_RECORDS
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise RuntimeError("LAKE_INGEST_MAX_RECORDS must be an integer") from error
+    if not 1 <= value <= 100_000:
+        raise RuntimeError("LAKE_INGEST_MAX_RECORDS must be between 1 and 100000")
+    return value
 
 
 def _select_session(session_date: date | None, now: datetime) -> CoverageSession:

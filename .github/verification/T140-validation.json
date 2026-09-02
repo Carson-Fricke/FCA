@@ -1,7 +1,7 @@
 {
   "taskId": "T140",
   "timestamp": "2026-09-02T19:06:00Z",
-  "numTotalTests": 8,
+  "numTotalTests": 9,
   "numPassedTests": 6,
   "numFailedTests": 0,
   "numPendingTests": 2,
@@ -46,7 +46,17 @@
     {
       "name": "controlled-provider-and-ingest-verification",
       "status": "pending",
-      "result": "The first bounded execution reached Alpaca and persisted error coverage, exposing an invalid adjustment=raw parameter on the trades/quotes endpoints. The client fix is prepared; a successful rerun must prove provider rows and Parquet persistence"
+      "result": "The ingest command now bounds each data type to LAKE_INGEST_MAX_RECORDS (default 1000), uses the corrected Alpaca list endpoints, and marks the session partial. A fresh execution must prove non-empty provider rows and Parquet persistence"
+    },
+    {
+      "name": "bounded-ingest-implementation",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/lake/providers/alpaca/test_client.py tests/lake/cli/test_ingest.py tests/lake/ingestion/equities/test_transaction.py",
+        "uv run --python 3.12 --extra dev ruff check src/lake/providers/alpaca/client.py src/lake/cli/ingest.py src/lake/ingestion/azure.py tests/lake/providers/alpaca/test_client.py tests/lake/cli/test_ingest.py",
+        "uv run --python 3.12 --extra dev ty check src/lake/providers/alpaca/client.py src/lake/cli/ingest.py src/lake/ingestion/azure.py tests/lake/providers/alpaca/test_client.py tests/lake/cli/test_ingest.py"
+      ],
+      "result": "The bounded client, production command composition, Azure committer, and transaction integration passed focused tests and type/lint checks"
     },
     {
       "name": "hosted-key-vault-deployment",

@@ -172,6 +172,39 @@ def test_quotes_are_normalized_to_the_t021_field_contract() -> None:
     assert len(transport.calls) == 1
 
 
+def test_stock_fetch_can_stop_at_a_bounded_record_count() -> None:
+    transport = FakeTransport(
+        [
+            FakeResponse(
+                {
+                    "trades": {
+                        "AAPL": [
+                            _trade(1, "2024-01-19T14:30:00Z"),
+                            _trade(2, "2024-01-19T14:30:01Z"),
+                        ]
+                    },
+                    "next_page_token": "unused",
+                }
+            )
+        ]
+    )
+
+    async def exercise() -> tuple[NormalizedTrade, ...]:
+        async with AlpacaClient(transport=transport) as client:
+            return await client.fetch_trades(
+                "AAPL",
+                date(2024, 1, 19),
+                date(2024, 1, 20),
+                limit=100,
+                max_records=1,
+            )
+
+    trades = _run(exercise())
+
+    assert [trade.trade_id for trade in trades] == [1]
+    assert len(transport.calls) == 1
+
+
 def test_multiple_symbols_are_bounded_and_settings_are_applied() -> None:
     class ConcurrentTransport:
         def __init__(self) -> None:

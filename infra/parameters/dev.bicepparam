@@ -18,3 +18,4 @@ param allowPublicNetworkAccess = true
 param enableExternalApiIngress = false
 param ingestCronExpression = '0 1 * * *'
 param ingestReplicaTimeoutSeconds = 3600
+param ingestMaxRecords = 1000
