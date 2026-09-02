@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-02T19:03:18.984Z",
+    "exportedAt": "2026-09-02T20:41:07.270Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 143
     },
-    "checksum": "50447fb52d6e978f",
+    "checksum": "8ed7ed225e2db01f",
     "taskCount": 142,
     "exportMode": "full"
   },
@@ -589,7 +589,7 @@
     "T004": {
       "type": "epic",
       "title": "E1 Azure infrastructure and budget controls",
-      "status": "pending",
+      "status": "done",
       "parentId": "T001",
       "depends": [
         "T003"
@@ -1305,7 +1305,7 @@
     "T140": {
       "type": "task",
       "title": "E1.6 Provision Key Vault and wire Alpaca runtime secrets",
-      "status": "pending",
+      "status": "done",
       "parentId": "T004",
       "depends": [
         "T017",
@@ -4950,7 +4950,7 @@
     {
       "id": "T004",
       "title": "E1 Azure infrastructure and budget controls",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -4977,8 +4977,9 @@
         "T003"
       ],
       "createdAt": "2026-09-01T03:15:24.964Z",
-      "updatedAt": "2026-09-02T16:24:51.115Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-02T20:39:46.093Z",
+      "completedAt": "2026-09-02T20:39:46.093Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -9823,7 +9824,7 @@
     {
       "id": "T140",
       "title": "E1.6 Provision Key Vault and wire Alpaca runtime secrets",
-      "status": "pending",
+      "status": "done",
       "priority": "critical",
       "type": "task",
       "parentId": "T004",
@@ -9837,6 +9838,9 @@
         "alpaca",
         "managed-identity",
         "secrets"
+      ],
+      "notes": [
+        "2026-09-02 20:39:46 UTC: Provisioned Key Vault runtime references, seeded Alpaca credentials and an application bearer token, deployed both workloads, and completed a bounded real Alpaca AAPL ingest with persisted Parquet and coverage metadata."
       ],
       "acceptance": [
         "The target resource group contains the Bicep-composed Key Vault with RBAC authorization, soft delete, purge protection, and the approved dev network posture; the deployment output identifies the vault without exposing secret values",
@@ -9858,21 +9862,114 @@
         "T020"
       ],
       "createdAt": "2026-09-02T16:24:51.115Z",
-      "updatedAt": "2026-09-02T16:24:51.115Z",
+      "updatedAt": "2026-09-02T20:39:49.692Z",
+      "completedAt": "2026-09-02T20:39:46.093Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T20:39:37.156Z",
         "failureLog": [],
-        "initializedAt": "2026-09-02T16:24:51.115Z"
+        "initializedAt": "2026-09-02T16:24:51.115Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "59628dc78e1b1de0634e1b46c071e4dd8d64a43c",
+                "shortSha": "59628dc"
+              },
+              {
+                "kind": "note",
+                "note": "Key Vault runtime references and bounded Azure Alpaca ingest are implemented"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T140",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "09937448-e733-59c8-862f-75625424e9cd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T140",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "e0cd9240-3acb-5a89-946d-5fe73ecd8a68"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T140",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "671b0c4f-830e-507e-a2f9-bbf61bb1051f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T140",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "c6503ac1-ab34-5525-9c06-2df93ca5b9c4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T140",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "b2a3d001-63ff-534e-aa3c-876c94ae4e72"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T140",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "2956defc-c762-58c8-984c-bb8e44cfd7a0"
+              }
+            ],
+            "capturedAt": "2026-09-02T20:39:22.147Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T140-validation.json",
+                "sha256": "9218c7ab5cee26451d9ce75b8f6eb86f65992c1f29c189074b62a09be53d3fee",
+                "passCount": 10,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T139-wave-validation.json",
+                "sha256": "33e6137daceeec657f1c80cb7cab9ee53b8aad3e0827d46d15c6fa5f0239a0f1",
+                "passCount": 231,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T20:39:29.820Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T20:39:37.525Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "bug",
       "scope": "feature",
       "relates": []
