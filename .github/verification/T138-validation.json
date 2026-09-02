@@ -1,0 +1,30 @@
+{
+  "taskId": "T138",
+  "numTotalTests": 4,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "wave-execution-policy",
+      "status": "passed",
+      "result": "AGENTS.md defines exclusive file ownership, focused subagent checks, one coordinator integration pass, one failure-driven rerun, wave reconciliation, and immutable historical evidence"
+    },
+    {
+      "name": "cleo-verification-budget",
+      "status": "passed",
+      "result": "CLEO guidance limits discovery and full validation to batch boundaries, requires timeout isolation, supports shared evidence, and reserves tool:audit for export portability"
+    },
+    {
+      "name": "copilot-focused-verification",
+      "status": "passed",
+      "result": ".github/instructions/copilot-instructions.md requires uv, Ruff, ty, focused task checks, one frozen-wave integration pass, and no MyPy"
+    },
+    {
+      "name": "instruction-portability-and-diff-quality",
+      "status": "passed",
+      "result": "Instruction references are repository-relative, mutable current-task claims were removed, and git diff --check reported no whitespace errors"
+    }
+  ]
+}

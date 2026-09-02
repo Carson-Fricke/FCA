@@ -50,7 +50,9 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - Do not use `cleo deps validate --epic <id>` as proof for an epic with cross-epic edges. The scoped validator excludes legitimate external targets, then reports them as `E_MISSING_REF`. It is useful only when all dependencies stay inside the selected epic.
 - `cleo deps waves` can misclassify cross-epic prerequisites as ready within a saga projection. Use `cleo plan --json`, `cleo next --json`, or the task's `blockedBy` projection for actionable scheduling.
 - `cleo deps overview --json` currently reports the reconciled graph as valid even though `cleo deps validate --scope all` emits the known root-saga defect. Use both cycle and scoped validation rather than relying on one projection.
-- `cleo next --json` can rank the root saga above executable leaf tasks. Filter recommendations by type and dependency state; the current ready implementation leaves are `T013` and `T016`.
+- `cleo next --json` can rank a root saga above executable leaf tasks. Filter
+  recommendations by type and dependency state; do not rely on task IDs listed
+  in documentation as currently actionable.
 
 ## Completion And Evidence
 
@@ -63,6 +65,36 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - For a pre-existing task that demonstrably predates evidence bindings, use an explicit audited `--waive-ac ... --waive-reason ...` only when repository evidence independently proves completion.
 - Completing the final pending child can auto-complete its epic or saga. Add planned siblings before completing a placeholder child, or immediately verify parent status, lifecycle, verification, and timestamps.
 - `cleo complete` may warn that `task/<id>` does not exist during worktree integration. This warning does not negate a successful task-state mutation when no task branch was expected.
+
+## Verification Budget And Batching
+
+- Treat one user-approved implementation wave as one CLEO reconciliation
+  batch. Define task IDs and non-overlapping file ownership before fan-out.
+- Run repository discovery commands once per session. Repeat them only when the
+  repository root, branch, CLEO session, or task graph changed externally.
+- Subagents run focused tests plus focused Ruff and ty checks for their owned
+  behavior. They do not run the complete repository suite, mutate CLEO, or
+  write final verification records.
+- After all subagents finish, freeze edits and run repository-wide lock, Ruff,
+  format, ty, pytest, Bicep, and workflow checks once as applicable. A second
+  full run is permitted only after fixing a failure from the first run.
+- If a suite hangs or times out, do not rerun it unchanged. Isolate the hanging
+  test with a hard timeout, fix the cause, then run one final full suite.
+- Keep completed task evidence immutable when later work increases the global
+  test count. Task records contain stable focused evidence; store global
+  integration results in one wave-level artifact and reuse them with
+  `--shared-evidence` when appropriate.
+- Prefer one `cleo verify <id> --all` call with implemented, test, QA, and
+  acceptance evidence over separate calls for each gate when the evidence
+  contract permits it.
+- Use `tool:audit` only for CLEO export portability and task-state publication,
+  not as generic application QA evidence.
+- Run the Validation Checklist once after all task-state mutations in the
+  reconciliation batch, immediately before export or commit. Do not run it
+  after every task.
+- Leave tasks with unmet live or external acceptance criteria pending. Do not
+  implement dependent tasks speculatively unless the user explicitly approves
+  that work.
 
 ## Reconciliation Edge Case
 
@@ -87,7 +119,8 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 
 ## Validation Checklist
 
-After changing CLEO state, run:
+After all CLEO state changes in a reconciliation batch, run this checklist
+once:
 
 ```powershell
 cleo check schema todo --json
@@ -99,13 +132,15 @@ cleo tree T001 --withDeps
 cleo plan --json
 ```
 
-Expected current state after the lake and quant-harness plans were reconciled:
+The original reconciled roadmap baseline contained:
 
-- `137` total tasks: two root sagas, `20` epics, and `115` tasks.
+- `137` total tasks: two root sagas, `20` epics, and `115` tasks. Later
+  implementation and process tasks may increase this count; query CLEO for the
+  current total.
 - The lake saga is `T001`; the quant-harness saga is `T068` with milestone epics `T069` through `T077`, implementation tasks `T078` through `T136`, and roadmap publication task `T137`.
 - Original harness source task identities are retained as `harness.h001` through `harness.h058` labels; `T121` is an added OPRA WebSocket plan-gap task.
-- `T002` and publication tasks `T067` and `T137` are done; all service implementation work is pending.
-- Dependency cycles are absent, schema and coherence checks pass, and the ID sequence ends at `T137`.
+- At baseline, dependency cycles were absent and schema and coherence checks
+  passed. Use the Validation Checklist for the current state.
 - The only full-graph dependency-validator findings are the known root-saga `E_ORPHAN` defects for `T001` and `T068`.
 
 ## Known CLEO Diagnostics
