@@ -27,7 +27,7 @@ RUN groupadd --gid 10001 lake \
     && useradd --uid 10001 --gid lake --create-home --shell /usr/sbin/nologin lake
 
 COPY --from=builder /opt/venv /opt/venv
-COPY config/ ./config/
+COPY config/ /app/config/
 
 WORKDIR /app
 USER lake
