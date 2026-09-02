@@ -9,6 +9,11 @@ provider credential or API bearer token in GitHub.
 - An existing Azure resource group in the intended subscription and region.
 - An Azure caller with `Contributor` and `Role Based Access Control
   Administrator` at that resource group, or `Owner` at an ancestor scope.
+- An authorized subscription operator must register `Microsoft.App`,
+  `Microsoft.OperationalInsights`, `Microsoft.Storage`, `Microsoft.KeyVault`,
+  and `Microsoft.Insights` before the first full deployment. Provider
+  registration is a subscription-level bootstrap action, not a recurring
+  deployer permission.
 - Repository administration access for Actions variables, Environments, OIDC
   subject customization, and private package access.
 - The `dev` Environment must restrict deployments to `master`. Add a required

@@ -1,8 +1,8 @@
 {
   "taskId": "T139",
   "timestamp": "2026-09-02T17:35:00Z",
-  "numTotalTests": 11,
-  "numPassedTests": 10,
+  "numTotalTests": 12,
+  "numPassedTests": 11,
   "numFailedTests": 0,
   "numPendingTests": 1,
   "numTodoTests": 0,
@@ -69,6 +69,11 @@
       "status": "passed",
       "evidence": ".github/verification/T139-wave-validation.json",
       "result": "The frozen-wave lock, Ruff lint and format, ty, 231-test pytest, Bicep, dev parameters, workflow validation, and live bootstrap-state checks all passed"
+    },
+    {
+      "name": "first-hosted-deployment-diagnostic",
+      "status": "passed",
+      "result": "GitHub run 33664898696 published the image, validated every configured input, completed immutable OIDC login, imported the private GHCR digest into ACR without changing it, and reached Bicep deployment. Azure then identified five missing subscription resource-provider registrations; an authorized subscription Owner registered Microsoft.App, Microsoft.OperationalInsights, Microsoft.Storage, Microsoft.KeyVault, and Microsoft.Insights"
     },
     {
       "name": "hosted-recurring-deployment",
