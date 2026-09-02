@@ -1,0 +1,88 @@
+{
+  "wave": "T031-T055-T079-T133",
+  "timestamp": "2026-09-02T23:47:00Z",
+  "numTotalTests": 299,
+  "numPassedTests": 299,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "commands": [
+        "uv lock --check",
+        "uv sync --locked --extra dev",
+        "uv run --extra dev ruff check .",
+        "uv run --extra dev ruff format --check .",
+        "uv run --extra dev ty check"
+      ],
+      "result": "The locked environment resolved successfully; Ruff lint, Ruff format over 179 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "299 tests passed in 22.71 seconds; one existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "package-build",
+      "status": "passed",
+      "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
+      "result": "The wheel built successfully and contains the split harness core/types package, lake HTTP option routes, and lake tools package."
+    },
+    {
+      "name": "bicep-validation",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/bootstrap-github-oidc.bicep --stdout",
+        "az bicep lint --file infra/bootstrap-github-oidc.bicep",
+        "az bicep build --file infra/main.bicep --stdout",
+        "az bicep lint --file infra/main.bicep",
+        "az bicep build-params --file infra/parameters/dev.bicepparam --stdout"
+      ],
+      "result": "Both Bicep entrypoints and the dev parameter file compiled and linted without diagnostics."
+    },
+    {
+      "name": "workflow-validation",
+      "status": "passed",
+      "commands": [
+        "actionlint .github/workflows/python-bicep-ci.yml .github/workflows/publish-image.yml .github/workflows/deploy-bicep.yml .github/workflows/deploy-main.yml",
+        "action-validator .github/workflows/python-bicep-ci.yml .github/workflows/publish-image.yml .github/workflows/deploy-bicep.yml .github/workflows/deploy-main.yml"
+      ],
+      "result": "actionlint 1.7.12 and action-validator 0.6.0 reported no diagnostics for all active workflows."
+    },
+    {
+      "name": "hosted-ci-and-deployment",
+      "status": "passed",
+      "commands": [
+        "https://github.com/Carson-Fricke/FCA/actions/runs/33696587871",
+        "https://github.com/Carson-Fricke/FCA/actions/runs/33696588091"
+      ],
+      "result": "Exact commit 373dd17 passed hosted Python/Bicep CI and the complete deploy-main workflow, including immutable image publication, Azure OIDC deployment, digest verification, and private health smoke."
+    },
+    {
+      "name": "published-entrypoints",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev lake --help",
+        "uv run --extra dev python -m lake --help",
+        "uv run --extra dev harness --help",
+        "uv run --extra dev api --help",
+        "uv run --extra dev backtest-job --help",
+        "uv run --extra dev trader --help",
+        "uv run --extra dev python -c \"from lake.app import app; assert app.title == 'Market Lake API'\""
+      ],
+      "result": "All published lake, harness, standalone harness process, and application entrypoints passed."
+    }
+  ],
+  "integrationHistory": [
+    "The first repository pass found one expected test assertion drift after T079 populated harness.core; updating that assertion was the only failure-driven correction.",
+    "The permitted failure-driven rerun passed all 299 tests and all repository gates."
+  ],
+  "limitations": [
+    "The hosted deployment emitted the existing Node.js 20 action deprecation warning.",
+    "The repository suite emitted the existing Starlette/httpx TestClient deprecation warning.",
+    "The known CLEO dependency validator root-saga E_ORPHAN findings for T001 and T068 are not introduced by this wave."
+  ]
+}

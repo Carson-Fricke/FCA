@@ -1,0 +1,45 @@
+{
+  "taskId": "T079",
+  "timestamp": "2026-09-02T23:47:00Z",
+  "numTotalTests": 9,
+  "numPassedTests": 9,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "harness-core-focused-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/harness/core",
+      "result": "9 focused tests passed for Decimal-safe immutable records, order semantics, Parquet round trips, OSI symbol identity, and deterministic IDs."
+    },
+    {
+      "name": "osi-and-event-parquet",
+      "status": "passed",
+      "result": "The focused suite round-trips 100 realistic OSI symbols and all 9 event/accounting schema types through the exact zstd Parquet codec while preserving Decimal scale."
+    },
+    {
+      "name": "deterministic-core-quality",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev ruff check src/harness/core tests/harness/core",
+        "uv run --extra dev ruff format --check src/harness/core tests/harness/core",
+        "uv run --extra dev ty check src/harness/core tests/harness/core"
+      ],
+      "result": "Focused Ruff lint, format, and ty checks passed; no wall-clock, unseeded randomness, network, Azure, FastAPI, or subprocess dependency was introduced in the core."
+    },
+    {
+      "name": "types-package-split",
+      "status": "passed",
+      "result": "The former 1,198-line harness/core/types.py implementation is split into common, events, orders, accounting, schemas, and codecs modules under harness/core/types/, with a preserved public facade."
+    }
+  ],
+  "decisions": [
+    "The public harness.core.types import path is retained as a package facade while implementation responsibilities are separated by capability.",
+    "Live broker globally unique UUID7 generation remains outside the synchronous deterministic core and is reserved for the future adapter boundary."
+  ],
+  "limitations": [
+    "The shared repository suite provides deterministic-core evidence; no live broker adapter was implemented by this task."
+  ],
+  "blockers": []
+}

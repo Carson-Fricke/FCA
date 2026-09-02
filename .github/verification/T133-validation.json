@@ -1,0 +1,46 @@
+{
+  "taskId": "T133",
+  "timestamp": "2026-09-02T23:47:00Z",
+  "numTotalTests": 6,
+  "numPassedTests": 6,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "delisted-probe-focused-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/lake/tools",
+      "result": "6 focused tests passed for bounded provider calls, injected fake transport/provider behavior, safe error codes, deterministic serialization, and explicit --live gating."
+    },
+    {
+      "name": "live-thirty-symbol-sweep",
+      "status": "passed",
+      "command": "uv run python -m lake.tools.delisted_probe --live --output .github/research/alpaca-delisted-coverage.json",
+      "result": "The bounded SIP trades sweep covered 30 representative symbols with max_records=1: 22 returned records, 8 returned empty, and 0 returned errors. The credential-free deterministic report was archived and the memo updated."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev ruff check src/lake/tools tests/lake/tools",
+        "uv run --extra dev ruff format --check src/lake/tools tests/lake/tools",
+        "uv run --extra dev ty check src/lake/tools tests/lake/tools"
+      ],
+      "result": "Focused Ruff lint, format, and ty checks passed."
+    },
+    {
+      "name": "research-recommendation",
+      "status": "passed",
+      "result": "The research memo records reproducible inputs and per-symbol outcomes and makes an explicit provisional GO recommendation to retain supplemental listings data because market-data history alone cannot explain lifecycle or identity gaps."
+    }
+  ],
+  "decisions": [
+    "The probe is sequential and capped to one record per symbol with no response bodies, headers, credentials, or run-specific metadata persisted.",
+    "Empty results are evidence of an observed empty provider response, not proof that a symbol never existed."
+  ],
+  "limitations": [
+    "The sweep is a bounded trades sample from the configured historical window; it is not a complete listings or lifecycle dataset."
+  ],
+  "blockers": []
+}

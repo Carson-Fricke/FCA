@@ -1,0 +1,32 @@
+{
+  "taskId": "T031",
+  "wave": "T031-T055-T079-T133",
+  "timestamp": "2026-09-02T23:47:00Z",
+  "numTotalTests": 2,
+  "numPassedTests": 2,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "hosted-deployment-and-health-smoke",
+      "status": "passed",
+      "command": "GitHub Actions deploy-main workflow",
+      "url": "https://github.com/Carson-Fricke/FCA/actions/runs/33696588091",
+      "result": "The workflow published the immutable image, logged in with Azure OIDC, validated and deployed infra/main.bicep, verified API and ingest image digests, and passed the private probe-safe /health smoke on commit 373dd17."
+    },
+    {
+      "name": "single-production-mutation-path",
+      "status": "passed",
+      "result": "README documents .github/workflows/deploy-main.yml as the only repository-triggered Azure mutation path; no alternate production mutation path is documented."
+    }
+  ],
+  "decisions": [
+    "The existing deploy-main workflow already satisfied the acceptance criteria, so no workflow source change was needed in this wave.",
+    "The hosted run is current deployment evidence; earlier workflow implementation remains anchored by commit df9a7be."
+  ],
+  "limitations": [
+    "GitHub emitted the existing Node.js 20 action deprecation warning; all workflow jobs passed."
+  ],
+  "blockers": []
+}
