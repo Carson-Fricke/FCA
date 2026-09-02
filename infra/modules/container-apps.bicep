@@ -179,8 +179,10 @@ resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
           probes: [
             {
               type: 'Startup'
-              tcpSocket: {
+              httpGet: {
+                path: '/health'
                 port: apiContainerPort
+                scheme: 'HTTP'
               }
               failureThreshold: 10
               initialDelaySeconds: 1
@@ -189,8 +191,10 @@ resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
             }
             {
               type: 'Liveness'
-              tcpSocket: {
+              httpGet: {
+                path: '/health'
                 port: apiContainerPort
+                scheme: 'HTTP'
               }
               failureThreshold: 3
               periodSeconds: 30
@@ -198,8 +202,10 @@ resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
             }
             {
               type: 'Readiness'
-              tcpSocket: {
+              httpGet: {
+                path: '/health'
                 port: apiContainerPort
+                scheme: 'HTTP'
               }
               failureThreshold: 3
               periodSeconds: 10

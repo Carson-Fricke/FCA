@@ -133,6 +133,10 @@ recorded in [`.github/verification/T031-validation.json`](.github/verification/T
 manual or alternate production mutation workflows are not part of this
 repository path.
 
+The one-time identity, immutable OIDC subject, GitHub Environment, and recovery
+procedure is documented in
+[`.github/runbooks/github-azure-oidc-bootstrap.md`](.github/runbooks/github-azure-oidc-bootstrap.md).
+
 ## Roadmap
 
 The portable roadmap is [`.cleo-export.json`](.cleo-export.json). The

@@ -1,0 +1,88 @@
+{
+  "taskId": "T139",
+  "timestamp": "2026-09-02T17:35:00Z",
+  "numTotalTests": 10,
+  "numPassedTests": 8,
+  "numFailedTests": 0,
+  "numPendingTests": 2,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bootstrap-bicep-build-and-lint",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/bootstrap-github-oidc.bicep --stdout",
+        "az bicep lint --file infra/bootstrap-github-oidc.bicep"
+      ],
+      "result": "The one-time identity, immutable federated credential, resource-group Contributor, and conditioned runtime-role administrator bootstrap compiled and linted without diagnostics"
+    },
+    {
+      "name": "main-bicep-build-and-lint",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/main.bicep --stdout",
+        "az bicep lint --file infra/main.bicep"
+      ],
+      "result": "The recurring composition compiled with three HTTP probes targeting /health and the approved private-ingress posture"
+    },
+    {
+      "name": "workflow-validation",
+      "status": "passed",
+      "commands": [
+        "actionlint .github/workflows/deploy-main.yml",
+        "action-validator .github/workflows/deploy-main.yml"
+      ],
+      "result": "actionlint 1.7.12 and action-validator 0.6.0 reported no diagnostics"
+    },
+    {
+      "name": "azure-bootstrap-validation-and-what-if",
+      "status": "passed",
+      "result": "Azure validation succeeded and the reviewed pre-deployment what-if contained exactly five creates: two user-assigned managed identities, github-deploy, resource-group Contributor, and conditioned resource-group Role Based Access Control Administrator"
+    },
+    {
+      "name": "azure-bootstrap-deployment",
+      "status": "passed",
+      "result": "Deployment fca-github-oidc-bootstrap succeeded in fca-rg-westus2. The deployer has resource-group Contributor plus conditioned runtime data-role administration; no Azure client secret was created"
+    },
+    {
+      "name": "immutable-federated-subject",
+      "status": "passed",
+      "result": "The Azure credential issuer is https://token.actions.githubusercontent.com, its audience is api://AzureADTokenExchange, and its subject exactly matches repo:Carson-Fricke@48462838/FCA@1347935926:environment:dev. GitHub reports use_default=true and use_immutable_subject=true with the matching repository prefix"
+    },
+    {
+      "name": "github-environment-configuration",
+      "status": "passed",
+      "result": "Repository variable DEPLOYMENT_ENVIRONMENT selects dev. The dev Environment contains all eleven required non-secret deployment variables and a master-only custom deployment branch policy"
+    },
+    {
+      "name": "github-secret-boundary",
+      "status": "passed",
+      "result": "BUDGET_ALERT_CONTACT_EMAIL exists only as a dev Environment secret. No Azure client secret, provider credential, or API bearer token was added to GitHub or tracked files"
+    },
+    {
+      "name": "anonymous-ghcr-pull",
+      "status": "pending",
+      "result": "The personal-account GHCR package is private and anonymous token issuance is unavailable. Package visibility must be changed to public before the secret-free Container Apps deployment can pull the image; this change is irreversible"
+    },
+    {
+      "name": "hosted-recurring-deployment",
+      "status": "pending",
+      "result": "The corrected workflow has not been pushed. A master push must prove input validation, OIDC login, resource-group validation and deployment with assignGithubDeployerRoles=false, immutable image verification, and public or private-ingress /health smoke behavior"
+    }
+  ],
+  "environmentProtection": {
+    "configured": "master-only custom deployment branch policy",
+    "requiredReviewer": "unsupported",
+    "limitation": "GitHub returned HTTP 422 because required reviewers are not supported for this private personal repository on its current plan"
+  },
+  "decisions": [
+    "The one-time bootstrap is independent of storage, Key Vault, budgets, Container Apps, and image pullability so it can create the OIDC identity before recurring deployment.",
+    "The deployer receives no Owner role. Its conditioned RBAC administrator assignment permits only the four runtime data roles and only for the runtime managed identity.",
+    "Private ingress remains false. The workflow temporarily scales the API to one replica, requires all three HTTP /health probes to report a healthy provisioned revision, and restores scale-to-zero through an EXIT trap.",
+    "The workflow rejects a non-public GHCR package before Azure login or mutation because no registry credential is stored in Bicep or GitHub."
+  ],
+  "blockers": [
+    "An administrator must explicitly accept the irreversible public visibility change for the personal-account GHCR package.",
+    "The local commits must be pushed to master before the required hosted deployment can run; repository policy requires explicit user authorization to push."
+  ]
+}

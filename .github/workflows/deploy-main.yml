@@ -35,7 +35,7 @@ jobs:
     needs: publish-image
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Required reviewers on this Environment are the deployment approval gate.
+    # Environment protection and branch policy are evaluated before this job.
     # This is the only repository-managed production mutation path.
     environment:
       name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
@@ -127,8 +127,25 @@ jobs:
             esac
           done
 
-          if [[ "${ENABLE_EXTERNAL_API_INGRESS,,}" != "true" ]]; then
-            echo "::error::ENABLE_EXTERNAL_API_INGRESS must be true for the hosted probe-safe health smoke"
+          package="${GITHUB_OWNER,,}/${GITHUB_REPOSITORY_NAME,,}"
+          registry_token="$(curl --fail --silent --show-error \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${package}:pull" \
+            | jq --raw-output '.token // empty')"
+          if [[ -z "$registry_token" ]]; then
+            echo "::error::The GHCR package must allow anonymous pulls because the Container Apps deployment intentionally has no registry credential"
+            exit 1
+          fi
+
+          manifest_status="$(curl \
+            --silent \
+            --show-error \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer $registry_token" \
+            --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/${package}/manifests/${IMAGE_DIGEST}")"
+          if [[ "$manifest_status" != "200" ]]; then
+            echo "::error::The immutable GHCR manifest is not anonymously pullable (HTTP $manifest_status)"
             exit 1
           fi
 
@@ -139,7 +156,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy digest-pinned infrastructure
+      - name: Validate and deploy digest-pinned infrastructure
         shell: bash
         env:
           DEPLOYMENT_NAME: fca-${{ github.run_id }}-${{ github.run_attempt }}
@@ -148,27 +165,37 @@ jobs:
           set -euo pipefail
 
           az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+          deployment_parameters=(
+            "location=$AZURE_LOCATION"
+            "resourceNamePrefix=$RESOURCE_NAME_PREFIX"
+            "environmentName=$DEPLOYMENT_ENVIRONMENT"
+            "sharedImageReference=$IMAGE_REFERENCE"
+            "githubOwner=$GITHUB_OWNER"
+            "githubOwnerId=$GITHUB_OWNER_ID"
+            "githubRepository=$GITHUB_REPOSITORY_NAME"
+            "githubRepositoryId=$GITHUB_REPOSITORY_ID"
+            "githubEnvironment=$DEPLOYMENT_ENVIRONMENT"
+            "budgetStartDate=$BUDGET_START_DATE"
+            "budgetAlertContactEmail=$BUDGET_ALERT_CONTACT_EMAIL"
+            "assignGithubDeployerRoles=false"
+            "allowPublicNetworkAccess=$ALLOW_PUBLIC_NETWORK_ACCESS"
+            "enableExternalApiIngress=$ENABLE_EXTERNAL_API_INGRESS"
+            "ingestCronExpression=$INGEST_CRON_EXPRESSION"
+            "ingestReplicaTimeoutSeconds=$INGEST_REPLICA_TIMEOUT_SECONDS"
+          )
+
+          az deployment group validate \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters "${deployment_parameters[@]}" \
+            --only-show-errors \
+            --output none
+
           az deployment group create \
             --name "$DEPLOYMENT_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --template-file infra/main.bicep \
-            --parameters \
-              "location=$AZURE_LOCATION" \
-              "resourceNamePrefix=$RESOURCE_NAME_PREFIX" \
-              "environmentName=$DEPLOYMENT_ENVIRONMENT" \
-              "sharedImageReference=$IMAGE_REFERENCE" \
-              "githubOwner=$GITHUB_OWNER" \
-              "githubOwnerId=$GITHUB_OWNER_ID" \
-              "githubRepository=$GITHUB_REPOSITORY_NAME" \
-              "githubRepositoryId=$GITHUB_REPOSITORY_ID" \
-              "githubEnvironment=$DEPLOYMENT_ENVIRONMENT" \
-              "budgetStartDate=$BUDGET_START_DATE" \
-              "budgetAlertContactEmail=$BUDGET_ALERT_CONTACT_EMAIL" \
-              "assignGithubDeployerRoles=false" \
-              "allowPublicNetworkAccess=$ALLOW_PUBLIC_NETWORK_ACCESS" \
-              "enableExternalApiIngress=$ENABLE_EXTERNAL_API_INGRESS" \
-              "ingestCronExpression=$INGEST_CRON_EXPRESSION" \
-              "ingestReplicaTimeoutSeconds=$INGEST_REPLICA_TIMEOUT_SECONDS" \
+            --parameters "${deployment_parameters[@]}" \
             --only-show-errors \
             --output none
 
@@ -229,18 +256,81 @@ jobs:
         run: |
           set -euo pipefail
 
-          response="$(curl \
-            --fail \
-            --silent \
-            --show-error \
-            --location \
-            --retry 12 \
-            --retry-all-errors \
-            --retry-delay 5 \
-            --connect-timeout 10 \
-            --max-time 30 \
-            "$API_HEALTH_URL")"
-          if ! printf '%s' "$response" | jq --exit-status --arg expected ok '.status == $expected' >/dev/null; then
-            echo "::error::The probe-safe health endpoint did not return status ok"
-            exit 1
+          if [[ "${ENABLE_EXTERNAL_API_INGRESS,,}" == "true" ]]; then
+            response="$(curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --retry 12 \
+              --retry-all-errors \
+              --retry-delay 5 \
+              --connect-timeout 10 \
+              --max-time 30 \
+              "$API_HEALTH_URL")"
+            if ! printf '%s' "$response" | jq --exit-status --arg expected ok '.status == $expected' >/dev/null; then
+              echo "::error::The probe-safe health endpoint did not return status ok"
+              exit 1
+            fi
+          else
+            normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+            normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+            api_app_name="${normalized_prefix}-${normalized_environment}-api"
+
+            restore_scale_to_zero() {
+              az containerapp update \
+                --name "$api_app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --min-replicas 0 \
+                --only-show-errors \
+                --output none
+            }
+            trap restore_scale_to_zero EXIT
+
+            az containerapp update \
+              --name "$api_app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --min-replicas 1 \
+              --only-show-errors \
+              --output none
+
+            probes="$(az containerapp show \
+              --name "$api_app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "properties.template.containers[?name=='api'] | [0].probes" \
+              --output json)"
+            if ! jq --exit-status \
+              'length == 3 and all(.[]; .httpGet.path == "/health" and .httpGet.port == 8000)' \
+              <<<"$probes" >/dev/null; then
+              echo "::error::The private API revision is not configured to probe /health"
+              exit 1
+            fi
+
+            health_state="Unknown"
+            provisioning_state="Unknown"
+            for _ in {1..24}; do
+              revision="$(az containerapp revision list \
+                --name "$api_app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --output json \
+                | jq --compact-output \
+                  '[.[] | select(.properties.active == true)] | sort_by(.properties.createdTime) | last // {}')"
+              health_state="$(jq --raw-output '.properties.healthState // "Unknown"' <<<"$revision")"
+              provisioning_state="$(jq --raw-output '.properties.provisioningState // "Unknown"' <<<"$revision")"
+              if [[ "$health_state" == "Healthy" && "$provisioning_state" == "Provisioned" ]]; then
+                break
+              fi
+              if [[ "$health_state" == "Unhealthy" || "$provisioning_state" == "Failed" ]]; then
+                echo "::error::The private API revision failed its /health probes ($health_state, $provisioning_state)"
+                exit 1
+              fi
+              sleep 5
+            done
+            if [[ "$health_state" != "Healthy" || "$provisioning_state" != "Provisioned" ]]; then
+              echo "::error::The private API revision did not pass /health probes before the smoke deadline ($health_state, $provisioning_state)"
+              exit 1
+            fi
+
+            restore_scale_to_zero
+            trap - EXIT
           fi
