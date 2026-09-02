@@ -29,6 +29,10 @@ param registryLoginServer string
 @minLength(1)
 param keyVaultUri string
 
+@description('Storage account name used by the Azure ingest composition.')
+@minLength(3)
+param storageAccountName string
+
 @description('Full resource ID of the runtime user-assigned managed identity.')
 @minLength(1)
 param runtimeIdentityResourceId string
@@ -91,6 +95,18 @@ var baseRuntimeEnvironment = [
   {
     name: 'AZURE_CLIENT_ID'
     value: runtimeIdentityClientId
+  }
+  {
+    name: 'LAKE_STORAGE_ACCOUNT_NAME'
+    value: storageAccountName
+  }
+  {
+    name: 'LAKE_STORAGE_CONTAINER'
+    value: 'lake'
+  }
+  {
+    name: 'LAKE_COVERAGE_TABLE'
+    value: 'coverage'
   }
 ]
 var providerEnvironment = concat(baseRuntimeEnvironment, [

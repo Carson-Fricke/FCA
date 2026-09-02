@@ -153,6 +153,7 @@ module containerApps './modules/container-apps.bicep' = {
     ingestJobName: ingestJobName
     sharedImageReference: sharedImageReference
     registryLoginServer: containerRegistry.outputs.registry.loginServer
+    storageAccountName: storage.outputs.storageAccountName
     keyVaultUri: keyVault.outputs.keyVaultUri
     runtimeIdentityResourceId: identities.outputs.runtimeIdentity.resourceId
     runtimeIdentityClientId: identities.outputs.runtimeIdentity.clientId
