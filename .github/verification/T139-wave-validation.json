@@ -1,0 +1,64 @@
+{
+  "wave": "T139-private-acr",
+  "timestamp": "2026-09-02T18:02:29Z",
+  "numTotalTests": 231,
+  "numPassedTests": 231,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "The lockfile is current"
+    },
+    {
+      "name": "python-quality",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check .",
+        "uv run --python 3.12 --extra dev ruff format --check .",
+        "uv run --python 3.12 --extra dev ty check"
+      ],
+      "result": "Ruff lint, Ruff format for 122 files, and ty all passed"
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "231 tests passed in 16.23s; one Starlette/httpx deprecation warning was emitted"
+    },
+    {
+      "name": "bicep-and-parameters",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/bootstrap-github-oidc.bicep --stdout",
+        "az bicep lint --file infra/bootstrap-github-oidc.bicep",
+        "az bicep build --file infra/main.bicep --stdout",
+        "az bicep lint --file infra/main.bicep",
+        "az bicep build-params --file infra/parameters/dev.bicepparam --stdout"
+      ],
+      "result": "Both Bicep entrypoints and the dev parameter file compiled without diagnostics; both entrypoints linted without diagnostics"
+    },
+    {
+      "name": "workflow-validation",
+      "status": "passed",
+      "commands": [
+        "actionlint .github/workflows/python-bicep-ci.yml .github/workflows/publish-image.yml .github/workflows/deploy-bicep.yml .github/workflows/deploy-main.yml",
+        "action-validator .github/workflows/python-bicep-ci.yml .github/workflows/publish-image.yml .github/workflows/deploy-bicep.yml .github/workflows/deploy-main.yml"
+      ],
+      "result": "actionlint 1.7.12 and action-validator 0.6.0 reported no diagnostics for all active workflows"
+    },
+    {
+      "name": "live-bootstrap-state",
+      "status": "passed",
+      "result": "The private Basic ACR is deployed with admin access disabled; the runtime and deployer identities have registry-scoped AcrPull; the deployer retains resource-group Contributor plus conditioned runtime-role administration; the immutable environment OIDC subject is unchanged"
+    }
+  ],
+  "limitations": [
+    "The hosted master deployment remains pending until the local commits are pushed.",
+    "The pytest run emitted the existing Starlette/httpx deprecation warning.",
+    "Workflow validator release binaries were resolved outside the repository; no downloaded tool or machine-specific path is retained in repository evidence."
+  ]
+}

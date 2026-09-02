@@ -10,12 +10,11 @@ provider credential or API bearer token in GitHub.
 - An Azure caller with `Contributor` and `Role Based Access Control
   Administrator` at that resource group, or `Owner` at an ancestor scope.
 - Repository administration access for Actions variables, Environments, OIDC
-  subject customization, and package visibility.
+  subject customization, and private package access.
 - The `dev` Environment must restrict deployments to `master`. Add a required
   reviewer when the repository plan and visibility support that rule.
-- The GHCR package must be public because the Container Apps resources
-  intentionally have no registry credential. Making a package public is not
-  reversible; confirm this is acceptable before changing package visibility.
+- Budget approval for one Basic Azure Container Registry. The private ACR is a
+  runtime mirror; deleting it stops new revisions from pulling images.
 
 ## One-Time Azure Bootstrap
 
@@ -43,10 +42,12 @@ The deployment creates or confirms:
 - `fca-ml-dev-github-deployer`, the separate deployment identity.
 - `github-deploy`, whose subject is exactly
   `repo:Carson-Fricke@48462838/FCA@1347935926:environment:dev`.
+- A deterministic private Basic ACR with its admin account disabled.
+- `AcrPull` on that ACR for both the runtime and deployer identities.
 - `Contributor` for the deployer at the dev resource group only.
 - Conditioned `Role Based Access Control Administrator` at that resource group.
-  Its condition permits only Blob, Queue, Table, and Key Vault secret data
-  roles, and only for the runtime identity.
+  Its condition permits only ACR pull, Blob, Queue, Table, and Key Vault secret
+  data roles, and only for the runtime identity.
 
 Treat deployment output as configuration data. Do not paste the full output
 into issues or logs. Record only the client, tenant, subscription, resource
@@ -95,12 +96,13 @@ template will not match the Bicep federated credential.
 After bootstrap, every push to `master` that matches the workflow paths:
 
 1. Publishes an immutable digest-addressed GHCR image.
-2. Checks every deployment value and confirms the image is anonymously
-   pullable before Azure login or mutation.
-3. Uses `azure/login` with the Environment OIDC token and no client secret.
-4. Validates and creates `infra/main.bicep` with
+2. Uses `azure/login` with the Environment OIDC token and no client secret.
+3. Imports the private GHCR digest into the private ACR with the run-scoped,
+   masked `GITHUB_TOKEN`, then verifies the ACR manifest digest is unchanged.
+4. Validates and creates `infra/main.bicep` with the immutable ACR digest and
    `assignGithubDeployerRoles=false`.
-5. Confirms both workloads use the published digest.
+5. Confirms both workloads use the mirrored digest and pull with the runtime
+   managed identity. No GHCR or ACR credential is stored in application state.
 6. Calls `/health` directly for public ingress, or requires the private
    revision's three Azure HTTP probes against `/health` to report healthy.
 
@@ -118,17 +120,20 @@ resources and runtime data-role assignments.
 - Authorization failure: wait several minutes for Azure RBAC propagation, then
   verify the deployer has resource-group Contributor and the conditioned RBAC
   administrator assignment. Do not add Owner to the deployer.
-- Image pull failure: confirm the exact digest exists and the GHCR package is
-  public. Do not add a long-lived registry token to Bicep or GitHub variables.
+- Image import failure: confirm the deploy job has `packages: read`, the source
+  digest exists in private GHCR, and the repository retains package access.
+- Image pull failure: confirm the mirrored digest exists in ACR, the ACR admin
+  account remains disabled, and the runtime identity has `AcrPull`.
 - Failed resource deployment: inspect the named resource-group deployment and
   rerun the same commit after correction. Bicep is incremental and the
   bootstrap resources are idempotent.
 - Federated credential rollback: restore the previous subject or delete only
   `github-deploy` from the deployer identity. Removing it immediately blocks
   new GitHub Azure sessions without affecting running workloads.
-- Authorization rollback: remove the deployer's two bootstrap role assignments
-  by their deployment outputs. Existing resources continue running, but GitHub
-  cannot update them.
+- Authorization rollback: remove the deployer's Contributor, conditioned RBAC
+  administrator, and registry `AcrPull` assignments by their deployment
+  outputs. Existing resources continue running, but GitHub cannot update or
+  import images.
 
 Never print Environment secrets, Azure access tokens, provider keys, or bearer
 tokens while diagnosing a run.

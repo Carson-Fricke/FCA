@@ -17,9 +17,13 @@ param apiAppName string
 @minLength(1)
 param ingestJobName string
 
-@description('Immutable, anonymously pullable shared image reference used by both workloads. Supply the digest reference emitted by the image publication workflow; this module configures no registry credential.')
+@description('Immutable private ACR image reference used by both workloads.')
 @minLength(1)
 param sharedImageReference string
+
+@description('Private Azure Container Registry login server. Both workloads authenticate image pulls with the runtime managed identity.')
+@minLength(1)
+param registryLoginServer string
 
 @description('Full resource ID of the runtime user-assigned managed identity.')
 @minLength(1)
@@ -143,6 +147,12 @@ resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
     workloadProfileName: consumptionProfileName
     configuration: {
       activeRevisionsMode: 'Single'
+      registries: [
+        {
+          server: registryLoginServer
+          identity: runtimeIdentityResourceId
+        }
+      ]
       identitySettings: [
         {
           identity: runtimeIdentityResourceId
@@ -247,6 +257,12 @@ resource ingestJob 'Microsoft.App/jobs@2025-07-01' = {
     workloadProfileName: consumptionProfileName
     configuration: {
       triggerType: 'Schedule'
+      registries: [
+        {
+          server: registryLoginServer
+          identity: runtimeIdentityResourceId
+        }
+      ]
       scheduleTriggerConfig: {
         cronExpression: ingestCronExpression
         parallelism: 1

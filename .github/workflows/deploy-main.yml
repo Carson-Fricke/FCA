@@ -42,6 +42,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: read
     env:
       IMAGE_REFERENCE: ${{ needs.publish-image.outputs.image-reference }}
       IMAGE_DIGEST: ${{ needs.publish-image.outputs.image-digest }}
@@ -127,28 +128,6 @@ jobs:
             esac
           done
 
-          package="${GITHUB_OWNER,,}/${GITHUB_REPOSITORY_NAME,,}"
-          registry_token="$(curl --fail --silent --show-error \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:${package}:pull" \
-            | jq --raw-output '.token // empty')"
-          if [[ -z "$registry_token" ]]; then
-            echo "::error::The GHCR package must allow anonymous pulls because the Container Apps deployment intentionally has no registry credential"
-            exit 1
-          fi
-
-          manifest_status="$(curl \
-            --silent \
-            --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --header "Authorization: Bearer $registry_token" \
-            --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
-            "https://ghcr.io/v2/${package}/manifests/${IMAGE_DIGEST}")"
-          if [[ "$manifest_status" != "200" ]]; then
-            echo "::error::The immutable GHCR manifest is not anonymously pullable (HTTP $manifest_status)"
-            exit 1
-          fi
-
       - name: Sign in to Azure with OIDC
         uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
         with:
@@ -161,15 +140,53 @@ jobs:
         env:
           DEPLOYMENT_NAME: fca-${{ github.run_id }}-${{ github.run_attempt }}
           BUDGET_ALERT_CONTACT_EMAIL: ${{ secrets.BUDGET_ALERT_CONTACT_EMAIL }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
           az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+          acr_name="$(az acr list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].name | [0]" \
+            --output tsv)"
+          if [[ -z "$acr_name" ]]; then
+            echo "::error::The private runtime ACR is missing; rerun the authorized OIDC bootstrap"
+            exit 1
+          fi
+
+          mirror_repository="${GITHUB_REPOSITORY_NAME,,}"
+          ghcr_source="${GITHUB_OWNER,,}/${GITHUB_REPOSITORY_NAME,,}@${IMAGE_DIGEST}"
+          az acr import \
+            --name "$acr_name" \
+            --source "ghcr.io/${ghcr_source}" \
+            --username "$GITHUB_ACTOR" \
+            --password "$GHCR_TOKEN" \
+            --image "${mirror_repository}:${GITHUB_SHA}" \
+            --force \
+            --only-show-errors \
+            --output none
+
+          mirrored_digest="$(az acr repository show \
+            --name "$acr_name" \
+            --image "${mirror_repository}:${GITHUB_SHA}" \
+            --query digest \
+            --output tsv)"
+          if [[ "$mirrored_digest" != "$IMAGE_DIGEST" ]]; then
+            echo "::error::The private ACR import changed the published image digest"
+            exit 1
+          fi
+          acr_login_server="$(az acr show \
+            --name "$acr_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query loginServer \
+            --output tsv)"
+          runtime_image_reference="${acr_login_server}/${mirror_repository}@${IMAGE_DIGEST}"
+
           deployment_parameters=(
             "location=$AZURE_LOCATION"
             "resourceNamePrefix=$RESOURCE_NAME_PREFIX"
             "environmentName=$DEPLOYMENT_ENVIRONMENT"
-            "sharedImageReference=$IMAGE_REFERENCE"
+            "sharedImageReference=$runtime_image_reference"
             "githubOwner=$GITHUB_OWNER"
             "githubOwnerId=$GITHUB_OWNER_ID"
             "githubRepository=$GITHUB_REPOSITORY_NAME"
@@ -209,6 +226,11 @@ jobs:
           normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
           api_app_name="${normalized_prefix}-${normalized_environment}-api"
           ingest_job_name="${normalized_prefix}-${normalized_environment}-ingest"
+          acr_login_server="$(az acr list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].loginServer | [0]" \
+            --output tsv)"
+          expected_runtime_image="${acr_login_server}/${GITHUB_REPOSITORY_NAME,,}@${IMAGE_DIGEST}"
 
           api_image="$(az containerapp show \
             --name "$api_app_name" \
@@ -221,11 +243,11 @@ jobs:
             --query "properties.template.containers[?name=='ingest'].image | [0]" \
             --output tsv)"
 
-          if [[ "$api_image" != "$IMAGE_REFERENCE" ]]; then
+          if [[ "$api_image" != "$expected_runtime_image" ]]; then
             echo "::error::The API does not use the published immutable image reference"
             exit 1
           fi
-          if [[ "$ingest_image" != "$IMAGE_REFERENCE" ]]; then
+          if [[ "$ingest_image" != "$expected_runtime_image" ]]; then
             echo "::error::The ingest job does not use the published immutable image reference"
             exit 1
           fi

@@ -13,7 +13,7 @@ param resourceNamePrefix string = 'fca-ml'
 @maxLength(12)
 param environmentName string = 'dev'
 
-@description('Immutable, anonymously pullable GHCR image reference. Replace the dev sentinel with the digest emitted by the image publication workflow before deployment.')
+@description('Immutable private ACR image reference imported from the GHCR publication digest before deployment.')
 @minLength(1)
 param sharedImageReference string
 
@@ -69,6 +69,7 @@ var storageAccountName = 'fca${take(deterministicSuffix, 18)}'
 var keyVaultName = '${shortNamePrefix}-kv-${take(deterministicSuffix, 7)}'
 var runtimeIdentityName = '${namePrefix}-runtime'
 var githubDeployerIdentityName = '${namePrefix}-github-deployer'
+var containerRegistryName = 'fca${take(uniqueString(resourceGroup().id, namePrefix, 'registry'), 18)}'
 var logAnalyticsWorkspaceName = '${namePrefix}-logs'
 var containerAppsEnvironmentName = '${namePrefix}-cae'
 var apiAppName = '${namePrefix}-api'
@@ -108,6 +109,16 @@ module identities './modules/identities.bicep' = {
   }
 }
 
+module containerRegistry './modules/container-registry.bicep' = {
+  name: 'market-lake-container-registry'
+  params: {
+    registryName: containerRegistryName
+    runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
+    location: location
+    tags: tags
+  }
+}
+
 module keyVault './modules/key-vault.bicep' = {
   name: 'market-lake-key-vault'
   params: {
@@ -137,6 +148,7 @@ module containerApps './modules/container-apps.bicep' = {
     apiAppName: apiAppName
     ingestJobName: ingestJobName
     sharedImageReference: sharedImageReference
+    registryLoginServer: containerRegistry.outputs.registry.loginServer
     runtimeIdentityResourceId: identities.outputs.runtimeIdentity.resourceId
     runtimeIdentityClientId: identities.outputs.runtimeIdentity.clientId
     location: location
@@ -182,12 +194,14 @@ output deploymentSummary object = {
     containerAppsEnvironment: containerAppsEnvironmentName
     api: apiAppName
     ingestJob: ingestJobName
+    containerRegistry: containerRegistry.outputs.registry.name
   }
   image: {
     reference: sharedImageReference
     pinnedByDigest: contains(sharedImageReference, '@sha256:')
   }
   runtimeIdentity: identities.outputs.runtimeIdentity
+  containerRegistry: containerRegistry.outputs.registry
   roleAssignments: access.outputs.runtimeRoleAssignments
   keyVaultNetwork: keyVault.outputs.networkAccess
   containerApps: containerApps.outputs

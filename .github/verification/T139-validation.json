@@ -1,10 +1,10 @@
 {
   "taskId": "T139",
   "timestamp": "2026-09-02T17:35:00Z",
-  "numTotalTests": 10,
-  "numPassedTests": 8,
+  "numTotalTests": 11,
+  "numPassedTests": 10,
   "numFailedTests": 0,
-  "numPendingTests": 2,
+  "numPendingTests": 1,
   "numTodoTests": 0,
   "testResults": [
     {
@@ -60,9 +60,15 @@
       "result": "BUDGET_ALERT_CONTACT_EMAIL exists only as a dev Environment secret. No Azure client secret, provider credential, or API bearer token was added to GitHub or tracked files"
     },
     {
-      "name": "anonymous-ghcr-pull",
-      "status": "pending",
-      "result": "The personal-account GHCR package is private and anonymous token issuance is unavailable. Package visibility must be changed to public before the secret-free Container Apps deployment can pull the image; this change is irreversible"
+      "name": "private-image-mirror",
+      "status": "passed",
+      "result": "The GHCR package remains private. The deterministic Basic ACR is deployed with its admin and anonymous access disabled; runtime and deployer identities have registry-scoped AcrPull. The workflow mirrors the exact digest using only the deploy run's masked GITHUB_TOKEN, and runtime image pulls persist no registry credential"
+    },
+    {
+      "name": "wave-integration",
+      "status": "passed",
+      "evidence": ".github/verification/T139-wave-validation.json",
+      "result": "The frozen-wave lock, Ruff lint and format, ty, 231-test pytest, Bicep, dev parameters, workflow validation, and live bootstrap-state checks all passed"
     },
     {
       "name": "hosted-recurring-deployment",
@@ -79,10 +85,9 @@
     "The one-time bootstrap is independent of storage, Key Vault, budgets, Container Apps, and image pullability so it can create the OIDC identity before recurring deployment.",
     "The deployer receives no Owner role. Its conditioned RBAC administrator assignment permits only the four runtime data roles and only for the runtime managed identity.",
     "Private ingress remains false. The workflow temporarily scales the API to one replica, requires all three HTTP /health probes to report a healthy provisioned revision, and restores scale-to-zero through an EXIT trap.",
-    "The workflow rejects a non-public GHCR package before Azure login or mutation because no registry credential is stored in Bicep or GitHub."
+    "Private GHCR remains the source registry. The deploy job uses packages: read only while importing the exact digest to ACR, and the runtime pulls the private mirror with its managed identity."
   ],
   "blockers": [
-    "An administrator must explicitly accept the irreversible public visibility change for the personal-account GHCR package.",
     "The local commits must be pushed to master before the required hosted deployment can run; repository policy requires explicit user authorization to push."
   ]
 }

@@ -115,7 +115,9 @@ The composition deploys storage, managed identities and GitHub OIDC, Key
 Vault, runtime access, Container Apps, and cost controls together. The dev
 parameters explicitly enable the Key Vault public endpoint because no private
 endpoint module is composed yet; the vault remains Entra-only and RBAC-based.
-The image must be supplied by immutable digest, and the budget alert contact
+The private GHCR image is mirrored by digest into a private Basic ACR during
+deployment. Container Apps pulls the mirrored digest with the runtime managed
+identity; the ACR admin account is disabled. The budget alert contact
 placeholder must be replaced with a valid user-supplied email before Azure
 operations. No secrets are stored in Bicep or parameter files.
 
