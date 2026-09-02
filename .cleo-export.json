@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-02T00:47:03.294Z",
+    "exportedAt": "2026-09-02T01:12:47.844Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 138
+      "nextId": 139
     },
-    "checksum": "f7ecbfc48f228afe",
-    "taskCount": 137,
+    "checksum": "4b86d7cd4904ce7c",
+    "taskCount": 138,
     "exportMode": "full"
   },
   "selection": {
@@ -129,6 +129,7 @@
       "T108",
       "T120",
       "T127",
+      "T138",
       "T008",
       "T027",
       "T039",
@@ -1289,6 +1290,13 @@
         "T114",
         "T126"
       ]
+    },
+    "T138": {
+      "type": "task",
+      "title": "E3.6 Verification budget and wave guidance",
+      "status": "done",
+      "parentId": "T006",
+      "depends": []
     },
     "T008": {
       "type": "epic",
@@ -7711,14 +7719,15 @@
         "Complete child T029: E3.2 Reusable Azure OIDC and Bicep deployment steps",
         "Complete child T030: E3.3 GHCR image build and immutable tagging",
         "Complete child T031: E3.4 Main-branch deploy workflow and health smoke",
-        "Complete child T032: E3.5 GitHub Environments and OIDC bootstrap documentation"
+        "Complete child T032: E3.5 GitHub Environments and OIDC bootstrap documentation",
+        "Complete child T138: E3.6 Verification budget and wave guidance"
       ],
       "depends": [
         "T003",
         "T004"
       ],
       "createdAt": "2026-09-01T03:15:31.494Z",
-      "updatedAt": "2026-09-01T03:32:56.318Z",
+      "updatedAt": "2026-09-02T01:08:10.276Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -9383,6 +9392,254 @@
       "relates": []
     },
     {
+      "id": "T138",
+      "title": "E3.6 Verification budget and wave guidance",
+      "status": "done",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T006",
+      "size": "small",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Codify focused subagent checks, wave-level integration verification, evidence reuse, and bounded CLEO reconciliation to prevent repeated full-suite validation.",
+      "labels": [
+        "documentation",
+        "tooling"
+      ],
+      "notes": [
+        "2026-09-02 01:12:00 UTC: Added repository-wide wave ownership and bounded verification guidance for CLEO and Copilot agents, with focused task evidence and one frozen-wave integration pass."
+      ],
+      "acceptance": [
+        "Repository instructions distinguish focused task checks from one wave-level integration pass",
+        "Completed task evidence is not rewritten only because later work changes the global test count",
+        "CLEO validation and export checks run once per reconciliation batch"
+      ],
+      "files": [
+        "AGENTS.md",
+        ".github/instructions/cleo.instructions.md",
+        ".github/instructions/copilot-instructions.md"
+      ],
+      "createdAt": "2026-09-02T01:08:10.276Z",
+      "updatedAt": "2026-09-02T01:12:04.069Z",
+      "completedAt": "2026-09-02T01:12:00.298Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T01:11:37.125Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-02T01:08:10.276Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "cea7270f644fb389ee642423f892389b407bfc11",
+                "shortSha": "cea7270"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "AGENTS.md",
+                    "sha256": "792e6941b3a49f035d204bbafdcc77fd7bc1b6aef57dbc4486b3e4c5a2eeed11"
+                  },
+                  {
+                    "path": ".github/instructions/cleo.instructions.md",
+                    "sha256": "02d1b0cf49075a35c67315f1a80dc4040e2f031dbf6d6084a4955676cd911469"
+                  },
+                  {
+                    "path": ".github/instructions/copilot-instructions.md",
+                    "sha256": "f06feb0738c779cf89000e76139291478a3d26390115a043b27b5590edfb4caa"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T138-validation.json",
+                "sha256": "f5a7cf31ba279f0b906b6e43dd9a5999db2a0df413ff3005fb45f0b3922600bf",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "54cdfee7-2f49-559a-9601-518ee45c234f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "c9541354-b0c0-57da-bbe4-41bc1996af9c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "f142327c-56c1-54b9-a8fd-0749a09db345"
+              },
+              {
+                "kind": "note",
+                "note": "Focused instruction validation passed and the commit modifies every declared task file"
+              }
+            ],
+            "capturedAt": "2026-09-02T01:11:38.012Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "cea7270f644fb389ee642423f892389b407bfc11",
+                "shortSha": "cea7270"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "AGENTS.md",
+                    "sha256": "792e6941b3a49f035d204bbafdcc77fd7bc1b6aef57dbc4486b3e4c5a2eeed11"
+                  },
+                  {
+                    "path": ".github/instructions/cleo.instructions.md",
+                    "sha256": "02d1b0cf49075a35c67315f1a80dc4040e2f031dbf6d6084a4955676cd911469"
+                  },
+                  {
+                    "path": ".github/instructions/copilot-instructions.md",
+                    "sha256": "f06feb0738c779cf89000e76139291478a3d26390115a043b27b5590edfb4caa"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T138-validation.json",
+                "sha256": "f5a7cf31ba279f0b906b6e43dd9a5999db2a0df413ff3005fb45f0b3922600bf",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "54cdfee7-2f49-559a-9601-518ee45c234f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "c9541354-b0c0-57da-bbe4-41bc1996af9c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "f142327c-56c1-54b9-a8fd-0749a09db345"
+              },
+              {
+                "kind": "note",
+                "note": "Focused instruction validation passed and the commit modifies every declared task file"
+              }
+            ],
+            "capturedAt": "2026-09-02T01:11:38.012Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "cea7270f644fb389ee642423f892389b407bfc11",
+                "shortSha": "cea7270"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "AGENTS.md",
+                    "sha256": "792e6941b3a49f035d204bbafdcc77fd7bc1b6aef57dbc4486b3e4c5a2eeed11"
+                  },
+                  {
+                    "path": ".github/instructions/cleo.instructions.md",
+                    "sha256": "02d1b0cf49075a35c67315f1a80dc4040e2f031dbf6d6084a4955676cd911469"
+                  },
+                  {
+                    "path": ".github/instructions/copilot-instructions.md",
+                    "sha256": "f06feb0738c779cf89000e76139291478a3d26390115a043b27b5590edfb4caa"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T138-validation.json",
+                "sha256": "f5a7cf31ba279f0b906b6e43dd9a5999db2a0df413ff3005fb45f0b3922600bf",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "54cdfee7-2f49-559a-9601-518ee45c234f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "c9541354-b0c0-57da-bbe4-41bc1996af9c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T138",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "f142327c-56c1-54b9-a8fd-0749a09db345"
+              },
+              {
+                "kind": "note",
+                "note": "Focused instruction validation passed and the commit modifies every declared task file"
+              }
+            ],
+            "capturedAt": "2026-09-02T01:11:38.012Z",
+            "capturedBy": "opencode"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "unit",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "pending",
@@ -10702,7 +10959,8 @@
         "T029",
         "T030",
         "T031",
-        "T032"
+        "T032",
+        "T138"
       ],
       "T007": [
         "T033",
