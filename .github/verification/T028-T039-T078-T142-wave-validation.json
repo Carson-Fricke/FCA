@@ -1,0 +1,87 @@
+{
+  "wave": "T028-T039-T078-T142",
+  "timestamp": "2026-09-02T21:54:55Z",
+  "numTotalTests": 278,
+  "numPassedTests": 278,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "uv-lock-and-environment",
+      "status": "passed",
+      "commands": [
+        "uv lock --check",
+        "uv sync --locked --extra dev"
+      ],
+      "result": "The 63-package lockfile is current and the locked development environment installs successfully"
+    },
+    {
+      "name": "repository-quality",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev ruff check .",
+        "uv run --extra dev ruff format --check .",
+        "uv run --extra dev ty check"
+      ],
+      "result": "Ruff lint, Ruff format over 163 files, and ty passed"
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "278 tests passed in 23.00 seconds; one Starlette/httpx deprecation warning was emitted"
+    },
+    {
+      "name": "python-package-build",
+      "status": "passed",
+      "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
+      "result": "The wheel built successfully with lake and harness capability packages plus all five console scripts"
+    },
+    {
+      "name": "bicep-and-parameters",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/bootstrap-github-oidc.bicep --stdout",
+        "az bicep lint --file infra/bootstrap-github-oidc.bicep",
+        "az bicep build --file infra/main.bicep --stdout",
+        "az bicep lint --file infra/main.bicep",
+        "az bicep build-params --file infra/parameters/dev.bicepparam --stdout"
+      ],
+      "result": "Both Bicep entrypoints and the dev parameter file compiled without diagnostics; both entrypoints linted without diagnostics"
+    },
+    {
+      "name": "workflow-validation",
+      "status": "passed",
+      "commands": [
+        "actionlint .github/workflows/python-bicep-ci.yml .github/workflows/publish-image.yml .github/workflows/deploy-bicep.yml .github/workflows/deploy-main.yml",
+        "action-validator .github/workflows/python-bicep-ci.yml .github/workflows/publish-image.yml .github/workflows/deploy-bicep.yml .github/workflows/deploy-main.yml"
+      ],
+      "result": "actionlint 1.7.12 and action-validator 0.6.0 reported no diagnostics for all active workflows"
+    },
+    {
+      "name": "published-entrypoints",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev lake --help",
+        "uv run --extra dev python -m lake --help",
+        "uv run --extra dev lake local --help",
+        "uv run --extra dev harness --help",
+        "uv run --extra dev api --help",
+        "uv run --extra dev backtest-job --help",
+        "uv run --extra dev trader --help",
+        "uv run --extra dev python -c \"from lake.app import app; assert app.title == 'Market Lake API'\""
+      ],
+      "result": "All market-lake, local-mode, quant-harness, and Uvicorn application entrypoints passed"
+    }
+  ],
+  "integrationHistory": [
+    "The first pass found one Ruff format-only failure in src/lake/cli/commands.py after all substantive checks passed.",
+    "The file was formatted once and the single permitted failure-driven repository rerun passed every gate."
+  ],
+  "limitations": [
+    "This integration pass did not deploy Azure resources, run a GitHub-hosted workflow, call Alpaca, or build a Docker image.",
+    "The pytest run emitted the existing Starlette/httpx deprecation warning.",
+    "Workflow validator binaries were resolved outside the repository; no downloaded tool or machine-specific path is retained in repository evidence."
+  ]
+}

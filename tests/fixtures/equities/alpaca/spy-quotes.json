@@ -1,0 +1,72 @@
+{
+  "interactions": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v2/stocks/quotes",
+        "params": {
+          "end": "2024-01-19T21:00:00Z",
+          "feed": "sip",
+          "limit": 2,
+          "sort": "asc",
+          "start": "2024-01-19T14:30:00Z",
+          "symbols": "SPY"
+        }
+      },
+      "response": {
+        "body": {"message": "service unavailable"},
+        "headers": {},
+        "status_code": 503
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v2/stocks/quotes",
+        "params": {
+          "end": "2024-01-19T21:00:00Z",
+          "feed": "sip",
+          "limit": 2,
+          "sort": "asc",
+          "start": "2024-01-19T14:30:00Z",
+          "symbols": "SPY"
+        }
+      },
+      "response": {
+        "body": {
+          "next_page_token": null,
+          "quotes": {
+            "SPY": [
+              {
+                "ap": "482.11",
+                "as": 200,
+                "ax": "P",
+                "bp": "482.10",
+                "bs": 100,
+                "bx": "K",
+                "c": ["R"],
+                "t": "2024-01-19T14:30:00.987654Z",
+                "z": "B"
+              },
+              {
+                "ap": "482.12",
+                "as": 300,
+                "ax": "Q",
+                "bp": "482.11",
+                "bs": 150,
+                "bx": "P",
+                "c": [],
+                "t": "2024-01-19T14:30:01Z",
+                "z": "B"
+              }
+            ]
+          }
+        },
+        "headers": {},
+        "status_code": 200
+      }
+    }
+  ],
+  "recording": "Alpaca SIP equity quotes",
+  "symbol": "SPY"
+}

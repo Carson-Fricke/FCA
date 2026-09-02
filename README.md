@@ -9,8 +9,8 @@ retaining clear product boundaries.
 
 | Product | Purpose | Status |
 | --- | --- | --- |
-| `market-lake` | Build and serve an on-demand Azure lake for equities, options, and crypto market data. | Planned, not built |
-| `quant-harness` | Run deterministic backtests, paper and shadow trading, and risk-controlled live trading over lake and live data. | Planned, not built |
+| `market-lake` | Build and serve an on-demand Azure lake for equities, options, and crypto market data. | Dev deployment and local workstation mode available |
+| `quant-harness` | Run deterministic backtests, paper and shadow trading, and risk-controlled live trading over lake and live data. | Package and process scaffold available; runtime capabilities planned |
 
 The market lake is a data product. The quant harness consumes its published
 schemas, catalog, API, and client contracts; it does not make the lake an
@@ -23,9 +23,9 @@ The repository currently contains the CLEO roadmap, project guidance, the
 tracked directory skeleton, an installable market-lake package, a shared
 runtime image, versioned market-lake configuration, core partition, schema,
 and calendar contracts, build-validated Azure foundation modules, a reusable
-GHCR publication workflow, and a protected main-branch deployment workflow. It
-does not yet contain the quant-harness package or a deployed service. Those
-artifacts belong to later CLEO tasks.
+GHCR publication workflow, a protected main-branch deployment workflow, the
+quant-harness package scaffold, and a supported local market-lake mode. The
+quant-harness runtime capabilities remain assigned to later CLEO tasks.
 
 ## Architecture
 
@@ -63,19 +63,21 @@ later tasks own their implementation.
 |-- src/
 |   |-- lake/
 |   |   |-- catalog/               Records, repositories, and table adapters
-|   |   |-- cli/                   API and ingest command entrypoints
+|   |   |-- cli/                   API, ingest, and local command entrypoints
 |   |   |-- configuration/         Typed settings and universe loaders
 |   |   |-- contracts/             Paths, schemas, and market sessions
 |   |   |-- coverage/              Coverage classification and planning
 |   |   |-- http/                  FastAPI composition and thin routes
 |   |   |-- ingestion/             Equity, option, and crypto workflows
+|   |   |-- local/                 Workstation API, ingest, and persistence
 |   |   |-- providers/             External market-data adapters
 |   |   |-- query/                 File and bounded SQL query services
 |   |   |-- queue/                 Durable worker and dead-letter behavior
 |   |   `-- storage/               Parquet, Azure, capacity, and leases
-|   `-- harness/                   quant-harness Python package (planned)
-|-- strategies/                    Harness strategy implementations (planned)
+|   `-- harness/                   quant-harness capability and process scaffold
+|-- strategies/                    Harness strategy namespace
 |-- tests/
+|   |-- harness/                   Tests mirroring quant-harness capabilities
 |   `-- lake/                      Tests mirroring market-lake capabilities
 |-- Dockerfile                     Shared runtime image definition
 |-- pyproject.toml                 Shared Python project and tools
@@ -94,6 +96,35 @@ uv run --python 3.12 --extra dev ruff format --check .
 uv run --python 3.12 --extra dev ty check
 uv run --python 3.12 --extra dev pytest
 ```
+
+The quant-harness scaffold publishes process help while later roadmap tasks own
+the API, backtest, and trader implementations:
+
+```powershell
+uv run harness --help
+uv run api --help
+uv run backtest-job --help
+uv run trader --help
+```
+
+Launching a scaffolded harness process without `--help` fails explicitly until
+its owning implementation task lands.
+
+## Local Market Lake
+
+The supported workstation mode uses local files and real bounded Alpaca data;
+it does not require Docker, Azure CLI, Azure resources, or Azure credentials:
+
+```powershell
+uv sync --python 3.12 --extra dev
+uv run lake local api --host 127.0.0.1 --port 8000
+uv run lake local ingest --symbol AAPL --max-records 100
+uv run lake local reset --yes
+```
+
+See [`docs/local-market-lake.md`](docs/local-market-lake.md) for prerequisites,
+required environment variables, authenticated smoke checks, safe cleanup, and
+the local-versus-Azure boundary.
 
 ## Development Principles
 

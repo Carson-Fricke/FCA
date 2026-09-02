@@ -14,6 +14,11 @@ RUN uv sync --locked --no-dev --no-install-project
 
 COPY src/ ./src/
 RUN uv sync --locked --no-dev --no-editable
+RUN command -v lake \
+    && command -v harness \
+    && command -v api \
+    && command -v backtest-job \
+    && command -v trader
 
 FROM python:3.12-slim AS runtime
 

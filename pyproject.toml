@@ -20,6 +20,7 @@ dependencies = [
     "pyarrow>=17",
     "pydantic-settings>=2.5",
     "tenacity>=9.0",
+    "typer>=0.16",
     "uvicorn>=0.30",
 ]
 
@@ -32,13 +33,17 @@ dev = [
 
 [project.scripts]
 lake = "lake.cli:main"
+harness = "harness.cli:main"
+api = "harness.cli.api:main"
+backtest-job = "harness.cli.backtest_job:main"
+trader = "harness.cli.trader:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["lake*"]
+include = ["harness*", "lake*"]
 namespaces = false
 
 [tool.pytest.ini_options]
@@ -47,7 +52,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
-src = ["src", "tests"]
+src = ["src", "strategies", "tests"]
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -57,4 +62,4 @@ select = ["B", "E4", "E7", "E9", "F", "I", "UP"]
 python-version = "3.12"
 
 [tool.ty.src]
-include = ["src", "tests"]
+include = ["src", "strategies", "tests"]

@@ -1,0 +1,56 @@
+{
+  "taskId": "T039",
+  "timestamp": "2026-09-02T21:54:55Z",
+  "numTotalTests": 45,
+  "numPassedTests": 45,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "recorded-provider-retries",
+      "status": "passed",
+      "command": "uv run pytest -q tests/lake/providers/alpaca/test_client.py tests/lake/ingestion/equities",
+      "result": "45 focused tests passed; recorded AAPL SIP trades honor Retry-After and pagination, and recorded SPY SIP quotes retry a transient server failure without live Alpaca access"
+    },
+    {
+      "name": "golden-parquet-round-trips",
+      "status": "passed",
+      "result": "AAPL and SPY trade and quote records round-trip through the stable Parquet schemas with deterministic ordering, Decimal precision, checksums, byte counts, row counts, and logical golden JSON"
+    },
+    {
+      "name": "calendar-coverage",
+      "status": "passed",
+      "result": "Focused cases verify XNYS bounds across the March DST change, the July 3 early close, and the July 4 holiday for both AAPL and SPY planning"
+    },
+    {
+      "name": "duplicate-delivery",
+      "status": "passed",
+      "result": "Duplicate AAPL and SPY queue deliveries deterministically replace two object paths and two catalog keys while both source messages complete successfully"
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "commands": [
+        "uv run ruff check tests/lake/providers/alpaca/test_client.py tests/lake/ingestion/equities",
+        "uv run ruff format --check tests/lake/providers/alpaca/test_client.py tests/lake/ingestion/equities",
+        "uv run ty check tests/lake/providers/alpaca/test_client.py tests/lake/ingestion/equities"
+      ],
+      "result": "Focused Ruff lint, Ruff format, and ty checks passed"
+    },
+    {
+      "name": "wave-integration",
+      "status": "passed",
+      "evidence": ".github/verification/T028-T039-T078-T142-wave-validation.json",
+      "result": "The frozen wave passed the repository-wide lock, quality, 278-test pytest, package build, Bicep, workflow, and entrypoint checks"
+    }
+  ],
+  "decisions": [
+    "Recorded HTTP fixtures contain request shape and response bodies but no provider credentials.",
+    "Duplicate delivery composes the production generic QueueWorker and EquityIngestTransaction through their injected handler boundary because equity-specific worker construction is not part of this test-only task."
+  ],
+  "limitations": [
+    "No live Alpaca or Azure operation was performed."
+  ],
+  "blockers": []
+}

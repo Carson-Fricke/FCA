@@ -1,0 +1,71 @@
+{
+  "taskId": "T142",
+  "timestamp": "2026-09-02T21:54:55Z",
+  "numTotalTests": 15,
+  "numPassedTests": 15,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "local-command-surface",
+      "status": "passed",
+      "commands": [
+        "uv run lake local --help",
+        "uv run pytest tests/lake/local"
+      ],
+      "result": "15 focused tests passed for stable local API, ingest, reset, configuration, persistence, and dispatcher behavior"
+    },
+    {
+      "name": "no-azure-authentication",
+      "status": "passed",
+      "result": "Local API startup composes local catalog, file URL, filesystem, and DuckDB adapters; focused tests prove it does not construct or load an Azure credential"
+    },
+    {
+      "name": "mandatory-alpaca-credentials",
+      "status": "passed",
+      "result": "Local ingest requires non-empty Alpaca API key and secret environment variables before provider construction or state creation, never prints their values, and tests inject a fake provider without network access"
+    },
+    {
+      "name": "bounded-local-persistence",
+      "status": "passed",
+      "result": "A bounded AAPL ingest writes deterministic trade and quote Parquet paths plus atomically replaced JSON coverage; bounded results are accurately recorded as partial"
+    },
+    {
+      "name": "authenticated-api-and-query",
+      "status": "passed",
+      "result": "The local FastAPI composition requires bearer authentication for v1 routes and executes bounded SQL over complete local Parquet partitions"
+    },
+    {
+      "name": "safe-data-lifecycle",
+      "status": "passed",
+      "result": "Local reset deletes only a marker-owned data tree; repository ignore rules cover the default .local data root and local secret files"
+    },
+    {
+      "name": "runbook-and-agent-instruction",
+      "status": "passed",
+      "result": "The runbook and scoped instruction document Python and uv prerequisites, process-only secrets, PowerShell and POSIX commands, authenticated API and real bounded Alpaca smoke paths, stop/reset steps, troubleshooting, and local-versus-Azure limitations"
+    },
+    {
+      "name": "focused-quality-and-wave-integration",
+      "status": "passed",
+      "commands": [
+        "uv run ruff check src/lake/local src/lake/cli/local.py tests/lake/local",
+        "uv run ruff format --check src/lake/local src/lake/cli/local.py tests/lake/local",
+        "uv run ty check src/lake/local src/lake/cli/local.py tests/lake/local"
+      ],
+      "evidence": ".github/verification/T028-T039-T078-T142-wave-validation.json",
+      "result": "Focused quality checks and every frozen-wave integration gate passed"
+    }
+  ],
+  "decisions": [
+    "Supported local ingestion is always Alpaca-backed; fake providers are test-only and are not exposed as a local command mode.",
+    "The bounded smoke records partial coverage because a record cap can truncate provider results.",
+    "Local state is single-writer and intentionally excludes Azure queues, leases, SAS, managed identity, Key Vault, and distributed execution."
+  ],
+  "limitations": [
+    "The documented real-Alpaca smoke path was not executed because no live network or credential operation was requested.",
+    "The existing Starlette/httpx deprecation warning is emitted by FastAPI TestClient."
+  ],
+  "blockers": []
+}

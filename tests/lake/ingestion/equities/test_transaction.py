@@ -1,11 +1,14 @@
 import asyncio
 import io
+import json
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
+import pytest
 
 from lake.catalog import (
     CatalogRepository,
@@ -21,6 +24,9 @@ from lake.ingestion.equities.transaction import (
     StagedParquetObject,
 )
 from lake.providers.alpaca import NormalizedQuote, NormalizedTrade
+
+ROOT = Path(__file__).parents[4]
+GOLDEN_FIXTURES = ROOT / "tests" / "fixtures" / "equities" / "golden"
 
 
 class FakeClient:
@@ -132,6 +138,21 @@ def _run(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
+def _json_rows(payload: bytes) -> list[dict[str, object]]:
+    rows = pq.read_table(io.BytesIO(payload)).to_pylist()
+    return [
+        {
+            key: value.isoformat().replace("+00:00", "Z")
+            if isinstance(value, datetime)
+            else str(value)
+            if isinstance(value, Decimal)
+            else value
+            for key, value in row.items()
+        }
+        for row in rows
+    ]
+
+
 def test_transaction_fetches_stages_and_atomically_publishes_both_datasets() -> None:
     session = _session()
     client = FakeClient(
@@ -174,6 +195,41 @@ def test_transaction_fetches_stages_and_atomically_publishes_both_datasets() -> 
         schema_for(AssetClass.EQUITY, DataType.QUOTE), check_metadata=True
     )
     assert trade_table.column("trade_id").to_pylist() == [1, 2]
+
+
+@pytest.mark.parametrize("symbol", ["AAPL", "SPY"])
+def test_equity_parquet_round_trip_matches_golden_rows(symbol: str) -> None:
+    committer = AtomicFake()
+    transaction = EquityIngestTransaction(
+        client=FakeClient(
+            trades=[
+                _trade("2024-01-19T14:31:00Z", 2, symbol=symbol),
+                _trade("2024-01-19T14:30:00Z", 1, symbol=symbol),
+            ],
+            quotes=[
+                _quote("2024-01-19T14:30:00.123456Z", symbol=symbol),
+            ],
+        ),
+        committer=committer,
+    )
+
+    result = _run(transaction.run(symbol, _session()))
+    golden: Any = json.loads(
+        (GOLDEN_FIXTURES / f"{symbol.lower()}.json").read_text(encoding="utf-8")
+    )
+
+    assert {
+        metadata.path.split("data_type=", maxsplit=1)[1].split("/", maxsplit=1)[
+            0
+        ]: _json_rows(committer.objects[metadata.path])
+        for metadata in result.objects
+    } == golden
+    assert all(
+        record.checksum == metadata.checksum
+        and record.byte_size == metadata.bytes
+        and record.row_count == metadata.rows
+        for record, metadata in zip(result.coverage, result.objects, strict=True)
+    )
 
 
 def test_repeated_transaction_replaces_the_same_bytes_and_catalog_keys() -> None:

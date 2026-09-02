@@ -176,6 +176,46 @@ def test_queue_messages_are_deterministic_and_sender_is_injected() -> None:
     assert len(messages) == 1
 
 
+@pytest.mark.parametrize(
+    ("session_date", "start_time", "end_time"),
+    [
+        (date(2024, 3, 8), "2024-03-08T14:30:00Z", "2024-03-08T21:00:00Z"),
+        (date(2024, 3, 11), "2024-03-11T13:30:00Z", "2024-03-11T20:00:00Z"),
+        (date(2024, 7, 3), "2024-07-03T13:30:00Z", "2024-07-03T17:00:00Z"),
+    ],
+)
+def test_calendar_queue_bounds_cover_dst_and_early_close(
+    session_date: date,
+    start_time: str,
+    end_time: str,
+) -> None:
+    plan = plan_equity_catch_up(
+        _catalog_for([]),
+        symbols=("AAPL", "SPY"),
+        start=session_date,
+        end=session_date,
+        as_of=datetime(2024, 7, 8, tzinfo=UTC),
+    )
+
+    assert [item.symbol for item in plan] == ["AAPL", "SPY"]
+    assert all(item.queue_message()["start_time"] == start_time for item in plan)
+    assert all(item.queue_message()["end_time"] == end_time for item in plan)
+
+
+def test_calendar_holiday_produces_no_equity_work() -> None:
+    holiday = date(2024, 7, 4)
+
+    plan = plan_equity_catch_up(
+        _catalog_for([]),
+        symbols=("AAPL", "SPY"),
+        start=holiday,
+        end=holiday,
+        as_of=datetime(2024, 7, 8, tzinfo=UTC),
+    )
+
+    assert plan.items == ()
+
+
 def test_configuration_can_supply_watchlist_and_newest_first_order() -> None:
     from lake.configuration import load_settings, load_universes
 

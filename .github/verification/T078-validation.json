@@ -1,0 +1,65 @@
+{
+  "taskId": "T078",
+  "timestamp": "2026-09-02T21:54:55Z",
+  "numTotalTests": 14,
+  "numPassedTests": 14,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "capability-oriented-scaffold",
+      "status": "passed",
+      "result": "The harness product root contains deliberate core, data, fills, OMS, portfolio, results, risk, runtime, strategy, testing, venues, and CLI capability facades; tests mirror the product structure"
+    },
+    {
+      "name": "process-commands",
+      "status": "passed",
+      "commands": [
+        "uv run harness --help",
+        "uv run api --help",
+        "uv run backtest-job --help",
+        "uv run trader --help"
+      ],
+      "result": "The harness help lists all three planned process groups, standalone commands expose help, and unimplemented process launches fail explicitly instead of pretending to run"
+    },
+    {
+      "name": "package-and-image-surface",
+      "status": "passed",
+      "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
+      "result": "The wheel contains both lake and harness packages and publishes lake, harness, api, backtest-job, and trader console scripts; the Docker builder asserts all five installed commands while preserving the deployed lake entrypoint"
+    },
+    {
+      "name": "focused-tests-and-quality",
+      "status": "passed",
+      "commands": [
+        "uv run pytest tests/harness",
+        "uv run ruff check src/harness tests/harness strategies",
+        "uv run ruff format --check src/harness tests/harness strategies",
+        "uv run ty check src/harness tests/harness strategies"
+      ],
+      "result": "14 focused tests and all focused quality checks passed"
+    },
+    {
+      "name": "deterministic-core-boundary",
+      "status": "passed",
+      "result": "The scaffold introduces no synchronous engine implementation and no wall-clock, unseeded randomness, network, Azure, FastAPI, subprocess, or lake dependency in harness core capabilities"
+    },
+    {
+      "name": "architecture-and-wave-integration",
+      "status": "passed",
+      "evidence": ".github/verification/T028-T039-T078-T142-wave-validation.json",
+      "result": "Repository architecture documents the harness product boundary and capability layout; the frozen wave passed all repository checks"
+    }
+  ],
+  "decisions": [
+    "Capability facades remain empty until later CLEO tasks establish stable public contracts.",
+    "The shared image retains ENTRYPOINT [\"lake\"] for deployed market-lake compatibility; harness process binaries are installed for explicit command overrides.",
+    "No strategy-facing contract or engine path exists in this scaffold, so no strategy contract migration or determinism golden update was required."
+  ],
+  "limitations": [
+    "A local wheel build validated packaged commands; Docker was unavailable for a local image build.",
+    "Harness API, backtest, and trader launches are intentional placeholders owned by later tasks."
+  ],
+  "blockers": []
+}

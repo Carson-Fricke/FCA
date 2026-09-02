@@ -28,6 +28,7 @@ def test_published_capability_facades_import() -> None:
         "lake.contracts",
         "lake.coverage",
         "lake.crypto",
+        "lake.local",
         "lake.options",
         "lake.providers.alpaca",
         "lake.query",
@@ -41,10 +42,14 @@ def test_published_capability_facades_import() -> None:
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
-        ([], "{api,ingest}"),
-        (["--help"], "{api,ingest}"),
+        ([], "{api,ingest,local}"),
+        (["--help"], "{api,ingest,local}"),
         (["api", "--help"], "Run the market-lake API process."),
         (["ingest", "--help"], "Run the market-lake ingest process."),
+        (
+            ["local", "--help"],
+            "Run the market lake with local files and no Azure resources.",
+        ),
     ],
 )
 def test_module_command_help(arguments: list[str], expected: str) -> None:
@@ -60,7 +65,7 @@ def test_module_command_help(arguments: list[str], expected: str) -> None:
     assert result.stderr == ""
 
 
-@pytest.mark.parametrize("command", ["api", "ingest"])
+@pytest.mark.parametrize("command", ["api", "ingest", "local"])
 def test_command_dispatch(command: str, monkeypatch: MonkeyPatch) -> None:
     received: list[str] = []
 

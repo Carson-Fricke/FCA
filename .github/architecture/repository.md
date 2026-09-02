@@ -7,8 +7,9 @@ initial skeleton, market-lake process package, shared image, foundational
 storage, identity, and Container Apps modules, and the market-lake
 resource-group infrastructure entry point are implemented. Versioned lake
 configuration, partition/schema/calendar contracts, and reusable image
-publication are also implemented. The quant-harness package, complete
-CI/deployment orchestration, and deployment remain planned.
+publication are also implemented. The quant-harness capability and process
+scaffold is implemented; its domain behavior, CI/deployment orchestration, and
+deployment remain planned.
 
 ## Product Boundaries
 
@@ -33,12 +34,13 @@ adapters, and orchestration details stay behind those boundaries.
 | Package | Responsibility |
 | --- | --- |
 | `lake.catalog` | Coverage, job, contract, and front-set records; repository ports; memory and Azure Table adapters. |
-| `lake.cli` | Console dispatch and API or ingest process commands. |
+| `lake.cli` | Console dispatch and API, ingest, or local process commands. |
 | `lake.configuration` | Strict YAML loading, typed settings, environment overrides, and normalized universes. |
 | `lake.contracts` | Stable partition paths, PyArrow schemas, and exchange or UTC session contracts. |
 | `lake.coverage` | Calendar-aware coverage classification, gap planning, and ensure-oriented application behavior. |
 | `lake.http` | FastAPI composition, authentication, request models, and thin catalog, ensure, and query controllers. |
 | `lake.ingestion` | Shared ingest ports plus equity, option, and crypto planning, transactions, and worker construction. |
+| `lake.local` | Workstation-only API, Alpaca ingest, filesystem, and catalog composition. |
 | `lake.providers.alpaca` | Async Alpaca transport, pagination/retry behavior, and normalized provider records. |
 | `lake.query` | File-query orchestration and bounded DuckDB execution over ensured objects. |
 | `lake.queue` | Durable delivery policy, Azure queue adapter, dead-letter envelopes, and explicit replay. |
@@ -58,6 +60,7 @@ src/lake/
 |   |-- equities/                  Equity transaction and backfill behavior
 |   |-- options/                   Front-set selection and option ingestion
 |   `-- crypto/                    UTC-day planning and crypto ingestion
+|-- local/                         Workstation-only composition and state
 |-- providers/
 |   `-- alpaca/                    Provider records and async HTTP client
 |-- query/                         File and bounded SQL query services
@@ -87,6 +90,13 @@ tests/lake/
 `-- storage/
 ```
 
+The quant-harness scaffold follows the same product-first rule under
+`src/harness` and `tests/harness`. Its `core`, `data`, `fills`, `oms`,
+`portfolio`, `results`, `risk`, `runtime`, `strategy`, `testing`, and `venues`
+facades reserve capability boundaries without defining contracts owned by later
+tasks. Thin `harness`, `api`, `backtest-job`, and `trader` command entrypoints
+make the future process boundaries explicit and fail clearly until composed.
+
 ## Shared Foundation
 
 The products share repository-level mechanics where divergence would create
@@ -99,8 +109,8 @@ operational drift:
   storage, observability, and Container Apps definitions.
 - `.github/workflows` provides path-filtered checks, image publication, and
   OIDC-based deployment.
-- `tests/lake` mirrors the market-lake capability boundaries. `tests` also
-  holds explicit cross-product contract tests where integration is
+- `tests/lake` and `tests/harness` mirror their product capability boundaries.
+  `tests` also holds explicit cross-product contract tests where integration is
   intentional.
 
 ## Market-Lake Deployment

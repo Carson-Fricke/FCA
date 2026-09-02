@@ -1,0 +1,40 @@
+{
+  "quote": [
+    {
+      "ask_exchange": "XNAS",
+      "ask_price": "190.130000000000000000",
+      "ask_size": 200,
+      "bid_exchange": "XNAS",
+      "bid_price": "190.120000000000000000",
+      "bid_size": 100,
+      "conditions": [],
+      "symbol": "AAPL",
+      "tape": "C",
+      "timestamp": "2024-01-19T14:30:00.123456Z"
+    }
+  ],
+  "trade": [
+    {
+      "conditions": ["@"],
+      "exchange": "XNAS",
+      "price": "190.125000000000000000",
+      "size": 100,
+      "symbol": "AAPL",
+      "tape": "C",
+      "timestamp": "2024-01-19T14:30:00Z",
+      "trade_id": 1,
+      "update": null
+    },
+    {
+      "conditions": ["@"],
+      "exchange": "XNAS",
+      "price": "190.125000000000000000",
+      "size": 100,
+      "symbol": "AAPL",
+      "tape": "C",
+      "timestamp": "2024-01-19T14:31:00Z",
+      "trade_id": 2,
+      "update": null
+    }
+  ]
+}

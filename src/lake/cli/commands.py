@@ -3,13 +3,14 @@
 import argparse
 from collections.abc import Callable, Sequence
 
-from lake.cli import api, ingest
+from lake.cli import api, ingest, local
 
 Command = Callable[[Sequence[str] | None], int]
 
 _COMMANDS: dict[str, Command] = {
     "api": api.main,
     "ingest": ingest.main,
+    "local": local.main,
 }
 
 
@@ -18,9 +19,10 @@ def _parser() -> argparse.ArgumentParser:
         prog="lake",
         description="Run a market-lake process from the shared runtime image.",
     )
-    commands = parser.add_subparsers(dest="command", metavar="{api,ingest}")
+    commands = parser.add_subparsers(dest="command", metavar="{api,ingest,local}")
     commands.add_parser("api", add_help=False, help="run the API process")
     commands.add_parser("ingest", add_help=False, help="run the ingest process")
+    commands.add_parser("local", add_help=False, help="run local API, ingest, or reset")
     return parser
 
 

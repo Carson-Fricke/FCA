@@ -23,6 +23,7 @@ ENV/
 # Packaging and build output
 build/
 dist/
+/dist-ci/
 .eggs/
 *.egg
 *.egg-info/

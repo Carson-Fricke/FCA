@@ -1,0 +1,96 @@
+{
+  "interactions": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v2/stocks/trades",
+        "params": {
+          "end": "2024-01-19T21:00:00Z",
+          "feed": "sip",
+          "limit": 2,
+          "sort": "asc",
+          "start": "2024-01-19T14:30:00Z",
+          "symbols": "AAPL"
+        }
+      },
+      "response": {
+        "body": {
+          "next_page_token": "aapl-page-2",
+          "trades": {
+            "AAPL": [
+              {
+                "c": ["@", "I"],
+                "i": 9001,
+                "p": "190.125",
+                "s": 10,
+                "t": "2024-01-19T14:30:00.123456Z",
+                "x": "V",
+                "z": "C"
+              }
+            ]
+          }
+        },
+        "headers": {},
+        "status_code": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v2/stocks/trades",
+        "params": {
+          "end": "2024-01-19T21:00:00Z",
+          "feed": "sip",
+          "limit": 2,
+          "page_token": "aapl-page-2",
+          "sort": "asc",
+          "start": "2024-01-19T14:30:00Z",
+          "symbols": "AAPL"
+        }
+      },
+      "response": {
+        "body": {"message": "rate limit exceeded"},
+        "headers": {"Retry-After": "1.5"},
+        "status_code": 429
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v2/stocks/trades",
+        "params": {
+          "end": "2024-01-19T21:00:00Z",
+          "feed": "sip",
+          "limit": 2,
+          "page_token": "aapl-page-2",
+          "sort": "asc",
+          "start": "2024-01-19T14:30:00Z",
+          "symbols": "AAPL"
+        }
+      },
+      "response": {
+        "body": {
+          "next_page_token": null,
+          "trades": {
+            "AAPL": [
+              {
+                "c": ["@"],
+                "i": 9002,
+                "p": "190.25",
+                "s": 25,
+                "t": "2024-01-19T14:31:00Z",
+                "u": "corrected",
+                "x": "Q",
+                "z": "C"
+              }
+            ]
+          }
+        },
+        "headers": {},
+        "status_code": 200
+      }
+    }
+  ],
+  "recording": "Alpaca SIP equity trades",
+  "symbol": "AAPL"
+}
