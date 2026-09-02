@@ -1,0 +1,72 @@
+{
+  "taskId": "T028",
+  "timestamp": "2026-09-01T22:30:00Z",
+  "numTotalTests": 7,
+  "numPassedTests": 7,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "workflow-static-assertions",
+      "status": "passed",
+      "command": "Node.js static assertions over .github/workflows/python-bicep-ci.yml",
+      "result": "The workflow has pull_request and main/master push triggers with Python/config/tests and infra path filters; uses uv for lock, sync, test, and build; runs Ruff lint/format and ty; validates Bicep build/lint; and contains no MyPy invocation. All action references are full 40-character commit SHAs."
+    },
+    {
+      "name": "workflow-json-validation",
+      "status": "passed",
+      "command": "Node.js JSON.parse over .github/verification/T028-validation.json",
+      "result": "Validation record parsed successfully"
+    },
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Lockfile is up to date"
+    },
+    {
+      "name": "python-quality-and-tests",
+      "status": "passed",
+      "commands": [
+        "uv sync --locked --extra dev",
+        "uv run --extra dev ruff check .",
+        "uv run --extra dev ruff format --check .",
+        "uv run --extra dev ty check",
+        "uv run --extra dev pytest -p no:cacheprovider"
+      ],
+      "result": "All local Python CI checks passed"
+    },
+    {
+      "name": "python-package-build",
+      "status": "passed",
+      "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
+      "result": "Wheel build completed successfully"
+    },
+    {
+      "name": "bicep-build",
+      "status": "passed",
+      "command": "az bicep build --file infra/main.bicep --stdout",
+      "result": "The resource-group composition compiled without diagnostics"
+    },
+    {
+      "name": "bicep-lint",
+      "status": "passed",
+      "command": "az bicep lint --file infra/main.bicep",
+      "result": "The resource-group composition linted without diagnostics"
+    }
+  ],
+  "decisions": [
+    "The workflow is intentionally separate from publish-image.yml and performs no image publication, Azure login, what-if, deployment, or data-plane operation.",
+    "Both jobs use default fail-fast step behavior so a nonzero lock, quality, test, build, or Bicep command fails CI.",
+    "The workflow is path-filtered for Python, configuration, tests, project metadata, lockfile, infrastructure, and its own changes."
+  ],
+  "limitations": [
+    "The GitHub-hosted workflow was not run, as requested; local command results do not prove runner or hosted-action behavior.",
+    "actionlint was not available on this machine, so workflow syntax was checked with static assertions only."
+  ],
+  "blockers": [
+    "T028 remains dependent on CLEO task T020; CLEO task state was not mutated.",
+    "No GitHub-hosted execution was performed."
+  ]
+}

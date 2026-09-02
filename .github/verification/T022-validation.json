@@ -1,0 +1,52 @@
+{
+  "taskId": "T022",
+  "timestamp": "2026-09-01T21:19:39Z",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-parquet-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_parquet.py",
+      "result": "6 tests passed in 0.95s"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "43 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "75 tests passed in 2.39s"
+    }
+  ],
+  "decisions": [
+    "The writer consumes the T021 date-first partition_path contract and schema_for registry without modifying either existing module.",
+    "Records are normalized to the selected schema, canonical symbol, UTC nanosecond timestamps, and exact Decimal values; binary floats are rejected for decimal fields.",
+    "LocalFilesystemStore exposes atomic os.replace whole-object semantics behind the ObjectStore protocol; Azure and blob transports are deferred.",
+    "Parquet payloads use Zstandard compression and preserve T021 field and schema metadata, including nested condition item names.",
+    "ParquetMetadata records the committed relative path, row count, byte count, and SHA-256 checksum of the exact payload sent to the store."
+  ],
+  "limitations": [
+    "No Azure or blob data-plane operation was run because transport ownership is explicitly deferred; local filesystem behavior is covered instead."
+  ],
+  "blockers": []
+}

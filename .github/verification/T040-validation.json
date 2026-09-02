@@ -1,0 +1,78 @@
+{
+  "taskId": "T040",
+  "numTotalTests": 12,
+  "numPassedTests": 12,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-api-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_api.py",
+      "result": "11 tests passed for unauthenticated health, health probe alias, missing and invalid bearer rejection, valid bearer acceptance, direct auth dependency use, token redaction, fail-closed configuration, environment token loading, strict request validation, consistent validation errors, date ordering, and symbol validation"
+    },
+    {
+      "name": "api-process-entrypoint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_package_entrypoints.py -k api_command_starts_uvicorn",
+      "result": "The lake api command starts Uvicorn against lake.app:app and accepts the configured host and port"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/app.py src/lake/auth.py src/lake/models.py tests/test_lake_api.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/app.py src/lake/auth.py src/lake/models.py tests/test_lake_api.py",
+      "result": "4 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/app.py src/lake/auth.py src/lake/models.py tests/test_lake_api.py",
+      "result": "All checks passed"
+    }
+  ],
+  "repositoryChecks": [
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "53 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "lockfile-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Lockfile is current"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    }
+  ],
+  "limitations": [
+    "The ingest command remains a help-only process boundary until the later worker tasks implement its execution loop.",
+    "T041 and later API endpoint behavior is intentionally deferred. T040 exposes only health and a minimal protected authentication check.",
+    "Protected routes require the runtime-only LAKE_API__BEARER_TOKEN environment variable or an equivalent injected token when create_app is used. No token value is stored in source or verification output.",
+    "No Azure, provider, deployment, Docker image, or live network call was run."
+  ]
+}

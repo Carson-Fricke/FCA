@@ -1,0 +1,84 @@
+{
+  "taskId": "T029",
+  "numTotalTests": 6,
+  "numPassedTests": 6,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "workflow-syntax-and-expressions",
+      "status": "passed",
+      "commands": [
+        "actionlint .github/workflows/deploy-bicep.yml",
+        "action-validator .github/workflows/deploy-bicep.yml"
+      ],
+      "result": "actionlint 1.7.12 and action-validator 0.6.0 reported no workflow syntax, expression, event, permissions, or reusable-workflow schema errors"
+    },
+    {
+      "name": "reusable-workflow-contract",
+      "status": "passed",
+      "result": "workflow_call requires azure-subscription-id, resource-group, environment, and parameters-file; template-file defaults to infra/main.bicep and dry-run defaults to true"
+    },
+    {
+      "name": "environment-scoped-oidc",
+      "status": "passed",
+      "result": "The deploy job binds to inputs.environment, grants id-token: write, and azure/login receives client-id from vars.AZURE_CLIENT_ID, tenant-id from vars.AZURE_TENANT_ID, and subscription-id from inputs.azure-subscription-id; no Azure client secret or secret context is used"
+    },
+    {
+      "name": "resource-group-validation-and-parameter-support",
+      "status": "passed",
+      "result": "The workflow runs az deployment group validate; .bicepparam files are passed directly, while JSON parameter files use the supplied template-file input and @path parameter syntax"
+    },
+    {
+      "name": "dry-run-and-deployment-gates",
+      "status": "passed",
+      "result": "dry-run=true runs az deployment group what-if after validation and skips deployment; dry-run=false skips what-if and runs az deployment group create after validation"
+    },
+    {
+      "name": "pinned-action-revisions",
+      "status": "passed",
+      "command": "git ls-remote against each action repository and referenced release tag",
+      "result": "actions/checkout v4.2.2 and azure/login v2.3.0 are referenced by full 40-character commit SHAs"
+    }
+  ],
+  "callerEnvironmentValuesRequired": [
+    {
+      "environmentVariable": "AZURE_CLIENT_ID",
+      "source": "GitHub Environment configuration variable",
+      "purpose": "Client ID of the user-assigned managed identity trusted by the environment-scoped GitHub federated credential"
+    },
+    {
+      "environmentVariable": "AZURE_TENANT_ID",
+      "source": "GitHub Environment configuration variable",
+      "purpose": "Microsoft Entra tenant ID containing the federated deployer identity"
+    }
+  ],
+  "callerInputsRequired": [
+    {
+      "input": "azure-subscription-id",
+      "purpose": "Azure subscription containing the target resource group"
+    },
+    {
+      "input": "resource-group",
+      "purpose": "Existing resource group to validate, preview, or deploy"
+    },
+    {
+      "input": "environment",
+      "purpose": "Exact GitHub Environment name; it supplies the two variables above and its approval/protection rules"
+    },
+    {
+      "input": "parameters-file",
+      "purpose": "Repository-relative .bicepparam or JSON parameter file"
+    }
+  ],
+  "callerRequirements": [
+    "The caller must permit id-token: write for the reusable workflow; the workflow itself requests contents: read and id-token: write.",
+    "No Azure client secret, certificate, password, or other secret is required by this workflow.",
+    "The caller must set dry-run to false explicitly to permit az deployment group create; the default is validation plus what-if only."
+  ],
+  "limitations": [
+    "No Azure login, validate, what-if, deployment, or secret access was run during verification.",
+    "Verification was limited to static workflow analysis and inspection of the command paths; Azure permissions, GitHub Environment protection, and the federated credential require a GitHub-hosted caller run."
+  ]
+}

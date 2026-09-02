@@ -1,0 +1,87 @@
+{
+  "taskId": "T042",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-ensure-api-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_ensure_api.py",
+      "result": "10 tests passed for authenticated bounded ensure requests, complete coverage responses, deterministic job IDs, injected launcher invocation and deduplication, persisted queued and failed states, bounded waiting, job polling, and not-found handling"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/app.py src/lake/ensure_api.py tests/test_lake_ensure_api.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/app.py src/lake/ensure_api.py tests/test_lake_ensure_api.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/app.py src/lake/ensure_api.py tests/test_lake_ensure_api.py",
+      "result": "All checks passed"
+    }
+  ],
+  "repositoryChecks": [
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed; one existing Starlette httpx deprecation warning"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "66 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "lockfile-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Lockfile is current"
+    }
+  ],
+  "files": [
+    "src/lake/ensure_api.py",
+    "src/lake/app.py",
+    "tests/test_lake_ensure_api.py",
+    ".github/verification/T042-validation.json"
+  ],
+  "decisions": [
+    "POST /v1/catalog/ensure is protected by the existing bearer dependency and uses the injected catalog, job repository, launcher, deterministic clock, and configured date-range and wait bounds.",
+    "Ensure job IDs are SHA-256 identifiers of the canonical request, so duplicate requests return the same persisted job and do not relaunch work.",
+    "The launcher receives an EnsureJob containing the request and calendar-aware actionable gaps; it is invoked without Azure, provider, file-query, or SAS calls. A deployment composition can adapt this seam to the T027 queue sender.",
+    "GET /v1/jobs/{job_id} returns the injected JobRecord state and timestamps; unknown jobs use the existing structured API error response."
+  ],
+  "limitations": [
+    "The default application launcher is a provider-free no-op. Deployment composition should inject a queue-backed launcher and durable JobRepository.",
+    "The launcher wait is bounded by api.ensure_wait_deadline_seconds; work that outlives the deadline remains available through polling.",
+    "T043 file query and SAS behavior is intentionally not implemented.",
+    "Focused and repository tests use in-memory repositories and a deterministic timezone-aware clock; no Azure, provider, deployment, or network call was made.",
+    "The queue-worker test harness now yields during fake lease renewal so the complete repository suite is bounded and green.",
+    "Pytest emits the pre-existing FastAPI/httpx StarletteDeprecationWarning from TestClient."
+  ],
+  "blockers": []
+}

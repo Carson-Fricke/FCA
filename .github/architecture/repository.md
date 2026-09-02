@@ -3,12 +3,12 @@
 ## Status
 
 This document describes the target repository and deployment boundaries. The
-initial skeleton, market-lake process package, shared image, and foundational
-storage, identity, and Container Apps modules are implemented. Versioned lake
+initial skeleton, market-lake process package, shared image, foundational
+storage, identity, and Container Apps modules, and the market-lake
+resource-group infrastructure entry point are implemented. Versioned lake
 configuration, partition/schema/calendar contracts, and reusable image
-publication are also implemented. The quant-harness package, infrastructure
-entry point, complete CI/deployment orchestration, and deployment remain
-planned.
+publication are also implemented. The quant-harness package, complete
+CI/deployment orchestration, and deployment remain planned.
 
 ## Product Boundaries
 
@@ -38,6 +38,22 @@ operational drift:
   OIDC-based deployment.
 - `tests` mirrors the source boundaries and holds explicit cross-product
   contract tests where integration is intentional.
+
+## Market-Lake Deployment
+
+`infra/main.bicep` is the resource-group entry point for the market-lake dev
+slice. `infra/parameters/dev.bicepparam` selects `westus2` and the `dev`
+environment. Names use the `fca-ml-dev` prefix; the storage account and Key
+Vault add deterministic suffixes derived from the deployment resource group,
+while the remaining resource names are stable from the prefix and environment.
+
+The composition deploys storage, managed identities and GitHub OIDC, Key
+Vault, runtime access, Container Apps, and cost controls together. The dev
+parameters explicitly enable the Key Vault public endpoint because no private
+endpoint module is composed yet; the vault remains Entra-only and RBAC-based.
+The image must be supplied by immutable digest, and the budget alert contact
+placeholder must be replaced with a valid user-supplied email before Azure
+operations. No secrets are stored in Bicep or parameter files.
 
 Sharing these roots does not imply unrestricted cross-package imports. New
 shared code should be introduced only when a stable contract has more than one

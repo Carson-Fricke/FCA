@@ -56,6 +56,7 @@ credentials.json
 /.secrets/
 /config/**/*.local.yaml
 /config/**/*.local.yml
+/infra/parameters/**/*.local.bicepparam
 /config/**/credentials.yaml
 /config/**/credentials.yml
 /config/**/secrets.yaml

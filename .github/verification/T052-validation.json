@@ -1,0 +1,84 @@
+{
+  "taskId": "T052",
+  "timestamp": "2026-09-01T22:46:37Z",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-option-selector-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_options.py",
+      "result": "5 tests passed for nearest expiration selection, inclusive spot-relative strike boundaries, lifecycle filtering, deterministic ordering, daily replacement, and underlying/date queries"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/contracts.py src/lake/option_selector.py tests/test_lake_options.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/contracts.py src/lake/option_selector.py tests/test_lake_options.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/contracts.py src/lake/option_selector.py tests/test_lake_options.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Resolved 58 packages in 0.86ms"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed; one existing Starlette httpx deprecation warning"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "79 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    }
+  ],
+  "files": [
+    "src/lake/contracts.py",
+    "src/lake/option_selector.py",
+    "tests/test_lake_options.py",
+    ".github/verification/T052-validation.json"
+  ],
+  "decisions": [
+    "T024, T033, and T026 are accepted CLEO dependencies with status done and all verification gates passed, so T052 implementation semantics permit proceeding.",
+    "OptionChainSelector consumes T024 ContractRecord and ContractRepository values and T026 OptionSelection settings without creating a provider or Azure client.",
+    "Nearest expiration dates are selected after excluding contracts expired or inactive on the selection date; strike bounds are inclusive and calculated from Decimal spot values.",
+    "DailyFrontSet freezes and deterministically sorts OSI membership, while InMemoryDailyFrontSetRepository replaces duplicate underlying/date keys for reproducible reruns.",
+    "ContractsCatalog exposes T024 contract queries together with daily front-set persistence and underlying/date filtering."
+  ],
+  "limitations": [
+    "No live Alpaca/provider calls, credentials, network access, Azure provisioning, or live Azure calls were used.",
+    "The shared worktree contains concurrent task changes; only the queue-worker test harness yield and its type-safe catch-up test annotation were corrected during integrated verification.",
+    "No MyPy run was performed; repository tooling uses Ruff and ty."
+  ],
+  "blockers": []
+}

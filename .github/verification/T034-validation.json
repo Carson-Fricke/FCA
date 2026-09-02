@@ -1,0 +1,73 @@
+{
+  "taskId": "T034",
+  "timestamp": "2026-09-01T21:54:00Z",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-equity-ingest-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_equity_ingest.py",
+      "result": "6 tests passed in 0.99s for trade and quote fetch/staging, deterministic paths and bytes, complete/empty/partial/error coverage, normalization rejection, retry replacement, and injected atomic commit behavior"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/equity_ingest.py tests/test_lake_equity_ingest.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/equity_ingest.py tests/test_lake_equity_ingest.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/equity_ingest.py tests/test_lake_equity_ingest.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed after the T040 API process integration"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "All files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed; one existing Starlette httpx deprecation warning"
+    }
+  ],
+  "decisions": [
+    "The new lake.equity_ingest module uses injected T033 client, T022 writer factory, and an AtomicIngestCommitter boundary so both staged Parquet objects and both T024 CoverageRecord rows publish in one commit.",
+    "Trades and quotes are fetched concurrently for one canonical symbol and CoverageSession bounds; no external write starts until both requests succeed.",
+    "T022 ParquetWriter normalizes records against the stable T021 schemas, while the transaction validates symbol and session membership and sorts records by deterministic keys before staging.",
+    "Closed sessions produce complete or empty coverage; open sessions produce partial coverage; provider or normalization failures publish two error rows and no objects through the same atomic boundary.",
+    "Deterministic date-first object paths and replace semantics make repeated runs safe: a retry replaces the same two objects and catalog keys rather than appending duplicates."
+  ],
+  "limitations": [
+    "The existing T022 ObjectStore and T024 CatalogRepository protocols do not provide a cross-object/catalog transaction primitive, so the new AtomicIngestCommitter protocol is an explicit injected backend boundary; tests use an in-memory atomic fake.",
+    "The transaction stages both Parquet payloads privately, calls the committer only after both fetches and normalization succeed, and publishes error coverage with no objects on provider or normalization failure.",
+    "No live Alpaca, Azure Blob, Azure Table, credentials, network access, or MyPy run was used.",
+    "The shared worktree contains unrelated user changes and untracked files; none were modified, staged, reverted, or committed by T034."
+  ],
+  "blockers": []
+}

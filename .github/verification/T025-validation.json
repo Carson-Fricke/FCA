@@ -1,0 +1,78 @@
+{
+  "taskId": "T025",
+  "numTotalTests": 9,
+  "numPassedTests": 9,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/coverage.py tests/test_lake_coverage.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/coverage.py tests/test_lake_coverage.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/coverage.py tests/test_lake_coverage.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-coverage-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_coverage.py",
+      "result": "7 tests passed"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "53 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "108 tests passed, 1 warning"
+    },
+    {
+      "name": "git-whitespace-check",
+      "status": "passed",
+      "command": "git diff --check",
+      "result": "No whitespace errors"
+    }
+  ],
+  "decisions": [
+    "CoverageSession wraps T023 equity ExchangeSession bounds and represents crypto UTC days as [00:00, 24:00) UTC windows; an explicit timezone-aware as_of marks only the currently open session partial.",
+    "CoverageState keeps missing, empty, partial, complete, and error distinct. Empty is terminal, complete is satisfied, and partial or error entries are actionable.",
+    "A currently open session is classified as partial even when its catalog row is complete, allowing the deterministic partition to be replaced as the session progresses; persisted partial rows are marked replace_existing.",
+    "calculate_coverage reads T024 CatalogRepository rows for the requested asset and date range, while plan_gaps returns only missing, partial, and error entries without Azure or provider coupling.",
+    "Symbols and data types are canonicalized and sorted before expansion; entries are emitted in stable data-type, symbol, and ascending session-date order for repeatable plans.",
+    "Equity planning uses XNYS sessions and excludes weekends and holidays while preserving half-day close bounds; crypto planning uses every inclusive UTC calendar day.",
+    "The API is exposed from src/lake/coverage.py through sessions_for, equity_sessions, crypto_sessions, calculate_coverage, plan_gaps, CoverageSession, SessionCoverage, CoverageReport, GapPlan, and CoverageState."
+  ],
+  "limitations": [
+    "Tests use the in-memory T024 catalog repository and deterministic historical as_of values; no live Azure, blob, or market-provider calls were made.",
+    "Repository-wide pytest emits the pre-existing FastAPI/httpx StarletteDeprecationWarning; all 105 tests pass."
+  ],
+  "blockers": []
+}

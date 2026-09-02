@@ -1,0 +1,115 @@
+name: Deploy Bicep infrastructure
+
+on:
+  workflow_call:
+    inputs:
+      azure-subscription-id:
+        description: Azure subscription ID used for the resource-group deployment
+        required: true
+        type: string
+      resource-group:
+        description: Existing Azure resource group targeted by the deployment
+        required: true
+        type: string
+      environment:
+        description: GitHub Environment that owns the Azure OIDC configuration and deployment approval
+        required: true
+        type: string
+      parameters-file:
+        description: Repository-relative Bicep parameter file, such as infra/parameters/dev.bicepparam
+        required: true
+        type: string
+      template-file:
+        description: Repository-relative Bicep template used with JSON parameter files
+        required: false
+        default: infra/main.bicep
+        type: string
+      dry-run:
+        description: Validate and run what-if without creating resources when true; deploy when false
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Validate and deploy Bicep
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Log in to Azure with workload identity
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+
+      - name: Validate Bicep deployment
+        shell: bash
+        env:
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+          PARAMETERS_FILE: ${{ inputs.parameters-file }}
+          TEMPLATE_FILE: ${{ inputs.template-file }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$PARAMETERS_FILE" == *.bicepparam ]]; then
+            deployment_args=(--parameters "$PARAMETERS_FILE")
+          else
+            deployment_args=(--template-file "$TEMPLATE_FILE" --parameters "@$PARAMETERS_FILE")
+          fi
+
+          az deployment group validate \
+            --resource-group "$RESOURCE_GROUP" \
+            "${deployment_args[@]}"
+
+      - name: Preview Bicep deployment with what-if
+        if: ${{ inputs.dry-run }}
+        shell: bash
+        env:
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+          PARAMETERS_FILE: ${{ inputs.parameters-file }}
+          TEMPLATE_FILE: ${{ inputs.template-file }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$PARAMETERS_FILE" == *.bicepparam ]]; then
+            deployment_args=(--parameters "$PARAMETERS_FILE")
+          else
+            deployment_args=(--template-file "$TEMPLATE_FILE" --parameters "@$PARAMETERS_FILE")
+          fi
+
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            "${deployment_args[@]}"
+
+      - name: Deploy Bicep template
+        if: ${{ !inputs.dry-run }}
+        shell: bash
+        env:
+          RESOURCE_GROUP: ${{ inputs.resource-group }}
+          PARAMETERS_FILE: ${{ inputs.parameters-file }}
+          TEMPLATE_FILE: ${{ inputs.template-file }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$PARAMETERS_FILE" == *.bicepparam ]]; then
+            deployment_args=(--parameters "$PARAMETERS_FILE")
+          else
+            deployment_args=(--template-file "$TEMPLATE_FILE" --parameters "@$PARAMETERS_FILE")
+          fi
+
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            "${deployment_args[@]}"

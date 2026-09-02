@@ -1,0 +1,98 @@
+{
+  "taskId": "T045",
+  "numTotalTests": 230,
+  "numPassedTests": 230,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-bounded-query-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_bounded_query.py",
+      "result": "17 tests passed using local DuckDB and Parquet fixtures for JSON and Arrow results, complete ensured coverage, canonical storage paths, dangerous SQL and multiple-statement rejection, scan estimates, 32 MiB result-cap behavior, and authorized force overrides"
+    },
+    {
+      "name": "focused-query-api-regression-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_query_api.py tests/test_lake_api.py",
+      "result": "17 existing API and T043 file-query tests passed; authentication, strict file mode, canonical catalog paths, SAS behavior, ensure behavior, and bounded request validation remain green"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/bounded_query.py src/lake/query_api.py src/lake/app.py tests/test_lake_bounded_query.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/bounded_query.py src/lake/query_api.py src/lake/app.py tests/test_lake_bounded_query.py",
+      "result": "4 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/bounded_query.py src/lake/query_api.py src/lake/app.py tests/test_lake_bounded_query.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests-with-worker-isolated",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider --ignore tests/test_lake_crypto_worker.py -q",
+      "result": "224 tests passed with one existing Starlette/httpx deprecation warning when the six crypto-worker tests are isolated"
+    },
+    {
+      "name": "repository-crypto-worker-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_crypto_worker.py -vv -x",
+      "result": "6 tests passed; the crypto-worker file was isolated only as additional split regression evidence"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "91 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Resolved 58 packages"
+    }
+  ],
+  "files": [
+    "src/lake/bounded_query.py",
+    "src/lake/query_api.py",
+    "src/lake/app.py",
+    "tests/test_lake_bounded_query.py",
+    ".github/verification/T045-validation.json"
+  ],
+  "decisions": [
+    "POST /v1/query retains T043 file mode and adds a strict mode=sql request with the same authenticated, bounded date and coverage filters. SQL execution is attempted only after every requested session is complete and its catalog object path exactly matches the canonical partition path.",
+    "BoundedDuckDBQuery materializes only validated local Parquet paths into an in-memory DuckDB relation named data, disables external access before query planning, rejects mutating or administrative SQL, rejects external storage table functions and path relations, and requires the query plan to scan data.",
+    "Scan cost is conservatively estimated from the greater of catalog byte_size and the local fixture file size for each unique ensured file. The configured scan and selected JSON or Arrow result caps are enforced before or during execution; force=true is accepted only when server-side authorized_force_override is explicitly enabled.",
+    "JSON responses contain columns, JSON-compatible rows, result_bytes, estimated_scan_bytes, forced, and limitations. Arrow responses use an Arrow IPC stream and expose the same cost metadata in response headers.",
+    "Tests use only local temporary Parquet fixtures, in-memory catalog records, and DuckDB; no Azure, provider, credential, or network call was made."
+  ],
+  "limitations": [
+    "The repository-wide Ruff format check remains blocked by the unrelated pre-existing formatting issue in src/lake/option_backfill.py; no unrelated file was changed.",
+    "The monolithic repository pytest command exceeded the shell timeout at the pre-existing crypto-worker portion. The complete 227-test set was verified by running the 221 other tests and the 6 crypto-worker tests as separate commands.",
+    "The query executor is intentionally local-root based for this task. Production composition must provide a local/cache materialization boundary for ensured objects; no Azure blob reader or provider integration is included.",
+    "Force authorization is a server-side application setting and is false by default. The caller cannot self-authorize an over-cap query by setting force=true.",
+    "No MyPy run was performed; the repository uses Ruff and ty."
+  ],
+  "blockers": []
+}

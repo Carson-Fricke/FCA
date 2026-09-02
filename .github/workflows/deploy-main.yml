@@ -1,0 +1,246 @@
+name: Deploy main environment
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/deploy-main.yml
+      - .github/workflows/publish-image.yml
+      - Dockerfile
+      - pyproject.toml
+      - uv.lock
+      - config/**
+      - infra/**
+      - src/**
+
+concurrency:
+  group: fca-main-deployment-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish-image:
+    name: Publish immutable image
+    uses: ./.github/workflows/publish-image.yml
+    permissions:
+      contents: read
+      packages: write
+
+  deploy:
+    name: Deploy and smoke test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: publish-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Required reviewers on this Environment are the deployment approval gate.
+    # This is the only repository-managed production mutation path.
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_REFERENCE: ${{ needs.publish-image.outputs.image-reference }}
+      IMAGE_DIGEST: ${{ needs.publish-image.outputs.image-digest }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      RESOURCE_NAME_PREFIX: ${{ vars.RESOURCE_NAME_PREFIX }}
+      DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+      BUDGET_START_DATE: ${{ vars.BUDGET_START_DATE }}
+      ALLOW_PUBLIC_NETWORK_ACCESS: ${{ vars.ALLOW_PUBLIC_NETWORK_ACCESS }}
+      ENABLE_EXTERNAL_API_INGRESS: ${{ vars.ENABLE_EXTERNAL_API_INGRESS }}
+      INGEST_CRON_EXPRESSION: ${{ vars.INGEST_CRON_EXPRESSION }}
+      INGEST_REPLICA_TIMEOUT_SECONDS: ${{ vars.INGEST_REPLICA_TIMEOUT_SECONDS }}
+      GITHUB_OWNER: ${{ github.event.repository.owner.login }}
+      GITHUB_OWNER_ID: ${{ github.event.repository.owner.id }}
+      GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+      GITHUB_REPOSITORY_ID: ${{ github.event.repository.id }}
+
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate deployment inputs
+        shell: bash
+        env:
+          BUDGET_ALERT_CONTACT_EMAIL: ${{ secrets.BUDGET_ALERT_CONTACT_EMAIL }}
+        run: |
+          set -euo pipefail
+
+          required=(
+            IMAGE_REFERENCE
+            IMAGE_DIGEST
+            AZURE_CLIENT_ID
+            AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID
+            AZURE_RESOURCE_GROUP
+            AZURE_LOCATION
+            RESOURCE_NAME_PREFIX
+            DEPLOYMENT_ENVIRONMENT
+            BUDGET_START_DATE
+            BUDGET_ALERT_CONTACT_EMAIL
+            ALLOW_PUBLIC_NETWORK_ACCESS
+            ENABLE_EXTERNAL_API_INGRESS
+            INGEST_CRON_EXPRESSION
+            INGEST_REPLICA_TIMEOUT_SECONDS
+            GITHUB_OWNER
+            GITHUB_OWNER_ID
+            GITHUB_REPOSITORY_NAME
+            GITHUB_REPOSITORY_ID
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required deployment input $name is empty"
+              exit 1
+            fi
+          done
+
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The image job did not return a valid immutable digest"
+            exit 1
+          fi
+          if [[ ! "$IMAGE_REFERENCE" =~ ^ghcr\.io/[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The image job did not return a digest-addressed GHCR reference"
+            exit 1
+          fi
+          if [[ "$IMAGE_REFERENCE" != *@$IMAGE_DIGEST ]]; then
+            echo "::error::The image reference and image digest outputs disagree"
+            exit 1
+          fi
+
+          for boolean in ALLOW_PUBLIC_NETWORK_ACCESS ENABLE_EXTERNAL_API_INGRESS; do
+            case "${!boolean,,}" in
+              true|false) ;;
+              *)
+                echo "::error::$boolean must be exactly true or false"
+                exit 1
+                ;;
+            esac
+          done
+
+          if [[ "${ENABLE_EXTERNAL_API_INGRESS,,}" != "true" ]]; then
+            echo "::error::ENABLE_EXTERNAL_API_INGRESS must be true for the hosted probe-safe health smoke"
+            exit 1
+          fi
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy digest-pinned infrastructure
+        shell: bash
+        env:
+          DEPLOYMENT_NAME: fca-${{ github.run_id }}-${{ github.run_attempt }}
+          BUDGET_ALERT_CONTACT_EMAIL: ${{ secrets.BUDGET_ALERT_CONTACT_EMAIL }}
+        run: |
+          set -euo pipefail
+
+          az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+          az deployment group create \
+            --name "$DEPLOYMENT_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters \
+              "location=$AZURE_LOCATION" \
+              "resourceNamePrefix=$RESOURCE_NAME_PREFIX" \
+              "environmentName=$DEPLOYMENT_ENVIRONMENT" \
+              "sharedImageReference=$IMAGE_REFERENCE" \
+              "githubOwner=$GITHUB_OWNER" \
+              "githubOwnerId=$GITHUB_OWNER_ID" \
+              "githubRepository=$GITHUB_REPOSITORY_NAME" \
+              "githubRepositoryId=$GITHUB_REPOSITORY_ID" \
+              "githubEnvironment=$DEPLOYMENT_ENVIRONMENT" \
+              "budgetStartDate=$BUDGET_START_DATE" \
+              "budgetAlertContactEmail=$BUDGET_ALERT_CONTACT_EMAIL" \
+              "assignGithubDeployerRoles=false" \
+              "allowPublicNetworkAccess=$ALLOW_PUBLIC_NETWORK_ACCESS" \
+              "enableExternalApiIngress=$ENABLE_EXTERNAL_API_INGRESS" \
+              "ingestCronExpression=$INGEST_CRON_EXPRESSION" \
+              "ingestReplicaTimeoutSeconds=$INGEST_REPLICA_TIMEOUT_SECONDS" \
+            --only-show-errors \
+            --output none
+
+      - name: Verify workload image digests
+        id: runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+          normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+          api_app_name="${normalized_prefix}-${normalized_environment}-api"
+          ingest_job_name="${normalized_prefix}-${normalized_environment}-ingest"
+
+          api_image="$(az containerapp show \
+            --name "$api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='api'].image | [0]" \
+            --output tsv)"
+          ingest_image="$(az containerapp job show \
+            --name "$ingest_job_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='ingest'].image | [0]" \
+            --output tsv)"
+
+          if [[ "$api_image" != "$IMAGE_REFERENCE" ]]; then
+            echo "::error::The API does not use the published immutable image reference"
+            exit 1
+          fi
+          if [[ "$ingest_image" != "$IMAGE_REFERENCE" ]]; then
+            echo "::error::The ingest job does not use the published immutable image reference"
+            exit 1
+          fi
+
+          api_fqdn="$(az containerapp show \
+            --name "$api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)"
+          if [[ -z "$api_fqdn" || "$api_fqdn" == "None" ]]; then
+            echo "::error::The deployed API did not expose an ingress FQDN for the health smoke"
+            exit 1
+          fi
+
+          api_url="https://${api_fqdn}/health"
+          printf 'api-url=%s\n' "$api_url" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deployment"
+            echo "- Environment: \\`$DEPLOYMENT_ENVIRONMENT\\`"
+            echo "- Image digest: \\`$IMAGE_DIGEST\\`"
+            echo "- API health endpoint: \\`$api_url\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run probe-safe health smoke
+        shell: bash
+        env:
+          API_HEALTH_URL: ${{ steps.runtime.outputs.api-url }}
+        run: |
+          set -euo pipefail
+
+          response="$(curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 12 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --connect-timeout 10 \
+            --max-time 30 \
+            "$API_HEALTH_URL")"
+          if ! printf '%s' "$response" | jq --exit-status --arg expected ok '.status == $expected' >/dev/null; then
+            echo "::error::The probe-safe health endpoint did not return status ok"
+            exit 1
+          fi

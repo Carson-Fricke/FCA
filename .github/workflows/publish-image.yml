@@ -1,6 +1,9 @@
 name: Publish container image
 
 on:
+  push:
+    branches:
+      - image-build
   workflow_call:
     outputs:
       image-reference:

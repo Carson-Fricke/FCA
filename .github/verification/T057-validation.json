@@ -1,0 +1,96 @@
+{
+  "taskId": "T057",
+  "timestamp": "2026-09-01T23:38:20Z",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-crypto-client-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_crypto.py",
+      "result": "2 tests passed for configured BTC/USD and ETH/USD pair normalization, historical crypto trades and quotes, cursor pagination, fractional Decimal values, nullable feed-specific fields, and T021 schema mapping"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/alpaca.py src/lake/crypto.py tests/test_lake_crypto.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/alpaca.py src/lake/crypto.py tests/test_lake_crypto.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/alpaca.py src/lake/crypto.py tests/test_lake_crypto.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Resolved 58 packages in 1ms"
+    },
+    {
+      "name": "regression-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_alpaca.py tests/test_lake_crypto.py tests/test_lake_data_contracts.py tests/test_lake_configuration.py",
+      "result": "35 tests passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed with one existing Starlette/httpx deprecation warning"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "79 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "cleo-export-audit",
+      "status": "passed",
+      "command": "node .github/scripts/validate-cleo-export.mjs",
+      "result": "Validated 137 CLEO tasks through T137."
+    }
+  ],
+  "files": [
+    "src/lake/alpaca.py",
+    "src/lake/crypto.py",
+    "tests/test_lake_crypto.py",
+    ".github/verification/T057-validation.json"
+  ],
+  "decisions": [
+    "Crypto historical trades and quotes extend the existing injected AsyncTransport, bounded concurrency, retry, cancellation, date-bound, and cursor-pagination behavior rather than creating a second provider client.",
+    "Configured crypto pairs are trimmed, uppercased, validated as BASE/QUOTE symbols, deduplicated, sent through the Alpaca /v1beta3/crypto/us/{trades|quotes} route, and returned in canonical slash-separated form.",
+    "NormalizedCryptoTrade and NormalizedCryptoQuote map directly to the T021 CRYPTO_TRADE_SCHEMA and CRYPTO_QUOTE_SCHEMA, retaining Decimal prices and fractional quantities and treating provider-optional identifiers, venues, and taker side as nullable.",
+    "Focused tests use an injected async transport and committed T026 BTC/USD and ETH/USD configuration; no provider request or credential is used."
+  ],
+  "limitations": [
+    "Crypto UTC-day worker integration, storage/catalog publication, and rollout validation remain owned by later tasks.",
+    "No live Alpaca/provider calls, credentials, network access, or MyPy run was used.",
+    "The shared worktree contains unrelated concurrent changes; this task is limited to the files listed above.",
+    "No MyPy run was performed; repository tooling uses Ruff and ty."
+  ],
+  "blockers": []
+}

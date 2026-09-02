@@ -1,0 +1,72 @@
+{
+  "taskId": "T038",
+  "timestamp": "2026-09-02T00:30:00Z",
+  "numTotalTests": 230,
+  "numPassedTests": 230,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-t038-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_storage_cap.py tests/test_lake_history_valve.py tests/test_lake_equity_backfill.py tests/test_lake_equity_ingest.py",
+      "result": "27 tests passed in 2.02s"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/storage_cap.py src/lake/history_valve.py src/lake/equity_backfill.py src/lake/equity_ingest.py tests/test_lake_storage_cap.py tests/test_lake_history_valve.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/storage_cap.py src/lake/history_valve.py src/lake/equity_backfill.py src/lake/equity_ingest.py tests/test_lake_storage_cap.py tests/test_lake_history_valve.py",
+      "result": "6 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/storage_cap.py src/lake/history_valve.py src/lake/equity_backfill.py src/lake/equity_ingest.py tests/test_lake_storage_cap.py tests/test_lake_history_valve.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "230 tests passed in 8.51s; one pre-existing Starlette/httpx deprecation warning"
+    },
+    {
+      "name": "scoped-git-whitespace-check",
+      "status": "passed",
+      "command": "git diff --check -- src/lake/equity_backfill.py src/lake/equity_ingest.py; git diff --no-index --check -- NUL <scoped T038 files>",
+      "result": "No whitespace diagnostics in the scoped T038 files"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "91 files already formatted"
+    }
+  ],
+  "decisions": [
+    "Current storage is estimated by summing persisted catalog byte_size values, while an injected StorageUsageProvider or callable can supply an authoritative non-negative byte count.",
+    "Capacity is evaluated against current bytes plus staged bytes; reaching the cap is paused when the operation's configured pause switch is enabled, and the status exposes stable state, reason, projected bytes, and alert fields.",
+    "Enqueue enforcement runs before each equity backfill message, and ingest enforcement runs before provider fetch plus after private Parquet staging, before the atomic committer can publish objects or coverage.",
+    "Trade and quote history limits are independent immutable HistoryLimit values. HistoryValve can be built from explicit limits, a mapping, or the T015/T026 universe, and equity backfill filters each data-type gap before ordering and dispatch.",
+    "No Azure, market-provider, credential, or network calls are created by the new guardrails or tests."
+  ],
+  "limitations": [
+    "A catalog-derived estimate is conservative for object replacement because staged bytes are checked in addition to current bytes; an authoritative injected usage reader can provide deployment-specific accounting.",
+    "Repository-wide Ruff and format checks still report unrelated pre-existing issues in bounded_query.py and option/crypto test files; those files were not modified per scope.",
+    "The repository test suite emits the existing Starlette/httpx deprecation warning."
+  ],
+  "blockers": []
+}

@@ -22,10 +22,10 @@ duplication without merging the two products into one package.
 The repository currently contains the CLEO roadmap, project guidance, the
 tracked directory skeleton, an installable market-lake package, a shared
 runtime image, versioned market-lake configuration, core partition, schema,
-and calendar contracts, build-validated Azure foundation modules, and a
-reusable GHCR publication workflow. It does not yet contain a complete
-infrastructure entry point, deployment workflow, the quant-harness package, or
-a deployed service. Those artifacts belong to later CLEO tasks.
+and calendar contracts, build-validated Azure foundation modules, a reusable
+GHCR publication workflow, and a protected main-branch deployment workflow. It
+does not yet contain the quant-harness package or a deployed service. Those
+artifacts belong to later CLEO tasks.
 
 ## Architecture
 
@@ -57,7 +57,7 @@ later tasks own their implementation.
 |   |-- instructions/              Repository-scoped agent guidance
 |   |-- scripts/                   Repository validation utilities
 |   |-- verification/              Tracked task validation records
-|   `-- workflows/                 Shared CI and delivery workflows (image started)
+|   `-- workflows/                 Shared CI, image publication, and deployment
 |-- config/                        Versioned, non-secret product configuration
 |-- infra/                         Shared Azure Bicep modules (foundation and runtime)
 |-- src/
@@ -110,6 +110,16 @@ uv run --python 3.12 --extra dev pytest
 - Prefer managed identity, least-privilege access, scale-to-zero services, and
   explicit cost and rollout gates. Development validation precedes broader
   data ingestion or live-trading eligibility.
+
+The only repository-triggered Azure mutation path is
+[`.github/workflows/deploy-main.yml`](.github/workflows/deploy-main.yml). A
+push to `master` publishes one digest-addressed image, waits for approval on the
+selected protected GitHub Environment, deploys the resource-group Bicep
+composition, verifies the API and ingest job image references, and runs the
+probe-safe API health smoke. Required repository and Environment values are
+recorded in [`.github/verification/T031-validation.json`](.github/verification/T031-validation.json);
+manual or alternate production mutation workflows are not part of this
+repository path.
 
 ## Roadmap
 

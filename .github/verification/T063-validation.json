@@ -1,0 +1,86 @@
+{
+  "taskId": "T063",
+  "timestamp": "2026-09-01T23:59:00Z",
+  "numTotalTests": 6,
+  "numPassedTests": 6,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-dead-letter-recovery-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_dead_letter.py",
+      "result": "6 tests passed for QueueWorker attempt exhaustion, send-before-delete ordering, stable diagnostic envelope metadata, indexed deduplication, valid replay, repaired replay, and replay safety checks"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/dead_letter.py tests/test_lake_dead_letter.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/dead_letter.py tests/test_lake_dead_letter.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/dead_letter.py tests/test_lake_dead_letter.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed; one pre-existing Starlette/httpx deprecation warning remains"
+    }
+  ],
+  "repositoryChecks": [
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "79 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "lockfile-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Lockfile is current"
+    }
+  ],
+  "files": [
+    "src/lake/dead_letter.py",
+    "tests/test_lake_dead_letter.py",
+    ".github/runbooks/queue-dead-letter-recovery.md",
+    ".github/verification/T063-validation.json"
+  ],
+  "decisions": [
+    "QueueDeadLetterSink implements the T035 DeadLetterSink contract and uses the T027 QueueSender boundary, so the worker sends a structured envelope before deleting an exhausted source message.",
+    "The envelope retains exact original content, source delivery identifiers, attempt count, UTC failure time, full error text, and parsed error type/detail. Its stable ID excludes pop receipt and attempt count so repeated transfer is diagnosable.",
+    "DeadLetterReplayer sends the original JSON object to the original queue and requires an explicit repaired mapping for malformed or non-object content. Replay is operator-triggered, one message at a time, and never automatically retries or deletes the dead-letter record.",
+    "InMemoryDeadLetterStore provides deterministic lookup, ordering, and stable-ID replacement for focused recovery tests and local tooling without pretending to be durable production storage."
+  ],
+  "limitations": [
+    "T027 QueueSender accepts JSON mappings rather than raw queue bytes; malformed or non-object source content requires an operator-approved repaired mapping for replay.",
+    "Dead-letter transfer and source deletion remain separate queue operations. A stable ID identifies duplicate transfers, but cannot provide an atomic cross-queue transaction.",
+    "No live Azure, provider, credentials, network access, CLEO mutation, staging, revert, commit, or MyPy run was used.",
+    "The shared worktree contains unrelated user changes and untracked files; none were modified, staged, reverted, or committed by T063."
+  ],
+  "blockers": []
+}

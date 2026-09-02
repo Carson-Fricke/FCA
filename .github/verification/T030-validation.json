@@ -18,12 +18,12 @@
     {
       "name": "ghcr-authentication-and-least-privilege",
       "status": "passed",
-      "result": "The publish job grants only contents: read and packages: write, logs in only to ghcr.io as github.actor, and uses the automatically generated secrets.GITHUB_TOKEN; no PAT, Azure permission, deployment, or secret input is present"
+      "result": "The publish job grants only contents: read and packages: write, logs in only to ghcr.io as github.actor, and uses the automatically generated secrets.GITHUB_TOKEN; the image-build branch trigger has no Azure permission or deployment step"
     },
     {
       "name": "single-immutable-image-contract",
       "status": "passed",
-      "result": "One build-push step publishes ghcr.io/<lowercase-owner>/<lowercase-repository>:<full GITHUB_SHA>, and workflow outputs expose that tag, the registry digest, and the digest-addressed image reference for caller jobs"
+      "result": "One build-push step publishes ghcr.io/<lowercase-owner>/<lowercase-repository>:<full GITHUB_SHA>, and workflow outputs expose that tag, the registry digest, and the digest-addressed image reference for caller jobs; the image-build push trigger is image-only and does not deploy Azure"
     },
     {
       "name": "pinned-action-revisions",
@@ -40,7 +40,7 @@
   ],
   "limitations": [
     "Docker is unavailable locally, so no local image build or runtime command execution was performed",
-    "GHCR authentication, package creation, SHA-tag publication, and emitted registry digest values require a GitHub-hosted run; this reusable workflow has no direct trigger and was not invoked or pushed",
+    "GHCR authentication, package creation, SHA-tag publication, and emitted registry digest values require a GitHub-hosted run; the image-build push trigger is intentionally image-only and does not invoke Azure deployment",
     "The future caller owned by T031 must grant packages: write because reusable workflows cannot elevate the caller GITHUB_TOKEN permissions"
   ]
 }

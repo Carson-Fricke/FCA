@@ -1,0 +1,78 @@
+{
+  "taskId": "T033",
+  "timestamp": "2026-09-01T21:36:26Z",
+  "numTotalTests": 108,
+  "numPassedTests": 108,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-alpaca-client-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_alpaca.py",
+      "result": "5 tests passed for cursor pagination, retry-after-aware 429 retry, transient transport retry, normalized trade and quote records, bounded concurrency, settings wiring, malformed cursors, exhausted errors, timeout propagation, and cancellation"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/alpaca.py tests/test_lake_alpaca.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/alpaca.py tests/test_lake_alpaca.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/alpaca.py tests/test_lake_alpaca.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Resolved 58 packages; uv.lock is up to date"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "53 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "108 tests passed in 9.54s; one existing Starlette httpx deprecation warning"
+    }
+  ],
+  "decisions": [
+    "The new lake.alpaca module uses injected AsyncTransport, sleep, and clock dependencies; the default transport is httpx.AsyncClient and no test sends a provider request.",
+    "T026 ProviderSettings request values configure concurrency, timeout, retry attempts, and Retry-After behavior through AlpacaClient.from_settings.",
+    "T021 equity trade and quote fields are represented by immutable NormalizedTrade and NormalizedQuote records with UTC timestamps and Decimal prices.",
+    "Each symbol is paginated sequentially, symbol jobs run under one bounded semaphore, cursor tokens are propagated exactly once per page, and repeated cursors fail explicitly.",
+    "Retryable transport failures and HTTP 408, 425, 429, 500, 502, 503, and 504 responses use bounded exponential backoff; 429 Retry-After supports seconds and HTTP-date values."
+  ],
+  "limitations": [
+    "The shared worktree contains unrelated changes in other files; they were not modified, staged, reverted, or committed by this task.",
+    "API credentials are deferred: the client accepts optional runtime api_key and api_secret values and T026 SecretStr settings, but credentials are not committed, resolved, or exercised.",
+    "No live Alpaca/provider calls, credentials, network access, or MyPy run were used."
+  ],
+  "blockers": []
+}

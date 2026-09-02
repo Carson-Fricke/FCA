@@ -1,0 +1,62 @@
+{
+  "taskId": "T026",
+  "numTotalTests": 8,
+  "numPassedTests": 8,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-configuration-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_configuration.py",
+      "result": "7 tests passed for typed YAML defaults, normalized universes, explicit environment overrides, invalid-value rejection, secret-bearing YAML rejection, and portable config roots"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/_configuration.py src/lake/settings.py src/lake/universes.py tests/test_lake_configuration.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/_configuration.py src/lake/settings.py src/lake/universes.py tests/test_lake_configuration.py",
+      "result": "4 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/_configuration.py src/lake/settings.py src/lake/universes.py tests/test_lake_configuration.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "43 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "75 tests passed"
+    }
+  ],
+  "limitations": [
+    "The locked project environment has no YAML parser dependency, so the loader intentionally supports and strictly validates the mappings, sequences, scalars, comments, and quoted values used by the committed market-lake YAML files rather than adding a dependency.",
+    "Key Vault references are preserved as masked SecretStr values; resolving a reference is the responsibility of the Azure-hosted runtime and is not performed locally."
+  ]
+}

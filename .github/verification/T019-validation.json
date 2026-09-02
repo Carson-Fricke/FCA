@@ -1,0 +1,44 @@
+{
+  "taskId": "T019",
+  "numTotalTests": 4,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bicep-build",
+      "status": "passed",
+      "command": "az bicep build --file infra/modules/cost-controls.bicep --stdout",
+      "result": "The resource-group cost-controls module compiled without diagnostics using Bicep 0.46.1"
+    },
+    {
+      "name": "bicep-lint",
+      "status": "passed",
+      "command": "az bicep lint --file infra/modules/cost-controls.bicep",
+      "result": "The cost-controls module linted without diagnostics using Bicep 0.46.1"
+    },
+    {
+      "name": "compiled-guardrail-assertions",
+      "status": "passed",
+      "command": "PowerShell static assertions over az bicep build --stdout compiled ARM JSON",
+      "result": "Compiled ARM assertions found seven-day Log Analytics retention; exact 40 USD and 70 USD monthly resource-group budgets with enabled actual-cost notifications at 100 percent; storage capacity 1099511627776 bytes with enqueue and ingest pause enabled; one backfill replica; one GiB maximum SQL scan; and 33554432-byte maximum SQL result. The runtime guardrail output exposes the same non-secret values for future T020 composition."
+    },
+    {
+      "name": "secret-free-and-scoped-boundary",
+      "status": "passed",
+      "result": "The module contains no secret values, credentials, account keys, tokens, or Azure calls. Budget recipients are caller-supplied email or Action Group arrays and default to empty; storage-cap pause and SQL limits are explicit non-secret outputs for runtime enforcement rather than unsupported native Azure quotas."
+    }
+  ],
+  "assumptions": [
+    "Azure Consumption budget notifications are percentage-based, so two independent monthly budgets at 40 USD and 70 USD use 100 percent actual-cost notifications to represent the plan's literal dollar alert amounts without inventing a separate monthly budget denominator.",
+    "T018 remains unchanged as required; T020 owns final module composition and should ensure the cost-controls workspace state is composed consistently with the Container Apps workspace resource.",
+    "The application must enforce storage-cap pause, one-replica backfill, and SQL scan/result limits because Azure does not expose native byte quotas for those runtime behaviors."
+  ],
+  "limitations": [
+    "No Azure login, deployment, what-if, Cost Management operation, or data-plane call was run.",
+    "A deployment must provide at least one valid budget notification email or existing Action Group resource ID; Azure will reject empty recipient arrays even though they are safe offline defaults.",
+    "A deployment must provide budgetStartDate as the first day of the current or permitted monthly budget period, and the caller must have permission to write the resource-group Log Analytics workspace and Cost Management budgets.",
+    "T020 must compose the emitted runtimeGuardrails object into workload configuration; this task does not edit the existing Container Apps module."
+  ]
+}

@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-01T20:34:22.107Z",
+    "exportedAt": "2026-09-02T00:47:03.294Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 138
     },
-    "checksum": "9905d392caf13f29",
+    "checksum": "f7ecbfc48f228afe",
     "taskCount": 137,
     "exportMode": "full"
   },
@@ -207,7 +207,7 @@
     "T033": {
       "type": "task",
       "title": "E4.1 Async Alpaca client pagination and 429 handling",
-      "status": "pending",
+      "status": "done",
       "parentId": "T007",
       "depends": [
         "T026"
@@ -216,7 +216,7 @@
     "T040": {
       "type": "task",
       "title": "E5.1 FastAPI health, bearer auth, and request models",
-      "status": "pending",
+      "status": "done",
       "parentId": "T008",
       "depends": [
         "T014",
@@ -238,7 +238,7 @@
     "T052": {
       "type": "task",
       "title": "E7.1 Option chain selector and contracts catalog",
-      "status": "pending",
+      "status": "done",
       "parentId": "T010",
       "depends": [
         "T024",
@@ -248,7 +248,7 @@
     "T057": {
       "type": "task",
       "title": "E8.1 Crypto trades and quotes client",
-      "status": "pending",
+      "status": "done",
       "parentId": "T011",
       "depends": [
         "T023",
@@ -398,7 +398,7 @@
     "T022": {
       "type": "task",
       "title": "E2.2 Idempotent Parquet writer and metadata",
-      "status": "pending",
+      "status": "done",
       "parentId": "T005",
       "depends": [
         "T021"
@@ -417,7 +417,7 @@
     "T034": {
       "type": "task",
       "title": "E4.2 Equity symbol-day ingest transaction",
-      "status": "pending",
+      "status": "done",
       "parentId": "T007",
       "depends": [
         "T022",
@@ -429,7 +429,7 @@
     "T041": {
       "type": "task",
       "title": "E5.2 Catalog coverage endpoint",
-      "status": "pending",
+      "status": "done",
       "parentId": "T008",
       "depends": [
         "T024",
@@ -448,7 +448,7 @@
     "T053": {
       "type": "task",
       "title": "E7.2 OPRA trades and quotes client",
-      "status": "pending",
+      "status": "done",
       "parentId": "T010",
       "depends": [
         "T033",
@@ -458,7 +458,7 @@
     "T058": {
       "type": "task",
       "title": "E8.2 Crypto UTC-day worker integration",
-      "status": "pending",
+      "status": "done",
       "parentId": "T011",
       "depends": [
         "T035",
@@ -468,7 +468,7 @@
     "T062": {
       "type": "task",
       "title": "E9.2 Blob leases for symbol-day writes",
-      "status": "pending",
+      "status": "done",
       "parentId": "T012",
       "depends": [
         "T027",
@@ -631,7 +631,7 @@
     "T035": {
       "type": "task",
       "title": "E4.3 Durable queue worker loop",
-      "status": "pending",
+      "status": "done",
       "parentId": "T007",
       "depends": [
         "T034"
@@ -640,7 +640,7 @@
     "T042": {
       "type": "task",
       "title": "E5.3 Ensure requests and job polling",
-      "status": "pending",
+      "status": "done",
       "parentId": "T008",
       "depends": [
         "T025",
@@ -660,7 +660,7 @@
     "T054": {
       "type": "task",
       "title": "E7.3 Options symbol-day worker integration",
-      "status": "pending",
+      "status": "done",
       "parentId": "T010",
       "depends": [
         "T035",
@@ -680,7 +680,7 @@
     "T063": {
       "type": "task",
       "title": "E9.3 Dead-letter queue and failure recovery",
-      "status": "pending",
+      "status": "done",
       "parentId": "T012",
       "depends": [
         "T035"
@@ -793,7 +793,7 @@
     "T005": {
       "type": "epic",
       "title": "E2 Lake core library",
-      "status": "pending",
+      "status": "done",
       "parentId": "T001",
       "depends": [
         "T003"
@@ -802,7 +802,7 @@
     "T019": {
       "type": "task",
       "title": "E1.4 Budget alerts and runtime cost guards",
-      "status": "pending",
+      "status": "done",
       "parentId": "T004",
       "depends": [
         "T018"
@@ -811,7 +811,7 @@
     "T024": {
       "type": "task",
       "title": "E2.4 Catalog protocols and memory or Azure Table adapters",
-      "status": "pending",
+      "status": "done",
       "parentId": "T005",
       "depends": [
         "T021",
@@ -832,7 +832,7 @@
     "T036": {
       "type": "task",
       "title": "E4.4 Previous-session equities catch-up",
-      "status": "pending",
+      "status": "done",
       "parentId": "T007",
       "depends": [
         "T023",
@@ -843,7 +843,7 @@
     "T043": {
       "type": "task",
       "title": "E5.4 File query mode with short-lived SAS",
-      "status": "pending",
+      "status": "done",
       "parentId": "T008",
       "depends": [
         "T027",
@@ -1017,7 +1017,7 @@
     "T025": {
       "type": "task",
       "title": "E2.5 Coverage gaps, empty days, and partial sessions",
-      "status": "pending",
+      "status": "done",
       "parentId": "T005",
       "depends": [
         "T023",
@@ -1037,7 +1037,7 @@
     "T037": {
       "type": "task",
       "title": "E4.5 Newest-first equity backfill planning",
-      "status": "pending",
+      "status": "done",
       "parentId": "T007",
       "depends": [
         "T025",
@@ -1184,7 +1184,7 @@
     "T026": {
       "type": "task",
       "title": "E2.6 Typed settings and universe loaders",
-      "status": "pending",
+      "status": "done",
       "parentId": "T005",
       "depends": [
         "T015"
@@ -1193,7 +1193,7 @@
     "T038": {
       "type": "task",
       "title": "E4.6 Storage-cap pause and history valve",
-      "status": "pending",
+      "status": "done",
       "parentId": "T007",
       "depends": [
         "T019",
@@ -1204,7 +1204,7 @@
     "T045": {
       "type": "task",
       "title": "E5.6 Bounded DuckDB SQL query mode",
-      "status": "pending",
+      "status": "done",
       "parentId": "T008",
       "depends": [
         "T043"
@@ -1304,7 +1304,7 @@
     "T027": {
       "type": "task",
       "title": "E2.7 Blob, queue, SAS, and job storage adapters",
-      "status": "pending",
+      "status": "done",
       "parentId": "T005",
       "depends": [
         "T024"
@@ -2095,7 +2095,7 @@
     {
       "id": "T033",
       "title": "E4.1 Async Alpaca client pagination and 429 handling",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T007",
@@ -2107,6 +2107,9 @@
         "alpaca",
         "httpx"
       ],
+      "notes": [
+        "2026-09-01 21:46:59 UTC: Implemented async Alpaca SIP client pagination, bounded concurrency, Retry-After-aware transient retries, cancellation safety, and normalized trade/quote records."
+      ],
       "acceptance": [
         "Recorded multi-page and rate-limit responses are fetched without duplicate or lost rows"
       ],
@@ -2114,21 +2117,89 @@
         "T026"
       ],
       "createdAt": "2026-09-01T03:21:59.705Z",
-      "updatedAt": "2026-09-01T03:26:30.757Z",
+      "updatedAt": "2026-09-01T21:47:04.505Z",
+      "completedAt": "2026-09-01T21:46:59.540Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T21:46:44.086Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:59.705Z"
+        "initializedAt": "2026-09-01T03:21:59.705Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/alpaca.py",
+                    "sha256": "a79ac6d7a2a3b4defc0de75bdf117bba58958ce56a5a019ed26574366cdda9f6"
+                  },
+                  {
+                    "path": "tests/test_lake_alpaca.py",
+                    "sha256": "a2d997ec2486c17978d1107698f66c9491266ce43fc87fa41e3bcc63fc7f5ce1"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T033",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "e20db744-df0d-5efe-bfed-e521ff147186"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree async Alpaca client; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:46:15.152Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T033-validation.json",
+                "sha256": "459ec7d357914b6042063a69256b19e69fcd0edfd0514851314d12894d5b9e79",
+                "passCount": 108,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T21:46:29.700Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:46:44.408Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -2136,7 +2207,7 @@
     {
       "id": "T040",
       "title": "E5.1 FastAPI health, bearer auth, and request models",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T008",
@@ -2148,6 +2219,9 @@
         "fastapi",
         "security"
       ],
+      "notes": [
+        "2026-09-01 21:48:24 UTC: Added FastAPI health and protected authentication boundaries, strict request models, consistent errors, and wired lake api to launch the listening Uvicorn application."
+      ],
       "acceptance": [
         "Health supports platform probing and protected routes reject missing or invalid credentials"
       ],
@@ -2156,21 +2230,105 @@
         "T026"
       ],
       "createdAt": "2026-09-01T03:22:23.459Z",
-      "updatedAt": "2026-09-01T03:27:23.284Z",
+      "updatedAt": "2026-09-01T21:48:28.757Z",
+      "completedAt": "2026-09-01T21:48:24.247Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T21:48:08.485Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:23.459Z"
+        "initializedAt": "2026-09-01T03:22:23.459Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/app.py",
+                    "sha256": "c794f65b05422a32344c90e9e7e1656a9f16d4dcc9879677712f8ad0f8e60ad1"
+                  },
+                  {
+                    "path": "src/lake/auth.py",
+                    "sha256": "62a1f076a6622691da1b099af9174eccd565a8769ff475785891a6a7e62eb6b0"
+                  },
+                  {
+                    "path": "src/lake/models.py",
+                    "sha256": "68957791b7f3d87913019b93e2c5fa5b7ebe16544aedd1d84c460f733d2aa33f"
+                  },
+                  {
+                    "path": "src/lake/api.py",
+                    "sha256": "9ef60c8cb31ea3b1c240ab2b6606b2b7075ac987fcc4d0830d3571a000ad2e44"
+                  },
+                  {
+                    "path": "tests/test_lake_api.py",
+                    "sha256": "e1412a144ad143af10b77c38ff5519c3e4b86b42fcb2aca34e47eee9ab34f97f"
+                  },
+                  {
+                    "path": "tests/test_package_entrypoints.py",
+                    "sha256": "5efb4f62192ac28843d51a461c70ce1b322acc5d745b6de7cc70c728522858e8"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T040",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "f697c671-b508-53a9-bb69-05fb28f25175"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree FastAPI boundary and listening api process; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:47:39.394Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T040-validation.json",
+                "sha256": "6d689b2cbdcbaa4e2ce2e2a7cb3450c3afdac3829a8992b47ce7d588793435b3",
+                "passCount": 12,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T21:47:54.637Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:48:08.807Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -2222,7 +2380,7 @@
     {
       "id": "T052",
       "title": "E7.1 Option chain selector and contracts catalog",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T010",
@@ -2234,6 +2392,9 @@
         "options",
         "contracts"
       ],
+      "notes": [
+        "2026-09-01 23:23:05 UTC: Implemented deterministic daily option front-set selection with nearest configured expirations, inclusive spot-relative strike windows, lifecycle filtering, and persisted daily membership."
+      ],
       "acceptance": [
         "Deterministic tests cover expiry and strike boundaries and contracts are queryable by underlying date"
       ],
@@ -2242,21 +2403,93 @@
         "T033"
       ],
       "createdAt": "2026-09-01T03:23:04.328Z",
-      "updatedAt": "2026-09-01T03:28:59.120Z",
+      "updatedAt": "2026-09-01T23:23:08.806Z",
+      "completedAt": "2026-09-01T23:23:04.751Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T23:22:47.641Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:04.328Z"
+        "initializedAt": "2026-09-01T03:23:04.328Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/contracts.py",
+                    "sha256": "1784c302a66e20069b594a121151424fcbba780a3e13a1f623de1b7f33438963"
+                  },
+                  {
+                    "path": "src/lake/option_selector.py",
+                    "sha256": "1a86805e7d2bccd20946e719c259e8854ff57c49a0b246f9f712cb7cf1521c96"
+                  },
+                  {
+                    "path": "tests/test_lake_options.py",
+                    "sha256": "a26459669943136f31a656e42f2ae27b7ddaacedc7c5466b3c412ab1695a3d53"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T052",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "f2e201a2-e751-5a38-9ea7-826c7f14e75d"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree deterministic option selector and front-set catalog; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:22:16.782Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T052-validation.json",
+                "sha256": "64a0a735d87fdf90ee35fcbb6b44da89818b76d7beab464b10e23ec12ae9cb60",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T23:22:33.055Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:22:47.972Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -2264,7 +2497,7 @@
     {
       "id": "T057",
       "title": "E8.1 Crypto trades and quotes client",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T011",
@@ -2276,6 +2509,9 @@
         "crypto",
         "alpaca"
       ],
+      "notes": [
+        "2026-09-02 00:02:22 UTC: Extended the shared Alpaca transport for configured crypto pair trades and quotes with pagination, retries, nullable fields, and stable Decimal-based schema mapping."
+      ],
       "acceptance": [
         "Recorded crypto responses paginate into stable shared trade and quote schemas"
       ],
@@ -2284,21 +2520,93 @@
         "T033"
       ],
       "createdAt": "2026-09-01T03:23:21.713Z",
-      "updatedAt": "2026-09-01T03:29:40.765Z",
+      "updatedAt": "2026-09-02T00:02:26.693Z",
+      "completedAt": "2026-09-02T00:02:22.543Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T00:02:03.362Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:21.713Z"
+        "initializedAt": "2026-09-01T03:23:21.713Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/alpaca.py",
+                    "sha256": "6fcde78353714ded9fd331faab7a550189c250c9075753ca1096909546775d45"
+                  },
+                  {
+                    "path": "src/lake/crypto.py",
+                    "sha256": "09db46410963eb71323aa61fc76a87ed926b696a9a45b53f385fba5f6a50cd59"
+                  },
+                  {
+                    "path": "tests/test_lake_crypto.py",
+                    "sha256": "976bfb7c261d97fb39e8f21c5422831470d2ffa48de37b3177d8da690c4e7955"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T057",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2e382f97-2b8f-5f63-b7c6-848aa785de2d"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree crypto client and shared normalized schemas; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:01:30.964Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T057-validation.json",
+                "sha256": "8e13b31a3f24d7aad5b97ad7fe6b2e4838358b9d75373c905b2aefe3ebc562c8",
+                "passCount": 187,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T00:01:48.476Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:02:03.709Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3183,7 +3491,7 @@
     {
       "id": "T022",
       "title": "E2.2 Idempotent Parquet writer and metadata",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T005",
@@ -3194,6 +3502,9 @@
       "labels": [
         "parquet"
       ],
+      "notes": [
+        "2026-09-01 21:24:53 UTC: Implemented schema-preserving zstd Parquet writes with canonical records, deterministic paths, atomic local object replacement, and row/byte/checksum metadata."
+      ],
       "acceptance": [
         "Repeated writes replace the same object and preserve schema",
         "Golden round trips validate compression and metadata"
@@ -3202,21 +3513,95 @@
         "T021"
       ],
       "createdAt": "2026-09-01T03:21:18.614Z",
-      "updatedAt": "2026-09-01T03:25:07.629Z",
+      "updatedAt": "2026-09-01T21:24:56.951Z",
+      "completedAt": "2026-09-01T21:24:52.692Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T21:24:30.114Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:18.614Z"
+        "initializedAt": "2026-09-01T03:21:18.614Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/parquet.py",
+                    "sha256": "8b9f7771987bd34208b7f37c0615c9e064de8657b3cd8a5652fc61c6f390a275"
+                  },
+                  {
+                    "path": "tests/test_lake_parquet.py",
+                    "sha256": "869db2ba8d5c7ecd0d620f4b95d3e396aac03fa8f6d0934c852543611d74268e"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T022",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "7f7372ad-2255-55ac-a4a0-cabb5ca38324"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T022",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "1fb1cbee-f81b-5e65-b9aa-e3cdb8974101"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree Parquet writer; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:24:01.718Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T022-validation.json",
+                "sha256": "97d39dce9b375f6a5922131e8535dae05275dd86958a4fe49f6c8f5fbaedeca0",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T21:24:16.364Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:24:30.461Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3266,7 +3651,7 @@
     {
       "id": "T034",
       "title": "E4.2 Equity symbol-day ingest transaction",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T007",
@@ -3278,6 +3663,9 @@
         "equities",
         "ingest"
       ],
+      "notes": [
+        "2026-09-01 22:23:10 UTC: Implemented atomic one-symbol equity session ingestion: concurrent trade/quote fetch, deterministic normalization, staged Parquet publication, and complete/empty/partial/error catalog outcomes."
+      ],
       "acceptance": [
         "A repeated symbol-day ingest is idempotent across blob and catalog state"
       ],
@@ -3288,21 +3676,89 @@
         "T033"
       ],
       "createdAt": "2026-09-01T03:22:03.182Z",
-      "updatedAt": "2026-09-01T03:26:38.304Z",
+      "updatedAt": "2026-09-01T22:23:14.846Z",
+      "completedAt": "2026-09-01T22:23:10.245Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T22:22:53.001Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:03.182Z"
+        "initializedAt": "2026-09-01T03:22:03.182Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/equity_ingest.py",
+                    "sha256": "1da6df3b95de20bd2d56792ab23d9a9d45d76820a58c1b48cc8bb9660e940311"
+                  },
+                  {
+                    "path": "tests/test_lake_equity_ingest.py",
+                    "sha256": "c09baea3998c555221cfba8e8779738c2e10b274ab44106abb2b72637cc04f28"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T034",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "01532542-2c1c-5ad3-a746-185d23a5b1f5"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree atomic equity ingest transaction; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T22:21:59.740Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T034-validation.json",
+                "sha256": "b31cc39e136c55883d34386090fcfb0c57fe846fb56aca39e8afbc97557dda28",
+                "passCount": 122,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T22:22:39.259Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T22:22:53.427Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3310,7 +3766,7 @@
     {
       "id": "T041",
       "title": "E5.2 Catalog coverage endpoint",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T008",
@@ -3322,6 +3778,9 @@
         "api",
         "catalog"
       ],
+      "notes": [
+        "2026-09-01 22:24:24 UTC: Added authenticated calendar-aware GET /v1/catalog/coverage with strict query/response models, injected catalog repository, bounded date ranges, and status metadata."
+      ],
       "acceptance": [
         "Catalog requests return only authorized, validated, range-filtered coverage metadata"
       ],
@@ -3330,21 +3789,93 @@
         "T040"
       ],
       "createdAt": "2026-09-01T03:22:26.946Z",
-      "updatedAt": "2026-09-01T03:27:30.825Z",
+      "updatedAt": "2026-09-01T22:24:28.692Z",
+      "completedAt": "2026-09-01T22:24:24.620Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T22:24:08.031Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:26.946Z"
+        "initializedAt": "2026-09-01T03:22:26.946Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/catalog_api.py",
+                    "sha256": "ad8e9dadcb9e84a2ae760640b5361cc348d4e299066d2d3dbe00330a0a4dfcfc"
+                  },
+                  {
+                    "path": "src/lake/app.py",
+                    "sha256": "d1b91eb59d6908686d05b7fd5791e41deb27c3a731d73515e1b80a900c7c5611"
+                  },
+                  {
+                    "path": "tests/test_lake_catalog_api.py",
+                    "sha256": "81430ee3deb57ebfd60c310260be74c545fd5471931edaf5d2000929a7d1f180"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T041",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "dd239754-3a54-5f20-8d50-e9e421a50ebd"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree authenticated catalog coverage endpoint; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T22:23:33.786Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T041-validation.json",
+                "sha256": "698a9eeee947eb52e46c6a3a7c6405f88b72a3c90008b2dd5bb81ce1fe1ba50e",
+                "passCount": 122,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T22:23:52.004Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T22:24:08.359Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3393,7 +3924,7 @@
     {
       "id": "T053",
       "title": "E7.2 OPRA trades and quotes client",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T010",
@@ -3405,6 +3936,9 @@
         "options",
         "alpaca"
       ],
+      "notes": [
+        "2026-09-02 00:00:53 UTC: Extended the async Alpaca client for historical OPRA option trades and quotes with selected-contract batching, cursor pagination, retries, and hydrated OSI contract metadata."
+      ],
       "acceptance": [
         "Recorded OPRA responses preserve OSI, underlying, expiry, strike, and call or put metadata"
       ],
@@ -3413,21 +3947,93 @@
         "T052"
       ],
       "createdAt": "2026-09-01T03:23:07.849Z",
-      "updatedAt": "2026-09-01T03:29:07.369Z",
+      "updatedAt": "2026-09-02T00:00:57.349Z",
+      "completedAt": "2026-09-02T00:00:53.216Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T00:00:35.387Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:07.849Z"
+        "initializedAt": "2026-09-01T03:23:07.849Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/alpaca.py",
+                    "sha256": "6fcde78353714ded9fd331faab7a550189c250c9075753ca1096909546775d45"
+                  },
+                  {
+                    "path": "src/lake/options.py",
+                    "sha256": "a430a0bb34b16d058fec049a33a6353c5b69b5b7d84b7cbb1ef965651444b52d"
+                  },
+                  {
+                    "path": "tests/test_lake_options_client.py",
+                    "sha256": "fdf81f11558d71b045f6926805c811072f45dcb68ba09b3e6aac8579a1dba431"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T053",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "0d16fcfc-9871-5496-9e72-0735df36a61e"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree OPRA option client; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:00:05.777Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T053-validation.json",
+                "sha256": "8f1c293f4a87d1587bf0bce300b9c8152bd31a750c5f3bb6f432283f5a01d55f",
+                "passCount": 187,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T00:00:20.385Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:00:35.487Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3435,7 +4041,7 @@
     {
       "id": "T058",
       "title": "E8.2 Crypto UTC-day worker integration",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T011",
@@ -3447,6 +4053,9 @@
         "crypto",
         "worker"
       ],
+      "notes": [
+        "2026-09-02 00:46:36 UTC: Implemented continuous crypto UTC-day planning and worker ingestion with current-day refresh, atomic object/catalog publication, and idempotent replacement through the shared queue worker."
+      ],
       "acceptance": [
         "Crypto worker covers every requested UTC day and safely refreshes the current partial day"
       ],
@@ -3455,21 +4064,93 @@
         "T057"
       ],
       "createdAt": "2026-09-01T03:23:25.376Z",
-      "updatedAt": "2026-09-01T03:29:49.113Z",
+      "updatedAt": "2026-09-02T00:46:40.314Z",
+      "completedAt": "2026-09-02T00:46:36.212Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T00:46:16.683Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:25.376Z"
+        "initializedAt": "2026-09-01T03:23:25.376Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/crypto_backfill.py",
+                    "sha256": "87890a9038e326cab0a1c857cec0db25521c3e365dcf369cd3372e3aa70ab3ee"
+                  },
+                  {
+                    "path": "src/lake/crypto_ingest.py",
+                    "sha256": "e952a3dd5436a71f987de5d42bef391624ed0eed50a7a404ab6f2d108ed8fd23"
+                  },
+                  {
+                    "path": "tests/test_lake_crypto_worker.py",
+                    "sha256": "9ed46d134307271bd830cb399a555074b435041c1bac412b7ae201d7d61482ad"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T058",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "b7df75d2-514c-588d-97e9-97c4bc7c377a"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree crypto UTC-day worker integration; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:45:40.278Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T058-validation.json",
+                "sha256": "1d407c72ad178a79ac38a44d3920f473519ec2eb798346eb509d617e58eacabe",
+                "passCount": 230,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T00:45:59.687Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:46:17.031Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3477,7 +4158,7 @@
     {
       "id": "T062",
       "title": "E9.2 Blob leases for symbol-day writes",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T012",
@@ -3489,6 +4170,9 @@
         "hardening",
         "concurrency"
       ],
+      "notes": [
+        "2026-09-02 00:03:39 UTC: Added symbol-day lease protection around atomic object/catalog commits with injectable providers and Azure Blob lease implementation."
+      ],
       "acceptance": [
         "Concurrency tests prove only one writer commits a symbol-day at a time"
       ],
@@ -3498,21 +4182,89 @@
         "T035"
       ],
       "createdAt": "2026-09-01T03:23:39.260Z",
-      "updatedAt": "2026-09-01T03:30:21.691Z",
+      "updatedAt": "2026-09-02T00:03:43.368Z",
+      "completedAt": "2026-09-02T00:03:39.250Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T00:03:22.460Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:39.260Z"
+        "initializedAt": "2026-09-01T03:23:39.260Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/leases.py",
+                    "sha256": "118eb10f7700002fbecbee33b21bbf19954eca80fa6d57145821eefd84e8cf4b"
+                  },
+                  {
+                    "path": "tests/test_lake_leases.py",
+                    "sha256": "ebeb430d9449cc28cd40277b348015cd9c5f3f4167bc6acff242394bd18ad3cd"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T062",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "9db2ee5f-6abf-53b2-a50c-7667bbcd54db"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree symbol-day lease protection; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:02:48.515Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T062-validation.json",
+                "sha256": "377f747fd58cfd3ac190a3469d7849fc2ee4a47f262e553cac2d28d51eb20f00",
+                "passCount": 187,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T00:03:06.408Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:03:22.561Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -4581,7 +5333,7 @@
     {
       "id": "T035",
       "title": "E4.3 Durable queue worker loop",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T007",
@@ -4593,6 +5345,9 @@
         "queue",
         "worker"
       ],
+      "notes": [
+        "2026-09-01 23:18:56 UTC: Implemented durable at-least-once queue processing with lease renewal, bounded retries, dead-letter transfer, success deletion, and Azure token-authenticated transport."
+      ],
       "acceptance": [
         "Worker restart or duplicate delivery cannot create duplicate objects or false completion"
       ],
@@ -4600,21 +5355,89 @@
         "T034"
       ],
       "createdAt": "2026-09-01T03:22:06.528Z",
-      "updatedAt": "2026-09-01T03:26:45.724Z",
+      "updatedAt": "2026-09-01T23:19:01.829Z",
+      "completedAt": "2026-09-01T23:18:56.533Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T23:18:39.669Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:06.528Z"
+        "initializedAt": "2026-09-01T03:22:06.528Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/queue_worker.py",
+                    "sha256": "4e0dc44344a743b28a2865f4563252482c7b560e8c4c61a16537885c60909c47"
+                  },
+                  {
+                    "path": "tests/test_lake_queue_worker.py",
+                    "sha256": "56ad5b6ce2f9e9b41f600eb17142ebb93a0cd435a8706aea55d6bf82210387eb"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T035",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "8cdf6399-24f0-5ea6-83a1-ce633192d61e"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree durable queue worker and starvation-safe renewal tests; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:18:10.325Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T035-validation.json",
+                "sha256": "6480b2227c3b495c9c8a3e70697fca0628c89e8401ff358ebf6b820829e21044",
+                "passCount": 156,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T23:18:25.699Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:18:40.052Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -4622,7 +5445,7 @@
     {
       "id": "T042",
       "title": "E5.3 Ensure requests and job polling",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T008",
@@ -4634,6 +5457,9 @@
         "api",
         "jobs"
       ],
+      "notes": [
+        "2026-09-01 23:21:52 UTC: Added authenticated bounded ensure and job polling routes with deterministic job IDs, injected launcher/repositories, calendar-aware gap planning, and structured errors."
+      ],
       "acceptance": [
         "Ensure returns complete data or a stable 202 job identifier without blocking beyond the deadline"
       ],
@@ -4643,21 +5469,93 @@
         "T040"
       ],
       "createdAt": "2026-09-01T03:22:30.424Z",
-      "updatedAt": "2026-09-01T03:27:38.321Z",
+      "updatedAt": "2026-09-01T23:21:56.832Z",
+      "completedAt": "2026-09-01T23:21:52.436Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T23:21:35.636Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:30.424Z"
+        "initializedAt": "2026-09-01T03:22:30.424Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/ensure_api.py",
+                    "sha256": "7d89b048e02e30884f8275fb9ce2815928c88da4fcc6eec6dc8674820def67e8"
+                  },
+                  {
+                    "path": "src/lake/app.py",
+                    "sha256": "33e80620263b15dc252f9e61a17807d34096d1c61442330d2e584d377d8b5d78"
+                  },
+                  {
+                    "path": "tests/test_lake_ensure_api.py",
+                    "sha256": "7354141984d2d949075f14bd0c8181a0ce298300e7e7083e452b35605e34fbec"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T042",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "8daf55e2-1fd8-5202-9c47-c5a1645af7e4"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree ensure and job polling API; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:21:05.882Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T042-validation.json",
+                "sha256": "313defcf63a8e0f5561cf4427e987934ec9e92075d12806408230c20b4b0efe4",
+                "passCount": 156,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T23:21:20.468Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:21:35.742Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -4706,7 +5604,7 @@
     {
       "id": "T054",
       "title": "E7.3 Options symbol-day worker integration",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T010",
@@ -4718,6 +5616,9 @@
         "options",
         "worker"
       ],
+      "notes": [
+        "2026-09-02 00:45:19 UTC: Implemented deterministic option front-set planning and OSI symbol-day ingestion through the shared queue worker, with terminal empty sessions and idempotent catalog/object replacement."
+      ],
       "acceptance": [
         "Option work is idempotent, resumable, and cataloged through shared worker semantics"
       ],
@@ -4726,21 +5627,97 @@
         "T053"
       ],
       "createdAt": "2026-09-01T03:23:11.357Z",
-      "updatedAt": "2026-09-01T03:29:15.962Z",
+      "updatedAt": "2026-09-02T00:45:23.084Z",
+      "completedAt": "2026-09-02T00:45:19.045Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T00:45:01.149Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:11.357Z"
+        "initializedAt": "2026-09-01T03:23:11.357Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/option_backfill.py",
+                    "sha256": "6cbca9902cc60bb124ddacbfe51f3781f7f81cfdaa8574fe5343407233d0dfa8"
+                  },
+                  {
+                    "path": "src/lake/option_ingest.py",
+                    "sha256": "138cc863f50fa7e4f09e469b31fc9bd80db01e0b182fa86173aeb3efcaa5d6c4"
+                  },
+                  {
+                    "path": "src/lake/options.py",
+                    "sha256": "8b79e511c112b3958f4e0c38137bad7a8c7c576b7e7898aa055bd6e46b2c715d"
+                  },
+                  {
+                    "path": "tests/test_lake_option_ingest.py",
+                    "sha256": "c8c7f69a71c2aa9254ca80630d29f09f6141cb149ecd1766d8f476a7570bf77c"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T054",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "7e967766-7bb1-52fa-bc91-bb5b7bdf8c1b"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree option worker integration; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:44:27.960Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T054-validation.json",
+                "sha256": "7b645c3aa0862731e850333c26c3d1d8eb706ddaeb8db24654ae8c64628ffbbf",
+                "passCount": 230,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T00:44:44.069Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:45:01.470Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -4790,7 +5767,7 @@
     {
       "id": "T063",
       "title": "E9.3 Dead-letter queue and failure recovery",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T012",
@@ -4802,6 +5779,9 @@
         "hardening",
         "queue"
       ],
+      "notes": [
+        "2026-09-02 00:05:07 UTC: Added versioned dead-letter envelopes, stable diagnostic identity, durable-sink boundary, explicit replay with repaired payload support, and operator recovery runbook."
+      ],
       "acceptance": [
         "Permanent failures stop retrying indefinitely and can be diagnosed and replayed"
       ],
@@ -4809,21 +5789,93 @@
         "T035"
       ],
       "createdAt": "2026-09-01T03:23:42.807Z",
-      "updatedAt": "2026-09-01T03:30:29.546Z",
+      "updatedAt": "2026-09-02T00:05:11.604Z",
+      "completedAt": "2026-09-02T00:05:07.487Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T00:04:50.386Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:42.807Z"
+        "initializedAt": "2026-09-01T03:23:42.807Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/dead_letter.py",
+                    "sha256": "3c33b95a30848e1a16a238818a67c0cec2ca1f3ef54598d6b829c025a1cb29bf"
+                  },
+                  {
+                    "path": "tests/test_lake_dead_letter.py",
+                    "sha256": "fa28957636716b478db5ed09b8fbc3b720bf1ad13c1ba5810ccae3b06fe80361"
+                  },
+                  {
+                    "path": ".github/runbooks/queue-dead-letter-recovery.md",
+                    "sha256": "22ccf1c304de6b970f353e99209898efb9346479b8c8546ef4175c22487f06fd"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T063",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "85cb12b8-b23c-5321-88c4-70216bbef440"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree dead-letter diagnostics and explicit replay runbook; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:04:16.152Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T063-validation.json",
+                "sha256": "ed3bc1bc95183bee587997720f55a9e33a47df1be0eb3045b9fa89df0d110a24",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T00:04:34.314Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:04:50.714Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -5344,7 +6396,7 @@
     {
       "id": "T005",
       "title": "E2 Lake core library",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -5371,8 +6423,9 @@
         "T003"
       ],
       "createdAt": "2026-09-01T03:15:28.244Z",
-      "updatedAt": "2026-09-01T03:32:48.401Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-01T21:45:33.162Z",
+      "completedAt": "2026-09-01T21:45:33.162Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -5380,7 +6433,7 @@
     {
       "id": "T019",
       "title": "E1.4 Budget alerts and runtime cost guards",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T004",
@@ -5392,6 +6445,9 @@
         "bicep",
         "cost-control"
       ],
+      "notes": [
+        "2026-09-01 21:23:36 UTC: Added seven-day Log Analytics retention, independent 40 and 70 USD monthly cost alerts, one-replica backfill, storage capacity pause flags, and bounded SQL scan/result guardrails."
+      ],
       "acceptance": [
         "Infrastructure encodes the plan's storage, compute, logging, and query guardrails"
       ],
@@ -5399,21 +6455,85 @@
         "T018"
       ],
       "createdAt": "2026-09-01T03:21:07.550Z",
-      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "updatedAt": "2026-09-01T21:23:40.563Z",
+      "completedAt": "2026-09-01T21:23:35.937Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T21:23:21.396Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:07.550Z"
+        "initializedAt": "2026-09-01T03:21:07.550Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/cost-controls.bicep",
+                    "sha256": "f25893bdd99570f431d627a6f34d6e18977e0ea6c63ad0ed8b550936615ab6c1"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T019",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "997d610a-3d33-5d76-a56d-a899561a8805"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree cost-controls module; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:22:51.451Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T019-validation.json",
+                "sha256": "9896e7f190ff686f97a9ddcb701bb51f748e678b219b5bc41bf62934f1832a3f",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T21:23:06.300Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:23:21.559Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -5421,7 +6541,7 @@
     {
       "id": "T024",
       "title": "E2.4 Catalog protocols and memory or Azure Table adapters",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T005",
@@ -5433,6 +6553,9 @@
         "catalog",
         "azure-table"
       ],
+      "notes": [
+        "2026-09-01 21:25:57 UTC: Defined Azure-independent catalog, job, and contract protocols with deterministic in-memory repositories and Azure Table entity adapters."
+      ],
       "acceptance": [
         "Coverage statuses and job state round-trip through memory and Azure-compatible entity mappings"
       ],
@@ -5441,21 +6564,89 @@
         "T023"
       ],
       "createdAt": "2026-09-01T03:21:25.939Z",
-      "updatedAt": "2026-09-01T03:25:22.707Z",
+      "updatedAt": "2026-09-01T21:26:02.820Z",
+      "completedAt": "2026-09-01T21:25:57.396Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T21:25:41.987Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:25.939Z"
+        "initializedAt": "2026-09-01T03:21:25.939Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/catalog.py",
+                    "sha256": "82f71178472921cc390dcc298762f8a9d91e00ad8dfb62de99d6a339288615f0"
+                  },
+                  {
+                    "path": "tests/test_lake_catalog.py",
+                    "sha256": "2440eb7f8fd8922722d758de0bfca39211b32dba6e96a8319de7c46817562a78"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T024",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "d69fb18f-2165-5657-b84e-bf278eca8598"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree catalog contracts and adapters; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:25:14.795Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T024-validation.json",
+                "sha256": "bf429fcf72bed1fad40909ff6a967bddb647a8b82a4557478783c3ac379bc7e8",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T21:25:28.012Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:25:42.330Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -5507,7 +6698,7 @@
     {
       "id": "T036",
       "title": "E4.4 Previous-session equities catch-up",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T007",
@@ -5519,6 +6710,9 @@
         "equities",
         "catchup"
       ],
+      "notes": [
+        "2026-09-01 23:20:16 UTC: Implemented deterministic previous-session equity catch-up planning that excludes open, future, holiday, and terminal sessions and emits injected queue messages."
+      ],
       "acceptance": [
         "A scheduled run leaves no unexplained watchlist holes for the prior completed session"
       ],
@@ -5528,21 +6722,89 @@
         "T035"
       ],
       "createdAt": "2026-09-01T03:22:09.837Z",
-      "updatedAt": "2026-09-01T03:26:53.183Z",
+      "updatedAt": "2026-09-01T23:20:20.674Z",
+      "completedAt": "2026-09-01T23:20:16.612Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T23:19:59.550Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:09.837Z"
+        "initializedAt": "2026-09-01T03:22:09.837Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/equity_catchup.py",
+                    "sha256": "d2df4945b4382dab246d9edd633f60eb137ae224afda61f43de44b7fc3526ef1"
+                  },
+                  {
+                    "path": "tests/test_lake_equity_catchup.py",
+                    "sha256": "72bc3654d44df7cc57e426bcc1523279f9553b6bfa7ded6d85acd0d60556bd0c"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T036",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "7ce912a2-42a8-57b0-b865-d2db7d3baf49"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree completed-session equity catch-up planner; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:19:22.519Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T036-validation.json",
+                "sha256": "2698bd6b0d64176d001eaad999cc60a9f6ca155f339b26b1363fec384b3f0de0",
+                "passCount": 156,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T23:19:45.089Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:19:59.666Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -5550,7 +6812,7 @@
     {
       "id": "T043",
       "title": "E5.4 File query mode with short-lived SAS",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T008",
@@ -5562,6 +6824,9 @@
         "api",
         "sas"
       ],
+      "notes": [
+        "2026-09-01 23:59:35 UTC: Implemented authenticated bounded file query mode with complete-only catalog filtering, canonical object-path validation, optional ensure callback, and read-only object-scoped SAS issuance."
+      ],
       "acceptance": [
         "Cached queries return only requested complete files and expiring read-only URLs"
       ],
@@ -5570,21 +6835,93 @@
         "T042"
       ],
       "createdAt": "2026-09-01T03:22:33.889Z",
-      "updatedAt": "2026-09-01T03:27:45.907Z",
+      "updatedAt": "2026-09-01T23:59:40.574Z",
+      "completedAt": "2026-09-01T23:59:35.409Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T23:59:18.600Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:33.889Z"
+        "initializedAt": "2026-09-01T03:22:33.889Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/query_api.py",
+                    "sha256": "b662cbd19e750b16d71b4eb59c50613a9e2abea741fa5b4d02b12bc2bd3a6c20"
+                  },
+                  {
+                    "path": "src/lake/app.py",
+                    "sha256": "380409218f0a73fcdd3a7c9f32b7c14ed85f1bffc5ef507600c015273c8127c6"
+                  },
+                  {
+                    "path": "tests/test_lake_query_api.py",
+                    "sha256": "2be2a1d8414b42ca46ae65caed697f31c63a57e1bb4211d57a6b443ade32596d"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T043",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "c5608568-71a3-5675-b638-5144eda9f47b"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree authenticated file query and SAS boundary; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:58:44.506Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T043-validation.json",
+                "sha256": "344b908cdd6c79d949302aca744f649e27ea9b53aeebbc391a8baa164b8b4dbb",
+                "passCount": 187,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T23:59:02.652Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:59:18.926Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -6435,7 +7772,7 @@
     {
       "id": "T025",
       "title": "E2.5 Coverage gaps, empty days, and partial sessions",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T005",
@@ -6446,6 +7783,9 @@
       "labels": [
         "coverage"
       ],
+      "notes": [
+        "2026-09-01 21:43:55 UTC: Implemented calendar-aware coverage classification and deterministic gap plans for missing, empty, partial, complete, and error sessions."
+      ],
       "acceptance": [
         "Coverage math correctly handles holidays, empty outcomes, errors, and today's partial session"
       ],
@@ -6454,21 +7794,89 @@
         "T024"
       ],
       "createdAt": "2026-09-01T03:21:29.711Z",
-      "updatedAt": "2026-09-01T03:25:30.336Z",
+      "updatedAt": "2026-09-01T21:44:00.445Z",
+      "completedAt": "2026-09-01T21:43:55.639Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T21:43:40.697Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:29.711Z"
+        "initializedAt": "2026-09-01T03:21:29.711Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/coverage.py",
+                    "sha256": "36592a9d4d11d28f56b9729f92ee852272b8c0bfd0b150e5987e55434491dffb"
+                  },
+                  {
+                    "path": "tests/test_lake_coverage.py",
+                    "sha256": "eeff60b5592f75712ecd2f5cd891be3398caf3557011fdd743cdd3e913b60819"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T025",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "626770a5-9c4c-5b0e-a710-6d5816dcf066"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree coverage and gap planning implementation; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:43:11.531Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T025-validation.json",
+                "sha256": "0db7589d680c4d5cf8fefe3da2ce8db9f45a4b5b269d462378790a520b514964",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T21:43:24.933Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:43:41.098Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -6518,7 +7926,7 @@
     {
       "id": "T037",
       "title": "E4.5 Newest-first equity backfill planning",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T007",
@@ -6530,6 +7938,9 @@
         "equities",
         "backfill"
       ],
+      "notes": [
+        "2026-09-01 23:57:47 UTC: Implemented resumable newest-first equity backfill planning with terminal-state skipping, liquidity rank tie-breaks, bounded batches, and injected queue dispatch."
+      ],
       "acceptance": [
         "Planning always prioritizes newer missing sessions and safely resumes from catalog state"
       ],
@@ -6538,21 +7949,89 @@
         "T035"
       ],
       "createdAt": "2026-09-01T03:22:13.245Z",
-      "updatedAt": "2026-09-01T03:27:00.636Z",
+      "updatedAt": "2026-09-01T23:57:51.559Z",
+      "completedAt": "2026-09-01T23:57:47.264Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T23:57:25.974Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:13.245Z"
+        "initializedAt": "2026-09-01T03:22:13.245Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/equity_backfill.py",
+                    "sha256": "4120b98cb0ebc6dfab196af6280c1e065f364add559b69c2534d4b841ec9e99f"
+                  },
+                  {
+                    "path": "tests/test_lake_equity_backfill.py",
+                    "sha256": "7274ef85bf19f45430b87d8552238462672c3d7cc82254f5cc640b1186228e9a"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T037",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "5e7f73bd-fd57-545e-80b2-33530bb54713"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree resumable newest-first equity backfill planner; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:56:55.551Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T037-validation.json",
+                "sha256": "7da7aed4b8580d876798cb3737b0385039f6e0064cd780090347062cd012ab21",
+                "passCount": 187,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T23:57:10.549Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T23:57:26.380Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -7175,7 +8654,7 @@
     {
       "id": "T026",
       "title": "E2.6 Typed settings and universe loaders",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T005",
@@ -7186,6 +8665,9 @@
       "labels": [
         "configuration"
       ],
+      "notes": [
+        "2026-09-01 21:27:04 UTC: Added portable typed settings and universe loaders with strict validation, environment overrides, normalized symbols/data types, and runtime-only SecretStr fields."
+      ],
       "acceptance": [
         "Invalid settings fail fast and secrets are accepted only through environment or Key Vault references"
       ],
@@ -7193,21 +8675,97 @@
         "T015"
       ],
       "createdAt": "2026-09-01T03:21:33.617Z",
-      "updatedAt": "2026-09-01T03:25:37.832Z",
+      "updatedAt": "2026-09-01T21:27:08.118Z",
+      "completedAt": "2026-09-01T21:27:03.833Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T21:26:48.992Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:33.617Z"
+        "initializedAt": "2026-09-01T03:21:33.617Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/_configuration.py",
+                    "sha256": "212071e3b44b9a6f21b5b8ee5059b3adf2d4a47c03cecb4806c4927b2374a639"
+                  },
+                  {
+                    "path": "src/lake/settings.py",
+                    "sha256": "d779f081b0d1923adf79f6a682a39a178a0993e718d15b004a3091ca1442cce7"
+                  },
+                  {
+                    "path": "src/lake/universes.py",
+                    "sha256": "a6410b335b345befa4d74a20c21eb5f90ad21842c49c7d8f969aa4e09dd2ae51"
+                  },
+                  {
+                    "path": "tests/test_lake_configuration.py",
+                    "sha256": "adead595e6df025886208a0ed43e49beb342bffabb497fd5d595299f7f8fc6e0"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T026",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "63c73de5-f40f-5723-96f7-83ec14d00d20"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree typed configuration loaders; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:26:20.848Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T026-validation.json",
+                "sha256": "57a4fb8457f8a98715df50064450137e5fffb88eee173195bd32c61c83d76d50",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T21:26:34.412Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:26:49.314Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -7215,7 +8773,7 @@
     {
       "id": "T038",
       "title": "E4.6 Storage-cap pause and history valve",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T007",
@@ -7227,6 +8785,9 @@
         "backfill",
         "cost-control"
       ],
+      "notes": [
+        "2026-09-02 00:42:50 UTC: Added storage-cap usage estimation and alertable pause enforcement before enqueue, fetch, and commit, plus independent trade/quote history valves."
+      ],
       "acceptance": [
         "Backfill cannot silently pass the configured storage ceiling",
         "Trade and quote history valves are explicit and testable"
@@ -7237,21 +8798,111 @@
         "T037"
       ],
       "createdAt": "2026-09-01T03:22:16.722Z",
-      "updatedAt": "2026-09-01T03:27:08.432Z",
+      "updatedAt": "2026-09-02T00:42:54.593Z",
+      "completedAt": "2026-09-02T00:42:50.202Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T00:42:28.731Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:16.722Z"
+        "initializedAt": "2026-09-01T03:22:16.722Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/storage_cap.py",
+                    "sha256": "91609e969750c76f953151d9f5c3910c37ebb4febf146aaa1ab76127031ff7b7"
+                  },
+                  {
+                    "path": "src/lake/history_valve.py",
+                    "sha256": "e079367eaefecc7ec0e320f4e9a6022bb8c4376a45d4e3054aec36d6a8175ddb"
+                  },
+                  {
+                    "path": "src/lake/equity_backfill.py",
+                    "sha256": "cdc82dd5d0bfdfb59febc844bcf95109d75c7cd34237370189ec7a0bad78ce08"
+                  },
+                  {
+                    "path": "src/lake/equity_ingest.py",
+                    "sha256": "6268e4a84225073e5f1efd16ef99b8a8d7993e38a69fb1fc9ecaab87cfc633a2"
+                  },
+                  {
+                    "path": "tests/test_lake_storage_cap.py",
+                    "sha256": "629993a7d1da5a4ad0aa05fe542eea259e0c5f5a7db85afaa799958d93e0b53e"
+                  },
+                  {
+                    "path": "tests/test_lake_history_valve.py",
+                    "sha256": "97a39868529e466f761009f74e6f173e5d0bb648ac7027f589f3faa613ee0d90"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T038",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "85bbb40d-30b5-5262-9b53-6e32613690f3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T038",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "1c99bb5a-3349-5660-b3d1-2a2a42979d8b"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree storage-cap and history-valve enforcement; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:41:54.147Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T038-validation.json",
+                "sha256": "7ecb47b345ce3630e01be2d835ea0f5f0e386e4b08351c75e742436b2a7a1650",
+                "passCount": 230,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T00:42:10.496Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:42:29.112Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -7259,7 +8910,7 @@
     {
       "id": "T045",
       "title": "E5.6 Bounded DuckDB SQL query mode",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T008",
@@ -7272,6 +8923,9 @@
         "duckdb",
         "cost-control"
       ],
+      "notes": [
+        "2026-09-02 00:44:01 UTC: Added bounded DuckDB SQL mode over complete ensured local Parquet files with path confinement, dangerous-query rejection, scan/result caps, JSON/Arrow output, and authorized force override."
+      ],
       "acceptance": [
         "SQL cannot reference arbitrary storage or exceed caps without an explicit authorized force option"
       ],
@@ -7279,21 +8933,97 @@
         "T043"
       ],
       "createdAt": "2026-09-01T03:22:40.656Z",
-      "updatedAt": "2026-09-01T03:28:01.997Z",
+      "updatedAt": "2026-09-02T00:44:05.850Z",
+      "completedAt": "2026-09-02T00:44:01.656Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T00:43:43.915Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:40.656Z"
+        "initializedAt": "2026-09-01T03:22:40.656Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/bounded_query.py",
+                    "sha256": "1a799c221e52b850bbd30a5541f91433aad3c0010fe67e8f83867192e857450b"
+                  },
+                  {
+                    "path": "src/lake/query_api.py",
+                    "sha256": "dc540375204f247610d637a65b22248759b1767bf0c0bdc8388659e8035fee0a"
+                  },
+                  {
+                    "path": "src/lake/app.py",
+                    "sha256": "de329ba71eb7d44f12487e2633cbb6a2a4cc7ba3221237757586e5fa29999acf"
+                  },
+                  {
+                    "path": "tests/test_lake_bounded_query.py",
+                    "sha256": "b938d8cefc027af1dbfa2066c5f6c3a7fe6b1319be1f9221cf28830b74efc111"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T045",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "f5118598-8641-55c4-9c93-5823adb51eed"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree bounded DuckDB query mode; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:43:11.641Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T045-validation.json",
+                "sha256": "4c559aae94ac1ae80c877ae1ff59c6073130b84bf52d157031bd770ea6549bad",
+                "passCount": 230,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T00:43:27.902Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T00:43:44.240Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -7694,7 +9424,7 @@
     {
       "id": "T027",
       "title": "E2.7 Blob, queue, SAS, and job storage adapters",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T005",
@@ -7706,6 +9436,9 @@
         "azure-storage",
         "security"
       ],
+      "notes": [
+        "2026-09-01 21:45:33 UTC: Implemented token-authenticated blob replacement, deterministic queue messaging, read-only object-scoped user-delegation SAS issuance, and job storage facades."
+      ],
       "acceptance": [
         "Azure adapters avoid account keys and expose only the minimum read or write capability required"
       ],
@@ -7713,21 +9446,89 @@
         "T024"
       ],
       "createdAt": "2026-09-01T03:21:37.177Z",
-      "updatedAt": "2026-09-01T03:25:45.469Z",
+      "updatedAt": "2026-09-01T21:45:37.842Z",
+      "completedAt": "2026-09-01T21:45:33.162Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-01T21:45:18.370Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:37.177Z"
+        "initializedAt": "2026-09-01T03:21:37.177Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ebe96cfa0539fafc45c9c29540caa80653fbc0a6",
+                "shortSha": "ebe96cf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/storage.py",
+                    "sha256": "6ea9271a97266bd505dbbff03c15d3f7523d1ad600c4d46e54f48af9b3a7bf73"
+                  },
+                  {
+                    "path": "tests/test_lake_storage.py",
+                    "sha256": "3ec68bffbe2c36aa8c2603151aec036cc45259a3b85794ef48422868ecf6a78c"
+                  }
+                ]
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T027",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "d5f38bb1-f320-59d8-a739-d203c09c90ef"
+              },
+              {
+                "kind": "note",
+                "note": "Current HEAD anchors content-hashed working-tree token-authenticated storage adapters; no commit was created"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:44:41.553Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T027-validation.json",
+                "sha256": "12706f5a8a422be4e7e6ddaf3b25d6496ec0685cf88b203f92563f89ccedd818",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-01T21:45:01.490Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 137 CLEO tasks through T137.\n"
+              }
+            ],
+            "capturedAt": "2026-09-01T21:45:18.700Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []

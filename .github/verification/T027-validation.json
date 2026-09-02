@@ -1,0 +1,71 @@
+{
+  "taskId": "T027",
+  "timestamp": "2026-09-01T21:38:53Z",
+  "numTotalTests": 8,
+  "numPassedTests": 8,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-storage-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_storage.py",
+      "result": "9 passed in 0.68s"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/storage.py tests/test_lake_storage.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/storage.py tests/test_lake_storage.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/storage.py tests/test_lake_storage.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "53 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "108 passed, 1 warning in 9.54s"
+    }
+  ],
+  "decisions": [
+    "AzureBlobStore implements the existing ObjectStore replacement contract with upload_blob(overwrite=True), validates relative POSIX object paths, and exposes no read operation.",
+    "AzureQueueSender accepts structured messages, serializes deterministic JSON, and only exposes send through its queue boundary.",
+    "AzureBlobSasIssuer obtains a user delegation key through a caller-supplied token credential, issues read-only permissions for one validated blob path, and enforces the T026 maximum TTL of 86400 seconds with the configured default of 900 seconds.",
+    "AzureJobStorage delegates get, upsert, and list operations to the T024 JobRepository implementation, preserving the existing testable Table adapter contract.",
+    "Endpoint factories pass the caller-supplied TokenCredential directly to Azure SDK clients; no credential discovery or secret-bearing storage configuration is introduced."
+  ],
+  "limitations": [
+    "All focused tests use local SDK-shaped fakes and a patched SAS signer; no live Azure request was made.",
+    "A deployed runtime still requires an Azure identity with Storage Blob Data Contributor, Storage Queue Data Contributor, and Storage Table Data Contributor access as applicable; user-delegation SAS issuance additionally requires Microsoft.Storage/storageAccounts/blobServices/generateUserDelegationKey/action, commonly granted by Storage Blob Delegator."
+  ],
+  "blockers": []
+}

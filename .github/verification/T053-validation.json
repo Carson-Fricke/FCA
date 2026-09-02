@@ -1,0 +1,90 @@
+{
+  "taskId": "T053",
+  "timestamp": "2026-09-01T23:39:25Z",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-option-client-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_options_client.py",
+      "result": "4 tests passed for selected OSI contract metadata hydration, OPRA trade and quote normalization, cursor pagination, Retry-After retry, 100-symbol batching, and rejection of unselected provider symbols"
+    },
+    {
+      "name": "focused-provider-regression-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_options_client.py tests/test_lake_alpaca.py",
+      "result": "9 tests passed for T053 option behavior and existing T033 equity/crypto Alpaca transport behavior"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/alpaca.py src/lake/options.py tests/test_lake_options_client.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/alpaca.py src/lake/options.py tests/test_lake_options_client.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/alpaca.py src/lake/options.py tests/test_lake_options_client.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed; one existing Starlette httpx deprecation warning"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "79 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Resolved 58 packages; uv.lock is up to date"
+    }
+  ],
+  "files": [
+    "src/lake/alpaca.py",
+    "src/lake/options.py",
+    "tests/test_lake_options_client.py",
+    ".github/verification/T053-validation.json"
+  ],
+  "decisions": [
+    "T053 extends the T033 AlpacaClient transport boundary and exposes AlpacaOptionsClient as a named option-provider facade without duplicating HTTP, retry, semaphore, or cancellation behavior.",
+    "Historical option requests use GET /v1beta1/options/trades and GET /v1beta1/options/quotes with feed=opra, comma-separated selected OSI symbols, inclusive start/end bounds, ascending sort, and cursor pagination.",
+    "Selected T024 ContractRecord values are canonicalized, de-duplicated, batched in provider-compatible groups of at most 100 symbols, and used to hydrate every returned row with OSI, underlying, expiration date, strike price, and OptionType call/put metadata.",
+    "Option trade and quote fields are normalized to UTC datetimes, exact Decimal prices, bounded integer sizes, exchange fields, and required OPRA condition codes; unselected response symbols and malformed rows fail explicitly."
+  ],
+  "limitations": [
+    "All provider calls use injected asynchronous fakes; no live Alpaca/provider calls, credentials, network access, Azure provisioning, or live Azure calls were used.",
+    "Option ingestion worker, API integration, persistence wiring, and multi-year soak remain deferred to T054-T056.",
+    "No MyPy run was performed; repository tooling uses Ruff and ty.",
+    "CLEO mutations, task completion, Git staging, commits, and unrelated file changes were not performed."
+  ],
+  "blockers": []
+}

@@ -1,0 +1,85 @@
+{
+  "taskId": "T058",
+  "timestamp": "2026-09-02T00:26:23Z",
+  "numTotalTests": 230,
+  "numPassedTests": 230,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-crypto-worker-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_crypto_worker.py",
+      "result": "6 tests passed for continuous UTC calendar-day planning, weekend/holiday coverage, current partial-day refresh, injected queue worker integration, atomic object/catalog publication, replacement idempotency, and provider failure handling"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/crypto_backfill.py src/lake/crypto_ingest.py tests/test_lake_crypto_worker.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/crypto_backfill.py src/lake/crypto_ingest.py tests/test_lake_crypto_worker.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/crypto_backfill.py src/lake/crypto_ingest.py tests/test_lake_crypto_worker.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Resolved 58 packages"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "230 tests passed with one existing Starlette/httpx deprecation warning"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "91 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    }
+  ],
+  "files": [
+    "src/lake/crypto_backfill.py",
+    "src/lake/crypto_ingest.py",
+    "tests/test_lake_crypto_worker.py",
+    ".github/verification/T058-validation.json"
+  ],
+  "decisions": [
+    "Crypto planning uses T023 crypto UTC sessions and continuous inclusive calendar dates, not XNYS sessions, holidays, or close times.",
+    "Each pair-day is grouped into one deterministic queue message with UTC-midnight start and next-midnight close bounds; current open days use the injected clock as the provider end bound.",
+    "The crypto transaction builds on T057 normalized crypto client methods, T022 writer semantics, T024 CoverageRecord keys, and the T034 atomic committer boundary.",
+    "The shared T035 QueueWorker is constructed by create_crypto_worker with injected queue, worker clock, client, writer, committer, and current-time clock; successful delivery deletes only after the transaction commits.",
+    "Deterministic date-first crypto object paths and catalog logical keys are replaced on every retry or partial-day refresh, making duplicate delivery idempotent without process-local deduplication.",
+    "Focused tests use provider, writer, committer, queue, worker-clock, and current-time fakes only; no live Alpaca, Azure, credentials, or network access was used."
+  ],
+  "limitations": [
+    "The existing repository-wide ruff format check remains blocked by an unrelated pre-existing formatting issue in src/lake/option_backfill.py; that file was outside T058 scope and was not changed.",
+    "No MyPy run was performed; repository tooling uses Ruff and ty.",
+    "No live provider or Azure data-plane operation was run."
+  ],
+  "blockers": []
+}

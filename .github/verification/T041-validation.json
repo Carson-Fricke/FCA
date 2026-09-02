@@ -1,0 +1,64 @@
+{
+  "taskId": "T041",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-catalog-api-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_catalog_api.py",
+      "result": "8 tests passed for authenticated calendar-aware equity and crypto coverage, persisted metadata, missing/empty/partial/error statuses, bearer rejection, strict query validation, unsupported asset rejection, and bounded date ranges"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "57 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "lockfile-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Lockfile is current"
+    }
+  ],
+  "files": [
+    "src/lake/catalog_api.py",
+    "src/lake/app.py",
+    "tests/test_lake_catalog_api.py",
+    ".github/verification/T041-validation.json"
+  ],
+  "decisions": [
+    "GET /v1/catalog/coverage is protected by the T040 bearer dependency and resolves its CatalogRepository, range limit, and coverage clock through application state for deterministic injection.",
+    "Coverage responses use T025 calculate_coverage, preserving XNYS holidays and half-days for equity and continuous UTC days for crypto while returning missing, empty, partial, complete, and error statuses.",
+    "The router applies the asset, data type, symbol, and date filters before repository listing so the catalog boundary remains compatible with partition-key-backed implementations.",
+    "The route is read-only and does not enqueue ensure work, create jobs, poll jobs, call Azure, or call a market provider; those behaviors remain owned by T042 and later tasks."
+  ],
+  "limitations": [
+    "Focused and repository tests use the injected InMemoryCatalogRepository and deterministic timezone-aware clocks; no live Azure, blob, provider, deployment, or network call was made.",
+    "The default app wiring uses an empty in-memory catalog until a deployment composition injects a persistent CatalogRepository.",
+    "Pytest emits the pre-existing FastAPI/httpx StarletteDeprecationWarning from TestClient."
+  ],
+  "blockers": []
+}

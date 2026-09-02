@@ -1,0 +1,70 @@
+{
+  "taskId": "T037",
+  "timestamp": "2026-09-01T23:37:00Z",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-equity-backfill-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_equity_backfill.py",
+      "result": "8 tests passed in 2.48s"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/equity_backfill.py tests/test_lake_equity_backfill.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/equity_backfill.py tests/test_lake_equity_backfill.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/equity_backfill.py tests/test_lake_equity_backfill.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "79 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 passed, 1 warning in 6.57s; warning is the existing Starlette/httpx deprecation"
+    }
+  ],
+  "decisions": [
+    "The new equity_backfill planner delegates session coverage classification, terminal-state filtering, item grouping, and queue message construction to T025/T036 lake.equity_catchup rather than duplicating it.",
+    "Each plan reads the catalog again, so successful complete or terminal-empty rows are omitted on a resumed plan without a process-local cursor. Newest session date is primary; lower liquidity rank, ranked-before-unranked status, and canonical symbol provide deterministic tie-breaks.",
+    "max_items bounds one dispatch batch and has_more reports omitted actionable candidates. Universe maximum_liquidity_rank is applied per data type, allowing a symbol to remain queued for an eligible data type.",
+    "Queue sending uses the injected T027 QueueSender through enqueue_equity_catch_up. Delivery handling remains the injected T035 QueueWorker QueueHandler boundary; no provider, Azure, credential, or network client is created by the planner."
+  ],
+  "limitations": [
+    "Liquidity ranks are caller-supplied metadata because the repository has no local liquidity-ranking provider or catalog table.",
+    "No live Azure, provider, credentials, network access, or MyPy run was used."
+  ],
+  "blockers": []
+}

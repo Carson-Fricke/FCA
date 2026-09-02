@@ -1,0 +1,58 @@
+{
+  "taskId": "T036",
+  "timestamp": "2026-09-01T00:00:00Z",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-equity-catchup-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_equity_catchup.py",
+      "result": "9 tests passed for latest completed session selection, terminal-state filtering, deterministic ordering, queue messages, configuration, and invalid inputs"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/equity_catchup.py tests/test_lake_equity_catchup.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/equity_catchup.py tests/test_lake_equity_catchup.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/equity_catchup.py tests/test_lake_equity_catchup.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-quality-and-tests",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check .",
+        "uv run --python 3.12 --extra dev ruff format --check .",
+        "uv run --python 3.12 --extra dev ty check",
+        "uv run --python 3.12 --extra dev pytest -p no:cacheprovider"
+      ],
+      "result": "Ruff, format, ty, and the full 187-test repository suite passed; one existing Starlette httpx deprecation warning remains"
+    }
+  ],
+  "decisions": [
+    "The new lake.equity_catchup module is a pure, dependency-injected planner. It uses T023 XNYS bounds and T025 calculate_coverage classifications, and does not create provider or Azure clients.",
+    "A default run targets the latest XNYS session whose close is at or before the timezone-aware as_of value. A bounded date range supports deterministic historical planning while filtering out open, future, weekend, and holiday dates.",
+    "Only missing, partial, and error coverage states for completed sessions produce work. Complete and empty states are terminal and excluded. Work is grouped by symbol-session for the T034 atomic trade-and-quote transaction.",
+    "Catch-up ordering supports newest_first and oldest_first configuration values, with session date as the primary key and canonical symbol and data-type values as stable tie-breakers.",
+    "Queue messages are emitted only through an explicitly injected QueueSender; no live Azure queue, provider, credential, or network access is used."
+  ],
+  "limitations": [
+    "T026 BackfillSettings currently constrains the committed YAML order to newest_first; the planner accepts oldest_first as a local planning value without modifying T026 files.",
+    "The shared worktree contains unrelated user changes and untracked files; this task is scoped to src/lake/equity_catchup.py, tests/test_lake_equity_catchup.py, and this validation record."
+  ],
+  "blockers": []
+}

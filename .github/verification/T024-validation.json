@@ -1,0 +1,75 @@
+{
+  "taskId": "T024",
+  "numTotalTests": 9,
+  "numPassedTests": 9,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/catalog.py tests/test_lake_catalog.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/catalog.py tests/test_lake_catalog.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/catalog.py tests/test_lake_catalog.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-catalog-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_catalog.py",
+      "result": "28 tests passed in 0.19s"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "43 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "75 tests passed in 2.00s"
+    },
+    {
+      "name": "git-whitespace-check",
+      "status": "passed",
+      "command": "git diff --check",
+      "result": "No whitespace errors"
+    }
+  ],
+  "decisions": [
+    "Coverage, job, and option contract records are frozen dataclasses with normalized symbols, enum values, dates, UTC timestamps, and validation at construction.",
+    "CatalogRepository, JobRepository, and ContractRepository are Azure-independent protocols; deterministic in-memory repositories sort results by stable logical keys and replace duplicate keys on upsert.",
+    "Azure adapters use TableClient only at the persistence boundary, replace entities on upsert to prevent stale optional fields, and catch ResourceNotFoundError as a normal missing-record result.",
+    "Coverage partitions are keyed by asset class, data type, and canonical symbol with ISO session dates as row keys; job and contract tables use fixed partition keys and encoded IDs.",
+    "Azure Tables have no decimal EDM type, so contract strike prices are persisted as exact decimal strings and restored as Decimal values; no live Azure calls are used by tests."
+  ],
+  "limitations": [
+    "The Azure adapter tests use an in-process TableClient-shaped fake and validate entity/query behavior without provisioning or contacting Azure."
+  ],
+  "blockers": []
+}

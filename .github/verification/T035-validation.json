@@ -1,0 +1,70 @@
+{
+  "taskId": "T035",
+  "timestamp": "2026-09-01T23:00:00Z",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-queue-worker-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_queue_worker.py",
+      "result": "10 tests passed in 0.77s; the renewal test completes without starvation"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/queue_worker.py tests/test_lake_queue_worker.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/queue_worker.py tests/test_lake_queue_worker.py",
+      "result": "4 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/queue_worker.py tests/test_lake_queue_worker.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "66 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed with one existing Starlette httpx deprecation warning"
+    }
+  ],
+  "decisions": [
+    "QueueTransport, WorkerClock, QueueHandler, and DeadLetterSink are injected boundaries, so focused tests use fakes and never connect to Azure.",
+    "A message is deleted only after the idempotent handler completes successfully; handler failures below the limit leave the leased message for normal visibility-timeout retry.",
+    "The renewal loop carries forward Azure's updated pop receipt. On the final failed attempt, the worker sends to the injected dead-letter boundary before deleting the source message.",
+    "Duplicate deliveries are intentionally processed at least once. The injected handler owns deterministic object and catalog replacement, which makes restart and duplicate delivery safe without process-local deduplication."
+  ],
+  "limitations": [
+    "Dead-letter transfer and source deletion are separate queue operations; a sink must be durable and idempotent because a crash between them can cause a repeated dead-letter transfer.",
+    "No live Azure, provider, credentials, network access, or MyPy run was used."
+  ],
+  "blockers": []
+}

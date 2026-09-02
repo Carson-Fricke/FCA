@@ -1,0 +1,65 @@
+{
+  "taskId": "T020",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bicep-build",
+      "status": "passed",
+      "command": "az bicep build --file infra/main.bicep --stdout",
+      "result": "The resource-group market-lake composition compiled without diagnostics"
+    },
+    {
+      "name": "bicep-lint",
+      "status": "passed",
+      "command": "az bicep lint --file infra/main.bicep",
+      "result": "The market-lake composition linted without diagnostics"
+    },
+    {
+      "name": "dev-parameter-file",
+      "status": "passed",
+      "command": "az bicep build-params --file infra/parameters/dev.bicepparam --stdout",
+      "result": "The westus2 dev parameter file compiled; it contains no secret values and visibly selects the dev names, image digest sentinel, disabled external API ingress, and explicit Key Vault public-network choice. The composition explicitly keeps shared Log Analytics public query access disabled to match cost-controls."
+    },
+    {
+      "name": "compiled-composition-assertions",
+      "status": "passed",
+      "command": "PowerShell static assertions over az bicep build --stdout compiled ARM JSON",
+      "result": "Compiled ARM assertions found six resource-group modules for storage, identities, Key Vault, access, Container Apps, and cost controls; deterministic resource-group-derived naming; runtime identity resource and client ID wired to both workloads; runtime storage and Key Vault role-assignment inputs wired from module outputs; digest-addressed shared image input; explicit Key Vault network selection; shared Log Analytics workspace sequencing; 40 USD and 70 USD monthly budget controls; and the configured non-secret runtime guardrails"
+    },
+    {
+      "name": "secret-free-and-deployment-boundary",
+      "status": "passed",
+      "result": "The composition creates no Key Vault secrets and accepts no provider credentials, tokens, account keys, passwords, or registry credentials. The dev file contains only a fake digest-shaped image sentinel and REPLACE_WITH_BUDGET_CONTACT_EMAIL sentinel, both documented as mandatory user input before Azure operations"
+    }
+  ],
+  "parametersRequiringUserInputBeforeAzure": [
+    {
+      "parameter": "sharedImageReference",
+      "currentDevValue": "ghcr.io/carson-fricke/fca@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "requiredValue": "The actual digest-addressed reference emitted by the GitHub GHCR publication workflow"
+    },
+    {
+      "parameter": "budgetAlertContactEmail",
+      "currentDevValue": "REPLACE_WITH_BUDGET_CONTACT_EMAIL",
+      "requiredValue": "A valid Cost Management notification email address"
+    },
+    {
+      "parameter": "budgetStartDate",
+      "currentDevValue": "2026-09-01",
+      "requiredValue": "The first day of the intended monthly budget period when deployment occurs"
+    }
+  ],
+  "limitations": [
+    "No Azure login, az what-if, deployment, Cost Management operation, registry operation, or data-plane call was run by this validation.",
+    "The effective shared Log Analytics workspace retention is 30 days because the existing Container Apps module declares that workspace at 30 days; cost-controls receives the same value to keep the repeated resource declaration consistent.",
+    "The dev Key Vault public endpoint choice is enabled explicitly because no private endpoint or private DNS module is in scope. Key Vault remains Entra-only and RBAC-authorized; set allowPublicNetworkAccess to false only after private connectivity is composed.",
+    "A deployment still needs an Azure subscription, a westus2-capable resource group, and an authenticated Azure caller or the later GitHub OIDC workflow. No Bicep parameter contains a secret; any provider/API credentials must be seeded separately in Key Vault by an authorized process."
+  ],
+  "blockers": [
+    "Azure what-if and deployment are intentionally deferred until the user supplies the actual GHCR digest, valid budget contact, deployment subscription/resource group context, and the approved Key Vault network posture."
+  ]
+}

@@ -51,3 +51,19 @@ def test_command_dispatch(command: str, monkeypatch: MonkeyPatch) -> None:
 
     assert cli.main([command, "--probe"]) == 17
     assert received == ["--probe"]
+
+
+def test_api_command_starts_uvicorn(monkeypatch: MonkeyPatch) -> None:
+    received: dict[str, object] = {}
+
+    def run(application: str, *, host: str, port: int) -> None:
+        received.update(application=application, host=host, port=port)
+
+    monkeypatch.setattr("lake.api.uvicorn.run", run)
+
+    assert cli.main(["api", "--host", "127.0.0.1", "--port", "9000"]) == 0
+    assert received == {
+        "application": "lake.app:app",
+        "host": "127.0.0.1",
+        "port": 9000,
+    }

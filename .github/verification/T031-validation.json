@@ -1,0 +1,129 @@
+{
+  "taskId": "T031",
+  "timestamp": "2026-09-01T22:36:15Z",
+  "numTotalTests": 7,
+  "numPassedTests": 7,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "workflow-static-syntax",
+      "status": "passed",
+      "command": "actionlint .github/workflows/deploy-main.yml",
+      "result": "actionlint 1.7.12, with ShellCheck 0.11.0 available, reported no diagnostics for the workflow YAML, GitHub Actions expressions, reusable-workflow call, job dependencies, permissions, and shell blocks"
+    },
+    {
+      "name": "main-branch-and-concurrency-boundary",
+      "status": "passed",
+      "result": "The workflow has a push-only master trigger with relevant path filters, a non-canceling deployment concurrency group, and an explicit deploy-job condition for refs/heads/master; it has no workflow_dispatch or alternate mutation trigger"
+    },
+    {
+      "name": "reusable-image-publication",
+      "status": "passed",
+      "result": "The publish-image job calls ./.github/workflows/publish-image.yml, grants packages: write only to that reusable job, and passes its image-reference and image-digest outputs to the deployment job"
+    },
+    {
+      "name": "immutable-image-contract",
+      "status": "passed",
+      "result": "The deployment fails unless the reusable-workflow outputs are a matching GHCR sha256 reference and digest, passes the digest reference to sharedImageReference, then verifies both the API container and ingest job use that exact reference"
+    },
+    {
+      "name": "oidc-and-least-privilege",
+      "status": "passed",
+      "result": "The deployment job uses azure/login with id-token: write and variable-backed client, tenant, and subscription identifiers; no Azure client secret, provider/API secret, subscription ID, resource group name, or email is embedded"
+    },
+    {
+      "name": "manual-approval-and-single-mutation-path",
+      "status": "passed",
+      "result": "The deployment job targets the repository-selected GitHub Environment before any Azure login or mutation; required reviewers on that Environment are the manual approval gate, and the workflow comments and trigger boundary identify this as the only repository-managed production mutation path"
+    },
+    {
+      "name": "probe-safe-health-smoke",
+      "status": "passed",
+      "result": "After deployment, the workflow derives the deployed API FQDN, calls the source-defined unauthenticated /health endpoint with curl retries, and requires JSON status=ok without handling a bearer, provider, or API credential"
+    }
+  ],
+  "requiredGitHubConfiguration": {
+    "repositoryVariables": [
+      {
+        "name": "DEPLOYMENT_ENVIRONMENT",
+        "purpose": "Exact name of the protected GitHub Environment and the Bicep environmentName/githubEnvironment value; define this at repository scope because it selects the Environment"
+      }
+    ],
+    "environmentVariables": [
+      {
+        "name": "AZURE_CLIENT_ID",
+        "purpose": "Client ID of the federated user-assigned GitHub deployer identity"
+      },
+      {
+        "name": "AZURE_TENANT_ID",
+        "purpose": "Azure tenant identifier accepted by the OIDC login"
+      },
+      {
+        "name": "AZURE_SUBSCRIPTION_ID",
+        "purpose": "Azure subscription identifier for login and the resource-group deployment"
+      },
+      {
+        "name": "AZURE_RESOURCE_GROUP",
+        "purpose": "Target resource group containing the composed market-lake resources"
+      },
+      {
+        "name": "AZURE_LOCATION",
+        "purpose": "Azure region passed to infra/main.bicep"
+      },
+      {
+        "name": "RESOURCE_NAME_PREFIX",
+        "purpose": "Non-secret Bicep resource naming prefix"
+      },
+      {
+        "name": "BUDGET_START_DATE",
+        "purpose": "First day of the monthly budget period in UTC ISO 8601 format"
+      },
+      {
+        "name": "ALLOW_PUBLIC_NETWORK_ACCESS",
+        "purpose": "Boolean Key Vault network setting required by the selected infrastructure posture"
+      },
+      {
+        "name": "ENABLE_EXTERNAL_API_INGRESS",
+        "purpose": "Must be true when using the hosted runner's probe-safe FQDN smoke"
+      },
+      {
+        "name": "INGEST_CRON_EXPRESSION",
+        "purpose": "Five-field UTC schedule for the deployed ingest job"
+      },
+      {
+        "name": "INGEST_REPLICA_TIMEOUT_SECONDS",
+        "purpose": "Maximum duration for one ingest job replica"
+      }
+    ],
+    "environmentSecrets": [
+      {
+        "name": "BUDGET_ALERT_CONTACT_EMAIL",
+        "purpose": "Cost Management alert recipient passed to Bicep without committing or logging the address"
+      }
+    ],
+    "environmentProtection": {
+      "requiredReviewers": true,
+      "purpose": "The deployment job must remain blocked until a reviewer approves the selected GitHub Environment"
+    },
+    "automaticSecrets": [
+      {
+        "name": "GITHUB_TOKEN",
+        "purpose": "Provided by GitHub to the existing publish-image reusable workflow for GHCR publication; no user-created token is required"
+      }
+    ],
+    "notRequired": [
+      "Azure client secret",
+      "Provider/API credential",
+      "Bearer token for the health smoke"
+    ]
+  },
+  "limitations": [
+    "actionlint and action-validator are static checks only; no GitHub Actions run was triggered",
+    "No Azure login, deployment, Container Apps update, GHCR publication, network request, or health smoke was executed",
+    "The hosted health smoke requires ENABLE_EXTERNAL_API_INGRESS=true; all non-health API routes remain protected by the application authentication boundary",
+    "Manual approval and the federated credential subject are GitHub/Azure configuration prerequisites and cannot be proven from the local worktree"
+  ],
+  "blockers": []
+}

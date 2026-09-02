@@ -1,0 +1,86 @@
+{
+  "taskId": "T043",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-query-api-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_query_api.py",
+      "result": "6 tests passed for authenticated file queries, complete-only catalog selection, object-path validation, read-only SAS injection, synchronous and pending ensure callbacks, missing ensure wiring, strict mode and no-SQL validation, and bounded ranges"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/query_api.py src/lake/app.py tests/test_lake_query_api.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/query_api.py src/lake/app.py tests/test_lake_query_api.py",
+      "result": "3 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/query_api.py src/lake/app.py tests/test_lake_query_api.py",
+      "result": "All checks passed"
+    }
+  ],
+  "repositoryChecks": [
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 tests passed; one existing Starlette httpx deprecation warning"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "79 files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "lockfile-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "Lockfile is current"
+    }
+  ],
+  "files": [
+    "src/lake/query_api.py",
+    "src/lake/app.py",
+    "tests/test_lake_query_api.py",
+    ".github/verification/T043-validation.json"
+  ],
+  "decisions": [
+    "POST /v1/query is protected by the existing bearer dependency and resolves the injected catalog repository, SAS issuer, coverage clock, range bound, and optional ensure callback through application state.",
+    "File mode is strict: mode must be file, the request has no SQL field, and only complete records whose catalog object path exactly matches the canonical partition path can receive a SAS URL.",
+    "Incomplete, missing, empty, partial, error, and malformed-path coverage is rejected with a structured 409 unless ensure=true. The injected callback is invoked with the existing EnsureRequest contract; a still-running result returns 202 with only already-complete files.",
+    "SAS issuance is delegated to the T027 SasIssuer boundary and is called only for requested complete objects. The query module does not read blobs, execute SQL, call Azure, or call a market provider."
+  ],
+  "limitations": [
+    "The default application has no SAS issuer or ensure callback; deployment composition must inject those boundaries for file retrieval and optional coverage work.",
+    "The query uses the existing bounded catalog date range and equity/crypto coverage calendars. Option-specific selection remains owned by later roadmap tasks.",
+    "The complete repository Ruff, format, ty, and test checks pass after integrated verification.",
+    "Pytest emits the pre-existing FastAPI/httpx StarletteDeprecationWarning from TestClient.",
+    "No live Azure, provider, deployment, SQL engine, or network call was made."
+  ],
+  "blockers": []
+}

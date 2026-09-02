@@ -1,0 +1,78 @@
+{
+  "taskId": "T062",
+  "timestamp": "2026-09-01T23:59:00Z",
+  "numTotalTests": 187,
+  "numPassedTests": 187,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-lease-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/test_lake_leases.py",
+      "result": "5 tests passed for symbol-day scope validation, serialized concurrent commits, release-on-failure, Azure-shaped lease renewal/release, lock-blob creation, and token-credential factory wiring"
+    },
+    {
+      "name": "focused-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check src/lake/leases.py tests/test_lake_leases.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "focused-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check src/lake/leases.py tests/test_lake_leases.py",
+      "result": "2 files already formatted"
+    },
+    {
+      "name": "focused-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check src/lake/leases.py tests/test_lake_leases.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-tests",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "187 passed, 1 existing Starlette/httpx deprecation warning; no T062 or unrelated test failures in the final run"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "All files already formatted"
+    },
+    {
+      "name": "repository-ty-type-check",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    }
+  ],
+  "files": [
+    "src/lake/leases.py",
+    "tests/test_lake_leases.py",
+    ".github/verification/T062-validation.json"
+  ],
+  "decisions": [
+    "LeasedAtomicIngestCommitter wraps the T034 AtomicIngestCommitter boundary and acquires one lease derived from all coverage records before publishing either staged object or catalog state.",
+    "A commit must contain coverage records for exactly one asset-class, symbol, and session date, preventing a mixed batch from sharing an ambiguous lock scope.",
+    "Lease and LeaseProvider are injectable protocols; local tests use a blocking fake to prove two concurrent writers reach the backend commit serially and that failures still release the scope.",
+    "AzureBlobLeaseProvider uses the T027 token-credential pattern, creates a deterministic lock blob without overwriting it, and delegates renewal and release through the acquired ID-bound BlobLeaseClient.",
+    "AzureBlobLease makes release idempotent and rejects renewal after release; the lock blob remains for subsequent writers to lease."
+  ],
+  "limitations": [
+    "All focused Azure tests use local SDK-shaped fakes; no live Azure request, credential, network access, or Azure mutation was used.",
+    "The Azure adapter reports lease-acquisition failures to the caller for normal job retry handling rather than adding an unbounded polling loop.",
+    "The shared worktree contains unrelated user changes and untracked files; none were modified, staged, reverted, or committed by T062.",
+    "No MyPy run was performed; repository tooling uses Ruff and ty."
+  ],
+  "blockers": []
+}
