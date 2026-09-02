@@ -16,7 +16,6 @@ from decimal import Decimal, InvalidOperation
 from email.utils import parsedate_to_datetime
 from types import TracebackType
 from typing import Any, Literal, Protocol, TypeVar, cast
-from urllib.parse import quote
 
 import httpx
 
@@ -485,8 +484,8 @@ class AlpacaClient:
             else:
                 # Alpaca's trades and quotes endpoints accept feed but not
                 # the adjustment parameter used by bar requests.
-                params["feed"] = feed
-                path = f"/v2/stocks/{quote(symbol, safe='')}/{data_type}"
+                params.update({"symbols": symbol, "feed": feed})
+                path = f"/v2/stocks/{data_type}"
             response = await self._request(path, params)
             payload = response.json()
             rows, next_page_token = _page_rows(payload, data_type, symbol)

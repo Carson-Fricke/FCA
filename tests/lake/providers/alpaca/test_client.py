@@ -130,6 +130,7 @@ def test_trades_follow_cursor_pages_and_retry_after_without_duplicates() -> None
     assert transport.calls[0]["params"] == {
         "start": "2024-01-19T00:00:00Z",
         "end": "2024-01-20T00:00:00Z",
+        "symbols": "AAPL",
         "feed": "sip",
         "limit": 100,
         "sort": "asc",
@@ -187,13 +188,13 @@ def test_multiple_symbols_are_bounded_and_settings_are_applied() -> None:
             headers: Mapping[str, str],
             timeout: float,
         ) -> FakeResponse:
-            del method, params, headers
+            del method, headers
             self.active += 1
             self.maximum = max(self.maximum, self.active)
             self.calls.append({"url": url, "timeout": timeout})
             await asyncio.sleep(0)
             self.active -= 1
-            symbol = url.split("/stocks/")[1].split("/")[0]
+            symbol = str(params["symbols"])
             return FakeResponse(
                 {"trades": {symbol: [_trade(1, "2024-01-19T14:30:00Z")]}}
             )
