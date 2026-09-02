@@ -483,7 +483,9 @@ class AlpacaClient:
                 params["symbols"] = symbol
                 path = f"/v1beta3/crypto/us/{data_type}"
             else:
-                params.update({"feed": feed, "adjustment": adjustment})
+                # Alpaca's trades and quotes endpoints accept feed but not
+                # the adjustment parameter used by bar requests.
+                params["feed"] = feed
                 path = f"/v2/stocks/{quote(symbol, safe='')}/{data_type}"
             response = await self._request(path, params)
             payload = response.json()

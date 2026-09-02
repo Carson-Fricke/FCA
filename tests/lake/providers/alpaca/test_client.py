@@ -131,7 +131,6 @@ def test_trades_follow_cursor_pages_and_retry_after_without_duplicates() -> None
         "start": "2024-01-19T00:00:00Z",
         "end": "2024-01-20T00:00:00Z",
         "feed": "sip",
-        "adjustment": "raw",
         "limit": 100,
         "sort": "asc",
     }

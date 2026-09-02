@@ -46,7 +46,7 @@
     {
       "name": "controlled-provider-and-ingest-verification",
       "status": "pending",
-      "result": "A bounded Azure-hosted Alpaca request and persistence check remains pending because the repository lake ingest command currently prints help and does not construct a provider transaction or persistence committer"
+      "result": "The first bounded execution reached Alpaca and persisted error coverage, exposing an invalid adjustment=raw parameter on the trades/quotes endpoints. The client fix is prepared; a successful rerun must prove provider rows and Parquet persistence"
     },
     {
       "name": "hosted-key-vault-deployment",
