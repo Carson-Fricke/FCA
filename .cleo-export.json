@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-02T01:12:47.844Z",
+    "exportedAt": "2026-09-02T17:18:29.208Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 139
+      "nextId": 142
     },
-    "checksum": "4b86d7cd4904ce7c",
-    "taskCount": 138,
+    "checksum": "d5e36719686861c6",
+    "taskCount": 141,
     "exportMode": "full"
   },
   "selection": {
@@ -130,6 +130,7 @@
       "T120",
       "T127",
       "T138",
+      "T140",
       "T008",
       "T027",
       "T039",
@@ -139,11 +140,13 @@
       "T094",
       "T109",
       "T121",
+      "T139",
       "T009",
       "T075",
       "T085",
       "T095",
       "T110",
+      "T141",
       "T010",
       "T076",
       "T086",
@@ -1006,7 +1009,7 @@
     "T020": {
       "type": "task",
       "title": "E1.5 Main Bicep, parameters, naming, and dev what-if",
-      "status": "pending",
+      "status": "done",
       "parentId": "T004",
       "depends": [
         "T016",
@@ -1298,6 +1301,16 @@
       "parentId": "T006",
       "depends": []
     },
+    "T140": {
+      "type": "task",
+      "title": "E1.6 Provision Key Vault and wire Alpaca runtime secrets",
+      "status": "pending",
+      "parentId": "T004",
+      "depends": [
+        "T017",
+        "T020"
+      ]
+    },
     "T008": {
       "type": "epic",
       "title": "E5 HTTP ensure and query API",
@@ -1397,6 +1410,16 @@
         "T115"
       ]
     },
+    "T139": {
+      "type": "task",
+      "title": "E3.7 Bootstrap GitHub Azure OIDC and deployment environment",
+      "status": "pending",
+      "parentId": "T006",
+      "depends": [
+        "T020",
+        "T029"
+      ]
+    },
     "T009": {
       "type": "epic",
       "title": "E6 Dev deployment and equities soak gate",
@@ -1450,6 +1473,13 @@
         "T095",
         "T107"
       ]
+    },
+    "T141": {
+      "type": "task",
+      "title": "E2.8 Reorganize market-lake source and test packages",
+      "status": "done",
+      "parentId": "T005",
+      "depends": []
     },
     "T010": {
       "type": "epic",
@@ -4867,13 +4897,14 @@
         "Complete child T017: E1.2 Managed identities, RBAC, Key Vault, and OIDC",
         "Complete child T018: E1.3 Container Apps environment, API, and ingest job",
         "Complete child T019: E1.4 Budget alerts and runtime cost guards",
-        "Complete child T020: E1.5 Main Bicep, parameters, naming, and dev what-if"
+        "Complete child T020: E1.5 Main Bicep, parameters, naming, and dev what-if",
+        "Complete child T140: E1.6 Provision Key Vault and wire Alpaca runtime secrets"
       ],
       "depends": [
         "T003"
       ],
       "createdAt": "2026-09-01T03:15:24.964Z",
-      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "updatedAt": "2026-09-02T16:24:51.115Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -6416,6 +6447,10 @@
         "lake-core",
         "phase.1"
       ],
+      "notes": [
+        "[2026-09-02T16:29:38.881Z] completion-history: completedAt=2026-09-01T21:45:33.162Z",
+        "[2026-09-02T16:29:38.881Z] Reopened by add of child T141 (done parent gained an unsatisfied child)"
+      ],
       "acceptance": [
         "Core library computes stable symbol-day objects and missing sessions",
         "Memory-backed tests and Azure adapters share explicit protocols",
@@ -6431,8 +6466,8 @@
         "T003"
       ],
       "createdAt": "2026-09-01T03:15:28.244Z",
-      "updatedAt": "2026-09-01T21:45:33.162Z",
-      "completedAt": "2026-09-01T21:45:33.162Z",
+      "updatedAt": "2026-09-02T17:16:27.415Z",
+      "completedAt": "2026-09-02T17:16:27.415Z",
       "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
@@ -7720,14 +7755,15 @@
         "Complete child T030: E3.3 GHCR image build and immutable tagging",
         "Complete child T031: E3.4 Main-branch deploy workflow and health smoke",
         "Complete child T032: E3.5 GitHub Environments and OIDC bootstrap documentation",
-        "Complete child T138: E3.6 Verification budget and wave guidance"
+        "Complete child T138: E3.6 Verification budget and wave guidance",
+        "Complete child T139: E3.7 Bootstrap GitHub Azure OIDC and deployment environment"
       ],
       "depends": [
         "T003",
         "T004"
       ],
       "createdAt": "2026-09-01T03:15:31.494Z",
-      "updatedAt": "2026-09-02T01:08:10.276Z",
+      "updatedAt": "2026-09-02T16:24:46.739Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -7736,7 +7772,7 @@
     {
       "id": "T020",
       "title": "E1.5 Main Bicep, parameters, naming, and dev what-if",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T004",
@@ -7747,6 +7783,9 @@
       "labels": [
         "bicep",
         "validation"
+      ],
+      "notes": [
+        "2026-09-02 17:16:06 UTC: Composed and Azure-validated the westus2 dev infrastructure, removed duplicate Log Analytics ownership, and reviewed a creates-only what-if."
       ],
       "acceptance": [
         "Bicep build succeeds",
@@ -7759,21 +7798,90 @@
         "T019"
       ],
       "createdAt": "2026-09-01T03:21:11.410Z",
-      "updatedAt": "2026-09-01T03:41:25.267Z",
+      "updatedAt": "2026-09-02T17:16:11.263Z",
+      "completedAt": "2026-09-02T17:16:06.407Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T17:15:36.763Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:11.410Z"
+        "initializedAt": "2026-09-01T03:21:11.410Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "8a9fde961d894a22420f352309c12a75b1f56767",
+                "shortSha": "8a9fde9"
+              },
+              {
+                "kind": "note",
+                "note": "Bicep composition and live resource-group what-if verified with no deployment mutation"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T020",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "8f36ece2-d855-5b2f-9506-0b4f9607ed7e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T020",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "cc38a048-8411-5a83-8e6a-a37e806ed47e"
+              }
+            ],
+            "capturedAt": "2026-09-02T17:14:37.258Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T020-validation.json",
+                "sha256": "5dd175b1db12422bde9f814bb9583981151e37ca3e1c8863d948418e21dfd94c",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T020-T141-wave-validation.json",
+                "sha256": "048757398356a32fc2847b38f942b6cd9e0f856e560ac3549eb5a6075fba940c",
+                "passCount": 231,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T17:14:51.280Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 141 CLEO tasks through T141.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T17:15:37.155Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -9640,6 +9748,63 @@
       "relates": []
     },
     {
+      "id": "T140",
+      "title": "E1.6 Provision Key Vault and wire Alpaca runtime secrets",
+      "status": "pending",
+      "priority": "critical",
+      "type": "task",
+      "parentId": "T004",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Deploy the missing RBAC-enabled Key Vault in the target resource group, seed the required Alpaca credentials through an authorized secret-management path, and wire the market-lake API and ingest Container Apps workloads to consume those secrets through the runtime managed identity. Preserve the secret-free Bicep and repository boundary, support the selected dev network posture, and verify a controlled provider connection and ingest operation.",
+      "labels": [
+        "azure",
+        "key-vault",
+        "alpaca",
+        "managed-identity",
+        "secrets"
+      ],
+      "acceptance": [
+        "The target resource group contains the Bicep-composed Key Vault with RBAC authorization, soft delete, purge protection, and the approved dev network posture; the deployment output identifies the vault without exposing secret values",
+        "The runtime user-assigned managed identity has Key Vault Secrets User scoped only to this vault, and both the API Container App and scheduled ingest job use that identity",
+        "The API and ingest workloads receive the provider settings LAKE_PROVIDER__API_KEY and LAKE_PROVIDER__API_SECRET from Key Vault-backed runtime secret references, and the protected API receives LAKE_API__BEARER_TOKEN through the same secret boundary when required",
+        "An authorized maintainer seeds the correct Alpaca paper or live credentials and bearer token through Azure Key Vault or an equivalent approved Azure secret operation; values never appear in Bicep parameters, GitHub variables, source files, logs, task evidence, or committed artifacts",
+        "A controlled Azure-hosted verification proves the runtime can authenticate to Alpaca, execute a bounded ingest or provider request, and persist the expected result without account keys or credentials in application configuration",
+        "The runbook explains the required Azure permissions, secret names and rotation procedure, Key Vault network requirements, RBAC propagation delay, rollback behavior, and how to confirm that both workloads are reading the current secret versions"
+      ],
+      "files": [
+        "infra/main.bicep",
+        "infra/modules/key-vault.bicep",
+        "infra/modules/access.bicep",
+        "infra/modules/container-apps.bicep",
+        "config/market-lake/settings.yaml"
+      ],
+      "depends": [
+        "T017",
+        "T020"
+      ],
+      "createdAt": "2026-09-02T16:24:51.115Z",
+      "updatedAt": "2026-09-02T16:24:51.115Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-02T16:24:51.115Z"
+      },
+      "pipelineStage": "research",
+      "kind": "bug",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "pending",
@@ -10128,6 +10293,59 @@
       "relates": []
     },
     {
+      "id": "T139",
+      "title": "E3.7 Bootstrap GitHub Azure OIDC and deployment environment",
+      "status": "pending",
+      "priority": "critical",
+      "type": "task",
+      "parentId": "T006",
+      "size": "medium",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Resolve the failed Deploy main environment run where vars.AZURE_CLIENT_ID is empty. Complete the one-time authorized Azure bootstrap for the user-assigned GitHub deployer identity and its immutable environment-scoped federated credential, configure the repository and dev GitHub Environment values consumed by deploy-main.yml, and run the hosted deployment path through Azure login, validation, deployment, and health smoke. Coach the maintainer through Azure subscription, resource-group, role-assignment, GitHub Environment protection, and secret-entry actions without placing credentials in source control.",
+      "labels": [
+        "github-actions",
+        "azure",
+        "oidc",
+        "bootstrap",
+        "deployment"
+      ],
+      "acceptance": [
+        "A one-time authorized Azure deployment creates or confirms the user-assigned GitHub deployer identity and the federated credential subject exactly matches the selected GitHub Environment and immutable repository subject",
+        "The repository variable DEPLOYMENT_ENVIRONMENT and the selected GitHub Environment contain every non-secret value consumed by deploy-main.yml, including AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_LOCATION, RESOURCE_NAME_PREFIX, BUDGET_START_DATE, ALLOW_PUBLIC_NETWORK_ACCESS, ENABLE_EXTERNAL_API_INGRESS, INGEST_CRON_EXPRESSION, and INGEST_REPLICA_TIMEOUT_SECONDS",
+        "The selected GitHub Environment has the required deployment protection and BUDGET_ALERT_CONTACT_EMAIL is stored only as an environment secret; no Azure client secret, provider credential, or bearer token is added to GitHub variables or the repository",
+        "A push to master reaches azure/login without an empty required deployment input, completes resource-group validation and deployment with assignGithubDeployerRoles=false, verifies the immutable workload image, and passes the hosted /health smoke",
+        "The bootstrap and recovery procedure documents the Azure permissions required from the maintainer, the exact GitHub configuration locations, safe handling of outputs, and the distinction between one-time bootstrap and recurring OIDC deployments"
+      ],
+      "files": [
+        ".github/workflows/deploy-main.yml",
+        ".github/workflows/deploy-bicep.yml"
+      ],
+      "depends": [
+        "T020",
+        "T029"
+      ],
+      "createdAt": "2026-09-02T16:24:46.739Z",
+      "updatedAt": "2026-09-02T17:17:38.127Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-02T16:24:46.739Z"
+      },
+      "pipelineStage": "research",
+      "kind": "bug",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T009",
       "title": "E6 Dev deployment and equities soak gate",
       "status": "pending",
@@ -10359,6 +10577,156 @@
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T141",
+      "title": "E2.8 Reorganize market-lake source and test packages",
+      "status": "done",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T005",
+      "size": "large",
+      "position": 8,
+      "positionVersion": 0,
+      "description": "Reorganize the market-lake implementation and its tests into maintainable capability-oriented packages. Use explicit package boundaries for configuration, published contracts, catalog, coverage, query, providers, storage, shared queue/dead-letter behavior, asset-specific ingestion, HTTP composition/routes, and CLI entrypoints. Split modules that currently combine domain records, ports, adapters, controllers, orchestration, and worker construction rather than creating generic catch-all services. Mirror the source structure under tests and update imports, package metadata, runtime entrypoints, active documentation, and active workflow references without changing externally published API behavior.",
+      "labels": [
+        "lake-core",
+        "refactor",
+        "tests",
+        "architecture"
+      ],
+      "notes": [
+        "2026-09-02 17:16:27 UTC: Reorganized market-lake source and tests into capability-oriented packages while preserving package facades, console/module commands, and lake.app:app."
+      ],
+      "acceptance": [
+        "src/lake is reorganized into nested capability-oriented packages with clear dependency direction; HTTP route modules are thin controllers and domain/application behavior is not coupled to FastAPI",
+        "catalog, storage, provider, and ingestion modules are split where they currently combine unrelated responsibilities, with stable public contracts exposed through deliberate package facades",
+        "tests are moved into a nested tests/lake structure that mirrors the source capabilities, with imports and test discovery updated and no obsolete flat lake test modules remaining",
+        "lake console-script, python -m lake, Uvicorn application target, documented import paths, and other supported runtime entrypoints continue to work after the move",
+        "pyproject metadata, Docker/runtime configuration, active CI/workflow path references, README architecture map, and architecture documentation reflect the new layout; historical verification records are preserved as immutable evidence",
+        "repository-wide Ruff lint, Ruff format check, ty check, and pytest pass after the reorganization"
+      ],
+      "files": [
+        "src/lake",
+        "tests",
+        "pyproject.toml",
+        "README.md",
+        "Dockerfile",
+        ".github/architecture/repository.md",
+        ".github/workflows"
+      ],
+      "createdAt": "2026-09-02T16:29:38.881Z",
+      "updatedAt": "2026-09-02T17:16:31.233Z",
+      "completedAt": "2026-09-02T17:16:27.415Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T17:15:51.175Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-02T16:29:38.881Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "8a9fde961d894a22420f352309c12a75b1f56767",
+                "shortSha": "8a9fde9"
+              },
+              {
+                "kind": "note",
+                "note": "Capability package reorganization preserves published runtime entrypoints and clean wheel contents"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T141",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "c68e557e-20bf-5a73-81f7-0208cc43a820"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T141",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "c934749a-a4e6-5ef6-af46-a7b0dd2e9de0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T141",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "862c1483-deec-58f7-8a56-c0cf2ee328db"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T141",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "ecfd4e35-eb44-5f7b-bc58-68e1dd0cb1ad"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T141",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "6e8815bf-bfab-5ac7-9e09-66a17094037a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T141",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "6faf7c99-2dd8-5249-8153-1d4abe6300c6"
+              }
+            ],
+            "capturedAt": "2026-09-02T17:14:37.673Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T141-validation.json",
+                "sha256": "24629623cb6044d45c3f56733a77e632ba2cf39b7df45fdebfcfbde1d70897e8",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T020-T141-wave-validation.json",
+                "sha256": "048757398356a32fc2847b38f942b6cd9e0f856e560ac3549eb5a6075fba940c",
+                "passCount": 231,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T17:14:51.265Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 141 CLEO tasks through T141.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T17:15:51.496Z",
+            "capturedBy": "opencode"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
       "relates": []
     },
     {
@@ -10943,7 +11311,8 @@
         "T017",
         "T018",
         "T019",
-        "T020"
+        "T020",
+        "T140"
       ],
       "T005": [
         "T021",
@@ -10952,7 +11321,8 @@
         "T024",
         "T025",
         "T026",
-        "T027"
+        "T027",
+        "T141"
       ],
       "T006": [
         "T028",
@@ -10960,7 +11330,8 @@
         "T030",
         "T031",
         "T032",
-        "T138"
+        "T138",
+        "T139"
       ],
       "T007": [
         "T033",
@@ -11547,6 +11918,10 @@
         "T114",
         "T126"
       ],
+      "T140": [
+        "T017",
+        "T020"
+      ],
       "T008": [
         "T003",
         "T005",
@@ -11591,6 +11966,10 @@
       "T121": [
         "T103",
         "T115"
+      ],
+      "T139": [
+        "T020",
+        "T029"
       ],
       "T009": [
         "T004",
