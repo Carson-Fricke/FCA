@@ -1,10 +1,10 @@
 {
   "taskId": "T140",
   "timestamp": "2026-09-02T19:06:00Z",
-  "numTotalTests": 7,
-  "numPassedTests": 4,
+  "numTotalTests": 8,
+  "numPassedTests": 6,
   "numFailedTests": 0,
-  "numPendingTests": 3,
+  "numPendingTests": 2,
   "numTodoTests": 0,
   "testResults": [
     {
@@ -40,16 +40,22 @@
     },
     {
       "name": "deployed-secret-references",
-      "status": "pending",
-      "result": "The three enabled Key Vault names are ready; deployment remains pending until the T140 commit is pushed"
+      "status": "passed",
+      "result": "Hosted deployment 33672808818 succeeded. The API exposes only the three secret names with secretRef values, and ingest exposes only the two Alpaca secret names; no resolved values were emitted"
     },
     {
       "name": "controlled-provider-and-ingest-verification",
       "status": "pending",
-      "result": "A bounded Azure-hosted Alpaca request and persistence check requires the seeded credentials and deployed references"
+      "result": "A bounded Azure-hosted Alpaca request and persistence check remains pending because the repository lake ingest command currently prints help and does not construct a provider transaction or persistence committer"
+    },
+    {
+      "name": "hosted-key-vault-deployment",
+      "status": "passed",
+      "url": "https://github.com/Carson-Fricke/FCA/actions/runs/33672808818",
+      "result": "The hosted deployment published the private image, completed OIDC login, deployed the Key Vault-backed API and ingest configuration, verified workload image digests, and passed the private /health smoke"
     }
   ],
   "blockers": [
-    "The T140 commit must be pushed and the hosted deployment must prove the three Key Vault references resolve. Secret values must not be sent through chat or stored in task evidence."
+    "The remaining live acceptance requires an implemented bounded Alpaca provider request plus persistence path. Secret values must not be sent through chat or stored in task evidence."
   ]
 }
