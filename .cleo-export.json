@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-02T17:18:29.208Z",
+    "exportedAt": "2026-09-02T19:03:18.984Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 142
+      "nextId": 143
     },
-    "checksum": "d5e36719686861c6",
-    "taskCount": 141,
+    "checksum": "50447fb52d6e978f",
+    "taskCount": 142,
     "exportMode": "full"
   },
   "selection": {
@@ -141,6 +141,7 @@
       "T109",
       "T121",
       "T139",
+      "T142",
       "T009",
       "T075",
       "T085",
@@ -411,7 +412,7 @@
     "T029": {
       "type": "task",
       "title": "E3.2 Reusable Azure OIDC and Bicep deployment steps",
-      "status": "pending",
+      "status": "done",
       "parentId": "T006",
       "depends": [
         "T017",
@@ -1413,11 +1414,25 @@
     "T139": {
       "type": "task",
       "title": "E3.7 Bootstrap GitHub Azure OIDC and deployment environment",
-      "status": "pending",
+      "status": "done",
       "parentId": "T006",
       "depends": [
         "T020",
         "T029"
+      ]
+    },
+    "T142": {
+      "type": "task",
+      "title": "E9.7 Local market-lake mode and developer runbook",
+      "status": "pending",
+      "parentId": "T012",
+      "depends": [
+        "T026",
+        "T027",
+        "T033",
+        "T040",
+        "T043",
+        "T141"
       ]
     },
     "T009": {
@@ -3647,7 +3662,7 @@
     {
       "id": "T029",
       "title": "E3.2 Reusable Azure OIDC and Bicep deployment steps",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T006",
@@ -3659,6 +3674,9 @@
         "github-actions",
         "oidc"
       ],
+      "notes": [
+        "2026-09-02 17:20:31 UTC: Reconciled the existing environment-scoped Azure OIDC validation, what-if, and deployment workflow against its tracked verification record."
+      ],
       "acceptance": [
         "Deployment authentication uses no stored Azure client secret"
       ],
@@ -3667,21 +3685,76 @@
         "T020"
       ],
       "createdAt": "2026-09-01T03:21:44.819Z",
-      "updatedAt": "2026-09-01T03:26:00.666Z",
+      "updatedAt": "2026-09-02T17:20:35.216Z",
+      "completedAt": "2026-09-02T17:20:30.859Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T17:20:21.078Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:44.819Z"
+        "initializedAt": "2026-09-01T03:21:44.819Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "db740c215c186a134128e6c691d24c49171fd357",
+                "shortSha": "db740c2"
+              },
+              {
+                "kind": "note",
+                "note": "The reusable workflow uses environment-scoped GitHub OIDC and no Azure client secret"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T029",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "28690cf7-09be-5ee6-b09a-308cf1c786e3"
+              }
+            ],
+            "capturedAt": "2026-09-02T17:20:04.339Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T029-validation.json",
+                "sha256": "369ee175b63baceecc7def22dd3a9cd55e4b029436d17df043e2a14b7ca87889",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T17:20:12.836Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 141 CLEO tasks through T141.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T17:20:21.470Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -10295,7 +10368,7 @@
     {
       "id": "T139",
       "title": "E3.7 Bootstrap GitHub Azure OIDC and deployment environment",
-      "status": "pending",
+      "status": "done",
       "priority": "critical",
       "type": "task",
       "parentId": "T006",
@@ -10309,6 +10382,9 @@
         "oidc",
         "bootstrap",
         "deployment"
+      ],
+      "notes": [
+        "2026-09-02 19:02:32 UTC: Bootstrapped immutable GitHub Azure OIDC, configured the protected dev Environment, mirrored private GHCR images to ACR, deployed the full dev slice, and passed the private health smoke."
       ],
       "acceptance": [
         "A one-time authorized Azure deployment creates or confirms the user-assigned GitHub deployer identity and the federated credential subject exactly matches the selected GitHub Environment and immutable repository subject",
@@ -10326,7 +10402,164 @@
         "T029"
       ],
       "createdAt": "2026-09-02T16:24:46.739Z",
-      "updatedAt": "2026-09-02T17:17:38.127Z",
+      "updatedAt": "2026-09-02T19:02:36.329Z",
+      "completedAt": "2026-09-02T19:02:31.639Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T19:02:21.757Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-02T16:24:46.739Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "df9a7be440e079a04c9479bf2c3f0656ba3583c2",
+                "shortSha": "df9a7be"
+              },
+              {
+                "kind": "note",
+                "note": "Private deployment workflow completed successfully in hosted run 33670262013 after runtime image correction"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T139",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2245a913-fc5b-5b9c-b24c-f9ce45a9e518"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T139",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "b065d5b0-cb2a-5f4a-88e9-e93a7def503a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T139",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "a83dc038-33e5-5858-aff6-21ea364fca3c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T139",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a062a149-e6b6-55a8-b84e-44c19a2e6c9f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T139",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "f9bb0522-bd56-5753-bde9-f14d31149b95"
+              }
+            ],
+            "capturedAt": "2026-09-02T19:02:05.167Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T139-validation.json",
+                "sha256": "abe40903a7f65822b1883d2e5e7ba52e2c052bf9d82827c2cff31217ab141ee0",
+                "passCount": 14,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T139-wave-validation.json",
+                "sha256": "33e6137daceeec657f1c80cb7cab9ee53b8aad3e0827d46d15c6fa5f0239a0f1",
+                "passCount": 231,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T19:02:13.527Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 141 CLEO tasks through T141.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T19:02:22.182Z",
+            "capturedBy": "opencode"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
+      "kind": "bug",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T142",
+      "title": "E9.7 Local market-lake mode and developer runbook",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T012",
+      "size": "large",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Implement a supported local market-lake mode that runs on a developer machine without Azure resources, Azure CLI, Docker, or Azure cloud credentials, while requiring real Alpaca data access for the supported local ingest path. Compose the existing local filesystem, in-memory, and injectable application adapters behind a stable local command or documented process entrypoints, require Alpaca credentials from runtime environment variables, provide a bounded real-provider smoke path, and keep no fixture-only mode as a supported substitute for local Alpaca operation. Document every prerequisite, dependency installation step, environment variable, local API and ingest command, data-directory lifecycle, authentication behavior, reset/troubleshooting procedure, provider credential setup, and the boundary between local and Azure modes. Publish the procedure as a repository-scoped instruction so agents can reliably start, test, and diagnose local market-lake work.",
+      "labels": [
+        "market-lake",
+        "local-development",
+        "documentation",
+        "developer-experience"
+      ],
+      "notes": [
+        "2026-09-02 18:45:55 UTC: Dependency reconciliation: T014 is covered transitively by the owning E9 epic dependency chain; keep direct dependencies within the owning epic where possible."
+      ],
+      "acceptance": [
+        "A clean developer machine with Python 3.12 and uv can install the documented project dependencies and start the supported local market-lake mode without Azure CLI, an Azure subscription, Docker, or Azure cloud credentials when the required Alpaca credentials are supplied",
+        "A stable local command or equivalent documented process starts the API with local filesystem/query storage and deterministic in-memory or local job/catalog state, requires Alpaca credentials for the supported local ingest path, and never attempts Azure authentication by default",
+        "The local mode exposes a reproducible authenticated API smoke path and a bounded real Alpaca smoke path that fetches configured market data and exercises local catalog, coverage, query, or Parquet persistence",
+        "Local market-data ingestion is always Alpaca-backed for supported local operation; provider API key and secret are mandatory runtime configuration, missing credentials fail clearly without leaking values, and deterministic fake providers are limited to tests rather than documented as a runnable substitute",
+        "Generated local data, caches, logs, temporary files, and local secret material have documented locations, safe reset instructions, and repository ignore coverage; no credentials or generated data are committed",
+        "Documentation lists supported Python and uv versions, installation commands, all required and optional dependencies, Alpaca credential setup, environment variables, Windows PowerShell and POSIX examples where applicable, API URLs, authentication setup, common failures, and local-versus-Azure limitations",
+        "A repository-scoped instruction at .github/instructions/market-lake-local.instructions.md describes when to use local mode, the exact startup and real-Alpaca smoke commands, credential-safety rules, and how to stop and clean up local processes",
+        "Focused local-mode tests cover configuration selection, mandatory Alpaca credential handling, no-Azure startup, mocked provider behavior, local persistence, and the documented smoke command; repository-wide Ruff, format, ty, and pytest checks pass"
+      ],
+      "files": [
+        "src/lake/cli",
+        "src/lake/http/application.py",
+        "src/lake/catalog",
+        "src/lake/storage",
+        "src/lake/providers",
+        "tests/lake",
+        "README.md",
+        "docs/local-market-lake.md",
+        ".env.example",
+        ".github/instructions/market-lake-local.instructions.md"
+      ],
+      "depends": [
+        "T026",
+        "T027",
+        "T033",
+        "T040",
+        "T043",
+        "T141"
+      ],
+      "createdAt": "2026-09-02T18:44:57.728Z",
+      "updatedAt": "2026-09-02T18:53:49.129Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -10338,10 +10571,10 @@
         "lastAgent": null,
         "lastUpdated": null,
         "failureLog": [],
-        "initializedAt": "2026-09-02T16:24:46.739Z"
+        "initializedAt": "2026-09-02T18:44:57.728Z"
       },
       "pipelineStage": "research",
-      "kind": "bug",
+      "kind": "work",
       "scope": "feature",
       "relates": []
     },
@@ -11131,7 +11364,8 @@
         "Complete child T063: E9.3 Dead-letter queue and failure recovery",
         "Complete child T064: E9.4 Daily coverage and budget report",
         "Complete child T065: E9.5 Evaluate and configure cold-tier policy",
-        "Complete child T066: E9.6 End-to-end validation and operations guide"
+        "Complete child T066: E9.6 End-to-end validation and operations guide",
+        "Complete child T142: E9.7 Local market-lake mode and developer runbook"
       ],
       "depends": [
         "T004",
@@ -11144,7 +11378,7 @@
         "T011"
       ],
       "createdAt": "2026-09-01T03:15:51.500Z",
-      "updatedAt": "2026-09-01T03:33:44.044Z",
+      "updatedAt": "2026-09-02T18:44:57.728Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -11377,7 +11611,8 @@
         "T063",
         "T064",
         "T065",
-        "T066"
+        "T066",
+        "T142"
       ],
       "T068": [
         "T069",
@@ -11970,6 +12205,14 @@
       "T139": [
         "T020",
         "T029"
+      ],
+      "T142": [
+        "T026",
+        "T027",
+        "T033",
+        "T040",
+        "T043",
+        "T141"
       ],
       "T009": [
         "T004",
