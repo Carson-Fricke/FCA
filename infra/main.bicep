@@ -143,6 +143,9 @@ module access './modules/access.bicep' = {
 
 module containerApps './modules/container-apps.bicep' = {
   name: 'market-lake-container-apps'
+  dependsOn: [
+    access
+  ]
   params: {
     logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
     containerAppsEnvironmentName: containerAppsEnvironmentName
@@ -150,6 +153,7 @@ module containerApps './modules/container-apps.bicep' = {
     ingestJobName: ingestJobName
     sharedImageReference: sharedImageReference
     registryLoginServer: containerRegistry.outputs.registry.loginServer
+    keyVaultUri: keyVault.outputs.keyVaultUri
     runtimeIdentityResourceId: identities.outputs.runtimeIdentity.resourceId
     runtimeIdentityClientId: identities.outputs.runtimeIdentity.clientId
     location: location

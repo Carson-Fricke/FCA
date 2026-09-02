@@ -1,0 +1,55 @@
+{
+  "taskId": "T140",
+  "timestamp": "2026-09-02T19:06:00Z",
+  "numTotalTests": 7,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 3,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bicep-build-and-lint",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/main.bicep --stdout",
+        "az bicep lint --file infra/main.bicep",
+        "az bicep lint --file infra/modules/container-apps.bicep"
+      ],
+      "result": "The Key Vault-backed Container Apps composition compiled and linted without diagnostics"
+    },
+    {
+      "name": "azure-resource-group-validation",
+      "status": "passed",
+      "command": "az deployment group validate --resource-group fca-rg-westus2 --parameters infra/parameters/dev.local.bicepparam",
+      "result": "Azure validation succeeded without deploying the unseeded references"
+    },
+    {
+      "name": "runtime-vault-access",
+      "status": "passed",
+      "result": "The runtime managed identity has Key Vault Secrets User scoped only to fca-ml-dev-kv-obj3kww, and both workloads already use that identity"
+    },
+    {
+      "name": "secret-reference-contract",
+      "status": "passed",
+      "result": "API references alpaca-api-key, alpaca-api-secret, and api-bearer-token through versionless Key Vault URLs; ingest references only the two Alpaca secrets. Environment variables use secretRef and no secret value is a Bicep parameter or tracked setting"
+    },
+    {
+      "name": "authorized-secret-seeding",
+      "status": "pending",
+      "result": "The signed-in maintainer has Key Vault Administrator on the vault, but alpaca-api-key, alpaca-api-secret, and api-bearer-token have not been entered"
+    },
+    {
+      "name": "deployed-secret-references",
+      "status": "pending",
+      "result": "Deployment is intentionally paused until all three Key Vault secret names contain enabled values"
+    },
+    {
+      "name": "controlled-provider-and-ingest-verification",
+      "status": "pending",
+      "result": "A bounded Azure-hosted Alpaca request and persistence check requires the seeded credentials and deployed references"
+    }
+  ],
+  "blockers": [
+    "An authorized maintainer must enter the Alpaca API key, Alpaca API secret, and API bearer token through the masked procedure in .github/runbooks/key-vault-runtime-secrets.md. Values must not be sent through chat or stored in task evidence."
+  ]
+}

@@ -25,6 +25,10 @@ param sharedImageReference string
 @minLength(1)
 param registryLoginServer string
 
+@description('Versionless URI of the Key Vault that owns runtime provider and API secrets.')
+@minLength(1)
+param keyVaultUri string
+
 @description('Full resource ID of the runtime user-assigned managed identity.')
 @minLength(1)
 param runtimeIdentityResourceId string
@@ -64,12 +68,47 @@ var consumptionProfileName = 'Consumption'
 var apiContainerPort = 8000
 var apiContainerName = 'api'
 var ingestContainerName = 'ingest'
-var runtimeEnvironment = [
+var providerSecrets = [
+  {
+    name: 'alpaca-api-key'
+    keyVaultUrl: '${keyVaultUri}secrets/alpaca-api-key'
+    identity: runtimeIdentityResourceId
+  }
+  {
+    name: 'alpaca-api-secret'
+    keyVaultUrl: '${keyVaultUri}secrets/alpaca-api-secret'
+    identity: runtimeIdentityResourceId
+  }
+]
+var apiSecrets = concat(providerSecrets, [
+  {
+    name: 'api-bearer-token'
+    keyVaultUrl: '${keyVaultUri}secrets/api-bearer-token'
+    identity: runtimeIdentityResourceId
+  }
+])
+var baseRuntimeEnvironment = [
   {
     name: 'AZURE_CLIENT_ID'
     value: runtimeIdentityClientId
   }
 ]
+var providerEnvironment = concat(baseRuntimeEnvironment, [
+  {
+    name: 'LAKE_PROVIDER__API_KEY'
+    secretRef: 'alpaca-api-key'
+  }
+  {
+    name: 'LAKE_PROVIDER__API_SECRET'
+    secretRef: 'alpaca-api-secret'
+  }
+])
+var apiEnvironment = concat(providerEnvironment, [
+  {
+    name: 'LAKE_API__BEARER_TOKEN'
+    secretRef: 'api-bearer-token'
+  }
+])
 
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsWorkspaceName
@@ -153,6 +192,7 @@ resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
           identity: runtimeIdentityResourceId
         }
       ]
+      secrets: apiSecrets
       identitySettings: [
         {
           identity: runtimeIdentityResourceId
@@ -181,7 +221,7 @@ resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
           args: [
             'api'
           ]
-          env: runtimeEnvironment
+          env: apiEnvironment
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'
@@ -263,6 +303,7 @@ resource ingestJob 'Microsoft.App/jobs@2025-07-01' = {
           identity: runtimeIdentityResourceId
         }
       ]
+      secrets: providerSecrets
       scheduleTriggerConfig: {
         cronExpression: ingestCronExpression
         parallelism: 1
@@ -286,7 +327,7 @@ resource ingestJob 'Microsoft.App/jobs@2025-07-01' = {
           args: [
             'ingest'
           ]
-          env: runtimeEnvironment
+          env: providerEnvironment
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'
