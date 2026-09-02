@@ -1,8 +1,8 @@
 {
   "taskId": "T139",
   "timestamp": "2026-09-02T17:35:00Z",
-  "numTotalTests": 12,
-  "numPassedTests": 11,
+  "numTotalTests": 14,
+  "numPassedTests": 13,
   "numFailedTests": 0,
   "numPendingTests": 1,
   "numTodoTests": 0,
@@ -74,6 +74,22 @@
       "name": "first-hosted-deployment-diagnostic",
       "status": "passed",
       "result": "GitHub run 33664898696 published the image, validated every configured input, completed immutable OIDC login, imported the private GHCR digest into ACR without changing it, and reached Bicep deployment. Azure then identified five missing subscription resource-provider registrations; an authorized subscription Owner registered Microsoft.App, Microsoft.OperationalInsights, Microsoft.Storage, Microsoft.KeyVault, and Microsoft.Insights"
+    },
+    {
+      "name": "second-hosted-deployment-diagnostic",
+      "status": "passed",
+      "result": "Attempt 2 of GitHub run 33664898696 again passed publication, input validation, OIDC login, private ACR import, digest verification, and deployed storage, identities, Key Vault, runtime RBAC, budgets, ACR, API, and ingest resources. The remaining Container Apps module failure identified the PerGB2018 30-day minimum retention constraint"
+    },
+    {
+      "name": "retention-and-runtime-config-recovery",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/lake/configuration/test_configuration.py tests/lake/cli/test_entrypoints.py",
+        "uv run --python 3.12 --extra dev ruff check src/lake/configuration/loader.py tests/lake/configuration/test_configuration.py",
+        "uv run --python 3.12 --extra dev ruff format --check src/lake/configuration/loader.py tests/lake/configuration/test_configuration.py",
+        "uv run --python 3.12 --extra dev ty check src/lake/configuration/loader.py tests/lake/configuration/test_configuration.py"
+      ],
+      "result": "17 focused tests and all focused quality checks passed. An exact local resource-group deployment succeeded with 30-day PerGB2018 retention, the private ACR digest, managed-identity registry configuration, and all non-Container-Apps modules. Container logs then proved the image needed the versioned non-secret config directory; the Docker image now copies config and sets LAKE_CONFIG_ROOT=/app"
     },
     {
       "name": "hosted-recurring-deployment",

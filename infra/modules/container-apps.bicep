@@ -43,7 +43,7 @@ param tags object = {}
 @description('Retention in days for the Log Analytics workspace.')
 @minValue(4)
 @maxValue(730)
-param logRetentionDays int = 7
+param logRetentionDays int = 30
 
 @description('Five-field UTC cron expression for scheduled ingest. A scheduled Container Apps job can also be started on demand.')
 @minLength(9)

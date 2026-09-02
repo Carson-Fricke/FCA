@@ -5,10 +5,10 @@ targetScope = 'resourceGroup'
 @maxLength(50)
 param budgetName string = 'market-lake'
 
-@description('Default analytics retention for the Log Analytics workspace. The market-lake settings use seven days; Azure supports four days as the minimum for Analytics tables.')
-@minValue(4)
+@description('Analytics retention reported with runtime guardrails. The composed PerGB2018 workspace requires at least 30 days.')
+@minValue(30)
 @maxValue(730)
-param logRetentionDays int = 7
+param logRetentionDays int = 30
 
 @description('First exact monthly budget alert amount in USD. Each budget uses a 100 percent actual-cost notification so the alert amount is literal rather than a percentage approximation.')
 @minValue(1)

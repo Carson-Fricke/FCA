@@ -83,6 +83,14 @@ def test_direct_config_directory_is_a_supported_root() -> None:
     assert load_settings(ROOT / "config" / "market-lake").provider.name == "alpaca"
 
 
+def test_explicit_runtime_config_root_is_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAKE_CONFIG_ROOT", str(ROOT))
+
+    assert load_settings().provider.name == "alpaca"
+
+
 def test_invalid_universe_values_fail_fast() -> None:
     with pytest.raises(ValidationError, match="crypto pair"):
         load_universes(

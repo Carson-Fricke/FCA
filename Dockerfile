@@ -18,6 +18,7 @@ RUN uv sync --locked --no-dev --no-editable
 FROM python:3.12-slim AS runtime
 
 ENV PATH="/opt/venv/bin:$PATH" \
+    LAKE_CONFIG_ROOT=/app \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONFAULTHANDLER=1 \
     PYTHONUNBUFFERED=1
@@ -26,6 +27,7 @@ RUN groupadd --gid 10001 lake \
     && useradd --uid 10001 --gid lake --create-home --shell /usr/sbin/nologin lake
 
 COPY --from=builder /opt/venv /opt/venv
+COPY config/ ./config/
 
 WORKDIR /app
 USER lake

@@ -121,6 +121,10 @@ identity; the ACR admin account is disabled. The budget alert contact
 placeholder must be replaced with a valid user-supplied email before Azure
 operations. No secrets are stored in Bicep or parameter files.
 
+Container Apps logs use the `PerGB2018` Log Analytics SKU with its required
+30-day minimum retention. The application operations setting reports the same
+effective retention guardrail.
+
 Sharing these roots does not imply unrestricted cross-package imports. New
 shared code should be introduced only when a stable contract has more than one
 real consumer.

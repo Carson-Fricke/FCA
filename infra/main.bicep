@@ -75,7 +75,8 @@ var containerAppsEnvironmentName = '${namePrefix}-cae'
 var apiAppName = '${namePrefix}-api'
 var ingestJobName = '${namePrefix}-ingest'
 var budgetName = '${namePrefix}-budget'
-var logRetentionDays = 7
+// The PerGB2018 Log Analytics SKU requires at least 30 days.
+var logRetentionDays = 30
 var tags = {
   application: 'fca'
   product: 'market-lake'

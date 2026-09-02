@@ -3,6 +3,8 @@
 !uv.lock
 !src/
 !src/**
+!config/
+!config/**
 **/__pycache__/
 **/*.py[cod]
 **/*.egg-info/

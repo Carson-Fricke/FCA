@@ -34,7 +34,12 @@ _SECRET_KEY = re.compile(
 def market_lake_config_dir(root: str | Path | None = None) -> Path:
     """Resolve the market-lake config directory without machine-specific paths."""
     if root is None:
-        root_path = Path(__file__).resolve().parents[3]
+        configured_root = os.environ.get("LAKE_CONFIG_ROOT")
+        root_path = (
+            Path(configured_root)
+            if configured_root
+            else Path(__file__).resolve().parents[3]
+        )
     else:
         root_path = Path(root)
 
