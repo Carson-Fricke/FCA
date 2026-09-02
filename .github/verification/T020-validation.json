@@ -1,7 +1,7 @@
 {
   "taskId": "T020",
-  "numTotalTests": 5,
-  "numPassedTests": 5,
+  "numTotalTests": 7,
+  "numPassedTests": 7,
   "numFailedTests": 0,
   "numPendingTests": 0,
   "numTodoTests": 0,
@@ -22,18 +22,30 @@
       "name": "dev-parameter-file",
       "status": "passed",
       "command": "az bicep build-params --file infra/parameters/dev.bicepparam --stdout",
-      "result": "The westus2 dev parameter file compiled; it contains no secret values and visibly selects the dev names, image digest sentinel, disabled external API ingress, and explicit Key Vault public-network choice. The composition explicitly keeps shared Log Analytics public query access disabled to match cost-controls."
+      "result": "The westus2 dev parameter file compiled; it contains no secret values and visibly selects the dev names, image digest sentinel, disabled external API ingress, and explicit Key Vault public-network choice. The Container Apps module is the single Log Analytics owner and applies seven-day retention."
     },
     {
       "name": "compiled-composition-assertions",
       "status": "passed",
       "command": "PowerShell static assertions over az bicep build --stdout compiled ARM JSON",
-      "result": "Compiled ARM assertions found six resource-group modules for storage, identities, Key Vault, access, Container Apps, and cost controls; deterministic resource-group-derived naming; runtime identity resource and client ID wired to both workloads; runtime storage and Key Vault role-assignment inputs wired from module outputs; digest-addressed shared image input; explicit Key Vault network selection; shared Log Analytics workspace sequencing; 40 USD and 70 USD monthly budget controls; and the configured non-secret runtime guardrails"
+      "result": "Compiled ARM assertions found six resource-group modules for storage, identities, Key Vault, access, Container Apps, and cost controls; deterministic resource-group-derived naming; runtime identity resource and client ID wired to both workloads; runtime storage and Key Vault role-assignment inputs wired from module outputs; digest-addressed shared image input; explicit Key Vault network selection; one seven-day Log Analytics workspace; 40 USD and 70 USD monthly budget controls; and the configured non-secret runtime guardrails"
     },
     {
       "name": "secret-free-and-deployment-boundary",
       "status": "passed",
       "result": "The composition creates no Key Vault secrets and accepts no provider credentials, tokens, account keys, passwords, or registry credentials. The dev file contains only a fake digest-shaped image sentinel and REPLACE_WITH_BUDGET_CONTACT_EMAIL sentinel, both documented as mandatory user input before Azure operations"
+    },
+    {
+      "name": "azure-resource-group-validation",
+      "status": "passed",
+      "command": "az deployment group validate --resource-group fca-rg-westus2 --parameters infra/parameters/dev.local.bicepparam",
+      "result": "Azure validation succeeded against the existing westus2 dev resource group. The local parameter file is git-ignored and no parameter values are retained in this evidence record"
+    },
+    {
+      "name": "azure-dev-what-if",
+      "status": "passed",
+      "command": "az deployment group what-if --resource-group fca-rg-westus2 --parameters infra/parameters/dev.local.bicepparam --result-format ResourceIdOnly",
+      "result": "What-if succeeded with creates only and no delete or modify operations. The duplicate Log Analytics resource warning is resolved. Four runtime role assignments are unsupported on the first preview because their IDs depend on the runtime managed identity principal ID created by the same deployment; they are exactly the intended Blob, Queue, Table, and Key Vault secret assignments"
     }
   ],
   "parametersRequiringUserInputBeforeAzure": [
@@ -54,12 +66,10 @@
     }
   ],
   "limitations": [
-    "No Azure login, az what-if, deployment, Cost Management operation, registry operation, or data-plane call was run by this validation.",
-    "The effective shared Log Analytics workspace retention is 30 days because the existing Container Apps module declares that workspace at 30 days; cost-controls receives the same value to keep the repeated resource declaration consistent.",
+    "Azure resource-group validation and what-if were run against the existing empty dev resource group; no deployment, Cost Management mutation, or data-plane call was run.",
+    "The Container Apps module owns the single Log Analytics workspace and applies the configured seven-day retention; cost-controls reports the same guardrail without redeclaring the resource.",
     "The dev Key Vault public endpoint choice is enabled explicitly because no private endpoint or private DNS module is in scope. Key Vault remains Entra-only and RBAC-authorized; set allowPublicNetworkAccess to false only after private connectivity is composed.",
-    "A deployment still needs an Azure subscription, a westus2-capable resource group, and an authenticated Azure caller or the later GitHub OIDC workflow. No Bicep parameter contains a secret; any provider/API credentials must be seeded separately in Key Vault by an authorized process."
+    "The what-if used an authenticated Azure caller, the existing westus2 resource group, and a git-ignored local parameter file. No tracked Bicep parameter contains a secret; provider/API credentials remain deferred to authorized Key Vault seeding."
   ],
-  "blockers": [
-    "Azure what-if and deployment are intentionally deferred until the user supplies the actual GHCR digest, valid budget contact, deployment subscription/resource group context, and the approved Key Vault network posture."
-  ]
+  "blockers": []
 }

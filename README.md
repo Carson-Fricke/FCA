@@ -61,10 +61,22 @@ later tasks own their implementation.
 |-- config/                        Versioned, non-secret product configuration
 |-- infra/                         Shared Azure Bicep modules (foundation and runtime)
 |-- src/
-|   |-- lake/                      market-lake entrypoints and core contracts
+|   |-- lake/
+|   |   |-- catalog/               Records, repositories, and table adapters
+|   |   |-- cli/                   API and ingest command entrypoints
+|   |   |-- configuration/         Typed settings and universe loaders
+|   |   |-- contracts/             Paths, schemas, and market sessions
+|   |   |-- coverage/              Coverage classification and planning
+|   |   |-- http/                  FastAPI composition and thin routes
+|   |   |-- ingestion/             Equity, option, and crypto workflows
+|   |   |-- providers/             External market-data adapters
+|   |   |-- query/                 File and bounded SQL query services
+|   |   |-- queue/                 Durable worker and dead-letter behavior
+|   |   `-- storage/               Parquet, Azure, capacity, and leases
 |   `-- harness/                   quant-harness Python package (planned)
 |-- strategies/                    Harness strategy implementations (planned)
-|-- tests/                         Product and cross-product tests (started)
+|-- tests/
+|   `-- lake/                      Tests mirroring market-lake capabilities
 |-- Dockerfile                     Shared runtime image definition
 |-- pyproject.toml                 Shared Python project and tools
 `-- README.md                      Repository entry point

@@ -5,7 +5,7 @@ It is an operator-triggered recovery path, not an automatic retry loop.
 
 ## Delivery Behavior
 
-`lake.queue_worker.QueueWorker` receives one leased message at a time. A
+`lake.queue.QueueWorker` receives one leased message at a time. A
 handler failure below `max_delivery_attempts` leaves the source message
 undeleted so Azure Queue visibility timeout can redeliver it. On the final
 failed delivery, the worker writes a versioned envelope to the configured
@@ -44,7 +44,7 @@ credentials, tokens, or complete sensitive payloads into incident tickets.
 2. Read and validate the envelope. Confirm `schema_version` is supported and
    `source_queue` is the intended target. Never replay using
    `source_pop_receipt`.
-3. For a valid JSON object, use `lake.dead_letter.DeadLetterReplayer` with a
+3. For a valid JSON object, use `lake.queue.DeadLetterReplayer` with a
    `QueueSender` for the original queue. The replayer sends only the original
    payload, not the dead-letter metadata wrapper, so the normal worker handler
    receives its usual message contract.

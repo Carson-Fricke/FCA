@@ -1,0 +1,67 @@
+{
+  "taskId": "T141",
+  "timestamp": "2026-09-02T17:08:27Z",
+  "numTotalTests": 7,
+  "numPassedTests": 7,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "capability-package-layout",
+      "status": "passed",
+      "result": "src/lake is organized into configuration, contracts, catalog, coverage, query, provider, storage, queue, ingestion, HTTP, and CLI capability packages; records, ports, adapters, application behavior, routes, and worker construction are separated at their relevant boundaries"
+    },
+    {
+      "name": "mirrored-test-layout",
+      "status": "passed",
+      "result": "All active market-lake tests reside under tests/lake in capability-oriented directories that mirror src/lake; no obsolete flat market-lake test module remains"
+    },
+    {
+      "name": "published-facades",
+      "status": "passed",
+      "result": "Deliberate package facades expose stable catalog, configuration, contracts, coverage, provider, query, queue, and storage contracts; lake.crypto and lake.options remain compatibility facades for their previously published clients"
+    },
+    {
+      "name": "runtime-entrypoints",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev pytest -p no:cacheprovider tests/lake/cli/test_entrypoints.py",
+        "uv run --python 3.12 --extra dev lake --help",
+        "uv run --python 3.12 --extra dev python -m lake --help",
+        "uv run --python 3.12 --extra dev python -c \"from lake.app import app; print(app.title)\""
+      ],
+      "result": "The entrypoint tests passed within the repository suite; the console script, python module, and Uvicorn target also passed direct smoke checks"
+    },
+    {
+      "name": "clean-distribution-package",
+      "status": "passed",
+      "commands": [
+        "uv build --python 3.12 --sdist --force-pep517 --clear --no-create-gitignore .",
+        "uv build --python 3.12 --wheel --force-pep517 --clear --no-create-gitignore fca-0.1.0.tar.gz"
+      ],
+      "result": "A wheel built from the clean source distribution contained all required nested capability packages and no obsolete flat implementation modules"
+    },
+    {
+      "name": "active-reference-and-documentation-update",
+      "status": "passed",
+      "result": "Active Python imports, package metadata, README architecture map, repository architecture, and queue recovery runbook use the capability layout. Old paths remain only in immutable historical verification records and the CLEO export pending this wave's task-state regeneration"
+    },
+    {
+      "name": "wave-integration",
+      "status": "passed",
+      "evidence": ".github/verification/T020-T141-wave-validation.json",
+      "result": "The frozen-wave lock, Ruff lint and format, ty, 231-test pytest, Bicep, workflow, and runtime-entrypoint checks all passed"
+    }
+  ],
+  "decisions": [
+    "Capability package __init__.py files are the deliberate public facades; implementation modules use explicit capability paths where separation matters.",
+    "FastAPI composition and routes live under lake.http, while coverage and query behavior remain independently importable application/domain code.",
+    "Historical verification files are intentionally unchanged even though their recorded source and test paths predate the reorganization."
+  ],
+  "limitations": [
+    "This task preserves the currently published package facades and runtime entrypoints, not every internal flat-module import that was never declared public.",
+    "The pytest run emitted the existing Starlette/httpx deprecation warning."
+  ],
+  "blockers": []
+}

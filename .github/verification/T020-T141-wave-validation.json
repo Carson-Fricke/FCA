@@ -1,0 +1,74 @@
+{
+  "wave": "T020-T141",
+  "timestamp": "2026-09-02T17:08:27Z",
+  "numTotalTests": 231,
+  "numPassedTests": 231,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "uv-lock-check",
+      "status": "passed",
+      "command": "uv lock --check",
+      "result": "The lockfile is current"
+    },
+    {
+      "name": "repository-ruff-lint",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff check .",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-ruff-format",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ruff format --check .",
+      "result": "121 files already formatted"
+    },
+    {
+      "name": "repository-ty",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev ty check",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest -p no:cacheprovider",
+      "result": "231 tests passed in 10.27s; one Starlette/httpx deprecation warning was emitted"
+    },
+    {
+      "name": "bicep-build-and-lint",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/main.bicep --stdout",
+        "az bicep lint --file infra/main.bicep"
+      ],
+      "result": "The composed resource-group template compiled and linted without diagnostics"
+    },
+    {
+      "name": "workflow-validation",
+      "status": "passed",
+      "commands": [
+        "actionlint .github/workflows/python-bicep-ci.yml .github/workflows/publish-image.yml .github/workflows/deploy-bicep.yml .github/workflows/deploy-main.yml",
+        "action-validator .github/workflows/python-bicep-ci.yml .github/workflows/publish-image.yml .github/workflows/deploy-bicep.yml .github/workflows/deploy-main.yml"
+      ],
+      "result": "actionlint 1.7.12 and action-validator 0.6.0 reported no diagnostics for all active workflows"
+    },
+    {
+      "name": "published-entrypoints",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev lake --help",
+        "uv run --python 3.12 --extra dev python -m lake --help",
+        "uv run --python 3.12 --extra dev python -c \"from lake.app import app; print(app.title)\""
+      ],
+      "result": "The console script and module entrypoint returned the expected command help, and lake.app:app imported as the Market Lake API"
+    }
+  ],
+  "limitations": [
+    "This integration pass did not deploy Azure resources or run a GitHub-hosted workflow.",
+    "The pytest run emitted the existing Starlette/httpx deprecation warning.",
+    "Workflow validator release binaries were resolved outside the repository after the commands were unavailable on PATH; no downloaded tool or machine-specific path is retained in repository evidence."
+  ]
+}

@@ -1,20 +1,9 @@
 targetScope = 'resourceGroup'
 
-@description('Name of the Log Analytics workspace used by the Container Apps environment. This module keeps the workspace security posture aligned with the shared Container Apps module while applying the short retention policy.')
-@minLength(4)
-@maxLength(63)
-param logAnalyticsWorkspaceName string
-
 @description('Name prefix for the two resource-group monthly budgets. The module appends 40usd and 70usd to keep each exact-dollar alert independently addressable.')
 @minLength(1)
 @maxLength(50)
 param budgetName string = 'market-lake'
-
-@description('Azure region for the Log Analytics workspace.')
-param location string = resourceGroup().location
-
-@description('Tags applied to the Log Analytics workspace.')
-param tags object = {}
 
 @description('Default analytics retention for the Log Analytics workspace. The market-lake settings use seven days; Azure supports four days as the minimum for Analytics tables.')
 @minValue(4)
@@ -73,24 +62,6 @@ var monthlyBudgetAlertAmountsUsd = [
 ]
 var monthlyBudgetIds = [for index in range(0, length(monthlyBudgetAlertAmountsUsd)): monthlyBudgets[index].id]
 
-resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: logAnalyticsWorkspaceName
-  location: location
-  tags: tags
-  properties: {
-    features: {
-      disableLocalAuth: true
-      enableLogAccessUsingOnlyResourcePermissions: true
-    }
-    publicNetworkAccessForIngestion: 'Disabled'
-    publicNetworkAccessForQuery: 'Disabled'
-    retentionInDays: logRetentionDays
-    sku: {
-      name: 'PerGB2018'
-    }
-  }
-}
-
 resource monthlyBudgets 'Microsoft.Consumption/budgets@2024-08-01' = [for alertAmountUsd in monthlyBudgetAlertAmountsUsd: {
   name: '${budgetName}-${alertAmountUsd}usd'
   properties: {
@@ -114,12 +85,6 @@ resource monthlyBudgets 'Microsoft.Consumption/budgets@2024-08-01' = [for alertA
     }
   }
 }]
-
-output logAnalyticsWorkspace object = {
-  name: logAnalyticsWorkspace.name
-  resourceId: logAnalyticsWorkspace.id
-  retentionInDays: logRetentionDays
-}
 
 output monthlyBudgetAlerts object = {
   amountsUsd: monthlyBudgetAlertAmountsUsd

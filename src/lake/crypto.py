@@ -1,6 +1,6 @@
 """Alpaca crypto market-data client facade."""
 
-from lake.alpaca import (
+from lake.providers.alpaca import (
     AlpacaClient,
     NormalizedCryptoQuote,
     NormalizedCryptoTrade,

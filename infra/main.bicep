@@ -74,7 +74,7 @@ var containerAppsEnvironmentName = '${namePrefix}-cae'
 var apiAppName = '${namePrefix}-api'
 var ingestJobName = '${namePrefix}-ingest'
 var budgetName = '${namePrefix}-budget'
-var sharedLogRetentionDays = 30
+var logRetentionDays = 7
 var tags = {
   application: 'fca'
   product: 'market-lake'
@@ -141,9 +141,9 @@ module containerApps './modules/container-apps.bicep' = {
     runtimeIdentityClientId: identities.outputs.runtimeIdentity.clientId
     location: location
     tags: tags
+    logRetentionDays: logRetentionDays
     ingestCronExpression: ingestCronExpression
     ingestReplicaTimeoutSeconds: ingestReplicaTimeoutSeconds
-    // Cost controls declares this shared workspace with public query disabled.
     allowPublicLogQuery: false
     enableExternalApiIngress: enableExternalApiIngress
   }
@@ -151,16 +151,9 @@ module containerApps './modules/container-apps.bicep' = {
 
 module costControls './modules/cost-controls.bicep' = {
   name: 'market-lake-cost-controls'
-  dependsOn: [
-    containerApps
-  ]
   params: {
-    logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
     budgetName: budgetName
-    location: location
-    tags: tags
-    // The Container Apps module also declares this shared workspace at 30 days.
-    logRetentionDays: sharedLogRetentionDays
+    logRetentionDays: logRetentionDays
     firstBudgetAlertUsd: 40
     secondBudgetAlertUsd: 70
     budgetStartDate: budgetStartDate

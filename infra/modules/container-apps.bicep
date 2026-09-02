@@ -36,6 +36,11 @@ param location string = resourceGroup().location
 @description('Tags applied to the workspace and Container Apps resources.')
 param tags object = {}
 
+@description('Retention in days for the Log Analytics workspace.')
+@minValue(4)
+@maxValue(730)
+param logRetentionDays int = 7
+
 @description('Five-field UTC cron expression for scheduled ingest. A scheduled Container Apps job can also be started on demand.')
 @minLength(9)
 param ingestCronExpression string = '0 1 * * *'
@@ -73,7 +78,7 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09
     }
     publicNetworkAccessForIngestion: 'Disabled'
     publicNetworkAccessForQuery: allowPublicLogQuery ? 'Enabled' : 'Disabled'
-    retentionInDays: 30
+    retentionInDays: logRetentionDays
     sku: {
       name: 'PerGB2018'
     }
