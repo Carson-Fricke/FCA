@@ -1,6 +1,6 @@
 {
   "taskId": "T078",
-  "timestamp": "2026-09-02T21:54:55Z",
+  "timestamp": "2026-09-02T22:08:00Z",
   "numTotalTests": 14,
   "numPassedTests": 14,
   "numFailedTests": 0,
@@ -28,6 +28,12 @@
       "status": "passed",
       "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
       "result": "The wheel contains both lake and harness packages and publishes lake, harness, api, backtest-job, and trader console scripts; the Docker builder asserts all five executables under /opt/venv/bin while preserving the deployed lake entrypoint"
+    },
+    {
+      "name": "hosted-image-and-deployment",
+      "status": "passed",
+      "url": "https://github.com/Carson-Fricke/FCA/actions/runs/33688127085",
+      "result": "The corrected image built and published successfully, then the existing OIDC deployment, digest verification, and private health smoke all passed"
     },
     {
       "name": "focused-tests-and-quality",
@@ -58,7 +64,6 @@
     "No strategy-facing contract or engine path exists in this scaffold, so no strategy contract migration or determinism golden update was required."
   ],
   "limitations": [
-    "A local wheel build validated packaged commands; Docker was unavailable for a local image build.",
     "Harness API, backtest, and trader launches are intentional placeholders owned by later tasks."
   ],
   "blockers": []

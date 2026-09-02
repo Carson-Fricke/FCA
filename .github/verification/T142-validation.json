@@ -1,6 +1,6 @@
 {
   "taskId": "T142",
-  "timestamp": "2026-09-02T21:54:55Z",
+  "timestamp": "2026-09-02T22:08:00Z",
   "numTotalTests": 15,
   "numPassedTests": 15,
   "numFailedTests": 0,
@@ -30,6 +30,12 @@
       "name": "bounded-local-persistence",
       "status": "passed",
       "result": "A bounded AAPL ingest writes deterministic trade and quote Parquet paths plus atomically replaced JSON coverage; bounded results are accurately recorded as partial"
+    },
+    {
+      "name": "bounded-real-alpaca-smoke",
+      "status": "passed",
+      "command": "uv run lake local ingest --symbol AAPL --session-date 2026-09-01 --max-records 10",
+      "result": "Using process-only credentials read transiently from the deployed Key Vault, local mode fetched 10 AAPL SIP trade rows and 10 quote rows, wrote 3,063-byte and 3,420-byte Parquet objects plus catalog coverage, reported both partitions as partial, and then removed the marker-owned local tree with lake local reset --yes"
     },
     {
       "name": "authenticated-api-and-query",
@@ -64,7 +70,6 @@
     "Local state is single-writer and intentionally excludes Azure queues, leases, SAS, managed identity, Key Vault, and distributed execution."
   ],
   "limitations": [
-    "The documented real-Alpaca smoke path was not executed because no live network or credential operation was requested.",
     "The existing Starlette/httpx deprecation warning is emitted by FastAPI TestClient."
   ],
   "blockers": []
