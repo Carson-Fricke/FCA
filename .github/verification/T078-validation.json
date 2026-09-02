@@ -27,7 +27,7 @@
       "name": "package-and-image-surface",
       "status": "passed",
       "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
-      "result": "The wheel contains both lake and harness packages and publishes lake, harness, api, backtest-job, and trader console scripts; the Docker builder asserts all five installed commands while preserving the deployed lake entrypoint"
+      "result": "The wheel contains both lake and harness packages and publishes lake, harness, api, backtest-job, and trader console scripts; the Docker builder asserts all five executables under /opt/venv/bin while preserving the deployed lake entrypoint"
     },
     {
       "name": "focused-tests-and-quality",
