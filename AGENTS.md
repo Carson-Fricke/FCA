@@ -6,6 +6,7 @@
 
 @.github/instructions/cleo.instructions.md
 @.github/instructions/copilot-instructions.md
+@.github/instructions/repository-organization.instructions.md
 
 ## FCA Execution Policy
 
