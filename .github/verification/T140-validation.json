@@ -1,10 +1,10 @@
 {
   "taskId": "T140",
-  "timestamp": "2026-09-02T19:06:00Z",
-  "numTotalTests": 9,
-  "numPassedTests": 6,
+  "timestamp": "2026-09-02T20:40:00Z",
+  "numTotalTests": 10,
+  "numPassedTests": 10,
   "numFailedTests": 0,
-  "numPendingTests": 2,
+  "numPendingTests": 0,
   "numTodoTests": 0,
   "testResults": [
     {
@@ -45,8 +45,8 @@
     },
     {
       "name": "controlled-provider-and-ingest-verification",
-      "status": "pending",
-      "result": "The ingest command now bounds each data type to LAKE_INGEST_MAX_RECORDS (default 1000), uses the corrected Alpaca list endpoints, and marks the session partial. A fresh execution must prove non-empty provider rows and Parquet persistence"
+      "status": "passed",
+      "result": "Execution fca-ml-dev-ingest-rf36v8f completed with status Succeeded in 36 seconds using the deployed bounded command. It fetched real Alpaca AAPL data through the Key Vault-backed credentials, wrote 1,000 trade rows and 1,000 quote rows, and persisted both deterministic Parquet objects and partial coverage records"
     },
     {
       "name": "bounded-ingest-implementation",
@@ -59,13 +59,16 @@
       "result": "The bounded client, production command composition, Azure committer, and transaction integration passed focused tests and type/lint checks"
     },
     {
+      "name": "persisted-data-verification",
+      "status": "passed",
+      "result": "Azure Blob Storage contains date=2026-09-02/asset_class=equity/data_type=trade/AAPL.parquet (13,151 bytes) and date=2026-09-02/asset_class=equity/data_type=quote/AAPL.parquet (10,762 bytes). Azure Table coverage contains matching AAPL rows with status partial, row_count 1000, and non-zero byte_size; no credential or provider response value was emitted"
+    },
+    {
       "name": "hosted-key-vault-deployment",
       "status": "passed",
       "url": "https://github.com/Carson-Fricke/FCA/actions/runs/33672808818",
       "result": "The hosted deployment published the private image, completed OIDC login, deployed the Key Vault-backed API and ingest configuration, verified workload image digests, and passed the private /health smoke"
     }
   ],
-  "blockers": [
-    "The remaining live acceptance requires an implemented bounded Alpaca provider request plus persistence path. Secret values must not be sent through chat or stored in task evidence."
-  ]
+  "blockers": []
 }
