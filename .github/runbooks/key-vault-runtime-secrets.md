@@ -53,7 +53,28 @@ function Set-MaskedVaultSecret([string] $name) {
 
 Set-MaskedVaultSecret alpaca-api-key
 Set-MaskedVaultSecret alpaca-api-secret
-Set-MaskedVaultSecret api-bearer-token
+
+# The bearer token belongs to this application, not to Alpaca. Generate it
+# locally when no existing client token has been provisioned.
+function Set-GeneratedVaultSecret([string] $name) {
+  $bytes = New-Object byte[] 32
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  $path = [IO.Path]::GetTempFileName()
+  try {
+    $rng.GetBytes($bytes)
+    $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    [IO.File]::WriteAllText($path, $token, (New-Object Text.UTF8Encoding($false)))
+    az keyvault secret set --vault-name $vault --name $name --file $path --encoding utf-8 --output none
+    if (-not $?) { throw "Failed to set $name" }
+  } finally {
+    $token = $null
+    $rng.Dispose()
+    [Array]::Clear($bytes, 0, $bytes.Length)
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+  }
+}
+
+Set-GeneratedVaultSecret api-bearer-token
 ```
 
 Never paste values into this runbook, a GitHub variable, Bicep parameter,
@@ -66,6 +87,17 @@ az keyvault secret list `
   --vault-name fca-ml-dev-kv-obj3kww `
   --query "[].{name:name, enabled:attributes.enabled}" `
   --output table
+```
+
+Retrieve the generated application token only when you need to call a
+protected API route, and keep it out of shell history and logs:
+
+```powershell
+az keyvault secret show `
+  --vault-name fca-ml-dev-kv-obj3kww `
+  --name api-bearer-token `
+  --query value `
+  --output tsv
 ```
 
 ## Deploy And Verify

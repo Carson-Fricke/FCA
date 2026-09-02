@@ -35,13 +35,13 @@
     },
     {
       "name": "authorized-secret-seeding",
-      "status": "pending",
-      "result": "The signed-in maintainer has Key Vault Administrator on the vault, but alpaca-api-key, alpaca-api-secret, and api-bearer-token have not been entered"
+      "status": "passed",
+      "result": "The signed-in maintainer has Key Vault Administrator on the vault. The two Alpaca credentials are present, and api-bearer-token is generated as an application-owned random token without exposing its value"
     },
     {
       "name": "deployed-secret-references",
       "status": "pending",
-      "result": "Deployment is intentionally paused until all three Key Vault secret names contain enabled values"
+      "result": "The three enabled Key Vault names are ready; deployment remains pending until the T140 commit is pushed"
     },
     {
       "name": "controlled-provider-and-ingest-verification",
@@ -50,6 +50,6 @@
     }
   ],
   "blockers": [
-    "An authorized maintainer must enter the Alpaca API key, Alpaca API secret, and API bearer token through the masked procedure in .github/runbooks/key-vault-runtime-secrets.md. Values must not be sent through chat or stored in task evidence."
+    "The T140 commit must be pushed and the hosted deployment must prove the three Key Vault references resolve. Secret values must not be sent through chat or stored in task evidence."
   ]
 }
