@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T17:06:16.981Z",
+    "exportedAt": "2026-09-03T19:35:19.506Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 179
     },
-    "checksum": "809551607695d785",
+    "checksum": "b8ad164f79894835",
     "taskCount": 178,
     "exportMode": "full"
   },
@@ -309,7 +309,7 @@
     "T069": {
       "type": "epic",
       "title": "H1 M0 Foundations and contracts",
-      "status": "pending",
+      "status": "done",
       "parentId": "T068",
       "depends": [
         "T003"
@@ -640,7 +640,7 @@
     "T089": {
       "type": "task",
       "title": "H2.2 Streaming LakeReplayFeed",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T080",
@@ -1815,7 +1815,7 @@
     "T084": {
       "type": "task",
       "title": "H1.7 HistoricalView look-ahead guard",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T080",
@@ -1920,7 +1920,7 @@
     "T085": {
       "type": "task",
       "title": "H1.8 Strategy sandbox lint",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T083"
@@ -3372,7 +3372,7 @@
     {
       "id": "T069",
       "title": "H1 M0 Foundations and contracts",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T068",
@@ -3403,8 +3403,9 @@
         "T003"
       ],
       "createdAt": "2026-09-01T17:55:19.941Z",
-      "updatedAt": "2026-09-01T18:47:12.026Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-03T19:33:06.172Z",
+      "completedAt": "2026-09-03T19:33:06.172Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -6452,7 +6453,7 @@
     {
       "id": "T089",
       "title": "H2.2 Streaming LakeReplayFeed",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -6465,6 +6466,9 @@
         "milestone.m1",
         "harness.h012",
         "replay"
+      ],
+      "notes": [
+        "2026-09-03 19:33:48 UTC: Completed the streaming LakeReplayFeed with deterministic k-way merge, session-at-a-time reading, and stable file/row/data fingerprints."
       ],
       "acceptance": [
         "Adversarial same-timestamp streams merge in deterministic feed order",
@@ -6482,7 +6486,8 @@
         "T088"
       ],
       "createdAt": "2026-09-01T18:00:42.945Z",
-      "updatedAt": "2026-09-03T17:01:39.260Z",
+      "updatedAt": "2026-09-03T19:33:52.110Z",
+      "completedAt": "2026-09-03T19:33:48.066Z",
       "verification": {
         "passed": true,
         "round": 1,
@@ -6717,7 +6722,12 @@
           }
         }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -17739,7 +17749,7 @@
     {
       "id": "T084",
       "title": "H1.7 HistoricalView look-ahead guard",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -17752,6 +17762,9 @@
         "milestone.m0",
         "harness.h007",
         "lookahead"
+      ],
+      "notes": [
+        "2026-09-03 19:33:06 UTC: Completed bounded HistoricalView with hard nanosecond look-ahead clipping and amortized last-N retrieval."
       ],
       "acceptance": [
         "A one-nanosecond future query raises LookaheadError and a canary strategy never receives future data",
@@ -17768,21 +17781,230 @@
         "T083"
       ],
       "createdAt": "2026-09-01T18:00:22.213Z",
-      "updatedAt": "2026-09-01T18:24:20.800Z",
+      "updatedAt": "2026-09-03T19:33:09.892Z",
+      "completedAt": "2026-09-03T19:33:06.172Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T19:31:40.997Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:22.213Z"
+        "initializedAt": "2026-09-01T18:00:22.213Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Bounded HistoricalView with hard look-ahead clipping is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "0ebdb10c-1046-5452-be85-cdaf36a81ccf"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "7e704140-fca8-5135-afd4-f91323a2e216"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "9dfe50b0-ac30-5af5-bc6f-201e0ccf35b6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a878571a-021a-5f68-926b-ac98cd21f048"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "e6c3f04d-2e97-5d08-87bf-1851c162fa43"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-validation.json",
+                "sha256": "6e9c685cbb127a14a73b2361ff61f74ad43105fa5a9e25c92a9367b1ec64cc66",
+                "passCount": 15,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:31:42.170Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Bounded HistoricalView with hard look-ahead clipping is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "0ebdb10c-1046-5452-be85-cdaf36a81ccf"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "7e704140-fca8-5135-afd4-f91323a2e216"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "9dfe50b0-ac30-5af5-bc6f-201e0ccf35b6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a878571a-021a-5f68-926b-ac98cd21f048"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "e6c3f04d-2e97-5d08-87bf-1851c162fa43"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-validation.json",
+                "sha256": "6e9c685cbb127a14a73b2361ff61f74ad43105fa5a9e25c92a9367b1ec64cc66",
+                "passCount": 15,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:31:42.170Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Bounded HistoricalView with hard look-ahead clipping is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "0ebdb10c-1046-5452-be85-cdaf36a81ccf"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "7e704140-fca8-5135-afd4-f91323a2e216"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "9dfe50b0-ac30-5af5-bc6f-201e0ccf35b6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a878571a-021a-5f68-926b-ac98cd21f048"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T084",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "e6c3f04d-2e97-5d08-87bf-1851c162fa43"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-validation.json",
+                "sha256": "6e9c685cbb127a14a73b2361ff61f74ad43105fa5a9e25c92a9367b1ec64cc66",
+                "passCount": 15,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:31:42.170Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -18603,7 +18825,7 @@
     {
       "id": "T085",
       "title": "H1.8 Strategy sandbox lint",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T069",
@@ -18616,6 +18838,9 @@
         "milestone.m0",
         "harness.h008",
         "sandbox"
+      ],
+      "notes": [
+        "2026-09-03 19:32:12 UTC: Completed AST strategy sandbox lint rejecting wall-clock, sleep, network, subprocess, unseeded random, asyncio, and concurrency patterns with actionable diagnostics and CI wiring."
       ],
       "acceptance": [
         "Clean strategies pass and every prohibited pattern has a failing fixture with an actionable diagnostic",
@@ -18632,21 +18857,230 @@
         "T083"
       ],
       "createdAt": "2026-09-01T18:00:26.105Z",
-      "updatedAt": "2026-09-01T18:24:29.171Z",
+      "updatedAt": "2026-09-03T19:32:16.143Z",
+      "completedAt": "2026-09-03T19:32:12.486Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T19:32:02.940Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:26.105Z"
+        "initializedAt": "2026-09-01T18:00:26.105Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "AST strategy sandbox lint with actionable diagnostics and CI wiring is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "52ddd580-07a5-57f5-b23e-3f84e27c90a1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "7ceb2259-653e-50c4-8d1c-30afc3f9b89a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6c7d09dc-5cf1-56a2-9382-e96d729aa625"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "1000e364-4062-5e18-89e2-f1349ab7b30b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "da13f003-9ab2-5c3d-9dd5-b86e1e043192"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T085-validation.json",
+                "sha256": "1092aa1158c55c67dd203f7dfc76ea8e06506aed5d6539cefaf0af05151874ad",
+                "passCount": 44,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:32:03.813Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "AST strategy sandbox lint with actionable diagnostics and CI wiring is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "52ddd580-07a5-57f5-b23e-3f84e27c90a1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "7ceb2259-653e-50c4-8d1c-30afc3f9b89a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6c7d09dc-5cf1-56a2-9382-e96d729aa625"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "1000e364-4062-5e18-89e2-f1349ab7b30b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "da13f003-9ab2-5c3d-9dd5-b86e1e043192"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T085-validation.json",
+                "sha256": "1092aa1158c55c67dd203f7dfc76ea8e06506aed5d6539cefaf0af05151874ad",
+                "passCount": 44,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:32:03.813Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "AST strategy sandbox lint with actionable diagnostics and CI wiring is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "52ddd580-07a5-57f5-b23e-3f84e27c90a1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "7ceb2259-653e-50c4-8d1c-30afc3f9b89a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6c7d09dc-5cf1-56a2-9382-e96d729aa625"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "1000e364-4062-5e18-89e2-f1349ab7b30b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T085",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "da13f003-9ab2-5c3d-9dd5-b86e1e043192"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T085-validation.json",
+                "sha256": "1092aa1158c55c67dd203f7dfc76ea8e06506aed5d6539cefaf0af05151874ad",
+                "passCount": 44,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:32:03.813Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -19392,19 +19826,240 @@
         "T095"
       ],
       "createdAt": "2026-09-01T18:01:11.600Z",
-      "updatedAt": "2026-09-01T18:26:02.172Z",
+      "updatedAt": "2026-09-03T19:32:38.175Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T19:32:38.175Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:11.600Z"
+        "initializedAt": "2026-09-01T18:01:11.600Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic backtest runner with reproducibility manifest and local backtest-job CLI is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "981558a4-0cf4-5651-b0c4-e680b7c49484"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "46abb907-0cc5-513d-8e19-f8217e635620"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "ddbf939b-5886-5789-8934-ddd71df6f1fa"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "902b1e9f-8eec-5977-91e6-95a3c5043665"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "0007b47e-1525-5929-bb19-894d321f2243"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "dea43ee0-1418-5ba2-a1da-6ebfda0c2d6d"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T096-validation.json",
+                "sha256": "3cc30e0748e851da05314a588858b555a9a60741090ed4789ae270eb058bf3ee",
+                "passCount": 50,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:32:39.092Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic backtest runner with reproducibility manifest and local backtest-job CLI is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "981558a4-0cf4-5651-b0c4-e680b7c49484"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "46abb907-0cc5-513d-8e19-f8217e635620"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "ddbf939b-5886-5789-8934-ddd71df6f1fa"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "902b1e9f-8eec-5977-91e6-95a3c5043665"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "0007b47e-1525-5929-bb19-894d321f2243"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "dea43ee0-1418-5ba2-a1da-6ebfda0c2d6d"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T096-validation.json",
+                "sha256": "3cc30e0748e851da05314a588858b555a9a60741090ed4789ae270eb058bf3ee",
+                "passCount": 50,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:32:39.092Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic backtest runner with reproducibility manifest and local backtest-job CLI is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "981558a4-0cf4-5651-b0c4-e680b7c49484"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "46abb907-0cc5-513d-8e19-f8217e635620"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "ddbf939b-5886-5789-8934-ddd71df6f1fa"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "902b1e9f-8eec-5977-91e6-95a3c5043665"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "0007b47e-1525-5929-bb19-894d321f2243"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T096",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "dea43ee0-1418-5ba2-a1da-6ebfda0c2d6d"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T096-validation.json",
+                "sha256": "3cc30e0748e851da05314a588858b555a9a60741090ed4789ae270eb058bf3ee",
+                "passCount": 50,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T084-T085-T089-T096-T098-wave-validation.json",
+                "sha256": "bcc4d46ed8b930fd9b93c7c16cdaa8e2f9d8a137dc7c2d69f92321b9885e326b",
+                "passCount": 830,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T19:32:39.092Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
       "pipelineStage": "implementation",
       "kind": "work",
