@@ -1,0 +1,45 @@
+{
+  "wave": "T097",
+  "timestamp": "2026-09-03T20:05:00Z",
+  "numTotalTests": 836,
+  "numPassedTests": 836,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "uv lock --check, repository Ruff lint, Ruff format across 346 files, and ty all passed after the facade and typing corrections."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "836 tests passed in 76.86 seconds; one existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "package-build",
+      "status": "passed",
+      "result": "The wheel now contains the strategies.harness_examples package alongside all harness, lake, and Thesis capability packages."
+    },
+    {
+      "name": "committed-local-benchmark",
+      "status": "passed",
+      "command": "uv run backtest-job --config config/harness/backtest.yaml",
+      "result": "The committed example runs end to end over the deterministic synthetic fixture: 252 market events, 26 orders, 26 fills, flat book at every close, and byte-identical manifest (5b0fff3d...) and artifact (445e195f...) digests across two independent runs."
+    },
+    {
+      "name": "example-consistency",
+      "status": "passed",
+      "result": "The example-validates and stable-hash configuration tests were updated for the now-real reference strategy implementation, and the old placeholder momentum reference was removed."
+    }
+  ],
+  "integrationHistory": [
+    "The first wave-B integration run found eight ty diagnostics in the new strategy and integration files plus two stale committed-example assertions; all were corrected, after which the permitted final repository pass succeeded."
+  ],
+  "limitations": [
+    "The repository suite emitted the existing Starlette/httpx TestClient deprecation warning.",
+    "The example run window is a deterministic two-week January 2024 fixture; longer windows require lake data through the T088 adapter."
+  ]
+}

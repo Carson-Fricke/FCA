@@ -1,0 +1,35 @@
+{
+  "taskId": "T097",
+  "timestamp": "2026-09-03T20:05:00Z",
+  "numTotalTests": 6,
+  "numPassedTests": 6,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "reference-strategy-integration",
+      "status": "passed",
+      "command": "uv run --extra dev python -m pytest -p no:cacheprovider tests/integration -q",
+      "result": "6 tests passed over a small two-symbol (SPY + QQQ) fixture driven through the real backtest runner: buy-and-hold enters one position per symbol and holds, intraday momentum is flat at every session close with byte-identical artifacts across repeated runs, and mean reversion exercises cancellation, replacement, and partial fills."
+    },
+    {
+      "name": "ci-fixture",
+      "status": "passed",
+      "result": "All three strategies run in a single combined runner execution over the packaged fixture; the suite runs in every pytest invocation, including CI."
+    },
+    {
+      "name": "sandbox-and-focused-quality",
+      "status": "passed",
+      "result": "All example sources pass assert_sandbox_clean and the repository Ruff lint/format and ty checks; strategies use only context-injected capabilities with no wall-clock, unseeded random, network, or I/O access."
+    }
+  ],
+  "decisions": [
+    "Momentum reads session closes from configuration and liquidates through context.clock before each close, so the same class is configuration-driven rather than hard-coded.",
+    "strategies.harness_examples ships in the runtime wheel via the repository packaging configuration, making module:Class implementation paths resolvable by the runner and CLI."
+  ],
+  "limitations": [
+    "Mean reversion exposes a module-level instance registry so integration tests can observe cancel/replace lifecycle without changing the runner contract."
+  ],
+  "blockers": []
+}
