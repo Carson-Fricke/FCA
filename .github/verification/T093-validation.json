@@ -1,0 +1,33 @@
+{
+  "taskId": "T093",
+  "timestamp": "2026-09-03T01:51:00Z",
+  "numTotalTests": 9,
+  "numPassedTests": 9,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "fee-schedules",
+      "status": "passed",
+      "command": "uv run pytest tests/harness/fills",
+      "result": "9 tests passed for equity commission/regulatory fees, option per-contract fees, crypto maker/taker fees and rebates, exact cent rounding, fill application, and aggregation."
+    },
+    {
+      "name": "configuration-separation",
+      "status": "passed",
+      "result": "The us-retail YAML schedule selects all models without strategy imports or binary floating point."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, Ruff format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "Fee attribution is supplied by engine-owned run, strategy, and asset-class context.",
+    "Each fee component is rounded before deterministic aggregation."
+  ],
+  "limitations": [],
+  "blockers": []
+}

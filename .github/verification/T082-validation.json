@@ -1,0 +1,28 @@
+{
+  "taskId": "T082",
+  "timestamp": "2026-09-03T01:51:00Z",
+  "numTotalTests": 8,
+  "numPassedTests": 8,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "scripted-venue",
+      "status": "passed",
+      "command": "uv run pytest tests/harness/venues",
+      "result": "8 tests passed for fire-and-forget commands, ordered callbacks, acknowledgement, partial/final fills, rejection, expiry, immediate fill, cancellation, replacement, and position snapshots."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, Ruff format, and ty checks passed with no wall-clock, random, or network access."
+    }
+  ],
+  "decisions": [
+    "Venue commands return no outcomes; all reports, fills, and positions re-enter through EventBus.",
+    "ScriptedVenue consumes an immutable FIFO script and fails mismatched calls without consuming a step."
+  ],
+  "limitations": [],
+  "blockers": []
+}

@@ -1,0 +1,52 @@
+{
+  "wave": "T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154",
+  "timestamp": "2026-09-03T01:51:00Z",
+  "numTotalTests": 570,
+  "numPassedTests": 570,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "uv lock --check, locked sync, Ruff lint, Ruff format over 249 files, and ty all passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "570 tests passed locally in 45.77 seconds; one existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "package-build",
+      "status": "passed",
+      "result": "The wheel contains market-lake, lakeclient, quant-harness, and Thesis capability packages."
+    },
+    {
+      "name": "bicep-workflows-docs-and-entrypoints",
+      "status": "passed",
+      "result": "Bicep entrypoints/dev parameters, actionlint, action-validator, Markdownlint, all process entrypoints, and all new public capability imports passed."
+    },
+    {
+      "name": "hosted-ci",
+      "status": "passed",
+      "url": "https://github.com/Carson-Fricke/FCA/actions/runs/33705017418",
+      "result": "Exact fix commit 57d5054 passed hosted Ruff, format, ty, all 570 tests, package build, and Bicep validation on Linux."
+    },
+    {
+      "name": "hosted-deployment",
+      "status": "passed",
+      "url": "https://github.com/Carson-Fricke/FCA/actions/runs/33705017823",
+      "result": "Exact fix commit 57d5054 passed immutable image publication, Azure OIDC deployment, workload digest verification, and private health smoke."
+    }
+  ],
+  "integrationHistory": [
+    "The first local repository pass found only MD013 table-width findings; scoped document exceptions were added and the one permitted full rerun passed.",
+    "Initial hosted Linux CI exposed Windows absolute-path acceptance in T151; a PureWindowsPath check fixed it and the next hosted run passed all 570 tests."
+  ],
+  "limitations": [
+    "The hosted workflows emitted existing Node.js 20 action deprecation warnings.",
+    "The test suite emitted the existing Starlette/httpx TestClient deprecation warning."
+  ]
+}

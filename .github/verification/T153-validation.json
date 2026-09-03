@@ -1,0 +1,33 @@
+{
+  "taskId": "T153",
+  "timestamp": "2026-09-03T01:51:00Z",
+  "numTotalTests": 14,
+  "numPassedTests": 14,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "journal-and-git-publication",
+      "status": "passed",
+      "command": "uv run pytest tests/thesis/persistence",
+      "result": "14 tests passed for append-only hash-chained journals, idempotency, immutable artifacts, outbox recovery, temporary-index Git publication, compare-and-swap fencing, duplicate commands, and interrupted publication."
+    },
+    {
+      "name": "workspace-contract-integration",
+      "status": "passed",
+      "result": "Workspace identity remains at .thesis/workspace.yaml while publication state is isolated at .thesis/publication.json."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, Ruff format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "Git publication stages only the configured publication document and preserves unrelated index changes.",
+    "Commit trailers retain workflow, model, input, journal, artifact, publication, idempotency, and tool-correlation identities."
+  ],
+  "limitations": [],
+  "blockers": []
+}

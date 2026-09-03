@@ -1,0 +1,33 @@
+{
+  "taskId": "T061",
+  "timestamp": "2026-09-03T01:51:00Z",
+  "numTotalTests": 9,
+  "numPassedTests": 9,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "lakeclient-contract",
+      "status": "passed",
+      "command": "uv run pytest tests/lakeclient",
+      "result": "9 tests passed for authenticated ensure, polling, API errors, file responses, DuckDB reads, and the local AAPL NBBO spread flow."
+    },
+    {
+      "name": "aapl-nbbo-acceptance",
+      "status": "passed",
+      "result": "The local mocked API flow ensures one quote day, polls to completion, reads the API-issued Parquet URL, and computes an exact 0.020000000000000000 NBBO spread."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, Ruff format, and ty checks passed; lakeclient imports no Alpaca, Azure, or lake service implementation."
+    }
+  ],
+  "decisions": [
+    "lakeclient is the standalone consumer SDK used by the future harness lake adapter.",
+    "It consumes API-issued URLs and does not construct provider or Azure credentials."
+  ],
+  "limitations": [],
+  "blockers": []
+}

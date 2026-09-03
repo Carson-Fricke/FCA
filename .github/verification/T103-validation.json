@@ -1,0 +1,35 @@
+{
+  "taskId": "T103",
+  "timestamp": "2026-09-03T01:51:00Z",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "alpaca-sip-websocket",
+      "status": "passed",
+      "command": "uv run pytest tests/harness/data",
+      "result": "5 tests passed for subscription, exact normalization, reception, disconnect recovery, bounded backoff, stale-symbol detection, timestamp sanity, and atomic inbox rejection."
+    },
+    {
+      "name": "replay-schema-parity",
+      "status": "passed",
+      "result": "Normalized quote and trade events round-trip through the same core Parquet schemas used by replay."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, Ruff format, and ty checks passed; network and clock behavior are injected at the async shell boundary."
+    }
+  ],
+  "decisions": [
+    "No concrete WebSocket dependency is added; production runtime must inject an AsyncWebSocketTransport.",
+    "The synchronous inbox owns deterministic event IDs and sequences and performs no network or wall-clock access."
+  ],
+  "limitations": [
+    "Tests use injected mock transports; no live WebSocket connection was required."
+  ],
+  "blockers": []
+}

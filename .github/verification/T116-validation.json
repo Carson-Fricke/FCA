@@ -1,0 +1,33 @@
+{
+  "taskId": "T116",
+  "timestamp": "2026-09-03T01:51:00Z",
+  "numTotalTests": 12,
+  "numPassedTests": 12,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "atomic-multi-leg-groups",
+      "status": "passed",
+      "command": "uv run pytest tests/harness/oms/test_groups.py",
+      "result": "12 tests passed for market/net-debit/net-credit groups, ratio/action validation, rejection, cancellation during evaluation, expiry, and atomic fill prohibition of partial batches."
+    },
+    {
+      "name": "vertical-accounting",
+      "status": "passed",
+      "result": "Filled vertical scenarios produce exact per-leg positions, notional, fees, gross cash, and net cash."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, Ruff format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "V1 group fills require exactly one complete symbol/action/quantity fill for every leg.",
+    "Net price is ratio weighted; cash accounting uses actual leg quantities and supplied exact fees."
+  ],
+  "limitations": [],
+  "blockers": []
+}

@@ -1,0 +1,28 @@
+{
+  "taskId": "T044",
+  "timestamp": "2026-09-03T01:51:00Z",
+  "numTotalTests": 19,
+  "numPassedTests": 19,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "authenticated-raw-object-route",
+      "status": "passed",
+      "command": "uv run pytest tests/lake/http/routes/test_raw.py",
+      "result": "19 tests passed for authentication, canonical equity/option/crypto paths, catalog authorization, read-only SAS issuance, traversal and malformed path rejection, missing SAS wiring, and no ensure invocation."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, Ruff format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "The route re-derives the catalog key and canonical partition path before issuing a URL.",
+    "Unknown, malformed, mismatched, and noncanonical paths never reach the SAS issuer."
+  ],
+  "limitations": [],
+  "blockers": []
+}
