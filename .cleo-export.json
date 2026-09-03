@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T03:45:09.807Z",
+    "exportedAt": "2026-09-03T16:28:37.097Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 179
     },
-    "checksum": "1c76a6468a5c5a6d",
+    "checksum": "aeaa0d8616d58b63",
     "taskCount": 178,
     "exportMode": "full"
   },
@@ -932,7 +932,7 @@
     "T090": {
       "type": "task",
       "title": "H2.3 Bars, simulated scheduler, and sessions",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T080",
@@ -1491,7 +1491,7 @@
     "T092": {
       "type": "task",
       "title": "H2.5 Pessimistic latency and trade-through fills",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T091"
@@ -1929,7 +1929,7 @@
     "T095": {
       "type": "task",
       "title": "H2.8 Risk pipeline and core rules",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T083",
@@ -2028,7 +2028,7 @@
     "T087": {
       "type": "task",
       "title": "H1.10 Determinism golden harness",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T082",
@@ -8900,7 +8900,7 @@
     {
       "id": "T090",
       "title": "H2.3 Bars, simulated scheduler, and sessions",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T070",
@@ -8914,6 +8914,9 @@
         "harness.h013",
         "bars",
         "scheduler"
+      ],
+      "notes": [
+        "2026-09-03 16:27:10 UTC: Completed exact OHLCV bar derivation and deterministic absolute, recurring, and XNYS session-relative scheduling."
       ],
       "acceptance": [
         "Golden bars reconcile exactly to underlying trades",
@@ -8931,21 +8934,230 @@
         "T083"
       ],
       "createdAt": "2026-09-01T18:00:47.050Z",
-      "updatedAt": "2026-09-01T18:25:11.643Z",
+      "updatedAt": "2026-09-03T16:27:13.411Z",
+      "completedAt": "2026-09-03T16:27:09.723Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T16:25:58.731Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:47.050Z"
+        "initializedAt": "2026-09-01T18:00:47.050Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Exact OHLCV bars and deterministic XNYS session scheduler are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "d8ef1463-b843-5fcc-8034-e91feac121d4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "cfd9e050-4649-5327-bd86-291800ee3fe8"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "7c9c2765-6617-57e3-99bb-f71169b9fa2f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "6c3eabd6-18a7-597d-886d-574bdeae11b4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ff62cfff-6e65-53d4-a7a5-f2825871ca78"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T090-validation.json",
+                "sha256": "a2f3a64bff75ef91795288896c84a85900211c6e9d10a0bd388bc7ef4dce7a1f",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:25:59.752Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Exact OHLCV bars and deterministic XNYS session scheduler are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "d8ef1463-b843-5fcc-8034-e91feac121d4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "cfd9e050-4649-5327-bd86-291800ee3fe8"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "7c9c2765-6617-57e3-99bb-f71169b9fa2f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "6c3eabd6-18a7-597d-886d-574bdeae11b4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ff62cfff-6e65-53d4-a7a5-f2825871ca78"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T090-validation.json",
+                "sha256": "a2f3a64bff75ef91795288896c84a85900211c6e9d10a0bd388bc7ef4dce7a1f",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:25:59.752Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Exact OHLCV bars and deterministic XNYS session scheduler are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "d8ef1463-b843-5fcc-8034-e91feac121d4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "cfd9e050-4649-5327-bd86-291800ee3fe8"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "7c9c2765-6617-57e3-99bb-f71169b9fa2f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "6c3eabd6-18a7-597d-886d-574bdeae11b4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T090",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ff62cfff-6e65-53d4-a7a5-f2825871ca78"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T090-validation.json",
+                "sha256": "a2f3a64bff75ef91795288896c84a85900211c6e9d10a0bd388bc7ef4dce7a1f",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:25:59.752Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -13328,7 +13540,7 @@
     {
       "id": "T092",
       "title": "H2.5 Pessimistic latency and trade-through fills",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -13341,6 +13553,9 @@
         "milestone.m1",
         "harness.h015",
         "fill-model"
+      ],
+      "notes": [
+        "2026-09-03 16:27:25 UTC: Completed deterministic latency-size, cancel/rest remainder, pessimistic print qualification, and strict trade-through fill models."
       ],
       "acceptance": [
         "A three-hundred-share order against one-hundred displayed shares fills and handles the remainder exactly under each policy",
@@ -13358,21 +13573,248 @@
         "T091"
       ],
       "createdAt": "2026-09-01T18:00:55.107Z",
-      "updatedAt": "2026-09-01T18:25:28.493Z",
+      "updatedAt": "2026-09-03T16:27:29.415Z",
+      "completedAt": "2026-09-03T16:27:25.677Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T16:26:18.171Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:55.107Z"
+        "initializedAt": "2026-09-01T18:00:55.107Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic pessimistic latency-size and strict trade-through fill models are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "1ebc3cc3-e864-5f8e-9545-76bd052c19d0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "9ee144c5-fa8e-565e-8ff3-2bb0b38ed777"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "e0e7f916-b376-5387-b490-0a0b34dc8e1f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a0945ed0-5662-5bbe-8f01-3b750fd4e52d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "a200b1b6-8260-5f8a-8668-be273b12cf04"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "e49a187e-7d16-5936-808e-add14b4dec70"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T092-validation.json",
+                "sha256": "00b52b413315abc717b1c9e488a6be73229865c5e84909a62ef541b37d09b772",
+                "passCount": 15,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:26:19.074Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic pessimistic latency-size and strict trade-through fill models are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "1ebc3cc3-e864-5f8e-9545-76bd052c19d0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "9ee144c5-fa8e-565e-8ff3-2bb0b38ed777"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "e0e7f916-b376-5387-b490-0a0b34dc8e1f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a0945ed0-5662-5bbe-8f01-3b750fd4e52d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "a200b1b6-8260-5f8a-8668-be273b12cf04"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "e49a187e-7d16-5936-808e-add14b4dec70"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T092-validation.json",
+                "sha256": "00b52b413315abc717b1c9e488a6be73229865c5e84909a62ef541b37d09b772",
+                "passCount": 15,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:26:19.074Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic pessimistic latency-size and strict trade-through fill models are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "1ebc3cc3-e864-5f8e-9545-76bd052c19d0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "9ee144c5-fa8e-565e-8ff3-2bb0b38ed777"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "e0e7f916-b376-5387-b490-0a0b34dc8e1f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a0945ed0-5662-5bbe-8f01-3b750fd4e52d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "a200b1b6-8260-5f8a-8668-be273b12cf04"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T092",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "e49a187e-7d16-5936-808e-add14b4dec70"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T092-validation.json",
+                "sha256": "00b52b413315abc717b1c9e488a6be73229865c5e84909a62ef541b37d09b772",
+                "passCount": 15,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:26:19.074Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -16931,7 +17373,7 @@
     {
       "id": "T095",
       "title": "H2.8 Risk pipeline and core rules",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -16944,6 +17386,9 @@
         "milestone.m1",
         "harness.h018",
         "risk"
+      ],
+      "notes": [
+        "2026-09-03 16:27:43 UTC: Completed ordered exact-decimal risk pipeline with reductions, rechecks, halts, per-strategy overrides, and complete decision audits."
       ],
       "acceptance": [
         "Every rule has exact allow, reduce, and reject boundary tests",
@@ -16961,21 +17406,248 @@
         "T094"
       ],
       "createdAt": "2026-09-01T18:01:07.452Z",
-      "updatedAt": "2026-09-01T18:25:53.864Z",
+      "updatedAt": "2026-09-03T16:27:47.676Z",
+      "completedAt": "2026-09-03T16:27:43.629Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T16:26:33.118Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:07.452Z"
+        "initializedAt": "2026-09-01T18:01:07.452Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Ordered exact-decimal risk pipeline with reductions halts and complete decision auditing is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "c2c19e68-f9a0-5ae9-97c8-3d99f933f07d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "307a79a9-c1f5-5f68-8029-79f6b26e7261"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "074ddb78-cebc-53d2-b871-136502bc9ab2"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "9f3085d1-ed56-5aae-9c9b-ae7a02dde32b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "91aac483-7b66-59c5-8af4-674f66726ac0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "f4ca8df4-2886-5bc6-b2f0-1dfaf75dc66f"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T095-validation.json",
+                "sha256": "9ad7a1ebc1eb9749027eb162309cdffd2b8020a153331153adf759fa66ce2637",
+                "passCount": 26,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:26:34.219Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Ordered exact-decimal risk pipeline with reductions halts and complete decision auditing is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "c2c19e68-f9a0-5ae9-97c8-3d99f933f07d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "307a79a9-c1f5-5f68-8029-79f6b26e7261"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "074ddb78-cebc-53d2-b871-136502bc9ab2"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "9f3085d1-ed56-5aae-9c9b-ae7a02dde32b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "91aac483-7b66-59c5-8af4-674f66726ac0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "f4ca8df4-2886-5bc6-b2f0-1dfaf75dc66f"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T095-validation.json",
+                "sha256": "9ad7a1ebc1eb9749027eb162309cdffd2b8020a153331153adf759fa66ce2637",
+                "passCount": 26,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:26:34.219Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Ordered exact-decimal risk pipeline with reductions halts and complete decision auditing is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "c2c19e68-f9a0-5ae9-97c8-3d99f933f07d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "307a79a9-c1f5-5f68-8029-79f6b26e7261"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "074ddb78-cebc-53d2-b871-136502bc9ab2"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "9f3085d1-ed56-5aae-9c9b-ae7a02dde32b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "91aac483-7b66-59c5-8af4-674f66726ac0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T095",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "f4ca8df4-2886-5bc6-b2f0-1dfaf75dc66f"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T095-validation.json",
+                "sha256": "9ad7a1ebc1eb9749027eb162309cdffd2b8020a153331153adf759fa66ce2637",
+                "passCount": 26,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:26:34.219Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -17551,7 +18223,7 @@
     {
       "id": "T087",
       "title": "H1.10 Determinism golden harness",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -17564,6 +18236,9 @@
         "milestone.m0",
         "harness.h010",
         "golden-test"
+      ],
+      "notes": [
+        "2026-09-03 16:26:52 UTC: Completed reusable deterministic golden harness with canonical artifacts, manifests, and nondeterminism detection."
       ],
       "acceptance": [
         "Two consecutive runs produce byte-identical artifact hashes",
@@ -17581,21 +18256,230 @@
         "T083"
       ],
       "createdAt": "2026-09-01T18:00:34.507Z",
-      "updatedAt": "2026-09-01T18:24:46.078Z",
+      "updatedAt": "2026-09-03T16:26:55.737Z",
+      "completedAt": "2026-09-03T16:26:51.141Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T16:25:41.335Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:34.507Z"
+        "initializedAt": "2026-09-01T18:00:34.507Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Reusable deterministic golden harness and nondeterminism detection are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "808c2478-7cf0-5e48-a51d-a9f7fe4deca4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "8c7b7db1-2c7e-5e08-be86-e0729b9b89ac"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "411ee836-15e0-5aa9-b9d3-caa9156f98ba"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "2835d598-bdb0-58fd-b58c-c183543de5a3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "98328d3e-8d55-5642-a3ac-59c8b866f016"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-validation.json",
+                "sha256": "56a34d2fa1fbcff83f3bbf5ccab5ca9ffc6fdef30be5560c308d70c5010a5cf1",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:25:42.462Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Reusable deterministic golden harness and nondeterminism detection are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "808c2478-7cf0-5e48-a51d-a9f7fe4deca4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "8c7b7db1-2c7e-5e08-be86-e0729b9b89ac"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "411ee836-15e0-5aa9-b9d3-caa9156f98ba"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "2835d598-bdb0-58fd-b58c-c183543de5a3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "98328d3e-8d55-5642-a3ac-59c8b866f016"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-validation.json",
+                "sha256": "56a34d2fa1fbcff83f3bbf5ccab5ca9ffc6fdef30be5560c308d70c5010a5cf1",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:25:42.462Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "917085d52ba06cb50c13511a967e4f1dbcf8eda8",
+                "shortSha": "917085d"
+              },
+              {
+                "kind": "note",
+                "note": "Reusable deterministic golden harness and nondeterminism detection are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "808c2478-7cf0-5e48-a51d-a9f7fe4deca4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "8c7b7db1-2c7e-5e08-be86-e0729b9b89ac"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "411ee836-15e0-5aa9-b9d3-caa9156f98ba"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "2835d598-bdb0-58fd-b58c-c183543de5a3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T087",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "98328d3e-8d55-5642-a3ac-59c8b866f016"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-validation.json",
+                "sha256": "56a34d2fa1fbcff83f3bbf5ccab5ca9ffc6fdef30be5560c308d70c5010a5cf1",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T087-T090-T092-T095-wave-validation.json",
+                "sha256": "c949a6b9b76599d46383e2f31eb76ef9f1dfe9afdc086a3b7d0ef9a37a5ffbe4",
+                "passCount": 666,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T16:25:42.462Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
