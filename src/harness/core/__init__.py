@@ -8,6 +8,14 @@ from harness.core.events import (
     EventQueue,
 )
 from harness.core.ids import EngineIdSource
+from harness.core.scheduler import (
+    DeterministicScheduler,
+    ScheduledCallbackEvent,
+    ScheduledHandle,
+    SessionEvent,
+    SessionEventKind,
+    SimScheduler,
+)
 from harness.core.symbols import OsiSymbol, Symbol
 from harness.core.types import (
     AccountSnapshot,
@@ -39,6 +47,7 @@ __all__ = (
     "Book",
     "BookLevel",
     "Clock",
+    "DeterministicScheduler",
     "EVENT_CLASS_PRIORITY",
     "EngineIdSource",
     "Event",
@@ -58,6 +67,11 @@ __all__ = (
     "Position",
     "QuoteEvent",
     "Side",
+    "ScheduledCallbackEvent",
+    "ScheduledHandle",
+    "SessionEvent",
+    "SessionEventKind",
+    "SimScheduler",
     "SimClock",
     "SingleLegOrder",
     "Symbol",

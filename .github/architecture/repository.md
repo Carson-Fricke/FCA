@@ -104,10 +104,12 @@ tests/lake/
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
-| `harness.data` | Live/replay market-data boundaries and synchronous normalized event inboxes. |
-| `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch fill decisions. |
+| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, and exact OHLCV bar derivation. |
+| `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, and trade-through fill decisions. |
 | `harness.portfolio` | Strategy virtual books and shared-account aggregate accounting. |
 | `harness.strategy` | Mode-independent strategy callbacks, constrained context, deterministic subscriptions, and class-plus-parameter binding. |
+| `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, and complete decision auditing. |
+| `harness.testing` | Deterministic synthetic feeds, golden artifact canonicalization, and reproducibility manifest comparison. |
 | `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, and simulated top-of-book matching venue. |
 
 The event ordering contract is timestamp, source sequence, fixed serialized
@@ -117,10 +119,10 @@ synchronous simulation kernel. OMS status and fill-ledger changes occur only by
 applying validated execution reports. Configuration hashes normalize mapping
 order, exact decimals, and UTC timestamps, and reject resolved secret values.
 
-The remaining `results`, `risk`, `runtime`, and `testing` facades reserve
-capability boundaries for later tasks. Thin `harness`, `api`, `backtest-job`,
-and `trader` command entrypoints make the future process boundaries explicit
-and fail clearly until composed.
+The remaining `results` and `runtime` facades reserve capability boundaries for
+later tasks. Thin `harness`, `api`, `backtest-job`, and `trader` command
+entrypoints make the future process boundaries explicit and fail clearly until
+composed.
 
 ## Thesis Packages
 

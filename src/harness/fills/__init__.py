@@ -17,7 +17,26 @@ from harness.fills.fees import (
     aggregate_fees,
     load_fee_schedule,
 )
+from harness.fills.latency_size import (
+    LatencyMetadata,
+    LatencySize,
+    LatencySizeConfig,
+    LatencySizeFill,
+    LatencySizeFillModel,
+    RemainderPolicy,
+    load_latency_size,
+    load_latency_size_config,
+)
 from harness.fills.simple_touch import FillDecision, SimpleTouch
+from harness.fills.trade_through import (
+    TradeThrough,
+    TradeThroughConfig,
+    TradeThroughFill,
+    TradeThroughFillModel,
+    TradeThroughMetadata,
+    load_trade_through,
+    load_trade_through_config,
+)
 
 __all__ = (
     "AssetClass",
@@ -31,10 +50,25 @@ __all__ = (
     "FeeRounding",
     "FeeSchedule",
     "FillDecision",
+    "LatencyMetadata",
+    "LatencySize",
+    "LatencySizeConfig",
+    "LatencySizeFill",
+    "LatencySizeFillModel",
     "LiquidityRole",
     "OptionsPerContractFeeModel",
     "RoundingMode",
+    "RemainderPolicy",
     "SimpleTouch",
+    "TradeThrough",
+    "TradeThroughConfig",
+    "TradeThroughFill",
+    "TradeThroughFillModel",
+    "TradeThroughMetadata",
     "aggregate_fees",
+    "load_latency_size",
+    "load_latency_size_config",
     "load_fee_schedule",
+    "load_trade_through",
+    "load_trade_through_config",
 )

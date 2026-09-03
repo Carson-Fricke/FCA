@@ -24,7 +24,9 @@ IMPLEMENTED_CAPABILITIES = {
     "fills",
     "oms",
     "portfolio",
+    "risk",
     "strategy",
+    "testing",
     "venues",
 }
 

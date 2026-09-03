@@ -8,6 +8,17 @@ from harness.data.alpaca_ws import (
     AsyncWebSocketConnection,
     AsyncWebSocketTransport,
 )
+from harness.data.bars import (
+    OHLCV,
+    Bar,
+    BarAggregator,
+    BarBuilder,
+    OHLCVBar,
+    aggregate_trades,
+    bars_from_trades,
+    build_bars,
+    interval_delta,
+)
 from harness.data.lake import (
     DEFAULT_EGRESS_WARNING_THRESHOLD_BYTES,
     EnsureJobError,
@@ -30,6 +41,9 @@ __all__ = (
     "AlpacaSipSubscription",
     "AlpacaSipWebSocketFeed",
     "AlpacaWebSocketProtocolError",
+    "Bar",
+    "BarAggregator",
+    "BarBuilder",
     "AsyncWebSocketConnection",
     "AsyncWebSocketTransport",
     "DEFAULT_EGRESS_WARNING_THRESHOLD_BYTES",
@@ -43,7 +57,13 @@ __all__ = (
     "MarketLakeError",
     "MarketLakeLoad",
     "MarketLakeRequest",
+    "OHLCV",
+    "OHLCVBar",
     "ProjectedEgressWarning",
     "UnsupportedMarketDataError",
+    "aggregate_trades",
+    "bars_from_trades",
+    "build_bars",
+    "interval_delta",
     "resolve_sessions",
 )
