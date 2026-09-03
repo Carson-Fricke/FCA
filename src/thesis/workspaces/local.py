@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from thesis.workspaces.manifest import (
     WorkspaceManifest,
@@ -62,7 +62,15 @@ def _resolve_beneath(
     must_exist: bool,
 ) -> Path:
     relative = Path(relative_path)
-    if relative.is_absolute() or relative.anchor or relative.drive:
+    windows_path = PureWindowsPath(relative_path)
+    if (
+        relative.is_absolute()
+        or relative.anchor
+        or relative.drive
+        or windows_path.is_absolute()
+        or windows_path.anchor
+        or windows_path.drive
+    ):
         raise WorkspacePathError("workspace paths must be relative")
     if ".." in relative.parts:
         raise WorkspacePathError("workspace paths must not contain traversal")
