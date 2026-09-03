@@ -1,0 +1,41 @@
+{
+  "wave": "T089-T155-T156-T157-T158-T159",
+  "timestamp": "2026-09-03T17:03:00Z",
+  "numTotalTests": 706,
+  "numPassedTests": 706,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "uv lock --check, repository Ruff lint, Ruff format across 307 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "706 tests passed in 42.99 seconds; one existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "package-build",
+      "status": "passed",
+      "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
+      "result": "The wheel contains bounded replay and all Thesis agent, artifact, chat, execution, HTTP, integration, and strategy capability packages."
+    },
+    {
+      "name": "architecture-and-workflows",
+      "status": "passed",
+      "result": "Markdownlint passed .github/architecture/repository.md; package facade imports/tests passed. The attempted npx actionlint package invocation was unavailable because npm has no actionlint package/version; no workflows changed in this wave."
+    }
+  ],
+  "integrationHistory": [
+    "Canceled subagents left complete implementation files; each lane was independently focused-tested before integration.",
+    "The integrated repository run passed all 706 tests, quality checks, build, and architecture documentation validation."
+  ],
+  "limitations": [
+    "The repository suite emitted the existing Starlette/httpx TestClient deprecation warning.",
+    "T089 remains dependency-blocked in CLEO by the unrecorded deployed-dev T048 smoke prerequisite."
+  ]
+}

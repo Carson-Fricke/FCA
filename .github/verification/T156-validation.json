@@ -1,0 +1,28 @@
+{
+  "taskId": "T156",
+  "timestamp": "2026-09-03T17:03:00Z",
+  "numTotalTests": 6,
+  "numPassedTests": 6,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "durable-execution-recovery",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/thesis/execution/test_recovery.py -q",
+      "result": "6 tests passed for restart recovery, idempotent workflow/tool submission, fenced leases, intent epochs, late-result queryability, checkpoint version compatibility, and explicit dead-letter states."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed with injected storage, clock, token, and recovery boundaries."
+    }
+  ],
+  "decisions": [
+    "Durable queue projections use immutable accepted identities and fenced leases to prevent stale publication.",
+    "Incompatible checkpoints enter recovery rather than being silently coerced or replayed."
+  ],
+  "limitations": [],
+  "blockers": []
+}

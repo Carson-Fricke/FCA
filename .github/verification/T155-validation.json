@@ -1,0 +1,28 @@
+{
+  "taskId": "T155",
+  "timestamp": "2026-09-03T17:03:00Z",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "chat-and-execution-contracts",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/thesis/chat/test_contracts.py -q",
+      "result": "5 tests passed for workspace-owned chats and investigations, lifecycle commands, explicit cross-record links, ordered execution events, cursor replay, and retained late tool results."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; contracts and HTTP models do not import or expose CLEO internals."
+    }
+  ],
+  "decisions": [
+    "Chat service persistence is injected and workspace ownership is validated at the record boundary.",
+    "Execution events are append-only with server-assigned cursors and replay pagination."
+  ],
+  "limitations": [],
+  "blockers": []
+}

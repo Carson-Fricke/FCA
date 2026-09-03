@@ -1,0 +1,32 @@
+{
+  "taskId": "T089",
+  "timestamp": "2026-09-03T17:03:00Z",
+  "numTotalTests": 6,
+  "numPassedTests": 6,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "streaming-lake-replay",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/harness/data/test_replay.py -q",
+      "result": "6 tests passed for adversarial same-timestamp k-way merge, stable file/row/data fingerprints, lazy reader activation, one-session-at-a-time replay, Parquet row adaptation, and event-bus publication."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; replay keeps one lookahead event per source and uses no wall clock, random, network, or provider SDK."
+    }
+  ],
+  "decisions": [
+    "Replay ordering is timestamp, source sequence, fixed event class priority, then deterministic source order.",
+    "File readers are activated only for the current session and row fingerprints are streamed without materializing a year of events."
+  ],
+  "limitations": [
+    "CLEO completion remains pending until the separately required deployed-dev smoke task T048 is satisfied."
+  ],
+  "blockers": [
+    "T048 deployed API/ingest first-query and cached-repeat smoke is not yet recorded."
+  ]
+}
