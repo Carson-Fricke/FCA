@@ -1,0 +1,28 @@
+{
+  "taskId": "T095",
+  "timestamp": "2026-09-03T03:50:00Z",
+  "numTotalTests": 26,
+  "numPassedTests": 26,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "risk-pipeline",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/harness/risk/test_pipeline.py -q",
+      "result": "26 tests passed for exact allow/reduce/reject boundaries across order notional, position, gross/net exposure, size, count, daily-loss halts, strategy overrides, reduced-order rechecks, decision auditing, YAML construction, and benchmark-shaped twenty-position evaluation."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; the synchronous risk kernel consumes only explicit immutable portfolio, price, loss, count, and strategy inputs."
+    }
+  ],
+  "decisions": [
+    "A reduction restarts evaluation from the first rule so earlier constraints recheck the reduced order.",
+    "Every rule invocation, reduction, veto reason, metric, recheck pass, and halt scope is retained in an immutable audit trail."
+  ],
+  "limitations": [],
+  "blockers": []
+}

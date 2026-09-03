@@ -1,0 +1,28 @@
+{
+  "taskId": "T087",
+  "timestamp": "2026-09-03T03:50:00Z",
+  "numTotalTests": 9,
+  "numPassedTests": 9,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "determinism-golden-harness",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/golden -q",
+      "result": "9 tests passed for repeated byte-identical runs, canonical artifact and manifest hashes, and deliberate set-order, clock, random-value, and ID nondeterminism failures."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; golden runs own fresh SimClock, EventBus, venue, portfolio, strategy binding, and seeded inputs without global state."
+    }
+  ],
+  "decisions": [
+    "Golden artifacts use canonical JSON and homogeneous event Parquet bytes, with manifests carrying configuration and artifact digests.",
+    "Unordered sets, binary floats, unseeded external values, and unstable IDs are rejected rather than normalized silently."
+  ],
+  "limitations": [],
+  "blockers": []
+}

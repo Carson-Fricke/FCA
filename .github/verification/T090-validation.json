@@ -1,0 +1,28 @@
+{
+  "taskId": "T090",
+  "timestamp": "2026-09-03T03:50:00Z",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bars-and-session-scheduler",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/harness/data/test_bars.py tests/harness/core/test_scheduler.py -q",
+      "result": "5 tests passed for exact OHLCV reconciliation, absolute and recurring callbacks, New York session-relative callbacks, normal-session DST conversion, half-day markers, and duplicate suppression."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; all scheduling uses explicit SimClock timestamps and exchange-calendar session contracts."
+    }
+  ],
+  "decisions": [
+    "Bars are half-open UTC intervals with Decimal prices/volume and source timestamp/sequence/feed ordering.",
+    "Session callbacks convert New York wall intent through ZoneInfo and schedule explicit UTC bus events once per session marker."
+  ],
+  "limitations": [],
+  "blockers": []
+}

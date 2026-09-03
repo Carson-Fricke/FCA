@@ -1,0 +1,28 @@
+{
+  "taskId": "T092",
+  "timestamp": "2026-09-03T03:50:00Z",
+  "numTotalTests": 15,
+  "numPassedTests": 15,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "pessimistic-fill-models",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/harness/fills/test_latency_size.py tests/harness/fills/test_trade_through.py -q",
+      "result": "15 tests passed for 300-share orders against 100 displayed shares, cancel/rest remainder policies, strict and non-strict print qualification, minimum trade-through thresholds, parameter-dependent outcomes, exact snapshots, and latency metadata."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed with exact Decimal arithmetic and no clock, random, network, or global configuration access."
+    }
+  ],
+  "decisions": [
+    "SimulatedVenue owns response scheduling; LatencySize and TradeThrough expose latency as immutable execution metadata.",
+    "Inside-spread resting limits require qualifying prints by default, while optimistic quote fills require explicit configuration."
+  ],
+  "limitations": [],
+  "blockers": []
+}

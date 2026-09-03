@@ -1,0 +1,40 @@
+{
+  "wave": "T087-T090-T092-T095",
+  "timestamp": "2026-09-03T03:50:00Z",
+  "numTotalTests": 666,
+  "numPassedTests": 666,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "uv lock --check, repository Ruff lint, Ruff format across 276 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "666 tests passed in 38.36 seconds; one existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "package-build",
+      "status": "passed",
+      "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
+      "result": "The wheel contains scheduler, bars, latency-size, trade-through, risk, golden testing, and previous harness/lake/Thesis packages."
+    },
+    {
+      "name": "architecture-and-entrypoints",
+      "status": "passed",
+      "result": "Markdownlint passed .github/architecture/repository.md and all package facade tests/import smoke checks passed."
+    }
+  ],
+  "integrationHistory": [
+    "The initial integration run passed tests, typing, formatting, build, and docs but found one data facade import-order violation; the targeted correction passed Ruff without another full rerun."
+  ],
+  "limitations": [
+    "The repository suite emitted the existing Starlette/httpx TestClient deprecation warning.",
+    "The backtest CLI runner, replay feed, and reference strategy integration remain pending in T089, T096, and T097."
+  ]
+}
