@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T00:46:43.893Z",
+    "exportedAt": "2026-09-03T01:03:21.099Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 179
     },
-    "checksum": "a4e6abfff281a16e",
+    "checksum": "97248be2e94e5ec9",
     "taskCount": 178,
     "exportMode": "full"
   },
@@ -892,7 +892,7 @@
     "T059": {
       "type": "task",
       "title": "E8.3 Crypto ensure and query API coverage",
-      "status": "pending",
+      "status": "done",
       "parentId": "T011",
       "depends": [
         "T043",
@@ -921,7 +921,7 @@
     "T080": {
       "type": "task",
       "title": "H1.3 Clock, event bus, and ordering contract",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T079"
@@ -1222,7 +1222,7 @@
     "T081": {
       "type": "task",
       "title": "H1.4 Single-leg OMS state machine",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T079"
@@ -1374,7 +1374,7 @@
     "T006": {
       "type": "epic",
       "title": "E3 CI/CD and GitHub OIDC",
-      "status": "pending",
+      "status": "done",
       "parentId": "T001",
       "depends": [
         "T003",
@@ -1406,7 +1406,7 @@
     "T032": {
       "type": "task",
       "title": "E3.5 GitHub Environments and OIDC bootstrap documentation",
-      "status": "pending",
+      "status": "done",
       "parentId": "T006",
       "depends": [
         "T017",
@@ -1979,7 +1979,7 @@
     "T086": {
       "type": "task",
       "title": "H1.9 Typed harness configuration and hashes",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T079"
@@ -7511,7 +7511,7 @@
     {
       "id": "T059",
       "title": "E8.3 Crypto ensure and query API coverage",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T011",
@@ -7523,6 +7523,9 @@
         "crypto",
         "api"
       ],
+      "notes": [
+        "2026-09-03 00:59:08 UTC: Completed 24/7 UTC crypto catalog, ensure, file-query, and bounded-SQL API coverage using the shared authenticated response contract."
+      ],
       "acceptance": [
         "Crypto API results use UTC partitions and the same authenticated response contract"
       ],
@@ -7531,21 +7534,84 @@
         "T058"
       ],
       "createdAt": "2026-09-01T03:23:28.730Z",
-      "updatedAt": "2026-09-01T03:29:57.451Z",
+      "updatedAt": "2026-09-03T00:59:13.005Z",
+      "completedAt": "2026-09-03T00:59:08.492Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T00:58:58.848Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:28.730Z"
+        "initializedAt": "2026-09-01T03:23:28.730Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "81d99f6c41d1bc1a5825b9faee6c00877a64f13f",
+                "shortSha": "81d99f6"
+              },
+              {
+                "kind": "note",
+                "note": "Existing shared crypto API behavior is now covered for authenticated UTC catalog ensure file and SQL contracts"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T059",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2445d216-1333-5a27-b754-fc0c9df07e88"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:58:42.379Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T059-validation.json",
+                "sha256": "633fbc22786a92809ff6137aa9960b24aa2ca5ab2782aed34911b503c91d8ea1",
+                "passCount": 33,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T032-T059-T080-T081-T086-wave-validation.json",
+                "sha256": "7521af40bf0c46140c5396499ba31f68100a6d2d156557864689a8d871e8d6da",
+                "passCount": 436,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-03T00:58:50.798Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:58:59.202Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -7705,7 +7771,7 @@
     {
       "id": "T080",
       "title": "H1.3 Clock, event bus, and ordering contract",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -7718,6 +7784,9 @@
         "milestone.m0",
         "harness.h003",
         "determinism"
+      ],
+      "notes": [
+        "2026-09-03 00:56:33 UTC: Implemented explicit SimClock/WallClock boundaries and deterministic timestamp-sequence-class-feed event queue and bus behavior."
       ],
       "acceptance": [
         "Same-timestamp quote, trade, and fill floods dispatch deterministically",
@@ -7735,21 +7804,114 @@
         "T079"
       ],
       "createdAt": "2026-09-01T18:00:06.380Z",
-      "updatedAt": "2026-09-01T18:23:45.020Z",
+      "updatedAt": "2026-09-03T00:56:39.053Z",
+      "completedAt": "2026-09-03T00:56:32.378Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T00:56:22.234Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:06.380Z"
+        "initializedAt": "2026-09-01T18:00:06.380Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "81d99f6c41d1bc1a5825b9faee6c00877a64f13f",
+                "shortSha": "81d99f6"
+              },
+              {
+                "kind": "note",
+                "note": "Explicit clocks and deterministic timestamp-sequence-class-feed event dispatch are implemented"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T080",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "4920267a-432f-56a2-8022-fa102c78dc62"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T080",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "0f9f7a20-cdd3-50d9-8644-f111a6e8c563"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T080",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "7e863f51-0ba6-50df-b787-e04dd89b5a16"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T080",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "3eada39f-c9ba-59f0-af3f-08cd55a8573d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T080",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "5464d34b-e84e-5639-bfe5-9362a6640328"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T080",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "3b70b61f-014c-5020-9712-4bda44158299"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:55:55.974Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T080-validation.json",
+                "sha256": "0264a7f254d51f1b6bf85fb997263647ad0fc0cca08d800b50050e769d24ac04",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T032-T059-T080-T081-T086-wave-validation.json",
+                "sha256": "7521af40bf0c46140c5396499ba31f68100a6d2d156557864689a8d871e8d6da",
+                "passCount": 436,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-03T00:56:13.753Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:56:22.682Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -9614,7 +9776,7 @@
     {
       "id": "T081",
       "title": "H1.4 Single-leg OMS state machine",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -9627,6 +9789,9 @@
         "milestone.m0",
         "harness.h004",
         "oms"
+      ],
+      "notes": [
+        "2026-09-03 00:57:27 UTC: Implemented the execution-report-driven single-leg OMS, exact fill ledgers, cancellation, atomic replacements, IOC expiry, and GTC carry-over."
       ],
       "acceptance": [
         "Exhaustive transition tests reject illegal state changes",
@@ -9643,21 +9808,114 @@
         "T079"
       ],
       "createdAt": "2026-09-01T18:00:10.315Z",
-      "updatedAt": "2026-09-01T18:23:53.578Z",
+      "updatedAt": "2026-09-03T00:57:32.195Z",
+      "completedAt": "2026-09-03T00:57:27.367Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T00:57:17.922Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:10.315Z"
+        "initializedAt": "2026-09-01T18:00:10.315Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "81d99f6c41d1bc1a5825b9faee6c00877a64f13f",
+                "shortSha": "81d99f6"
+              },
+              {
+                "kind": "note",
+                "note": "Execution-report-driven single-leg OMS lifecycle and exact ledgers are implemented"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T081",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "416f43a5-0994-5279-a2bf-1315baa3670b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T081",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "8b222eba-e7cb-5012-8c42-1e063df05e09"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T081",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "8d0341a1-2123-582b-84ea-35f6b3c9fcee"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T081",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "eab9b0e9-bd94-572d-a406-8f451b25a04a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T081",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "7c7f5cc6-0202-58b3-b6b3-cd1fb2e40852"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T081",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "a72404bc-0745-5034-85b9-c0198e233331"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:57:00.886Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T081-validation.json",
+                "sha256": "2c5a72176208b6ae4730931a48d5e3ca613401f6d1112c5841ee7f23baa95e79",
+                "passCount": 109,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T032-T059-T080-T081-T086-wave-validation.json",
+                "sha256": "7521af40bf0c46140c5396499ba31f68100a6d2d156557864689a8d871e8d6da",
+                "passCount": 436,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-03T00:57:09.362Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:57:18.028Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -10353,7 +10611,7 @@
     {
       "id": "T006",
       "title": "E3 CI/CD and GitHub OIDC",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -10382,8 +10640,9 @@
         "T004"
       ],
       "createdAt": "2026-09-01T03:15:31.494Z",
-      "updatedAt": "2026-09-02T16:24:46.739Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-03T00:59:59.580Z",
+      "completedAt": "2026-09-03T00:59:59.580Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -10620,7 +10879,7 @@
     {
       "id": "T032",
       "title": "E3.5 GitHub Environments and OIDC bootstrap documentation",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T006",
@@ -10632,6 +10891,9 @@
         "documentation",
         "oidc"
       ],
+      "notes": [
+        "2026-09-03 00:59:59 UTC: Documented reusable dev and prod GitHub Environment, immutable OIDC, provider registration, package permissions, Key Vault secret seeding and rotation, validation, deployment, and rollback procedures."
+      ],
       "acceptance": [
         "A maintainer can bootstrap dev and prod without committing secrets"
       ],
@@ -10640,21 +10902,84 @@
         "T031"
       ],
       "createdAt": "2026-09-01T03:21:56.283Z",
-      "updatedAt": "2026-09-01T03:26:23.206Z",
+      "updatedAt": "2026-09-03T01:00:04.151Z",
+      "completedAt": "2026-09-03T00:59:59.580Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T00:59:49.587Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:56.283Z"
+        "initializedAt": "2026-09-01T03:21:56.283Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "81d99f6c41d1bc1a5825b9faee6c00877a64f13f",
+                "shortSha": "81d99f6"
+              },
+              {
+                "kind": "note",
+                "note": "Reusable dev and prod OIDC Environment and Key Vault bootstrap runbook is complete"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T032",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "a8086790-a8ad-515a-a6a5-b0fdcb2441f4"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:59:32.140Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T032-validation.json",
+                "sha256": "eef9ae5df9b8bc9f8f6109a7015e0f5f88ab959ac49437ada266f5a460600a9e",
+                "passCount": 23,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T032-T059-T080-T081-T086-wave-validation.json",
+                "sha256": "7521af40bf0c46140c5396499ba31f68100a6d2d156557864689a8d871e8d6da",
+                "passCount": 436,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-03T00:59:40.422Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:59:49.710Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -14157,7 +14482,7 @@
     {
       "id": "T086",
       "title": "H1.9 Typed harness configuration and hashes",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -14171,6 +14496,10 @@
         "harness.h009",
         "configuration"
       ],
+      "notes": [
+        "2026-09-03 00:58:21 UTC: Implemented strict API, backtest, and trader configuration, runtime-only secret references, safe YAML loading, and canonical cross-machine hashes.",
+        "2026-09-03 01:01:56 UTC: Reconciled file ownership to the capability-oriented harness.configuration package implemented by T086."
+      ],
       "acceptance": [
         "All example YAML validates and invalid fixtures identify precise fields",
         "Equivalent configuration produces the same hash across machines and map ordering",
@@ -14179,28 +14508,116 @@
         "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
       ],
       "files": [
-        "src/harness/config.py",
-        "config"
+        "src/harness/configuration/**",
+        "config/harness/**",
+        "tests/harness/configuration/**"
       ],
       "depends": [
         "T079"
       ],
       "createdAt": "2026-09-01T18:00:30.244Z",
-      "updatedAt": "2026-09-01T18:24:37.690Z",
+      "updatedAt": "2026-09-03T01:01:56.091Z",
+      "completedAt": "2026-09-03T00:58:21.011Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T00:58:11.346Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:30.244Z"
+        "initializedAt": "2026-09-01T18:00:30.244Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "81d99f6c41d1bc1a5825b9faee6c00877a64f13f",
+                "shortSha": "81d99f6"
+              },
+              {
+                "kind": "note",
+                "note": "Strict capability-oriented harness configuration and canonical cross-machine hashing are implemented"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T086",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "dc2b17fe-34cb-52a3-b392-8366cc1dcaa5"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T086",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "28d46b4a-b5f0-5416-a77d-5fc3ef80a8c7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T086",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "59a0a477-35e5-5952-afbe-002b14fb5ba2"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T086",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "78969f83-ae24-525e-8cf4-7fa8bf5eb8f3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T086",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "4dabaf52-cfaf-5d00-9bc5-da87a36255a0"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:57:55.015Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T086-validation.json",
+                "sha256": "0a70a24db36a05798c76f3717b40be30967f73ab5f1d7d2a0bde0eb8a31f96c0",
+                "passCount": 16,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T032-T059-T080-T081-T086-wave-validation.json",
+                "sha256": "7521af40bf0c46140c5396499ba31f68100a6d2d156557864689a8d871e8d6da",
+                "passCount": 436,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-03T00:58:03.369Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T00:58:11.688Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
