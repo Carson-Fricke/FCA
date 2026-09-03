@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T00:04:42.225Z",
+    "exportedAt": "2026-09-03T00:46:43.893Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 155
+      "nextId": 179
     },
-    "checksum": "0c160c1014194069",
-    "taskCount": 154,
+    "checksum": "a4e6abfff281a16e",
+    "taskCount": 178,
     "exportMode": "full"
   },
   "selection": {
@@ -40,6 +40,12 @@
       "T132",
       "T144",
       "T151",
+      "T155",
+      "T161",
+      "T165",
+      "T168",
+      "T172",
+      "T174",
       "T003",
       "T014",
       "T017",
@@ -64,6 +70,12 @@
       "T133",
       "T145",
       "T152",
+      "T156",
+      "T162",
+      "T166",
+      "T169",
+      "T173",
+      "T175",
       "T004",
       "T015",
       "T018",
@@ -88,6 +100,11 @@
       "T143",
       "T146",
       "T153",
+      "T157",
+      "T163",
+      "T167",
+      "T170",
+      "T176",
       "T005",
       "T019",
       "T024",
@@ -110,6 +127,10 @@
       "T135",
       "T147",
       "T154",
+      "T158",
+      "T164",
+      "T171",
+      "T177",
       "T006",
       "T020",
       "T025",
@@ -128,6 +149,8 @@
       "T126",
       "T136",
       "T148",
+      "T159",
+      "T178",
       "T007",
       "T026",
       "T038",
@@ -142,6 +165,7 @@
       "T138",
       "T140",
       "T149",
+      "T160",
       "T008",
       "T027",
       "T039",
@@ -405,6 +429,78 @@
         "T003"
       ]
     },
+    "T155": {
+      "type": "task",
+      "title": "TH1.1 Chat, investigation, and execution contracts",
+      "status": "pending",
+      "parentId": "T145",
+      "depends": [
+        "T151",
+        "T152",
+        "T153",
+        "T154"
+      ]
+    },
+    "T161": {
+      "type": "task",
+      "title": "TH2.1 Hypothesis validation workflow",
+      "status": "pending",
+      "parentId": "T146",
+      "depends": [
+        "T155",
+        "T157",
+        "T158",
+        "T159"
+      ]
+    },
+    "T165": {
+      "type": "task",
+      "title": "TH3.1 Markdown knowledge corpus and links",
+      "status": "pending",
+      "parentId": "T147",
+      "depends": [
+        "T151"
+      ]
+    },
+    "T168": {
+      "type": "task",
+      "title": "TH4.1 Model registry and RCA evidence tiers",
+      "status": "pending",
+      "parentId": "T148",
+      "depends": [
+        "T145",
+        "T157",
+        "T161"
+      ]
+    },
+    "T172": {
+      "type": "task",
+      "title": "TH5.1 Consent grants and activation request boundary",
+      "status": "pending",
+      "parentId": "T149",
+      "depends": [
+        "T072",
+        "T148",
+        "T154",
+        "T160"
+      ]
+    },
+    "T174": {
+      "type": "task",
+      "title": "TH6.1 Azure Thesis deployment and workspace operations",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": [
+        "T073",
+        "T144",
+        "T145",
+        "T151",
+        "T152",
+        "T153",
+        "T154",
+        "T178"
+      ]
+    },
     "T003": {
       "type": "epic",
       "title": "E0 Repository and Python foundation",
@@ -622,9 +718,8 @@
       "status": "pending",
       "parentId": "T143",
       "depends": [
-        "T069",
-        "T070",
-        "T071"
+        "T005",
+        "T144"
       ]
     },
     "T152": {
@@ -634,6 +729,78 @@
       "parentId": "T144",
       "depends": [
         "T003"
+      ]
+    },
+    "T156": {
+      "type": "task",
+      "title": "TH1.2 Durable execution queue and checkpoints",
+      "status": "pending",
+      "parentId": "T145",
+      "depends": [
+        "T151",
+        "T152",
+        "T153",
+        "T154"
+      ]
+    },
+    "T162": {
+      "type": "task",
+      "title": "TH2.2 Autonomous strategy discovery workflow",
+      "status": "pending",
+      "parentId": "T146",
+      "depends": [
+        "T155",
+        "T157",
+        "T158",
+        "T159"
+      ]
+    },
+    "T166": {
+      "type": "task",
+      "title": "TH3.2 Knowledge ingestion and semantic search",
+      "status": "pending",
+      "parentId": "T147",
+      "depends": [
+        "T151"
+      ]
+    },
+    "T169": {
+      "type": "task",
+      "title": "TH4.2 Protected test authority client and exposure ledger",
+      "status": "pending",
+      "parentId": "T148",
+      "depends": [
+        "T145",
+        "T158",
+        "T161",
+        "T164"
+      ]
+    },
+    "T173": {
+      "type": "task",
+      "title": "TH5.2 Quant-harness local and Azure activation adapters",
+      "status": "pending",
+      "parentId": "T149",
+      "depends": [
+        "T072",
+        "T073",
+        "T148",
+        "T159",
+        "T160"
+      ]
+    },
+    "T175": {
+      "type": "task",
+      "title": "TH6.2 Local and Azure security recovery hardening",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": [
+        "T073",
+        "T076",
+        "T145",
+        "T156",
+        "T157",
+        "T158"
       ]
     },
     "T004": {
@@ -858,9 +1025,7 @@
       "status": "pending",
       "parentId": "T143",
       "depends": [
-        "T069",
-        "T070",
-        "T071"
+        "T145"
       ]
     },
     "T153": {
@@ -870,6 +1035,67 @@
       "parentId": "T144",
       "depends": [
         "T003"
+      ]
+    },
+    "T157": {
+      "type": "task",
+      "title": "TH1.3 Model router, skills, and context assembly",
+      "status": "pending",
+      "parentId": "T145",
+      "depends": [
+        "T151",
+        "T154"
+      ]
+    },
+    "T163": {
+      "type": "task",
+      "title": "TH2.3 RCA and strategy iteration loop",
+      "status": "pending",
+      "parentId": "T146",
+      "depends": [
+        "T155",
+        "T156",
+        "T157",
+        "T158",
+        "T159"
+      ]
+    },
+    "T167": {
+      "type": "task",
+      "title": "TH3.3 Workspace knowledge trust and CLEO projection",
+      "status": "pending",
+      "parentId": "T147",
+      "depends": [
+        "T151",
+        "T152",
+        "T165",
+        "T166"
+      ]
+    },
+    "T170": {
+      "type": "task",
+      "title": "TH4.3 RCA alias release and information-flow controls",
+      "status": "pending",
+      "parentId": "T148",
+      "depends": [
+        "T147",
+        "T159",
+        "T168",
+        "T169"
+      ]
+    },
+    "T176": {
+      "type": "task",
+      "title": "TH6.3 Thesis UI design specification",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": [
+        "T145",
+        "T146",
+        "T147",
+        "T149",
+        "T155",
+        "T161"
       ]
     },
     "T005": {
@@ -1080,7 +1306,8 @@
       "status": "pending",
       "parentId": "T143",
       "depends": [
-        "T003"
+        "T003",
+        "T144"
       ]
     },
     "T154": {
@@ -1090,6 +1317,58 @@
       "parentId": "T144",
       "depends": [
         "T003"
+      ]
+    },
+    "T158": {
+      "type": "task",
+      "title": "TH1.4 Thesis lake and harness clients",
+      "status": "pending",
+      "parentId": "T145",
+      "depends": [
+        "T021",
+        "T023",
+        "T024",
+        "T151",
+        "T154"
+      ]
+    },
+    "T164": {
+      "type": "task",
+      "title": "TH2.4 Statistical discipline and evidence ledger",
+      "status": "pending",
+      "parentId": "T146",
+      "depends": [
+        "T155",
+        "T156",
+        "T157",
+        "T158"
+      ]
+    },
+    "T171": {
+      "type": "task",
+      "title": "TH4.4 Blinded RCA advice and revision handoff",
+      "status": "pending",
+      "parentId": "T148",
+      "depends": [
+        "T147",
+        "T159",
+        "T168",
+        "T169",
+        "T170"
+      ]
+    },
+    "T177": {
+      "type": "task",
+      "title": "TH6.4 Publish Thesis architecture and repository boundaries",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": [
+        "T171",
+        "T173",
+        "T174",
+        "T175",
+        "T176",
+        "T178"
       ]
     },
     "T006": {
@@ -1277,9 +1556,31 @@
       "status": "pending",
       "parentId": "T143",
       "depends": [
-        "T069",
-        "T070",
-        "T071"
+        "T145",
+        "T146",
+        "T147"
+      ]
+    },
+    "T159": {
+      "type": "task",
+      "title": "TH1.5 Strategy bundle and artifact importer",
+      "status": "pending",
+      "parentId": "T145",
+      "depends": [
+        "T151",
+        "T153"
+      ]
+    },
+    "T178": {
+      "type": "task",
+      "title": "TH1.7 Thesis backend packaging and runtime image",
+      "status": "pending",
+      "parentId": "T145",
+      "depends": [
+        "T151",
+        "T154",
+        "T155",
+        "T158"
       ]
     },
     "T007": {
@@ -1424,10 +1725,29 @@
       "status": "pending",
       "parentId": "T143",
       "depends": [
-        "T069",
         "T072",
         "T073",
-        "T075"
+        "T144",
+        "T145",
+        "T146",
+        "T148"
+      ]
+    },
+    "T160": {
+      "type": "task",
+      "title": "TH1.6 Strategy-development vertical workflow",
+      "status": "pending",
+      "parentId": "T145",
+      "depends": [
+        "T151",
+        "T152",
+        "T153",
+        "T154",
+        "T155",
+        "T156",
+        "T157",
+        "T158",
+        "T159"
       ]
     },
     "T008": {
@@ -1561,7 +1881,13 @@
       "depends": [
         "T069",
         "T073",
-        "T076"
+        "T076",
+        "T144",
+        "T145",
+        "T146",
+        "T147",
+        "T148",
+        "T149"
       ]
     },
     "T009": {
@@ -3270,6 +3596,9 @@
         "bicep",
         "azure"
       ],
+      "notes": [
+        "2026-09-03 00:39:17 UTC: Path ownership is partitioned from Thesis: this task owns quant-harness-specific infrastructure only; the Thesis deployment task owns Thesis modules and the shared composition entrypoint."
+      ],
       "acceptance": [
         "Deployment from an empty dev resource group is idempotent and a repeat what-if is clean",
         "RTH scaling transitions on schedule and crypto compute is absent unless enabled",
@@ -3279,7 +3608,9 @@
         "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
       ],
       "files": [
-        "infra"
+        "infra/modules/quant-harness.bicep",
+        "infra/modules/quant-harness-runtime.bicep",
+        "infra/parameters/quant-harness.dev.bicepparam"
       ],
       "depends": [
         "T020",
@@ -3287,7 +3618,7 @@
         "T107"
       ],
       "createdAt": "2026-09-01T18:02:19.009Z",
-      "updatedAt": "2026-09-01T18:28:19.287Z",
+      "updatedAt": "2026-09-03T00:39:17.018Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -3549,7 +3880,7 @@
         "T003"
       ],
       "createdAt": "2026-09-03T00:01:51.591Z",
-      "updatedAt": "2026-09-03T00:04:39.260Z",
+      "updatedAt": "2026-09-03T00:12:43.218Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -3602,6 +3933,346 @@
         "lastUpdated": null,
         "failureLog": [],
         "initializedAt": "2026-09-03T00:04:24.969Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T155",
+      "title": "TH1.1 Chat, investigation, and execution contracts",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T145",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Define the workspace-scoped chat and investigation records, message/attachment lifecycle, workflow execution API, event stream contract, and explicit links between chats, investigations, strategies, experiments, and tool jobs.",
+      "labels": [
+        "thesis",
+        "chat",
+        "api",
+        "vertical-slice"
+      ],
+      "acceptance": [
+        "A workspace can create, persist, and retrieve multiple chats and investigations with explicit ownership links",
+        "Chat messages can launch, steer, stop, or cancel a workflow execution without losing late tool results",
+        "Execution events have ordered cursors, correlation IDs, actor scope, and reconnect/replay semantics",
+        "The API contract is usable by a later UI without requiring the UI to know CLEO internals",
+        "Focused chat and event contract tests pass"
+      ],
+      "files": [
+        "src/thesis/chat/contracts.py",
+        "src/thesis/chat/service.py",
+        "src/thesis/http/chat.py",
+        "src/thesis/execution/events.py",
+        "tests/thesis/chat/test_contracts.py"
+      ],
+      "depends": [
+        "T151",
+        "T152",
+        "T153",
+        "T154"
+      ],
+      "createdAt": "2026-09-03T00:06:02.095Z",
+      "updatedAt": "2026-09-03T00:34:03.100Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:06:02.095Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T161",
+      "title": "TH2.1 Hypothesis validation workflow",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T146",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Implement a Thesis workflow for operationalizing user-supplied hypotheses, selecting appropriate point-in-time data, running statistical tests, and reporting support or contradiction with limitations.",
+      "labels": [
+        "thesis",
+        "hypothesis",
+        "statistics",
+        "workflow"
+      ],
+      "acceptance": [
+        "The workflow converts a user claim into measurable variables, alternatives, estimands, endpoints, and data requirements",
+        "It checks data quality, point-in-time coverage, calendars, corporate actions, option membership, and leakage hazards before analysis",
+        "Nonexploratory contracts record inferential fields and distinguish descriptive, predictive, and causal claims",
+        "The report links tests and claims to reproducible artifacts and states when evidence is insufficient",
+        "Focused hypothesis workflow tests pass"
+      ],
+      "files": [
+        "src/thesis/workflows/hypothesis_validation.py",
+        "src/thesis/experiments/inference.py",
+        "tests/thesis/workflows/test_hypothesis_validation.py"
+      ],
+      "depends": [
+        "T155",
+        "T157",
+        "T158",
+        "T159"
+      ],
+      "createdAt": "2026-09-03T00:08:11.841Z",
+      "updatedAt": "2026-09-03T00:08:11.841Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:08:11.841Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T165",
+      "title": "TH3.1 Markdown knowledge corpus and links",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T147",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Implement the global Git-versioned Markdown knowledge corpus with page metadata, hyperlinks, source provenance, revisions, curation, and rebuildable search-index inputs.",
+      "labels": [
+        "thesis",
+        "knowledge",
+        "markdown",
+        "git"
+      ],
+      "acceptance": [
+        "Knowledge pages are canonical Markdown files with stable identity, metadata, source provenance, dates, tags, links, and revisions",
+        "Hyperlinks, supersession, contradiction, and typed relationships are preserved and validated",
+        "Curation and publication are explicit Git operations and fetched content remains untrusted until published",
+        "Search-index data is rebuildable from a selected corpus Git revision and is not canonical knowledge",
+        "Focused corpus and link validation tests pass"
+      ],
+      "files": [
+        "src/thesis/knowledge/corpus.py",
+        "src/thesis/knowledge/metadata.py",
+        "src/thesis/knowledge/links.py",
+        "knowledge/README.md",
+        "tests/thesis/knowledge/test_corpus.py"
+      ],
+      "depends": [
+        "T151"
+      ],
+      "createdAt": "2026-09-03T00:08:31.650Z",
+      "updatedAt": "2026-09-03T00:08:31.650Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:08:31.650Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T168",
+      "title": "TH4.1 Model registry and RCA evidence tiers",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T148",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Define model registry records, cutoff attestation, RCA subagent evidence tiers, role restrictions, and per-session verification for protected-result diagnosis.",
+      "labels": [
+        "thesis",
+        "rca",
+        "models",
+        "evidence-tiers"
+      ],
+      "acceptance": [
+        "The exact provider/model deployment, role, version, cutoff evidence, and capability policy are recorded for every RCA session",
+        "Cutoff-constrained RCA is enforced as standard practice for the second-highest RCA evidence tier",
+        "The registry verifies a conservative cutoff before the earliest model-visible observation and rejects revoked, mutable, or unknown deployments",
+        "RCA sessions cannot generate, select, rank, edit, activate, browse, or access workspace history",
+        "Focused model-registry and tier-policy tests pass"
+      ],
+      "files": [
+        "src/thesis/rca/model_registry.py",
+        "src/thesis/rca/tiers.py",
+        "src/thesis/rca/policy.py",
+        "tests/thesis/rca/test_model_registry.py"
+      ],
+      "depends": [
+        "T145",
+        "T157",
+        "T161"
+      ],
+      "createdAt": "2026-09-03T00:11:20.086Z",
+      "updatedAt": "2026-09-03T00:15:50.737Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:20.086Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T172",
+      "title": "TH5.1 Consent grants and activation request boundary",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T149",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Implement structured chat/UI consent proposals, scoped expiring grants, revocation, activation eligibility checks, and Thesis requests to the deterministic quant-harness activation gatekeeper.",
+      "labels": [
+        "thesis",
+        "consent",
+        "activation",
+        "quant-harness"
+      ],
+      "acceptance": [
+        "Natural-language ambiguity cannot create activation authority; explicit structured confirmation can create a grant",
+        "A grant names exact bundle hash, environment, action, instruments, capital/risk bounds, expiration, and one-shot or interval scope",
+        "Paper, shadow, and live activation are disabled by default and revocation is enforced",
+        "The gatekeeper validates bundle integrity, harness capability, tests, environment, risk policy, and grant scope",
+        "Thesis has no broker or gatekeeper credentials and receives only activation status",
+        "Focused consent and gatekeeper-request tests pass"
+      ],
+      "files": [
+        "src/thesis/activation/consent.py",
+        "src/thesis/activation/requests.py",
+        "src/thesis/activation/gatekeeper_client.py",
+        "tests/thesis/activation/test_consent.py"
+      ],
+      "depends": [
+        "T072",
+        "T148",
+        "T154",
+        "T160"
+      ],
+      "createdAt": "2026-09-03T00:11:39.202Z",
+      "updatedAt": "2026-09-03T00:45:11.726Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:39.202Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T174",
+      "title": "TH6.1 Azure Thesis deployment and workspace operations",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T150",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Define Azure deployment and operations for the Thesis backend using the T178 backend packaging contract and existing FCA immutable-image, identity, monitoring, cost, and authenticated remote-harness patterns.",
+      "labels": [
+        "thesis",
+        "azure",
+        "bicep",
+        "operations"
+      ],
+      "acceptance": [
+        "Azure deployment defines Thesis API/execution resources, identity, workspace persistence, monitoring, and explicit additive cost controls",
+        "Workspace Git-backed entities and execution resources are isolated by workspace",
+        "Deployment consumes an immutable Thesis backend image or approved FCA image composition from T178 and uses existing GitHub OIDC patterns without committed provider or model secrets",
+        "Operational health, restart, queue recovery, workspace lifecycle, and remote harness connectivity are observable",
+        "Focused Bicep, identity, cost, and deployment smoke checks pass"
+      ],
+      "files": [
+        "infra/modules/thesis.bicep",
+        "infra/modules/thesis-workspaces.bicep",
+        "infra/parameters/thesis.dev.bicepparam",
+        ".github/workflows/deploy-thesis.yml",
+        "tests/thesis/operations/test_deployment_contract.py",
+        "infra/main.bicep"
+      ],
+      "depends": [
+        "T073",
+        "T144",
+        "T145",
+        "T151",
+        "T152",
+        "T153",
+        "T154",
+        "T178"
+      ],
+      "createdAt": "2026-09-03T00:11:49.105Z",
+      "updatedAt": "2026-09-03T00:46:23.128Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:49.105Z"
       },
       "pipelineStage": "implementation",
       "kind": "work",
@@ -5180,6 +5851,9 @@
         "github-actions",
         "oidc"
       ],
+      "notes": [
+        "2026-09-03 00:39:15 UTC: Path ownership is partitioned from Thesis: this task owns quant-harness deployment workflow/action paths only; Thesis deployment workflow paths are owned by the Thesis operations task."
+      ],
       "acceptance": [
         "A main-branch deployment updates every selected quant runtime by immutable image reference",
         "Health and harness status failures fail the workflow without introducing Azure client secrets",
@@ -5188,8 +5862,8 @@
         "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
       ],
       "files": [
-        ".github/workflows",
-        ".github/actions"
+        ".github/workflows/deploy-quant-harness.yml",
+        ".github/actions/quant-harness"
       ],
       "depends": [
         "T031",
@@ -5197,7 +5871,7 @@
         "T112"
       ],
       "createdAt": "2026-09-01T18:02:23.322Z",
-      "updatedAt": "2026-09-01T18:28:27.922Z",
+      "updatedAt": "2026-09-03T00:39:14.991Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -5533,15 +6207,21 @@
       "acceptance": [
         "A local operator can use Thesis chat to generate and test a Python strategy through published quant-harness contracts",
         "The workflow survives UI disconnect and service restart while preserving tool results and Git artifacts",
-        "The first release labels historical results exploratory and does not give Thesis broker or activation capability"
+        "The first release labels historical results exploratory and does not give Thesis broker or activation capability",
+        "Complete child T155: TH1.1 Chat, investigation, and execution contracts",
+        "Complete child T156: TH1.2 Durable execution queue and checkpoints",
+        "Complete child T157: TH1.3 Model router, skills, and context assembly",
+        "Complete child T158: TH1.4 Thesis lake and harness clients",
+        "Complete child T159: TH1.5 Strategy bundle and artifact importer",
+        "Complete child T178: TH1.7 Thesis backend packaging and runtime image",
+        "Complete child T160: TH1.6 Strategy-development vertical workflow"
       ],
       "depends": [
-        "T069",
-        "T070",
-        "T071"
+        "T005",
+        "T144"
       ],
       "createdAt": "2026-09-03T00:01:55.650Z",
-      "updatedAt": "2026-09-03T00:01:55.650Z",
+      "updatedAt": "2026-09-03T00:43:52.870Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -5594,6 +6274,346 @@
         "lastUpdated": null,
         "failureLog": [],
         "initializedAt": "2026-09-03T00:04:30.027Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T156",
+      "title": "TH1.2 Durable execution queue and checkpoints",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T145",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Implement the local durable workflow execution projection, fenced leases, idempotent tool submissions, intent epochs, checkpoint versioning, restart recovery, and explicit failed or dead-letter states.",
+      "labels": [
+        "thesis",
+        "execution",
+        "recovery",
+        "vertical-slice"
+      ],
+      "acceptance": [
+        "A workflow resumes after API restart without duplicating accepted commands or external tool jobs",
+        "Fenced leases prevent stale workers from publishing strategy, CLEO, Git, or findings mutations",
+        "Steering increments an intent epoch and late results remain queryable without stale writes",
+        "Checkpoint versions are validated and incompatible checkpoints enter an explicit recovery state",
+        "Focused restart, idempotency, fencing, and dead-letter tests pass"
+      ],
+      "files": [
+        "src/thesis/execution/queue.py",
+        "src/thesis/execution/checkpoints.py",
+        "src/thesis/execution/recovery.py",
+        "tests/thesis/execution/test_recovery.py"
+      ],
+      "depends": [
+        "T151",
+        "T152",
+        "T153",
+        "T154"
+      ],
+      "createdAt": "2026-09-03T00:06:07.844Z",
+      "updatedAt": "2026-09-03T00:06:07.844Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:06:07.844Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T162",
+      "title": "TH2.2 Autonomous strategy discovery workflow",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T146",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Implement bounded autonomous strategy discovery with explicit research rationales, candidate accounting, cheap triage, adaptive-search controls, and negative-result reporting.",
+      "labels": [
+        "thesis",
+        "discovery",
+        "search",
+        "overfitting"
+      ],
+      "acceptance": [
+        "Discovery can choose supported markets, horizons, hypotheses, and strategy directions within workspace and platform budgets",
+        "Generated, ranked, rejected, aborted, and implemented candidates are recorded in the observed/declared attempt ledger",
+        "Cheap sanity, placebo, and plausibility checks precede expensive harness jobs",
+        "Adaptive search, stopping, candidate selection, and multiple-testing effects are reflected in evidence",
+        "Discovery reports negative findings and stops on budget or unresolved-uncertainty conditions",
+        "Focused discovery and ledger tests pass"
+      ],
+      "files": [
+        "src/thesis/workflows/discovery.py",
+        "src/thesis/experiments/attempts.py",
+        "src/thesis/agent/search_policy.py",
+        "tests/thesis/workflows/test_discovery.py"
+      ],
+      "depends": [
+        "T155",
+        "T157",
+        "T158",
+        "T159"
+      ],
+      "createdAt": "2026-09-03T00:08:16.478Z",
+      "updatedAt": "2026-09-03T00:08:16.478Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:08:16.478Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T166",
+      "title": "TH3.2 Knowledge ingestion and semantic search",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T147",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Implement the separate knowledge ingestion pipeline and replaceable hybrid search over Markdown lexical, metadata, hyperlink, and semantic representations.",
+      "labels": [
+        "thesis",
+        "knowledge",
+        "ingestion",
+        "semantic-search"
+      ],
+      "acceptance": [
+        "Ingestion fetches, parses, deduplicates, links, embeds, and proposes Markdown revisions without auto-trusting sources",
+        "Search combines lexical, metadata, hyperlink, and semantic retrieval with replaceable embeddings",
+        "Results cite Markdown path, Git revision, page version, source, and effective dates",
+        "Index rebuilds are deterministic for a pinned corpus revision",
+        "Prompt-injection and provenance-confusion tests cover retrieved pages",
+        "Focused ingestion and search tests pass"
+      ],
+      "files": [
+        "src/thesis/knowledge/ingest.py",
+        "src/thesis/knowledge/search.py",
+        "src/thesis/knowledge/index.py",
+        "knowledge/index/.gitkeep",
+        "tests/thesis/knowledge/test_search.py"
+      ],
+      "depends": [
+        "T151"
+      ],
+      "createdAt": "2026-09-03T00:08:35.975Z",
+      "updatedAt": "2026-09-03T00:08:35.975Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:08:35.975Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T169",
+      "title": "TH4.2 Protected test authority client and exposure ledger",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T148",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Implement the Thesis boundary to an authority-owned protected-test service for preallocated hidden windows, eligibility, exposure, reuse, influence, and signed sealed-status facts.",
+      "labels": [
+        "thesis",
+        "protected-test",
+        "exposure",
+        "authority"
+      ],
+      "acceptance": [
+        "Submissions contain immutable contract, strategy bundle, configuration, lineage, and model-registry identities",
+        "The authority is the canonical owner of hidden allocation, protected exposure, eligibility, reuse, and sealed-status facts",
+        "Protected rows are excluded from generator/selector access and allocation follows a versioned strategy-independent policy",
+        "Exact bundle fingerprints and signed ancestry prevent lineage IDs from laundering prior exposure",
+        "Thesis stores only a signed read-only mirror of authority decisions",
+        "Focused protected-test protocol and exposure tests pass"
+      ],
+      "files": [
+        "src/thesis/protected/authority_client.py",
+        "src/thesis/protected/exposure.py",
+        "src/thesis/protected/contracts.py",
+        "tests/thesis/protected/test_authority.py"
+      ],
+      "depends": [
+        "T145",
+        "T158",
+        "T161",
+        "T164"
+      ],
+      "createdAt": "2026-09-03T00:11:24.776Z",
+      "updatedAt": "2026-09-03T00:15:46.423Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:24.776Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T173",
+      "title": "TH5.2 Quant-harness local and Azure activation adapters",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T149",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Connect Thesis immutable strategy bundles to local and Azure quant-harness API/trader boundaries for backtest, paper, shadow, and capability-gated live activation without duplicating harness runtime behavior.",
+      "labels": [
+        "thesis",
+        "quant-harness",
+        "local-mode",
+        "azure"
+      ],
+      "acceptance": [
+        "Thesis can invoke local harness process/API boundaries and authenticated remote harness APIs using the same bundle and request contracts",
+        "Backtest, paper, shadow, and live status, manifests, artifacts, portfolio summaries, and risk decisions are consumed from quant-harness",
+        "Thesis does not implement portfolio, OMS, matching, risk, state recovery, broker, or trader supervision logic",
+        "Unimplemented harness capabilities are reported as unavailable and cannot be activated by Thesis",
+        "Focused local/remote activation adapter tests pass"
+      ],
+      "files": [
+        "src/thesis/integrations/harness_activation.py",
+        "src/thesis/integrations/runtime_status.py",
+        "tests/thesis/integrations/test_activation.py"
+      ],
+      "depends": [
+        "T072",
+        "T073",
+        "T148",
+        "T159",
+        "T160"
+      ],
+      "createdAt": "2026-09-03T00:11:44.239Z",
+      "updatedAt": "2026-09-03T00:39:16.313Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:44.239Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T175",
+      "title": "TH6.2 Local and Azure security recovery hardening",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Harden local and Azure Thesis operation with repository integrity, checkpoint migration, security boundaries, cross-workspace tests, prompt-injection defenses, and recovery procedures.",
+      "labels": [
+        "thesis",
+        "security",
+        "recovery",
+        "hardening"
+      ],
+      "acceptance": [
+        "Local and Azure modes satisfy equivalent workspace, event, artifact, consent, and audit contracts",
+        "Tests cover cross-workspace access, prompt injection, secret exfiltration, confused deputy, stale worker, repository, and provider-auth failures",
+        "Checkpoint incompatibility, queue interruption, Git publication interruption, and partial tool completion have documented recovery behavior",
+        "All-in-Git repository size, backup, restore, and retention limits are measured and enforced",
+        "Focused security, recovery, and integrity checks pass"
+      ],
+      "files": [
+        "src/thesis/operations/recovery.py",
+        "src/thesis/operations/security.py",
+        "src/thesis/operations/integrity.py",
+        ".github/runbooks/thesis.md",
+        "tests/thesis/operations/test_security.py"
+      ],
+      "depends": [
+        "T073",
+        "T076",
+        "T145",
+        "T156",
+        "T157",
+        "T158"
+      ],
+      "createdAt": "2026-09-03T00:11:53.826Z",
+      "updatedAt": "2026-09-03T00:15:48.317Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:53.826Z"
       },
       "pipelineStage": "implementation",
       "kind": "work",
@@ -7163,7 +8183,7 @@
       "id": "T143",
       "title": "FCA Thesis strategy research agent and workspace platform",
       "status": "pending",
-      "priority": "medium",
+      "priority": "high",
       "type": "saga",
       "size": "medium",
       "position": 3,
@@ -7173,6 +8193,7 @@
         "A local operator can create isolated workspace repositories and use Thesis chat to generate, test, evaluate, and iterate strategies through published market-lake and quant-harness contracts",
         "Thesis supports local operation and Azure-hosted operation without placing broker orders or bypassing harness risk and activation gates",
         "Protected RCA, global Markdown knowledge, workspace/CLEO planning, and UI/API boundaries are implemented according to .github/architecture/fca-thesis.md",
+        "The Thesis UI boundary and API contracts are documented and integrated without claiming that the later React visual implementation is complete",
         "Complete child T144: TH0 Workspace and CLEO foundations",
         "Complete child T145: TH1 Local-first chat to backtest vertical slice",
         "Complete child T146: TH2 Research workflows and evidence",
@@ -7182,7 +8203,7 @@
         "Complete child T150: TH6 Local and Azure operations hardening"
       ],
       "createdAt": "2026-09-02T23:59:57.700Z",
-      "updatedAt": "2026-09-03T00:02:16.159Z",
+      "updatedAt": "2026-09-03T00:41:44.217Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -7221,15 +8242,17 @@
       "acceptance": [
         "Thesis supports user-supplied hypothesis validation, strategy improvement, and bounded autonomous discovery workflows",
         "Investigations preserve strategy lineages, observed and declared attempts, influence records, and evidence grades",
-        "Statistical and RCA workflow behavior distinguishes data, harness, implementation, statistical, regime, and premise failures"
+        "Statistical and RCA workflow behavior distinguishes data, harness, implementation, statistical, regime, and premise failures",
+        "Complete child T161: TH2.1 Hypothesis validation workflow",
+        "Complete child T162: TH2.2 Autonomous strategy discovery workflow",
+        "Complete child T163: TH2.3 RCA and strategy iteration loop",
+        "Complete child T164: TH2.4 Statistical discipline and evidence ledger"
       ],
       "depends": [
-        "T069",
-        "T070",
-        "T071"
+        "T145"
       ],
       "createdAt": "2026-09-03T00:02:00.080Z",
-      "updatedAt": "2026-09-03T00:02:00.080Z",
+      "updatedAt": "2026-09-03T00:39:13.338Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -7284,6 +8307,285 @@
       },
       "pipelineStage": "implementation",
       "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T157",
+      "title": "TH1.3 Model router, skills, and context assembly",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T145",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement policy-driven model-role routing, versioned Thesis skills, fresh scoped subagent contexts, workspace summaries, prompt precedence, and model invocation provenance for the first vertical slice.",
+      "labels": [
+        "thesis",
+        "models",
+        "skills",
+        "agent-runtime"
+      ],
+      "acceptance": [
+        "Primary, coding, critique, and research roles resolve through configurable provider/model profiles",
+        "Every invocation records model role/version, bundle hashes, allowed tools, inputs, outputs, and workspace scope",
+        "Workspace summaries and published artifacts cross chat boundaries without injecting unrestricted transcripts",
+        "Untrusted uploads, retrieved pages, and tool output are data rather than higher-precedence instructions",
+        "Focused routing, context-boundary, and provenance tests pass"
+      ],
+      "files": [
+        "src/thesis/agent/router.py",
+        "src/thesis/agent/context.py",
+        "src/thesis/agent/skills.py",
+        "src/thesis/agent/subagents.py",
+        "tests/thesis/agent/test_router.py"
+      ],
+      "depends": [
+        "T151",
+        "T154"
+      ],
+      "createdAt": "2026-09-03T00:06:12.944Z",
+      "updatedAt": "2026-09-03T00:06:12.944Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:06:12.944Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T163",
+      "title": "TH2.3 RCA and strategy iteration loop",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T146",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement ordinary root-cause analysis and strategy revision loops that classify data, harness, implementation, statistical, regime, execution, and premise failures while preserving lineage and contract history.",
+      "labels": [
+        "thesis",
+        "rca",
+        "iteration",
+        "lineage"
+      ],
+      "acceptance": [
+        "RCA distinguishes engine/data defects from strategy and premise failures",
+        "Every material adaptation creates a new strategy lineage version and experiment-contract transition",
+        "RCA findings include competing explanations, confidence, supporting/disconfirming evidence, and discriminating follow-up tests",
+        "The loop cannot rewrite a failed hypothesis into a positive claim without recording a new claim",
+        "Focused RCA and lineage tests pass"
+      ],
+      "files": [
+        "src/thesis/research/rca.py",
+        "src/thesis/research/lineage.py",
+        "tests/thesis/research/test_rca.py"
+      ],
+      "depends": [
+        "T155",
+        "T156",
+        "T157",
+        "T158",
+        "T159"
+      ],
+      "createdAt": "2026-09-03T00:08:21.730Z",
+      "updatedAt": "2026-09-03T00:08:21.730Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:08:21.730Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T167",
+      "title": "TH3.3 Workspace knowledge trust and CLEO projection",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T147",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement full global read access, workspace trust overlays, and an optional rebuildable CLEO initialization projection containing version-pinned knowledge references rather than a copied corpus.",
+      "labels": [
+        "thesis",
+        "knowledge",
+        "cleo",
+        "trust"
+      ],
+      "acceptance": [
+        "Every workspace can read the global Markdown corpus by default",
+        "Workspace-promoted pages guide methods/preferences but cannot override platform policy or grant capabilities",
+        "Initialization can seed CLEO with a compact manifest or selected references linked to corpus revisions",
+        "The projection is rebuildable and never becomes a second canonical corpus",
+        "The implementation explicitly avoids treating CLEO Nexus or Brain as the global knowledge source",
+        "Focused trust-overlay and projection tests pass"
+      ],
+      "files": [
+        "src/thesis/knowledge/trust.py",
+        "src/thesis/knowledge/cleo_projection.py",
+        "tests/thesis/knowledge/test_projection.py"
+      ],
+      "depends": [
+        "T151",
+        "T152",
+        "T165",
+        "T166"
+      ],
+      "createdAt": "2026-09-03T00:08:40.519Z",
+      "updatedAt": "2026-09-03T00:34:10.351Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:08:40.519Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T170",
+      "title": "TH4.3 RCA alias release and information-flow controls",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T148",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement authority-side identity masking and hardened de-identification strategies, source leak blocking, actor-specific release, cross-release disclosure tracking, and protected-runner information-flow checks.",
+      "labels": [
+        "thesis",
+        "rca",
+        "aliasing",
+        "de-identification"
+      ],
+      "acceptance": [
+        "Aliasing strategies are selected by RCA evidence tier and release gates rather than exposed as Thesis user modes",
+        "Identity mappings remain outside all model prompts, logs, traces, and artifacts",
+        "Original strategy source that reveals or encodes identities blocks protected RCA rather than being relabeled or rewritten",
+        "Allowlisted RCA outputs remove or transform paths, tags, logs, errors, timing, and other identity side channels",
+        "Full aliased runs go only to the named RCA session and filtered advice excludes raw identifiers from the main agent",
+        "Cross-release disclosure, empirical reidentification, diagnostic utility, and residual risk are recorded",
+        "Focused aliasing and information-flow tests pass"
+      ],
+      "files": [
+        "src/thesis/protected/aliasing.py",
+        "src/thesis/protected/release.py",
+        "src/thesis/protected/flow_checks.py",
+        "tests/thesis/protected/test_release.py"
+      ],
+      "depends": [
+        "T147",
+        "T159",
+        "T168",
+        "T169"
+      ],
+      "createdAt": "2026-09-03T00:11:29.753Z",
+      "updatedAt": "2026-09-03T00:34:03.452Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:29.753Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T176",
+      "title": "TH6.3 Thesis UI design specification",
+      "status": "pending",
+      "priority": "low",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Capture the later UI design requirements for the chat-first workspace experience without implementing the React UI in the current Thesis implementation wave.",
+      "labels": [
+        "thesis",
+        "ui",
+        "design",
+        "deferred"
+      ],
+      "acceptance": [
+        "The design specification covers workspace creation/selection, multiple chats, investigations, uploads, workflow timelines, steering, CLEO plan visibility, evidence, strategy lineage, knowledge search, and activation consent",
+        "The design preserves the backend event cursor, reconnect, artifact, and authorization contracts",
+        "The specification explicitly defers visual layout and React implementation to a later UI-owned task",
+        "The specification does not introduce a second source of truth for workflow or CLEO state"
+      ],
+      "files": [
+        ".github/architecture/thesis-ui-design.md"
+      ],
+      "depends": [
+        "T145",
+        "T146",
+        "T147",
+        "T149",
+        "T155",
+        "T161"
+      ],
+      "createdAt": "2026-09-03T00:11:59.051Z",
+      "updatedAt": "2026-09-03T00:34:09.739Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:59.051Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "spike",
       "scope": "feature",
       "relates": []
     },
@@ -8744,13 +10046,17 @@
       "acceptance": [
         "Every workspace can read a globally shared, versioned Markdown knowledge corpus with hyperlink and semantic search",
         "Ingestion, curation, and publication are separate from retrieval and preserve page/version/source provenance",
-        "Workspace CLEO initialization can use a rebuildable version-pinned manifest without copying the corpus into Brain or Nexus as a second source of truth"
+        "Workspace CLEO initialization can use a rebuildable version-pinned manifest without copying the corpus into Brain or Nexus as a second source of truth",
+        "Complete child T165: TH3.1 Markdown knowledge corpus and links",
+        "Complete child T166: TH3.2 Knowledge ingestion and semantic search",
+        "Complete child T167: TH3.3 Workspace knowledge trust and CLEO projection"
       ],
       "depends": [
-        "T003"
+        "T003",
+        "T144"
       ],
       "createdAt": "2026-09-03T00:02:03.996Z",
-      "updatedAt": "2026-09-03T00:02:03.996Z",
+      "updatedAt": "2026-09-03T00:12:43.874Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -8808,6 +10114,240 @@
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T158",
+      "title": "TH1.4 Thesis lake and harness clients",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T145",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Implement Thesis clients for published market-lake and quant-harness contracts, supporting local process/API adapters and authenticated remote service adapters without importing engine internals.",
+      "labels": [
+        "thesis",
+        "market-lake",
+        "quant-harness",
+        "integration"
+      ],
+      "acceptance": [
+        "Thesis can request point-in-time lake data and launch/query harness backtests through published contracts",
+        "Local mode can invoke local harness process/API boundaries while Azure mode uses authenticated remote APIs",
+        "Client behavior preserves harness manifests, metrics, result artifacts, and capability status",
+        "Missing or unimplemented harness capabilities are reported as unavailable rather than emulated silently",
+        "Focused client contract and local/remote adapter tests pass"
+      ],
+      "files": [
+        "src/thesis/integrations/lake.py",
+        "src/thesis/integrations/harness.py",
+        "src/thesis/integrations/capabilities.py",
+        "tests/thesis/integrations/test_clients.py"
+      ],
+      "depends": [
+        "T021",
+        "T023",
+        "T024",
+        "T151",
+        "T154"
+      ],
+      "createdAt": "2026-09-03T00:06:18.507Z",
+      "updatedAt": "2026-09-03T00:42:42.276Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:06:18.507Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T164",
+      "title": "TH2.4 Statistical discipline and evidence ledger",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T146",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Implement experiment contracts, dependency-interval audits, observed/declared attempt and influence ledgers, adaptive-testing modifiers, evidence grades, and claim traceability.",
+      "labels": [
+        "thesis",
+        "evidence",
+        "statistics",
+        "ledger"
+      ],
+      "acceptance": [
+        "Contracts can lock hypothesis, endpoint, partitions, costs, selection, stopping, and permitted follow-up fields",
+        "Dependency intervals derive warm-up, lookback, label, position, liquidation, revised-data, and linked-instrument boundaries",
+        "Evidence records distinguish exploratory, historical validation, sealed historical, and forward observation results",
+        "Model, human, retrieval, upload, tool, and source influences are recorded with unknown/exposed modifiers when necessary",
+        "Adaptive reuse and steering after result exposure downgrade evidence rather than restoring sealed status",
+        "Focused contract, ledger, and evidence tests pass"
+      ],
+      "files": [
+        "src/thesis/experiments/contracts.py",
+        "src/thesis/experiments/intervals.py",
+        "src/thesis/evidence/ledger.py",
+        "src/thesis/evidence/grades.py",
+        "tests/thesis/evidence/test_ledger.py"
+      ],
+      "depends": [
+        "T155",
+        "T156",
+        "T157",
+        "T158"
+      ],
+      "createdAt": "2026-09-03T00:08:26.970Z",
+      "updatedAt": "2026-09-03T00:08:26.970Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:08:26.970Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T171",
+      "title": "TH4.4 Blinded RCA advice and revision handoff",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T148",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Implement the full aliased RCA subagent handoff, schema-limited advice egress, RCA artifact provenance, and safe return of candidate explanations to the main Thesis workflow.",
+      "labels": [
+        "thesis",
+        "rca",
+        "subagents",
+        "handoff"
+      ],
+      "acceptance": [
+        "RCA receives the policy-approved full aliased run, original source, aliased contract/configuration, dependency versions, benchmark, costs, data-quality manifest, and transformation manifest",
+        "RCA outputs candidate explanations, evidence, uncertainty, alternatives, and discriminating tests without strategy edits or promotion decisions",
+        "The main agent receives filtered advice without raw aliases, identifying values, quotations, or web-query linkage material",
+        "Any revision returns to exploratory or validation data and records protected-result reuse/adaptation modifiers",
+        "Focused RCA handoff and egress tests pass"
+      ],
+      "files": [
+        "src/thesis/rca/session.py",
+        "src/thesis/rca/egress.py",
+        "src/thesis/rca/handoff.py",
+        "tests/thesis/rca/test_handoff.py"
+      ],
+      "depends": [
+        "T147",
+        "T159",
+        "T168",
+        "T169",
+        "T170"
+      ],
+      "createdAt": "2026-09-03T00:11:34.670Z",
+      "updatedAt": "2026-09-03T00:34:08.305Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:11:34.670Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T177",
+      "title": "TH6.4 Publish Thesis architecture and repository boundaries",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Reconcile the implemented Thesis contracts with the FCA README, repository architecture, deployment documentation, and portable CLEO roadmap after the initial Thesis architecture is accepted.",
+      "labels": [
+        "thesis",
+        "documentation",
+        "architecture",
+        "cleo"
+      ],
+      "notes": [
+        "2026-09-03 00:43:53 UTC: Final publication owns the current architecture, repository-boundary reconciliation, and portable export. Its validation record is .github/verification/T177-validation.json; it must regenerate the export after all Thesis task changes.",
+        "2026-09-03 00:45:11 UTC: Audit reconciliation: T177 no longer depends on its parent T150; it is the final TH6 child and waits on TH4/TH5/operations/design plus T178 packaging. Regenerate .cleo-export.json from live CLEO state when this task is executed."
+      ],
+      "acceptance": [
+        "README and repository architecture accurately describe the Thesis backend/UI boundaries and local/Azure runtime modes",
+        "The Thesis architecture document, implementation paths, and CLEO task state do not claim unimplemented capabilities",
+        "Cross-product dependencies point to published market-lake and quant-harness contracts rather than internals",
+        "The portable CLEO export passes the repository validation script and task graph checks"
+      ],
+      "files": [
+        "README.md",
+        ".github/architecture/repository.md",
+        ".github/architecture/fca-thesis.md",
+        ".cleo-export.json",
+        ".github/verification/T177-validation.json"
+      ],
+      "depends": [
+        "T171",
+        "T173",
+        "T174",
+        "T175",
+        "T176",
+        "T178"
+      ],
+      "createdAt": "2026-09-03T00:12:03.938Z",
+      "updatedAt": "2026-09-03T00:45:11.224Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:12:03.938Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "release",
+      "scope": "project",
       "relates": []
     },
     {
@@ -9829,17 +11369,137 @@
       "acceptance": [
         "Protected tests use an authority-owned exposure ledger, hidden allocation policy, and allowlisted release schema outside the normal reasoning path",
         "RCA aliasing strategies and cutoff-constrained RCA are selected by evidence tier and never expose real mappings or unauthorized capabilities",
-        "Reuse, influence, cutoff overlap, source leakage, and empirical reidentification risk are recorded and reflected in evidence"
+        "Reuse, influence, cutoff overlap, source leakage, and empirical reidentification risk are recorded and reflected in evidence",
+        "Complete child T168: TH4.1 Model registry and RCA evidence tiers",
+        "Complete child T169: TH4.2 Protected test authority client and exposure ledger",
+        "Complete child T170: TH4.3 RCA alias release and information-flow controls",
+        "Complete child T171: TH4.4 Blinded RCA advice and revision handoff"
       ],
       "depends": [
-        "T069",
-        "T070",
-        "T071"
+        "T145",
+        "T146",
+        "T147"
       ],
       "createdAt": "2026-09-03T00:02:07.865Z",
-      "updatedAt": "2026-09-03T00:02:07.865Z",
+      "updatedAt": "2026-09-03T00:39:16.340Z",
       "pipelineStage": "implementation",
       "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T159",
+      "title": "TH1.5 Strategy bundle and artifact importer",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T145",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Create immutable content-addressed Python strategy bundles, sandbox validation requests, harness manifest references, and Git-backed import of reproducibility-critical backtest artifacts into the workspace.",
+      "labels": [
+        "thesis",
+        "strategy",
+        "artifacts",
+        "reproducibility"
+      ],
+      "acceptance": [
+        "Equivalent strategy source/configuration/dependency inputs produce the same bundle identity",
+        "Generated Python is checked through the published harness strategy boundary before backtest launch",
+        "Every reproducibility-critical harness artifact is hash-verified and imported into the workspace repository",
+        "Artifact references link strategy version, experiment, workflow execution, harness manifest, and Git commit",
+        "Focused bundle, sandbox handoff, hash, and artifact-import tests pass"
+      ],
+      "files": [
+        "src/thesis/strategies/bundles.py",
+        "src/thesis/strategies/validation.py",
+        "src/thesis/artifacts/importer.py",
+        "tests/thesis/strategies/test_bundles.py"
+      ],
+      "depends": [
+        "T151",
+        "T153"
+      ],
+      "createdAt": "2026-09-03T00:06:23.247Z",
+      "updatedAt": "2026-09-03T00:41:45.344Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:06:23.247Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T178",
+      "title": "TH1.7 Thesis backend packaging and runtime image",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T145",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Add the packaging and runtime-image contract for the src/thesis backend so Azure Thesis deployment has a real process boundary without modifying quant-harness runtime ownership. Keep React UI packaging separate and deferred to the UI-owned design and implementation work.",
+      "labels": [
+        "thesis",
+        "packaging",
+        "runtime-image",
+        "azure",
+        "local-mode"
+      ],
+      "notes": [
+        "2026-09-03 00:41:45 UTC: This task owns the Thesis packaging slice of shared entrypoints and package metadata; quant-harness commands and runtime behavior remain owned by T078/T112/T113 and are not modified here. React UI packaging remains deferred.",
+        "2026-09-03 00:42:42 UTC: Thesis packaging owns a dedicated backend image/process boundary. Shared Dockerfile and pyproject changes remain integration-owned and must be coordinated with the existing quant-harness packaging task.",
+        "2026-09-03 00:43:53 UTC: Moved under the local-first vertical slice because the backend process/image contract is a prerequisite for local execution and later Azure deployment. React UI packaging remains deferred."
+      ],
+      "acceptance": [
+        "A reproducible Thesis backend image or equivalent local process exposes the Thesis API entrypoint and includes the workspace, chat, execution, and integration packages",
+        "Local and Azure Thesis modes use the same backend process and configuration contract",
+        "The packaging task does not change quant-harness lake, backtest-job, trader, portfolio, OMS, risk, or broker runtime ownership",
+        "The React UI remains a separate deployable boundary and is not packaged by this backend task",
+        "A focused image/process smoke check verifies startup, capability reporting, and secret-free configuration"
+      ],
+      "files": [
+        "Dockerfile.thesis",
+        "src/thesis/__main__.py",
+        "src/thesis/cli.py",
+        "tests/thesis/packaging/test_image_contract.py"
+      ],
+      "depends": [
+        "T151",
+        "T154",
+        "T155",
+        "T158"
+      ],
+      "createdAt": "2026-09-03T00:36:49.814Z",
+      "updatedAt": "2026-09-03T00:46:23.848Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:36:49.814Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
       "scope": "feature",
       "relates": []
     },
@@ -11034,16 +12694,81 @@
       "acceptance": [
         "Thesis submits immutable strategy bundles and activation requests to quant-harness or its deterministic gatekeeper",
         "Paper, shadow, and live activation are disabled by default and require scoped, expiring consent",
-        "Thesis never receives broker capability and does not reimplement portfolio, OMS, risk, state recovery, or strategy runtime behavior"
+        "Thesis never receives broker capability and does not reimplement portfolio, OMS, risk, state recovery, or strategy runtime behavior",
+        "Complete child T172: TH5.1 Consent grants and activation request boundary",
+        "Complete child T173: TH5.2 Quant-harness local and Azure activation adapters"
       ],
       "depends": [
-        "T069",
         "T072",
         "T073",
-        "T075"
+        "T144",
+        "T145",
+        "T146",
+        "T148"
       ],
       "createdAt": "2026-09-03T00:02:12.406Z",
-      "updatedAt": "2026-09-03T00:02:12.406Z",
+      "updatedAt": "2026-09-03T00:39:14.104Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T160",
+      "title": "TH1.6 Strategy-development vertical workflow",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T145",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Orchestrate the first complete Thesis workflow from chat request through strategy generation, local or remote harness backtest, result evaluation, steering, and Git-backed evidence report.",
+      "labels": [
+        "thesis",
+        "workflow",
+        "strategy-development",
+        "vertical-slice"
+      ],
+      "acceptance": [
+        "A chat request can execute the documented strategy-development path end to end in local mode",
+        "The workflow produces strategy source, tests, bundle, backtest references, manifests, metrics, report, and Git commit links",
+        "The workflow accepts immediate non-destructive steering and fences stale continuations",
+        "Phase 1 historical findings are explicitly labeled exploratory",
+        "A reconnecting client can observe progress and retrieve the final report",
+        "Focused vertical workflow integration tests pass"
+      ],
+      "files": [
+        "src/thesis/workflows/strategy_development.py",
+        "src/thesis/reports/evidence.py",
+        "tests/thesis/workflows/test_strategy_development.py"
+      ],
+      "depends": [
+        "T151",
+        "T152",
+        "T153",
+        "T154",
+        "T155",
+        "T156",
+        "T157",
+        "T158",
+        "T159"
+      ],
+      "createdAt": "2026-09-03T00:06:28.634Z",
+      "updatedAt": "2026-09-03T00:34:08.744Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:06:28.634Z"
+      },
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -11939,18 +13664,31 @@
         "azure",
         "operations"
       ],
+      "notes": [
+        "2026-09-03 00:46:23 UTC: Audit reconciliation: Thesis backend packaging is owned by T178 under TH1; TH6 owns Azure deployment consumption through T174. UI implementation remains deferred to the later UI-owned work."
+      ],
       "acceptance": [
         "Local and Azure runtime profiles satisfy equivalent workspace, artifact, authentication, recovery, and audit contracts",
         "Azure operation uses managed identity, protected deployment workflows, isolated workspace resources, and explicit cost controls",
-        "Security, recovery, cross-workspace, prompt-injection, secret, confused-deputy, and repository-integrity tests pass before live activation is enabled"
+        "Security, recovery, cross-workspace, prompt-injection, secret, confused-deputy, and repository-integrity tests pass before live activation is enabled",
+        "Complete child T174: TH6.1 Azure Thesis deployment and workspace operations",
+        "Complete child T175: TH6.2 Local and Azure security recovery hardening",
+        "Complete child T176: TH6.3 Thesis UI design specification",
+        "Complete child T177: TH6.4 Publish Thesis architecture and repository boundaries"
       ],
       "depends": [
         "T069",
         "T073",
-        "T076"
+        "T076",
+        "T144",
+        "T145",
+        "T146",
+        "T147",
+        "T148",
+        "T149"
       ],
       "createdAt": "2026-09-03T00:02:16.159Z",
-      "updatedAt": "2026-09-03T00:02:16.159Z",
+      "updatedAt": "2026-09-03T00:46:23.446Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -13095,6 +14833,42 @@
         "T152",
         "T153",
         "T154"
+      ],
+      "T145": [
+        "T155",
+        "T156",
+        "T157",
+        "T158",
+        "T159",
+        "T178",
+        "T160"
+      ],
+      "T146": [
+        "T161",
+        "T162",
+        "T163",
+        "T164"
+      ],
+      "T147": [
+        "T165",
+        "T166",
+        "T167"
+      ],
+      "T148": [
+        "T168",
+        "T169",
+        "T170",
+        "T171"
+      ],
+      "T149": [
+        "T172",
+        "T173"
+      ],
+      "T150": [
+        "T174",
+        "T175",
+        "T176",
+        "T177"
       ]
     },
     "dependencies": {
@@ -13181,6 +14955,42 @@
       "T151": [
         "T003"
       ],
+      "T155": [
+        "T151",
+        "T152",
+        "T153",
+        "T154"
+      ],
+      "T161": [
+        "T155",
+        "T157",
+        "T158",
+        "T159"
+      ],
+      "T165": [
+        "T151"
+      ],
+      "T168": [
+        "T145",
+        "T157",
+        "T161"
+      ],
+      "T172": [
+        "T072",
+        "T148",
+        "T154",
+        "T160"
+      ],
+      "T174": [
+        "T073",
+        "T144",
+        "T145",
+        "T151",
+        "T152",
+        "T153",
+        "T154",
+        "T178"
+      ],
       "T014": [
         "T013"
       ],
@@ -13259,12 +15069,47 @@
         "T033"
       ],
       "T145": [
-        "T069",
-        "T070",
-        "T071"
+        "T005",
+        "T144"
       ],
       "T152": [
         "T003"
+      ],
+      "T156": [
+        "T151",
+        "T152",
+        "T153",
+        "T154"
+      ],
+      "T162": [
+        "T155",
+        "T157",
+        "T158",
+        "T159"
+      ],
+      "T166": [
+        "T151"
+      ],
+      "T169": [
+        "T145",
+        "T158",
+        "T161",
+        "T164"
+      ],
+      "T173": [
+        "T072",
+        "T073",
+        "T148",
+        "T159",
+        "T160"
+      ],
+      "T175": [
+        "T073",
+        "T076",
+        "T145",
+        "T156",
+        "T157",
+        "T158"
       ],
       "T004": [
         "T003"
@@ -13350,12 +15195,41 @@
         "T132"
       ],
       "T146": [
-        "T069",
-        "T070",
-        "T071"
+        "T145"
       ],
       "T153": [
         "T003"
+      ],
+      "T157": [
+        "T151",
+        "T154"
+      ],
+      "T163": [
+        "T155",
+        "T156",
+        "T157",
+        "T158",
+        "T159"
+      ],
+      "T167": [
+        "T151",
+        "T152",
+        "T165",
+        "T166"
+      ],
+      "T170": [
+        "T147",
+        "T159",
+        "T168",
+        "T169"
+      ],
+      "T176": [
+        "T145",
+        "T146",
+        "T147",
+        "T149",
+        "T155",
+        "T161"
       ],
       "T005": [
         "T003"
@@ -13439,10 +15313,39 @@
         "T132"
       ],
       "T147": [
-        "T003"
+        "T003",
+        "T144"
       ],
       "T154": [
         "T003"
+      ],
+      "T158": [
+        "T021",
+        "T023",
+        "T024",
+        "T151",
+        "T154"
+      ],
+      "T164": [
+        "T155",
+        "T156",
+        "T157",
+        "T158"
+      ],
+      "T171": [
+        "T147",
+        "T159",
+        "T168",
+        "T169",
+        "T170"
+      ],
+      "T177": [
+        "T171",
+        "T173",
+        "T174",
+        "T175",
+        "T176",
+        "T178"
       ],
       "T006": [
         "T003",
@@ -13522,9 +15425,19 @@
         "T133"
       ],
       "T148": [
-        "T069",
-        "T070",
-        "T071"
+        "T145",
+        "T146",
+        "T147"
+      ],
+      "T159": [
+        "T151",
+        "T153"
+      ],
+      "T178": [
+        "T151",
+        "T154",
+        "T155",
+        "T158"
       ],
       "T007": [
         "T004",
@@ -13584,10 +15497,23 @@
         "T020"
       ],
       "T149": [
-        "T069",
         "T072",
         "T073",
-        "T075"
+        "T144",
+        "T145",
+        "T146",
+        "T148"
+      ],
+      "T160": [
+        "T151",
+        "T152",
+        "T153",
+        "T154",
+        "T155",
+        "T156",
+        "T157",
+        "T158",
+        "T159"
       ],
       "T008": [
         "T003",
@@ -13649,7 +15575,13 @@
       "T150": [
         "T069",
         "T073",
-        "T076"
+        "T076",
+        "T144",
+        "T145",
+        "T146",
+        "T147",
+        "T148",
+        "T149"
       ],
       "T009": [
         "T004",
