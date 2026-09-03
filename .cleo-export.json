@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T19:35:19.506Z",
+    "exportedAt": "2026-09-03T20:45:18.987Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 179
     },
-    "checksum": "b8ad164f79894835",
+    "checksum": "d73118f7c22f4ab3",
     "taskCount": 178,
     "exportMode": "full"
   },
@@ -1990,7 +1990,7 @@
     "T096": {
       "type": "task",
       "title": "H2.9 Backtest runner and reproducibility manifest",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T086",
@@ -2038,7 +2038,7 @@
     "T097": {
       "type": "task",
       "title": "H2.10 Reference equity strategies and integration tests",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T090",
@@ -19791,7 +19791,7 @@
     {
       "id": "T096",
       "title": "H2.9 Backtest runner and reproducibility manifest",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -19804,6 +19804,9 @@
         "milestone.m1",
         "harness.h019",
         "backtest-runner"
+      ],
+      "notes": [
+        "2026-09-03 20:43:50 UTC: Completed the deterministic backtest runner with reproducibility manifest, error taxonomy, abort/halt policies, local synthetic and Parquet-lake data sources, and the wired backtest-job CLI."
       ],
       "acceptance": [
         "A one-month SPY run is artifact-identical across repeated execution",
@@ -19826,7 +19829,8 @@
         "T095"
       ],
       "createdAt": "2026-09-01T18:01:11.600Z",
-      "updatedAt": "2026-09-03T19:32:38.175Z",
+      "updatedAt": "2026-09-03T20:43:54.701Z",
+      "completedAt": "2026-09-03T20:43:50.011Z",
       "verification": {
         "passed": true,
         "round": 1,
@@ -20061,7 +20065,12 @@
           }
         }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -20423,7 +20432,7 @@
     {
       "id": "T097",
       "title": "H2.10 Reference equity strategies and integration tests",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T070",
@@ -20436,6 +20445,9 @@
         "milestone.m1",
         "harness.h020",
         "examples"
+      ],
+      "notes": [
+        "2026-09-03 20:44:09 UTC: Completed buy-and-hold, intraday momentum (flat at every close), and mean-reversion reference strategies with packaged two-symbol fixture integration through the real runner."
       ],
       "acceptance": [
         "All examples run in CI over a small two-symbol fixture",
@@ -20453,21 +20465,230 @@
         "T096"
       ],
       "createdAt": "2026-09-01T18:01:15.694Z",
-      "updatedAt": "2026-09-01T18:26:10.542Z",
+      "updatedAt": "2026-09-03T20:44:13.377Z",
+      "completedAt": "2026-09-03T20:44:09.631Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T20:42:43.655Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:15.694Z"
+        "initializedAt": "2026-09-01T18:01:15.694Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "2768591a4c3160fd96d6b2ce6815dccc35d136ba",
+                "shortSha": "2768591"
+              },
+              {
+                "kind": "note",
+                "note": "Reference equity strategies with packaged two-symbol fixture integration are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "55f56cfe-7cee-5eb7-8c85-72ade7213ad7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "41589b4d-1535-5ac3-bacf-170069176742"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "ca7660e1-400d-5ac2-874d-f0447e531b98"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "b65726cd-ff8d-526c-a6c4-ed22b96e2866"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "26d0dacd-772b-596f-a84e-b50d0564c519"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T097-validation.json",
+                "sha256": "e6db9175d5debb19c428155ca9348176f095f58bb30cf0de9249896961c84dac",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T097-wave-validation.json",
+                "sha256": "e37e567375d7cfff4b61703049f6d6af50dda474ddb53dd751416086de1e9706",
+                "passCount": 836,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T20:42:44.548Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "2768591a4c3160fd96d6b2ce6815dccc35d136ba",
+                "shortSha": "2768591"
+              },
+              {
+                "kind": "note",
+                "note": "Reference equity strategies with packaged two-symbol fixture integration are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "55f56cfe-7cee-5eb7-8c85-72ade7213ad7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "41589b4d-1535-5ac3-bacf-170069176742"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "ca7660e1-400d-5ac2-874d-f0447e531b98"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "b65726cd-ff8d-526c-a6c4-ed22b96e2866"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "26d0dacd-772b-596f-a84e-b50d0564c519"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T097-validation.json",
+                "sha256": "e6db9175d5debb19c428155ca9348176f095f58bb30cf0de9249896961c84dac",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T097-wave-validation.json",
+                "sha256": "e37e567375d7cfff4b61703049f6d6af50dda474ddb53dd751416086de1e9706",
+                "passCount": 836,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T20:42:44.548Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "2768591a4c3160fd96d6b2ce6815dccc35d136ba",
+                "shortSha": "2768591"
+              },
+              {
+                "kind": "note",
+                "note": "Reference equity strategies with packaged two-symbol fixture integration are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "55f56cfe-7cee-5eb7-8c85-72ade7213ad7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "41589b4d-1535-5ac3-bacf-170069176742"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "ca7660e1-400d-5ac2-874d-f0447e531b98"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "b65726cd-ff8d-526c-a6c4-ed22b96e2866"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T097",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "26d0dacd-772b-596f-a84e-b50d0564c519"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T097-validation.json",
+                "sha256": "e6db9175d5debb19c428155ca9348176f095f58bb30cf0de9249896961c84dac",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T097-wave-validation.json",
+                "sha256": "e37e567375d7cfff4b61703049f6d6af50dda474ddb53dd751416086de1e9706",
+                "passCount": 836,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T20:42:44.548Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
