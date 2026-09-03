@@ -35,6 +35,13 @@ from harness.data.lake import (
     UnsupportedMarketDataError,
     resolve_sessions,
 )
+from harness.data.replay import (
+    LakeReplayFeed,
+    MarketEvent,
+    ParquetReader,
+    ReplayFingerprints,
+    ReplayStream,
+)
 
 __all__ = (
     "AlpacaSipInbox",
@@ -52,6 +59,8 @@ __all__ = (
     "LakeClientPort",
     "LakeRequest",
     "LoadedMarketData",
+    "LakeReplayFeed",
+    "MarketEvent",
     "MarketLake",
     "MarketLakeAdapter",
     "MarketLakeError",
@@ -60,6 +69,9 @@ __all__ = (
     "OHLCV",
     "OHLCVBar",
     "ProjectedEgressWarning",
+    "ParquetReader",
+    "ReplayFingerprints",
+    "ReplayStream",
     "UnsupportedMarketDataError",
     "aggregate_trades",
     "bars_from_trades",

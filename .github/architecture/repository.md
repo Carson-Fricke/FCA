@@ -104,7 +104,7 @@ tests/lake/
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
-| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, and exact OHLCV bar derivation. |
+| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, and bounded lake replay. |
 | `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, and trade-through fill decisions. |
 | `harness.portfolio` | Strategy virtual books and shared-account aggregate accounting. |
 | `harness.strategy` | Mode-independent strategy callbacks, constrained context, deterministic subscriptions, and class-plus-parameter binding. |
@@ -129,8 +129,13 @@ composed.
 Thesis remains a peer product. `thesis.workspaces` owns isolated workspace
 identity and repository scaffolds; `thesis.cleo` serializes workspace-local
 planning mutations; `thesis.persistence` journals accepted commands and fences
-Git publication; `thesis.auth` binds operator sessions to workspaces; and
-`thesis.providers` keeps model credentials behind backend-only protocols.
+Git publication; `thesis.auth` binds operator sessions to workspaces;
+`thesis.chat`, `thesis.execution`, and `thesis.http` define the UI-facing
+workflow boundary; `thesis.agent` owns policy-driven model context and
+provenance; `thesis.integrations` owns lake and harness adapters;
+`thesis.strategies` owns content-addressed strategy bundles; `thesis.artifacts`
+owns reproducibility-critical result imports; and `thesis.providers` keeps model
+credentials behind backend-only protocols.
 Workspace identity remains `.thesis/workspace.yaml`; publication state is
 written separately to `.thesis/publication.json`.
 

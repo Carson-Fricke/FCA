@@ -9,7 +9,20 @@ from thesis.workspaces import load_workspace_manifest
 
 
 def test_thesis_capability_facades_import() -> None:
-    capabilities = ("auth", "cleo", "persistence", "providers", "workspaces")
+    capabilities = (
+        "agent",
+        "artifacts",
+        "auth",
+        "chat",
+        "cleo",
+        "execution",
+        "http",
+        "integrations",
+        "persistence",
+        "providers",
+        "strategies",
+        "workspaces",
+    )
 
     assert thesis.__all__ == ()
     assert all(import_module(f"thesis.{name}").__all__ for name in capabilities)
