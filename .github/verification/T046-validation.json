@@ -1,0 +1,28 @@
+{
+  "taskId": "T046",
+  "timestamp": "2026-09-03T02:24:00Z",
+  "numTotalTests": 44,
+  "numPassedTests": 44,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "api-contract-security",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/lake/http/routes/test_catalog.py tests/lake/http/routes/test_ensure.py tests/lake/http/routes/test_query.py tests/lake/local/test_application.py -q",
+      "result": "44 tests passed for authentication, coverage filtering, synchronous completion, asynchronous 202 polling, SAS scoping, read-only SQL, scan/result limits, force authorization, local file queries, and validation rejection paths."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff, format, and ty checks passed for the API contract tests."
+    }
+  ],
+  "decisions": [
+    "The tests exercise in-memory and local adapters without Azure dependencies.",
+    "Local missing coverage remains an explicit queued/polling path until local ensure launch composition is added by a later deployment task."
+  ],
+  "limitations": [],
+  "blockers": []
+}

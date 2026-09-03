@@ -1,0 +1,33 @@
+{
+  "taskId": "T091",
+  "timestamp": "2026-09-03T02:24:00Z",
+  "numTotalTests": 21,
+  "numPassedTests": 21,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "simulated-venue-and-simple-touch",
+      "status": "passed",
+      "command": "uv run --extra dev pytest tests/harness/venues/test_sim.py tests/harness/fills/test_simple_touch.py -q",
+      "result": "21 tests passed for market/limit/stop/stop-limit orders, crossing and resting behavior, stop arming, partial and non-fill decisions, cancellation, replacement, and bus-scheduled outcomes."
+    },
+    {
+      "name": "deterministic-fill-boundary",
+      "status": "passed",
+      "result": "Decision-price and triggering-market snapshots are retained; worsening quotes do not improve fills; latency preserves deterministic event ordering; no wall-clock, random, or network access is used."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "SimpleTouch uses visible quote-side size to bound fills and does not treat a trade as a resting-limit fill; print qualification belongs to T092.",
+    "Venue commands are fire-and-forget while acknowledgements, reports, fills, cancellation, replacement, and expiry are scheduled through EventBus."
+  ],
+  "limitations": [],
+  "blockers": []
+}
