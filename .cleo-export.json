@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T16:28:37.097Z",
+    "exportedAt": "2026-09-03T17:06:16.981Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 179
     },
-    "checksum": "aeaa0d8616d58b63",
+    "checksum": "809551607695d785",
     "taskCount": 178,
     "exportMode": "full"
   },
@@ -433,7 +433,7 @@
     "T155": {
       "type": "task",
       "title": "TH1.1 Chat, investigation, and execution contracts",
-      "status": "pending",
+      "status": "done",
       "parentId": "T145",
       "depends": [
         "T151",
@@ -736,7 +736,7 @@
     "T156": {
       "type": "task",
       "title": "TH1.2 Durable execution queue and checkpoints",
-      "status": "pending",
+      "status": "done",
       "parentId": "T145",
       "depends": [
         "T151",
@@ -1042,7 +1042,7 @@
     "T157": {
       "type": "task",
       "title": "TH1.3 Model router, skills, and context assembly",
-      "status": "pending",
+      "status": "done",
       "parentId": "T145",
       "depends": [
         "T151",
@@ -1324,7 +1324,7 @@
     "T158": {
       "type": "task",
       "title": "TH1.4 Thesis lake and harness clients",
-      "status": "pending",
+      "status": "done",
       "parentId": "T145",
       "depends": [
         "T021",
@@ -1566,7 +1566,7 @@
     "T159": {
       "type": "task",
       "title": "TH1.5 Strategy bundle and artifact importer",
-      "status": "pending",
+      "status": "done",
       "parentId": "T145",
       "depends": [
         "T151",
@@ -4495,7 +4495,7 @@
     {
       "id": "T155",
       "title": "TH1.1 Chat, investigation, and execution contracts",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T145",
@@ -4508,6 +4508,9 @@
         "chat",
         "api",
         "vertical-slice"
+      ],
+      "notes": [
+        "2026-09-03 17:03:42 UTC: Completed workspace-scoped chat, investigation, workflow, and ordered execution-event contracts with UI-safe HTTP models."
       ],
       "acceptance": [
         "A workspace can create, persist, and retrieve multiple chats and investigations with explicit ownership links",
@@ -4530,21 +4533,230 @@
         "T154"
       ],
       "createdAt": "2026-09-03T00:06:02.095Z",
-      "updatedAt": "2026-09-03T00:34:03.100Z",
+      "updatedAt": "2026-09-03T17:03:47.394Z",
+      "completedAt": "2026-09-03T17:03:41.677Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T17:01:57.244Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:06:02.095Z"
+        "initializedAt": "2026-09-03T00:06:02.095Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Workspace-scoped chat investigation workflow and ordered execution event contracts are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "040c9cc8-2a91-578c-b025-f8b120f847ab"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "a11ac911-d7a3-56af-b4c3-a88fc7afecaf"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "320b79dc-ad5e-5d65-8965-98bd24ce163a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "746ef87f-5056-5885-8107-8344630c25b7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "21d5368f-9ab5-5e88-876d-3f3ac1663d77"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T155-validation.json",
+                "sha256": "b597d6cf77fb51c09388d166d69002a296e68b1e0ea122425256562254218f5c",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:01:58.299Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Workspace-scoped chat investigation workflow and ordered execution event contracts are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "040c9cc8-2a91-578c-b025-f8b120f847ab"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "a11ac911-d7a3-56af-b4c3-a88fc7afecaf"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "320b79dc-ad5e-5d65-8965-98bd24ce163a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "746ef87f-5056-5885-8107-8344630c25b7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "21d5368f-9ab5-5e88-876d-3f3ac1663d77"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T155-validation.json",
+                "sha256": "b597d6cf77fb51c09388d166d69002a296e68b1e0ea122425256562254218f5c",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:01:58.299Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Workspace-scoped chat investigation workflow and ordered execution event contracts are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "040c9cc8-2a91-578c-b025-f8b120f847ab"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "a11ac911-d7a3-56af-b4c3-a88fc7afecaf"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "320b79dc-ad5e-5d65-8965-98bd24ce163a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "746ef87f-5056-5885-8107-8344630c25b7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T155",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "21d5368f-9ab5-5e88-876d-3f3ac1663d77"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T155-validation.json",
+                "sha256": "b597d6cf77fb51c09388d166d69002a296e68b1e0ea122425256562254218f5c",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:01:58.299Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -6270,19 +6482,240 @@
         "T088"
       ],
       "createdAt": "2026-09-01T18:00:42.945Z",
-      "updatedAt": "2026-09-01T18:25:03.222Z",
+      "updatedAt": "2026-09-03T17:01:39.260Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T17:01:39.260Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:42.945Z"
+        "initializedAt": "2026-09-01T18:00:42.945Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Streaming bounded LakeReplayFeed with deterministic merge and stable fingerprints is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "36a65115-c943-5aea-a4f5-2f78ac3c9741"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "055a9bb4-414c-56cd-9b3f-2b0b250888dd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "65986bcf-c281-5296-bff0-298912b6642e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "c7c9144f-8377-5a3d-a79c-c17117019b53"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "aef98e1c-906d-5223-b238-707ddaa37265"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "f123c341-e2b7-5fa9-8d3f-79fe7da8f09b"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-validation.json",
+                "sha256": "d439dd1ef07e99117b79d76b7fe7286ac0d284712b50d1119f7b34ed6eb705c1",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:01:40.292Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Streaming bounded LakeReplayFeed with deterministic merge and stable fingerprints is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "36a65115-c943-5aea-a4f5-2f78ac3c9741"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "055a9bb4-414c-56cd-9b3f-2b0b250888dd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "65986bcf-c281-5296-bff0-298912b6642e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "c7c9144f-8377-5a3d-a79c-c17117019b53"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "aef98e1c-906d-5223-b238-707ddaa37265"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "f123c341-e2b7-5fa9-8d3f-79fe7da8f09b"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-validation.json",
+                "sha256": "d439dd1ef07e99117b79d76b7fe7286ac0d284712b50d1119f7b34ed6eb705c1",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:01:40.292Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Streaming bounded LakeReplayFeed with deterministic merge and stable fingerprints is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "36a65115-c943-5aea-a4f5-2f78ac3c9741"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "055a9bb4-414c-56cd-9b3f-2b0b250888dd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "65986bcf-c281-5296-bff0-298912b6642e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "c7c9144f-8377-5a3d-a79c-c17117019b53"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "aef98e1c-906d-5223-b238-707ddaa37265"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T089",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "f123c341-e2b7-5fa9-8d3f-79fe7da8f09b"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-validation.json",
+                "sha256": "d439dd1ef07e99117b79d76b7fe7286ac0d284712b50d1119f7b34ed6eb705c1",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:01:40.292Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
       "pipelineStage": "implementation",
       "kind": "work",
@@ -7264,7 +7697,7 @@
     {
       "id": "T156",
       "title": "TH1.2 Durable execution queue and checkpoints",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T145",
@@ -7277,6 +7710,9 @@
         "execution",
         "recovery",
         "vertical-slice"
+      ],
+      "notes": [
+        "2026-09-03 17:04:03 UTC: Completed durable Thesis execution queues, fenced leases, idempotent submissions, intent epochs, checkpoint validation, restart recovery, and dead-letter states."
       ],
       "acceptance": [
         "A workflow resumes after API restart without duplicating accepted commands or external tool jobs",
@@ -7298,21 +7734,230 @@
         "T154"
       ],
       "createdAt": "2026-09-03T00:06:07.844Z",
-      "updatedAt": "2026-09-03T00:06:07.844Z",
+      "updatedAt": "2026-09-03T17:04:08.068Z",
+      "completedAt": "2026-09-03T17:04:03.660Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T17:02:14.531Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:06:07.844Z"
+        "initializedAt": "2026-09-03T00:06:07.844Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Durable Thesis execution queue checkpoints leases and restart recovery are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "94c32931-e280-5920-9e47-375eceb19417"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "df545106-a0dd-58c3-b7ad-b249d43680d1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "0802bb25-a12a-5111-81a2-6705864a3196"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "5107d88c-a541-5adf-b8cb-2efd83dd087d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ea60678e-7319-55d1-aefd-5c2873d47f37"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T156-validation.json",
+                "sha256": "91e12f75969ccf6c58617bf83cdcad70ee18c4983e6dc44895f7fe46d29718b9",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:15.600Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Durable Thesis execution queue checkpoints leases and restart recovery are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "94c32931-e280-5920-9e47-375eceb19417"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "df545106-a0dd-58c3-b7ad-b249d43680d1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "0802bb25-a12a-5111-81a2-6705864a3196"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "5107d88c-a541-5adf-b8cb-2efd83dd087d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ea60678e-7319-55d1-aefd-5c2873d47f37"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T156-validation.json",
+                "sha256": "91e12f75969ccf6c58617bf83cdcad70ee18c4983e6dc44895f7fe46d29718b9",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:15.600Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Durable Thesis execution queue checkpoints leases and restart recovery are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "94c32931-e280-5920-9e47-375eceb19417"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "df545106-a0dd-58c3-b7ad-b249d43680d1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "0802bb25-a12a-5111-81a2-6705864a3196"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "5107d88c-a541-5adf-b8cb-2efd83dd087d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T156",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ea60678e-7319-55d1-aefd-5c2873d47f37"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T156-validation.json",
+                "sha256": "91e12f75969ccf6c58617bf83cdcad70ee18c4983e6dc44895f7fe46d29718b9",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:15.600Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -9862,7 +10507,7 @@
     {
       "id": "T157",
       "title": "TH1.3 Model router, skills, and context assembly",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T145",
@@ -9875,6 +10520,9 @@
         "models",
         "skills",
         "agent-runtime"
+      ],
+      "notes": [
+        "2026-09-03 17:04:26 UTC: Completed policy-driven Thesis role routing, versioned skills, scoped subagent contexts, prompt precedence, and invocation provenance."
       ],
       "acceptance": [
         "Primary, coding, critique, and research roles resolve through configurable provider/model profiles",
@@ -9895,21 +10543,230 @@
         "T154"
       ],
       "createdAt": "2026-09-03T00:06:12.944Z",
-      "updatedAt": "2026-09-03T00:06:12.944Z",
+      "updatedAt": "2026-09-03T17:04:30.974Z",
+      "completedAt": "2026-09-03T17:04:26.072Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T17:02:32.049Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:06:12.944Z"
+        "initializedAt": "2026-09-03T00:06:12.944Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Policy-driven Thesis model routing skills scoped context assembly and invocation provenance are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "19878d3a-ebd5-54ac-be80-25de5303ade7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "2cc907ca-c66a-577f-adea-328cc4b9d96e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6ea24bba-09bd-5a07-a089-eb64852d8c2a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "8ff70fb1-88bf-52e3-a99d-7ca84e9da50c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "55341743-6959-5dee-ac2d-e63fb9f205f9"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T157-validation.json",
+                "sha256": "8c80b625a0109a3aa49dd3d2dc46d18d610ab36bd38780d2ec6b546d30b53915",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:33.119Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Policy-driven Thesis model routing skills scoped context assembly and invocation provenance are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "19878d3a-ebd5-54ac-be80-25de5303ade7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "2cc907ca-c66a-577f-adea-328cc4b9d96e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6ea24bba-09bd-5a07-a089-eb64852d8c2a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "8ff70fb1-88bf-52e3-a99d-7ca84e9da50c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "55341743-6959-5dee-ac2d-e63fb9f205f9"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T157-validation.json",
+                "sha256": "8c80b625a0109a3aa49dd3d2dc46d18d610ab36bd38780d2ec6b546d30b53915",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:33.119Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Policy-driven Thesis model routing skills scoped context assembly and invocation provenance are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "19878d3a-ebd5-54ac-be80-25de5303ade7"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "2cc907ca-c66a-577f-adea-328cc4b9d96e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6ea24bba-09bd-5a07-a089-eb64852d8c2a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "8ff70fb1-88bf-52e3-a99d-7ca84e9da50c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T157",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "55341743-6959-5dee-ac2d-e63fb9f205f9"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T157-validation.json",
+                "sha256": "8c80b625a0109a3aa49dd3d2dc46d18d610ab36bd38780d2ec6b546d30b53915",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:33.119Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -12206,7 +13063,7 @@
     {
       "id": "T158",
       "title": "TH1.4 Thesis lake and harness clients",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T145",
@@ -12219,6 +13076,9 @@
         "market-lake",
         "quant-harness",
         "integration"
+      ],
+      "notes": [
+        "2026-09-03 17:04:47 UTC: Completed Thesis lake and quant-harness local/remote client adapters with preserved manifests, metrics, artifacts, capabilities, and unavailable-state reporting."
       ],
       "acceptance": [
         "Thesis can request point-in-time lake data and launch/query harness backtests through published contracts",
@@ -12241,21 +13101,230 @@
         "T154"
       ],
       "createdAt": "2026-09-03T00:06:18.507Z",
-      "updatedAt": "2026-09-03T00:42:42.276Z",
+      "updatedAt": "2026-09-03T17:04:52.356Z",
+      "completedAt": "2026-09-03T17:04:47.276Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T17:02:48.694Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:06:18.507Z"
+        "initializedAt": "2026-09-03T00:06:18.507Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Thesis lake and harness local/remote integration clients are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "c669d4e3-0d2e-5023-aeca-5b35874bfe89"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "37e7526e-dd4d-5e5c-ab57-776889307989"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "100c0c85-5c5a-501a-b2d4-8b513abeeac5"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "8abf7459-0042-5217-9c1f-5a4eff4a98a2"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "676b30ac-6b4e-56c4-9b32-bd98d1e72fc2"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T158-validation.json",
+                "sha256": "9d29995b99c5bc944af237e441458b6debfe335efe2066b589702792904d55af",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:49.769Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Thesis lake and harness local/remote integration clients are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "c669d4e3-0d2e-5023-aeca-5b35874bfe89"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "37e7526e-dd4d-5e5c-ab57-776889307989"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "100c0c85-5c5a-501a-b2d4-8b513abeeac5"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "8abf7459-0042-5217-9c1f-5a4eff4a98a2"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "676b30ac-6b4e-56c4-9b32-bd98d1e72fc2"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T158-validation.json",
+                "sha256": "9d29995b99c5bc944af237e441458b6debfe335efe2066b589702792904d55af",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:49.769Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Thesis lake and harness local/remote integration clients are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "c669d4e3-0d2e-5023-aeca-5b35874bfe89"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "37e7526e-dd4d-5e5c-ab57-776889307989"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "100c0c85-5c5a-501a-b2d4-8b513abeeac5"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "8abf7459-0042-5217-9c1f-5a4eff4a98a2"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T158",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "676b30ac-6b4e-56c4-9b32-bd98d1e72fc2"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T158-validation.json",
+                "sha256": "9d29995b99c5bc944af237e441458b6debfe335efe2066b589702792904d55af",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:02:49.769Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -14126,7 +15195,7 @@
     {
       "id": "T159",
       "title": "TH1.5 Strategy bundle and artifact importer",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T145",
@@ -14139,6 +15208,9 @@
         "strategy",
         "artifacts",
         "reproducibility"
+      ],
+      "notes": [
+        "2026-09-03 17:05:07 UTC: Completed content-addressed Thesis strategy bundles, sandbox validation handoff, hash-verified artifact import, and provenance links."
       ],
       "acceptance": [
         "Equivalent strategy source/configuration/dependency inputs produce the same bundle identity",
@@ -14158,21 +15230,230 @@
         "T153"
       ],
       "createdAt": "2026-09-03T00:06:23.247Z",
-      "updatedAt": "2026-09-03T00:41:45.344Z",
+      "updatedAt": "2026-09-03T17:05:12.157Z",
+      "completedAt": "2026-09-03T17:05:07.579Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T17:03:06.350Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:06:23.247Z"
+        "initializedAt": "2026-09-03T00:06:23.247Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Content-addressed Thesis strategy bundles sandbox handoff and hash-verified artifact import are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "7a1d14a2-89ac-5394-ba95-255ce5f9bc85"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "fdf39413-d3b8-529d-b838-a890ef170395"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "d18ed7da-aeb8-5d7c-a628-ddb9269a1f9d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "204874af-ead3-5145-9050-8aa1449203a6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "c024e716-e39b-5e47-90e2-5dac7cdc45d6"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T159-validation.json",
+                "sha256": "e6cf90877a56944c11fd4489750c85368b6a79c6c5ca6517143a3ca413dceb1a",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:03:07.414Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Content-addressed Thesis strategy bundles sandbox handoff and hash-verified artifact import are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "7a1d14a2-89ac-5394-ba95-255ce5f9bc85"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "fdf39413-d3b8-529d-b838-a890ef170395"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "d18ed7da-aeb8-5d7c-a628-ddb9269a1f9d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "204874af-ead3-5145-9050-8aa1449203a6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "c024e716-e39b-5e47-90e2-5dac7cdc45d6"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T159-validation.json",
+                "sha256": "e6cf90877a56944c11fd4489750c85368b6a79c6c5ca6517143a3ca413dceb1a",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:03:07.414Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b54b7138612b93e13fccb8a5733180a2efe98cf5",
+                "shortSha": "b54b713"
+              },
+              {
+                "kind": "note",
+                "note": "Content-addressed Thesis strategy bundles sandbox handoff and hash-verified artifact import are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "7a1d14a2-89ac-5394-ba95-255ce5f9bc85"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "fdf39413-d3b8-529d-b838-a890ef170395"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "d18ed7da-aeb8-5d7c-a628-ddb9269a1f9d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "204874af-ead3-5145-9050-8aa1449203a6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T159",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "c024e716-e39b-5e47-90e2-5dac7cdc45d6"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T159-validation.json",
+                "sha256": "e6cf90877a56944c11fd4489750c85368b6a79c6c5ca6517143a3ca413dceb1a",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T089-T155-T156-T157-T158-T159-wave-validation.json",
+                "sha256": "48e49d9f297a6af2f2ff82806de457b7bc982f803160cf0387a5fdbbf5066972",
+                "passCount": 706,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T17:03:07.414Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
