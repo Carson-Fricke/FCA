@@ -114,6 +114,36 @@ def test_satisfied_ensure_returns_coverage_without_launching() -> None:
     assert launched == []
 
 
+def test_missing_ensure_returns_synchronous_completion_when_launcher_fills_catalog() -> (
+    None
+):
+    catalog = InMemoryCatalogRepository()
+    launched: list[EnsureJob] = []
+
+    def launcher(job: EnsureJob) -> None:
+        launched.append(job)
+        for gap in job.gaps:
+            catalog.upsert(
+                CoverageRecord(
+                    asset_class=job.request.asset_class,
+                    data_type=job.request.data_type,
+                    symbol=job.request.symbol,
+                    session_date=gap.session_date,
+                    status=CoverageStatus.COMPLETE,
+                )
+            )
+
+    response = _post(
+        _client(catalog, launcher=launcher),
+        _request(start_date="2024-01-18", end_date="2024-01-18"),
+    )
+
+    assert response.status_code == 200
+    assert [entry["status"] for entry in response.json()["entries"]] == ["complete"]
+    assert len(launched) == 1
+    assert response.headers.get("location") is None
+
+
 def test_option_ensure_uses_selected_osi_contracts_and_stable_authenticated_job() -> (
     None
 ):

@@ -105,9 +105,10 @@ tests/lake/
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
 | `harness.data` | Live/replay market-data boundaries and synchronous normalized event inboxes. |
-| `harness.fills` | Configuration-selected exact fee and commission models. |
+| `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch fill decisions. |
 | `harness.portfolio` | Strategy virtual books and shared-account aggregate accounting. |
-| `harness.venues` | Fire-and-forget execution boundary and deterministic scripted venue. |
+| `harness.strategy` | Mode-independent strategy callbacks, constrained context, deterministic subscriptions, and class-plus-parameter binding. |
+| `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, and simulated top-of-book matching venue. |
 
 The event ordering contract is timestamp, source sequence, fixed serialized
 event-class priority, then incoming feed order. `SimClock` advances only from
@@ -116,10 +117,10 @@ synchronous simulation kernel. OMS status and fill-ledger changes occur only by
 applying validated execution reports. Configuration hashes normalize mapping
 order, exact decimals, and UTC timestamps, and reject resolved secret values.
 
-The remaining `results`, `risk`, `runtime`, `strategy`, and `testing` facades
-reserve capability boundaries for later tasks. Thin `harness`, `api`,
-`backtest-job`, and `trader` command entrypoints make the future process
-boundaries explicit and fail clearly until composed.
+The remaining `results`, `risk`, `runtime`, and `testing` facades reserve
+capability boundaries for later tasks. Thin `harness`, `api`, `backtest-job`,
+and `trader` command entrypoints make the future process boundaries explicit
+and fail clearly until composed.
 
 ## Thesis Packages
 

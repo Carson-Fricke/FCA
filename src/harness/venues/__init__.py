@@ -8,12 +8,24 @@ from harness.venues.scripted import (
     VenueCall,
     VenueOperation,
 )
+from harness.venues.sim import (
+    SimOrderState,
+    SimulatedVenue,
+    SimVenue,
+    SimVenueError,
+    UnknownSimOrderError,
+)
 
 __all__ = (
     "ExecutionVenue",
     "ScriptedStep",
     "ScriptedVenue",
+    "SimOrderState",
+    "SimVenue",
+    "SimVenueError",
+    "SimulatedVenue",
     "UnexpectedVenueCall",
+    "UnknownSimOrderError",
     "VenueCall",
     "VenueOperation",
 )

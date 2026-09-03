@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from lake.app import create_app
@@ -70,6 +71,9 @@ def _client(
     *,
     ensure_callback: EnsureCallback | None = None,
     max_range_days: int = 366,
+    query_file_root: Path | None = None,
+    sql_max_scan_bytes: int | None = None,
+    sql_max_result_bytes: int | None = None,
 ) -> TestClient:
     return TestClient(
         create_app(
@@ -79,6 +83,9 @@ def _client(
             coverage_clock=lambda: AS_OF,
             sas_issuer=issuer,
             ensure_callback=ensure_callback,
+            query_file_root=query_file_root,
+            sql_max_scan_bytes=sql_max_scan_bytes,
+            sql_max_result_bytes=sql_max_result_bytes,
         )
     )
 
@@ -129,6 +136,29 @@ def _option_record(
         byte_size=byte_size,
         checksum="option-checksum",
     )
+
+
+def _write_equity_trade_fixture(root: Path) -> str:
+    metadata = ParquetWriter(LocalFilesystemStore(root)).write(
+        [
+            {
+                "timestamp": "2024-01-18T14:31:00Z",
+                "symbol": "AAPL",
+                "trade_id": 7,
+                "exchange": "XNAS",
+                "price": "190.12",
+                "size": 10,
+                "conditions": ["@"],
+                "tape": "C",
+                "update": None,
+            }
+        ],
+        session_date=date(2024, 1, 18),
+        asset_class=AssetClass.EQUITY,
+        data_type=DataType.TRADE,
+        symbol="AAPL",
+    )
+    return metadata.path
 
 
 def _post(client: TestClient, body: dict[str, object]):
@@ -193,6 +223,25 @@ def test_cached_file_query_returns_only_complete_files_and_catalog_metadata() ->
         }
     ]
     assert issuer.paths == [complete_path]
+
+
+def test_file_query_filters_catalog_rows_before_scoping_sas_urls() -> None:
+    requested = _record(session_date=date(2024, 1, 18))
+    unrelated = _record(
+        session_date=date(2024, 1, 18),
+        symbol="MSFT",
+    )
+    issuer = RecordingSasIssuer()
+
+    response = _post(
+        _client(InMemoryCatalogRepository([requested, unrelated]), issuer),
+        _request(start_date="2024-01-18", end_date="2024-01-18"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"]["returned_files"] == 1
+    assert response.json()["files"][0]["symbol"] == "AAPL"
+    assert issuer.paths == [requested.object_path]
 
 
 def test_option_file_query_returns_selected_osi_file_with_authentication() -> None:
@@ -403,6 +452,119 @@ def test_file_query_rejects_bounds_and_malformed_complete_catalog_paths() -> Non
     assert malformed.status_code == 409
     assert malformed.json()["error"]["code"] == "coverage_incomplete"
     assert issuer.paths == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DROP TABLE data",
+        "SELECT * FROM read_parquet('outside.parquet')",
+    ],
+)
+def test_sql_api_rejects_mutating_statements_and_external_storage_functions(
+    tmp_path: Path, sql: str
+) -> None:
+    object_path = _write_equity_trade_fixture(tmp_path)
+    catalog = InMemoryCatalogRepository(
+        [
+            _record(
+                session_date=date(2024, 1, 18),
+                object_path=object_path,
+            )
+        ]
+    )
+
+    response = _post(
+        _client(catalog, query_file_root=tmp_path),
+        _request(
+            mode="sql",
+            start_date="2024-01-18",
+            end_date="2024-01-18",
+            sql=sql,
+        ),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] in {
+        "sql_not_allowed",
+        "storage_path_not_allowed",
+    }
+
+
+def test_sql_api_rejects_scan_result_and_unauthorized_force_overrides(
+    tmp_path: Path,
+) -> None:
+    object_path = _write_equity_trade_fixture(tmp_path)
+    catalog = InMemoryCatalogRepository(
+        [
+            _record(
+                session_date=date(2024, 1, 18),
+                object_path=object_path,
+            )
+        ]
+    )
+
+    scan_limited = _client(
+        catalog,
+        query_file_root=tmp_path,
+        sql_max_scan_bytes=1,
+        sql_max_result_bytes=1,
+    )
+    blocked = _post(
+        scan_limited,
+        _request(
+            mode="sql",
+            start_date="2024-01-18",
+            end_date="2024-01-18",
+            sql="SELECT * FROM data",
+        ),
+    )
+    unauthorized = _post(
+        scan_limited,
+        _request(
+            mode="sql",
+            start_date="2024-01-18",
+            end_date="2024-01-18",
+            sql="SELECT * FROM data",
+            force=True,
+        ),
+    )
+
+    assert blocked.status_code == 413
+    assert blocked.json()["error"]["code"] == "scan_limit_exceeded"
+    assert unauthorized.status_code == 403
+    assert unauthorized.json()["error"]["code"] == "force_override_not_authorized"
+
+
+def test_sql_api_rejects_result_limit_after_a_valid_bounded_scan(
+    tmp_path: Path,
+) -> None:
+    object_path = _write_equity_trade_fixture(tmp_path)
+    catalog = InMemoryCatalogRepository(
+        [
+            _record(
+                session_date=date(2024, 1, 18),
+                object_path=object_path,
+            )
+        ]
+    )
+
+    response = _post(
+        _client(
+            catalog,
+            query_file_root=tmp_path,
+            sql_max_result_bytes=1,
+        ),
+        _request(
+            mode="sql",
+            start_date="2024-01-18",
+            end_date="2024-01-18",
+            sql="SELECT * FROM data",
+        ),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "result_limit_exceeded"
 
 
 def test_option_sql_query_uses_only_selected_local_parquet(tmp_path: Path) -> None:

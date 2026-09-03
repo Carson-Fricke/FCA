@@ -147,6 +147,57 @@ def test_authenticated_coverage_is_calendar_aware_and_returns_metadata() -> None
     assert body["entries"][2]["error_message"] == "source unavailable"
 
 
+def test_coverage_filters_catalog_rows_by_the_complete_requested_partition() -> None:
+    requested_date = date(2024, 11, 27)
+    repository = InMemoryCatalogRepository(
+        [
+            _record(
+                symbol="AAPL",
+                data_type=DataType.TRADE,
+                session_date=requested_date,
+                status=CoverageStatus.COMPLETE,
+            ),
+            _record(
+                symbol="AAPL",
+                data_type=DataType.QUOTE,
+                session_date=requested_date,
+                status=CoverageStatus.COMPLETE,
+            ),
+            _record(
+                symbol="MSFT",
+                data_type=DataType.TRADE,
+                session_date=requested_date,
+                status=CoverageStatus.COMPLETE,
+            ),
+        ]
+    )
+
+    response = _get(
+        _client(repository, as_of=datetime(2024, 12, 3, tzinfo=UTC)),
+        asset_class="equity",
+        data_type="trade",
+        symbol="aapl",
+        start_date=requested_date.isoformat(),
+        end_date=requested_date.isoformat(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["entries"] == [
+        {
+            "session_date": requested_date.isoformat(),
+            "open_time": "2024-11-27T14:30:00Z",
+            "close_time": "2024-11-27T21:00:00Z",
+            "is_partial": False,
+            "status": "complete",
+            "object_path": "date=2024-11-27/asset_class=equity/data_type=trade/AAPL.parquet",
+            "row_count": 12,
+            "byte_size": 3456,
+            "checksum": None,
+            "error_message": None,
+        }
+    ]
+
+
 def test_crypto_coverage_includes_every_utc_day_and_marks_the_open_day_partial() -> (
     None
 ):

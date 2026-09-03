@@ -1,5 +1,5 @@
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -113,3 +113,108 @@ def test_local_app_uses_persistent_catalog_and_bounded_query(tmp_path) -> None:
     assert response.json()["entries"][0]["status"] == "complete"
     assert query.status_code == 200
     assert query.json()["rows"] == [{"symbol": "AAPL", "trade_id": 7}]
+
+
+def test_local_api_file_query_scopes_sas_to_complete_catalog_objects(tmp_path) -> None:
+    layout = LocalLayout(tmp_path / "local")
+    layout.initialize()
+    metadata = ParquetWriter(LocalFilesystemStore(layout.objects)).write(
+        (
+            {
+                "timestamp": datetime(2024, 1, 19, 14, 31, tzinfo=UTC),
+                "symbol": "AAPL",
+                "trade_id": 7,
+                "exchange": "XNAS",
+                "price": Decimal("190.12"),
+                "size": 10,
+                "conditions": ("@",),
+                "tape": "C",
+                "update": None,
+            },
+        ),
+        session_date=datetime(2024, 1, 19, tzinfo=UTC).date(),
+        asset_class=AssetClass.EQUITY,
+        data_type=DataType.TRADE,
+        symbol="AAPL",
+    )
+    LocalCatalogRepository(layout.catalog).upsert(
+        CoverageRecord(
+            asset_class=AssetClass.EQUITY,
+            data_type=DataType.TRADE,
+            symbol="AAPL",
+            session_date=date(2024, 1, 19),
+            status=CoverageStatus.COMPLETE,
+            object_path=metadata.path,
+            row_count=metadata.rows,
+            byte_size=metadata.bytes,
+            checksum=metadata.checksum,
+        )
+    )
+
+    with TestClient(create_local_app(layout=layout, bearer_token="token")) as client:
+        unauthenticated = client.post(
+            "/v1/query",
+            json={
+                "mode": "file",
+                "asset_class": "equity",
+                "data_type": "trade",
+                "symbol": "AAPL",
+                "start_date": "2024-01-19",
+                "end_date": "2024-01-19",
+            },
+        )
+        response = client.post(
+            "/v1/query",
+            json={
+                "mode": "file",
+                "asset_class": "equity",
+                "data_type": "trade",
+                "symbol": "AAPL",
+                "start_date": "2024-01-19",
+                "end_date": "2024-01-19",
+            },
+            headers={"Authorization": "Bearer token"},
+        )
+
+    assert unauthenticated.status_code == 401
+    assert response.status_code == 200
+    assert response.json()["results"] == {
+        "requested_sessions": 1,
+        "returned_files": 1,
+        "complete_sessions": 1,
+        "pending_sessions": 0,
+        "state": "complete",
+    }
+    assert response.json()["files"][0]["object_path"] == metadata.path
+    assert response.json()["files"][0]["url"].startswith("file://")
+
+
+def test_local_api_ensure_returns_202_and_authenticated_polling_for_missing_data(
+    tmp_path,
+) -> None:
+    layout = LocalLayout(tmp_path / "local")
+
+    with TestClient(create_local_app(layout=layout, bearer_token="token")) as client:
+        response = client.post(
+            "/v1/catalog/ensure",
+            json={
+                "asset_class": "equity",
+                "data_type": "trade",
+                "symbol": "AAPL",
+                "start_date": "2024-01-19",
+                "end_date": "2024-01-19",
+            },
+            headers={"Authorization": "Bearer token"},
+        )
+        polled = client.get(
+            response.headers["location"],
+            headers={"Authorization": "Bearer token"},
+        )
+        unauthenticated = client.get(response.headers["location"])
+
+    assert response.status_code == 202
+    assert response.headers["location"].startswith("/v1/jobs/ensure-")
+    assert response.json()["state"] == "queued"
+    assert polled.status_code == 200
+    assert polled.json()["state"] == "queued"
+    assert unauthenticated.status_code == 401

@@ -17,6 +17,7 @@ from harness.fills.fees import (
     aggregate_fees,
     load_fee_schedule,
 )
+from harness.fills.simple_touch import FillDecision, SimpleTouch
 
 __all__ = (
     "AssetClass",
@@ -29,9 +30,11 @@ __all__ = (
     "FeeContext",
     "FeeRounding",
     "FeeSchedule",
+    "FillDecision",
     "LiquidityRole",
     "OptionsPerContractFeeModel",
     "RoundingMode",
+    "SimpleTouch",
     "aggregate_fees",
     "load_fee_schedule",
 )

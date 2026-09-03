@@ -8,6 +8,22 @@ from harness.data.alpaca_ws import (
     AsyncWebSocketConnection,
     AsyncWebSocketTransport,
 )
+from harness.data.lake import (
+    DEFAULT_EGRESS_WARNING_THRESHOLD_BYTES,
+    EnsureJobError,
+    IncompleteMarketDataError,
+    LakeClientPort,
+    LakeRequest,
+    LoadedMarketData,
+    MarketLake,
+    MarketLakeAdapter,
+    MarketLakeError,
+    MarketLakeLoad,
+    MarketLakeRequest,
+    ProjectedEgressWarning,
+    UnsupportedMarketDataError,
+    resolve_sessions,
+)
 
 __all__ = (
     "AlpacaSipInbox",
@@ -16,4 +32,18 @@ __all__ = (
     "AlpacaWebSocketProtocolError",
     "AsyncWebSocketConnection",
     "AsyncWebSocketTransport",
+    "DEFAULT_EGRESS_WARNING_THRESHOLD_BYTES",
+    "EnsureJobError",
+    "IncompleteMarketDataError",
+    "LakeClientPort",
+    "LakeRequest",
+    "LoadedMarketData",
+    "MarketLake",
+    "MarketLakeAdapter",
+    "MarketLakeError",
+    "MarketLakeLoad",
+    "MarketLakeRequest",
+    "ProjectedEgressWarning",
+    "UnsupportedMarketDataError",
+    "resolve_sessions",
 )
