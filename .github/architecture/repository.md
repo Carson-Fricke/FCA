@@ -9,10 +9,13 @@ initial skeleton, market-lake process package, shared image, foundational
 storage, identity, and Container Apps modules, and the market-lake
 resource-group infrastructure entry point are implemented. Versioned lake
 configuration, partition/schema/calendar contracts, and reusable image
-publication are also implemented. The quant-harness capability and process
-scaffold, core records, deterministic event ordering, single-leg OMS, and
-typed configuration are implemented; broader simulation, CI/deployment
-orchestration, and deployment remain planned.
+publication are also implemented. The quant-harness core records, event
+kernel, OMS, strategy contract with sandbox lint and look-ahead guard, venues,
+fees, portfolio, risk, bars/scheduler, bounded lake replay, the deterministic
+backtest runner with reproducibility manifest, the streaming run recorder, and
+the local `backtest-job` CLI are implemented; standard metrics, offline
+reports, the results store, the harness query API, paper/shadow/live runtimes,
+and CI/deployment orchestration remain planned.
 
 ## Product Boundaries
 
@@ -104,10 +107,12 @@ tests/lake/
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
-| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, and bounded lake replay. |
+| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, and the look-ahead-guarded historical view. |
 | `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, and trade-through fill decisions. |
 | `harness.portfolio` | Strategy virtual books and shared-account aggregate accounting. |
-| `harness.strategy` | Mode-independent strategy callbacks, constrained context, deterministic subscriptions, and class-plus-parameter binding. |
+| `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts. |
+| `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies. |
+| `harness.strategy` | Mode-independent strategy callbacks, constrained context, deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
 | `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, and complete decision auditing. |
 | `harness.testing` | Deterministic synthetic feeds, golden artifact canonicalization, and reproducibility manifest comparison. |
 | `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, and simulated top-of-book matching venue. |
@@ -118,11 +123,20 @@ explicit events; `WallClock` is an adapter boundary and is not used by the
 synchronous simulation kernel. OMS status and fill-ledger changes occur only by
 applying validated execution reports. Configuration hashes normalize mapping
 order, exact decimals, and UTC timestamps, and reject resolved secret values.
+Historical queries hard-clip to the engine clock, and strategy sandbox lint
+rejects wall-clock, sleep, network, subprocess, unseeded-random, asyncio, and
+concurrency patterns before a strategy can run.
 
-The remaining `results` and `runtime` facades reserve capability boundaries for
-later tasks. Thin `harness`, `api`, `backtest-job`, and `trader` command
-entrypoints make the future process boundaries explicit and fail clearly until
-composed.
+The deterministic backtest runner composes lake replay, the simulated venue,
+fees, risk, portfolio accounting, and the look-ahead guard behind one
+`SimClock`, and emits a reproducibility manifest covering configuration, code,
+seed, data, fill-model, fee, and risk fingerprints. `backtest-job --config`
+runs it locally over the built-in deterministic synthetic benchmark fixture or
+a user-supplied local Parquet lake directory, writing canonical run artifacts
+under `.local/backtests/`.
+
+The `api` and `trader` command entrypoints remain thin process boundaries and
+fail clearly until composed.
 
 ## Thesis Packages
 

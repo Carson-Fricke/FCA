@@ -7,6 +7,7 @@
 @.github/instructions/cleo.instructions.md
 @.github/instructions/copilot-instructions.md
 @.github/instructions/repository-organization.instructions.md
+@.github/instructions/market-lake-local.instructions.md
 
 ## FCA Execution Policy
 
@@ -23,3 +24,14 @@
   in CLEO. Stop after the number of waves requested by the user.
 - Do not rewrite historical verification records solely because later tasks
   change the repository-wide test count.
+- Use `ruff` for all lint and format checks and `ty` for all type checks. Do not
+  use MyPy, pyright, flake8, pylint, black, or another lint/type/format tool.
+- Run Python verification through `uv` from the repository root using the
+  canonical commands in `.github/instructions/copilot-instructions.md`. Never
+  invoke `.venv` interpreters directly.
+- Treat `.github/architecture/*.md` as the source of truth for repository
+  structure, package boundaries, and practices. Update the affected
+  architecture document whenever a task changes package layout, public
+  facades, entrypoints, dependency direction, or deployment shape.
+- Treat architecture-documentation updates as integration-owned unless a wave
+  explicitly assigns that file.

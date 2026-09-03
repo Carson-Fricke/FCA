@@ -1,6 +1,7 @@
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -43,12 +44,93 @@ def test_process_group_help(command: str, description: str) -> None:
     assert description in result.stdout
 
 
-@pytest.mark.parametrize("command", ["api", "backtest-job", "trader"])
+@pytest.mark.parametrize("command", ["api", "trader"])
 def test_unimplemented_process_fails_explicitly(command: str) -> None:
     result = runner.invoke(cli.app, [command])
 
     assert result.exit_code == 2
     assert "scaffolded but not implemented yet" in result.stderr
+
+
+def test_backtest_job_requires_a_configuration() -> None:
+    result = runner.invoke(cli.app, ["backtest-job"])
+
+    assert result.exit_code == 2
+    assert "--config" in result.stderr
+
+
+def test_backtest_job_rejects_a_non_backtest_shell(tmp_path) -> None:
+    config_path = tmp_path / "api.yaml"
+    config_path.write_text(
+        (Path(__file__).parents[3] / "config" / "harness" / "api.yaml").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["backtest-job", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 2
+    assert "shell must be 'backtest'" in result.stderr
+
+
+def test_backtest_job_runs_the_synthetic_benchmark_identically(tmp_path) -> None:
+    config_path = tmp_path / "backtest.yaml"
+    config_path.write_text(_benchmark_configuration(), encoding="utf-8")
+
+    first = runner.invoke(
+        cli.app,
+        [
+            "backtest-job",
+            "--config",
+            str(config_path),
+            "--output-dir",
+            str(tmp_path / "first"),
+        ],
+    )
+    second = runner.invoke(
+        cli.app,
+        [
+            "backtest-job",
+            "--config",
+            str(config_path),
+            "--output-dir",
+            str(tmp_path / "second"),
+        ],
+    )
+
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    assert "status: completed" in first.stdout
+    first_digest = _stdout_value(first.stdout, "artifact_digest")
+    second_digest = _stdout_value(second.stdout, "artifact_digest")
+    assert first_digest == second_digest
+    first_artifact = (tmp_path / "first" / "backtest.json").read_text(encoding="utf-8")
+    second_artifact = (tmp_path / "second" / "backtest.json").read_text(
+        encoding="utf-8"
+    )
+    assert first_artifact == second_artifact
+
+
+def _stdout_value(stdout: str, key: str) -> str:
+    for line in stdout.splitlines():
+        name, _, value = line.partition(": ")
+        if name == key:
+            return value.strip()
+    raise AssertionError(f"missing {key!r} in output: {stdout!r}")
+
+
+def _benchmark_configuration() -> str:
+    example = (
+        Path(__file__).parents[3] / "config" / "harness" / "backtest.yaml"
+    ).read_text(encoding="utf-8")
+    return example.replace(
+        "implementation: strategies.reference.momentum:MomentumStrategy",
+        "implementation: harness.strategy.reference:ReferenceStrategy",
+    )
 
 
 @pytest.mark.parametrize("entrypoint", [api.main, backtest_job.main, trader.main])

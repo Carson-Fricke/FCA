@@ -66,6 +66,38 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - Completing the final pending child can auto-complete its epic or saga. Add planned siblings before completing a placeholder child, or immediately verify parent status, lifecycle, verification, and timestamps.
 - `cleo complete` may warn that `task/<id>` does not exist during worktree integration. This warning does not negate a successful task-state mutation when no task branch was expected.
 
+## Verification Commands And Evidence
+
+- Run Python verification only through `uv` from the resolved repository root.
+  Do not call `.venv\Scripts\python.exe`, `.venv/bin/python`, or any other
+  virtual-environment interpreter directly.
+- Use the canonical command table in
+  `.github/instructions/copilot-instructions.md` for lock, lint, format, type,
+  test, build, and entrypoint checks.
+- Use `ruff` for all lint and format checks and `ty` for all type checks. Do not
+  record evidence from `mypy`, `pyright`, `flake8`, `pylint`, `black`, or any
+  other lint/type/format tool.
+- Record the same canonical `uv` commands in verification records, evidence
+  `command` values, and workflow references. Do not record direct interpreter
+  paths.
+- Use `node <script>` only for the explicitly Node-based repository validators,
+  such as `node .github/scripts/validate-cleo-export.mjs`.
+
+## Architecture Documentation
+
+- Treat `.github/architecture/*.md` as the source of truth for repository
+  structure, package boundaries, product responsibilities, and deployment
+  shape.
+- Update the affected architecture document in the same task whenever a task
+  adds, removes, renames, or repurposes a package or capability directory, or
+  changes public facades, entrypoints, dependency direction, or deployment
+  shape.
+- Keep architecture documentation factual and current; do not describe planned
+  behavior as implemented, and update the `## Status` section when a planned
+  capability is implemented.
+- Architecture-documentation changes for a wave are integration-owned unless
+  the wave explicitly assigns that file.
+
 ## Verification Budget And Batching
 
 - Treat one user-approved implementation wave as one CLEO reconciliation

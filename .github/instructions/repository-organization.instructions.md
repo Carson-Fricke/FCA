@@ -9,6 +9,23 @@ technical layer. Preserve the product roots under `src/lake` and `src/harness`;
 do not create a generic shared package without at least two real consumers and
 a stable contract.
 
+Read the architecture documents under `.github/architecture/` as the source of
+truth for the current repository map, product boundaries, capability tables,
+and deployment shape. Extend the existing documented structure consistently
+rather than introducing a parallel taxonomy.
+
+## Canonical Commands
+
+Run verification commands through `uv` from the repository root. Do not call
+`.venv\Scripts\python.exe`, `.venv/bin/python`, or any other
+virtual-environment interpreter directly. Use the command table in
+`.github/instructions/copilot-instructions.md` for environment, lint, format,
+type, test, build, and entrypoint checks.
+
+Use `ruff` for lint and format and `ty` for type checks. Do not substitute
+`mypy`, `pyright`, `flake8`, `pylint`, `black`, or another lint/type/format
+tool.
+
 ## Package Shape
 
 - Put related domain records, application behavior, ports, and adapters in a
