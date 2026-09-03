@@ -1,0 +1,28 @@
+{
+  "taskId": "T084",
+  "timestamp": "2026-09-03T18:20:00Z",
+  "numTotalTests": 15,
+  "numPassedTests": 15,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "historical-view-lookahead-guard",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/data/test_history.py -q",
+      "result": "15 tests passed for bounded per-subscription ring buffers, point-in-time quote/trade/last-N/window/aggregate reads hard-clipped to the engine clock, one-nanosecond LookaheadError rejection, canary no-future-data proof, and benchmark-shaped amortized last-1000 retrieval."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; the view uses an integer nanosecond timeline, injected clocks only, and no wall-clock, random, network, or I/O access."
+    }
+  ],
+  "decisions": [
+    "Every query bound is clipped against the clock head; future queries raise LookaheadError instead of leaking data.",
+    "HistoricalView.read implements the strategy PointInTimeData boundary and accepts nanosecond timestamps so sub-microsecond engine boundaries remain enforceable."
+  ],
+  "limitations": [],
+  "blockers": []
+}

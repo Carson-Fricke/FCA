@@ -1,0 +1,33 @@
+{
+  "taskId": "T085",
+  "timestamp": "2026-09-03T18:20:00Z",
+  "numTotalTests": 44,
+  "numPassedTests": 44,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "strategy-sandbox-lint",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/strategy_lint -q",
+      "result": "44 tests passed: clean strategies pass and every prohibited pattern (wall-clock, sleep, network, subprocess, unseeded random, asyncio, concurrency, async syntax) has a failing fixture with an actionable file/line/rule diagnostic."
+    },
+    {
+      "name": "ci-wiring",
+      "status": "passed",
+      "result": "The sandbox checker is wired into the repository suite through tests/strategy_lint and asserts the committed strategies tree lints clean, so it runs in CI with every pytest invocation."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; the checker parses ASTs only, never imports or executes strategy code, and has no clock, random, or network dependency."
+    }
+  ],
+  "decisions": [
+    "Rules report at import site for whole-module rules and at each use for attribute rules; seeded generators remain legal.",
+    "lint_strategy dispatches over source text, paths, classes, and modules, and assert_sandbox_clean raises with a CI-ready rendered report."
+  ],
+  "limitations": [],
+  "blockers": []
+}

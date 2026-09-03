@@ -1,0 +1,36 @@
+{
+  "taskId": "T096",
+  "timestamp": "2026-09-03T18:20:00Z",
+  "numTotalTests": 50,
+  "numPassedTests": 50,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "backtest-runner-and-manifest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/runtime -q",
+      "result": "36 tests passed across runner, manifest, and fixture modules: a one-month synthetic SPY run is artifact-identical across repeated execution, every reproducibility input (configuration, code, seed, data, fill model, fees, risk, strategies) affects the manifest hash under a 10-case parametrization, and abort, per-strategy halt, teardown, and look-ahead policies are tested."
+    },
+    {
+      "name": "cli-local-benchmark",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/cli -q",
+      "result": "14 CLI tests passed including end-to-end backtest-job runs that produce byte-identical canonical artifacts across repeated executions, plus missing-configuration and wrong-shell rejection paths."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; the runner uses one SimClock-driven EventBus, exact Decimal arithmetic, and no wall-clock, unseeded random, network, or credential access."
+    }
+  ],
+  "decisions": [
+    "The runner accepts None (deterministic synthetic fixture), a ReplayFixture, a stream mapping, or a local Parquet lake directory path, keeping the local benchmark fully offline.",
+    "The backtest runner is a submodule package (errors/fills/fees/fixture/preflight/manifest/strategies/engine) behind the unchanged harness.runtime.backtest import surface, and the CLI writes canonical artifacts under .local/backtests/<run_id>."
+  ],
+  "limitations": [
+    "The committed example configuration still targets the T097 reference momentum strategy, so running it fails with a clean StrategyLoadError until T097 lands; the built-in synthetic fixture and ReferenceStrategy path are fully runnable now."
+  ],
+  "blockers": []
+}

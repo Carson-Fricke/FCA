@@ -1,0 +1,45 @@
+{
+  "wave": "T084-T085-T089-T096-T098",
+  "timestamp": "2026-09-03T18:20:00Z",
+  "numTotalTests": 830,
+  "numPassedTests": 830,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "uv lock --check, repository Ruff lint, Ruff format across 341 files, and ty all passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "830 tests passed in 78.78 seconds; one existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "package-build",
+      "status": "passed",
+      "result": "The wheel contains the split backtest runner and recorder packages, the look-ahead guard, sandbox lint, and the wired backtest CLI."
+    },
+    {
+      "name": "architecture-and-docs",
+      "status": "passed",
+      "result": "Markdownlint passed repository.md, README.md, and the local market-lake runbook; canonical uv command and Ruff/ty-only tooling rules were codified in AGENTS.md and the instruction files."
+    },
+    {
+      "name": "local-benchmark-entrypoint",
+      "status": "passed",
+      "result": "uv run backtest-job --config config/harness/backtest.yaml runs end to end over the built-in deterministic synthetic fixture and produces byte-identical artifacts across repeated runs; the committed example config fails cleanly with StrategyLoadError until the T097 reference strategy lands."
+    }
+  ],
+  "integrationHistory": [
+    "The two large implementation modules (2096-line runner, 1416-line recorder) were split into behavior-preserving submodule packages with mirrored test splits; all 36 runner and 27 recorder tests were kept without assertion changes.",
+    "One integration failure (CLI no-args stderr assertion and four lint findings) was fixed, after which the full repository pass and build succeeded on the permitted final rerun."
+  ],
+  "limitations": [
+    "The repository suite emitted the existing Starlette/httpx TestClient deprecation warning.",
+    "T089 remains CLEO-blocked by the deployed-dev T048 smoke prerequisite; its code and all acceptance criteria are verified."
+  ]
+}

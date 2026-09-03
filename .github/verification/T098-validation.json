@@ -1,0 +1,33 @@
+{
+  "taskId": "T098",
+  "timestamp": "2026-09-03T18:20:00Z",
+  "numTotalTests": 27,
+  "numPassedTests": 27,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "streaming-run-recorder",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/results/test_recorder.py -q",
+      "result": "27 tests passed: a scripted run produces every required artifact with complete action-to-order-to-fill links, and a one-million-event stream stays memory bounded (pending rows capped at the batch size, ~10k) while writing exactly 1,000,000 rows."
+    },
+    {
+      "name": "determinism",
+      "status": "passed",
+      "result": "Repeated identical scripted runs produce byte-identical artifacts including the manifest; execution_reports round-trips through the core ParquetCodec."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "result": "Focused Ruff lint, format, and ty checks passed; the recorder implements the strategy Emitter protocol directly, uses EngineIdSource identity and injected clocks, and has no wall-clock, random, or network dependency."
+    }
+  ],
+  "decisions": [
+    "Eleven linked Parquet artifacts (actions, orders, risk_decisions, risk_audits, fills, execution_reports, position_transitions, equity, emissions, markers, events) stream one row group per batch for bounded memory.",
+    "The recorder is a submodule package behind the unchanged harness.results.recorder import surface; schemas extend core ORDER/FILL/REPORT schemas for referential integrity."
+  ],
+  "limitations": [],
+  "blockers": []
+}
