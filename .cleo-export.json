@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T01:03:21.099Z",
+    "exportedAt": "2026-09-03T02:03:32.165Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 179
     },
-    "checksum": "97248be2e94e5ec9",
+    "checksum": "e11de548c6707d1f",
     "taskCount": 178,
     "exportMode": "full"
   },
@@ -299,7 +299,7 @@
     "T061": {
       "type": "task",
       "title": "E9.1 Thin Python lakeclient",
-      "status": "pending",
+      "status": "done",
       "parentId": "T012",
       "depends": [
         "T032",
@@ -334,6 +334,7 @@
         "T023",
         "T046",
         "T048",
+        "T061",
         "T079"
       ]
     },
@@ -350,7 +351,7 @@
     "T103": {
       "type": "task",
       "title": "H4.1 Alpaca SIP WebSocket feed",
-      "status": "pending",
+      "status": "done",
       "parentId": "T072",
       "depends": [
         "T079",
@@ -414,7 +415,7 @@
     "T144": {
       "type": "epic",
       "title": "TH0 Workspace and CLEO foundations",
-      "status": "pending",
+      "status": "done",
       "parentId": "T143",
       "depends": [
         "T003"
@@ -423,7 +424,7 @@
     "T151": {
       "type": "task",
       "title": "TH0.1 Workspace manifest and repository provider",
-      "status": "pending",
+      "status": "done",
       "parentId": "T144",
       "depends": [
         "T003"
@@ -623,6 +624,7 @@
         "T005",
         "T008",
         "T009",
+        "T012",
         "T069"
       ]
     },
@@ -677,7 +679,7 @@
     "T116": {
       "type": "task",
       "title": "H6.2 Atomic multi-leg orders and OMS groups",
-      "status": "pending",
+      "status": "done",
       "parentId": "T074",
       "depends": [
         "T079",
@@ -725,7 +727,7 @@
     "T152": {
       "type": "task",
       "title": "TH0.2 Workspace CLEO profile and coordinator",
-      "status": "pending",
+      "status": "done",
       "parentId": "T144",
       "depends": [
         "T003"
@@ -1031,7 +1033,7 @@
     "T153": {
       "type": "task",
       "title": "TH0.3 Workspace journal and Git publication",
-      "status": "pending",
+      "status": "done",
       "parentId": "T144",
       "depends": [
         "T003"
@@ -1313,7 +1315,7 @@
     "T154": {
       "type": "task",
       "title": "TH0.4 Operator sessions and model provider profiles",
-      "status": "pending",
+      "status": "done",
       "parentId": "T144",
       "depends": [
         "T003"
@@ -1426,7 +1428,7 @@
     "T044": {
       "type": "task",
       "title": "E5.5 Raw objects endpoint",
-      "status": "pending",
+      "status": "done",
       "parentId": "T008",
       "depends": [
         "T043"
@@ -1478,7 +1480,7 @@
     "T082": {
       "type": "task",
       "title": "H1.5 ExecutionVenue protocol and ScriptedVenue",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T079",
@@ -1663,7 +1665,7 @@
     "T093": {
       "type": "task",
       "title": "H2.6 Fee and commission models",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T079"
@@ -1823,7 +1825,7 @@
     "T094": {
       "type": "task",
       "title": "H2.7 Virtual books and PortfolioHub",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T079",
@@ -3188,7 +3190,7 @@
     {
       "id": "T061",
       "title": "E9.1 Thin Python lakeclient",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T012",
@@ -3200,6 +3202,9 @@
         "client",
         "python"
       ],
+      "notes": [
+        "2026-09-03 01:59:18 UTC: Implemented the standalone authenticated lakeclient with ensure, polling, API-issued file reads, and the local AAPL NBBO example."
+      ],
       "acceptance": [
         "A local snippet can ensure and compute one-day AAPL NBBO spread through the API"
       ],
@@ -3208,21 +3213,158 @@
         "T043"
       ],
       "createdAt": "2026-09-01T03:23:35.503Z",
-      "updatedAt": "2026-09-01T03:30:13.827Z",
+      "updatedAt": "2026-09-03T01:59:23.100Z",
+      "completedAt": "2026-09-03T01:59:17.831Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:55:57.882Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:35.503Z"
+        "initializedAt": "2026-09-01T03:23:35.503Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Thin authenticated lakeclient and one-day AAPL NBBO flow are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T061",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2ac78f26-178e-56d7-a00b-a9dc1fa7cfd7"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T061-validation.json",
+                "sha256": "31442059047e78f42777c028b563e0252e2998867fc9b9e14e70c512f91bdcd1",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:55:58.672Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Thin authenticated lakeclient and one-day AAPL NBBO flow are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T061",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2ac78f26-178e-56d7-a00b-a9dc1fa7cfd7"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T061-validation.json",
+                "sha256": "31442059047e78f42777c028b563e0252e2998867fc9b9e14e70c512f91bdcd1",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:55:58.672Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Thin authenticated lakeclient and one-day AAPL NBBO flow are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T061",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2ac78f26-178e-56d7-a00b-a9dc1fa7cfd7"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T061-validation.json",
+                "sha256": "31442059047e78f42777c028b563e0252e2998867fc9b9e14e70c512f91bdcd1",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:55:58.672Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3436,6 +3578,9 @@
         "harness.h011",
         "lake-integration"
       ],
+      "notes": [
+        "2026-09-03 01:17:25 UTC: The harness market-lake adapter consumes the standalone lakeclient contract rather than reimplementing HTTP and SAS behavior."
+      ],
       "acceptance": [
         "Mocked missing coverage follows ensure, poll, and load before a run starts",
         "A dev integration loads two symbols across five sessions including half-days",
@@ -3452,10 +3597,11 @@
         "T023",
         "T046",
         "T048",
+        "T061",
         "T079"
       ],
       "createdAt": "2026-09-01T18:00:38.596Z",
-      "updatedAt": "2026-09-01T18:34:09.413Z",
+      "updatedAt": "2026-09-03T01:17:25.268Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -3528,7 +3674,7 @@
     {
       "id": "T103",
       "title": "H4.1 Alpaca SIP WebSocket feed",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T072",
@@ -3542,6 +3688,9 @@
         "harness.h026",
         "websocket",
         "equities"
+      ],
+      "notes": [
+        "2026-09-03 02:00:46 UTC: Implemented the injected Alpaca SIP WebSocket shell, normalized replay-compatible events, reconnect behavior, and deterministic inbox."
       ],
       "acceptance": [
         "A mock server verifies subscription, reception, disconnect recovery, and stale-symbol detection",
@@ -3559,21 +3708,230 @@
         "T086"
       ],
       "createdAt": "2026-09-01T18:01:40.756Z",
-      "updatedAt": "2026-09-01T18:27:01.993Z",
+      "updatedAt": "2026-09-03T02:00:51.346Z",
+      "completedAt": "2026-09-03T02:00:46.251Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:57:04.843Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:40.756Z"
+        "initializedAt": "2026-09-01T18:01:40.756Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Injected Alpaca SIP WebSocket shell and deterministic inbox are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "41377f2a-0760-59aa-a11a-434aea7cadf3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "74e21e53-9af3-5ae0-ac2f-3893d3bfa5e0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "433be094-0d55-50d3-8895-7b9342e24198"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "41840547-7956-5006-90df-9fe3d50d003a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "baff6ed7-8478-5b0b-a40f-42d2603e0ac5"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T103-validation.json",
+                "sha256": "ec1f8bb6efd606146dfc3c3e52c81869d250eda6745825367f5d7c8fad59dea7",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:05.712Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Injected Alpaca SIP WebSocket shell and deterministic inbox are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "41377f2a-0760-59aa-a11a-434aea7cadf3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "74e21e53-9af3-5ae0-ac2f-3893d3bfa5e0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "433be094-0d55-50d3-8895-7b9342e24198"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "41840547-7956-5006-90df-9fe3d50d003a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "baff6ed7-8478-5b0b-a40f-42d2603e0ac5"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T103-validation.json",
+                "sha256": "ec1f8bb6efd606146dfc3c3e52c81869d250eda6745825367f5d7c8fad59dea7",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:05.712Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Injected Alpaca SIP WebSocket shell and deterministic inbox are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "41377f2a-0760-59aa-a11a-434aea7cadf3"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "74e21e53-9af3-5ae0-ac2f-3893d3bfa5e0"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "433be094-0d55-50d3-8895-7b9342e24198"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "41840547-7956-5006-90df-9fe3d50d003a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T103",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "baff6ed7-8478-5b0b-a40f-42d2603e0ac5"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T103-validation.json",
+                "sha256": "ec1f8bb6efd606146dfc3c3e52c81869d250eda6745825367f5d7c8fad59dea7",
+                "passCount": 5,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:05.712Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3853,7 +4211,7 @@
     {
       "id": "T144",
       "title": "TH0 Workspace and CLEO foundations",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T143",
@@ -3880,8 +4238,9 @@
         "T003"
       ],
       "createdAt": "2026-09-03T00:01:51.591Z",
-      "updatedAt": "2026-09-03T00:12:43.218Z",
-      "pipelineStage": "implementation",
+      "updatedAt": "2026-09-03T02:02:16.789Z",
+      "completedAt": "2026-09-03T02:02:16.789Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -3889,7 +4248,7 @@
     {
       "id": "T151",
       "title": "TH0.1 Workspace manifest and repository provider",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T144",
@@ -3902,6 +4261,9 @@
         "workspace",
         "git",
         "local-mode"
+      ],
+      "notes": [
+        "2026-09-03 02:01:23 UTC: Implemented strict workspace manifests, per-workspace native Git repositories, canonical scaffolds, secret references, and Azure entity contracts."
       ],
       "acceptance": [
         "A workspace manifest records owner, charter, limits, runtime profile, platform bundle, and repository identity",
@@ -3920,21 +4282,212 @@
         "T003"
       ],
       "createdAt": "2026-09-03T00:04:24.969Z",
-      "updatedAt": "2026-09-03T00:04:24.969Z",
+      "updatedAt": "2026-09-03T02:01:29.830Z",
+      "completedAt": "2026-09-03T02:01:23.426Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:57:33.120Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:04:24.969Z"
+        "initializedAt": "2026-09-03T00:04:24.969Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "57d5054c9234783a6ffd58525e09d401d3f21444",
+                "shortSha": "57d5054"
+              },
+              {
+                "kind": "note",
+                "note": "Strict isolated workspace manifests repositories scaffolds and Azure entities are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "5fe57db3-fd0b-5573-a948-f3ba58691456"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "1733e0b6-7334-5943-a984-cb96f1c71708"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6c3c86ec-2db7-5e0b-a0e2-0040a47e0286"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "557fb898-af2e-5864-8f81-440527f7c5c8"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T151-validation.json",
+                "sha256": "43a473543c366127c17eac6d615a22c1fe5d99fe4459e4e2f7ad80194dd06635",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:34.301Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "57d5054c9234783a6ffd58525e09d401d3f21444",
+                "shortSha": "57d5054"
+              },
+              {
+                "kind": "note",
+                "note": "Strict isolated workspace manifests repositories scaffolds and Azure entities are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "5fe57db3-fd0b-5573-a948-f3ba58691456"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "1733e0b6-7334-5943-a984-cb96f1c71708"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6c3c86ec-2db7-5e0b-a0e2-0040a47e0286"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "557fb898-af2e-5864-8f81-440527f7c5c8"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T151-validation.json",
+                "sha256": "43a473543c366127c17eac6d615a22c1fe5d99fe4459e4e2f7ad80194dd06635",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:34.301Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "57d5054c9234783a6ffd58525e09d401d3f21444",
+                "shortSha": "57d5054"
+              },
+              {
+                "kind": "note",
+                "note": "Strict isolated workspace manifests repositories scaffolds and Azure entities are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "5fe57db3-fd0b-5573-a948-f3ba58691456"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "1733e0b6-7334-5943-a984-cb96f1c71708"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "6c3c86ec-2db7-5e0b-a0e2-0040a47e0286"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T151",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "557fb898-af2e-5864-8f81-440527f7c5c8"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T151-validation.json",
+                "sha256": "43a473543c366127c17eac6d615a22c1fe5d99fe4459e4e2f7ad80194dd06635",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:34.301Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -5505,6 +6058,9 @@
         "milestone.m1",
         "backtest"
       ],
+      "notes": [
+        "2026-09-03 01:17:34 UTC: Mirrors child dependency T088 -> T061 across the owning T070 and T012 epics."
+      ],
       "acceptance": [
         "A repeatable SPY and QQQ backtest runs over lake data with pessimistic fills, exact accounting, bounded memory, and no look-ahead",
         "Complete child T088: H2.1 Market-lake access adapter",
@@ -5522,10 +6078,11 @@
         "T005",
         "T008",
         "T009",
+        "T012",
         "T069"
       ],
       "createdAt": "2026-09-01T17:55:23.154Z",
-      "updatedAt": "2026-09-01T18:34:01.363Z",
+      "updatedAt": "2026-09-03T01:17:33.951Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -5893,7 +6450,7 @@
     {
       "id": "T116",
       "title": "H6.2 Atomic multi-leg orders and OMS groups",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T074",
@@ -5907,6 +6464,9 @@
         "harness.h039",
         "options",
         "oms"
+      ],
+      "notes": [
+        "2026-09-03 02:01:04 UTC: Implemented all-or-nothing market, net-debit, and net-credit OMS groups with exact leg accounting and lifecycle propagation."
       ],
       "acceptance": [
         "Group transition tests cover rejection, cancellation during evaluation, expiry, and no partial group fills",
@@ -5923,21 +6483,230 @@
         "T081"
       ],
       "createdAt": "2026-09-01T18:02:37.008Z",
-      "updatedAt": "2026-09-01T18:28:54.029Z",
+      "updatedAt": "2026-09-03T02:01:09.429Z",
+      "completedAt": "2026-09-03T02:01:04.535Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:57:19.238Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:02:37.008Z"
+        "initializedAt": "2026-09-01T18:02:37.008Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Atomic multi-leg OMS groups and exact per-leg accounting are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "768db606-9062-539b-974a-d6f139a0c7ea"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "f87a71c8-938c-5091-b6d8-6c8528b05653"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "31a1d4f8-5d72-5318-ba43-48d1afcc8720"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "33d8a1ea-c470-5bf4-bc03-5debbda2ae55"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "d1b7f8bb-6435-5b46-bdae-589b2bacfc5f"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T116-validation.json",
+                "sha256": "dff5de2c5a4be3d1edf9875974c9e81e2bbed94933ae6a790b3e8a833fe43b2d",
+                "passCount": 12,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:20.494Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Atomic multi-leg OMS groups and exact per-leg accounting are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "768db606-9062-539b-974a-d6f139a0c7ea"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "f87a71c8-938c-5091-b6d8-6c8528b05653"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "31a1d4f8-5d72-5318-ba43-48d1afcc8720"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "33d8a1ea-c470-5bf4-bc03-5debbda2ae55"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "d1b7f8bb-6435-5b46-bdae-589b2bacfc5f"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T116-validation.json",
+                "sha256": "dff5de2c5a4be3d1edf9875974c9e81e2bbed94933ae6a790b3e8a833fe43b2d",
+                "passCount": 12,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:20.494Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Atomic multi-leg OMS groups and exact per-leg accounting are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "768db606-9062-539b-974a-d6f139a0c7ea"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "f87a71c8-938c-5091-b6d8-6c8528b05653"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "31a1d4f8-5d72-5318-ba43-48d1afcc8720"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "33d8a1ea-c470-5bf4-bc03-5debbda2ae55"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T116",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "d1b7f8bb-6435-5b46-bdae-589b2bacfc5f"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T116-validation.json",
+                "sha256": "dff5de2c5a4be3d1edf9875974c9e81e2bbed94933ae6a790b3e8a833fe43b2d",
+                "passCount": 12,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:20.494Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -6230,7 +6999,7 @@
     {
       "id": "T152",
       "title": "TH0.2 Workspace CLEO profile and coordinator",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T144",
@@ -6243,6 +7012,9 @@
         "cleo",
         "workspace",
         "coordination"
+      ],
+      "notes": [
+        "2026-09-03 02:01:42 UTC: Implemented independent workspace CLEO profiles, queued single-writer staging, atomic SQLite snapshots, idempotency, and crash recovery."
       ],
       "acceptance": [
         "A new workspace initializes an independent CLEO project with the selected workspace plan",
@@ -6261,21 +7033,230 @@
         "T003"
       ],
       "createdAt": "2026-09-03T00:04:30.027Z",
-      "updatedAt": "2026-09-03T00:04:30.027Z",
+      "updatedAt": "2026-09-03T02:01:47.263Z",
+      "completedAt": "2026-09-03T02:01:41.970Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:57:49.621Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:04:30.027Z"
+        "initializedAt": "2026-09-03T00:04:30.027Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Workspace CLEO profile single-writer coordinator snapshots and recovery are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "36afe635-978d-54ea-ae93-110ee1cf8acc"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "4f22c62f-2d0c-5ae0-9653-073f93ad3ced"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "86465b8e-a378-5eb6-9a85-47c65903a54b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "b6b8947f-a42f-5f81-a5e4-935b95e99acd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "45fcbca6-74b1-5246-896b-765974c3b18c"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T152-validation.json",
+                "sha256": "00bf629a7e4f6e9ab4eb257bc9872a74bfc7079787ab5a22d12a30c4515e27a8",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:50.836Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Workspace CLEO profile single-writer coordinator snapshots and recovery are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "36afe635-978d-54ea-ae93-110ee1cf8acc"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "4f22c62f-2d0c-5ae0-9653-073f93ad3ced"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "86465b8e-a378-5eb6-9a85-47c65903a54b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "b6b8947f-a42f-5f81-a5e4-935b95e99acd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "45fcbca6-74b1-5246-896b-765974c3b18c"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T152-validation.json",
+                "sha256": "00bf629a7e4f6e9ab4eb257bc9872a74bfc7079787ab5a22d12a30c4515e27a8",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:50.836Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Workspace CLEO profile single-writer coordinator snapshots and recovery are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "36afe635-978d-54ea-ae93-110ee1cf8acc"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "4f22c62f-2d0c-5ae0-9653-073f93ad3ced"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "86465b8e-a378-5eb6-9a85-47c65903a54b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "b6b8947f-a42f-5f81-a5e4-935b95e99acd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T152",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "45fcbca6-74b1-5246-896b-765974c3b18c"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T152-validation.json",
+                "sha256": "00bf629a7e4f6e9ab4eb257bc9872a74bfc7079787ab5a22d12a30c4515e27a8",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:57:50.836Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -8423,7 +9404,7 @@
     {
       "id": "T153",
       "title": "TH0.3 Workspace journal and Git publication",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T144",
@@ -8436,6 +9417,9 @@
         "git",
         "journal",
         "recovery"
+      ],
+      "notes": [
+        "2026-09-03 02:01:59 UTC: Implemented hash-chained command journaling, immutable artifacts, outbox recovery, and fenced Git publication with full provenance."
       ],
       "acceptance": [
         "Accepted commands and canonical mutations receive idempotency IDs and durable journal entries",
@@ -8453,21 +9437,212 @@
         "T003"
       ],
       "createdAt": "2026-09-03T00:04:34.627Z",
-      "updatedAt": "2026-09-03T00:04:34.627Z",
+      "updatedAt": "2026-09-03T02:02:04.399Z",
+      "completedAt": "2026-09-03T02:01:59.214Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:58:03.905Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:04:34.627Z"
+        "initializedAt": "2026-09-03T00:04:34.627Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Durable command journal fenced Git publication and crash reconciliation are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "79f7f238-028a-54e1-bd00-7c2470375fd5"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "b22f5373-a929-57c0-9be8-8cae707a8685"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "dc6e9b6b-a236-5218-a69f-8e09d716e554"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "aa11ca74-4d88-58bf-b673-7383692720d2"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T153-validation.json",
+                "sha256": "d00b30d9892989af5a0d6ff165d57595336a9d3149da0c315587b99d5e64a890",
+                "passCount": 14,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:58:04.698Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Durable command journal fenced Git publication and crash reconciliation are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "79f7f238-028a-54e1-bd00-7c2470375fd5"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "b22f5373-a929-57c0-9be8-8cae707a8685"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "dc6e9b6b-a236-5218-a69f-8e09d716e554"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "aa11ca74-4d88-58bf-b673-7383692720d2"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T153-validation.json",
+                "sha256": "d00b30d9892989af5a0d6ff165d57595336a9d3149da0c315587b99d5e64a890",
+                "passCount": 14,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:58:04.698Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Durable command journal fenced Git publication and crash reconciliation are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "79f7f238-028a-54e1-bd00-7c2470375fd5"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "b22f5373-a929-57c0-9be8-8cae707a8685"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "dc6e9b6b-a236-5218-a69f-8e09d716e554"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T153",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "aa11ca74-4d88-58bf-b673-7383692720d2"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T153-validation.json",
+                "sha256": "d00b30d9892989af5a0d6ff165d57595336a9d3149da0c315587b99d5e64a890",
+                "passCount": 14,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:58:04.698Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -10323,7 +11498,7 @@
     {
       "id": "T154",
       "title": "TH0.4 Operator sessions and model provider profiles",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T144",
@@ -10336,6 +11511,9 @@
         "auth",
         "foundry",
         "local-mode"
+      ],
+      "notes": [
+        "2026-09-03 02:02:17 UTC: Implemented loopback operator sessions, workspace authorization, fail-closed browser security, and backend-only Foundry capability preflight."
       ],
       "acceptance": [
         "Local UI sessions bind to the operator and selected workspace while defaulting to loopback-only access",
@@ -10355,21 +11533,230 @@
         "T003"
       ],
       "createdAt": "2026-09-03T00:04:39.260Z",
-      "updatedAt": "2026-09-03T00:04:39.260Z",
+      "updatedAt": "2026-09-03T02:02:22.657Z",
+      "completedAt": "2026-09-03T02:02:16.789Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:58:41.892Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:04:39.260Z"
+        "initializedAt": "2026-09-03T00:04:39.260Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Operator sessions workspace authorization browser controls and Foundry preflight are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "8f50aa64-c157-59a0-a625-1697f3631cdd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "725f2fe9-7cfa-5c7a-8081-bb9626bf6265"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "5dec8657-28e6-5e27-938c-8872f44523a1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "2f73f079-6f79-5f12-af14-89fc22b74d44"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "817a39ae-f0bf-5450-bdea-ca4cc67aeb21"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T154-validation.json",
+                "sha256": "d82ef4f946eb3a39ae7949d0bda42ee85ce33f25730e7ea9a8d8ba41c875ef00",
+                "passCount": 20,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:58:43.104Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Operator sessions workspace authorization browser controls and Foundry preflight are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "8f50aa64-c157-59a0-a625-1697f3631cdd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "725f2fe9-7cfa-5c7a-8081-bb9626bf6265"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "5dec8657-28e6-5e27-938c-8872f44523a1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "2f73f079-6f79-5f12-af14-89fc22b74d44"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "817a39ae-f0bf-5450-bdea-ca4cc67aeb21"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T154-validation.json",
+                "sha256": "d82ef4f946eb3a39ae7949d0bda42ee85ce33f25730e7ea9a8d8ba41c875ef00",
+                "passCount": 20,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:58:43.104Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Operator sessions workspace authorization browser controls and Foundry preflight are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "8f50aa64-c157-59a0-a625-1697f3631cdd"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "725f2fe9-7cfa-5c7a-8081-bb9626bf6265"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "5dec8657-28e6-5e27-938c-8872f44523a1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "2f73f079-6f79-5f12-af14-89fc22b74d44"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T154",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "817a39ae-f0bf-5450-bdea-ca4cc67aeb21"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T154-validation.json",
+                "sha256": "d82ef4f946eb3a39ae7949d0bda42ee85ce33f25730e7ea9a8d8ba41c875ef00",
+                "passCount": 20,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:58:43.104Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -11100,7 +12487,7 @@
     {
       "id": "T044",
       "title": "E5.5 Raw objects endpoint",
-      "status": "pending",
+      "status": "done",
       "priority": "low",
       "type": "task",
       "parentId": "T008",
@@ -11112,6 +12499,9 @@
         "api",
         "sas"
       ],
+      "notes": [
+        "2026-09-03 01:59:00 UTC: Implemented authenticated canonical raw-object SAS issuance with strict malformed, traversal, scope, and catalog authorization rejection."
+      ],
       "acceptance": [
         "Unknown, malformed, or out-of-scope paths cannot receive SAS credentials"
       ],
@@ -11119,21 +12509,158 @@
         "T043"
       ],
       "createdAt": "2026-09-01T03:22:37.125Z",
-      "updatedAt": "2026-09-01T03:27:53.908Z",
+      "updatedAt": "2026-09-03T01:59:04.483Z",
+      "completedAt": "2026-09-03T01:58:59.236Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:55:33.915Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:37.125Z"
+        "initializedAt": "2026-09-01T03:22:37.125Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Authenticated canonical raw-object SAS route is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T044",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "cbbab315-cab5-59e4-aecd-de2f0670b3c6"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-validation.json",
+                "sha256": "71f24c4932590c93f98882ffb603f9d709b887f1d159f63a13ee9fa600bc35f9",
+                "passCount": 19,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:55:35.048Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Authenticated canonical raw-object SAS route is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T044",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "cbbab315-cab5-59e4-aecd-de2f0670b3c6"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-validation.json",
+                "sha256": "71f24c4932590c93f98882ffb603f9d709b887f1d159f63a13ee9fa600bc35f9",
+                "passCount": 19,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:55:35.048Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Authenticated canonical raw-object SAS route is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T044",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "cbbab315-cab5-59e4-aecd-de2f0670b3c6"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-validation.json",
+                "sha256": "71f24c4932590c93f98882ffb603f9d709b887f1d159f63a13ee9fa600bc35f9",
+                "passCount": 19,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:55:35.048Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -11306,7 +12833,7 @@
     {
       "id": "T082",
       "title": "H1.5 ExecutionVenue protocol and ScriptedVenue",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -11319,6 +12846,9 @@
         "milestone.m0",
         "harness.h005",
         "venue"
+      ],
+      "notes": [
+        "2026-09-03 01:59:44 UTC: Implemented fire-and-forget venue commands and deterministic scripted lifecycle callbacks through EventBus."
       ],
       "acceptance": [
         "A toy submit, acknowledgement, partial fill, fill, and callback sequence has verified ordering",
@@ -11337,21 +12867,230 @@
         "T081"
       ],
       "createdAt": "2026-09-01T18:00:14.197Z",
-      "updatedAt": "2026-09-01T18:24:02.724Z",
+      "updatedAt": "2026-09-03T01:59:49.633Z",
+      "completedAt": "2026-09-03T01:59:44.598Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:56:14.745Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:14.197Z"
+        "initializedAt": "2026-09-01T18:00:14.197Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "ExecutionVenue and deterministic ScriptedVenue lifecycle are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "fdd28c21-ffd9-5c42-9413-0610f77559e6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "0da3ef77-8faf-571b-89cf-a6b27c4df451"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "0e6a4b1b-9c55-5181-82ed-d8b21c69bd80"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "1a96c629-c80a-5f42-8a7e-7342df7eccb4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "fb25b5b9-7609-56ee-b33d-622fdd8af9df"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T082-validation.json",
+                "sha256": "fbf41ddbabc36e36efbd09d1c16851674451726e1b578c5a266f30f7ed561d55",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:15.847Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "ExecutionVenue and deterministic ScriptedVenue lifecycle are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "fdd28c21-ffd9-5c42-9413-0610f77559e6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "0da3ef77-8faf-571b-89cf-a6b27c4df451"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "0e6a4b1b-9c55-5181-82ed-d8b21c69bd80"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "1a96c629-c80a-5f42-8a7e-7342df7eccb4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "fb25b5b9-7609-56ee-b33d-622fdd8af9df"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T082-validation.json",
+                "sha256": "fbf41ddbabc36e36efbd09d1c16851674451726e1b578c5a266f30f7ed561d55",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:15.847Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "ExecutionVenue and deterministic ScriptedVenue lifecycle are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "fdd28c21-ffd9-5c42-9413-0610f77559e6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "0da3ef77-8faf-571b-89cf-a6b27c4df451"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "0e6a4b1b-9c55-5181-82ed-d8b21c69bd80"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "1a96c629-c80a-5f42-8a7e-7342df7eccb4"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T082",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "fb25b5b9-7609-56ee-b33d-622fdd8af9df"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T082-validation.json",
+                "sha256": "fbf41ddbabc36e36efbd09d1c16851674451726e1b578c5a266f30f7ed561d55",
+                "passCount": 8,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:15.847Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -12389,7 +14128,7 @@
     {
       "id": "T093",
       "title": "H2.6 Fee and commission models",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T070",
@@ -12402,6 +14141,9 @@
         "milestone.m1",
         "harness.h016",
         "fees"
+      ],
+      "notes": [
+        "2026-09-03 02:00:03 UTC: Implemented exact YAML-selected equity, option, and crypto fees with deterministic attribution and aggregation."
       ],
       "acceptance": [
         "Fixtures calculate each asset-class schedule to the cent",
@@ -12418,21 +14160,230 @@
         "T079"
       ],
       "createdAt": "2026-09-01T18:00:59.214Z",
-      "updatedAt": "2026-09-01T18:25:37.246Z",
+      "updatedAt": "2026-09-03T02:00:07.926Z",
+      "completedAt": "2026-09-03T02:00:03.484Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:56:30.711Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:59.214Z"
+        "initializedAt": "2026-09-01T18:00:59.214Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Exact configurable equity option and crypto fee models are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2aea5868-b678-5edb-963d-2f0d82b96b3f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "e55545ac-e0f7-5396-abfc-c721f7865a89"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "248ae2bf-2023-5a72-83f4-023d0ce46b96"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a8eb7511-f7f6-59e3-bfc1-f3d420e01a05"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "3cc5e693-f378-505c-ad91-a5f2e26d3e38"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T093-validation.json",
+                "sha256": "b0cecaaa7ecd84eb55495f7395d81149bba1ecfcd4afce34b67c71ce654c9e1b",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:31.589Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Exact configurable equity option and crypto fee models are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2aea5868-b678-5edb-963d-2f0d82b96b3f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "e55545ac-e0f7-5396-abfc-c721f7865a89"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "248ae2bf-2023-5a72-83f4-023d0ce46b96"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a8eb7511-f7f6-59e3-bfc1-f3d420e01a05"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "3cc5e693-f378-505c-ad91-a5f2e26d3e38"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T093-validation.json",
+                "sha256": "b0cecaaa7ecd84eb55495f7395d81149bba1ecfcd4afce34b67c71ce654c9e1b",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:31.589Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Exact configurable equity option and crypto fee models are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "2aea5868-b678-5edb-963d-2f0d82b96b3f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "e55545ac-e0f7-5396-abfc-c721f7865a89"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "248ae2bf-2023-5a72-83f4-023d0ce46b96"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "a8eb7511-f7f6-59e3-bfc1-f3d420e01a05"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T093",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "3cc5e693-f378-505c-ad91-a5f2e26d3e38"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T093-validation.json",
+                "sha256": "b0cecaaa7ecd84eb55495f7395d81149bba1ecfcd4afce34b67c71ce654c9e1b",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:31.589Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -13500,7 +15451,7 @@
     {
       "id": "T094",
       "title": "H2.7 Virtual books and PortfolioHub",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -13513,6 +15464,9 @@
         "milestone.m1",
         "harness.h017",
         "portfolio"
+      ],
+      "notes": [
+        "2026-09-03 02:00:24 UTC: Implemented Decimal-exact virtual books and shared-account PortfolioHub conservation and PnL accounting."
       ],
       "acceptance": [
         "Ten thousand generated fill sequences preserve cash and position conservation",
@@ -13529,21 +15483,230 @@
         "T081"
       ],
       "createdAt": "2026-09-01T18:01:03.351Z",
-      "updatedAt": "2026-09-01T18:25:45.520Z",
+      "updatedAt": "2026-09-03T02:00:29.822Z",
+      "completedAt": "2026-09-03T02:00:24.392Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T01:56:45.891Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:03.351Z"
+        "initializedAt": "2026-09-01T18:01:03.351Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Decimal-exact virtual books and shared PortfolioHub accounting are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "f4c9cb8f-ebd3-51e2-a12c-7063bf68e56b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "b27a2803-3407-5ff1-958d-3ca1ecce355f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "df4250f9-6310-52dd-8cce-a0f6fcbfaa9d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "229ac9ec-0b46-5ce3-ab42-ac559cdd38aa"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "f506eeae-0c89-5f79-99d3-92720a4507da"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T094-validation.json",
+                "sha256": "55d68ce19d30957f759008ff8b6e928d21831c9fe7f1962df1d7eb282265870b",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:46.985Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Decimal-exact virtual books and shared PortfolioHub accounting are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "f4c9cb8f-ebd3-51e2-a12c-7063bf68e56b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "b27a2803-3407-5ff1-958d-3ca1ecce355f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "df4250f9-6310-52dd-8cce-a0f6fcbfaa9d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "229ac9ec-0b46-5ce3-ab42-ac559cdd38aa"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "f506eeae-0c89-5f79-99d3-92720a4507da"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T094-validation.json",
+                "sha256": "55d68ce19d30957f759008ff8b6e928d21831c9fe7f1962df1d7eb282265870b",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:46.985Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "e86fd5e2e935945a993346a0d67b47cc6520404d",
+                "shortSha": "e86fd5e"
+              },
+              {
+                "kind": "note",
+                "note": "Decimal-exact virtual books and shared PortfolioHub accounting are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "f4c9cb8f-ebd3-51e2-a12c-7063bf68e56b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "b27a2803-3407-5ff1-958d-3ca1ecce355f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "df4250f9-6310-52dd-8cce-a0f6fcbfaa9d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "229ac9ec-0b46-5ce3-ab42-ac559cdd38aa"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T094",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "f506eeae-0c89-5f79-99d3-92720a4507da"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T094-validation.json",
+                "sha256": "55d68ce19d30957f759008ff8b6e928d21831c9fe7f1962df1d7eb282265870b",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T044-T061-T082-T093-T094-T103-T116-T151-T152-T153-T154-wave-validation.json",
+                "sha256": "bf1efd23b354f4684ada418bd6c341b955db2493e1fe54b83899e4db29863d5b",
+                "passCount": 570,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T01:56:46.985Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -15332,6 +17495,7 @@
         "T023",
         "T046",
         "T048",
+        "T061",
         "T079"
       ],
       "T098": [
@@ -15451,6 +17615,7 @@
         "T005",
         "T008",
         "T009",
+        "T012",
         "T069"
       ],
       "T079": [
