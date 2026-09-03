@@ -1,0 +1,38 @@
+{
+  "taskId": "T080",
+  "timestamp": "2026-09-03T00:54:00Z",
+  "numTotalTests": 8,
+  "numPassedTests": 8,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "clock-and-event-ordering",
+      "status": "passed",
+      "command": "uv run pytest tests/harness/core/test_clock.py tests/harness/core/test_events.py",
+      "result": "8 focused tests passed for explicit clocks, timestamp/sequence/class/feed ordering, stale-event rejection, scheduled venue responses, and the deterministic event bus."
+    },
+    {
+      "name": "ten-thousand-event-golden",
+      "status": "passed",
+      "result": "Three independent 10,000-event quote/trade/fill floods produced the same dispatch hash: 949b0dd3fbf95bcb1b93baec06c20e8e5c66ad74e342df01b1e21d9eff769df2."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "commands": [
+        "uv run ruff check src/harness/core/clock.py src/harness/core/events.py tests/harness/core/test_clock.py tests/harness/core/test_events.py",
+        "uv run ruff format --check src/harness/core/clock.py src/harness/core/events.py tests/harness/core/test_clock.py tests/harness/core/test_events.py",
+        "uv run ty check src/harness/core/clock.py src/harness/core/events.py tests/harness/core/test_clock.py tests/harness/core/test_events.py"
+      ],
+      "result": "Focused Ruff lint, format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "Event ordering is timestamp, source sequence, fixed serialized event-class priority, then incoming feed order.",
+    "WallClock is an explicit adapter boundary; SimClock and the synchronous event kernel never read wall time implicitly."
+  ],
+  "limitations": [],
+  "blockers": []
+}

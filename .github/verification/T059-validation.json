@@ -1,0 +1,35 @@
+{
+  "taskId": "T059",
+  "timestamp": "2026-09-03T00:54:00Z",
+  "numTotalTests": 33,
+  "numPassedTests": 33,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "crypto-api-contract",
+      "status": "passed",
+      "command": "uv run pytest tests/lake/http/routes/test_catalog.py tests/lake/http/routes/test_ensure.py tests/lake/http/routes/test_query.py",
+      "result": "33 route tests passed, including weekend UTC coverage, open-day partial classification, stable authenticated ensure jobs, canonical BTC%2FUSD partitions, file queries, and bounded Sunday SQL."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "commands": [
+        "uv run ruff check src/lake/http/routes tests/lake/http/routes",
+        "uv run ruff format --check src/lake/http/routes tests/lake/http/routes",
+        "uv run ty check src/lake/http/routes tests/lake/http/routes"
+      ],
+      "result": "Focused Ruff lint, format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "Existing shared HTTP implementation already supported crypto; this task added complete 24/7 UTC API contract coverage without duplicating routes.",
+    "The current UTC day remains partial even when a catalog record claims complete coverage."
+  ],
+  "limitations": [
+    "Tests use in-memory repositories and local Parquet/DuckDB fixtures; no live Azure or provider request was required."
+  ],
+  "blockers": []
+}

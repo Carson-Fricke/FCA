@@ -1,0 +1,66 @@
+{
+  "wave": "T032-T059-T080-T081-T086",
+  "timestamp": "2026-09-03T00:54:00Z",
+  "numTotalTests": 436,
+  "numPassedTests": 436,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "commands": [
+        "uv lock --check",
+        "uv sync --locked --extra dev",
+        "uv run --extra dev ruff check .",
+        "uv run --extra dev ruff format --check .",
+        "uv run --extra dev ty check"
+      ],
+      "result": "The locked environment is current; Ruff lint, Ruff format over 199 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "436 tests passed in 29.94 seconds; one existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "package-build",
+      "status": "passed",
+      "command": "uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .",
+      "result": "The wheel contains the new harness configuration, clock/event, and OMS packages."
+    },
+    {
+      "name": "bicep-workflows-and-docs",
+      "status": "passed",
+      "result": "Both Bicep entrypoints and dev parameters passed build/lint; actionlint and action-validator passed all active workflows; Markdownlint passed the architecture and OIDC runbook."
+    },
+    {
+      "name": "hosted-ci",
+      "status": "passed",
+      "url": "https://github.com/Carson-Fricke/FCA/actions/runs/33701131458",
+      "result": "Exact implementation commit 81d99f6 passed hosted Python quality, tests, package build, and Bicep validation."
+    },
+    {
+      "name": "hosted-deployment",
+      "status": "passed",
+      "url": "https://github.com/Carson-Fricke/FCA/actions/runs/33701131711",
+      "result": "Exact implementation commit 81d99f6 passed immutable image publication, Azure OIDC deployment, digest verification, and private health smoke."
+    },
+    {
+      "name": "published-entrypoints",
+      "status": "passed",
+      "result": "Lake, Python module, harness, API, backtest-job, trader, harness core/configuration/OMS imports, and lake.app all passed direct smoke checks."
+    }
+  ],
+  "integrationHistory": [
+    "Focused integration aligned T086's event-ordering value with T080, updating its expected canonical hash, and reformatted one facade-test line.",
+    "The first repository pass found only Markdownlint MD013 findings in architecture tables; a document-scoped table-width exception was added.",
+    "The single permitted failure-driven repository rerun passed every gate."
+  ],
+  "limitations": [
+    "The hosted deployment emitted the existing Node.js 20 action deprecation warning.",
+    "The repository suite emitted the existing Starlette/httpx TestClient deprecation warning."
+  ]
+}

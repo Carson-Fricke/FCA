@@ -1,0 +1,38 @@
+{
+  "taskId": "T086",
+  "timestamp": "2026-09-03T00:54:00Z",
+  "numTotalTests": 16,
+  "numPassedTests": 16,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "typed-configuration",
+      "status": "passed",
+      "command": "uv run pytest tests/harness/configuration",
+      "result": "16 focused tests passed for API, backtest, and trader examples, precise invalid fields, runtime-only secret references, strict models, and deterministic constraints."
+    },
+    {
+      "name": "canonical-hashes",
+      "status": "passed",
+      "result": "Configuration hashes are stable across mapping order, Decimal representation, equivalent UTC datetimes, and filesystem locations; ordered rule changes remain hash-significant."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "commands": [
+        "uv run ruff check src/harness/configuration tests/harness/configuration",
+        "uv run ruff format --check src/harness/configuration tests/harness/configuration",
+        "uv run ty check src/harness/configuration tests/harness/configuration"
+      ],
+      "result": "Focused Ruff lint, format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "The capability lives under harness.configuration rather than an expanding flat harness/config.py module.",
+    "Supported secret fields contain only ${ENV_VAR} references in committed YAML; resolved SecretStr values are rejected from hashes."
+  ],
+  "limitations": [],
+  "blockers": []
+}

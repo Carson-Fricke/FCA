@@ -1,0 +1,38 @@
+{
+  "taskId": "T081",
+  "timestamp": "2026-09-03T00:54:00Z",
+  "numTotalTests": 109,
+  "numPassedTests": 109,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "single-leg-oms",
+      "status": "passed",
+      "command": "uv run pytest tests/harness/oms",
+      "result": "109 focused tests passed across the exhaustive status transition matrix, all order-type/time-in-force combinations, exact partial-fill ledgers, cancellation, replacement, IOC expiry, and GTC carry-over."
+    },
+    {
+      "name": "report-only-mutation",
+      "status": "passed",
+      "result": "After submission, validated ExecutionReport values are the only lifecycle and fill-ledger mutation path; invalid and duplicate reports leave state unchanged."
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "commands": [
+        "uv run ruff check src/harness/oms tests/harness/oms",
+        "uv run ruff format --check src/harness/oms tests/harness/oms",
+        "uv run ty check src/harness/oms tests/harness/oms"
+      ],
+      "result": "Focused Ruff lint, format, and ty checks passed."
+    }
+  ],
+  "decisions": [
+    "Replacement IDs are reserved before venue confirmation and become active only after a valid REPLACED report atomically terminates the original order.",
+    "Session boundary APIs emit deterministic directives; GTC carry-over does not synthesize a state transition."
+  ],
+  "limitations": [],
+  "blockers": []
+}
