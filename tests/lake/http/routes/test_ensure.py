@@ -34,10 +34,12 @@ def _request(
     start_date: str = "2024-01-18",
     end_date: str = "2024-01-19",
     symbol: str = "AAPL",
+    asset_class: str = "equity",
+    data_type: str = "trade",
 ) -> dict[str, str]:
     return {
-        "asset_class": "equity",
-        "data_type": "trade",
+        "asset_class": asset_class,
+        "data_type": data_type,
         "symbol": symbol,
         "start_date": start_date,
         "end_date": end_date,
@@ -180,6 +182,47 @@ def test_missing_ensure_persists_stable_job_invokes_launcher_and_polls() -> None
         "updated_at": "2024-01-22T12:00:00Z",
         "error_message": None,
     }
+
+
+def test_crypto_ensure_uses_utc_days_and_the_equity_job_contract() -> None:
+    catalog = InMemoryCatalogRepository()
+    jobs = InMemoryJobRepository()
+    launched: list[EnsureJob] = []
+    client = _client(catalog, jobs, launcher=launched.append)
+    body = _request(
+        asset_class="crypto",
+        data_type="quote",
+        symbol="BTC/USD",
+        start_date="2024-01-19",
+        end_date="2024-01-22",
+    )
+
+    unauthenticated = client.post("/v1/catalog/ensure", json=body)
+    first = _post(client, body)
+    second = _post(client, body)
+
+    assert unauthenticated.status_code == 401
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json() == second.json()
+    assert first.json()["state"] == "queued"
+    assert first.headers["location"] == f"/v1/jobs/{first.json()['job_id']}"
+    assert len(launched) == 1
+    assert launched[0].request.asset_class is AssetClass.CRYPTO
+    assert launched[0].request.symbol == "BTC/USD"
+    assert [gap.session_date.isoformat() for gap in launched[0].gaps] == [
+        "2024-01-19",
+        "2024-01-20",
+        "2024-01-21",
+        "2024-01-22",
+    ]
+    assert [gap.state for gap in launched[0].gaps] == [
+        "missing",
+        "missing",
+        "missing",
+        "partial",
+    ]
+    assert _get(client, first.json()["job_id"]).json()["state"] == "queued"
 
 
 @pytest.mark.parametrize(

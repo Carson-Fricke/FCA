@@ -39,10 +39,12 @@ def _record(
     status: CoverageStatus = CoverageStatus.COMPLETE,
     object_path: str | None = None,
     symbol: str = "AAPL",
+    asset_class: AssetClass = AssetClass.EQUITY,
+    data_type: DataType = DataType.TRADE,
 ) -> CoverageRecord:
     return CoverageRecord(
-        asset_class=AssetClass.EQUITY,
-        data_type=DataType.TRADE,
+        asset_class=asset_class,
+        data_type=data_type,
         symbol=symbol,
         session_date=session_date,
         status=status,
@@ -50,8 +52,8 @@ def _record(
         if object_path is not None
         else partition_path(
             session_date=session_date,
-            asset_class=AssetClass.EQUITY,
-            data_type=DataType.TRADE,
+            asset_class=asset_class,
+            data_type=data_type,
             symbol=symbol,
         )
         if status is CoverageStatus.COMPLETE
@@ -219,6 +221,86 @@ def test_option_file_query_returns_selected_osi_file_with_authentication() -> No
     assert issuer.paths == [_option_record(contract).object_path]
 
 
+def test_crypto_file_query_returns_canonical_files_for_every_weekend_utc_day() -> None:
+    session_dates = tuple(date(2024, 1, day) for day in range(19, 22))
+    catalog = InMemoryCatalogRepository(
+        [
+            _record(
+                asset_class=AssetClass.CRYPTO,
+                data_type=DataType.QUOTE,
+                symbol="BTC/USD",
+                session_date=session_date,
+            )
+            for session_date in session_dates
+        ]
+    )
+    issuer = RecordingSasIssuer()
+
+    response = _post(
+        _client(catalog, issuer),
+        _request(
+            asset_class="crypto",
+            data_type="quote",
+            symbol="btc/usd",
+            start_date="2024-01-19",
+            end_date="2024-01-21",
+        ),
+    )
+
+    expected_paths = [
+        partition_path(
+            session_date=session_date,
+            asset_class=AssetClass.CRYPTO,
+            data_type=DataType.QUOTE,
+            symbol="BTC/USD",
+        )
+        for session_date in session_dates
+    ]
+    assert response.status_code == 200
+    assert response.json()["results"] == {
+        "requested_sessions": 3,
+        "returned_files": 3,
+        "complete_sessions": 3,
+        "pending_sessions": 0,
+        "state": "complete",
+    }
+    assert [item["object_path"] for item in response.json()["files"]] == expected_paths
+    assert all(path.endswith("/BTC%2FUSD.parquet") for path in issuer.paths)
+    assert issuer.paths == expected_paths
+
+
+def test_crypto_file_query_treats_the_open_utc_day_as_partial() -> None:
+    issuer = RecordingSasIssuer()
+    catalog = InMemoryCatalogRepository(
+        [
+            _record(
+                asset_class=AssetClass.CRYPTO,
+                symbol="BTC/USD",
+                session_date=AS_OF.date(),
+            )
+        ]
+    )
+
+    response = _post(
+        _client(catalog, issuer),
+        _request(
+            asset_class="crypto",
+            symbol="BTC/USD",
+            start_date="2024-01-22",
+            end_date="2024-01-22",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "coverage_incomplete",
+        "message": (
+            "requested coverage is incomplete; set ensure=true to request coverage"
+        ),
+    }
+    assert issuer.paths == []
+
+
 def test_file_query_requires_authentication_and_rejects_sql_fields() -> None:
     client = _client(InMemoryCatalogRepository(), RecordingSasIssuer())
 
@@ -371,4 +453,62 @@ def test_option_sql_query_uses_only_selected_local_parquet(tmp_path: Path) -> No
     assert response.json()["rows"] == [
         {"symbol": contract.symbol, "price": "5.250000000000000000"}
     ]
+    assert response.json()["forced"] is False
+
+
+def test_crypto_sql_query_reads_a_canonical_sunday_partition(tmp_path: Path) -> None:
+    session_date = date(2024, 1, 21)
+    metadata = ParquetWriter(LocalFilesystemStore(tmp_path)).write(
+        [
+            {
+                "timestamp": "2024-01-21T12:30:00Z",
+                "symbol": "BTC/USD",
+                "trade_id": 1,
+                "exchange": "CBSE",
+                "price": "41234.125",
+                "size": "0.01",
+                "taker_side": "B",
+            }
+        ],
+        session_date=session_date,
+        asset_class=AssetClass.CRYPTO,
+        data_type=DataType.TRADE,
+        symbol="BTC/USD",
+    )
+    catalog = InMemoryCatalogRepository(
+        [
+            _record(
+                asset_class=AssetClass.CRYPTO,
+                symbol="BTC/USD",
+                session_date=session_date,
+                object_path=metadata.path,
+            )
+        ]
+    )
+    client = TestClient(
+        create_app(
+            bearer_token=TOKEN,
+            catalog_repository=catalog,
+            coverage_clock=lambda: AS_OF,
+            query_file_root=tmp_path,
+        )
+    )
+
+    response = _post(
+        client,
+        _request(
+            mode="sql",
+            asset_class="crypto",
+            symbol="btc/usd",
+            start_date="2024-01-21",
+            end_date="2024-01-21",
+            sql="SELECT symbol, trade_id FROM data",
+        ),
+    )
+
+    assert metadata.path == (
+        "date=2024-01-21/asset_class=crypto/data_type=trade/BTC%2FUSD.parquet"
+    )
+    assert response.status_code == 200
+    assert response.json()["rows"] == [{"symbol": "BTC/USD", "trade_id": 1}]
     assert response.json()["forced"] is False

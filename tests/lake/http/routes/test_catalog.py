@@ -14,7 +14,7 @@ from lake.catalog import (
     OptionType,
 )
 from lake.catalog.front_sets import DailyFrontSet, InMemoryDailyFrontSetRepository
-from lake.contracts import AssetClass, DataType
+from lake.contracts import AssetClass, DataType, partition_path
 from lake.coverage import CoverageState
 
 TOKEN = "test-secret"
@@ -35,8 +35,12 @@ def _record(
         session_date=session_date,
         status=status,
         object_path=(
-            f"date={session_date}/asset_class={asset_class.value}/"
-            f"data_type={data_type.value}/{symbol}.parquet"
+            partition_path(
+                session_date=session_date,
+                asset_class=asset_class,
+                data_type=data_type,
+                symbol=symbol,
+            )
         )
         if status is CoverageStatus.COMPLETE
         else None,
@@ -143,41 +147,52 @@ def test_authenticated_coverage_is_calendar_aware_and_returns_metadata() -> None
     assert body["entries"][2]["error_message"] == "source unavailable"
 
 
-def test_crypto_coverage_marks_the_open_utc_day_partial() -> None:
+def test_crypto_coverage_includes_every_utc_day_and_marks_the_open_day_partial() -> (
+    None
+):
+    session_dates = tuple(date(2024, 1, day) for day in range(18, 23))
     repository = InMemoryCatalogRepository(
         [
             _record(
                 asset_class=AssetClass.CRYPTO,
                 symbol="BTC/USD",
                 data_type=DataType.QUOTE,
-                session_date=date(2024, 1, 18),
+                session_date=session_date,
                 status=CoverageStatus.COMPLETE,
-            ),
-            _record(
-                asset_class=AssetClass.CRYPTO,
-                symbol="BTC/USD",
-                data_type=DataType.QUOTE,
-                session_date=date(2024, 1, 19),
-                status=CoverageStatus.COMPLETE,
-            ),
+            )
+            for session_date in session_dates
         ]
     )
 
     response = _get(
-        _client(repository, as_of=datetime(2024, 1, 19, 12, tzinfo=UTC)),
+        _client(repository, as_of=datetime(2024, 1, 22, 12, tzinfo=UTC)),
         asset_class="crypto",
         data_type="quote",
         symbol="btc/usd",
         start_date="2024-01-18",
-        end_date="2024-01-19",
+        end_date="2024-01-22",
     )
 
     assert response.status_code == 200
-    entries = response.json()["entries"]
-    assert [entry["status"] for entry in entries] == ["complete", "partial"]
-    assert entries[1]["is_partial"] is True
-    assert entries[1]["open_time"] == "2024-01-19T00:00:00Z"
-    assert entries[1]["close_time"] == "2024-01-20T00:00:00Z"
+    body = response.json()
+    entries = body["entries"]
+    assert body["symbol"] == "BTC/USD"
+    assert [entry["session_date"] for entry in entries] == [
+        session_date.isoformat() for session_date in session_dates
+    ]
+    assert [entry["status"] for entry in entries] == [
+        "complete",
+        "complete",
+        "complete",
+        "complete",
+        "partial",
+    ]
+    assert entries[2]["object_path"] == (
+        "date=2024-01-20/asset_class=crypto/data_type=quote/BTC%2FUSD.parquet"
+    )
+    assert entries[-1]["is_partial"] is True
+    assert entries[-1]["open_time"] == "2024-01-22T00:00:00Z"
+    assert entries[-1]["close_time"] == "2024-01-23T00:00:00Z"
 
 
 def test_coverage_endpoint_requires_authentication() -> None:

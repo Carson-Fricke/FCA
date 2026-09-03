@@ -1,0 +1,49 @@
+schema_version: 1
+shell: backtest
+run_id: invalid-cash
+start: "2024-01-02T14:30:00Z"
+end: "2024-01-03T20:00:00Z"
+clock: event_time
+event_ordering: timestamp_then_sequence
+seed: 1
+base_currency: USD
+initial_cash: -1.00
+data:
+  snapshot_id: fixture-v1
+  fingerprint: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  symbols: [SPY]
+  bar_interval: 1min
+strategy_instances:
+  -
+    instance_id: fixture
+    implementation: strategies.fixture:Strategy
+    bundle_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    capital_fraction: 1.0
+    symbols: [SPY]
+risk_pipeline:
+  on_reject: reject_order
+  rules:
+    -
+      rule_id: fixture
+      implementation: harness.risk.fixture:Rule
+fees:
+  currency: USD
+  rounding: half_even
+  rules:
+    -
+      fee_id: fixture
+      basis: flat
+      rate: 0.00
+      minimum: 0.00
+      side: both
+deployment:
+  name: fixture
+  target: local
+  environment: local
+  image: null
+  replicas: 1
+  restart_policy: never
+  network_access: disabled
+  resources:
+    cpu_cores: 1.0
+    memory_mib: 512

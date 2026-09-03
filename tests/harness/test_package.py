@@ -4,6 +4,7 @@ from pathlib import Path
 import harness
 
 CAPABILITIES = (
+    "configuration",
     "core",
     "data",
     "fills",
@@ -16,6 +17,7 @@ CAPABILITIES = (
     "testing",
     "venues",
 )
+IMPLEMENTED_CAPABILITIES = {"configuration", "core", "oms"}
 
 
 def test_product_and_capability_facades_import() -> None:
@@ -25,8 +27,13 @@ def test_product_and_capability_facades_import() -> None:
     assert [module.__name__ for module in modules] == [
         f"harness.{name}" for name in CAPABILITIES
     ]
-    assert modules[0].__all__
-    assert all(module.__all__ == () for module in modules[1:])
+    exports = dict(
+        zip(CAPABILITIES, (module.__all__ for module in modules), strict=True)
+    )
+    assert all(exports[name] for name in IMPLEMENTED_CAPABILITIES)
+    assert all(
+        exports[name] == () for name in set(CAPABILITIES) - IMPLEMENTED_CAPABILITIES
+    )
 
 
 def test_strategy_and_configuration_namespaces_exist() -> None:

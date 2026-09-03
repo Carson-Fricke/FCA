@@ -1,0 +1,20 @@
+schema_version: 1
+shell: api
+server:
+  host: 127.0.0.1
+  port: 70000
+  workers: 1
+  cors_origins: []
+auth:
+  bearer_token: "${HARNESS_API_BEARER_TOKEN}"
+deployment:
+  name: harness-api-local
+  target: local
+  environment: local
+  image: null
+  replicas: 1
+  restart_policy: on_failure
+  network_access: runtime_only
+  resources:
+    cpu_cores: 1.0
+    memory_mib: 512

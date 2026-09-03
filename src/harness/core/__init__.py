@@ -1,5 +1,12 @@
 """Deterministic event-kernel contracts and domain types."""
 
+from harness.core.clock import AdvanceableClock, Clock, SimClock, WallClock
+from harness.core.events import (
+    EVENT_CLASS_PRIORITY,
+    EventBus,
+    EventHandler,
+    EventQueue,
+)
 from harness.core.ids import EngineIdSource
 from harness.core.symbols import OsiSymbol, Symbol
 from harness.core.types import (
@@ -28,10 +35,16 @@ from harness.core.types import (
 
 __all__ = (
     "AccountSnapshot",
+    "AdvanceableClock",
     "Book",
     "BookLevel",
+    "Clock",
+    "EVENT_CLASS_PRIORITY",
     "EngineIdSource",
     "Event",
+    "EventBus",
+    "EventHandler",
+    "EventQueue",
     "EventType",
     "ExecutionReport",
     "ExecutionType",
@@ -45,10 +58,12 @@ __all__ = (
     "Position",
     "QuoteEvent",
     "Side",
+    "SimClock",
     "SingleLegOrder",
     "Symbol",
     "SymbolParquetCodec",
     "TimeInForce",
     "TradeEvent",
+    "WallClock",
     "exact_decimal",
 )

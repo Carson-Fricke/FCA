@@ -1,3 +1,37 @@
-"""Order-management capabilities."""
+"""Public facade for deterministic single-leg order management."""
 
-__all__: tuple[str, ...] = ()
+from harness.oms.manager import (
+    DuplicateOrderError,
+    ReplaceError,
+    ReplaceRecord,
+    ReplaceStatus,
+    SessionAction,
+    SessionDirective,
+    SingleLegOMS,
+    UnknownOrderError,
+)
+from harness.oms.state import (
+    DuplicateExecutionReportError,
+    ExecutionLedgerError,
+    IllegalTransitionError,
+    OmsError,
+    OrderSnapshot,
+    OrderStateMachine,
+)
+
+__all__ = (
+    "DuplicateExecutionReportError",
+    "DuplicateOrderError",
+    "ExecutionLedgerError",
+    "IllegalTransitionError",
+    "OmsError",
+    "OrderSnapshot",
+    "OrderStateMachine",
+    "ReplaceError",
+    "ReplaceRecord",
+    "ReplaceStatus",
+    "SessionAction",
+    "SessionDirective",
+    "SingleLegOMS",
+    "UnknownOrderError",
+)

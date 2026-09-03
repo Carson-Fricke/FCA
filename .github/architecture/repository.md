@@ -1,5 +1,7 @@
 # Repository Architecture
 
+<!-- markdownlint-disable MD013 -->
+
 ## Status
 
 This document describes the target repository and deployment boundaries. The
@@ -8,8 +10,9 @@ storage, identity, and Container Apps modules, and the market-lake
 resource-group infrastructure entry point are implemented. Versioned lake
 configuration, partition/schema/calendar contracts, and reusable image
 publication are also implemented. The quant-harness capability and process
-scaffold is implemented; its domain behavior, CI/deployment orchestration, and
-deployment remain planned.
+scaffold, core records, deterministic event ordering, single-leg OMS, and
+typed configuration are implemented; broader simulation, CI/deployment
+orchestration, and deployment remain planned.
 
 ## Product Boundaries
 
@@ -90,12 +93,28 @@ tests/lake/
 `-- storage/
 ```
 
-The quant-harness scaffold follows the same product-first rule under
-`src/harness` and `tests/harness`. Its `core`, `data`, `fills`, `oms`,
-`portfolio`, `results`, `risk`, `runtime`, `strategy`, `testing`, and `venues`
-facades reserve capability boundaries without defining contracts owned by later
-tasks. Thin `harness`, `api`, `backtest-job`, and `trader` command entrypoints
-make the future process boundaries explicit and fail clearly until composed.
+## Quant-Harness Packages
+
+`src/harness` mirrors the product-first structure under `tests/harness`.
+
+| Package | Responsibility |
+| --- | --- |
+| `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
+| `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
+| `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
+
+The event ordering contract is timestamp, source sequence, fixed serialized
+event-class priority, then incoming feed order. `SimClock` advances only from
+explicit events; `WallClock` is an adapter boundary and is not used by the
+synchronous simulation kernel. OMS status and fill-ledger changes occur only by
+applying validated execution reports. Configuration hashes normalize mapping
+order, exact decimals, and UTC timestamps, and reject resolved secret values.
+
+The remaining `data`, `fills`, `portfolio`, `results`, `risk`, `runtime`,
+`strategy`, `testing`, and `venues` facades reserve capability boundaries for
+later tasks. Thin `harness`, `api`, `backtest-job`, and `trader` command
+entrypoints make the future process boundaries explicit and fail clearly until
+composed.
 
 ## Shared Foundation
 
