@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-02T20:41:07.270Z",
+    "exportedAt": "2026-09-03T00:04:42.225Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 143
+      "nextId": 155
     },
-    "checksum": "8ed7ed225e2db01f",
-    "taskCount": 142,
+    "checksum": "0c160c1014194069",
+    "taskCount": 154,
     "exportMode": "full"
   },
   "selection": {
@@ -38,6 +38,8 @@
       "T122",
       "T128",
       "T132",
+      "T144",
+      "T151",
       "T003",
       "T014",
       "T017",
@@ -60,6 +62,8 @@
       "T123",
       "T129",
       "T133",
+      "T145",
+      "T152",
       "T004",
       "T015",
       "T018",
@@ -81,6 +85,9 @@
       "T124",
       "T130",
       "T134",
+      "T143",
+      "T146",
+      "T153",
       "T005",
       "T019",
       "T024",
@@ -101,6 +108,8 @@
       "T125",
       "T131",
       "T135",
+      "T147",
+      "T154",
       "T006",
       "T020",
       "T025",
@@ -118,6 +127,7 @@
       "T119",
       "T126",
       "T136",
+      "T148",
       "T007",
       "T026",
       "T038",
@@ -131,6 +141,7 @@
       "T127",
       "T138",
       "T140",
+      "T149",
       "T008",
       "T027",
       "T039",
@@ -142,6 +153,7 @@
       "T121",
       "T139",
       "T142",
+      "T150",
       "T009",
       "T075",
       "T085",
@@ -202,7 +214,7 @@
     "T028": {
       "type": "task",
       "title": "E3.1 Path-filtered Python and Bicep CI",
-      "status": "pending",
+      "status": "done",
       "parentId": "T006",
       "depends": [
         "T014",
@@ -282,7 +294,7 @@
     "T078": {
       "type": "task",
       "title": "H1.1 Extend FCA scaffold for quant-harness",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T014"
@@ -373,6 +385,24 @@
         "T025",
         "T034",
         "T088"
+      ]
+    },
+    "T144": {
+      "type": "epic",
+      "title": "TH0 Workspace and CLEO foundations",
+      "status": "pending",
+      "parentId": "T143",
+      "depends": [
+        "T003"
+      ]
+    },
+    "T151": {
+      "type": "task",
+      "title": "TH0.1 Workspace manifest and repository provider",
+      "status": "pending",
+      "parentId": "T144",
+      "depends": [
+        "T003"
       ]
     },
     "T003": {
@@ -503,7 +533,7 @@
     "T079": {
       "type": "task",
       "title": "H1.2 Core domain types and deterministic IDs",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T078"
@@ -580,10 +610,30 @@
     "T133": {
       "type": "task",
       "title": "H9.2 Alpaca delisted-history coverage sweep",
-      "status": "pending",
+      "status": "done",
       "parentId": "T077",
       "depends": [
         "T033"
+      ]
+    },
+    "T145": {
+      "type": "epic",
+      "title": "TH1 Local-first chat to backtest vertical slice",
+      "status": "pending",
+      "parentId": "T143",
+      "depends": [
+        "T069",
+        "T070",
+        "T071"
+      ]
+    },
+    "T152": {
+      "type": "task",
+      "title": "TH0.2 Workspace CLEO profile and coordinator",
+      "status": "pending",
+      "parentId": "T144",
+      "depends": [
+        "T003"
       ]
     },
     "T004": {
@@ -795,6 +845,33 @@
         "T132"
       ]
     },
+    "T143": {
+      "type": "saga",
+      "title": "FCA Thesis strategy research agent and workspace platform",
+      "status": "pending",
+      "parentId": null,
+      "depends": []
+    },
+    "T146": {
+      "type": "epic",
+      "title": "TH2 Research workflows and evidence",
+      "status": "pending",
+      "parentId": "T143",
+      "depends": [
+        "T069",
+        "T070",
+        "T071"
+      ]
+    },
+    "T153": {
+      "type": "task",
+      "title": "TH0.3 Workspace journal and Git publication",
+      "status": "pending",
+      "parentId": "T144",
+      "depends": [
+        "T003"
+      ]
+    },
     "T005": {
       "type": "epic",
       "title": "E2 Lake core library",
@@ -826,7 +903,7 @@
     "T031": {
       "type": "task",
       "title": "E3.4 Main-branch deploy workflow and health smoke",
-      "status": "pending",
+      "status": "done",
       "parentId": "T006",
       "depends": [
         "T028",
@@ -867,7 +944,7 @@
     "T055": {
       "type": "task",
       "title": "E7.4 Options ensure and query API coverage",
-      "status": "pending",
+      "status": "done",
       "parentId": "T010",
       "depends": [
         "T043",
@@ -995,6 +1072,24 @@
         "T083",
         "T089",
         "T132"
+      ]
+    },
+    "T147": {
+      "type": "epic",
+      "title": "TH3 Global Markdown knowledge library",
+      "status": "pending",
+      "parentId": "T143",
+      "depends": [
+        "T003"
+      ]
+    },
+    "T154": {
+      "type": "task",
+      "title": "TH0.4 Operator sessions and model provider profiles",
+      "status": "pending",
+      "parentId": "T144",
+      "depends": [
+        "T003"
       ]
     },
     "T006": {
@@ -1176,10 +1271,21 @@
         "T133"
       ]
     },
+    "T148": {
+      "type": "epic",
+      "title": "TH4 Protected testing and blinded RCA",
+      "status": "pending",
+      "parentId": "T143",
+      "depends": [
+        "T069",
+        "T070",
+        "T071"
+      ]
+    },
     "T007": {
       "type": "epic",
       "title": "E4 Equities SIP ingest",
-      "status": "pending",
+      "status": "done",
       "parentId": "T001",
       "depends": [
         "T004",
@@ -1312,6 +1418,18 @@
         "T020"
       ]
     },
+    "T149": {
+      "type": "epic",
+      "title": "TH5 Quant-harness activation integration",
+      "status": "pending",
+      "parentId": "T143",
+      "depends": [
+        "T069",
+        "T072",
+        "T073",
+        "T075"
+      ]
+    },
     "T008": {
       "type": "epic",
       "title": "E5 HTTP ensure and query API",
@@ -1335,7 +1453,7 @@
     "T039": {
       "type": "task",
       "title": "E4.7 Equity client, writer, worker, and coverage tests",
-      "status": "pending",
+      "status": "done",
       "parentId": "T007",
       "depends": [
         "T033",
@@ -1424,7 +1542,7 @@
     "T142": {
       "type": "task",
       "title": "E9.7 Local market-lake mode and developer runbook",
-      "status": "pending",
+      "status": "done",
       "parentId": "T012",
       "depends": [
         "T026",
@@ -1433,6 +1551,17 @@
         "T040",
         "T043",
         "T141"
+      ]
+    },
+    "T150": {
+      "type": "epic",
+      "title": "TH6 Local and Azure operations hardening",
+      "status": "pending",
+      "parentId": "T143",
+      "depends": [
+        "T069",
+        "T073",
+        "T076"
       ]
     },
     "T009": {
@@ -2106,7 +2235,7 @@
     {
       "id": "T028",
       "title": "E3.1 Path-filtered Python and Bicep CI",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T006",
@@ -2118,6 +2247,9 @@
         "github-actions",
         "ci"
       ],
+      "notes": [
+        "2026-09-02 22:09:53 UTC: Path-filtered Python and Bicep CI passed hosted Python quality, tests, package build, and Bicep validation."
+      ],
       "acceptance": [
         "CI fails on Python quality, test, package, or Bicep validation errors"
       ],
@@ -2126,21 +2258,84 @@
         "T020"
       ],
       "createdAt": "2026-09-01T03:21:41.026Z",
-      "updatedAt": "2026-09-01T03:25:52.896Z",
+      "updatedAt": "2026-09-02T22:09:57.158Z",
+      "completedAt": "2026-09-02T22:09:53.256Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T22:09:44.185Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:41.026Z"
+        "initializedAt": "2026-09-01T03:21:41.026Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "10428a5fffe4388267ab8b5898501d07b5061b89",
+                "shortSha": "10428a5"
+              },
+              {
+                "kind": "note",
+                "note": "Path-filtered Python and Bicep CI passed hosted run 33687898290"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T028",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "a08206ba-dfa7-54b3-ab66-19e75d996bd2"
+              }
+            ],
+            "capturedAt": "2026-09-02T22:07:45.942Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T028-validation.json",
+                "sha256": "833897ff6c8e7efde04590bfed0eb2942b18618380bff8b7f2863dd431b5ef81",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T028-T039-T078-T142-wave-validation.json",
+                "sha256": "51ebe9d7f9feccc5f41a2cf51c69a9c0d21585ea5f0472d2b0ab873c67998a15",
+                "passCount": 278,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T22:09:06.098Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T22:09:44.558Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -2749,7 +2944,7 @@
     {
       "id": "T078",
       "title": "H1.1 Extend FCA scaffold for quant-harness",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -2762,6 +2957,9 @@
         "milestone.m0",
         "harness.h001",
         "foundation"
+      ],
+      "notes": [
+        "2026-09-02 22:13:02 UTC: Added the capability-oriented quant-harness package, strategy/config namespaces, Typer process groups, five installed image commands, mirrored tests, and architecture guidance."
       ],
       "acceptance": [
         "A fresh checkout installs the development package and passes pytest plus Ruff",
@@ -2783,21 +2981,114 @@
         "T014"
       ],
       "createdAt": "2026-09-01T17:59:58.623Z",
-      "updatedAt": "2026-09-01T18:23:27.683Z",
+      "updatedAt": "2026-09-02T22:13:06.054Z",
+      "completedAt": "2026-09-02T22:13:01.905Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T22:12:52.952Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T17:59:58.623Z"
+        "initializedAt": "2026-09-01T17:59:58.623Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "17619acf6ec22714bf969b5d6ba1fdc4ab1be8f5",
+                "shortSha": "17619ac"
+              },
+              {
+                "kind": "note",
+                "note": "Capability scaffold in commit 10428a5 and corrected Docker command assertions passed hosted build and deployment run 33688127085"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T078",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "f8233ee8-6b90-51b7-99fb-da836bb4c0f1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T078",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "518fe1c6-e733-5e52-9b01-7ea275a2c0f9"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T078",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "e9ca7068-017c-5ec4-97d6-861c0a885e93"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T078",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "7ab47447-7b78-5197-994a-cacdb2f469d1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T078",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "2efa4a43-ef01-5440-9850-d2b830f426ae"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T078",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "4df52d06-c8b7-584c-a0e0-16caa2b338ce"
+              }
+            ],
+            "capturedAt": "2026-09-02T22:12:37.658Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T078-validation.json",
+                "sha256": "414a539f9bd8e8514e5dcabf3ec541503904a3682df6177d0e72ec2e8dd01085",
+                "passCount": 14,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T028-T039-T078-T142-wave-validation.json",
+                "sha256": "51ebe9d7f9feccc5f41a2cf51c69a9c0d21585ea5f0472d2b0ab873c67998a15",
+                "passCount": 278,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T22:12:45.500Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T22:12:53.264Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3226,6 +3517,95 @@
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T144",
+      "title": "TH0 Workspace and CLEO foundations",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T143",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Establish the isolated local or Azure workspace repository, workspace-scoped CLEO project, platform bundle, authentication, and durable coordination contracts for FCA Thesis.",
+      "labels": [
+        "thesis",
+        "workspace",
+        "cleo",
+        "foundations"
+      ],
+      "acceptance": [
+        "A new workspace receives an isolated Git repository, fresh CLEO project, policy, and platform bundle without inheriting another workspace's state",
+        "Local loopback operation and Azure-hosted operation share documented workspace, authentication, and persistence contracts",
+        "CLEO mutations, Git publication, execution journaling, and platform overlays have explicit ownership and recovery boundaries",
+        "Complete child T151: TH0.1 Workspace manifest and repository provider",
+        "Complete child T152: TH0.2 Workspace CLEO profile and coordinator",
+        "Complete child T153: TH0.3 Workspace journal and Git publication",
+        "Complete child T154: TH0.4 Operator sessions and model provider profiles"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-03T00:01:51.591Z",
+      "updatedAt": "2026-09-03T00:04:39.260Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T151",
+      "title": "TH0.1 Workspace manifest and repository provider",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T144",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Define the workspace manifest, strategy-family charter, local workspace directory provider, Azure workspace entity contract, and full workspace repository scaffold without inheriting state from another workspace.",
+      "labels": [
+        "thesis",
+        "workspace",
+        "git",
+        "local-mode"
+      ],
+      "acceptance": [
+        "A workspace manifest records owner, charter, limits, runtime profile, platform bundle, and repository identity",
+        "Local mode creates and opens a separate Git repository per workspace and refuses cross-workspace paths",
+        "The scaffold contains the documented workspace directories and tracks secrets only as references",
+        "Focused workspace isolation and repository lifecycle tests pass"
+      ],
+      "files": [
+        "src/thesis/workspaces/manifest.py",
+        "src/thesis/workspaces/local.py",
+        "src/thesis/workspaces/azure_contract.py",
+        "config/thesis/workspace.yaml",
+        "tests/thesis/workspaces/test_provider.py"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-03T00:04:24.969Z",
+      "updatedAt": "2026-09-03T00:04:24.969Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:04:24.969Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
       "relates": []
     },
     {
@@ -4483,7 +4863,7 @@
     {
       "id": "T079",
       "title": "H1.2 Core domain types and deterministic IDs",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -4496,6 +4876,9 @@
         "milestone.m0",
         "harness.h002",
         "contracts"
+      ],
+      "notes": [
+        "2026-09-02 23:58:27 UTC: Implemented Decimal-safe immutable harness core records, deterministic IDs, exact Parquet schemas/codecs, and split the former monolithic types module into capability-focused harness/core/types files."
       ],
       "acceptance": [
         "Property tests round-trip at least 50 real OSI symbols and every event schema through Parquet",
@@ -4514,21 +4897,114 @@
         "T078"
       ],
       "createdAt": "2026-09-01T18:00:02.555Z",
-      "updatedAt": "2026-09-01T18:23:36.294Z",
+      "updatedAt": "2026-09-02T23:58:33.429Z",
+      "completedAt": "2026-09-02T23:58:27.389Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T23:58:08.444Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:02.555Z"
+        "initializedAt": "2026-09-01T18:00:02.555Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "373dd17d7a6a4da888850e7700b41df1b0d97be6",
+                "shortSha": "373dd17"
+              },
+              {
+                "kind": "note",
+                "note": "Decimal-safe harness core records, deterministic IDs, exact Parquet schemas/codecs, and split types package are implemented"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T079",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "cf5d927a-4d76-50d9-8269-7eca9da27b85"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T079",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "483df44e-d03a-51c2-9b4b-b2f7234ae71c"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T079",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "8b546368-83b1-5cad-8eaa-1de1e28e1e20"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T079",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "51eab864-12e9-59b3-9432-8d5c69ce2bd1"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T079",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "7d16ee0e-4a73-5441-8794-be49078a4810"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T079",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "4aba45cc-a4b0-5fd2-83a9-a9cde19dfb8d"
+              }
+            ],
+            "capturedAt": "2026-09-02T23:57:35.534Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T079-validation.json",
+                "sha256": "f7cdc661970ff959c2ecab9ae33cf5880559aeef4be53094a30206473426e096",
+                "passCount": 9,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T031-T055-T079-T133-wave-validation.json",
+                "sha256": "2af9eb6635ec337bbaa939f5b0c204352e2adcb2e47afa67aab82ebf1fb7e165",
+                "passCount": 299,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T23:57:52.445Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T23:58:08.934Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -4898,7 +5374,7 @@
     {
       "id": "T133",
       "title": "H9.2 Alpaca delisted-history coverage sweep",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T077",
@@ -4912,6 +5388,9 @@
         "harness.h055",
         "research",
         "delistings"
+      ],
+      "notes": [
+        "2026-09-02 23:59:38 UTC: Implemented and ran the bounded Alpaca delisted-history coverage sweep across 30 representative acquisition, bankruptcy, delisted, and reused symbols; archived the credential-free report and updated the research memo."
       ],
       "acceptance": [
         "A repository research memo records per-symbol results and reproducible probe inputs",
@@ -4928,7 +5407,181 @@
         "T033"
       ],
       "createdAt": "2026-09-01T18:03:48.200Z",
-      "updatedAt": "2026-09-01T18:31:22.194Z",
+      "updatedAt": "2026-09-02T23:59:42.688Z",
+      "completedAt": "2026-09-02T23:59:37.713Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T23:59:19.097Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-01T18:03:48.200Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "373dd17d7a6a4da888850e7700b41df1b0d97be6",
+                "shortSha": "373dd17"
+              },
+              {
+                "kind": "note",
+                "note": "Bounded Alpaca delisted-history probe, 30-symbol research report, and explicit supplemental-listings recommendation are implemented"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T133",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "85106b04-c4cd-5f39-8e1e-0a1fe5bf64df"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T133",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "6a925da9-b187-5e9d-b505-a4332757445b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T133",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "abadcab4-5a2a-57b0-af37-1c6387e7f72f"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T133",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "51238751-4538-5065-85de-a785db1f606e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T133",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "4a17ce70-a045-5038-bef1-3aa965ecba07"
+              }
+            ],
+            "capturedAt": "2026-09-02T23:58:48.770Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T133-validation.json",
+                "sha256": "2a557c6758389a27b47a996cd8add625dd1e1174c4bde1ddc9ab2d0030b117f1",
+                "passCount": 6,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T031-T055-T079-T133-wave-validation.json",
+                "sha256": "2af9eb6635ec337bbaa939f5b0c204352e2adcb2e47afa67aab82ebf1fb7e165",
+                "passCount": 299,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T23:59:04.159Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T23:59:19.454Z",
+            "capturedBy": "opencode"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
+      "kind": "research",
+      "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T145",
+      "title": "TH1 Local-first chat to backtest vertical slice",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T143",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Deliver the first complete local Thesis outcome from workspace chat through Python strategy generation, quant-harness backtests, durable events, steering, and evidence reporting.",
+      "labels": [
+        "thesis",
+        "vertical-slice",
+        "chat",
+        "backtest"
+      ],
+      "acceptance": [
+        "A local operator can use Thesis chat to generate and test a Python strategy through published quant-harness contracts",
+        "The workflow survives UI disconnect and service restart while preserving tool results and Git artifacts",
+        "The first release labels historical results exploratory and does not give Thesis broker or activation capability"
+      ],
+      "depends": [
+        "T069",
+        "T070",
+        "T071"
+      ],
+      "createdAt": "2026-09-03T00:01:55.650Z",
+      "updatedAt": "2026-09-03T00:01:55.650Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T152",
+      "title": "TH0.2 Workspace CLEO profile and coordinator",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T144",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Create the per-workspace CLEO profile and queued single-writer coordinator for tracked workspace CLEO state, including safe snapshot, validation, and crash recovery behavior.",
+      "labels": [
+        "thesis",
+        "cleo",
+        "workspace",
+        "coordination"
+      ],
+      "acceptance": [
+        "A new workspace initializes an independent CLEO project with the selected workspace plan",
+        "Only the coordinator writes the canonical workspace CLEO database and concurrent proposals are queued",
+        "The profile tracks the canonical database while excluding WAL, journal, backup, and runtime files",
+        "Interrupted CLEO publication is recoverable without replaying a logical mutation twice",
+        "Focused coordinator and SQLite snapshot tests pass"
+      ],
+      "files": [
+        "src/thesis/cleo/profile.py",
+        "src/thesis/cleo/coordinator.py",
+        "src/thesis/cleo/recovery.py",
+        "tests/thesis/cleo/test_coordinator.py"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-03T00:04:30.027Z",
+      "updatedAt": "2026-09-03T00:04:30.027Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -4940,11 +5593,11 @@
         "lastAgent": null,
         "lastUpdated": null,
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:48.200Z"
+        "initializedAt": "2026-09-03T00:04:30.027Z"
       },
       "pipelineStage": "implementation",
-      "kind": "research",
-      "scope": "unit",
+      "kind": "work",
+      "scope": "feature",
       "relates": []
     },
     {
@@ -6507,6 +7160,134 @@
       "relates": []
     },
     {
+      "id": "T143",
+      "title": "FCA Thesis strategy research agent and workspace platform",
+      "status": "pending",
+      "priority": "medium",
+      "type": "saga",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Build FCA Thesis as a workspace-scoped chat agent and UI integration for hypothesis validation, strategy development, autonomous discovery, evidence, RCA, and consent-gated quant-harness activation.",
+      "acceptance": [
+        "A local operator can create isolated workspace repositories and use Thesis chat to generate, test, evaluate, and iterate strategies through published market-lake and quant-harness contracts",
+        "Thesis supports local operation and Azure-hosted operation without placing broker orders or bypassing harness risk and activation gates",
+        "Protected RCA, global Markdown knowledge, workspace/CLEO planning, and UI/API boundaries are implemented according to .github/architecture/fca-thesis.md",
+        "Complete child T144: TH0 Workspace and CLEO foundations",
+        "Complete child T145: TH1 Local-first chat to backtest vertical slice",
+        "Complete child T146: TH2 Research workflows and evidence",
+        "Complete child T147: TH3 Global Markdown knowledge library",
+        "Complete child T148: TH4 Protected testing and blinded RCA",
+        "Complete child T149: TH5 Quant-harness activation integration",
+        "Complete child T150: TH6 Local and Azure operations hardening"
+      ],
+      "createdAt": "2026-09-02T23:59:57.700Z",
+      "updatedAt": "2026-09-03T00:02:16.159Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-02T23:59:57.700Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T146",
+      "title": "TH2 Research workflows and evidence",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T143",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Add hypothesis validation, strategy development, autonomous discovery, RCA iteration, statistical discipline, influence ledgers, and evidence reporting over multiple workspace investigations.",
+      "labels": [
+        "thesis",
+        "research",
+        "evidence",
+        "workflows"
+      ],
+      "acceptance": [
+        "Thesis supports user-supplied hypothesis validation, strategy improvement, and bounded autonomous discovery workflows",
+        "Investigations preserve strategy lineages, observed and declared attempts, influence records, and evidence grades",
+        "Statistical and RCA workflow behavior distinguishes data, harness, implementation, statistical, regime, and premise failures"
+      ],
+      "depends": [
+        "T069",
+        "T070",
+        "T071"
+      ],
+      "createdAt": "2026-09-03T00:02:00.080Z",
+      "updatedAt": "2026-09-03T00:02:00.080Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T153",
+      "title": "TH0.3 Workspace journal and Git publication",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T144",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement the workspace command journal, publication outbox, fenced Git coordinator, immutable artifact references, and reconciliation between accepted state and repository history.",
+      "labels": [
+        "thesis",
+        "git",
+        "journal",
+        "recovery"
+      ],
+      "acceptance": [
+        "Accepted commands and canonical mutations receive idempotency IDs and durable journal entries",
+        "Git publication serializes workspace state and records workflow, model, input, and artifact hashes",
+        "Crash recovery reconciles journal, Git head, tool correlation IDs, and rebuildable queue state",
+        "Repository and journal integrity tests cover duplicate commands and interrupted publication"
+      ],
+      "files": [
+        "src/thesis/persistence/journal.py",
+        "src/thesis/persistence/git.py",
+        "src/thesis/persistence/reconcile.py",
+        "tests/thesis/persistence/test_journal.py"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-03T00:04:34.627Z",
+      "updatedAt": "2026-09-03T00:04:34.627Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:04:34.627Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T005",
       "title": "E2 Lake core library",
       "status": "done",
@@ -6771,7 +7552,7 @@
     {
       "id": "T031",
       "title": "E3.4 Main-branch deploy workflow and health smoke",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T006",
@@ -6783,6 +7564,9 @@
         "github-actions",
         "deployment"
       ],
+      "notes": [
+        "2026-09-02 23:56:00 UTC: Completed main-branch deployment and health-smoke verification using the existing immutable OIDC deployment workflow."
+      ],
       "acceptance": [
         "A successful workflow fully deploys a selected environment and verifies health",
         "No alternate production mutation path is documented"
@@ -6793,21 +7577,90 @@
         "T030"
       ],
       "createdAt": "2026-09-01T03:21:52.178Z",
-      "updatedAt": "2026-09-01T03:26:15.710Z",
+      "updatedAt": "2026-09-02T23:56:07.371Z",
+      "completedAt": "2026-09-02T23:55:58.524Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T23:55:43.383Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:21:52.178Z"
+        "initializedAt": "2026-09-01T03:21:52.178Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "df9a7be440e079a04c9479bf2c3f0656ba3583c2",
+                "shortSha": "df9a7be"
+              },
+              {
+                "kind": "note",
+                "note": "deploy-main workflow is the sole production mutation path and current hosted run 33696588091 passed deployment and health smoke"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T031",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "ed570340-4c4f-5cf4-b945-249a7960c31d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T031",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "c28c09cb-9480-576a-a19c-184ecfdc55bb"
+              }
+            ],
+            "capturedAt": "2026-09-02T23:55:12.379Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T031-wave-current.json",
+                "sha256": "e725d17212687bda1a646dccd2dd74e1068a936b9c06d11a8d32dcede7794022",
+                "passCount": 2,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T031-T055-T079-T133-wave-validation.json",
+                "sha256": "2af9eb6635ec337bbaa939f5b0c204352e2adcb2e47afa67aab82ebf1fb7e165",
+                "passCount": 299,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T23:55:27.201Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T23:55:43.763Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -7087,7 +7940,7 @@
     {
       "id": "T055",
       "title": "E7.4 Options ensure and query API coverage",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T010",
@@ -7099,6 +7952,9 @@
         "options",
         "api"
       ],
+      "notes": [
+        "2026-09-02 23:57:18 UTC: Added authenticated options catalog coverage, selected OSI/front-set resolution, option ensure jobs, file queries, and bounded SQL support with application repository wiring."
+      ],
       "acceptance": [
         "Options use the same authenticated job and retrieval contract as equities"
       ],
@@ -7107,21 +7963,84 @@
         "T054"
       ],
       "createdAt": "2026-09-01T03:23:14.898Z",
-      "updatedAt": "2026-09-01T03:29:24.427Z",
+      "updatedAt": "2026-09-02T23:57:22.065Z",
+      "completedAt": "2026-09-02T23:57:17.914Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T23:57:01.844Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:14.898Z"
+        "initializedAt": "2026-09-01T03:23:14.898Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "373dd17d7a6a4da888850e7700b41df1b0d97be6",
+                "shortSha": "373dd17"
+              },
+              {
+                "kind": "note",
+                "note": "Option catalog, ensure, file-query, bounded-SQL routes, and application repository wiring are implemented"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T055",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "027403c2-8777-5591-b5d3-4d72cd28c719"
+              }
+            ],
+            "capturedAt": "2026-09-02T23:56:33.902Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T055-validation.json",
+                "sha256": "42f0f925f2387f72541083c32574fda842e863f798c55a069ed89846bbe197ce",
+                "passCount": 41,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T031-T055-T079-T133-wave-validation.json",
+                "sha256": "2af9eb6635ec337bbaa939f5b0c204352e2adcb2e47afa67aab82ebf1fb7e165",
+                "passCount": 299,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T23:56:48.508Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T23:57:02.201Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -7803,6 +8722,92 @@
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T147",
+      "title": "TH3 Global Markdown knowledge library",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T143",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Implement the global Git-versioned Markdown knowledge corpus, hyperlinks, metadata, semantic and lexical search, separate ingestion, and workspace trust projections.",
+      "labels": [
+        "thesis",
+        "knowledge",
+        "markdown",
+        "search"
+      ],
+      "acceptance": [
+        "Every workspace can read a globally shared, versioned Markdown knowledge corpus with hyperlink and semantic search",
+        "Ingestion, curation, and publication are separate from retrieval and preserve page/version/source provenance",
+        "Workspace CLEO initialization can use a rebuildable version-pinned manifest without copying the corpus into Brain or Nexus as a second source of truth"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-03T00:02:03.996Z",
+      "updatedAt": "2026-09-03T00:02:03.996Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T154",
+      "title": "TH0.4 Operator sessions and model provider profiles",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T144",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Define local loopback operator sessions, workspace authorization, browser security boundaries, Azure AI Foundry provider authentication, and runtime capability preflight for local and Azure modes.",
+      "labels": [
+        "thesis",
+        "auth",
+        "foundry",
+        "local-mode"
+      ],
+      "acceptance": [
+        "Local UI sessions bind to the operator and selected workspace while defaulting to loopback-only access",
+        "Azure AI Foundry authentication uses backend-only Entra credentials and never exposes tokens to browser code or Git",
+        "Provider/model preflight reports unavailable capabilities without destroying offline workspace access",
+        "Non-loopback mode requires explicit authenticated TLS configuration and browser security checks",
+        "Focused session, authorization, and provider-preflight tests pass"
+      ],
+      "files": [
+        "src/thesis/auth/session.py",
+        "src/thesis/auth/workspace_access.py",
+        "src/thesis/providers/foundry.py",
+        "config/thesis/runtime.yaml",
+        "tests/thesis/auth/test_sessions.py"
+      ],
+      "depends": [
+        "T003"
+      ],
+      "createdAt": "2026-09-03T00:04:39.260Z",
+      "updatedAt": "2026-09-03T00:04:39.260Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-03T00:04:39.260Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
       "relates": []
     },
     {
@@ -8805,9 +9810,43 @@
       "relates": []
     },
     {
+      "id": "T148",
+      "title": "TH4 Protected testing and blinded RCA",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T143",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Build the protected-test authority integration, evidence-tier protocols, model cutoff registry, RCA subagent routing, aliasing strategies, and disclosure controls.",
+      "labels": [
+        "thesis",
+        "protected-test",
+        "rca",
+        "bias-controls"
+      ],
+      "acceptance": [
+        "Protected tests use an authority-owned exposure ledger, hidden allocation policy, and allowlisted release schema outside the normal reasoning path",
+        "RCA aliasing strategies and cutoff-constrained RCA are selected by evidence tier and never expose real mappings or unauthorized capabilities",
+        "Reuse, influence, cutoff overlap, source leakage, and empirical reidentification risk are recorded and reflected in evidence"
+      ],
+      "depends": [
+        "T069",
+        "T070",
+        "T071"
+      ],
+      "createdAt": "2026-09-03T00:02:07.865Z",
+      "updatedAt": "2026-09-03T00:02:07.865Z",
+      "pipelineStage": "implementation",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T007",
       "title": "E4 Equities SIP ingest",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -8836,8 +9875,9 @@
         "T005"
       ],
       "createdAt": "2026-09-01T03:15:34.634Z",
-      "updatedAt": "2026-09-01T03:33:04.189Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-02T22:10:35.722Z",
+      "completedAt": "2026-09-02T22:10:35.722Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -9975,6 +11015,41 @@
       "relates": []
     },
     {
+      "id": "T149",
+      "title": "TH5 Quant-harness activation integration",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T143",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Connect Thesis strategy bundles, scoped consent, and deterministic activation requests to quant-harness paper, shadow, and live runtime capabilities without duplicating execution logic.",
+      "labels": [
+        "thesis",
+        "quant-harness",
+        "activation",
+        "consent"
+      ],
+      "acceptance": [
+        "Thesis submits immutable strategy bundles and activation requests to quant-harness or its deterministic gatekeeper",
+        "Paper, shadow, and live activation are disabled by default and require scoped, expiring consent",
+        "Thesis never receives broker capability and does not reimplement portfolio, OMS, risk, state recovery, or strategy runtime behavior"
+      ],
+      "depends": [
+        "T069",
+        "T072",
+        "T073",
+        "T075"
+      ],
+      "createdAt": "2026-09-03T00:02:12.406Z",
+      "updatedAt": "2026-09-03T00:02:12.406Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "pending",
@@ -10128,7 +11203,7 @@
     {
       "id": "T039",
       "title": "E4.7 Equity client, writer, worker, and coverage tests",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T007",
@@ -10139,6 +11214,9 @@
       "labels": [
         "tests",
         "equities"
+      ],
+      "notes": [
+        "2026-09-02 22:10:36 UTC: Added secret-free recorded HTTP fixtures, golden AAPL/SPY Parquet round trips, exchange-calendar cases, retry cases, and duplicate-delivery tests."
       ],
       "acceptance": [
         "Core equities pipeline behavior is reproducible without live Alpaca or Azure access"
@@ -10152,21 +11230,84 @@
         "T038"
       ],
       "createdAt": "2026-09-01T03:22:20.113Z",
-      "updatedAt": "2026-09-01T03:27:15.873Z",
+      "updatedAt": "2026-09-02T22:10:39.604Z",
+      "completedAt": "2026-09-02T22:10:35.722Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T22:10:26.542Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:20.113Z"
+        "initializedAt": "2026-09-01T03:22:20.113Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "10428a5fffe4388267ab8b5898501d07b5061b89",
+                "shortSha": "10428a5"
+              },
+              {
+                "kind": "note",
+                "note": "Recorded AAPL and SPY retries, golden Parquet, calendar, and duplicate-delivery coverage are reproducible offline"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T039",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "422dd9e6-efc0-57ef-89d3-2680654439e4"
+              }
+            ],
+            "capturedAt": "2026-09-02T22:10:11.216Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T039-validation.json",
+                "sha256": "adfca92d988ae9a44c78083a5630ca23d90f8025c99b0a013837eb9d7311fe47",
+                "passCount": 45,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T028-T039-T078-T142-wave-validation.json",
+                "sha256": "51ebe9d7f9feccc5f41a2cf51c69a9c0d21585ea5f0472d2b0ab873c67998a15",
+                "passCount": 278,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T22:10:19.027Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T22:10:26.851Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -10608,7 +11749,7 @@
     {
       "id": "T142",
       "title": "E9.7 Local market-lake mode and developer runbook",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T012",
@@ -10623,7 +11764,8 @@
         "developer-experience"
       ],
       "notes": [
-        "2026-09-02 18:45:55 UTC: Dependency reconciliation: T014 is covered transitively by the owning E9 epic dependency chain; keep direct dependencies within the owning epic where possible."
+        "2026-09-02 18:45:55 UTC: Dependency reconciliation: T014 is covered transitively by the owning E9 epic dependency chain; keep direct dependencies within the owning epic where possible.",
+        "2026-09-02 22:13:47 UTC: Added a supported no-Azure local API/ingest/reset mode, real bounded Alpaca smoke, deterministic local Parquet/catalog/query persistence, safe cleanup, runbook, environment template, and scoped agent instruction."
       ],
       "acceptance": [
         "A clean developer machine with Python 3.12 and uv can install the documented project dependencies and start the supported local market-lake mode without Azure CLI, an Azure subscription, Docker, or Azure cloud credentials when the required Alpaca credentials are supplied",
@@ -10656,21 +11798,160 @@
         "T141"
       ],
       "createdAt": "2026-09-02T18:44:57.728Z",
-      "updatedAt": "2026-09-02T18:53:49.129Z",
+      "updatedAt": "2026-09-02T22:13:50.583Z",
+      "completedAt": "2026-09-02T22:13:46.773Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-02T22:13:37.418Z",
         "failureLog": [],
-        "initializedAt": "2026-09-02T18:44:57.728Z"
+        "initializedAt": "2026-09-02T18:44:57.728Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "10428a5fffe4388267ab8b5898501d07b5061b89",
+                "shortSha": "10428a5"
+              },
+              {
+                "kind": "note",
+                "note": "Supported local mode passed a bounded real AAPL smoke and safe reset with process-only credentials"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T142",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "121a2338-627e-5f30-bbfd-6b3d1ec39eea"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T142",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "eb49340f-b4d4-5e4e-a2fd-94b284cf0e08"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T142",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "75c2b1a8-ee4d-5d14-bc35-d920a491ae3a"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T142",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "eb5e63dd-6e52-5774-9169-ba99adc68b78"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T142",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "7b7c1798-9dd4-50f8-beb9-4ebeeeca4f1d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T142",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "933513c3-7c16-55dd-aee3-1e09e2d92d3b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T142",
+                "targetAcAlias": "AC7",
+                "resolvedAcUuid": "47fcb455-e45c-5f23-ad27-efdf54a8bea6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T142",
+                "targetAcAlias": "AC8",
+                "resolvedAcUuid": "175ff998-bf46-5212-bb4f-a019beb3b67c"
+              }
+            ],
+            "capturedAt": "2026-09-02T22:13:21.531Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T142-validation.json",
+                "sha256": "7779a5a71b6fc767f806fbad1d7b7e1fad25e34af19e269528f9bc831d0e406e",
+                "passCount": 15,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T028-T039-T078-T142-wave-validation.json",
+                "sha256": "51ebe9d7f9feccc5f41a2cf51c69a9c0d21585ea5f0472d2b0ab873c67998a15",
+                "passCount": 278,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-02T22:13:29.650Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 142 CLEO tasks through T142.\n"
+              }
+            ],
+            "capturedAt": "2026-09-02T22:13:37.738Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T150",
+      "title": "TH6 Local and Azure operations hardening",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T143",
+      "size": "large",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Complete local harness operation, Azure Thesis deployment integration, durable recovery, security testing, repository operations, and deferred UI design planning.",
+      "labels": [
+        "thesis",
+        "local",
+        "azure",
+        "operations"
+      ],
+      "acceptance": [
+        "Local and Azure runtime profiles satisfy equivalent workspace, artifact, authentication, recovery, and audit contracts",
+        "Azure operation uses managed identity, protected deployment workflows, isolated workspace resources, and explicit cost controls",
+        "Security, recovery, cross-workspace, prompt-injection, secret, confused-deputy, and repository-integrity tests pass before live activation is enabled"
+      ],
+      "depends": [
+        "T069",
+        "T073",
+        "T076"
+      ],
+      "createdAt": "2026-09-03T00:02:16.159Z",
+      "updatedAt": "2026-09-03T00:02:16.159Z",
+      "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -11799,6 +13080,21 @@
         "T134",
         "T135",
         "T136"
+      ],
+      "T143": [
+        "T144",
+        "T145",
+        "T146",
+        "T147",
+        "T148",
+        "T149",
+        "T150"
+      ],
+      "T144": [
+        "T151",
+        "T152",
+        "T153",
+        "T154"
       ]
     },
     "dependencies": {
@@ -11879,6 +13175,12 @@
         "T034",
         "T088"
       ],
+      "T144": [
+        "T003"
+      ],
+      "T151": [
+        "T003"
+      ],
       "T014": [
         "T013"
       ],
@@ -11955,6 +13257,14 @@
       ],
       "T133": [
         "T033"
+      ],
+      "T145": [
+        "T069",
+        "T070",
+        "T071"
+      ],
+      "T152": [
+        "T003"
       ],
       "T004": [
         "T003"
@@ -12039,6 +13349,14 @@
         "T094",
         "T132"
       ],
+      "T146": [
+        "T069",
+        "T070",
+        "T071"
+      ],
+      "T153": [
+        "T003"
+      ],
       "T005": [
         "T003"
       ],
@@ -12120,6 +13438,12 @@
         "T089",
         "T132"
       ],
+      "T147": [
+        "T003"
+      ],
+      "T154": [
+        "T003"
+      ],
       "T006": [
         "T003",
         "T004"
@@ -12197,6 +13521,11 @@
         "T132",
         "T133"
       ],
+      "T148": [
+        "T069",
+        "T070",
+        "T071"
+      ],
       "T007": [
         "T004",
         "T005"
@@ -12254,6 +13583,12 @@
         "T017",
         "T020"
       ],
+      "T149": [
+        "T069",
+        "T072",
+        "T073",
+        "T075"
+      ],
       "T008": [
         "T003",
         "T005",
@@ -12310,6 +13645,11 @@
         "T040",
         "T043",
         "T141"
+      ],
+      "T150": [
+        "T069",
+        "T073",
+        "T076"
       ],
       "T009": [
         "T004",
@@ -12392,7 +13732,8 @@
     },
     "roots": [
       "T001",
-      "T068"
+      "T068",
+      "T143"
     ]
   }
 }
