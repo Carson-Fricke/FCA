@@ -43,7 +43,7 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["harness*", "lake*"]
+include = ["harness*", "lake*", "thesis*"]
 namespaces = false
 
 [tool.pytest.ini_options]

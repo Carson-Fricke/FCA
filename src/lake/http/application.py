@@ -26,6 +26,7 @@ from lake.http.models import AuthCheckResponse, ErrorResponse, HealthResponse
 from lake.http.routes.catalog import create_catalog_router
 from lake.http.routes.ensure import EnsureJobLauncher, create_ensure_router
 from lake.http.routes.query import EnsureCallback, create_query_router
+from lake.http.routes.raw import create_raw_router
 from lake.query import BoundedDuckDBQuery, QueryLimits
 from lake.storage.ports import SasIssuer
 
@@ -210,6 +211,10 @@ def create_app(
     )
     application.include_router(
         create_query_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_raw_router(),
         dependencies=[Depends(authenticator)],
     )
 

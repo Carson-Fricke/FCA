@@ -1,0 +1,46 @@
+schema_version: 1
+default_runtime_profile: local-loopback
+
+runtime_profiles:
+  local-loopback:
+    profile_id: local-loopback
+    version: 1.0.0
+    bind_host: 127.0.0.1
+    tls_enabled: false
+    authentication: loopback
+    browser:
+      allowed_origins: ["http://127.0.0.1:5173", "http://localhost:5173"]
+      csrf_protection: true
+      http_only_cookies: true
+      secure_cookies: false
+      same_site: strict
+    provider_profile: foundry_developer
+  azure-managed:
+    profile_id: azure-managed
+    version: 1.0.0
+    bind_host: 0.0.0.0
+    tls_enabled: true
+    authentication: entra
+    browser:
+      allowed_origins: ["https://thesis.example.invalid"]
+      csrf_protection: true
+      http_only_cookies: true
+      secure_cookies: true
+      same_site: strict
+    provider_profile: foundry_managed_identity
+
+provider_profiles:
+  foundry_developer:
+    profile_id: foundry_developer
+    enabled: false
+    endpoint: https://configure-me.services.ai.azure.com
+    project_name: configure-me
+    model_deployment: configure-me
+    credential_mode: default_azure_credential
+  foundry_managed_identity:
+    profile_id: foundry_managed_identity
+    enabled: false
+    endpoint: https://configure-me.services.ai.azure.com
+    project_name: configure-me
+    model_deployment: configure-me
+    credential_mode: managed_identity

@@ -1,0 +1,66 @@
+{
+  "charter": {
+    "family_id": "equity-momentum",
+    "horizons": [
+      "intraday",
+      "swing"
+    ],
+    "markets": [
+      "us-equities"
+    ],
+    "objective": "Research related, falsifiable US equity momentum strategies.",
+    "out_of_scope": [
+      "Unrelated asset families",
+      "Unconsented live activation"
+    ],
+    "relationship": "Lineages share momentum hypotheses, data, and execution assumptions.",
+    "title": "US Equity Momentum"
+  },
+  "created_at": "2026-09-02T00:00:00Z",
+  "created_by": "local-operator",
+  "limits": {
+    "allowed_activation_modes": [
+      "paper"
+    ],
+    "allowed_strategy_classes": [
+      "directional-equity"
+    ],
+    "max_artifact_bytes": 1073741824,
+    "max_backtests_per_experiment": 100,
+    "max_concurrent_executions": 2,
+    "max_cpu_cores": 4,
+    "max_lake_rows_per_execution": 10000000,
+    "max_memory_mib": 8192,
+    "max_model_tokens_per_execution": 200000,
+    "max_repository_bytes": 10737418240,
+    "max_strategy_lineages": 25,
+    "max_wall_time_seconds": 14400,
+    "max_web_requests_per_execution": 100
+  },
+  "owner": {
+    "display_name": "Local Operator",
+    "identity_provider": "local",
+    "owner_id": "local-operator"
+  },
+  "platform_bundle": {
+    "bundle_id": "fca-thesis-platform",
+    "bundle_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "policy_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": "1.0.0"
+  },
+  "repository_identity": {
+    "default_branch": "main",
+    "provider": "local",
+    "repository_id": "equity-momentum"
+  },
+  "runtime_profile": {
+    "mode": "local",
+    "profile_id": "local-loopback",
+    "version": "1.0.0"
+  },
+  "schema_version": 1,
+  "secret_references": {
+    "broker_api_key": "${THESIS_BROKER_API_KEY}"
+  },
+  "workspace_id": "equity-momentum"
+}

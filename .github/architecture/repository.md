@@ -20,6 +20,8 @@ orchestration, and deployment remain planned.
 | --- | --- | --- |
 | `market-lake` | `src/lake` | Provider ingestion, stable lake schemas, storage and catalog access, coverage planning, and the lake API/client surface. |
 | `quant-harness` | `src/harness` | Deterministic simulation, OMS and portfolio behavior, results, paper and shadow runtimes, and capability-gated live execution. |
+| `lakeclient` | `src/lakeclient` | Consumer-facing authenticated ensure, polling, file-query, and Parquet access without provider or Azure credentials. |
+| `thesis` | `src/thesis` | Workspace-scoped research, coordination, persistence, authorization, and model-provider boundaries. |
 | Strategies | `strategies` | User-authored implementations of the public harness strategy contract. |
 
 Dependency direction is from the harness and strategies toward published
@@ -102,6 +104,10 @@ tests/lake/
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
+| `harness.data` | Live/replay market-data boundaries and synchronous normalized event inboxes. |
+| `harness.fills` | Configuration-selected exact fee and commission models. |
+| `harness.portfolio` | Strategy virtual books and shared-account aggregate accounting. |
+| `harness.venues` | Fire-and-forget execution boundary and deterministic scripted venue. |
 
 The event ordering contract is timestamp, source sequence, fixed serialized
 event-class priority, then incoming feed order. `SimClock` advances only from
@@ -110,11 +116,20 @@ synchronous simulation kernel. OMS status and fill-ledger changes occur only by
 applying validated execution reports. Configuration hashes normalize mapping
 order, exact decimals, and UTC timestamps, and reject resolved secret values.
 
-The remaining `data`, `fills`, `portfolio`, `results`, `risk`, `runtime`,
-`strategy`, `testing`, and `venues` facades reserve capability boundaries for
-later tasks. Thin `harness`, `api`, `backtest-job`, and `trader` command
-entrypoints make the future process boundaries explicit and fail clearly until
-composed.
+The remaining `results`, `risk`, `runtime`, `strategy`, and `testing` facades
+reserve capability boundaries for later tasks. Thin `harness`, `api`,
+`backtest-job`, and `trader` command entrypoints make the future process
+boundaries explicit and fail clearly until composed.
+
+## Thesis Packages
+
+Thesis remains a peer product. `thesis.workspaces` owns isolated workspace
+identity and repository scaffolds; `thesis.cleo` serializes workspace-local
+planning mutations; `thesis.persistence` journals accepted commands and fences
+Git publication; `thesis.auth` binds operator sessions to workspaces; and
+`thesis.providers` keeps model credentials behind backend-only protocols.
+Workspace identity remains `.thesis/workspace.yaml`; publication state is
+written separately to `.thesis/publication.json`.
 
 ## Shared Foundation
 

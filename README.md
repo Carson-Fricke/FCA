@@ -1,5 +1,7 @@
 # FCA
 
+<!-- markdownlint-disable MD013 -->
+
 FCA is a planned financial data and quantitative trading platform. One
 repository contains two products that share Python tooling, configuration,
 infrastructure patterns, a container image, and delivery workflows while
@@ -74,11 +76,15 @@ later tasks own their implementation.
 |   |   |-- query/                 File and bounded SQL query services
 |   |   |-- queue/                 Durable worker and dead-letter behavior
 |   |   `-- storage/               Parquet, Azure, capacity, and leases
-|   `-- harness/                   quant-harness capability and process scaffold
+|   |-- harness/                   quant-harness capabilities and processes
+|   |-- lakeclient/                Consumer-facing market-lake Python client
+|   `-- thesis/                    Workspace-scoped research platform
 |-- strategies/                    Harness strategy namespace
 |-- tests/
 |   |-- harness/                   Tests mirroring quant-harness capabilities
-|   `-- lake/                      Tests mirroring market-lake capabilities
+|   |-- lake/                      Tests mirroring market-lake capabilities
+|   |-- lakeclient/                Market-lake client contract tests
+|   `-- thesis/                    Thesis capability tests
 |-- Dockerfile                     Shared runtime image definition
 |-- pyproject.toml                 Shared Python project and tools
 `-- README.md                      Repository entry point

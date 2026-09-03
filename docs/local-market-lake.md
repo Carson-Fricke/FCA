@@ -1,5 +1,7 @@
 # Local Market Lake
 
+<!-- markdownlint-disable MD013 -->
+
 Local mode is the supported developer path for running the market-lake API and
 one bounded equity ingest on a workstation. It uses Alpaca's real market-data
 API, local Parquet files, a local JSON coverage catalog, and bounded DuckDB
@@ -105,6 +107,41 @@ curl --fail --silent --show-error \
 
 Both responses have `{"status":"ok"}`. A missing or incorrect bearer token
 returns HTTP 401 without disclosing the configured value.
+
+### Python Client Smoke
+
+`lakeclient` is the consumer-facing API client used by applications and the
+planned harness lake adapter. It sends the bearer token only to the configured
+market-lake API, polls ensure jobs, consumes API-issued file URLs, and never
+calls Alpaca or constructs Azure credentials.
+
+```python
+from datetime import date
+
+from lakeclient import AssetClass, DatasetRequest, DataType, EnsureAccepted
+from lakeclient import LakeClient, nbbo_spread
+
+request = DatasetRequest(
+    asset_class=AssetClass.EQUITY,
+    data_type=DataType.QUOTE,
+    symbol="AAPL",
+    start_date=date(2024, 1, 19),
+    end_date=date(2024, 1, 19),
+)
+with LakeClient(
+    "http://127.0.0.1:8000",
+    "replace-with-LAKE_API__BEARER_TOKEN",
+) as client:
+    result = client.ensure(request)
+    if isinstance(result, EnsureAccepted):
+        client.wait_for_job(result.job_id)
+    files = client.query_files(request)
+
+print(nbbo_spread(files.files).fetchall())
+```
+
+Supply the bearer value through runtime secret handling in real applications;
+do not commit it or hard-code it in source.
 
 ## Bounded Real-Alpaca Smoke
 

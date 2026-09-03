@@ -1,5 +1,18 @@
 """Public facade for deterministic single-leg order management."""
 
+from harness.oms.groups import (
+    DuplicateGroupError,
+    GroupError,
+    GroupFillError,
+    GroupLegSnapshot,
+    GroupOrderType,
+    GroupSnapshot,
+    GroupStatus,
+    GroupTransitionError,
+    MultiLegOMS,
+    MultiLegOrderGroup,
+    UnknownGroupError,
+)
 from harness.oms.manager import (
     DuplicateOrderError,
     ReplaceError,
@@ -21,10 +34,20 @@ from harness.oms.state import (
 
 __all__ = (
     "DuplicateExecutionReportError",
+    "DuplicateGroupError",
     "DuplicateOrderError",
     "ExecutionLedgerError",
+    "GroupError",
+    "GroupFillError",
+    "GroupLegSnapshot",
+    "GroupOrderType",
+    "GroupSnapshot",
+    "GroupStatus",
+    "GroupTransitionError",
     "IllegalTransitionError",
     "OmsError",
+    "MultiLegOMS",
+    "MultiLegOrderGroup",
     "OrderSnapshot",
     "OrderStateMachine",
     "ReplaceError",
@@ -34,4 +57,5 @@ __all__ = (
     "SessionDirective",
     "SingleLegOMS",
     "UnknownOrderError",
+    "UnknownGroupError",
 )

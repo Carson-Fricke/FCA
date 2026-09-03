@@ -17,7 +17,15 @@ CAPABILITIES = (
     "testing",
     "venues",
 )
-IMPLEMENTED_CAPABILITIES = {"configuration", "core", "oms"}
+IMPLEMENTED_CAPABILITIES = {
+    "configuration",
+    "core",
+    "data",
+    "fills",
+    "oms",
+    "portfolio",
+    "venues",
+}
 
 
 def test_product_and_capability_facades_import() -> None:

@@ -1,0 +1,23 @@
+# Exact-decimal fixture schedule for US retail execution simulations.
+schema_version: 1
+schedule_id: us-retail
+currency: USD
+rounding:
+  precision: 0.01
+  mode: half_even
+models:
+  equity:
+    model: equity_regulatory
+    commission_per_share: 0.005
+    commission_minimum: 1.00
+    sec_rate_bps: 0.278
+    taf_per_share: 0.000166
+    taf_maximum: 8.30
+  option:
+    model: options_per_contract
+    commission_per_contract: 0.65
+    fee_per_contract: 0.03
+  crypto:
+    model: crypto_maker_taker
+    maker_rate_bps: 15.00
+    taker_rate_bps: 25.00

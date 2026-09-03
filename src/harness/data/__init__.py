@@ -1,3 +1,19 @@
 """Historical and live market-data capabilities."""
 
-__all__: tuple[str, ...] = ()
+from harness.data.alpaca_ws import (
+    AlpacaSipInbox,
+    AlpacaSipSubscription,
+    AlpacaSipWebSocketFeed,
+    AlpacaWebSocketProtocolError,
+    AsyncWebSocketConnection,
+    AsyncWebSocketTransport,
+)
+
+__all__ = (
+    "AlpacaSipInbox",
+    "AlpacaSipSubscription",
+    "AlpacaSipWebSocketFeed",
+    "AlpacaWebSocketProtocolError",
+    "AsyncWebSocketConnection",
+    "AsyncWebSocketTransport",
+)
