@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T02:03:32.165Z",
+    "exportedAt": "2026-09-03T03:45:09.807Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 179
     },
-    "checksum": "e11de548c6707d1f",
+    "checksum": "1c76a6468a5c5a6d",
     "taskCount": 178,
     "exportMode": "full"
   },
@@ -1233,7 +1233,7 @@
     "T091": {
       "type": "task",
       "title": "H2.4 Matching engine and SimpleTouch fills",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T082"
@@ -1655,7 +1655,7 @@
     "T083": {
       "type": "task",
       "title": "H1.6 Strategy contract and context facade",
-      "status": "pending",
+      "status": "done",
       "parentId": "T069",
       "depends": [
         "T080",
@@ -1755,7 +1755,7 @@
     "T008": {
       "type": "epic",
       "title": "E5 HTTP ensure and query API",
-      "status": "pending",
+      "status": "done",
       "parentId": "T001",
       "depends": [
         "T003",
@@ -1789,7 +1789,7 @@
     "T046": {
       "type": "task",
       "title": "E5.7 API authentication, ensure, and query tests",
-      "status": "pending",
+      "status": "done",
       "parentId": "T008",
       "depends": [
         "T040",
@@ -11098,7 +11098,7 @@
     {
       "id": "T091",
       "title": "H2.4 Matching engine and SimpleTouch fills",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -11111,6 +11111,9 @@
         "milestone.m1",
         "harness.h014",
         "matching-engine"
+      ],
+      "notes": [
+        "2026-09-03 03:43:59 UTC: Completed deterministic simulated venue and SimpleTouch matching with market, limit, stop, stop-limit, partial, resting, cancellation, replacement, and bus-scheduled outcomes."
       ],
       "acceptance": [
         "Buy and sell scenario matrices cover crossing, resting, stop arming, partial, and non-fill outcomes",
@@ -11128,21 +11131,248 @@
         "T082"
       ],
       "createdAt": "2026-09-01T18:00:50.998Z",
-      "updatedAt": "2026-09-01T18:25:20.218Z",
+      "updatedAt": "2026-09-03T03:44:04.448Z",
+      "completedAt": "2026-09-03T03:43:58.945Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T03:43:03.818Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:50.998Z"
+        "initializedAt": "2026-09-01T18:00:50.998Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic simulated venue and SimpleTouch matching lifecycle are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "5e6441c4-2022-52e9-8cca-1e35c59ab829"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "26c4c138-34da-5770-89a6-7e122551cf37"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "906b931f-d298-5d8a-9d5a-f13776f81d6e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "d71d2f43-4d84-5181-a604-42916c9a6ee6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "32dd99f4-628e-53e0-b00e-251b43c9faed"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "740ffcc2-566c-5bb7-9f10-efba8f4da740"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T091-validation.json",
+                "sha256": "c6314c34c54a4ffa8e1e6870cc3a56df573522a003ffc58753a40fa65a64a007",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:43:05.085Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic simulated venue and SimpleTouch matching lifecycle are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "5e6441c4-2022-52e9-8cca-1e35c59ab829"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "26c4c138-34da-5770-89a6-7e122551cf37"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "906b931f-d298-5d8a-9d5a-f13776f81d6e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "d71d2f43-4d84-5181-a604-42916c9a6ee6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "32dd99f4-628e-53e0-b00e-251b43c9faed"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "740ffcc2-566c-5bb7-9f10-efba8f4da740"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T091-validation.json",
+                "sha256": "c6314c34c54a4ffa8e1e6870cc3a56df573522a003ffc58753a40fa65a64a007",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:43:05.085Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "note",
+                "note": "Deterministic simulated venue and SimpleTouch matching lifecycle are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "5e6441c4-2022-52e9-8cca-1e35c59ab829"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "26c4c138-34da-5770-89a6-7e122551cf37"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "906b931f-d298-5d8a-9d5a-f13776f81d6e"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "d71d2f43-4d84-5181-a604-42916c9a6ee6"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "32dd99f4-628e-53e0-b00e-251b43c9faed"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T091",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "740ffcc2-566c-5bb7-9f10-efba8f4da740"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T091-validation.json",
+                "sha256": "c6314c34c54a4ffa8e1e6870cc3a56df573522a003ffc58753a40fa65a64a007",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:43:05.085Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -14076,7 +14306,7 @@
     {
       "id": "T083",
       "title": "H1.6 Strategy contract and context facade",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T069",
@@ -14089,6 +14319,9 @@
         "milestone.m0",
         "harness.h006",
         "strategy-api"
+      ],
+      "notes": [
+        "2026-09-03 03:43:39 UTC: Completed mode-independent strategy callbacks, constrained StrategyContext, deterministic subscriptions, fill-before-on_fill binding, and class-plus-parameter strategy binding."
       ],
       "acceptance": [
         "A reference strategy exercises every callback in documented order",
@@ -14106,21 +14339,248 @@
         "T082"
       ],
       "createdAt": "2026-09-01T18:00:18.219Z",
-      "updatedAt": "2026-09-01T18:24:12.461Z",
+      "updatedAt": "2026-09-03T03:43:45.262Z",
+      "completedAt": "2026-09-03T03:43:39.629Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T03:42:42.389Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:18.219Z"
+        "initializedAt": "2026-09-01T18:00:18.219Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "note",
+                "note": "Mode-independent strategy callbacks constrained context and deterministic binding are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "063e055d-fe48-5766-b90e-1f8fe2649d0b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "932b6030-f9df-580f-a4d3-ac8ab08c7e6d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "76909707-8262-5d69-85f4-5d1a501cd168"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "66112e29-3998-587d-a40e-90c0614ab431"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ce96992a-1eaa-522c-8a5f-a9040d675843"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "e9005633-8180-5fc3-9b7f-b503db3619c9"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T083-validation.json",
+                "sha256": "05db93087e80f0051080d5554696aae392939a3f5721b5516d4b8aea9f41d31b",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:42:43.638Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "note",
+                "note": "Mode-independent strategy callbacks constrained context and deterministic binding are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "063e055d-fe48-5766-b90e-1f8fe2649d0b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "932b6030-f9df-580f-a4d3-ac8ab08c7e6d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "76909707-8262-5d69-85f4-5d1a501cd168"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "66112e29-3998-587d-a40e-90c0614ab431"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ce96992a-1eaa-522c-8a5f-a9040d675843"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "e9005633-8180-5fc3-9b7f-b503db3619c9"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T083-validation.json",
+                "sha256": "05db93087e80f0051080d5554696aae392939a3f5721b5516d4b8aea9f41d31b",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:42:43.638Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "note",
+                "note": "Mode-independent strategy callbacks constrained context and deterministic binding are implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "063e055d-fe48-5766-b90e-1f8fe2649d0b"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC2",
+                "resolvedAcUuid": "932b6030-f9df-580f-a4d3-ac8ab08c7e6d"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC3",
+                "resolvedAcUuid": "76909707-8262-5d69-85f4-5d1a501cd168"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC4",
+                "resolvedAcUuid": "66112e29-3998-587d-a40e-90c0614ab431"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC5",
+                "resolvedAcUuid": "ce96992a-1eaa-522c-8a5f-a9040d675843"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T083",
+                "targetAcAlias": "AC6",
+                "resolvedAcUuid": "e9005633-8180-5fc3-9b7f-b503db3619c9"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T083-validation.json",
+                "sha256": "05db93087e80f0051080d5554696aae392939a3f5721b5516d4b8aea9f41d31b",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:42:43.638Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -15053,7 +15513,7 @@
     {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -15083,8 +15543,9 @@
         "T007"
       ],
       "createdAt": "2026-09-01T03:15:38.157Z",
-      "updatedAt": "2026-09-01T03:33:12.176Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-03T03:43:20.589Z",
+      "completedAt": "2026-09-03T03:43:20.589Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -15316,7 +15777,7 @@
     {
       "id": "T046",
       "title": "E5.7 API authentication, ensure, and query tests",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T008",
@@ -15327,6 +15788,9 @@
       "labels": [
         "api",
         "tests"
+      ],
+      "notes": [
+        "2026-09-03 03:43:21 UTC: Completed API authentication, ensure, query, SAS scope, and cost-control contract coverage with in-memory and local adapters."
       ],
       "acceptance": [
         "API tests cover happy paths and security or cost-control rejection paths without Azure"
@@ -15340,21 +15804,173 @@
         "T045"
       ],
       "createdAt": "2026-09-01T03:22:44.054Z",
-      "updatedAt": "2026-09-01T03:28:10.340Z",
+      "updatedAt": "2026-09-03T03:43:25.930Z",
+      "completedAt": "2026-09-03T03:43:20.589Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T03:42:13.185Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:44.054Z"
+        "initializedAt": "2026-09-01T03:22:44.054Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "commit",
+                "sha": "deb89a81337de73c51ff6c3896bdcb75e87b45f2",
+                "shortSha": "deb89a8"
+              },
+              {
+                "kind": "note",
+                "note": "API happy-path and security/cost-control contract coverage is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T046",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "091d67f8-5acf-59a9-8aae-66f716d34269"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-validation.json",
+                "sha256": "9ec9cfb80e00600e14ef92309541617700093c4a91405a15aad067ed4bd81977",
+                "passCount": 44,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:42:14.396Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "commit",
+                "sha": "deb89a81337de73c51ff6c3896bdcb75e87b45f2",
+                "shortSha": "deb89a8"
+              },
+              {
+                "kind": "note",
+                "note": "API happy-path and security/cost-control contract coverage is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T046",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "091d67f8-5acf-59a9-8aae-66f716d34269"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-validation.json",
+                "sha256": "9ec9cfb80e00600e14ef92309541617700093c4a91405a15aad067ed4bd81977",
+                "passCount": 44,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:42:14.396Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ce268c83c49f8066bee14e78fa2fb6cc4eebebf9",
+                "shortSha": "ce268c8"
+              },
+              {
+                "kind": "commit",
+                "sha": "deb89a81337de73c51ff6c3896bdcb75e87b45f2",
+                "shortSha": "deb89a8"
+              },
+              {
+                "kind": "note",
+                "note": "API happy-path and security/cost-control contract coverage is implemented and published"
+              },
+              {
+                "kind": "satisfies",
+                "targetTaskId": "T046",
+                "targetAcAlias": "AC1",
+                "resolvedAcUuid": "091d67f8-5acf-59a9-8aae-66f716d34269"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-validation.json",
+                "sha256": "9ec9cfb80e00600e14ef92309541617700093c4a91405a15aad067ed4bd81977",
+                "passCount": 44,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T046-T083-T088-T091-wave-validation.json",
+                "sha256": "9cbc87e39d2fe594772b5a11d73f8b2bf2d5a0447e2c4e96dc1a4a943cd30453",
+                "passCount": 611,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T03:42:14.396Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
