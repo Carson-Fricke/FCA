@@ -35,9 +35,10 @@ def test_every_execution_shell_example_validates() -> None:
     assert isinstance(trader, TraderConfig)
     assert backtest.start == datetime(2024, 1, 2, 14, 30, tzinfo=UTC)
     assert backtest.data.symbols == ("SPY",)
-    assert backtest.strategy_instances[0].parameters["entry_threshold"] == Decimal(
-        "0.015"
+    assert backtest.strategy_instances[0].implementation == (
+        "strategies.harness_examples.intraday_momentum:IntradayMomentumStrategy"
     )
+    assert backtest.strategy_instances[0].parameters["threshold"] == "0.05"
     assert trader.market_data.credentials["api_key"] == "${HARNESS_ALPACA_API_KEY}"
 
 
@@ -127,7 +128,7 @@ def test_hash_does_not_depend_on_configuration_file_location(tmp_path: Path) -> 
         ("api", "3b1a01c125bb246c965d877fdac68fb0d12a78941a89c20a4c62df508b51b676"),
         (
             "backtest",
-            "3af3663e10da6f0dd9f0819d03f02497282fce8474a398b2bfa9b271f0a50682",
+            "9076d70fa89c3624ce292824665f45f5c6e5afa74837f92084ee7d1bd629adf5",
         ),
         (
             "trader",

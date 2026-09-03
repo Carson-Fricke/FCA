@@ -103,8 +103,8 @@ uv run --python 3.12 --extra dev ty check
 uv run --python 3.12 --extra dev pytest
 ```
 
-The quant-harness scaffold publishes process help while later roadmap tasks own
-the API, backtest, and trader implementations:
+The quant-harness backtest runtime is implemented; the API and trader commands
+remain scaffolded while their roadmap tasks own their implementations:
 
 ```powershell
 uv run harness --help
@@ -115,6 +115,22 @@ uv run trader --help
 
 Launching a scaffolded harness process without `--help` fails explicitly until
 its owning implementation task lands.
+
+## Local Backtest Benchmark
+
+The committed backtest example runs end to end on the deterministic synthetic
+benchmark fixture, offline and without credentials, and produces byte-identical
+artifacts on every run:
+
+```powershell
+uv run backtest-job --config config/harness/backtest.yaml
+```
+
+Artifacts are written under `.local/backtests/<run_id>/backtest.json` and
+include the reproducibility manifest hash and run artifact digest. Pass
+`--data-dir <path>` to replay a user-supplied local Parquet lake directory
+(`date=/asset_class=/data_type=/SYMBOL.parquet`) instead of the built-in
+fixture.
 
 ## Local Market Lake
 

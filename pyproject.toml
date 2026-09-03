@@ -39,11 +39,11 @@ backtest-job = "harness.cli.backtest_job:main"
 trader = "harness.cli.trader:main"
 
 [tool.setuptools]
-package-dir = { "" = "src" }
+package-dir = { "" = "src", "strategies" = "strategies" }
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["harness*", "lake*", "thesis*"]
+where = ["src", "."]
+include = ["harness*", "lake*", "thesis*", "strategies*"]
 namespaces = false
 
 [tool.pytest.ini_options]
