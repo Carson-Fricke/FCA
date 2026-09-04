@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-04T18:17:27.367Z",
+    "exportedAt": "2026-09-04T20:39:38.408Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 190
+      "nextId": 206
     },
-    "checksum": "bae9ff641080f725",
-    "taskCount": 189,
+    "checksum": "5d8b8a3a118b91c0",
+    "taskCount": 202,
     "exportMode": "full"
   },
   "selection": {
@@ -174,6 +174,7 @@
       "T160",
       "T187",
       "T189",
+      "T191",
       "T008",
       "T027",
       "T039",
@@ -186,6 +187,7 @@
       "T139",
       "T142",
       "T150",
+      "T205",
       "T009",
       "T075",
       "T085",
@@ -204,7 +206,18 @@
       "T097",
       "T181",
       "T012",
-      "T137"
+      "T137",
+      "T190",
+      "T192",
+      "T193",
+      "T194",
+      "T195",
+      "T196",
+      "T197",
+      "T198",
+      "T199",
+      "T200",
+      "T204"
     ],
     "includeChildren": false
   },
@@ -384,7 +397,7 @@
     "T115": {
       "type": "task",
       "title": "H6.1 Point-in-time option contract universe",
-      "status": "pending",
+      "status": "done",
       "parentId": "T074",
       "depends": [
         "T055",
@@ -516,7 +529,7 @@
     "T182": {
       "type": "task",
       "title": "H10.1 Zig toolchain, image stage, and repository gates",
-      "status": "pending",
+      "status": "done",
       "parentId": "T181",
       "depends": []
     },
@@ -636,7 +649,7 @@
     "T070": {
       "type": "epic",
       "title": "H2 M1 Equities backtest engine",
-      "status": "done",
+      "status": "pending",
       "parentId": "T068",
       "depends": [
         "T005",
@@ -668,7 +681,7 @@
     "T099": {
       "type": "task",
       "title": "H3.2 Standard metrics and attribution",
-      "status": "pending",
+      "status": "done",
       "parentId": "T071",
       "depends": [
         "T098"
@@ -1278,7 +1291,7 @@
     "T101": {
       "type": "task",
       "title": "H3.4 Backtest results store and catalog",
-      "status": "pending",
+      "status": "done",
       "parentId": "T071",
       "depends": [
         "T096",
@@ -1642,7 +1655,7 @@
     "T188": {
       "type": "task",
       "title": "Agent instructions for source folder READMEs and file purposes",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": []
     },
@@ -1830,6 +1843,13 @@
       "parentId": "T150",
       "depends": []
     },
+    "T191": {
+      "type": "task",
+      "title": "Production adapters for the backtest results store",
+      "status": "pending",
+      "parentId": "T071",
+      "depends": []
+    },
     "T008": {
       "type": "epic",
       "title": "E5 HTTP ensure and query API",
@@ -1969,6 +1989,13 @@
         "T148",
         "T149"
       ]
+    },
+    "T205": {
+      "type": "task",
+      "title": "Retire BRAIN embedding backfill workaround after upstream fix #1217",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
     },
     "T009": {
       "type": "epic",
@@ -2180,6 +2207,104 @@
       "status": "done",
       "parentId": "T069",
       "depends": []
+    },
+    "T190": {
+      "type": "task",
+      "title": "Structural no-look-ahead hardening for the backtest engine",
+      "status": "done",
+      "parentId": "T070",
+      "depends": []
+    },
+    "T192": {
+      "type": "task",
+      "title": "Capability-scoped read-only strategy clock",
+      "status": "done",
+      "parentId": "T070",
+      "depends": []
+    },
+    "T193": {
+      "type": "task",
+      "title": "Venue and event-emission capability narrowing",
+      "status": "done",
+      "parentId": "T070",
+      "depends": []
+    },
+    "T194": {
+      "type": "task",
+      "title": "Opaque StrategyHistory facade",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T192"
+      ]
+    },
+    "T195": {
+      "type": "task",
+      "title": "Engine wiring for the data capability",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T194"
+      ]
+    },
+    "T196": {
+      "type": "task",
+      "title": "Schedule provenance for strategy-emitted events",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T192"
+      ]
+    },
+    "T197": {
+      "type": "task",
+      "title": "Book-view scope and cross-book visibility decision",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T196"
+      ]
+    },
+    "T198": {
+      "type": "task",
+      "title": "Import-boundary and type separation for the strategy surface",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T192"
+      ]
+    },
+    "T199": {
+      "type": "task",
+      "title": "Adversarial look-ahead detector suite and lint CI sweep",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T194",
+        "T195",
+        "T196",
+        "T197"
+      ]
+    },
+    "T200": {
+      "type": "task",
+      "title": "Golden data-path scenario coverage",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T193",
+        "T195"
+      ]
+    },
+    "T204": {
+      "type": "task",
+      "title": "Architecture doc correction for structural look-ahead",
+      "status": "pending",
+      "parentId": "T070",
+      "depends": [
+        "T199",
+        "T200"
+      ]
     }
   },
   "tasks": [
@@ -4406,7 +4531,7 @@
     {
       "id": "T115",
       "title": "H6.1 Point-in-time option contract universe",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T074",
@@ -4436,21 +4561,79 @@
         "T088"
       ],
       "createdAt": "2026-09-01T18:02:32.542Z",
-      "updatedAt": "2026-09-01T18:28:45.533Z",
+      "updatedAt": "2026-09-04T19:45:04.237Z",
+      "completedAt": "2026-09-04T19:45:00.276Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T19:41:32.220Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:02:32.542Z"
+        "initializedAt": "2026-09-01T18:02:32.542Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/data/options_universe.py",
+                    "sha256": "d8d8fb960e429619dc6b94da5ffae427d9b103ae024f1b8451f3cb8e023acdac"
+                  },
+                  {
+                    "path": "tests/harness/data/test_options_universe.py",
+                    "sha256": "b37a5ce9d86c5261484b672776c9c6568f1616af23186bec490fd6d91d5cf4ea"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T19:41:16.222Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T115-validation.json",
+                "sha256": "0f1e718949faa4479188500f181a6730b493be760af6046aab26123f208363f8",
+                "passCount": 17,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T19:41:24.177Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T19:41:32.333Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "options-universe",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -5455,7 +5638,7 @@
     {
       "id": "T182",
       "title": "H10.1 Zig toolchain, image stage, and repository gates",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T181",
@@ -5486,21 +5669,107 @@
         ".github/instructions/copilot-instructions.md"
       ],
       "createdAt": "2026-09-04T16:44:31.761Z",
-      "updatedAt": "2026-09-04T16:44:31.761Z",
+      "updatedAt": "2026-09-04T19:44:31.718Z",
+      "completedAt": "2026-09-04T19:44:27.226Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T19:42:37.821Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T16:44:31.761Z"
+        "initializedAt": "2026-09-04T16:44:31.761Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "build.zig",
+                    "sha256": "581895a16920013d102a3634ac85550ea2eece5e17006873714c8125ef1dfe9c"
+                  },
+                  {
+                    "path": "build.zig.zon",
+                    "sha256": "842a2967637a7ed6655c824aa889f9565202bafe40dc1460264477a5610a11ed"
+                  },
+                  {
+                    "path": "src/harness/native/root.zig",
+                    "sha256": "2ce8613bcc36cca346ea073283faac6480ce7992430199f38509d612355f75e5"
+                  },
+                  {
+                    "path": "Dockerfile",
+                    "sha256": "45a6712a08b461cab004e3abdfa29092e22448b5903e0bb107a07f80f00d07cd"
+                  },
+                  {
+                    "path": ".dockerignore",
+                    "sha256": "bbde5a924eede0a19e8cd4de94504ac0d54b9ef26c3801ee6254c34716f5de04"
+                  },
+                  {
+                    "path": ".gitignore",
+                    "sha256": "9bd9d26d018abca8e3f5517af7e0943e84473072595f143273719b7fbf9ed992"
+                  },
+                  {
+                    "path": ".github/workflows/python-bicep-ci.yml",
+                    "sha256": "20cf723519ac4d58cb7e55252ee3c9720fd74c224a473e98d9b0e25c82b1b0c3"
+                  },
+                  {
+                    "path": ".github/instructions/copilot-instructions.md",
+                    "sha256": "f4096c0dd5574815abf5b28ee52020c2f04a1f098bf26c23c3c06619c2c9694c"
+                  },
+                  {
+                    "path": ".github/architecture/repository.md",
+                    "sha256": "85a1302c74691a73fc249fe862d5c019b92f9933eb0831247a96618e668c59ee"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T19:42:21.901Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T182-validation.json",
+                "sha256": "c3c8808989148d1ac0c573a816235dbbd9e3b962ab9673b9c006fc1615623101",
+                "passCount": 25,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T19:42:29.840Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T19:42:37.927Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "zig-toolchain",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -6818,7 +7087,7 @@
     {
       "id": "T070",
       "title": "H2 M1 Equities backtest engine",
-      "status": "done",
+      "status": "pending",
       "priority": "high",
       "type": "epic",
       "parentId": "T068",
@@ -6832,7 +7101,9 @@
         "backtest"
       ],
       "notes": [
-        "2026-09-03 01:17:34 UTC: Mirrors child dependency T088 -> T061 across the owning T070 and T012 epics."
+        "2026-09-03 01:17:34 UTC: Mirrors child dependency T088 -> T061 across the owning T070 and T012 epics.",
+        "[2026-09-04T18:27:54.460Z] completion-history: completedAt=2026-09-04T04:42:29.490Z",
+        "[2026-09-04T18:27:54.460Z] Reopened by add of child T190 (done parent gained an unsatisfied child)"
       ],
       "acceptance": [
         "A repeatable SPY and QQQ backtest runs over lake data with pessimistic fills, exact accounting, bounded memory, and no look-ahead",
@@ -6845,7 +7116,17 @@
         "Complete child T094: H2.7 Virtual books and PortfolioHub",
         "Complete child T095: H2.8 Risk pipeline and core rules",
         "Complete child T096: H2.9 Backtest runner and reproducibility manifest",
-        "Complete child T097: H2.10 Reference equity strategies and integration tests"
+        "Complete child T097: H2.10 Reference equity strategies and integration tests",
+        "Complete child T192: Capability-scoped read-only strategy clock",
+        "Complete child T193: Venue and event-emission capability narrowing",
+        "Complete child T194: Opaque StrategyHistory facade",
+        "Complete child T195: Engine wiring for the data capability",
+        "Complete child T196: Schedule provenance for strategy-emitted events",
+        "Complete child T197: Book-view scope and cross-book visibility decision",
+        "Complete child T198: Import-boundary and type separation for the strategy surface",
+        "Complete child T199: Adversarial look-ahead detector suite and lint CI sweep",
+        "Complete child T200: Golden data-path scenario coverage",
+        "Complete child T204: Architecture doc correction for structural look-ahead"
       ],
       "depends": [
         "T005",
@@ -6855,8 +7136,7 @@
         "T069"
       ],
       "createdAt": "2026-09-01T17:55:23.154Z",
-      "updatedAt": "2026-09-04T04:42:29.490Z",
-      "completedAt": "2026-09-04T04:42:29.490Z",
+      "updatedAt": "2026-09-04T19:34:27.764Z",
       "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
@@ -7296,7 +7576,7 @@
     {
       "id": "T099",
       "title": "H3.2 Standard metrics and attribution",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T071",
@@ -7327,21 +7607,79 @@
         "T098"
       ],
       "createdAt": "2026-09-01T18:01:24.406Z",
-      "updatedAt": "2026-09-04T16:57:07.964Z",
+      "updatedAt": "2026-09-04T19:44:43.369Z",
+      "completedAt": "2026-09-04T19:44:39.565Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T19:40:34.551Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:24.406Z"
+        "initializedAt": "2026-09-01T18:01:24.406Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/results/metrics.py",
+                    "sha256": "83426f227adbaca8176bf3e3f6e47ea7568582f41df7a5c272fc5dc54a786b99"
+                  },
+                  {
+                    "path": "tests/harness/results/test_metrics.py",
+                    "sha256": "dc3ff64fc5a02089b60ee8afc1ef258acdbc045372dcd21d39bebd71abd7438f"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T19:38:41.648Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T099-validation.json",
+                "sha256": "d6bac0e62047547b3bbb3a911a859cedd76be7d6acc8ceb195812ba11a0f39a1",
+                "passCount": 30,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T19:38:50.169Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T19:40:34.728Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "metrics",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -9052,21 +9390,50 @@
         "T182"
       ],
       "createdAt": "2026-09-04T16:44:35.845Z",
-      "updatedAt": "2026-09-04T16:45:25.681Z",
+      "updatedAt": "2026-09-04T20:37:47.569Z",
       "verification": {
         "passed": false,
         "round": 1,
         "gates": {
           "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T20:37:47.569Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T16:44:35.845Z"
+        "initializedAt": "2026-09-04T16:44:35.845Z",
+        "evidence": {
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T183-validation.json",
+                "sha256": "a2ca3c1ac12da6f651a732d8f24e3d11544d79930f1a4999d390cfbf5e7efa6a",
+                "passCount": 17,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T20:37:37.324Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T20:37:47.798Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
       "pipelineStage": "research",
+      "assignee": "zig-ffi",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -10206,14 +10573,15 @@
         "Complete child T099: H3.2 Standard metrics and attribution",
         "Complete child T100: H3.3 Offline static HTML report",
         "Complete child T101: H3.4 Backtest results store and catalog",
-        "Complete child T102: H3.5 Backtest query API and job launcher"
+        "Complete child T102: H3.5 Backtest query API and job launcher",
+        "Complete child T191: Production adapters for the backtest results store"
       ],
       "depends": [
         "T069",
         "T070"
       ],
       "createdAt": "2026-09-01T17:55:26.350Z",
-      "updatedAt": "2026-09-01T18:22:25.322Z",
+      "updatedAt": "2026-09-04T19:31:06.778Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -13524,7 +13892,7 @@
     {
       "id": "T101",
       "title": "H3.4 Backtest results store and catalog",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T071",
@@ -13553,21 +13921,79 @@
         "T098"
       ],
       "createdAt": "2026-09-01T18:01:32.618Z",
-      "updatedAt": "2026-09-01T18:26:44.125Z",
+      "updatedAt": "2026-09-04T19:44:53.691Z",
+      "completedAt": "2026-09-04T19:44:49.868Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T19:41:07.869Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:32.618Z"
+        "initializedAt": "2026-09-01T18:01:32.618Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/results/store.py",
+                    "sha256": "0c7dd80dae0543f90e9de8314a4cc21fd66489d3156d51ef1051825f7e719f18"
+                  },
+                  {
+                    "path": "tests/harness/results/test_store.py",
+                    "sha256": "c8066d2256d818675ea5625c92454654de9723355cba126966348a7e975fcac4"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T19:40:51.882Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T101-validation.json",
+                "sha256": "51fc9c5b8d9edf20d01eb7f3e8b93faaf6907ca189416980f2e1720962195db9",
+                "passCount": 23,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T19:40:59.861Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T19:41:07.978Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "results-store",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -16808,7 +17234,7 @@
     {
       "id": "T188",
       "title": "Agent instructions for source folder READMEs and file purposes",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T150",
@@ -16831,21 +17257,79 @@
         "AGENTS.md"
       ],
       "createdAt": "2026-09-04T17:01:17.362Z",
-      "updatedAt": "2026-09-04T17:01:17.362Z",
+      "updatedAt": "2026-09-04T19:45:14.333Z",
+      "completedAt": "2026-09-04T19:45:10.733Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T19:44:06.413Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T17:01:17.362Z"
+        "initializedAt": "2026-09-04T17:01:17.362Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/instructions/source-documentation.instructions.md",
+                    "sha256": "62a17158637319fc820d0b383dc5f2941ad82609bad08fbbc0358790bdc7b4bb"
+                  },
+                  {
+                    "path": "AGENTS.md",
+                    "sha256": "c6d38a47a7a19a70963675129a2e7a86db25351cbd72e8d895838e983b36e4db"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T19:42:45.989Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T19:42:58.525Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T182-T099-T101-T115-T188-T190-wave-validation.json",
+                "sha256": "2a10a31f4cdc2666a1aedcdbd2131b1843f90239fc778c511057cec9bd378065",
+                "passCount": 1048,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T19:44:06.418Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "source-docs",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -18659,6 +19143,50 @@
       "relates": []
     },
     {
+      "id": "T191",
+      "title": "Production adapters for the backtest results store",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T071",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "T101 exposed lake port gaps: BlobStore/AzureBlobStore support only replace (no read/list_prefix/delete_prefix) and lake.catalog has no run-record port. Add an Azure blob adapter implementing run-blob read, list, and prefix-delete over ContainerClient, a lake-side run-catalog port with AzureTableRunRepository entity mapping, and wire BacktestResultsStore to the production adapters; consider unifying RunStatus with JobState.",
+      "labels": [
+        "results-store",
+        "followup"
+      ],
+      "acceptance": [
+        "BacktestResultsStore runs against real Azure blob + table adapters in integration tests behind a credential guard",
+        "In-memory adapters and store behavior unchanged; focused ruff/ty/pytest pass"
+      ],
+      "files": [
+        "src/lake/storage",
+        "src/lake/catalog",
+        "src/harness/results/store.py"
+      ],
+      "createdAt": "2026-09-04T19:31:06.778Z",
+      "updatedAt": "2026-09-04T19:31:06.778Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:31:06.778Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "done",
@@ -20144,7 +20672,8 @@
         "Complete child T176: TH6.3 Thesis UI design specification",
         "Complete child T177: TH6.4 Publish Thesis architecture and repository boundaries",
         "Complete child T188: Agent instructions for source folder READMEs and file purposes",
-        "Complete child T189: Track CLEO LLM provider workaround and OpenRouter transport fix"
+        "Complete child T189: Track CLEO LLM provider workaround and OpenRouter transport fix",
+        "Complete child T205: Retire BRAIN embedding backfill workaround after upstream fix #1217"
       ],
       "depends": [
         "T069",
@@ -20158,7 +20687,51 @@
         "T149"
       ],
       "createdAt": "2026-09-03T00:02:16.159Z",
-      "updatedAt": "2026-09-04T18:09:15.014Z",
+      "updatedAt": "2026-09-04T20:39:12.326Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T205",
+      "title": "Retire BRAIN embedding backfill workaround after upstream fix #1217",
+      "status": "pending",
+      "priority": "low",
+      "type": "task",
+      "parentId": "T150",
+      "size": "small",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Transient workaround for kryptobaseddev/cleo#1217: on CLEO 2026.8.9 the BRAIN local embedding provider (Xenova/all-MiniLM-L6-v2, 384-dim) registers but can never be reached, because populateEmbeddings gates on isAvailable() which only latches true inside embed() itself, and the EmbeddingQueue has no callers. The committed script .github/scripts/backfill-brain-embeddings.mjs pins @cleocode/core to 2026.8.9, primes the pipeline with one warmup embed() call so the gate passes honestly, then runs populateEmbeddings to backfill brain_embeddings for observations missing vectors. Run `node .github/scripts/backfill-brain-embeddings.mjs` from the repository root after significant BRAIN writes; it refuses to run on any other core version. Re-run is idempotent (LEFT JOIN selects only missing rows). This task exists to retire the workaround: once a CLEO upgrade contains the #1217 fix, verify `cleo brain maintenance` populates embeddings natively and `cleo memory search-hybrid` uses vector ranking, then delete the script and close this task.",
+      "labels": [
+        "cleo",
+        "tooling"
+      ],
+      "acceptance": [
+        "After upgrading CLEO past 2026.8.9 with kryptobaseddev/cleo#1217 fixed, cleo brain maintenance reports embeddings processed/skipped/errors from its own path (not the workaround script) with no rows left unbackfilled",
+        "cleo memory search-hybrid returns vector-ranked results in a plain CLI session without any priming step, confirming the isAvailable gate no longer blocks query-time embedText",
+        "The workaround script .github/scripts/backfill-brain-embeddings.mjs is deleted in the same change and this task is completed with evidence from the upgraded CLEO version",
+        "Related workaround inventory in T189 and brain observations O-mtn8k38i-0, O-mtn92j4t-0, O-mtne5ffu-0 are updated to reflect that the embedding defect is resolved"
+      ],
+      "files": [
+        ".github/scripts/backfill-brain-embeddings.mjs"
+      ],
+      "createdAt": "2026-09-04T20:39:12.326Z",
+      "updatedAt": "2026-09-04T20:39:12.326Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T20:39:12.326Z"
+      },
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -22656,6 +23229,690 @@
       "kind": "work",
       "scope": "unit",
       "relates": []
+    },
+    {
+      "id": "T190",
+      "title": "Structural no-look-ahead hardening for the backtest engine",
+      "status": "done",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 11,
+      "positionVersion": 0,
+      "description": "Audit the harness backtest engine and strategy-facing boundary so that no-look-ahead is structural to how strategies interact with the engine, not merely a lint check or a hard-clip in one query path. Produce: (1) a findings report mapping every strategy-reachable surface (context views, subscriptions, historical queries, venues, fills, portfolio, risk, recorder) to its look-ahead protection mechanism, classifying each as structural (impossible by construction) or advisory (lint/check only); (2) a concrete hardening design that converts advisory protections into structural ones (capability-scoped context, opaque point-in-time views, engine-clocked data access, venue/fill-only order emission, detector tests that fail on future-knowledge strategies); (3) a CLEO task breakdown with file ownership for the implementation waves. The backtester should be world class: future information must be unrepresentable in the strategy API, not just rejected at runtime.",
+      "labels": [
+        "wave.1",
+        "look-ahead",
+        "harness.audit"
+      ],
+      "acceptance": [
+        "Findings report covers every strategy-reachable surface and classifies each protection as structural or advisory with code references",
+        "Hardening design makes future information unrepresentable in the strategy API and preserves the determinism golden contract and existing engine semantics",
+        "Implementation task breakdown defines exclusive file ownership per task and sequences engine-path changes so the determinism golden test is the arbiter",
+        "Report and breakdown are recorded as agent output and reconciled into CLEO tasks"
+      ],
+      "createdAt": "2026-09-04T18:27:54.460Z",
+      "updatedAt": "2026-09-04T19:45:24.431Z",
+      "completedAt": "2026-09-04T19:45:20.750Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T19:44:14.541Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-04T18:27:54.460Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".cleo/agent-outputs/T190-lookahead-structural-audit.md",
+                    "sha256": "0325330551da16ab763227876310de1d687c41d6a43c503c988b36aa850266c7"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T19:43:06.703Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T19:43:19.344Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T182-T099-T101-T115-T188-T190-wave-validation.json",
+                "sha256": "2a10a31f4cdc2666a1aedcdbd2131b1843f90239fc778c511057cec9bd378065",
+                "passCount": 1048,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T19:44:14.545Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "lookahead-audit",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T192",
+      "title": "Capability-scoped read-only strategy clock",
+      "status": "done",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 12,
+      "positionVersion": 0,
+      "description": "Replace the raw SimClock handed to strategies (context.clock exposes advance_to/advance_by) with a read-only clock capability exposing only observed-time queries; the engine keeps sole mutation authority; determinism golden artifacts must be unchanged.",
+      "labels": [
+        "wave.2",
+        "look-ahead"
+      ],
+      "acceptance": [
+        "No strategy-reachable path can advance or mutate the engine clock",
+        "Determinism golden artifacts unchanged; focused ruff/ty/pytest pass"
+      ],
+      "files": [
+        "src/harness/core/clock.py",
+        "src/harness/strategy/context.py",
+        "tests/harness/core/test_clock.py",
+        "tests/harness/strategy"
+      ],
+      "createdAt": "2026-09-04T19:31:14.526Z",
+      "updatedAt": "2026-09-04T20:38:41.466Z",
+      "completedAt": "2026-09-04T20:38:36.044Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T20:38:25.221Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:31:14.526Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/core/clock.py",
+                    "sha256": "942fa8d1bba0365f35073a87b38c0a57608b626edee209452bd0f39c94b76c35"
+                  },
+                  {
+                    "path": "src/harness/strategy/context.py",
+                    "sha256": "ee14a574297242d544bec2af4330f548206fb54c72de5e785d5966150b09a87f"
+                  },
+                  {
+                    "path": "src/harness/runtime/backtest/engine.py",
+                    "sha256": "01c57d77b0477a6cfdfa6f5b453a2c06274706154f3c69113e37391c212d8891"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T20:38:04.028Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T192-validation.json",
+                "sha256": "8dfe6a2b15406836e664833d5153c62b6a7c06285ed8aeea257ce72e6f10d837",
+                "passCount": 31,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T20:38:14.512Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T20:38:25.347Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "clock-capability",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T193",
+      "title": "Venue and event-emission capability narrowing",
+      "status": "done",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 13,
+      "positionVersion": 0,
+      "description": "Narrow the strategy-facing venue boundary in the engine and golden harness: one-way order submission without venue-state observation (ScriptedVenue leaks remaining_steps), and scheduler access that cannot inject fabricated market-data events.",
+      "labels": [
+        "wave.2",
+        "look-ahead"
+      ],
+      "acceptance": [
+        "Strategy-facing venue surface exposes no venue internals such as remaining_steps",
+        "Golden runs pass unchanged for valid strategies"
+      ],
+      "files": [
+        "src/harness/runtime/backtest/strategies.py",
+        "src/harness/testing/golden.py",
+        "tests/harness/runtime",
+        "tests/golden"
+      ],
+      "createdAt": "2026-09-04T19:31:21.987Z",
+      "updatedAt": "2026-09-04T20:39:26.519Z",
+      "completedAt": "2026-09-04T20:39:21.272Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T20:39:09.224Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:31:21.987Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/runtime/backtest/strategies.py",
+                    "sha256": "866f05d596114910572adeaf94e069801e6b6104fb5bedc423c08c70492549a6"
+                  },
+                  {
+                    "path": "src/harness/testing/golden.py",
+                    "sha256": "4accabb5ced45abecdd26cf368ab6971a71da8453895353a6ea8660bb5f1151e"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T20:38:49.123Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T193-validation.json",
+                "sha256": "63c5358f6f477efc17338fbeea768dfdd509d24db4c1549f1635b4ac1d47fe6a",
+                "passCount": 60,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T20:38:59.048Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 189 CLEO tasks through T189.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T20:39:09.398Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "venue-narrowing",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T194",
+      "title": "Opaque StrategyHistory facade",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "large",
+      "position": 14,
+      "positionVersion": 0,
+      "description": "Introduce an opaque StrategyHistory capability: strategies cannot re-query with future timestamps, cannot hold re-readable handles past events, and cannot record, subscribe, or attach poison events; the clip becomes structural on construction and lookahead_guard is retired as an off-switch.",
+      "labels": [
+        "look-ahead",
+        "wave.3"
+      ],
+      "acceptance": [
+        "No strategy-reachable surface can obtain data beyond the engine clock by construction, not by runtime raise",
+        "lookahead_guard option removed or reduced to an internal invariant; golden artifacts unchanged"
+      ],
+      "files": [
+        "src/harness/data/history.py",
+        "src/harness/data/__init__.py",
+        "src/harness/strategy/context.py",
+        "tests/harness/data/test_history.py",
+        "tests/harness/strategy"
+      ],
+      "depends": [
+        "T192"
+      ],
+      "createdAt": "2026-09-04T19:31:45.337Z",
+      "updatedAt": "2026-09-04T19:31:45.337Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:31:45.337Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T195",
+      "title": "Engine wiring for the data capability",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 15,
+      "positionVersion": 0,
+      "description": "Wire the engine to hand strategies the opaque StrategyHistory instead of the shared mutable HistoricalView, completing the structural data boundary.",
+      "labels": [
+        "look-ahead",
+        "wave.3"
+      ],
+      "acceptance": [
+        "Engine passes only the capability object to strategy callbacks",
+        "Determinism golden test passes unchanged"
+      ],
+      "files": [
+        "src/harness/runtime/backtest/engine.py",
+        "tests/harness/runtime"
+      ],
+      "depends": [
+        "T194"
+      ],
+      "createdAt": "2026-09-04T19:31:52.934Z",
+      "updatedAt": "2026-09-04T19:31:52.934Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:31:52.934Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T196",
+      "title": "Schedule provenance for strategy-emitted events",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 16,
+      "positionVersion": 0,
+      "description": "Tag strategy-scheduled events with provenance so the bus, venues, and recorders distinguish fabricated market data from feed events; the venue matcher rejects strategy-emitted market-data impersonation.",
+      "labels": [
+        "look-ahead",
+        "wave.3"
+      ],
+      "acceptance": [
+        "Strategy-emitted events carry provenance and cannot reach the venue matcher as market data",
+        "Golden artifacts unchanged"
+      ],
+      "files": [
+        "src/harness/strategy/context.py",
+        "src/harness/core/types/events.py",
+        "tests/harness/core/test_events.py",
+        "tests/harness/strategy"
+      ],
+      "depends": [
+        "T192"
+      ],
+      "createdAt": "2026-09-04T19:32:00.518Z",
+      "updatedAt": "2026-09-04T19:32:00.518Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:32:00.518Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T197",
+      "title": "Book-view scope and cross-book visibility decision",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 17,
+      "positionVersion": 0,
+      "description": "Decide and implement the cross-book visibility policy (audit question Q1): strategies observe their own book as-of callback time through frozen snapshots; shared-account aggregate visibility is either removed from the strategy surface or explicitly capability-gated.",
+      "labels": [
+        "look-ahead",
+        "wave.4"
+      ],
+      "acceptance": [
+        "A strategy cannot observe another book's or a future book state through the strategy surface|Decision recorded and golden artifacts unchanged"
+      ],
+      "files": [
+        "src/harness/strategy/context.py",
+        "tests/harness/strategy",
+        "tests/harness/portfolio/test_hub.py"
+      ],
+      "depends": [
+        "T196"
+      ],
+      "createdAt": "2026-09-04T19:32:20.313Z",
+      "updatedAt": "2026-09-04T19:32:20.313Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:32:20.313Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T198",
+      "title": "Import-boundary and type separation for the strategy surface",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T070",
+      "size": "small",
+      "position": 18,
+      "positionVersion": 0,
+      "description": "Add an import-boundary test proving strategy-reachable modules never expose engine-internal mutable types, with type-level separation between engine-internal and strategy-visible surfaces.",
+      "labels": [
+        "look-ahead",
+        "wave.4"
+      ],
+      "acceptance": [
+        "Import-boundary test fails if engine-internal mutable types become strategy-reachable",
+        "Focused checks pass"
+      ],
+      "files": [
+        "src/harness/strategy/context.py",
+        "tests/harness/strategy"
+      ],
+      "depends": [
+        "T192"
+      ],
+      "createdAt": "2026-09-04T19:32:27.954Z",
+      "updatedAt": "2026-09-04T19:32:27.954Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:32:27.954Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T199",
+      "title": "Adversarial look-ahead detector suite and lint CI sweep",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 19,
+      "positionVersion": 0,
+      "description": "Construct future-knowledge strategies (peeking references, captured views, time-travel queries, fabricated events, cross-book snooping) that must fail structurally; wire the sandbox lint as a CI gate sweep so it is defense-in-depth rather than load-bearing in the run path.",
+      "labels": [
+        "look-ahead",
+        "wave.5"
+      ],
+      "acceptance": [
+        "Every adversarial strategy is rejected by construction or an explicit structural error, never silently allowed",
+        "Lint runs in CI alongside the Python gates"
+      ],
+      "files": [
+        "tests/harness/strategy",
+        "tests/strategy_lint"
+      ],
+      "depends": [
+        "T194",
+        "T195",
+        "T196",
+        "T197"
+      ],
+      "createdAt": "2026-09-04T19:33:27.248Z",
+      "updatedAt": "2026-09-04T19:33:27.248Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:33:27.248Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T200",
+      "title": "Golden data-path scenario coverage",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T070",
+      "size": "medium",
+      "position": 20,
+      "positionVersion": 0,
+      "description": "Extend golden scenarios to exercise context.data history reads so the determinism oracle arbitrates the new data path end to end; correct golden harness injection of the raw ScriptedVenue.",
+      "labels": [
+        "look-ahead",
+        "wave.5"
+      ],
+      "acceptance": [
+        "Golden scenarios cover strategy history reads and fabricated-event rejection",
+        "Determinism manifests remain byte-identical for valid strategies"
+      ],
+      "files": [
+        "src/harness/testing/golden.py",
+        "tests/golden"
+      ],
+      "depends": [
+        "T193",
+        "T195"
+      ],
+      "createdAt": "2026-09-04T19:33:35.009Z",
+      "updatedAt": "2026-09-04T19:33:35.009Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:33:35.009Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T204",
+      "title": "Architecture doc correction for structural look-ahead",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T070",
+      "size": "small",
+      "position": 21,
+      "positionVersion": 0,
+      "description": "Correct repository.md overstated protections (sandbox lint is not invoked in the run path; history queries raise LookaheadError rather than silently clipping) and document the structural capability model once the capability tasks land.",
+      "labels": [
+        "look-ahead",
+        "wave.5",
+        "docs"
+      ],
+      "acceptance": [
+        "Architecture statements match implemented behavior exactly",
+        "No historical verification records rewritten"
+      ],
+      "files": [
+        ".github/architecture/repository.md"
+      ],
+      "depends": [
+        "T199",
+        "T200"
+      ],
+      "createdAt": "2026-09-04T19:34:27.764Z",
+      "updatedAt": "2026-09-04T19:34:27.764Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T19:34:27.764Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
     }
   ],
   "relationshipGraph": {
@@ -22790,14 +24047,26 @@
         "T094",
         "T095",
         "T096",
-        "T097"
+        "T097",
+        "T190",
+        "T192",
+        "T193",
+        "T194",
+        "T195",
+        "T196",
+        "T197",
+        "T198",
+        "T199",
+        "T200",
+        "T204"
       ],
       "T071": [
         "T098",
         "T099",
         "T100",
         "T101",
-        "T102"
+        "T102",
+        "T191"
       ],
       "T072": [
         "T103",
@@ -22896,7 +24165,8 @@
         "T176",
         "T177",
         "T188",
-        "T189"
+        "T189",
+        "T205"
       ],
       "T181": [
         "T182",
@@ -23731,6 +25001,35 @@
         "T009",
         "T010",
         "T011"
+      ],
+      "T194": [
+        "T192"
+      ],
+      "T195": [
+        "T194"
+      ],
+      "T196": [
+        "T192"
+      ],
+      "T197": [
+        "T196"
+      ],
+      "T198": [
+        "T192"
+      ],
+      "T199": [
+        "T194",
+        "T195",
+        "T196",
+        "T197"
+      ],
+      "T200": [
+        "T193",
+        "T195"
+      ],
+      "T204": [
+        "T199",
+        "T200"
       ]
     },
     "roots": [
