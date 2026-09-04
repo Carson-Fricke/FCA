@@ -16,6 +16,11 @@ Use Python 3.12 with uv, Ruff, ty, and pytest. Do not use MyPy.
   - Format check: `uv run --extra dev ruff format --check <paths>`
 - Type-check with `ty` only. Do not use `mypy`, `pyright`, or `pyre`.
   - Type check: `uv run --extra dev ty check <paths>`
+- Build and test the native core with the pinned Zig toolchain (0.16.0).
+  Zig gates run in CI alongside Ruff and ty and fail on violations exactly
+  like the Python gates do.
+  - Format check: `zig fmt --check .`
+  - Build and test: `zig build test`
 - Do not add a parallel MyPy configuration, lint configuration, or type-check
   configuration to `pyproject.toml`.
 - If a check appears to require another tool, stop and surface it as an
@@ -39,6 +44,8 @@ environment setup.
 | Focused Ruff format check | `uv run --extra dev ruff format --check <paths>` |
 | Type check | `uv run --extra dev ty check` |
 | Focused type check | `uv run --extra dev ty check <paths>` |
+| Zig format check | `zig fmt --check .` |
+| Zig build and native core tests | `zig build test` |
 | Full test suite (integration owner) | `uv run --extra dev pytest -p no:cacheprovider` |
 | Focused tests | `uv run --extra dev pytest -p no:cacheprovider <paths>` |
 | Build a wheel for packaging checks | See the wheel build command below |

@@ -1,0 +1,42 @@
+{
+  "taskId": "T182",
+  "numTotalTests": 25,
+  "numPassedTests": 25,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "commands": ["zig version", "zig fmt --check .", "zig build test"],
+      "result": "Pinned Zig 0.16.0: format check clean and harness-native smoke tests pass from the repository root"
+    },
+    {
+      "name": "entrypoint-image-contracts",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/cli/test_commands.py tests/lake/cli/test_entrypoints.py",
+      "result": "25 passed: lake, harness, api, backtest-job, and trader entrypoint contracts intact after the Dockerfile native stage addition"
+    },
+    {
+      "name": "workflow-validation",
+      "status": "passed",
+      "result": "python-bicep-ci.yml parses with jobs python, zig, bicep; zig job pins 0.16.0 via mlugg/setup-zig (SHA-pinned action) and runs zig fmt --check plus zig build test; path filters include build.zig, build.zig.zon, and src/harness/native/**; the official 0.16.0 linux tarball URL returns HTTP 200 and the Dockerfile verifies its SHA256"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev ruff check .",
+        "uv run --extra dev ruff format --check .",
+        "uv run --extra dev ty check",
+        "uv run --extra dev pytest -p no:cacheprovider"
+      ],
+      "result": "Repository-wide gates passed with 1048 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "Docker is not installed locally; the native image stage is verified by construction and will first execute during image publication",
+    "The CI zig job runs on ubuntu-latest following the existing non-matrix workflow pattern; Windows coverage is the cross-platform toolchain verified locally on win32"
+  ]
+}

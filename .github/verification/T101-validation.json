@@ -1,0 +1,36 @@
+{
+  "taskId": "T101",
+  "numTotalTests": 23,
+  "numPassedTests": 23,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "store-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/results/test_store.py",
+      "result": "23 passed: upload/list/fetch, prefix-boundary delete (run-1 vs run-10), partial-state cleanup, determinism, digest convention pinning, and record validation; fully in-memory via ports"
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check + ruff format --check + ty check on src/harness/results/store.py tests/harness/results/test_store.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev ruff check .",
+        "uv run --extra dev ruff format --check .",
+        "uv run --extra dev ty check",
+        "uv run --extra dev pytest -p no:cacheprovider"
+      ],
+      "result": "Repository-wide gates passed with 1048 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "Lake port gaps recorded as follow-up T191: Azure blob adapter needs read/list_prefix/delete_prefix and a lake-side run-catalog port for production wiring"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "taskId": "T099",
+  "numTotalTests": 30,
+  "numPassedTests": 30,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "metrics-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/results/test_metrics.py",
+      "result": "30 passed: hand-computed vectors for every metric including pathological drawdowns, zero-variance (Sharpe None), no-loss (profit_factor None), single-point curves, and the slippage-to-fill-ledger reconciliation test; pure Decimal-first module with documented conventions"
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check + ruff format --check + ty check on src/harness/results/metrics.py tests/harness/results/test_metrics.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev ruff check .",
+        "uv run --extra dev ruff format --check .",
+        "uv run --extra dev ty check",
+        "uv run --extra dev pytest -p no:cacheprovider"
+      ],
+      "result": "Repository-wide gates passed with 1048 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "Metrics consume plain data records (EquityPoint, TradeRow, FillRow, OrderRow); wiring to recorder artifact rows is a later H3 task"
+  ]
+}

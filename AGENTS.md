@@ -7,6 +7,7 @@
 @.github/instructions/cleo.instructions.md
 @.github/instructions/copilot-instructions.md
 @.github/instructions/repository-organization.instructions.md
+@.github/instructions/source-documentation.instructions.md
 @.github/instructions/market-lake-local.instructions.md
 
 ## FCA Execution Policy

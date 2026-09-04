@@ -28,6 +28,8 @@ dist/
 *.egg
 *.egg-info/
 pip-wheel-metadata/
+zig-out/
+.zig-cache/
 
 # Tests, coverage, and generated reports
 .tox/

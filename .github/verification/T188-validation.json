@@ -1,0 +1,16 @@
+{
+  "taskId": "T188",
+  "numTotalTests": 0,
+  "numPassedTests": 0,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "instruction-file-contract",
+      "status": "passed",
+      "result": ".github/instructions/source-documentation.instructions.md exists with applyTo: \"src/**\" frontmatter matching sibling instruction files; mandates a README.md in every src/ folder covering subfolder purpose/boundaries and slice architecture/design decisions, an exact purpose statement for every code file at that folder level, and same-change README updates on add/remove/rename/repurpose; AGENTS.md references it alongside the other .github/instructions entries; initial README authoring for existing folders is explicitly out of scope per the task"
+    }
+  ],
+  "limitations": []
+}

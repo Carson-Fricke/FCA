@@ -1,0 +1,18 @@
+{
+  "taskId": "T190",
+  "numTotalTests": 0,
+  "numPassedTests": 0,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "research-deliverable",
+      "status": "passed",
+      "result": "Report written to .cleo/agent-outputs/T190-lookahead-structural-audit.md: surface-by-surface findings classifying protections as structural or advisory with file:line evidence (key findings: raw SimClock handed to strategies at engine.py:320/context.py:655; raise-on-read guard toggled off by lookahead_guard at history.py:622-631; strategy record/subscribe poisoning surfaces at history.py:343-395; schedule() forwards arbitrary events at context.py:86-98; sandbox lint never invoked in the run path at strategies.py:38-61; ScriptedVenue leaks remaining_steps into the golden path), hardening design converting advisory protections into structural capabilities, adversarial detector test plan, and an implementation wave breakdown filed as CLEO tasks T192-T204 with exclusive file ownership"
+    }
+  ],
+  "limitations": [
+    "Research-only task; implementation waves are separate tasks arbitrated by the determinism golden test"
+  ]
+}

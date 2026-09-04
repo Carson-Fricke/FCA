@@ -1,0 +1,48 @@
+{
+  "wave": "T182-T099-T101-T115-T188-T190",
+  "timestamp": "2026-09-04T19:30:00Z",
+  "numTotalTests": 1060,
+  "numPassedTests": 1048,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "uv lock --check, repository Ruff lint, Ruff format across 376 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "1048 tests passed, 12 skipped (existing FCA_PERF-gated performance benchmarks), in 86.18 seconds; the pre-existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "command": "zig fmt --check . ; zig build test",
+      "result": "Pinned Zig 0.16.0 toolchain: format check clean and native-core smoke tests pass from the repository root (build.zig exposes the harness-native module over src/harness/native)."
+    },
+    {
+      "name": "focused-task-evidence",
+      "status": "passed",
+      "result": "T099 metrics 30 passed; T101 results store 23 passed; T115 options universe 17 passed; T182 entrypoint/image contract tests 25 passed."
+    },
+    {
+      "name": "architecture-and-instructions",
+      "status": "passed",
+      "result": "repository.md Status and harness.data/harness.results rows updated for the results store, metrics, and options universe; copilot-instructions.md documents the Zig gates; AGENTS.md references source-documentation.instructions.md; market-lake and Thesis code paths unchanged."
+    }
+  ],
+  "integrationHistory": [
+    "Six-lane fan-out with exclusive file ownership: T182 Zig toolchain/image/CI, T099 metrics, T101 results store, T115 options universe, T188 source-documentation instructions, T190 look-ahead structural audit.",
+    "T099 and one T101 lane returned empty on first dispatch and were re-run; T099 required a third dispatch. Integration wiring (results/data facades, architecture doc) performed by the coordinator.",
+    "The integrated repository run passed all 1048 tests plus the Zig gates."
+  ],
+  "limitations": [
+    "Docker is not installed locally, so the Dockerfile native stage was verified by construction (identical zig commands pinned by SHA256 from the official ziglang.org index) and will first execute in image publication.",
+    "T190 is a research deliverable: its report lives at .cleo/agent-outputs/T190-lookahead-structural-audit.md and its implementation waves are filed as pending CLEO tasks T192-T204.",
+    "T101 exposed lake port gaps recorded as follow-up T191: production Azure adapters for run-blob read/list-prefix/delete-prefix and a lake-side run-catalog port."
+  ]
+}

@@ -12,10 +12,15 @@ configuration, partition/schema/calendar contracts, and reusable image
 publication are also implemented. The quant-harness core records, event
 kernel, OMS, strategy contract with sandbox lint and look-ahead guard, venues,
 fees, portfolio, risk, bars/scheduler, bounded lake replay, the deterministic
-backtest runner with reproducibility manifest, the streaming run recorder, and
-the local `backtest-job` CLI are implemented; standard metrics, offline
-reports, the results store, the harness query API, paper/shadow/live runtimes,
-and CI/deployment orchestration remain planned.
+backtest runner with reproducibility manifest, the streaming run recorder, the
+backtest results store with its run catalog, standard metrics and attribution,
+the point-in-time option contract universe, and the local `backtest-job` CLI
+are implemented; offline reports, the harness query API, paper/shadow/live
+runtimes, and CI/deployment orchestration remain planned. The pinned Zig 0.16.0
+toolchain is a first-class build component: the `build.zig` module builds the
+native core under `src/harness/native`, the shared image compiles it in a
+dedicated Zig build stage, and CI gates the native core with `zig fmt --check`
+and `zig build test` alongside the Python gates.
 
 ## Product Boundaries
 
@@ -110,10 +115,10 @@ tests/lake/
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
-| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, the look-ahead-guarded historical view, the market-lake access adapter for ensure/query-driven backtest data, Alpaca SIP and crypto WebSocket feeds with UTC-day crypto semantics, and the live event recorder writing lake-schema Parquet under `live/{deployment}`. |
+| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, the look-ahead-guarded historical view, the point-in-time option contract universe over the market-lake contracts catalog (front-set and static-OSI modes, as-of DTE/strike/moneyness filters, expiry-indexed snapshots clipped to the engine clock), the market-lake access adapter for ensure/query-driven backtest data, Alpaca SIP and crypto WebSocket feeds with UTC-day crypto semantics, and the live event recorder writing lake-schema Parquet under `live/{deployment}`. |
 | `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, trade-through, and MidTouch option fill decisions. |
 | `harness.portfolio` | Strategy virtual books, shared-account aggregate accounting, and deterministic option expiry, exercise, and assignment settlement. |
-| `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts. |
+| `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts; standard metrics and attribution with documented conventions; and the backtest results store writing run artifacts under `backtests/{run_id}` with a filterable run catalog and prefix-complete cleanup. |
 | `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies. |
 | `harness.strategy` | Mode-independent strategy callbacks, constrained context, deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
 | `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, and complete decision auditing. |
@@ -162,7 +167,14 @@ The products share repository-level mechanics where divergence would create
 operational drift:
 
 - `pyproject.toml` defines the Python project and common quality tooling.
-- `Dockerfile` builds one immutable image with distinct runtime commands.
+- `build.zig` and `build.zig.zon` define the pinned Zig 0.16.0 toolchain. They
+  expose the `harness-native` module rooted at `src/harness/native`, install
+  the native core library, and provide the `zig build test` smoke gate. CI
+  enforces `zig fmt --check` and `zig build test` alongside the Python gates.
+- `Dockerfile` builds one immutable image with distinct runtime commands. A
+  pinned Zig build stage compiles the native core and tests it during image
+  build, and the runtime stage carries the resulting library under
+  `/opt/native`.
 - `config` contains versioned, non-secret YAML grouped by product or concern.
 - `infra` contains reusable Bicep modules, environment parameters, identity,
   storage, observability, and Container Apps definitions.

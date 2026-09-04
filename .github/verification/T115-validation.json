@@ -1,0 +1,37 @@
+{
+  "taskId": "T115",
+  "numTotalTests": 17,
+  "numPassedTests": 17,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "options-universe-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/data/test_options_universe.py",
+      "result": "17 passed: expiry-week fixture resolves and retires the correct daily contracts (DTE 4..0 then retirement at T+1); static vs front-set mode differences; structural point-in-time guarantees (as-of clipped to engine clock, LookaheadError on future reads, front-set reads only the engine-date row, static OSI proven visible at T, snapshot chokepoint re-clips, as-of-only filters)"
+    },
+    {
+      "name": "focused-quality",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check + ruff format --check + ty check on src/harness/data/options_universe.py tests/harness/data/test_options_universe.py",
+      "result": "All checks passed"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --extra dev ruff check .",
+        "uv run --extra dev ruff format --check .",
+        "uv run --extra dev ty check",
+        "uv run --extra dev pytest -p no:cacheprovider"
+      ],
+      "result": "Repository-wide gates passed with 1048 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "Underlying join uses a caller-supplied UnderlyingView port because lake.catalog has no equity-listing record yet (H9.1/T132 future work)",
+    "DTE is calendar-day based; ContractRecord carries no session metadata"
+  ]
+}
