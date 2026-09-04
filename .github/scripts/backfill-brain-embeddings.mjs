@@ -26,6 +26,10 @@ const observeUrl = pathToFileURL(
 
 const { initDefaultProvider, getEmbeddingProvider } = await import(brainEmbeddingUrl);
 const { populateEmbeddings } = await import(observeUrl);
+const memorySqliteUrl = pathToFileURL(
+  join(corePath, "dist", "store", "memory-sqlite.js"),
+).href;
+const { getBrainNativeDb } = await import(memorySqliteUrl);
 
 await initDefaultProvider();
 const provider = getEmbeddingProvider();
@@ -37,4 +41,18 @@ await provider.embed("warmup");
 console.log("Embedding pipeline primed; backfilling observations without vectors...");
 
 const result = await populateEmbeddings(resolve(process.cwd()));
-console.log(JSON.stringify(result));
+
+const nativeDb = getBrainNativeDb(resolve(process.cwd()));
+const orphanIds = nativeDb
+  .prepare(
+    "SELECT e.id FROM brain_embeddings e " +
+      "WHERE NOT EXISTS (SELECT 1 FROM brain_observations o WHERE o.id = e.id)",
+  )
+  .all();
+let orphansDeleted = 0;
+for (const row of orphanIds) {
+  nativeDb.prepare("DELETE FROM brain_embeddings WHERE id = ?").run(row.id);
+  orphansDeleted++;
+}
+
+console.log(JSON.stringify({ ...result, orphansDeleted }));
