@@ -1,0 +1,25 @@
+{
+  "taskId": "T196",
+  "numTotalTests": 40,
+  "numPassedTests": 40,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "strategy-and-portfolio-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/strategy tests/harness/portfolio",
+      "result": "40 passed: Q1 decision implemented (sibling book visibility structurally unrepresentable via UnknownBookError and book-scoped snapshots; shared-account aggregate totals stay visible as the named account/portfolio capability); frozen-snapshot mutation blocked; all 7 reserved classes refused by the context-internal EventScheduler; fill-before-callback ordering preserved"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and 1256-test pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "Reserved event-class set is duplicated in context.py rather than imported (harness.strategy must not import harness.runtime, per the D8 import-boundary task)",
+    "Aggregate account visibility remains a named capability; withdrawing it later requires an engine-constructed capability object"
+  ]
+}

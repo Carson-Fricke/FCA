@@ -1,0 +1,25 @@
+{
+  "taskId": "T195",
+  "numTotalTests": 69,
+  "numPassedTests": 69,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "runtime-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/runtime",
+      "result": "69 passed: lookahead_guard option removed from BacktestOptions and BacktestManifest; engine constructs StrategyHistory engine-side and adopts StrategyScheduler; all 7 reserved event classes refused via context.schedule; capability-surface probe pins ReadonlyClock/StrategyHistory/one-way venue; LookaheadViolationError abort path preserved"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and 1256-test pytest suite (including tests/determinism) passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "BacktestManifest dropped the lookahead_guard field; MANIFEST_VERSION left at 1 (cross-version digests are not pinned anywhere by design)",
+    "paper.py carried its own PaperOptions.lookahead_guard toggle; removed by the coordinator in the same wave (history_capacity=0 now opts out of the view)"
+  ]
+}

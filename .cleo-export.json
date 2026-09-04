@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-04T20:40:34.336Z",
+    "exportedAt": "2026-09-04T23:23:12.971Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 206
     },
-    "checksum": "57bf54303f74bb6c",
+    "checksum": "b213e30a696a55d7",
     "taskCount": 202,
     "exportMode": "full"
   },
@@ -427,7 +427,7 @@
     "T132": {
       "type": "task",
       "title": "H9.1 SecurityMaster and listings-aware lake coverage",
-      "status": "pending",
+      "status": "done",
       "parentId": "T077",
       "depends": [
         "T024",
@@ -1143,7 +1143,7 @@
     "T184": {
       "type": "task",
       "title": "H10.3 Zig event kernel: clock, bus, OMS, and accounting books",
-      "status": "pending",
+      "status": "done",
       "parentId": "T181",
       "depends": [
         "T183"
@@ -1301,7 +1301,7 @@
     "T106": {
       "type": "task",
       "title": "H4.4 Live feed gap healing through market lake",
-      "status": "pending",
+      "status": "done",
       "parentId": "T072",
       "depends": [
         "T042",
@@ -1425,7 +1425,7 @@
     "T185": {
       "type": "task",
       "title": "H10.4 Zig replay merge, bars, matching, and fill models",
-      "status": "pending",
+      "status": "done",
       "parentId": "T181",
       "depends": [
         "T184"
@@ -1567,7 +1567,7 @@
     "T107": {
       "type": "task",
       "title": "H4.5 PaperShell shared simulation runtime",
-      "status": "pending",
+      "status": "done",
       "parentId": "T072",
       "depends": [
         "T086",
@@ -2232,7 +2232,7 @@
     "T194": {
       "type": "task",
       "title": "Opaque StrategyHistory facade",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T192"
@@ -2241,7 +2241,7 @@
     "T195": {
       "type": "task",
       "title": "Engine wiring for the data capability",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T194"
@@ -2250,7 +2250,7 @@
     "T196": {
       "type": "task",
       "title": "Schedule provenance for strategy-emitted events",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T192"
@@ -2267,7 +2267,7 @@
     },
     "T198": {
       "type": "task",
-      "title": "Import-boundary and type separation for the strategy surface",
+      "title": "Determinism data-path scenario coverage",
       "status": "pending",
       "parentId": "T070",
       "depends": [
@@ -4745,7 +4745,7 @@
     {
       "id": "T132",
       "title": "H9.1 SecurityMaster and listings-aware lake coverage",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T077",
@@ -4780,21 +4780,79 @@
         "T088"
       ],
       "createdAt": "2026-09-01T18:03:44.075Z",
-      "updatedAt": "2026-09-01T18:34:25.501Z",
+      "updatedAt": "2026-09-04T23:16:51.145Z",
+      "completedAt": "2026-09-04T23:16:41.043Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T23:16:19.068Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:44.075Z"
+        "initializedAt": "2026-09-01T18:03:44.075Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/data/security_master.py",
+                    "sha256": "d67f672d81464420495895d23425c5c46e2cb18c9966c38be964030e7c137b29"
+                  },
+                  {
+                    "path": "src/lake/catalog/models.py",
+                    "sha256": "d62f38c4a1d21e52925b3558b241e054f78f3ae370fbc7a450c6462d6b661e2e"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T23:15:40.955Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T132-validation.json",
+                "sha256": "d1a419c372099118bc0bf0e9cb7cf65362b0fa00337feb661afe39f2a98a83d3",
+                "passCount": 152,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T23:16:00.494Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 202 CLEO tasks through T205.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T23:16:19.362Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "security-master",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -12432,7 +12490,7 @@
     {
       "id": "T184",
       "title": "H10.3 Zig event kernel: clock, bus, OMS, and accounting books",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T181",
@@ -12464,21 +12522,87 @@
         "T183"
       ],
       "createdAt": "2026-09-04T16:44:39.889Z",
-      "updatedAt": "2026-09-04T16:45:26.613Z",
+      "updatedAt": "2026-09-04T23:10:51.667Z",
+      "completedAt": "2026-09-04T23:10:40.836Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T23:10:08.486Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T16:44:39.889Z"
+        "initializedAt": "2026-09-04T16:44:39.889Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/native/clock.zig",
+                    "sha256": "8b872f7b2e62f3869a23a54967468c889bdbc988ac6232451c50b1a877cf9227"
+                  },
+                  {
+                    "path": "src/harness/native/bus.zig",
+                    "sha256": "e2509541970c66ae753bb2ac269a01a9741a7bdc355f055b57dae113090331e5"
+                  },
+                  {
+                    "path": "src/harness/native/oms.zig",
+                    "sha256": "a868271fcca73faf559864ec7b3e69579cb3492a1a3feea485922a465c260224"
+                  },
+                  {
+                    "path": "src/harness/native/books.zig",
+                    "sha256": "c3c958b1a800fa724dc1cc1a5b957d4d423cd36f5ba774ad219bcbddada70303"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T21:36:57.280Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T184-validation.json",
+                "sha256": "1d15bf25089187aee7179284bd8d693dc4ee4af2367e73f9643139ecbc82a963",
+                "passCount": 41,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T21:47:57.173Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 202 CLEO tasks through T205.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T23:10:08.679Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "zig-kernel",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -14046,7 +14170,7 @@
     {
       "id": "T106",
       "title": "H4.4 Live feed gap healing through market lake",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T072",
@@ -14077,21 +14201,75 @@
         "T105"
       ],
       "createdAt": "2026-09-01T18:01:53.164Z",
-      "updatedAt": "2026-09-01T18:27:27.737Z",
+      "updatedAt": "2026-09-04T23:15:23.270Z",
+      "completedAt": "2026-09-04T23:15:14.652Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T23:14:51.944Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:53.164Z"
+        "initializedAt": "2026-09-01T18:01:53.164Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/data/gap_healing.py",
+                    "sha256": "27641cbdfef41a956cd04477ca2c8c901669c6542a6c969b2240505fb8cc11d6"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T23:14:12.855Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T106-validation.json",
+                "sha256": "0374b1681a7fac9876003c5373507b94f94156aae593ff27afe121d0f0aee9a5",
+                "passCount": 26,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T23:14:33.447Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 202 CLEO tasks through T205.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T23:14:52.206Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "gap-healing",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -15153,7 +15331,7 @@
     {
       "id": "T185",
       "title": "H10.4 Zig replay merge, bars, matching, and fill models",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T181",
@@ -15186,21 +15364,90 @@
         "T184"
       ],
       "createdAt": "2026-09-04T16:44:44.270Z",
-      "updatedAt": "2026-09-04T16:45:27.726Z",
+      "updatedAt": "2026-09-04T23:18:29.119Z",
+      "completedAt": "2026-09-04T23:18:20.518Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T23:17:58.944Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T16:44:44.270Z"
+        "initializedAt": "2026-09-04T16:44:44.270Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/native/replay.zig",
+                    "sha256": "5fb0c391e8b679e0448a656b496771b6bb8b110b11f680918f92b11d766500b3"
+                  },
+                  {
+                    "path": "src/harness/native/matching.zig",
+                    "sha256": "c53d8737c8d90f2e7c02805a41372c389505dac28cb1c8b919e3688bb9b4f336"
+                  },
+                  {
+                    "path": "src/harness/native/bars.zig",
+                    "sha256": "703ee261d21da4cc71a9d31e3353057764aa385e8206a9fc3d311fc54ad77bcd"
+                  },
+                  {
+                    "path": "src/harness/native/simple_touch.zig",
+                    "sha256": "645e1411455adc77ebcf9c6724df43687b1e24359dca49a089606415e731b7c2"
+                  },
+                  {
+                    "path": "src/harness/native/oms_state.zig",
+                    "sha256": "101ce9272c8c2568482d9b69b535b0757d41faca8976ed3fa76686c59ffa24ba"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T23:17:19.220Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T185-validation.json",
+                "sha256": "89068cf9a5a55d280f1b8019afc76e88d999ac71511e82dbc9eda394cbd6876c",
+                "passCount": 81,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T23:17:40.224Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 202 CLEO tasks through T205.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T23:17:59.240Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -16640,7 +16887,7 @@
     {
       "id": "T107",
       "title": "H4.5 PaperShell shared simulation runtime",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T072",
@@ -16675,21 +16922,75 @@
         "T103"
       ],
       "createdAt": "2026-09-01T18:01:57.398Z",
-      "updatedAt": "2026-09-04T16:57:08.160Z",
+      "updatedAt": "2026-09-04T23:13:52.303Z",
+      "completedAt": "2026-09-04T23:13:36.878Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T23:13:12.490Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:57.398Z"
+        "initializedAt": "2026-09-01T18:01:57.398Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/runtime/paper.py",
+                    "sha256": "3b19e6abfd6bdfe004327f6a7f9bd74bfe4a35a718e058821066f21593070fe0"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T23:12:34.877Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T107-validation.json",
+                "sha256": "bc17a5dfc0baa6cbc20b5dfba8816ddda709ea82eba806714b41cfc4a1c596bd",
+                "passCount": 15,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T23:12:53.664Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 202 CLEO tasks through T205.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T23:13:12.769Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "paper-runtime",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -17257,7 +17558,7 @@
         "T184"
       ],
       "createdAt": "2026-09-04T16:44:48.313Z",
-      "updatedAt": "2026-09-04T16:45:25.977Z",
+      "updatedAt": "2026-09-04T23:22:15.436Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -17272,6 +17573,7 @@
         "initializedAt": "2026-09-04T16:44:48.313Z"
       },
       "pipelineStage": "research",
+      "assignee": "zig-metrics",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -23584,7 +23886,7 @@
     {
       "id": "T194",
       "title": "Opaque StrategyHistory facade",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -23611,21 +23913,79 @@
         "T192"
       ],
       "createdAt": "2026-09-04T19:31:45.337Z",
-      "updatedAt": "2026-09-04T19:31:45.337Z",
+      "updatedAt": "2026-09-04T23:12:17.677Z",
+      "completedAt": "2026-09-04T23:12:08.373Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T23:11:46.154Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:31:45.337Z"
+        "initializedAt": "2026-09-04T19:31:45.337Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/data/history.py",
+                    "sha256": "673c20487a740ad7548606f8bcbf558bc1abbfcd89991dcf5fefafadb7c805cc"
+                  },
+                  {
+                    "path": "src/harness/strategy/context.py",
+                    "sha256": "ea51ea821a8690b07ed5ce64092f3145883a26ac948280e37228a07472ba3dd6"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T23:11:09.549Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T194-validation.json",
+                "sha256": "981b4fbe03f4dc6729d47ac3d3e39dfef6c58b58f2e8f12f9d6adb22bb8e3a31",
+                "passCount": 35,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T23:11:26.960Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 202 CLEO tasks through T205.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T23:11:46.627Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
+      "assignee": "history-facade",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -23633,7 +23993,7 @@
     {
       "id": "T195",
       "title": "Engine wiring for the data capability",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -23657,19 +24017,76 @@
         "T194"
       ],
       "createdAt": "2026-09-04T19:31:52.934Z",
-      "updatedAt": "2026-09-04T19:31:52.934Z",
+      "updatedAt": "2026-09-04T23:19:51.733Z",
+      "completedAt": "2026-09-04T23:19:43.535Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T23:19:22.391Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:31:52.934Z"
+        "initializedAt": "2026-09-04T19:31:52.934Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/runtime/backtest/engine.py",
+                    "sha256": "73d6360919e016cdf9a69fac70cf1b2a5a5fbcd299219f963bb9bd63772ab7f7"
+                  },
+                  {
+                    "path": "src/harness/runtime/backtest/manifest.py",
+                    "sha256": "23fe08a49dd25094feef469d2cf9cc569e6bd32814d7329a163ace9ed01db88a"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T23:18:46.316Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T195-validation.json",
+                "sha256": "627b24cccf6aa0a44680a4c79b2e4c3e165cdefdcda1d8db50aee62542126a10",
+                "passCount": 69,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T23:19:04.541Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 202 CLEO tasks through T205.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T23:19:22.667Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
       "kind": "work",
@@ -23679,7 +24096,7 @@
     {
       "id": "T196",
       "title": "Schedule provenance for strategy-emitted events",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -23705,19 +24122,76 @@
         "T192"
       ],
       "createdAt": "2026-09-04T19:32:00.518Z",
-      "updatedAt": "2026-09-04T19:32:00.518Z",
+      "updatedAt": "2026-09-04T23:21:17.606Z",
+      "completedAt": "2026-09-04T23:21:08.366Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-04T23:20:46.042Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:32:00.518Z"
+        "initializedAt": "2026-09-04T19:32:00.518Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/strategy/context.py",
+                    "sha256": "ea51ea821a8690b07ed5ce64092f3145883a26ac948280e37228a07472ba3dd6"
+                  },
+                  {
+                    "path": "tests/harness/strategy/test_book_view_scope.py",
+                    "sha256": "bcadf8cae870de5ea71af52093371e1f35f6f8c69726191d759351d351c4b1c4"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-04T23:20:08.379Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T196-validation.json",
+                "sha256": "40ddb72b86845ab14bdf8253d04edd8a536bf78b12baaf34204d4b844efeb6e2",
+                "passCount": 40,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-04T23:20:27.345Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 202 CLEO tasks through T205.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T23:20:46.536Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
       "kind": "work",
@@ -23772,7 +24246,7 @@
     },
     {
       "id": "T198",
-      "title": "Import-boundary and type separation for the strategy surface",
+      "title": "Determinism data-path scenario coverage",
       "status": "pending",
       "priority": "medium",
       "type": "task",
@@ -23797,7 +24271,7 @@
         "T192"
       ],
       "createdAt": "2026-09-04T19:32:27.954Z",
-      "updatedAt": "2026-09-04T19:32:27.954Z",
+      "updatedAt": "2026-09-04T23:22:51.989Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -23812,6 +24286,7 @@
         "initializedAt": "2026-09-04T19:32:27.954Z"
       },
       "pipelineStage": "contribution",
+      "assignee": "determinism-datapath",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -23846,7 +24321,7 @@
         "T197"
       ],
       "createdAt": "2026-09-04T19:33:27.248Z",
-      "updatedAt": "2026-09-04T19:33:27.248Z",
+      "updatedAt": "2026-09-04T23:22:34.594Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -23861,6 +24336,7 @@
         "initializedAt": "2026-09-04T19:33:27.248Z"
       },
       "pipelineStage": "contribution",
+      "assignee": "adversarial-suite",
       "kind": "work",
       "scope": "feature",
       "relates": []

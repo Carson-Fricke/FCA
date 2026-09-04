@@ -1,0 +1,30 @@
+{
+  "taskId": "T185",
+  "numTotalTests": 81,
+  "numPassedTests": 81,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "zig-native-gates",
+      "status": "passed",
+      "commands": ["zig fmt --check .", "zig build test --summary all"],
+      "result": "81/81 native tests: K-way replay merge (ordering contract, Arrow-batch sources, session windows), exact OHLCV bar derivation, resting-order matching engine (all 10 test_sim vectors), SimpleTouch/LatencySize/TradeThrough fill models (all 16 Python vectors), plus the preserved oms/books/clock/bus vectors after the modular oms split"
+    },
+    {
+      "name": "file-hygiene",
+      "status": "passed",
+      "result": "oms.zig 1224 lines split into oms_state.zig (653), oms_manager.zig (624), decimal.zig (116), and a 42-line facade; every new file 653 raw lines or fewer; ffi ABI v1 untouched"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide Ruff/format/ty and 1256-test pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "mid_touch options fill model and fees remain Python-side (out of task scope)",
+    "Native boundary takes canonical symbols and required event_id/sequence batch columns; YAML config loading stays Python-side"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "wave": "T185-T195-T196",
+  "timestamp": "2026-09-04T22:10:00Z",
+  "numTotalTests": 1268,
+  "numPassedTests": 1256,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "Repository Ruff lint, Ruff format across 396 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "1256 tests passed, 12 skipped (FCA_PERF-gated), in 115.97 seconds."
+    },
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "command": "zig fmt --check . ; zig build test",
+      "result": "Zig 0.16.0 clean; 81/81 native tests including the ported replay merge, bar derivation, matching venue, and fill models; no native file exceeds 700 lines after the oms split."
+    },
+    {
+      "name": "integration-wiring",
+      "status": "passed",
+      "result": "Coordinator removed the residual PaperOptions.lookahead_guard toggle, completed the golden-to-determinism rename verification (zero active-code hits; historical verification records untouched), and updated the repository.md status paragraph for the newly ported native modules."
+    }
+  ],
+  "integrationHistory": [
+    "Three-lane fan-out: T185 Zig replay/bars/matching/fills plus oms modular split, T195 engine capability wiring and lookahead_guard removal, T196 book-view scope and Q1 cross-book decision.",
+    "The golden-to-determinism rename (user-directed) landed as a dedicated lane: harness.testing.determinism, tests/determinism, Determinism* identifiers, fca-determinism-manifest-v1 schema name.",
+    "Committed and pushed as 27a929e."
+  ],
+  "limitations": [
+    "Reserved event-class set duplicated in harness.strategy (import-boundary D8 task T198 owns unification); aggregate account visibility remains a named capability per the Q1 decision."
+  ]
+}
