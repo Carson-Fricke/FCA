@@ -63,6 +63,10 @@ jobs:
       - name: Ruff format check
         run: uv run --extra dev ruff format --check .
 
+      - name: Strategy sandbox lint sweep
+        run: |
+          uv run --extra dev python -c "from harness.strategy.lint import lint_strategy_directory; report = lint_strategy_directory('strategies'); print(report.render()); report.raise_for_status()"
+
       - name: ty type check
         run: uv run --extra dev ty check
 

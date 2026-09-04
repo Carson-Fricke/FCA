@@ -15,7 +15,12 @@ context also receives a
 :class:`~harness.runtime.backtest.strategies.StrategyScheduler` that refuses
 market-data and outcome classes, so ``schedule()`` usage cannot impersonate
 the feed or fabricate execution outcomes; engine-assigned provenance for
-strategy-owned events remains the context scheduler's responsibility.
+strategy-owned events remains the context scheduler's responsibility.  When
+a scenario enables ``history``, the context also receives the opaque,
+now-anchored :class:`~harness.data.history.StrategyHistory` data capability,
+whose reads take no timestamp and whose surface exposes no record, subscribe,
+attach, or clock handles, so the determinism oracle arbitrates the strategy
+data path end to end.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from types import MappingProxyType
@@ -43,8 +48,10 @@ from harness.core.types import (
     Side,
     SingleLegOrder,
     TimeInForce,
+    TradeEvent,
 )
 from harness.core.types.common import exact_decimal
+from harness.data.history import HistoricalView, StrategyHistory
 from harness.portfolio import PortfolioHub
 from harness.runtime.backtest.strategies import StrategyScheduler, StrategyVenue
 from harness.strategy import (
@@ -89,6 +96,11 @@ def _normalized(value: object, path: str = "value") -> object:
 def _class_name(value: object) -> str:
     value_type = value if isinstance(value, type) else type(value)
     return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
+def _event_identity(event: object) -> str | None:
+    """Return the deterministic identity of one read event, if any."""
+    return event.event_id if isinstance(event, Event) else None
 
 
 def _sha256(payload: bytes) -> str:
@@ -322,6 +334,160 @@ class OrderSignalStrategy(Strategy):
         self.callbacks.append("on_stop")
 
 
+class DataProbeStrategy(Strategy):
+    """Probe the strategy-visible data capability and record every read.
+
+    Each phase reads ``context.data`` through the now-anchored surface —
+    ``read``, ``last``, ``window``, and ``aggregate`` — and logs one
+    structured record per read with the observed event identities and
+    aggregate statistics, so determinism artifacts prove both that the data
+    path works and that every read is clipped to the engine clock head. Every
+    observed capability-narrowing surface is also logged with its concrete
+    type name, and every reachable engine-view attribute is logged as a
+    finding, so artifacts prove what strategy code can and cannot observe:
+    the harness hands strategies the opaque
+    :class:`~harness.data.history.StrategyHistory` capability, which exposes
+    none of these attributes.
+    """
+
+    forbidden_attributes = (
+        "record",
+        "record_many",
+        "subscribe",
+        "attach",
+        "retained",
+        "dropped",
+        "quote",
+        "trade",
+        "quotes",
+        "trades",
+        "head",
+        "clock",
+        "capacity",
+        "subscriptions",
+        "symbols",
+    )
+
+    def __init__(
+        self,
+        lookback: timedelta = timedelta(microseconds=500),
+        recent_count: int = 2,
+    ) -> None:
+        self.lookback = lookback
+        self.recent_count = recent_count
+        self.callbacks: list[str] = []
+        self.observations: list[str] = []
+        self._context: StrategyContext | None = None
+
+    def on_start(self, context: StrategyContext) -> None:
+        self._context = context
+        self.callbacks.append("on_start")
+        self._probe("on_start")
+
+    def on_quote(self, event: QuoteEvent) -> None:
+        self.callbacks.append("on_quote")
+        self._probe("on_quote")
+        self._read("on_quote", event.symbol, event.timestamp)
+
+    def on_trade(self, event: TradeEvent) -> None:
+        self.callbacks.append("on_trade")
+        self._probe("on_trade")
+        self._read("on_trade", event.symbol, event.timestamp)
+
+    def on_stop(self, context: StrategyContext) -> None:
+        self.callbacks.append("on_stop")
+        self._probe("on_stop")
+        symbols = context.universe.symbols
+        if symbols:
+            self._read("on_stop", symbols[0], context.clock.now())
+
+    def _probe(self, phase: str) -> None:
+        context = self._context
+        if context is None:
+            raise RuntimeError("data probe strategy has not received on_start")
+        data = context.data
+        surface_type = "none" if data is None else _class_name(data)
+        context.log.info(
+            "data-probe",
+            phase=phase,
+            surface_type=surface_type,
+        )
+        if data is None:
+            return
+        for attribute in self.forbidden_attributes:
+            if hasattr(data, attribute):
+                self.observations.append(attribute)
+                context.log.warning(
+                    "data-state-observed",
+                    phase=phase,
+                    surface="data",
+                    attribute=attribute,
+                )
+
+    def _read(self, phase: str, symbol: Symbol, anchor: datetime) -> None:
+        context = self._context
+        if context is None:
+            raise RuntimeError("data probe strategy has not received on_start")
+        data = context.data
+        if not isinstance(data, StrategyHistory):
+            raise RuntimeError("data probe strategy has no data capability")
+        start = anchor - self.lookback
+        aggregate = data.aggregate(symbol, start)
+        recent = data.last(symbol, self.recent_count)
+        window = data.window(symbol, start)
+        context.log.info(
+            "data-read",
+            phase=phase,
+            symbol=str(canonical_symbol(symbol)),
+            latest=_event_identity(data.read(symbol)),
+            latest_quote=_event_identity(data.read(symbol, QuoteEvent)),
+            latest_trade=_event_identity(data.read(symbol, TradeEvent)),
+            recent=[_event_identity(event) for event in recent],
+            window=[_event_identity(event) for event in window],
+            quote_count=aggregate.quote_count,
+            trade_count=aggregate.trade_count,
+            volume=aggregate.volume,
+            vwap=aggregate.vwap,
+        )
+
+
+class FabricatedQuoteStrategy(Strategy):
+    """Attempt to schedule a fabricated quote; the scheduler must refuse it.
+
+    The strategy scheduler capability refuses reserved market-data and
+    outcome classes before they reach the event bus, so the fabricated
+    :class:`~harness.core.types.QuoteEvent` surfaces as the documented
+    :class:`TypeError` and the run aborts cleanly with no fabricated
+    dispatch and no artifacts.
+    """
+
+    def __init__(self) -> None:
+        self.callbacks: list[str] = []
+        self._context: StrategyContext | None = None
+
+    def on_start(self, context: StrategyContext) -> None:
+        self._context = context
+
+    def on_quote(self, event: QuoteEvent) -> None:
+        self.callbacks.append("on_quote")
+        context = self._context
+        if context is None:
+            raise RuntimeError("fabrication strategy has not received on_start")
+        context.schedule(
+            QuoteEvent(
+                event_id="fabricated-quote",
+                timestamp=event.timestamp,
+                sequence=event.sequence + 1,
+                symbol=event.symbol,
+                bid_price=event.bid_price,
+                bid_quantity=event.bid_quantity,
+                ask_price=event.ask_price,
+                ask_quantity=event.ask_quantity,
+                venue="fabricated",
+            )
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class DeterminismScenario:
     """Complete deterministic input for one fresh determinism-harness run."""
@@ -338,6 +504,7 @@ class DeterminismScenario:
     start: datetime | None = None
     universe: tuple[str | Symbol, ...] | Sequence[str | Symbol] = ()
     subscriptions: tuple[Subscription, ...] | Sequence[Subscription] | None = None
+    history: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.feed, SyntheticFeed):
@@ -350,6 +517,8 @@ class DeterminismScenario:
             self.strategy_class, Strategy
         ):
             raise TypeError("strategy_class must derive from Strategy")
+        if not isinstance(self.history, bool):
+            raise TypeError("history must be a boolean")
         if not isinstance(self.strategy_parameters, Mapping):
             raise TypeError("strategy_parameters must be a mapping")
         if not isinstance(self.configuration, Mapping):
@@ -421,6 +590,7 @@ class DeterminismScenario:
                 }
                 for item in self.subscriptions or ()
             ],
+            "history": self.history,
         }
 
     def run(self) -> DeterminismRun:
@@ -708,6 +878,12 @@ def run_scenario(scenario: DeterminismScenario) -> DeterminismRun:
     context receives only the one-way :class:`StrategyVenue` command
     capability and the refusing :class:`StrategyScheduler`, so strategy code
     can neither observe venue state nor schedule fabricated market data.
+    When the scenario enables ``history``, the context also receives the
+    opaque :class:`~harness.data.history.StrategyHistory` capability over a
+    fresh :class:`~harness.data.history.HistoricalView` subscribed to the
+    scenario universe and attached before the strategy binding, so every
+    strategy read observes exactly the events dispatched at or before the
+    current clock head.
     """
     if not isinstance(scenario, DeterminismScenario):
         raise TypeError("scenario must be a DeterminismScenario")
@@ -718,12 +894,18 @@ def run_scenario(scenario: DeterminismScenario) -> DeterminismRun:
     portfolio = PortfolioHub(scenario.account_id)
     portfolio.create_book(scenario.book_id, scenario.initial_cash)
     venue = ScriptedVenue(bus, scenario.venue_steps)
+    view: HistoricalView | None = None
+    if scenario.history:
+        view = HistoricalView(clock, bus=bus)
+        for symbol in scenario.universe:
+            view.subscribe(symbol)
     context = StrategyContext(
         clock,
         portfolio=portfolio,
         venue=StrategyVenue(venue),
         bus=bus,
         scheduler=StrategyScheduler(bus),
+        data=None if view is None else StrategyHistory(view, clock),
         seed=scenario.seed,
         universe=scenario.universe,
         subscriptions=scenario.subscriptions,
@@ -798,11 +980,13 @@ def assert_reproducible(
 __all__ = [
     "ArtifactCanonicalizer",
     "ArtifactDigest",
+    "DataProbeStrategy",
     "DeterminismError",
     "DeterminismArtifact",
     "DeterminismManifest",
     "DeterminismRun",
     "DeterminismScenario",
+    "FabricatedQuoteStrategy",
     "ManifestComparison",
     "OrderSignalStrategy",
     "SyntheticFeed",
