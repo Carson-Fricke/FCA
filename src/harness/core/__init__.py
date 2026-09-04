@@ -1,6 +1,12 @@
 """Deterministic event-kernel contracts and domain types."""
 
-from harness.core.clock import AdvanceableClock, Clock, SimClock, WallClock
+from harness.core.clock import (
+    AdvanceableClock,
+    Clock,
+    ReadonlyClock,
+    SimClock,
+    WallClock,
+)
 from harness.core.events import (
     EVENT_CLASS_PRIORITY,
     EventBus,
@@ -66,6 +72,7 @@ __all__ = (
     "ParquetCodec",
     "Position",
     "QuoteEvent",
+    "ReadonlyClock",
     "Side",
     "ScheduledCallbackEvent",
     "ScheduledHandle",

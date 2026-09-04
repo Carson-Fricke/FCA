@@ -9,6 +9,7 @@ from typing import Any, Final
 
 from harness.configuration import BacktestConfig, canonical_hash
 from harness.core import EventBus, SimClock
+from harness.core.clock import ReadonlyClock
 from harness.core.types import (
     Event,
     ExecutionReport,
@@ -317,7 +318,7 @@ class _BacktestEngine:
                     f"{instance.instance_id!r}"
                 )
             context = StrategyContext(
-                self._clock,
+                ReadonlyClock(self._clock),
                 portfolio=self._hub,
                 venue=_RiskVenue(self, instance.instance_id, self._venue),
                 bus=self._bus,

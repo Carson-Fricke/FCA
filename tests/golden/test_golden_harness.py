@@ -7,6 +7,7 @@ import pytest
 
 from harness.core.symbols import Symbol
 from harness.core.types import QuoteEvent
+from harness.runtime.backtest.strategies import StrategyVenue
 from harness.testing.golden import (
     ArtifactCanonicalizer,
     DeterminismError,
@@ -162,9 +163,12 @@ def test_strategy_id_nondeterminism_changes_run_artifact() -> None:
         assert_manifest_equal(stable, changed)
 
 
-def test_scripted_venue_is_constructed_for_every_run() -> None:
+def test_venue_capability_is_constructed_for_every_run() -> None:
     first = run_scenario(scenario())
     second = run_scenario(scenario())
 
-    assert isinstance(first.binding.context.venue, ScriptedVenue)
+    context = first.binding.context
+    assert isinstance(context.venue, StrategyVenue)
+    assert not isinstance(context.venue, ScriptedVenue)
+    assert context.venue is context.orders.venue
     assert first.binding.context.venue is not second.binding.context.venue

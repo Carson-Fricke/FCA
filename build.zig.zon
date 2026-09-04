@@ -1,0 +1,11 @@
+.{
+    .fingerprint = 0xf61ca4b1cce83b7,
+    .name = .harness_native,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/harness/native",
+    },
+}

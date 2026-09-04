@@ -158,6 +158,65 @@ class LookaheadStrategy(Strategy):
         data.read(self.context.clock.now() + timedelta(seconds=1), event.symbol)
 
 
+class VenueProbingStrategy(Strategy):
+    """Probe every strategy-visible venue surface for venue-state attributes.
+
+    The engine hands strategies a one-way command capability. If any venue
+    state attribute were reachable, the probe raises and the run aborts with
+    the execution-error taxonomy; a green run proves the strategy-visible
+    surfaces expose no venue state.
+    """
+
+    forbidden_attributes = (
+        "remaining_steps",
+        "calls",
+        "state",
+        "decisions_for",
+        "active_orders",
+        "latest_market",
+        "steps",
+    )
+
+    def __init__(self, **parameters: object) -> None:
+        self.context: StrategyContext | None = None
+        self.observations: list[str] = []
+
+    def on_start(self, context: StrategyContext) -> None:
+        self.context = context
+        self._probe("on_start")
+
+    def on_quote(self, event: QuoteEvent) -> None:
+        self._probe("on_quote")
+
+    def on_stop(self, context: StrategyContext) -> None:
+        self._probe("on_stop")
+
+    def _probe(self, phase: str) -> None:
+        context = self.context
+        if context is None:
+            raise RuntimeError("venue probe has not received on_start")
+        surfaces: dict[str, object] = {
+            "venue": context.venue,
+            "orders": context.orders,
+            "orders.venue": context.orders.venue,
+        }
+        for surface_name, surface in surfaces.items():
+            if surface is None:
+                continue
+            for attribute in self.forbidden_attributes:
+                if hasattr(surface, attribute):
+                    self.observations.append(f"{surface_name}.{attribute}")
+        if self.observations:
+            raise ValueError(f"strategy observed venue state: {self.observations}")
+
+
+class InertStrategy(Strategy):
+    """Observe events without acting, for dispatch-stream comparisons."""
+
+    def on_quote(self, event: QuoteEvent) -> None:
+        return
+
+
 class ExplodingStrategy(Strategy):
     """Raise an unexpected exception on the first quote."""
 
@@ -189,6 +248,8 @@ def _register_strategy_module() -> None:
         ("HaltingStrategy", HaltingStrategy),
         ("AbortingStrategy", AbortingStrategy),
         ("LookaheadStrategy", LookaheadStrategy),
+        ("VenueProbingStrategy", VenueProbingStrategy),
+        ("InertStrategy", InertStrategy),
         ("ExplodingStrategy", ExplodingStrategy),
         ("RejectAllRule", RejectAllRule),
     ):
@@ -413,6 +474,45 @@ def test_lookahead_guard_can_be_disabled() -> None:
 
     assert result.status is BacktestStatus.COMPLETED
     assert result.lookahead_violations == ()
+
+
+# --------------------------------------------------------------------------
+# Venue capability boundary
+# --------------------------------------------------------------------------
+
+
+def test_venue_capability_denies_venue_state_introspection() -> None:
+    configuration = _configuration(
+        strategy_instances=(
+            _instance(implementation=f"{STRATEGY_MODULE}:VenueProbingStrategy"),
+        )
+    )
+
+    result = _run(configuration)
+
+    assert result.status is BacktestStatus.COMPLETED
+    assert result.fills == ()
+    assert result.stopped_strategies == ("spy-momentum",)
+
+
+def test_venue_introspection_attempts_do_not_change_the_dispatch_stream() -> None:
+    probing = _configuration(
+        strategy_instances=(
+            _instance(implementation=f"{STRATEGY_MODULE}:VenueProbingStrategy"),
+        )
+    )
+    inert = _configuration(
+        strategy_instances=(
+            _instance(implementation=f"{STRATEGY_MODULE}:InertStrategy"),
+        )
+    )
+
+    probe_result = _run(probing)
+    repeat_result = _run(probing)
+    inert_result = _run(inert)
+
+    assert probe_result.dispatch_hash == repeat_result.dispatch_hash
+    assert probe_result.dispatch_hash == inert_result.dispatch_hash
 
 
 # --------------------------------------------------------------------------

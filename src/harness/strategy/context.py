@@ -10,7 +10,7 @@ from random import Random
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
-from harness.core.clock import Clock
+from harness.core.clock import Clock, ReadonlyClock
 from harness.core.events import EventBus, EventSelector
 from harness.core.symbols import Symbol, canonical_symbol
 from harness.core.types import (
@@ -633,7 +633,9 @@ class StrategyContext:
         if actual_seed < 0:
             raise ValueError("seed must be a non-negative integer")
 
-        self._clock = clock
+        self._clock = (
+            clock if isinstance(clock, ReadonlyClock) else ReadonlyClock(clock)
+        )
         self._bus = bus
         self._portfolio = hub
         self._book_id = selected_book
@@ -653,8 +655,8 @@ class StrategyContext:
         self._books = BooksView(hub, selected_book)
 
     @property
-    def clock(self) -> Clock:
-        """Return the injected clock boundary."""
+    def clock(self) -> ReadonlyClock:
+        """Return the read-only clock capability for observed engine time."""
         return self._clock
 
     @property
@@ -805,6 +807,7 @@ __all__ = [
     "LogRecord",
     "OrdersView",
     "PointInTimeData",
+    "ReadonlyClock",
     "Scheduler",
     "StateStore",
     "StructuredLog",

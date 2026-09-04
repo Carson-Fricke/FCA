@@ -1,14 +1,33 @@
-"""Strategy loading, identity, and guarded per-strategy execution bindings."""
+"""Strategy loading, identity, capability wiring, and guarded bindings.
+
+The engine and test shells hand strategy contexts capability-narrowed
+surfaces: a one-way :class:`StrategyVenue` command capability without
+venue-state observation, and a :class:`StrategyScheduler` that refuses
+market-data and outcome classes so strategy scheduling cannot fabricate
+feed or execution events.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from harness.configuration import StrategyInstanceConfig, canonical_hash
-from harness.core.types import Event, OrderRequest, SingleLegOrder
+from harness.core.events import EventBus
+from harness.core.types import (
+    AccountSnapshot,
+    Book,
+    Event,
+    ExecutionReport,
+    Fill,
+    OrderRequest,
+    Position,
+    QuoteEvent,
+    SingleLegOrder,
+    TradeEvent,
+)
 from harness.data import LookaheadError
 from harness.risk import RiskAction, RiskContext
 from harness.runtime.backtest.errors import (
@@ -23,6 +42,7 @@ from harness.strategy import (
     StrategyContext,
     bind_strategy,
 )
+from harness.venues import ExecutionVenue
 
 if TYPE_CHECKING:
     from harness.runtime.backtest.engine import _BacktestEngine
@@ -170,15 +190,67 @@ def _record(sink: _StrategySink, error: Exception) -> None:
         sink.violation = cast("LookaheadError", error)
 
 
-class _RiskVenue:
+# --------------------------------------------------------------------------
+# Strategy capability boundary
+# --------------------------------------------------------------------------
+
+_RESERVED_EVENT_CLASSES: Final[tuple[type[Event], ...]] = (
+    QuoteEvent,
+    TradeEvent,
+    ExecutionReport,
+    Fill,
+    Position,
+    Book,
+    AccountSnapshot,
+)
+
+
+class StrategyVenue:
+    """One-way venue command capability without venue-state observation.
+
+    Strategy contexts receive this capability instead of a concrete venue.
+    Commands are fire-and-forget; every outcome arrives as a dispatched
+    event. The capability exposes no venue state, so strategy code cannot
+    observe pending decisions, call records, remaining script steps, or any
+    other venue internal. Shells keep ownership of the concrete venue.
+    """
+
+    __slots__ = ("_venue",)
+
+    def __init__(self, venue: ExecutionVenue) -> None:
+        if not isinstance(venue, ExecutionVenue):
+            raise TypeError("venue must implement ExecutionVenue")
+        self._venue = venue
+
+    def submit(self, order: OrderRequest) -> None:
+        """Forward one submission; outcomes arrive as events."""
+        self._venue.submit(order)
+
+    def cancel(self, order_id: str) -> None:
+        """Forward one cancellation; outcomes arrive as events."""
+        self._venue.cancel(order_id)
+
+    def replace(self, order_id: str, replacement: OrderRequest) -> None:
+        """Forward one replacement; outcomes arrive as events."""
+        self._venue.replace(order_id, replacement)
+
+    def request_position_snapshot(self, account_id: str) -> None:
+        """Forward one snapshot request; outcomes arrive as events."""
+        self._venue.request_position_snapshot(account_id)
+
+
+class _RiskVenue(StrategyVenue):
     """Run one strategy's orders through the risk pipeline before the venue."""
 
-    __slots__ = ("_engine", "_instance_id", "_venue")
+    __slots__ = (
+        "_engine",
+        "_instance_id",
+    )
 
     def __init__(self, engine: _BacktestEngine, instance_id: str, venue: Any) -> None:
+        super().__init__(venue)
         self._engine = engine
         self._instance_id = instance_id
-        self._venue = venue
 
     def submit(self, order: OrderRequest) -> None:
         """Evaluate and forward one order; outcomes arrive as events."""
@@ -186,19 +258,11 @@ class _RiskVenue:
         if approved is not None:
             self._venue.submit(approved)
 
-    def cancel(self, order_id: str) -> None:
-        """Request cancellation through the simulated venue."""
-        self._venue.cancel(order_id)
-
     def replace(self, order_id: str, replacement: OrderRequest) -> None:
         """Evaluate and forward a replacement; outcomes arrive as events."""
         approved = self._admit(replacement)
         if approved is not None:
             self._venue.replace(order_id, approved)
-
-    def request_position_snapshot(self, account_id: str) -> None:
-        """Validate the protocol command without fabricating an outcome."""
-        self._venue.request_position_snapshot(account_id)
 
     def _admit(self, order: OrderRequest) -> OrderRequest | None:
         engine = self._engine
@@ -235,3 +299,30 @@ class _RiskVenue:
         engine.own_order(approved.order_id, self._instance_id)
         engine.count_order(self._instance_id)
         return approved
+
+
+class StrategyScheduler:
+    """Scheduler capability that refuses fabricated feed and outcome events.
+
+    Market data and venue or portfolio outcomes are reserved for the feed and
+    the venue. The capability rejects those event classes before they reach
+    the event bus, so strategy scheduling cannot impersonate market data or
+    fabricate execution outcomes. Provenance stamping of strategy-owned
+    events remains the shell scheduler's responsibility.
+    """
+
+    __slots__ = ("_bus",)
+
+    def __init__(self, bus: EventBus) -> None:
+        if not isinstance(bus, EventBus):
+            raise TypeError("bus must be an EventBus")
+        self._bus = bus
+
+    def schedule(self, event: Event) -> None:
+        """Schedule one strategy-owned event; reserved classes are refused."""
+        if isinstance(event, _RESERVED_EVENT_CLASSES):
+            raise TypeError(
+                f"{type(event).__name__} events are reserved for the feed and "
+                "the venue; strategies cannot schedule them"
+            )
+        self._bus.schedule(event)

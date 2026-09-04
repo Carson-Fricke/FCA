@@ -26,6 +26,35 @@ class AdvanceableClock(Clock, Protocol):
         ...
 
 
+class ReadonlyClock:
+    """Frozen capability view that only observes a clock's current time.
+
+    Execution shells hand strategies and other observers this wrapper so the
+    only reachable surface is :meth:`now`; advancing the engine clock stays
+    with the event kernel, which holds the concrete :class:`SimClock` or
+    another :class:`AdvanceableClock`.
+    """
+
+    __slots__ = ("_clock",)
+
+    _clock: Clock
+
+    def __init__(self, clock: Clock) -> None:
+        if not isinstance(clock, Clock):
+            raise TypeError("clock must implement Clock")
+        object.__setattr__(self, "_clock", clock)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"{type(self).__name__} is read-only")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"{type(self).__name__} is read-only")
+
+    def now(self) -> datetime:
+        """Return the observed engine timestamp."""
+        return self._clock.now()
+
+
 class SimClock:
     """A deterministic clock that only moves monotonically forward."""
 
@@ -70,4 +99,4 @@ class WallClock:
         return datetime.now(UTC)
 
 
-__all__ = ["AdvanceableClock", "Clock", "SimClock", "WallClock"]
+__all__ = ["AdvanceableClock", "Clock", "ReadonlyClock", "SimClock", "WallClock"]

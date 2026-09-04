@@ -3,6 +3,19 @@
 This module is deliberately an adapter for tests.  Each run owns its clock,
 event bus, venue, portfolio, and strategy binding; no process-wide clock,
 random source, network client, or identifier generator is used here.
+
+Strategy-visible surfaces are capability-narrowed.  The strategy context
+receives the one-way
+:class:`~harness.runtime.backtest.strategies.StrategyVenue` command
+capability — submission, cancellation, replacement, and snapshot requests
+with outcomes arriving only as dispatched events — never the raw
+:class:`~harness.venues.scripted.ScriptedVenue`, whose call record and
+``remaining_steps`` state stay scenario-owned test-facing inputs.  The
+context also receives a
+:class:`~harness.runtime.backtest.strategies.StrategyScheduler` that refuses
+market-data and outcome classes, so ``schedule()`` usage cannot impersonate
+the feed or fabricate execution outcomes; engine-assigned provenance for
+strategy-owned events remains the context scheduler's responsibility.
 """
 
 from __future__ import annotations
@@ -33,6 +46,7 @@ from harness.core.types import (
 )
 from harness.core.types.common import exact_decimal
 from harness.portfolio import PortfolioHub
+from harness.runtime.backtest.strategies import StrategyScheduler, StrategyVenue
 from harness.strategy import (
     Strategy,
     StrategyBinding,
@@ -184,6 +198,125 @@ class ToyStrategy(Strategy):
             raise RuntimeError("toy strategy has not received on_start")
         context.orders.submit(order)
         self.orders.append(order)
+
+    def on_stop(self, context: StrategyContext) -> None:
+        self.callbacks.append("on_stop")
+
+
+class VenueStateProbeStrategy(Strategy):
+    """Probe the strategy-visible venue surfaces and record what they expose.
+
+    Each phase probes the context venue surfaces for venue-state attributes
+    such as ``remaining_steps``, ``calls``, ``state``, ``decisions_for``,
+    ``active_orders``, ``latest_market``, and ``steps``. Every observed
+    surface is logged with its concrete type name and every reachable
+    attribute is logged as a finding, so golden artifacts prove what strategy
+    code can and cannot observe. The harness hands strategies the one-way
+    :class:`~harness.runtime.backtest.strategies.StrategyVenue` capability,
+    which exposes none of these attributes.
+    """
+
+    forbidden_attributes = (
+        "remaining_steps",
+        "calls",
+        "state",
+        "decisions_for",
+        "active_orders",
+        "latest_market",
+        "steps",
+    )
+
+    def __init__(self) -> None:
+        self.callbacks: list[str] = []
+        self.observations: list[str] = []
+        self._context: StrategyContext | None = None
+
+    def on_start(self, context: StrategyContext) -> None:
+        self._context = context
+        self.callbacks.append("on_start")
+        self._probe("on_start")
+
+    def on_quote(self, event: QuoteEvent) -> None:
+        self.callbacks.append("on_quote")
+        self._probe("on_quote")
+
+    def on_stop(self, context: StrategyContext) -> None:
+        self.callbacks.append("on_stop")
+        self._probe("on_stop")
+
+    def _probe(self, phase: str) -> None:
+        context = self._context
+        if context is None:
+            raise RuntimeError("venue probe strategy has not received on_start")
+        surfaces: dict[str, object] = {
+            "venue": context.venue,
+            "orders": context.orders,
+            "orders.venue": context.orders.venue,
+        }
+        for surface_name, surface in surfaces.items():
+            surface_type = "none" if surface is None else _class_name(surface)
+            context.log.info(
+                "venue-probe",
+                phase=phase,
+                surface=surface_name,
+                surface_type=surface_type,
+            )
+            if surface is None:
+                continue
+            for attribute in self.forbidden_attributes:
+                if hasattr(surface, attribute):
+                    self.observations.append(f"{surface_name}.{attribute}")
+                    context.log.warning(
+                        "venue-state-observed",
+                        phase=phase,
+                        surface=surface_name,
+                        attribute=attribute,
+                    )
+
+
+class OrderSignalStrategy(Strategy):
+    """Schedule one strategy-owned order-notification event per scenario.
+
+    The scheduled ``SingleLegOrder`` describes the order this strategy would
+    submit: it is a strategy-owned event, not market data and not a venue
+    outcome. The strategy scheduler capability refuses reserved market-data
+    and outcome classes, so ``schedule()`` usage cannot impersonate the feed
+    or fabricate execution outcomes.
+    """
+
+    def __init__(
+        self,
+        order_id: str = "signal-order",
+        symbol: str = "AAPL",
+        quantity: Decimal | int | str = Decimal("1"),
+    ) -> None:
+        self.order_id = order_id
+        self.symbol = canonical_symbol(symbol)
+        self.quantity = exact_decimal(quantity, "quantity")
+        self.callbacks: list[str] = []
+        self.scheduled: list[SingleLegOrder] = []
+        self._context: StrategyContext | None = None
+
+    def on_start(self, context: StrategyContext) -> None:
+        self._context = context
+        self.callbacks.append("on_start")
+
+    def on_quote(self, event: QuoteEvent) -> None:
+        self.callbacks.append("on_quote")
+        context = self._context
+        if context is None or self.scheduled or event.symbol != self.symbol:
+            return
+        order = SingleLegOrder(
+            event_id=f"strategy-event-{self.order_id}",
+            timestamp=event.timestamp,
+            sequence=event.sequence + 1,
+            order_id=self.order_id,
+            symbol=self.symbol,
+            side=Side.BUY,
+            quantity=self.quantity,
+        )
+        context.schedule(order)
+        self.scheduled.append(order)
 
     def on_stop(self, context: StrategyContext) -> None:
         self.callbacks.append("on_stop")
@@ -566,7 +699,14 @@ def assert_same_artifacts(left: GoldenRun, right: GoldenRun) -> None:
 
 
 def run_scenario(scenario: GoldenScenario) -> GoldenRun:
-    """Execute one scenario using only explicit deterministic dependencies."""
+    """Execute one scenario using only explicit deterministic dependencies.
+
+    The scenario owns the concrete :class:`ScriptedVenue` and uses it for the
+    ``venue/calls.json`` artifact and the exhaustion assertion. The strategy
+    context receives only the one-way :class:`StrategyVenue` command
+    capability and the refusing :class:`StrategyScheduler`, so strategy code
+    can neither observe venue state nor schedule fabricated market data.
+    """
     if not isinstance(scenario, GoldenScenario):
         raise TypeError("scenario must be a GoldenScenario")
     start = scenario.clock_start
@@ -579,8 +719,9 @@ def run_scenario(scenario: GoldenScenario) -> GoldenRun:
     context = StrategyContext(
         clock,
         portfolio=portfolio,
-        venue=venue,
+        venue=StrategyVenue(venue),
         bus=bus,
+        scheduler=StrategyScheduler(bus),
         seed=scenario.seed,
         universe=scenario.universe,
         subscriptions=scenario.subscriptions,
@@ -659,8 +800,10 @@ __all__ = [
     "GoldenRun",
     "GoldenScenario",
     "ManifestComparison",
+    "OrderSignalStrategy",
     "SyntheticFeed",
     "ToyStrategy",
+    "VenueStateProbeStrategy",
     "assert_manifest_equal",
     "assert_reproducible",
     "assert_same_artifacts",

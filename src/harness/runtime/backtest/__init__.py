@@ -73,6 +73,8 @@ from harness.runtime.backtest.preflight import (
 )
 from harness.runtime.backtest.strategies import (
     StrategyLoader,
+    StrategyScheduler,
+    StrategyVenue,
     default_strategy_loader,
     load_strategy_class,
 )
@@ -102,6 +104,8 @@ __all__ = [
     "StrategyIdentity",
     "StrategyLoadError",
     "StrategyLoader",
+    "StrategyScheduler",
+    "StrategyVenue",
     "SyntheticDataOptions",
     "TeardownPolicy",
     "backtest_sessions",
