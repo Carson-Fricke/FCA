@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-03T20:45:18.987Z",
+    "exportedAt": "2026-09-04T02:26:48.091Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 179
+      "nextId": 180
     },
-    "checksum": "d73118f7c22f4ab3",
-    "taskCount": 178,
+    "checksum": "18588e5fd7e93810",
+    "taskCount": 179,
     "exportMode": "full"
   },
   "selection": {
@@ -184,6 +184,7 @@
       "T095",
       "T110",
       "T141",
+      "T179",
       "T010",
       "T076",
       "T086",
@@ -267,7 +268,7 @@
     "T047": {
       "type": "task",
       "title": "E6.1 Deploy the complete dev slice",
-      "status": "pending",
+      "status": "done",
       "parentId": "T009",
       "depends": [
         "T020",
@@ -1953,6 +1954,20 @@
       "parentId": "T005",
       "depends": []
     },
+    "T179": {
+      "type": "task",
+      "title": "E5.8 Wire hosted API composition to Azure runtime",
+      "status": "done",
+      "parentId": "T008",
+      "depends": [
+        "T027",
+        "T033",
+        "T034",
+        "T040",
+        "T043",
+        "T141"
+      ]
+    },
     "T010": {
       "type": "epic",
       "title": "E7 Options front-set OPRA",
@@ -2912,7 +2927,7 @@
     {
       "id": "T047",
       "title": "E6.1 Deploy the complete dev slice",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T009",
@@ -2924,6 +2939,9 @@
         "dev",
         "deployment"
       ],
+      "notes": [
+        "2026-09-04 00:00:00 UTC: Dev slice deployed through the main workflow (run fca-33803672636-1). API revision fca-ml-dev-api--0000060 Healthy; scheduled ingest execution fca-ml-dev-ingest-29806620 succeeded in 35s. Both workloads authenticate with user-assigned managed identity fca-ml-dev-runtime: AcrPull on fcau7enxjst4w72u, Blob/Queue/Table Data Contributor on fcaobj3kwwfxxfxu, Key Vault Secrets User on fca-ml-dev-kv-obj3kww. Alpaca and bearer secrets resolve through identity-bound Key Vault references. Budget alerts 40/70 USD notify Carson.Fricke@outlook.com. The absence of AZURE_STORAGE_CONNECTION_STRING is by design because shared-key access is disabled and the app uses DefaultAzureCredential."
+      ],
       "acceptance": [
         "Dev API and ingest job revisions are healthy and use managed identities"
       ],
@@ -2934,21 +2952,116 @@
         "T046"
       ],
       "createdAt": "2026-09-01T03:22:47.454Z",
-      "updatedAt": "2026-09-01T03:28:18.591Z",
+      "updatedAt": "2026-09-04T00:00:04.259Z",
+      "completedAt": "2026-09-04T00:00:00.345Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-03T23:59:40.251Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:47.454Z"
+        "initializedAt": "2026-09-01T03:22:47.454Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "5077f8a5e9d0262a3e8dd517ef8d92eeef25bb7e",
+                "shortSha": "5077f8a"
+              },
+              {
+                "kind": "note",
+                "note": "Hosted deployment fca-33803672636-1 succeeded 2026-09-03T20:43:52Z; API revision fca-ml-dev-api--0000060 is Healthy and the latest scheduled ingest execution succeeded; both workloads run as user-assigned managed identity fca-ml-dev-runtime with AcrPull, storage data roles, and Key Vault Secrets User verified"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T047-validation.json",
+                "sha256": "6758d1a1ba394c40fc249882911945b72b5716b3dd4327d9221f7a5d57f70c42",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T23:59:40.746Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "5077f8a5e9d0262a3e8dd517ef8d92eeef25bb7e",
+                "shortSha": "5077f8a"
+              },
+              {
+                "kind": "note",
+                "note": "Hosted deployment fca-33803672636-1 succeeded 2026-09-03T20:43:52Z; API revision fca-ml-dev-api--0000060 is Healthy and the latest scheduled ingest execution succeeded; both workloads run as user-assigned managed identity fca-ml-dev-runtime with AcrPull, storage data roles, and Key Vault Secrets User verified"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T047-validation.json",
+                "sha256": "6758d1a1ba394c40fc249882911945b72b5716b3dd4327d9221f7a5d57f70c42",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T23:59:40.746Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "5077f8a5e9d0262a3e8dd517ef8d92eeef25bb7e",
+                "shortSha": "5077f8a"
+              },
+              {
+                "kind": "note",
+                "note": "Hosted deployment fca-33803672636-1 succeeded 2026-09-03T20:43:52Z; API revision fca-ml-dev-api--0000060 is Healthy and the latest scheduled ingest execution succeeded; both workloads run as user-assigned managed identity fca-ml-dev-runtime with AcrPull, storage data roles, and Key Vault Secrets User verified"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T047-validation.json",
+                "sha256": "6758d1a1ba394c40fc249882911945b72b5716b3dd4327d9221f7a5d57f70c42",
+                "passCount": 7,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-03T23:59:40.746Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -17259,6 +17372,10 @@
         "fastapi",
         "phase.1"
       ],
+      "notes": [
+        "[2026-09-04T02:12:46.920Z] completion-history: completedAt=2026-09-03T03:43:20.589Z",
+        "[2026-09-04T02:12:46.920Z] Reopened by add of child T179 (done parent gained an unsatisfied child)"
+      ],
       "acceptance": [
         "Missing sessions can be enqueued and polled through the API",
         "Cached data is returned as short-lived SAS files or size-capped SQL results",
@@ -17276,8 +17393,8 @@
         "T007"
       ],
       "createdAt": "2026-09-01T03:15:38.157Z",
-      "updatedAt": "2026-09-03T03:43:20.589Z",
-      "completedAt": "2026-09-03T03:43:20.589Z",
+      "updatedAt": "2026-09-04T02:25:09.367Z",
+      "completedAt": "2026-09-04T02:25:09.367Z",
       "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
@@ -19570,6 +19687,164 @@
       "relates": []
     },
     {
+      "id": "T179",
+      "title": "E5.8 Wire hosted API composition to Azure runtime",
+      "status": "done",
+      "priority": "critical",
+      "type": "task",
+      "parentId": "T008",
+      "size": "medium",
+      "position": 8,
+      "positionVersion": 0,
+      "description": "The deployed API process composes in-memory catalog and job repositories with no SAS issuer or ensure callback because the published lake.app:app target calls create_app without arguments, so hosted ensure requests queue forever and file queries return ensure_unavailable or sas_unavailable even though storage, identity, roles, and Key Vault secrets are healthy. Implement a hosted Azure composition package that mirrors the lake/local pattern: build the Azure Table catalog and job repositories, token-authenticated blob SAS issuer, and bounded lease-protected Alpaca ingest from non-secret environment configuration, wire them into the published Uvicorn target when LAKE_STORAGE_ACCOUNT_NAME is configured, keep local and default behavior unchanged without Azure access, and reject crypto and option ensure with clear errors until their runtime tasks land. This unblocks the T048 dev API and ingest smoke tests.",
+      "labels": [
+        "market-lake",
+        "azure",
+        "composition",
+        "hosting"
+      ],
+      "notes": [
+        "2026-09-04 02:25:10 UTC: Implemented lake/hosted composition mirroring lake/local: HostedRuntime builds the Azure Table catalog and job repositories, identity-based AzureBlobSasIssuer, and bounded lease-protected Alpaca ingest from LAKE_* environment configuration; hosted_overrides wires them into the published lake.app:app target only when LAKE_STORAGE_ACCOUNT_NAME is set, leaving local and default behavior Azure-free; the ensure-route launcher records durable SUCCEEDED job state and failures propagate to ensure_coverage failure marking; crypto and option ensure fail with HostedEnsureError pending their runtime tasks; CLI ingest now shares BoundedAlpacaClient and ingest_max_records. Focused suites: 112 tests; repository-wide 845 pytest, Ruff, format, and ty all green."
+      ],
+      "acceptance": [
+        "When LAKE_STORAGE_ACCOUNT_NAME is configured, the published lake.app:app target composes the Azure Table catalog and job repositories, identity-based blob SAS issuer, environment-driven ensure callback, and durable ensure job launcher without embedding secret values in source or configuration",
+        "A hosted equity ensure or file query with ensure=true performs bounded, lease-protected Alpaca ingestion for the requested missing sessions, records durable job state including succeeded or failed outcomes, and reads provider credentials only from the runtime environment",
+        "Without LAKE_STORAGE_ACCOUNT_NAME, create_app and lake.app keep the existing in-memory defaults and never construct Azure clients, credentials, or network calls",
+        "Crypto and option ensure requests fail with clear typed errors instead of silently queuing no-op jobs, pending their dedicated runtime tasks",
+        "Focused tests cover environment selection, repository and issuer wiring, equity session planning, provider credential guardrails, job outcome marking, and non-equity rejection; repository-wide Ruff lint, format, ty, and pytest checks pass"
+      ],
+      "files": [
+        "src/lake/app.py",
+        "src/lake/hosted",
+        "src/lake/cli/ingest.py",
+        "tests/lake/hosted",
+        "README.md",
+        ".github/architecture/repository.md"
+      ],
+      "depends": [
+        "T027",
+        "T033",
+        "T034",
+        "T040",
+        "T043",
+        "T141"
+      ],
+      "createdAt": "2026-09-04T02:12:46.920Z",
+      "updatedAt": "2026-09-04T02:25:14.193Z",
+      "completedAt": "2026-09-04T02:25:09.367Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T02:24:45.951Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-04T02:12:46.920Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "572de436f051207f49a5ce9832385574ed8e5075",
+                "shortSha": "572de43"
+              },
+              {
+                "kind": "note",
+                "note": "Hosted Azure composition package lake/hosted wired into the published lake.app:app target; CLI ingest shares the bounded client; local mode unchanged without Azure access"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T179-validation.json",
+                "sha256": "8c0c9588a25ec1573f48d97b68be58ea94d3588b7028423953e8fe4ca9f8a587",
+                "passCount": 112,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T02:24:46.704Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "572de436f051207f49a5ce9832385574ed8e5075",
+                "shortSha": "572de43"
+              },
+              {
+                "kind": "note",
+                "note": "Hosted Azure composition package lake/hosted wired into the published lake.app:app target; CLI ingest shares the bounded client; local mode unchanged without Azure access"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T179-validation.json",
+                "sha256": "8c0c9588a25ec1573f48d97b68be58ea94d3588b7028423953e8fe4ca9f8a587",
+                "passCount": 112,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T02:24:46.704Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "572de436f051207f49a5ce9832385574ed8e5075",
+                "shortSha": "572de43"
+              },
+              {
+                "kind": "note",
+                "note": "Hosted Azure composition package lake/hosted wired into the published lake.app:app target; CLI ingest shares the bounded client; local mode unchanged without Azure access"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T179-validation.json",
+                "sha256": "8c0c9588a25ec1573f48d97b68be58ea94d3588b7028423953e8fe4ca9f8a587",
+                "passCount": 112,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 178 CLEO tasks through T178.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T02:24:46.704Z",
+            "capturedBy": "opencode"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
+      "kind": "bug",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T010",
       "title": "E7 Options front-set OPRA",
       "status": "pending",
@@ -20936,7 +21211,8 @@
         "T043",
         "T044",
         "T045",
-        "T046"
+        "T046",
+        "T179"
       ],
       "T009": [
         "T047",
@@ -21845,6 +22121,14 @@
       "T110": [
         "T095",
         "T107"
+      ],
+      "T179": [
+        "T027",
+        "T033",
+        "T034",
+        "T040",
+        "T043",
+        "T141"
       ],
       "T010": [
         "T005",
