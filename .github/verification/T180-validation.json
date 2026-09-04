@@ -43,6 +43,14 @@
         "uv run --python 3.12 --extra dev pytest -q -p no:cacheprovider"
       ],
       "result": "Repository-wide Ruff lint, format check, ty type check, and the complete pytest suite passed with 894 tests after wave integration"
+    },
+    {
+      "name": "hosted-managed-identity-authentication",
+      "status": "passed",
+      "commands": [
+        "deploy-main run 33837767827 (success) then one-off verification job fca-ml-dev-authsmoke-pcs4emh"
+      ],
+      "result": "The deployed API (revision with LAKE_API__AUTH__ENTRA_TENANT_ID and LAKE_API__AUTH__ENTRA_AUDIENCE from the deployer) accepted a live managed-identity token: the job minted a token with aud equal to the lake application client id and the Lake.Access role claim, /health answered 200 without credentials, /v1/auth/check returned 200 with the Entra JWT (real tenant JWKS validation), 200 with the legacy static bearer, 401 for a garbage credential, and POST /v1/catalog/ensure authorized solely by the managed-identity token returned the complete coverage report for AAPL 2026-08-28"
     }
   ],
   "limitations": [

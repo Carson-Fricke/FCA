@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-04T03:37:46.816Z",
+    "exportedAt": "2026-09-04T04:55:07.545Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 181
     },
-    "checksum": "7850f4cbdf2cbe3f",
+    "checksum": "33bd5a1e692623c4",
     "taskCount": 180,
     "exportMode": "full"
   },
@@ -329,7 +329,7 @@
     "T088": {
       "type": "task",
       "title": "H2.1 Market-lake access adapter",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T021",
@@ -343,7 +343,7 @@
     "T098": {
       "type": "task",
       "title": "H3.1 Streaming recorder and audit trail",
-      "status": "pending",
+      "status": "done",
       "parentId": "T071",
       "depends": [
         "T080",
@@ -620,7 +620,7 @@
     "T070": {
       "type": "epic",
       "title": "H2 M1 Equities backtest engine",
-      "status": "pending",
+      "status": "done",
       "parentId": "T068",
       "depends": [
         "T005",
@@ -1266,7 +1266,7 @@
     "T118": {
       "type": "task",
       "title": "H6.4 Option expiry, exercise, and assignment",
-      "status": "pending",
+      "status": "done",
       "parentId": "T074",
       "depends": [
         "T094",
@@ -1972,7 +1972,7 @@
     "T180": {
       "type": "task",
       "title": "E9.8 Entra managed-identity JWT authentication for the lake API",
-      "status": "pending",
+      "status": "done",
       "parentId": "T012",
       "depends": [
         "T017",
@@ -3691,7 +3691,7 @@
     {
       "id": "T088",
       "title": "H2.1 Market-lake access adapter",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -3706,7 +3706,8 @@
         "lake-integration"
       ],
       "notes": [
-        "2026-09-03 01:17:25 UTC: The harness market-lake adapter consumes the standalone lakeclient contract rather than reimplementing HTTP and SAS behavior."
+        "2026-09-03 01:17:25 UTC: The harness market-lake adapter consumes the standalone lakeclient contract rather than reimplementing HTTP and SAS behavior.",
+        "2026-09-04 04:42:29 UTC: Wave-verified MarketLakeAdapter: ensure, terminal-job wait, and file-query ordering before reader invocation; complete-coverage validation against canonical partition paths; projected egress warning before reader at the configurable 1 GiB threshold; injected LakeClientPort boundary with exactly-one-of client/client_factory, lazy cached factory resolution, and factory failure surfacing on first load. Credential and audience selection stays with the caller's factory, consuming the concurrent T180 LakeClient credential kwargs without adapter coupling."
       ],
       "acceptance": [
         "Mocked missing coverage follows ensure, poll, and load before a run starts",
@@ -3728,21 +3729,116 @@
         "T079"
       ],
       "createdAt": "2026-09-01T18:00:38.596Z",
-      "updatedAt": "2026-09-03T01:17:25.268Z",
+      "updatedAt": "2026-09-04T04:42:33.745Z",
+      "completedAt": "2026-09-04T04:42:29.490Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T04:41:46.253Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:00:38.596Z"
+        "initializedAt": "2026-09-01T18:00:38.596Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the MarketLakeAdapter injected client boundary, exactly-one-of validation, lazy factory resolution, and egress warning ordering against all acceptance criteria"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T088-validation.json",
+                "sha256": "b2d9b0f2a7e719062572a35949389d5879d5ed8384b6b64b4fcc72dbba444c9d",
+                "passCount": 40,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:41:46.795Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the MarketLakeAdapter injected client boundary, exactly-one-of validation, lazy factory resolution, and egress warning ordering against all acceptance criteria"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T088-validation.json",
+                "sha256": "b2d9b0f2a7e719062572a35949389d5879d5ed8384b6b64b4fcc72dbba444c9d",
+                "passCount": 40,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:41:46.795Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the MarketLakeAdapter injected client boundary, exactly-one-of validation, lazy factory resolution, and egress warning ordering against all acceptance criteria"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T088-validation.json",
+                "sha256": "b2d9b0f2a7e719062572a35949389d5879d5ed8384b6b64b4fcc72dbba444c9d",
+                "passCount": 40,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:41:46.795Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -3750,7 +3846,7 @@
     {
       "id": "T098",
       "title": "H3.1 Streaming recorder and audit trail",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T071",
@@ -3764,6 +3860,10 @@
         "harness.h021",
         "recorder"
       ],
+      "notes": [
+        "2026-09-04 04:39:22 UTC: File list reconciled at wave integration: the recorder is a package at src/harness/results/recorder/ implemented in commit 6460ef8; this wave verified the implementation against all acceptance criteria.",
+        "2026-09-04 04:42:55 UTC: Wave-verified the streaming RunRecorder end-to-end against all acceptance criteria: referential link integrity across actions, orders, risk decisions, fills, equity snapshots, and emissions; bounded-memory streaming of one million events with bounded pending batches and tracemalloc peak under 64 MiB; byte-identical reruns through the determinism manifest with per-artifact SHA-256 digests and a run digest; strategy Emitter and event-bus attachment integration; read_artifact schema-drift rejection. Implementation landed in commit 6460ef8 as the package src/harness/results/recorder/; CLEO file list reconciled to the package."
+      ],
       "acceptance": [
         "A scripted run produces every required artifact with complete action-to-order-to-fill links",
         "A one-million-event run remains memory bounded",
@@ -3772,28 +3872,124 @@
         "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
       ],
       "files": [
-        "src/harness/results/recorder.py"
+        "src/harness/results",
+        "tests/harness/results"
       ],
       "depends": [
         "T080",
         "T094"
       ],
       "createdAt": "2026-09-01T18:01:20.144Z",
-      "updatedAt": "2026-09-01T18:26:18.843Z",
+      "updatedAt": "2026-09-04T04:42:58.803Z",
+      "completedAt": "2026-09-04T04:42:54.765Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T04:41:54.851Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:20.144Z"
+        "initializedAt": "2026-09-01T18:01:20.144Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Recorder implementation in commit 6460ef8 verified end-to-end this wave: link integrity, one-million-event bounded memory, byte-identical reruns, emitter and bus integration"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T098-validation.json",
+                "sha256": "45abd3140133685e29b8e5538ca48532021935ef3b18463423a0e8840cff4c9a",
+                "passCount": 27,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:41:55.330Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Recorder implementation in commit 6460ef8 verified end-to-end this wave: link integrity, one-million-event bounded memory, byte-identical reruns, emitter and bus integration"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T098-validation.json",
+                "sha256": "45abd3140133685e29b8e5538ca48532021935ef3b18463423a0e8840cff4c9a",
+                "passCount": 27,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:41:55.330Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6460ef876fe7cac1ff58e1906b6b33d8ef8c2ad9",
+                "shortSha": "6460ef8"
+              },
+              {
+                "kind": "note",
+                "note": "Recorder implementation in commit 6460ef8 verified end-to-end this wave: link integrity, one-million-event bounded memory, byte-identical reruns, emitter and bus integration"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T098-validation.json",
+                "sha256": "45abd3140133685e29b8e5538ca48532021935ef3b18463423a0e8840cff4c9a",
+                "passCount": 27,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:41:55.330Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -6482,7 +6678,7 @@
     {
       "id": "T070",
       "title": "H2 M1 Equities backtest engine",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T068",
@@ -6519,8 +6715,9 @@
         "T069"
       ],
       "createdAt": "2026-09-01T17:55:23.154Z",
-      "updatedAt": "2026-09-03T01:17:33.951Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-04T04:42:29.490Z",
+      "completedAt": "2026-09-04T04:42:29.490Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -12787,7 +12984,7 @@
     {
       "id": "T118",
       "title": "H6.4 Option expiry, exercise, and assignment",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T074",
@@ -12801,6 +12998,9 @@
         "harness.h041",
         "options",
         "expiry"
+      ],
+      "notes": [
+        "2026-09-04 04:43:17 UTC: Wave-verified OptionLifecycle: deterministic long exercise at exact strike-price settlement, pessimistic full ITM short assignment through the injectable AssignmentPolicy with cash settlement of unassigned remainder, worthless and pinned expiry, days-to-expiry threshold events, contract retirement registry, expired-contract rejection on late fills, and VirtualBook.retire_position. All money math is exact Decimal and timing flows through the injected clock; no OMS changes required."
       ],
       "acceptance": [
         "An ITM short put spread produces exact assignment, exercise, positions, and cash",
@@ -12817,21 +13017,116 @@
         "T116"
       ],
       "createdAt": "2026-09-01T18:02:46.130Z",
-      "updatedAt": "2026-09-01T18:29:11.227Z",
+      "updatedAt": "2026-09-04T04:43:21.158Z",
+      "completedAt": "2026-09-04T04:43:17.482Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T04:42:03.126Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:02:46.130Z"
+        "initializedAt": "2026-09-01T18:02:46.130Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified OptionLifecycle exercise, pessimistic assignment, worthless and pinned expiry, DTE events, retirement registry, and expired-contract rejection"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T118-validation.json",
+                "sha256": "c7f7ae2fb80de18d47d27a374fad7326246151f1a224e0e7e1e00efa1c4f6588",
+                "passCount": 24,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:42:03.811Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified OptionLifecycle exercise, pessimistic assignment, worthless and pinned expiry, DTE events, retirement registry, and expired-contract rejection"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T118-validation.json",
+                "sha256": "c7f7ae2fb80de18d47d27a374fad7326246151f1a224e0e7e1e00efa1c4f6588",
+                "passCount": 24,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:42:03.811Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified OptionLifecycle exercise, pessimistic assignment, worthless and pinned expiry, DTE events, retirement registry, and expired-contract rejection"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T118-validation.json",
+                "sha256": "c7f7ae2fb80de18d47d27a374fad7326246151f1a224e0e7e1e00efa1c4f6588",
+                "passCount": 24,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:42:03.811Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -19958,7 +20253,7 @@
     {
       "id": "T180",
       "title": "E9.8 Entra managed-identity JWT authentication for the lake API",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T012",
@@ -19974,7 +20269,8 @@
         "hardening"
       ],
       "notes": [
-        "2026-09-04 03:36:51 UTC: Entra bootstrap performed by the maintainer-authorized session: fca-ml-lake-api and fca-harness-api applications created with application roles, and fca-ml-dev-runtime assigned Lake.Access; hosted mint verification succeeded with roles claim present."
+        "2026-09-04 03:36:51 UTC: Entra bootstrap performed by the maintainer-authorized session: fca-ml-lake-api and fca-harness-api applications created with application roles, and fca-ml-dev-runtime assigned Lake.Access; hosted mint verification succeeded with roles claim present.",
+        "2026-09-04 04:54:08 UTC: Implemented Entra managed-identity JWT authentication for the lake API: CombinedAuthenticator validates JWT-shaped bearer credentials against the tenant JWKS (signature, audience, both v1 sts.windows.net and v2 login.microsoftonline.com issuer forms, expiry, Lake.Access role claim) while the static bearer remains for local and transition; settings gained non-secret api.auth (tenant id, audience, role) with blank-tolerant parsing; lakeclient gained credential+audience authentication with 401 retry; Bicep passes tenant and the lake application audience into the API container conditionally, with deploy-main.yml consuming the LAKE_API_AUDIENCE environment variable without a hard requirement. Hosted verification: deploy run 33837767827 succeeded, live MI token with Lake.Access accepted on /v1/auth/check (200), static bearer still 200, garbage 401, and POST /v1/catalog/ensure authorized solely by the MI token returned the complete AAPL 2026-08-28 coverage."
       ],
       "acceptance": [
         "The lake API accepts Entra ID JWTs whose audience is the fca-ml-lake-api application and enforces the Lake.Access role claim, validating signature against the tenant JWKS, both v1 sts.windows.net and v2 login.microsoftonline.com issuer forms for managed-identity tokens, and expiry, while continuing to accept the existing static bearer token for local and transition use",
@@ -20004,21 +20300,116 @@
         "T179"
       ],
       "createdAt": "2026-09-04T03:25:22.348Z",
-      "updatedAt": "2026-09-04T03:36:51.105Z",
+      "updatedAt": "2026-09-04T04:54:12.316Z",
+      "completedAt": "2026-09-04T04:54:08.681Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T04:53:44.532Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T03:25:22.348Z"
+        "initializedAt": "2026-09-04T03:25:22.348Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration plus hosted verification: deploy run 33837767827 succeeded, live managed-identity token with Lake.Access role accepted by the deployed API on /v1/auth/check and a data-route ensure, static bearer compatibility intact, garbage rejected"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T180-validation.json",
+                "sha256": "f02b8df3bc42b10a59e29d001716e8c24b384be4fbcf927398d3c9480f826988",
+                "passCount": 116,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:53:45.288Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration plus hosted verification: deploy run 33837767827 succeeded, live managed-identity token with Lake.Access role accepted by the deployed API on /v1/auth/check and a data-route ensure, static bearer compatibility intact, garbage rejected"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T180-validation.json",
+                "sha256": "f02b8df3bc42b10a59e29d001716e8c24b384be4fbcf927398d3c9480f826988",
+                "passCount": 116,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:53:45.288Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c8fcce2a33031d51a941b968cddc479685c6122b",
+                "shortSha": "c8fcce2"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration plus hosted verification: deploy run 33837767827 succeeded, live managed-identity token with Lake.Access role accepted by the deployed API on /v1/auth/check and a data-route ensure, static bearer compatibility intact, garbage rejected"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T180-validation.json",
+                "sha256": "f02b8df3bc42b10a59e29d001716e8c24b384be4fbcf927398d3c9480f826988",
+                "passCount": 116,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T04:53:45.288Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
