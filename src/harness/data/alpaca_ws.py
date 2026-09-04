@@ -1,9 +1,11 @@
-"""Transport-neutral Alpaca SIP WebSocket feed for the live async shell.
+"""Transport-neutral Alpaca WebSocket feeds for the live async shell.
 
 The WebSocket connection and async clock are ports supplied by the deployment
-shell. ``AlpacaSipInbox`` is deliberately synchronous: it performs no network,
-clock, sleep, or random access while producing the same market event records
-used by replay.
+shell. ``AlpacaSipInbox`` and ``AlpacaCryptoInbox`` are deliberately
+synchronous: they perform no network, clock, sleep, or random access while
+producing the same market event records used by replay. The SIP feed serves
+XNYS-session equities, while the crypto feed normalizes fractional quotes and
+trades continuously across every UTC day.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Protocol, cast
+from typing import ClassVar, Protocol, Self, cast
 
 from harness.configuration.models import TraderConfig
 from harness.core.symbols import Symbol
@@ -79,20 +81,41 @@ class AlpacaSipSubscription:
             raise ValueError("Alpaca SIP requires runtime network access")
         if config.market_data.settings.get("feed") != "sip":
             raise ValueError("Alpaca equity WebSocket feed must be configured as sip")
-        symbols = tuple(
-            sorted(
-                {
-                    symbol
-                    for instance in config.strategy_instances
-                    for symbol in instance.symbols
-                }
-            )
-        )
+        symbols = _deployment_symbols(config)
         return cls(trades=symbols, quotes=symbols)
+
+
+@dataclass(frozen=True, slots=True)
+class AlpacaCryptoSubscription(AlpacaSipSubscription):
+    """Canonical crypto trading pairs requested by one trader deployment."""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "trades", _crypto_pairs(self.trades, "trades"))
+        object.__setattr__(self, "quotes", _crypto_pairs(self.quotes, "quotes"))
+        if not self.trades and not self.quotes:
+            raise ValueError(
+                "at least one crypto trade or quote subscription is required"
+            )
+
+    @classmethod
+    def from_trader_config(cls, config: TraderConfig) -> AlpacaCryptoSubscription:
+        """Derive always-on pair subscriptions from the deployed strategy universes."""
+        if not isinstance(config, TraderConfig):
+            raise TypeError("config must be a TraderConfig")
+        if config.deployment.network_access != "runtime_only":
+            raise ValueError("Alpaca crypto requires runtime network access")
+        if config.market_data.settings.get("feed") != "crypto":
+            raise ValueError(
+                "Alpaca crypto WebSocket feed must be configured as crypto"
+            )
+        pairs = _crypto_pairs(_deployment_symbols(config), "strategy symbols")
+        return cls(trades=pairs, quotes=pairs)
 
 
 class AlpacaSipInbox:
     """Synchronous, deterministic normalizer and kernel-facing event inbox."""
+
+    event_source: ClassVar[str] = "alpaca-sip"
 
     __slots__ = (
         "_events",
@@ -186,6 +209,10 @@ class AlpacaSipInbox:
                 stale.append(symbol)
         return tuple(stale)
 
+    def _event_symbol(self, raw: str) -> str:
+        """Return the canonical symbol carried by one provider event."""
+        return str(Symbol(raw))
+
     def _normalize(
         self, message: Mapping[str, object], observed_at: datetime, sequence: int
     ) -> MarketEvent:
@@ -194,7 +221,7 @@ class AlpacaSipInbox:
             raise AlpacaWebSocketProtocolError(
                 f"unsupported Alpaca market-data message type: {message_type}"
             )
-        symbol = str(Symbol(_required_text(message, "S")))
+        symbol = self._event_symbol(_required_text(message, "S"))
         event_timestamp = _provider_timestamp(message.get("t"))
         if event_timestamp > observed_at + self._max_future_skew:
             raise AlpacaWebSocketProtocolError(
@@ -206,7 +233,7 @@ class AlpacaSipInbox:
             )
         event_id = ":".join(
             (
-                "alpaca-sip",
+                self.event_source,
                 message_type,
                 symbol,
                 event_timestamp.isoformat(timespec="microseconds"),
@@ -240,8 +267,32 @@ class AlpacaSipInbox:
         )
 
 
+class AlpacaCryptoInbox(AlpacaSipInbox):
+    """Crypto normalizer for fractional quotes and trades on every UTC day.
+
+    Event identities carry crypto provenance, so pair this inbox with
+    ``AlpacaCryptoWebSocketFeed``. Crypto quotes carry no consolidated tape, and
+    fractional prices and sizes stay exact ``Decimal`` values.
+    """
+
+    __slots__ = ()
+
+    event_source: ClassVar[str] = "alpaca-crypto"
+
+    def _event_symbol(self, raw: str) -> str:
+        symbol = str(Symbol(raw))
+        if not _is_crypto_pair(symbol):
+            raise AlpacaWebSocketProtocolError(
+                f"Alpaca field S must use BASE/QUOTE crypto pairs: {raw!r}"
+            )
+        return symbol
+
+
 class AlpacaSipWebSocketFeed:
     """Async Alpaca shell with auth, reconnect backoff, and stale monitoring."""
+
+    subscription_type: ClassVar[type[AlpacaSipSubscription]] = AlpacaSipSubscription
+    default_websocket_url: ClassVar[str] = "wss://stream.data.alpaca.markets/v2/sip"
 
     __slots__ = (
         "_api_key",
@@ -273,7 +324,7 @@ class AlpacaSipWebSocketFeed:
         inbox: AlpacaSipInbox,
         clock: AsyncClock,
         sleep: AsyncSleep = asyncio.sleep,
-        websocket_url: str = "wss://stream.data.alpaca.markets/v2/sip",
+        websocket_url: str | None = None,
         backoff_seconds: float = 0.5,
         max_backoff_seconds: float = 30.0,
         watchdog_interval: float = 1.0,
@@ -285,6 +336,8 @@ class AlpacaSipWebSocketFeed:
             raise ValueError("api_key must not be empty")
         if not api_secret or not api_secret.strip():
             raise ValueError("api_secret must not be empty")
+        if websocket_url is None:
+            websocket_url = self.default_websocket_url
         if not websocket_url or not websocket_url.strip():
             raise ValueError("websocket_url must not be empty")
         if backoff_seconds < 0 or max_backoff_seconds < 0:
@@ -322,19 +375,19 @@ class AlpacaSipWebSocketFeed:
         inbox: AlpacaSipInbox,
         clock: AsyncClock,
         sleep: AsyncSleep = asyncio.sleep,
-        websocket_url: str = "wss://stream.data.alpaca.markets/v2/sip",
+        websocket_url: str | None = None,
         backoff_seconds: float = 0.5,
         max_backoff_seconds: float = 30.0,
         watchdog_interval: float = 1.0,
         stale_after: timedelta = timedelta(seconds=30),
         handshake_timeout: timedelta = timedelta(seconds=10),
         on_stale: StaleHandler | None = None,
-    ) -> AlpacaSipWebSocketFeed:
+    ) -> Self:
         """Build a feed whose channels follow the deployed strategy universes."""
         return cls(
             api_key=api_key,
             api_secret=api_secret,
-            subscription=AlpacaSipSubscription.from_trader_config(config),
+            subscription=cls.subscription_type.from_trader_config(config),
             transport=transport,
             inbox=inbox,
             clock=clock,
@@ -494,6 +547,21 @@ class AlpacaSipWebSocketFeed:
         return timestamp(self._clock(), "async shell clock")
 
 
+class AlpacaCryptoWebSocketFeed(AlpacaSipWebSocketFeed):
+    """Async Alpaca crypto shell reusing the SIP auth and reconnect policy.
+
+    Crypto trades continuously on every UTC day, so the feed applies no session
+    gating and the stale watchdog relies only on timestamps supplied by the
+    async shell. Pair channels follow the deployment configuration, and pair
+    this feed with ``AlpacaCryptoInbox`` for crypto event provenance.
+    """
+
+    __slots__ = ()
+
+    subscription_type = AlpacaCryptoSubscription
+    default_websocket_url = "wss://stream.data.alpaca.markets/v1beta3/crypto"
+
+
 def _canonical_symbols(symbols: Sequence[str], field_name: str) -> tuple[str, ...]:
     if isinstance(symbols, str):
         raise TypeError(f"{field_name} must be a sequence of symbols")
@@ -501,6 +569,33 @@ def _canonical_symbols(symbols: Sequence[str], field_name: str) -> tuple[str, ..
     if len(values) != len(symbols):
         raise ValueError(f"{field_name} must not contain duplicate symbols")
     return values
+
+
+def _deployment_symbols(config: TraderConfig) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                symbol
+                for instance in config.strategy_instances
+                for symbol in instance.symbols
+            }
+        )
+    )
+
+
+def _is_crypto_pair(symbol: str) -> bool:
+    base, separator, quote = symbol.partition("/")
+    return bool(separator and base and quote and "/" not in quote)
+
+
+def _crypto_pairs(symbols: Sequence[str], field_name: str) -> tuple[str, ...]:
+    canonical = _canonical_symbols(symbols, field_name)
+    for symbol in canonical:
+        if not _is_crypto_pair(symbol):
+            raise ValueError(
+                f"{field_name} must use BASE/QUOTE crypto pairs, not {symbol!r}"
+            )
+    return canonical
 
 
 def _message_sequence(
@@ -649,6 +744,9 @@ def _nonnegative_duration(value: timedelta, field_name: str) -> None:
 
 
 __all__ = [
+    "AlpacaCryptoInbox",
+    "AlpacaCryptoSubscription",
+    "AlpacaCryptoWebSocketFeed",
     "AlpacaSipInbox",
     "AlpacaSipSubscription",
     "AlpacaSipWebSocketFeed",

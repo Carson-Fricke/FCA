@@ -3,17 +3,30 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
 from harness.configuration import load_example
-from harness.configuration.models import TraderConfig
+from harness.configuration.models import (
+    DeploymentConfig,
+    FeeConfig,
+    FeeRuleConfig,
+    ResourceLimitsConfig,
+    RiskPipelineConfig,
+    RiskRuleConfig,
+    RuntimeAdapterConfig,
+    StrategyInstanceConfig,
+    TraderConfig,
+)
 from harness.core.types import ParquetCodec, QuoteEvent, TradeEvent
 from harness.data.alpaca_ws import (
+    AlpacaCryptoInbox,
+    AlpacaCryptoSubscription,
+    AlpacaCryptoWebSocketFeed,
     AlpacaSipInbox,
     AlpacaSipSubscription,
     AlpacaSipWebSocketFeed,
@@ -124,6 +137,120 @@ def exact(message: dict[str, object]) -> dict[str, object]:
     payload: Any = json.loads(json.dumps(message), parse_float=Decimal)
     assert isinstance(payload, dict)
     return payload
+
+
+def crypto_controls(pairs: list[str]) -> list[object]:
+    return [
+        [{"T": "success", "msg": "connected"}],
+        [{"T": "success", "msg": "authenticated"}],
+        [{"T": "subscription", "trades": pairs, "quotes": pairs, "bars": []}],
+    ]
+
+
+def crypto_quote(
+    timestamp: str = "2024-01-19T14:30:00.123456789Z",
+) -> dict[str, object]:
+    return {
+        "T": "q",
+        "S": "BTC/USD",
+        "t": timestamp,
+        "bx": "CBSE",
+        "bp": 43161.69,
+        "bs": 0.5,
+        "ax": "CBSE",
+        "ap": 43162.13,
+        "as": 0.028347,
+    }
+
+
+def crypto_trade(
+    timestamp: str = "2024-01-19T14:30:00.500000000Z",
+) -> dict[str, object]:
+    return {
+        "T": "t",
+        "S": "BTC/USD",
+        "i": 133364,
+        "x": "CBSE",
+        "p": 43161.69,
+        "s": 0.028347,
+        "t": timestamp,
+    }
+
+
+def crypto_trader_config(
+    instances: tuple[tuple[str, ...], ...],
+    *,
+    feed: str = "crypto",
+    network_access: Literal["disabled", "runtime_only"] = "runtime_only",
+) -> TraderConfig:
+    share = Decimal(1) / len(instances)
+    return TraderConfig(
+        schema_version=1,
+        shell="trader",
+        mode="paper",
+        seed=1729,
+        base_currency="USD",
+        strategy_instances=tuple(
+            StrategyInstanceConfig(
+                instance_id=f"crypto-{index}",
+                implementation="strategies.reference.momentum:MomentumStrategy",
+                bundle_hash="aa" * 32,
+                capital_fraction=share,
+                symbols=symbols,
+                parameters={},
+            )
+            for index, symbols in enumerate(instances)
+        ),
+        risk_pipeline=RiskPipelineConfig(
+            on_reject="halt_strategy",
+            rules=(
+                RiskRuleConfig(
+                    rule_id="max-order-notional",
+                    implementation="harness.risk.limits:MaxOrderNotional",
+                    parameters={"limit": Decimal("10000.00")},
+                ),
+            ),
+        ),
+        fees=FeeConfig(
+            currency="USD",
+            rounding="half_even",
+            rules=(
+                FeeRuleConfig(
+                    fee_id="crypto-commission",
+                    basis="per_unit",
+                    rate=Decimal("0.005"),
+                    minimum=Decimal("0.01"),
+                    side="both",
+                ),
+            ),
+        ),
+        market_data=RuntimeAdapterConfig(
+            adapter="harness.venues.alpaca:AlpacaMarketData",
+            credentials={
+                "api_key": "${HARNESS_ALPACA_API_KEY}",
+                "api_secret": "${HARNESS_ALPACA_API_SECRET}",
+            },
+            settings={"feed": feed},
+        ),
+        broker=RuntimeAdapterConfig(
+            adapter="harness.venues.alpaca:AlpacaBroker",
+            credentials={
+                "api_key": "${HARNESS_ALPACA_API_KEY}",
+                "api_secret": "${HARNESS_ALPACA_API_SECRET}",
+            },
+            settings={"account": "paper"},
+        ),
+        deployment=DeploymentConfig(
+            name="trader-local",
+            target="local",
+            environment="local",
+            image=None,
+            replicas=1,
+            restart_policy="always",
+            network_access=network_access,
+            resources=ResourceLimitsConfig(cpu_cores=Decimal("1.0"), memory_mib=1024),
+        ),
+    )
 
 
 def run(coroutine: Any) -> Any:
@@ -285,3 +412,164 @@ def test_inbox_staleness_uses_only_caller_supplied_times() -> None:
         )
         == ()
     )
+
+
+def test_crypto_pairs_are_sourced_from_trader_config() -> None:
+    config = crypto_trader_config((("ETH/USD", "BTC/USD"), ("BTC/USD",)))
+    subscription = AlpacaCryptoSubscription.from_trader_config(config)
+    assert subscription.trades == ("BTC/USD", "ETH/USD")
+    assert subscription.quotes == ("BTC/USD", "ETH/USD")
+
+    stop = asyncio.Event()
+    socket = MockSocket(
+        [*crypto_controls(["BTC/USD", "ETH/USD"]), [crypto_trade()]],
+        stop=stop,
+        stop_after=4,
+    )
+    server = MockServer([socket])
+    inbox = AlpacaCryptoInbox()
+    feed = AlpacaCryptoWebSocketFeed.from_trader_config(
+        config,
+        api_key="key",
+        api_secret="secret",
+        transport=server,
+        inbox=inbox,
+        clock=FakeClock(),
+    )
+
+    run(feed.run(stop, max_connections=1))
+
+    assert server.urls == ["wss://stream.data.alpaca.markets/v1beta3/crypto"]
+    assert socket.sent == [
+        {"action": "auth", "key": "key", "secret": "secret"},
+        {
+            "action": "subscribe",
+            "trades": ["BTC/USD", "ETH/USD"],
+            "quotes": ["BTC/USD", "ETH/USD"],
+        },
+    ]
+    events = inbox.drain()
+    assert len(events) == 1
+    assert isinstance(events[0], TradeEvent)
+    assert events[0].symbol.value == "BTC/USD"
+    assert events[0].event_id.startswith("alpaca-crypto:t:BTC/USD:")
+    assert socket.closed
+
+
+def test_crypto_subscription_requires_pairs_and_crypto_feed_setting() -> None:
+    with pytest.raises(ValueError, match="BASE/QUOTE"):
+        AlpacaCryptoSubscription(("SPY",), ())
+    with pytest.raises(ValueError, match="BASE/QUOTE"):
+        AlpacaCryptoSubscription(("BTC/USD/USDT",), ())
+    with pytest.raises(ValueError, match="BASE/QUOTE"):
+        AlpacaCryptoSubscription(("BTC/",), ())
+    with pytest.raises(ValueError, match="at least one crypto"):
+        AlpacaCryptoSubscription((), ())
+    crypto = AlpacaCryptoSubscription(("BTC/USD",), ("BTC/USD",))
+    sip = AlpacaSipSubscription(("BTC/USD",), ("BTC/USD",))
+    assert crypto != sip
+
+    with pytest.raises(ValueError, match="must be configured as crypto"):
+        AlpacaCryptoSubscription.from_trader_config(
+            crypto_trader_config((("BTC/USD",),), feed="sip")
+        )
+    with pytest.raises(ValueError, match="runtime network access"):
+        AlpacaCryptoSubscription.from_trader_config(
+            crypto_trader_config((("BTC/USD",),), network_access="disabled")
+        )
+    with pytest.raises(ValueError, match="BASE/QUOTE"):
+        AlpacaCryptoSubscription.from_trader_config(crypto_trader_config((("SPY",),)))
+
+
+def test_crypto_quotes_and_trades_keep_fractional_decimals_exact() -> None:
+    inbox = AlpacaCryptoInbox(initial_sequence=11)
+    events = inbox.push(
+        [exact(crypto_quote()), exact(crypto_trade())], observed_at=START
+    )
+
+    assert isinstance(events[0], QuoteEvent)
+    assert events[0].event_id == (
+        "alpaca-crypto:q:BTC/USD:2024-01-19T14:30:00.123456+00:00:11"
+    )
+    assert isinstance(events[0].bid_price, Decimal)
+    assert str(events[0].bid_price) == "43161.69"
+    assert str(events[0].bid_quantity) == "0.5"
+    assert str(events[0].ask_price) == "43162.13"
+    assert str(events[0].ask_quantity) == "0.028347"
+    assert events[0].venue is None
+    assert isinstance(events[1], TradeEvent)
+    assert events[1].event_id == (
+        "alpaca-crypto:t:BTC/USD:2024-01-19T14:30:00.500000+00:00:12"
+    )
+    assert str(events[1].price) == "43161.69"
+    assert str(events[1].quantity) == "0.028347"
+    assert events[1].trade_id == "133364"
+    assert events[1].venue == "CBSE"
+    for event in events:
+        restored = ParquetCodec.decode(ParquetCodec.encode([event]), type(event))[0]
+        assert restored == event
+
+
+def test_crypto_inbox_rejects_non_pair_event_symbols() -> None:
+    inbox = AlpacaCryptoInbox()
+    message = exact(crypto_quote())
+    message["S"] = "SPY"
+
+    with pytest.raises(AlpacaWebSocketProtocolError, match="BASE/QUOTE"):
+        inbox.push(message, observed_at=START)
+
+    assert len(inbox) == 0
+    assert inbox.next_sequence == 0
+
+
+def test_crypto_reconnect_across_utc_day_boundary_without_loss_or_duplication() -> None:
+    stop = asyncio.Event()
+    clock = FakeClock(datetime(2024, 1, 19, 23, 59, 58, tzinfo=UTC))
+    first = MockSocket(
+        [
+            *crypto_controls(["BTC/USD"]),
+            [crypto_quote("2024-01-19T23:59:59.123456789Z")],
+            ConnectionError("disconnected"),
+        ]
+    )
+    second = MockSocket(
+        [
+            *crypto_controls(["BTC/USD"]),
+            [crypto_trade("2024-01-20T00:00:01.000000000Z")],
+        ],
+        stop=stop,
+        stop_after=4,
+    )
+    server = MockServer([first, second])
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+        clock.advance(delay)
+
+    inbox = AlpacaCryptoInbox()
+    feed = AlpacaCryptoWebSocketFeed(
+        api_key="key",
+        api_secret="secret",
+        subscription=AlpacaCryptoSubscription(("BTC/USD",), ("BTC/USD",)),
+        transport=server,
+        inbox=inbox,
+        clock=clock,
+        sleep=sleep,
+        backoff_seconds=3.0,
+    )
+
+    run(feed.run(stop, max_connections=2))
+
+    assert feed.connection_attempts == 2
+    assert sleeps == [3.0]
+    assert len(server.urls) == 2
+    assert first.closed and second.closed
+    events = inbox.drain()
+    assert [event.sequence for event in events] == [0, 1]
+    assert len({event.event_id for event in events}) == 2
+    assert isinstance(events[0], QuoteEvent)
+    assert events[0].timestamp.date() == date(2024, 1, 19)
+    assert isinstance(events[1], TradeEvent)
+    assert events[1].timestamp.date() == date(2024, 1, 20)
+    assert feed.stale_symbols == ()

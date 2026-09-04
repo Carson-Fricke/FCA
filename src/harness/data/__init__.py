@@ -1,6 +1,9 @@
 """Historical and live market-data capabilities."""
 
 from harness.data.alpaca_ws import (
+    AlpacaCryptoInbox,
+    AlpacaCryptoSubscription,
+    AlpacaCryptoWebSocketFeed,
     AlpacaSipInbox,
     AlpacaSipSubscription,
     AlpacaSipWebSocketFeed,
@@ -45,6 +48,16 @@ from harness.data.lake import (
     UnsupportedMarketDataError,
     resolve_sessions,
 )
+from harness.data.live_recorder import (
+    LiveObjectStore,
+    LiveRecorder,
+    LiveRecorderConfig,
+    LocalLiveObjectStore,
+    SessionResolver,
+    UtcDaySessionResolver,
+    XnysSessionResolver,
+    live_part_path,
+)
 from harness.data.replay import (
     LakeReplayFeed,
     MarketEvent,
@@ -54,6 +67,9 @@ from harness.data.replay import (
 )
 
 __all__ = (
+    "AlpacaCryptoInbox",
+    "AlpacaCryptoSubscription",
+    "AlpacaCryptoWebSocketFeed",
     "AlpacaSipInbox",
     "AlpacaSipSubscription",
     "AlpacaSipWebSocketFeed",
@@ -74,6 +90,10 @@ __all__ = (
     "LakeRequest",
     "LoadedMarketData",
     "LakeReplayFeed",
+    "LiveObjectStore",
+    "LiveRecorder",
+    "LiveRecorderConfig",
+    "LocalLiveObjectStore",
     "LookaheadError",
     "MarketEvent",
     "MarketLake",
@@ -88,12 +108,16 @@ __all__ = (
     "ParquetReader",
     "ReplayFingerprints",
     "ReplayStream",
+    "SessionResolver",
     "UnsupportedMarketDataError",
+    "UtcDaySessionResolver",
+    "XnysSessionResolver",
     "aggregate_trades",
     "bars_from_trades",
     "build_bars",
     "from_nanos",
     "interval_delta",
+    "live_part_path",
     "resolve_sessions",
     "to_nanos",
 )

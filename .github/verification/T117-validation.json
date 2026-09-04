@@ -1,0 +1,42 @@
+{
+  "taskId": "T117",
+  "numTotalTests": 58,
+  "numPassedTests": 58,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "mid-touch-fill-model",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/harness/fills -q",
+      "result": "34 new tests covering the documented adverse midpoint rule: fills only at exact on-tick midpoints when the far touch is marketable through the limit, market and stop orders take the touch or trade print, tick gate, maximum-spread gate, adverse-touch gate, displayed-size capping, stop arming, YAML configuration loading, and replay determinism"
+    },
+    {
+      "name": "options-multi-leg-matching",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/harness/venues -q",
+      "result": "24 new tests covering atomic all-leg fillability on a single constituent quote update, staggered quotes completing atomically later or never, a non-fillable leg blocking the whole group, natural-touch and mid combination net debit or credit gates against the exact MultiLegOrderGroup net rule, displayed-size pools, ratio legs, IOC expiry, cancellation, MultiLegOMS integration with per-venue fill ids, latency and injected clock, and SimVenue drop-in determinism replay"
+    },
+    {
+      "name": "determinism-golden-preserved",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/golden -q",
+      "result": "9 golden determinism tests pass; no engine-path files were modified"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check .",
+        "uv run --python 3.12 --extra dev ruff format --check .",
+        "uv run --python 3.12 --extra dev ty check",
+        "uv run --python 3.12 --extra dev pytest -q -p no:cacheprovider"
+      ],
+      "result": "Repository-wide Ruff lint, format check, ty type check, and the complete pytest suite passed with 978 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "The engine requires a MidTouch instance because group matching needs the mid_execution primitive, and emits only Fill events with group lifecycle reports remaining in the OMS; option fills carry per-contract notional prices per the portfolio settlement convention"
+  ]
+}

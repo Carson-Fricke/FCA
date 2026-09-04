@@ -1,0 +1,31 @@
+{
+  "taskId": "T105",
+  "numTotalTests": 21,
+  "numPassedTests": 21,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "live-event-recorder-lake-schema",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/harness/data -q",
+      "result": "21 new focused tests with fakes (no network, no wall clock): a 30-minute equity recording reads back every part with exact lake schema and metadata equality and zero warnings; rotation boundaries for UTC-day crypto and XNYS equity sessions with gap-midpoint attribution; graceful flush and pre-shutdown partial-file readability; and error paths including earlier-session events raising. Every flush atomically replaces one complete readable Parquet part (tempfile, fsync, os.replace) under live/{deployment}/date=/asset_class=/data_type= with zstd Parquet 2.6 matching the lake writer, and an optional injected-clock flush interval ages pending rows"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check .",
+        "uv run --python 3.12 --extra dev ruff format --check .",
+        "uv run --python 3.12 --extra dev ty check",
+        "uv run --python 3.12 --extra dev pytest -q -p no:cacheprovider"
+      ],
+      "result": "Repository-wide Ruff lint, format check, ty type check, and the complete pytest suite passed with 978 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "Per-flush part files rather than single-file append: whole-object replacement is the only atomic primitive at the storage boundary, memory stays bounded, and parity replay reads a partition's parts in name order",
+    "Live-source-unavailable fields carry documented sentinels (equity conditions/tape, option condition, blank venue for non-nullable exchange columns); non-integral equity and option sizes raise"
+  ]
+}

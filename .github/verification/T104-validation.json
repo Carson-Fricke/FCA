@@ -1,0 +1,30 @@
+{
+  "taskId": "T104",
+  "numTotalTests": 45,
+  "numPassedTests": 45,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "alpaca-crypto-websocket-feed",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/harness/data -q",
+      "result": "45 tests passed including five new crypto cases: deployment-managed pair sourcing from strategy universes with runtime_only network enforcement and feed=crypto setting validation, subscription and feed validation for BASE/QUOTE pairs, exact fractional Decimal prices and sizes through the JSON parse path with Parquet round-trip, rejection of non-pair event symbols, and reconnection across the UTC-day boundary with continuous sequence ids and no false staleness. The feed inherits SIP auth, backoff, and watchdog behavior, uses the v1beta3 crypto endpoint, applies no session gating (continuous UTC-day semantics), and crypto quotes carry no tape"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check .",
+        "uv run --python 3.12 --extra dev ruff format --check .",
+        "uv run --python 3.12 --extra dev ty check",
+        "uv run --python 3.12 --extra dev pytest -q -p no:cacheprovider"
+      ],
+      "result": "Repository-wide Ruff lint, format check, ty type check, and the complete pytest suite passed with 978 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "Feed pairing contract requires AlpacaCryptoWebSocketFeed with AlpacaCryptoInbox; the shared SIP feed remains unchanged for equities"
+  ]
+}

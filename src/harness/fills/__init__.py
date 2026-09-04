@@ -27,6 +27,15 @@ from harness.fills.latency_size import (
     load_latency_size,
     load_latency_size_config,
 )
+from harness.fills.mid_touch import (
+    MidTouch,
+    MidTouchConfig,
+    MidTouchFill,
+    MidTouchFillModel,
+    MidTouchMetadata,
+    load_mid_touch,
+    load_mid_touch_config,
+)
 from harness.fills.simple_touch import FillDecision, SimpleTouch
 from harness.fills.trade_through import (
     TradeThrough,
@@ -56,6 +65,11 @@ __all__ = (
     "LatencySizeFill",
     "LatencySizeFillModel",
     "LiquidityRole",
+    "MidTouch",
+    "MidTouchConfig",
+    "MidTouchFill",
+    "MidTouchFillModel",
+    "MidTouchMetadata",
     "OptionsPerContractFeeModel",
     "RoundingMode",
     "RemainderPolicy",
@@ -69,6 +83,8 @@ __all__ = (
     "load_latency_size",
     "load_latency_size_config",
     "load_fee_schedule",
+    "load_mid_touch",
+    "load_mid_touch_config",
     "load_trade_through",
     "load_trade_through_config",
 )

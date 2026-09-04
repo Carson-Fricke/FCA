@@ -1,6 +1,13 @@
 """Simulated and live execution-venue capabilities."""
 
 from harness.venues.base import ExecutionVenue
+from harness.venues.options_matching import (
+    DuplicateOptionsGroupError,
+    OptionsMatchingEngine,
+    OptionsVenue,
+    OptionsVenueError,
+    UnknownOptionsGroupError,
+)
 from harness.venues.scripted import (
     ScriptedStep,
     ScriptedVenue,
@@ -17,7 +24,11 @@ from harness.venues.sim import (
 )
 
 __all__ = (
+    "DuplicateOptionsGroupError",
     "ExecutionVenue",
+    "OptionsMatchingEngine",
+    "OptionsVenue",
+    "OptionsVenueError",
     "ScriptedStep",
     "ScriptedVenue",
     "SimOrderState",
@@ -25,6 +36,7 @@ __all__ = (
     "SimVenueError",
     "SimulatedVenue",
     "UnexpectedVenueCall",
+    "UnknownOptionsGroupError",
     "UnknownSimOrderError",
     "VenueCall",
     "VenueOperation",

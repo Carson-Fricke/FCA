@@ -110,15 +110,15 @@ tests/lake/
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
-| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, the look-ahead-guarded historical view, and the market-lake access adapter for ensure/query-driven backtest data. |
-| `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, and trade-through fill decisions. |
+| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, the look-ahead-guarded historical view, the market-lake access adapter for ensure/query-driven backtest data, Alpaca SIP and crypto WebSocket feeds with UTC-day crypto semantics, and the live event recorder writing lake-schema Parquet under `live/{deployment}`. |
+| `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, trade-through, and MidTouch option fill decisions. |
 | `harness.portfolio` | Strategy virtual books, shared-account aggregate accounting, and deterministic option expiry, exercise, and assignment settlement. |
 | `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts. |
 | `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies. |
 | `harness.strategy` | Mode-independent strategy callbacks, constrained context, deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
 | `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, and complete decision auditing. |
 | `harness.testing` | Deterministic synthetic feeds, golden artifact canonicalization, and reproducibility manifest comparison. |
-| `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, and simulated top-of-book matching venue. |
+| `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, simulated top-of-book matching venue, and the options multi-leg matching engine with atomic all-leg fillability. |
 
 The event ordering contract is timestamp, source sequence, fixed serialized
 event-class priority, then incoming feed order. `SimClock` advances only from

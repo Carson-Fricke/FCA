@@ -1,0 +1,40 @@
+{
+  "taskId": "T129",
+  "numTotalTests": 12,
+  "numPassedTests": 12,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "performance-benchmark-suite",
+      "status": "passed",
+      "command": "FCA_PERF=1 uv run --python 3.12 --extra dev pytest tests/performance -q",
+      "result": "12 benchmarks pass with the FCA_PERF gate enabled and record baselines across narrow, medium, and wide tiers: replay throughput 164231/144946/136847 events per second, SimpleTouch and TradeThrough matching cost 3.35 and 3.52 microseconds per order, risk pipeline allow and reduce latency 41.49 and 35.75 microseconds per decision, recorder artifact writes 102404 rows per second, and streaming peak memory flat across tiers at 2.456 to 2.466 MiB (257.5 to 259.0 bytes per event), confirming bounded lookahead and bounded recorder batches"
+    },
+    {
+      "name": "skip-by-default-confirmed",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/performance -q",
+      "result": "Without FCA_PERF the 12 benchmarks skip in 0.04 seconds with no files written, keeping CI and the regular suite unaffected"
+    },
+    {
+      "name": "regression-detection",
+      "status": "passed",
+      "command": "doctored-baseline probe then pristine re-verification",
+      "result": "The direction-aware regression report flags greater-than-twenty-percent regressions against tests/performance/baselines.json with a focused [REGRESSION] output, proven by a doctored baseline that failed the check before the pristine baseline was restored and re-verified"
+    },
+    {
+      "name": "repository-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check tests/performance",
+        "uv run --python 3.12 --extra dev ty check"
+      ],
+      "result": "Ruff and ty passed for the new suite; no source files were modified"
+    }
+  ],
+  "limitations": [
+    "Benchmarks use stdlib timing and tracemalloc only (no new dependencies) and record baselines rather than asserting absolute machine speed; baselines are environment-specific and refreshed deliberately via FCA_PERF_UPDATE_BASELINES=1"
+  ]
+}
