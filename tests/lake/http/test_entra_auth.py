@@ -219,7 +219,9 @@ def test_tampered_signature_is_rejected(
     # only padding bits, so flipping it may decode to the identical bytes.
     middle = len(signature) // 2
     tampered = "A" if signature[middle] != "A" else "B"
-    token = f"{header}.{payload}.{signature[:middle]}{tampered}{signature[middle + 1 :]}"
+    token = (
+        f"{header}.{payload}.{signature[:middle]}{tampered}{signature[middle + 1 :]}"
+    )
 
     with pytest.raises(HTTPException) as raised:
         authenticator.authenticate(token)
