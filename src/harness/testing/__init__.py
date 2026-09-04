@@ -1,13 +1,13 @@
 """Determinism and runtime-parity test support."""
 
-from harness.testing.golden import (
+from harness.testing.determinism import (
     ArtifactCanonicalizer,
     ArtifactDigest,
+    DeterminismArtifact,
     DeterminismError,
-    GoldenArtifact,
-    GoldenManifest,
-    GoldenRun,
-    GoldenScenario,
+    DeterminismManifest,
+    DeterminismRun,
+    DeterminismScenario,
     ManifestComparison,
     SyntheticFeed,
     ToyStrategy,
@@ -23,10 +23,10 @@ __all__ = [
     "ArtifactCanonicalizer",
     "ArtifactDigest",
     "DeterminismError",
-    "GoldenArtifact",
-    "GoldenManifest",
-    "GoldenRun",
-    "GoldenScenario",
+    "DeterminismArtifact",
+    "DeterminismManifest",
+    "DeterminismRun",
+    "DeterminismScenario",
     "ManifestComparison",
     "SyntheticFeed",
     "ToyStrategy",

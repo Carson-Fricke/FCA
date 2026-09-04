@@ -1,0 +1,24 @@
+{
+  "taskId": "T106",
+  "numTotalTests": 26,
+  "numPassedTests": 26,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "gap-healing-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/data/test_gap_healing.py",
+      "result": "26 passed: calendar-aware detection clipped to expected coverage, lake-driven bounded backfill with no reorder/duplicate (late live events dropped and counted), deterministic heal-before-resume ordering, immutable audit trail, UncoveredGapError preserving earlier heals"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and 1242-test pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "MarketLakeAdapter.load demands COMPLETE per-session coverage, so the healer drives LakeClientPort ensure/query directly; a per-session coverage map on FileQueryResults would make the accepted-job path precise (lakeclient follow-up)"
+  ]
+}

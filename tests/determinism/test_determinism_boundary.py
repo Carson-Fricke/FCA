@@ -1,6 +1,6 @@
-"""Golden boundary scenarios: venue-state blindness and schedule() limits.
+"""Determinism boundary scenarios: venue-state blindness and schedule() limits.
 
-The golden harness hands strategies a one-way venue command capability and a
+The determinism harness hands strategies a one-way venue command capability and a
 scheduler that refuses fabricated market data. These scenarios exercise both
 boundaries with deterministic, byte-identical artifacts, and pin the
 valid-strategy artifact surface so capability narrowing stays
@@ -19,8 +19,8 @@ from harness.core.symbols import Symbol
 from harness.core.types import QuoteEvent
 from harness.runtime.backtest.strategies import StrategyVenue
 from harness.strategy import Strategy, StrategyContext
-from harness.testing.golden import (
-    GoldenScenario,
+from harness.testing.determinism import (
+    DeterminismScenario,
     OrderSignalStrategy,
     SyntheticFeed,
     ToyStrategy,
@@ -43,27 +43,27 @@ def quote(event_id: str) -> QuoteEvent:
         bid_quantity=Decimal("10"),
         ask_price=Decimal("101"),
         ask_quantity=Decimal("10"),
-        venue="golden",
+        venue="determinism",
     )
 
 
-def probe_scenario() -> GoldenScenario:
-    return GoldenScenario(
+def probe_scenario() -> DeterminismScenario:
+    return DeterminismScenario(
         feed=SyntheticFeed((quote("probe-quote"),)),
         venue_steps=(),
         strategy_class=VenueStateProbeStrategy,
-        configuration={"symbols": ["AAPL"], "mode": "golden"},
+        configuration={"symbols": ["AAPL"], "mode": "determinism"},
         start=STAMP,
     )
 
 
-def signal_scenario() -> GoldenScenario:
-    return GoldenScenario(
+def signal_scenario() -> DeterminismScenario:
+    return DeterminismScenario(
         feed=SyntheticFeed((quote("signal-quote"),)),
         venue_steps=(),
         strategy_class=OrderSignalStrategy,
         strategy_parameters={"order_id": "signal-order"},
-        configuration={"symbols": ["AAPL"], "mode": "golden"},
+        configuration={"symbols": ["AAPL"], "mode": "determinism"},
         start=STAMP,
     )
 
@@ -154,11 +154,11 @@ class FabricatingQuoteStrategy(Strategy):
 
 
 def test_strategy_scheduler_refuses_fabricated_market_data() -> None:
-    scenario = GoldenScenario(
+    scenario = DeterminismScenario(
         feed=SyntheticFeed((quote("fabrication-quote"),)),
         venue_steps=(),
         strategy_class=FabricatingQuoteStrategy,
-        configuration={"symbols": ["AAPL"], "mode": "golden"},
+        configuration={"symbols": ["AAPL"], "mode": "determinism"},
         start=STAMP,
     )
 
@@ -167,7 +167,7 @@ def test_strategy_scheduler_refuses_fabricated_market_data() -> None:
 
 
 def test_capability_boundary_leaves_valid_strategy_artifacts_unchanged() -> None:
-    scenario = GoldenScenario(
+    scenario = DeterminismScenario(
         feed=SyntheticFeed((quote("toy-quote"),)),
         venue_steps=(
             ScriptedStep(
@@ -179,7 +179,7 @@ def test_capability_boundary_leaves_valid_strategy_artifacts_unchanged() -> None
         ),
         strategy_class=ToyStrategy,
         strategy_parameters={"order_id": "toy-order", "quantity": Decimal("2")},
-        configuration={"symbols": ["AAPL"], "mode": "golden"},
+        configuration={"symbols": ["AAPL"], "mode": "determinism"},
         start=STAMP,
     )
     first, second = assert_reproducible(scenario)

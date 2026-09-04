@@ -1,0 +1,25 @@
+{
+  "taskId": "T194",
+  "numTotalTests": 35,
+  "numPassedTests": 35,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "history-and-strategy-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/data tests/harness/strategy",
+      "result": "StrategyHistory opaque now-anchored capability: no timestamp parameters, future end raises LookaheadError, write-hardened, no record/subscribe/attach/clock/head; context wraps any raw HistoricalView at the boundary; adversarial strategies blocked structurally; facade reads byte-identical to prior view reads"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and 1242-test pytest suite passed after wave integration (coordinator updated the LookaheadStrategy adversary in tests/harness/runtime/test_backtest_runner.py to the new now-anchored window signature, preserving the LookaheadViolationError abort path)"
+    }
+  ],
+  "limitations": [
+    "API break is planned per audit D2: strategy-facing read(timestamp, symbol) replaced by now-anchored read(symbol); past-window reads move to window(symbol, start, end)",
+    "lookahead_guard option removal and engine-side construction are T195's job"
+  ]
+}

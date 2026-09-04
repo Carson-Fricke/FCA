@@ -7,6 +7,10 @@ raises :class:`LookaheadError` instead of silently leaking the future.  No code
 path here reads wall time, consumes randomness, touches the network, or
 performs I/O.
 
+:class:`HistoricalView` is the engine- and test-facing surface with explicit
+``as_of`` parameters; strategies receive the opaque, now-anchored
+:class:`StrategyHistory` capability that wraps one view and its engine clock.
+
 Timestamps are compared on an integer nanosecond timeline so sub-microsecond
 engine boundaries survive the query path even though ``datetime`` itself only
 carries microsecond resolution.  Callers may therefore pass either a
@@ -286,7 +290,8 @@ class HistoricalView:
     The view owns one ring buffer per subscribed ``(symbol, kind)`` pair.  Reads
     never return an event newer than the injected clock head, and an explicit
     ``as_of`` newer than that head raises :class:`LookaheadError` before any
-    data is touched.
+    data is touched.  This is the engine- and test-facing surface; strategies
+    receive the opaque :class:`StrategyHistory` capability instead.
     """
 
     __slots__ = ("_attached", "_buffers", "_capacity", "_clock", "_subscriptions")
@@ -709,6 +714,103 @@ class HistoricalView:
         return value
 
 
+class StrategyHistory:
+    """Opaque, now-anchored point-in-time data capability for strategies.
+
+    The capability wraps the engine-owned :class:`HistoricalView` together
+    with the engine clock and exposes only as-of reads whose as-of is the
+    engine clock head.  Reads take no timestamp parameter, so a query for
+    data beyond the head is structurally unrepresentable and the as-of can
+    only move when the engine moves the head between callbacks.  Reads
+    return immutable snapshots (frozen events, aggregates, and bars), never
+    live re-readable handles, and the surface has no ``record``,
+    ``subscribe``, ``attach``, or clock handle, so strategy code cannot
+    poison or re-configure the shared history.  Window, aggregate, and bar
+    reads keep past-bounded queries; a future ``end`` still raises
+    :class:`LookaheadError` as defense-in-depth behind the structural rule.
+    """
+
+    __slots__ = ("_clock", "_view")
+
+    def __init__(self, view: HistoricalView, clock: Clock) -> None:
+        if not isinstance(view, HistoricalView):
+            raise TypeError("view must be a HistoricalView")
+        if not isinstance(clock, Clock):
+            raise TypeError("clock must implement Clock")
+        object.__setattr__(self, "_view", view)
+        object.__setattr__(self, "_clock", clock)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"{type(self).__name__} is read-only")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"{type(self).__name__} is read-only")
+
+    def read(
+        self,
+        symbol: str | Symbol,
+        data_type: type[Event] | EventType | None = None,
+    ) -> object:
+        """Read the newest matching event at or before the engine clock head."""
+        return self._view.read(self._head(), symbol, data_type)
+
+    def last(
+        self,
+        symbol: str | Symbol,
+        count: int,
+        selector: EventSelector | None = None,
+    ) -> tuple[Event, ...]:
+        """Return up to ``count`` newest matching events at the engine head."""
+        return self._view.last(symbol, count, selector, self._head())
+
+    def window(
+        self,
+        symbol: str | Symbol,
+        start: datetime | Nanos,
+        end: datetime | Nanos | None = None,
+        selector: EventSelector | None = None,
+    ) -> tuple[Event, ...]:
+        """Return matching events in ``[start, end)``, capped at the head.
+
+        ``end`` defaults to the engine clock head; a supplied future ``end``
+        raises :class:`LookaheadError` before any data is touched.
+        """
+        return self._view.window(
+            symbol, start, self._head() if end is None else end, selector
+        )
+
+    def aggregate(
+        self,
+        symbol: str | Symbol,
+        start: datetime | Nanos,
+        end: datetime | Nanos | None = None,
+    ) -> HistoryAggregate:
+        """Return exact trade and quote statistics capped at the head.
+
+        ``end`` defaults to the engine clock head; a supplied future ``end``
+        raises :class:`LookaheadError` before any data is touched.
+        """
+        return self._view.aggregate(symbol, start, self._head() if end is None else end)
+
+    def bars(
+        self,
+        symbol: str | Symbol,
+        interval: timedelta | str,
+        start: datetime | Nanos | None = None,
+        end: datetime | Nanos | None = None,
+    ) -> tuple[OHLCVBar, ...]:
+        """Return exact OHLCV bars over retained trades capped at the head.
+
+        ``end`` defaults to the engine clock head; a supplied future ``end``
+        raises :class:`LookaheadError` before any data is touched.
+        """
+        return self._view.bars(symbol, interval, start, end)
+
+    def _head(self) -> datetime:
+        """Return the engine clock head, the only as-of this capability reads."""
+        return self._clock.now()
+
+
 __all__ = [
     "DEFAULT_HISTORY_CAPACITY",
     "HistoryAggregate",
@@ -716,6 +818,7 @@ __all__ = [
     "HistoricalView",
     "LookaheadError",
     "Nanos",
+    "StrategyHistory",
     "from_nanos",
     "to_nanos",
 ]

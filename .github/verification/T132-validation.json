@@ -1,0 +1,31 @@
+{
+  "taskId": "T132",
+  "numTotalTests": 152,
+  "numPassedTests": 152,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "security-master-and-listings-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/data/test_security_master.py tests/lake/catalog/test_listings.py tests/lake/coverage/test_listings_coverage.py",
+      "result": "100 passed: ListingRecord point-in-time semantics (is_known/active_on), memory + Azure Table listing repositories, listings-aware coverage with terminal delisted state, SecurityMasterView/SecuritySnapshot structural clipping with rename chains"
+    },
+    {
+      "name": "regression-of-changed-modules",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/lake/catalog tests/lake/coverage tests/harness/data/test_options_universe.py",
+      "result": "52 passed for existing catalog, coverage, and options-universe suites exercising the changed modules"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and 1242-test pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "requested_coverage/ensure_coverage do not yet thread listings into calculate_coverage (ensure-path wiring follow-up)",
+    "listed_date/delisted_date are inclusive first/last session dates; renames must be adjacent episodes"
+  ]
+}

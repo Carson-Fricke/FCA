@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 
-from lake.catalog.models import CoverageRecord, CoverageStatus
-from lake.catalog.ports import CatalogRepository
+from lake.catalog.models import CoverageRecord, CoverageStatus, ListingRecord
+from lake.catalog.ports import CatalogRepository, ListingRepository
 from lake.contracts import (
     AssetClass,
     DataType,
@@ -32,6 +32,7 @@ class CoverageState(StrEnum):
     PARTIAL = "partial"
     COMPLETE = "complete"
     ERROR = "error"
+    DELISTED = "delisted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +102,11 @@ class SessionCoverage:
     @property
     def is_terminal(self) -> bool:
         """Whether no ingest retry is required for this session."""
-        return self.state in {CoverageState.COMPLETE, CoverageState.EMPTY}
+        return self.state in {
+            CoverageState.COMPLETE,
+            CoverageState.EMPTY,
+            CoverageState.DELISTED,
+        }
 
     @property
     def is_actionable(self) -> bool:
@@ -157,6 +162,10 @@ class CoverageReport:
     @property
     def errors(self) -> tuple[SessionCoverage, ...]:
         return self.by_state(CoverageState.ERROR)
+
+    @property
+    def delisted(self) -> tuple[SessionCoverage, ...]:
+        return self.by_state(CoverageState.DELISTED)
 
     @property
     def is_satisfied(self) -> bool:
@@ -267,6 +276,7 @@ def calculate_coverage(
     start: date,
     end: date,
     as_of: datetime | None = None,
+    listings: ListingRepository | None = None,
 ) -> CoverageReport:
     """Classify every expected symbol/data-type session in a calendar range.
 
@@ -275,24 +285,47 @@ def calculate_coverage(
     terminal result.  Existing partial and error rows remain actionable, while
     a complete row for a currently open session is deliberately reclassified as
     partial so the canonical object can be replaced after more data arrives.
+
+    When a ``listings`` repository is supplied, coverage becomes listings
+    aware: a symbol with no listing episode covering a session is classified
+    ``delisted`` instead of ``missing``, keeping sessions before a listing or
+    after a delisting out of the gap plan.  Point-in-time discipline is
+    structural: only listing episodes known on or before ``as_of`` (their
+    ``listed_date`` has arrived) are consulted, and a delisting dated after
+    ``as_of`` is treated as unknown, so as-of queries never expose listings,
+    delistings, or renames dated after the as-of instant.  Persisted catalog
+    rows keep their own classification regardless of listing knowledge.
     """
     asset_class = AssetClass(asset_class)
     _validate_date_range(start, end)
     normalized_symbols = _normalize_symbols(symbols)
     normalized_data_types = _normalize_data_types(data_types)
-    sessions = sessions_for(asset_class, start, end, as_of=as_of)
+    normalized_as_of = _normalize_as_of(as_of)
+    sessions = sessions_for(asset_class, start, end, as_of=normalized_as_of)
     records = catalog.list(asset_class=asset_class, start=start, end=end)
     records_by_key = {
         (record.data_type, record.symbol, record.session_date): record
         for record in records
     }
+    visible_listings = _visible_listings_by_symbol(
+        listings, normalized_symbols, normalized_as_of.date()
+    )
 
     entries: list[SessionCoverage] = []
     for data_type in normalized_data_types:
         for symbol in normalized_symbols:
+            episodes = visible_listings.get(symbol, ())
             for session in sessions:
                 record = records_by_key.get((data_type, symbol, session.session_date))
                 state = _coverage_state(record, session)
+                if (
+                    record is None
+                    and episodes
+                    and not _listing_covers(
+                        episodes, session.session_date, normalized_as_of.date()
+                    )
+                ):
+                    state = CoverageState.DELISTED
                 entries.append(
                     SessionCoverage(
                         asset_class=asset_class,
@@ -315,6 +348,7 @@ def plan_gaps(
     start: date,
     end: date,
     as_of: datetime | None = None,
+    listings: ListingRepository | None = None,
 ) -> GapPlan:
     """Plan missing, partial, and error sessions in deterministic order."""
     return calculate_coverage(
@@ -325,6 +359,7 @@ def plan_gaps(
         start=start,
         end=end,
         as_of=as_of,
+        listings=listings,
     ).gap_plan()
 
 
@@ -343,6 +378,37 @@ def _coverage_state(
     if record is None:
         return CoverageState.MISSING
     return CoverageState(record.status.value)
+
+
+def _visible_listings_by_symbol(
+    listings: ListingRepository | None,
+    symbols: tuple[str, ...],
+    as_of_day: date,
+) -> dict[str, tuple[ListingRecord, ...]]:
+    """Return listing episodes known on ``as_of`` keyed by canonical symbol.
+
+    Episodes listed after ``as_of`` are invisible: their existence, and any
+    delisting or rename they carry, cannot surface in an as-of query.
+    """
+    if listings is None:
+        return {}
+    visible: dict[str, tuple[ListingRecord, ...]] = {}
+    for symbol in symbols:
+        episodes = tuple(
+            record
+            for record in listings.list(symbol=symbol)
+            if record.is_known(as_of_day)
+        )
+        if episodes:
+            visible[symbol] = episodes
+    return visible
+
+
+def _listing_covers(
+    episodes: tuple[ListingRecord, ...], session_date: date, as_of_day: date
+) -> bool:
+    """Return whether any known episode covered the session date."""
+    return any(record.active_on(session_date, as_of=as_of_day) for record in episodes)
 
 
 def _crypto_session(session_date: date, as_of: datetime) -> CoverageSession:

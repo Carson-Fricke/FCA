@@ -12,15 +12,26 @@ from typing import Any, cast
 import pytest
 
 from harness.configuration import BacktestConfig, StrategyInstanceConfig, load_example
+from harness.core.clock import ReadonlyClock, SimClock
 from harness.core.types import (
+    AccountSnapshot,
+    Book,
+    Event,
+    ExecutionReport,
+    ExecutionType,
     Fill,
     OrderRequest,
+    OrderStatus,
     OrderType,
+    Position,
     QuoteEvent,
     Side,
     SingleLegOrder,
     TimeInForce,
+    TradeEvent,
 )
+from harness.data import HistoricalView
+from harness.data.history import StrategyHistory
 from harness.risk import RiskContext, RuleDecision
 from harness.runtime.backtest import (
     AbortPolicy,
@@ -39,7 +50,7 @@ from harness.runtime.backtest import (
     TeardownPolicy,
     run_backtest,
 )
-from harness.strategy import Strategy, StrategyContext
+from harness.strategy import Scheduler, Strategy, StrategyContext
 
 STRATEGY_MODULE = "fca_backtest_test_strategies"
 BUNDLE = "a" * 64
@@ -142,7 +153,6 @@ class LookaheadStrategy(Strategy):
 
     def __init__(self, **parameters: object) -> None:
         self.reads = 0
-        self.skipped = False
         self.context: StrategyContext | None = None
 
     def on_start(self, context: StrategyContext) -> None:
@@ -150,12 +160,11 @@ class LookaheadStrategy(Strategy):
 
     def on_quote(self, event: QuoteEvent) -> None:
         assert self.context is not None
-        data = self.context.data
-        if data is None:
-            self.skipped = True
-            return
         self.reads += 1
-        data.read(self.context.clock.now() + timedelta(seconds=1), event.symbol)
+        data = self.context.data
+        assert isinstance(data, StrategyHistory)
+        head = self.context.clock.now()
+        data.window(event.symbol, head, head + timedelta(seconds=1))
 
 
 class VenueProbingStrategy(Strategy):
@@ -210,6 +219,85 @@ class VenueProbingStrategy(Strategy):
             raise ValueError(f"strategy observed venue state: {self.observations}")
 
 
+class ScheduleFabricatingStrategy(Strategy):
+    """Schedule one reserved feed or outcome event through the context.
+
+    Feed and outcome event classes are reserved for the data feed and the
+    venue. The scheduler capability must refuse them before they reach the
+    event bus, so fabricated market data or execution outcomes are
+    structurally unrepresentable from strategy code.
+    """
+
+    def __init__(self, **parameters: object) -> None:
+        self.event_kind = str(parameters.get("event_kind", "quote"))
+        self.context: StrategyContext | None = None
+
+    def on_start(self, context: StrategyContext) -> None:
+        self.context = context
+
+    def on_quote(self, event: QuoteEvent) -> None:
+        assert self.context is not None
+        self.context.schedule(_fabricated_event(self.event_kind, event))
+
+
+class CapabilityProbeStrategy(Strategy):
+    """Probe every strategy-visible surface for engine-internal handles.
+
+    The engine hands strategies capability objects only: a read-only clock,
+    the opaque :class:`StrategyHistory` data capability, a one-way venue
+    command boundary, and a scheduler capability. If any engine-internal
+    surface (clock advancement, raw history view, head access) were
+    reachable, the probe raises and the run aborts; a green run proves the
+    callback surface is capability-narrow.
+    """
+
+    forbidden_attributes = (
+        ("clock", "advance_to"),
+        ("clock", "advance_by"),
+        ("clock", "head"),
+        ("data", "record"),
+        ("data", "record_many"),
+        ("data", "subscribe"),
+        ("data", "attach"),
+        ("data", "head"),
+        ("data", "capacity"),
+        ("data", "subscriptions"),
+    )
+
+    def __init__(self, **parameters: object) -> None:
+        self.context: StrategyContext | None = None
+        self.observations: list[str] = []
+
+    def on_start(self, context: StrategyContext) -> None:
+        self.context = context
+        self._probe()
+
+    def on_quote(self, event: QuoteEvent) -> None:
+        self._probe()
+
+    def on_stop(self, context: StrategyContext) -> None:
+        self._probe()
+
+    def _probe(self) -> None:
+        context = self.context
+        if context is None:
+            raise RuntimeError("capability probe has not received on_start")
+        clock = context.clock
+        if isinstance(clock, SimClock) or not isinstance(clock, ReadonlyClock):
+            self.observations.append("clock is not a read-only capability")
+        data = context.data
+        if isinstance(data, HistoricalView) or not isinstance(data, StrategyHistory):
+            self.observations.append("data is not the opaque history capability")
+        for surface_name, attribute in self.forbidden_attributes:
+            surface = clock if surface_name == "clock" else data
+            if surface is not None and hasattr(surface, attribute):
+                self.observations.append(f"{surface_name}.{attribute}")
+        if not isinstance(context.scheduler, Scheduler):
+            self.observations.append("scheduler is not the Scheduler capability")
+        if self.observations:
+            raise ValueError(f"strategy observed engine internals: {self.observations}")
+
+
 class InertStrategy(Strategy):
     """Observe events without acting, for dispatch-stream comparisons."""
 
@@ -240,6 +328,86 @@ class RejectAllRule:
         return RuleDecision.reject(order, f"{self.rule_id} vetoed the order")
 
 
+def _fabricated_event(kind: str, template: QuoteEvent) -> Event:
+    """Build one reserved feed or outcome event stamped at the current head."""
+    stamp = template.timestamp
+    sequence = template.sequence
+    symbol = template.symbol
+    if kind == "quote":
+        return QuoteEvent(
+            event_id="fabricated-quote",
+            timestamp=stamp,
+            sequence=sequence,
+            symbol=symbol,
+            bid_price=Decimal("99"),
+            bid_quantity=Decimal("1"),
+            ask_price=Decimal("101"),
+            ask_quantity=Decimal("1"),
+        )
+    if kind == "trade":
+        return TradeEvent(
+            event_id="fabricated-trade",
+            timestamp=stamp,
+            sequence=sequence,
+            symbol=symbol,
+            price=Decimal("100"),
+            quantity=Decimal("1"),
+        )
+    if kind == "execution_report":
+        return ExecutionReport(
+            event_id="fabricated-report",
+            timestamp=stamp,
+            sequence=sequence,
+            report_id="fabricated-report-1",
+            order_id="order-1",
+            status=OrderStatus.NEW,
+            execution_type=ExecutionType.ACKNOWLEDGED,
+            order_quantity=Decimal("1"),
+            filled_quantity=Decimal("0"),
+            remaining_quantity=Decimal("1"),
+        )
+    if kind == "fill":
+        return Fill(
+            event_id="fabricated-fill",
+            timestamp=stamp,
+            sequence=sequence,
+            fill_id="fabricated-fill-1",
+            order_id="order-1",
+            symbol=symbol,
+            side=Side.BUY,
+            quantity=Decimal("1"),
+            price=Decimal("100"),
+        )
+    if kind == "position":
+        return Position(
+            event_id="fabricated-position",
+            timestamp=stamp,
+            sequence=sequence,
+            account_id="account-1",
+            symbol=symbol,
+            quantity=Decimal("1"),
+            average_price=Decimal("100"),
+        )
+    if kind == "book":
+        return Book(
+            event_id="fabricated-book",
+            timestamp=stamp,
+            sequence=sequence,
+            symbol=symbol,
+        )
+    if kind == "account":
+        return AccountSnapshot(
+            event_id="fabricated-account",
+            timestamp=stamp,
+            sequence=sequence,
+            account_id="account-1",
+            cash=Decimal("100"),
+            equity=Decimal("100"),
+            buying_power=Decimal("100"),
+        )
+    raise AssertionError(f"unknown fabricated event kind: {kind}")
+
+
 def _register_strategy_module() -> None:
     """Expose the test strategies under one importable module name."""
     module = types.ModuleType(STRATEGY_MODULE)
@@ -249,6 +417,8 @@ def _register_strategy_module() -> None:
         ("AbortingStrategy", AbortingStrategy),
         ("LookaheadStrategy", LookaheadStrategy),
         ("VenueProbingStrategy", VenueProbingStrategy),
+        ("ScheduleFabricatingStrategy", ScheduleFabricatingStrategy),
+        ("CapabilityProbeStrategy", CapabilityProbeStrategy),
         ("InertStrategy", InertStrategy),
         ("ExplodingStrategy", ExplodingStrategy),
         ("RejectAllRule", RejectAllRule),
@@ -447,11 +617,11 @@ def test_unexpected_strategy_errors_use_the_execution_error_taxonomy() -> None:
 
 
 # --------------------------------------------------------------------------
-# Look-ahead guard
+# Look-ahead capability boundary
 # --------------------------------------------------------------------------
 
 
-def test_lookahead_guard_rejects_reads_beyond_the_engine_clock() -> None:
+def test_lookahead_reads_beyond_the_engine_clock_abort_the_run() -> None:
     configuration = _configuration(
         strategy_instances=(
             _instance(implementation=f"{STRATEGY_MODULE}:LookaheadStrategy"),
@@ -462,18 +632,56 @@ def test_lookahead_guard_rejects_reads_beyond_the_engine_clock() -> None:
         _run(configuration)
 
 
-def test_lookahead_guard_can_be_disabled() -> None:
+def test_lookahead_violations_are_recorded_on_the_aborted_result() -> None:
     configuration = _configuration(
         strategy_instances=(
             _instance(implementation=f"{STRATEGY_MODULE}:LookaheadStrategy"),
         )
     )
-    options = BacktestOptions(lookahead_guard=False)
+    options = BacktestOptions(abort_policy=AbortPolicy.STOP)
 
     result = _run(configuration, options=options)
 
+    assert result.status is BacktestStatus.ABORTED
+    assert result.lookahead_violations == ("spy-momentum",)
+    assert result.reason is not None and "ahead of the engine clock" in result.reason
+
+
+@pytest.mark.parametrize(
+    "event_kind",
+    ["quote", "trade", "execution_report", "fill", "position", "book", "account"],
+)
+def test_strategy_cannot_schedule_reserved_feed_or_outcome_events(
+    event_kind: str,
+) -> None:
+    configuration = _configuration(
+        strategy_instances=(
+            _instance(
+                implementation=f"{STRATEGY_MODULE}:ScheduleFabricatingStrategy",
+                parameters={"event_kind": event_kind},
+            ),
+        )
+    )
+
+    with pytest.raises(StrategyExecutionError) as raised:
+        _run(configuration)
+
+    cause = raised.value.__cause__
+    assert isinstance(cause, TypeError)
+    assert "reserved" in str(cause)
+
+
+def test_capability_surfaces_expose_no_engine_internals() -> None:
+    configuration = _configuration(
+        strategy_instances=(
+            _instance(implementation=f"{STRATEGY_MODULE}:CapabilityProbeStrategy"),
+        )
+    )
+
+    result = _run(configuration)
+
     assert result.status is BacktestStatus.COMPLETED
-    assert result.lookahead_violations == ()
+    assert result.stopped_strategies == ("spy-momentum",)
 
 
 # --------------------------------------------------------------------------

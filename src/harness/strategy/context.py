@@ -4,48 +4,56 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
 from random import Random
 from types import MappingProxyType
-from typing import Protocol, runtime_checkable
+from typing import Final, Protocol, runtime_checkable
 
 from harness.core.clock import Clock, ReadonlyClock
 from harness.core.events import EventBus, EventSelector
 from harness.core.symbols import Symbol, canonical_symbol
 from harness.core.types import (
     AccountSnapshot,
+    Book,
     Event,
     EventType,
+    ExecutionReport,
     Fill,
+    Position,
+    QuoteEvent,
+    TradeEvent,
 )
 from harness.core.types.orders import OrderRequest
+from harness.data.history import HistoricalView, StrategyHistory
 from harness.portfolio import (
     BookSnapshot,
     DuplicateFillError,
     PortfolioHub,
     PortfolioSnapshot,
     PositionSnapshot,
+    UnknownBookError,
 )
 from harness.venues import ExecutionVenue
 
 
 @runtime_checkable
 class PointInTimeData(Protocol):
-    """Read-only point-in-time data boundary supplied by an execution shell.
+    """Read-only, now-anchored point-in-time data boundary.
 
     The strategy contract deliberately does not prescribe a storage engine.
-    Later history adapters can implement ``read`` while replay and live shells
-    provide equivalent views.
+    Every read is stamped to the engine clock head by the supplying shell: the
+    boundary takes no timestamp parameter, so strategy code cannot express a
+    query for data beyond the engine clock, and returned values are immutable
+    snapshots.  Later history adapters can implement ``read`` while replay and
+    live shells provide equivalent views.
     """
 
     def read(
         self,
-        timestamp: datetime,
         symbol: str | Symbol,
         data_type: type[Event] | EventType | None = None,
     ) -> object:
-        """Read data no later than the explicit engine timestamp."""
+        """Read the newest matching data at or before the engine clock head."""
         ...
 
 
@@ -83,8 +91,27 @@ class Emitter(Protocol):
     ) -> None: ...
 
 
+_RESERVED_EVENT_CLASSES: Final[tuple[type[Event], ...]] = (
+    QuoteEvent,
+    TradeEvent,
+    ExecutionReport,
+    Fill,
+    Position,
+    Book,
+    AccountSnapshot,
+)
+
+
 class EventScheduler:
-    """Adapt the existing event bus to the strategy scheduler boundary."""
+    """Adapt the existing event bus to the strategy scheduler boundary.
+
+    Market data and venue or portfolio outcomes are reserved for the feed and
+    the venue. The capability rejects those event classes before they reach
+    the event bus, so fabricated market data cannot originate from
+    ``context.schedule`` in any shell. The reserved set mirrors the engine
+    scheduler and is duplicated here because ``harness.strategy`` must not
+    import ``harness.runtime``.
+    """
 
     __slots__ = ("_bus",)
 
@@ -94,7 +121,12 @@ class EventScheduler:
         self._bus = bus
 
     def schedule(self, event: Event) -> None:
-        """Schedule an event through the synchronous deterministic bus."""
+        """Schedule one strategy-owned event; reserved classes are refused."""
+        if isinstance(event, _RESERVED_EVENT_CLASSES):
+            raise TypeError(
+                f"{type(event).__name__} events are reserved for the feed and "
+                "the venue; strategies cannot schedule them"
+            )
         self._bus.schedule(event)
 
 
@@ -401,8 +433,31 @@ def _event_symbols(event: Event) -> frozenset[Symbol]:
     )
 
 
+def _scoped_snapshot(snapshot: PortfolioSnapshot, book_id: str) -> PortfolioSnapshot:
+    """Return the shared-account aggregate scoped to one strategy book.
+
+    Aggregate account totals (cash, positions, fill count) are the account
+    the strategy trades in and stay observable. Sibling virtual-book
+    constituents are removed, so another strategy's book is not representable
+    through the returned value.
+    """
+    return PortfolioSnapshot(
+        account_id=snapshot.account_id,
+        initial_cash=snapshot.initial_cash,
+        cash=snapshot.cash,
+        positions=snapshot.positions,
+        books=(snapshot.book(book_id),),
+        fill_count=snapshot.fill_count,
+    )
+
+
 class BooksView:
-    """Read-only strategy view over a hub and one strategy book."""
+    """Read-only strategy view over a hub and one strategy book.
+
+    The view resolves only the context's own book; sibling virtual books in
+    the shared account are not observable. Aggregate shared-account totals
+    remain visible as the explicitly named account capability.
+    """
 
     __slots__ = ("_book_id", "_hub")
 
@@ -417,8 +472,8 @@ class BooksView:
 
     @property
     def snapshot(self) -> PortfolioSnapshot:
-        """Return the current shared-account and constituent snapshot."""
-        return self._hub.snapshot
+        """Return the shared-account aggregate scoped to this strategy book."""
+        return _scoped_snapshot(self._hub.snapshot, self._book_id)
 
     @property
     def current(self) -> BookSnapshot:
@@ -442,11 +497,13 @@ class BooksView:
 
     @property
     def book_ids(self) -> tuple[str, ...]:
-        """Return all virtual books without exposing mutable book objects."""
-        return self._hub.book_ids
+        """Return this strategy's own virtual book identifier."""
+        return (self._book_id,)
 
     def book(self, book_id: str) -> BookSnapshot:
-        """Return an immutable book snapshot by identifier."""
+        """Return the strategy's own immutable book snapshot."""
+        if book_id != self._book_id:
+            raise UnknownBookError(book_id)
         return self.snapshot.book(book_id)
 
     def position(self, symbol: str | Symbol) -> PositionSnapshot:
@@ -455,12 +512,17 @@ class BooksView:
 
 
 class AccountView:
-    """Read-only account view combining portfolio and latest account event."""
+    """Read-only account view combining portfolio and latest account event.
 
-    __slots__ = ("_account_event", "_hub")
+    The fallback portfolio snapshot is scoped to one strategy book, so
+    account-level totals are observable while sibling virtual books are not.
+    """
 
-    def __init__(self, hub: PortfolioHub) -> None:
+    __slots__ = ("_account_event", "_book_id", "_hub")
+
+    def __init__(self, hub: PortfolioHub, book_id: str | None = None) -> None:
         self._hub = hub
+        self._book_id = book_id
         self._account_event: AccountSnapshot | None = None
 
     @property
@@ -470,10 +532,12 @@ class AccountView:
 
     @property
     def snapshot(self) -> AccountSnapshot | PortfolioSnapshot:
-        """Return the latest account event or the live portfolio aggregate."""
-        return (
-            self._hub.snapshot if self._account_event is None else self._account_event
-        )
+        """Return the latest account event or the book-scoped aggregate."""
+        if self._account_event is not None:
+            return self._account_event
+        if self._book_id is None:
+            return self._hub.snapshot
+        return _scoped_snapshot(self._hub.snapshot, self._book_id)
 
     @property
     def cash(self) -> Decimal:
@@ -586,7 +650,7 @@ class StrategyContext:
         books: PortfolioHub | None = None,
         venue: ExecutionVenue | None = None,
         bus: EventBus | None = None,
-        data: PointInTimeData | None = None,
+        data: HistoricalView | PointInTimeData | None = None,
         scheduler: Scheduler | None = None,
         state: Mapping[str, object] | None = None,
         seed: int = 0,
@@ -621,7 +685,7 @@ class StrategyContext:
             raise TypeError("bus must be an EventBus")
         if scheduler is not None and not isinstance(scheduler, Scheduler):
             raise TypeError("scheduler must implement Scheduler")
-        if data is not None and not isinstance(data, PointInTimeData):
+        if data is not None and not isinstance(data, PointInTimeData | HistoricalView):
             raise TypeError("data must implement PointInTimeData")
         if logger is not None and not isinstance(logger, StructuredLogger):
             raise TypeError("logger must implement StructuredLogger")
@@ -639,7 +703,14 @@ class StrategyContext:
         self._bus = bus
         self._portfolio = hub
         self._book_id = selected_book
-        self._data = data
+        if data is None:
+            self._data = None
+        elif isinstance(data, StrategyHistory):
+            self._data = data
+        elif isinstance(data, HistoricalView):
+            self._data = StrategyHistory(data, clock)
+        else:
+            self._data = data
         if scheduler is None:
             assert bus is not None
             scheduler = EventScheduler(bus)
@@ -648,7 +719,7 @@ class StrategyContext:
         self._random = Random(actual_seed)
         self._universe = UniverseView(universe)
         self._subscriptions = SubscriptionSet(self._universe, subscriptions)
-        self._account = AccountView(hub)
+        self._account = AccountView(hub, selected_book)
         self._orders = OrdersView(venue)
         self._log = StructuredLog() if logger is None else logger
         self._emissions = EmissionSink() if emissions is None else emissions
@@ -685,13 +756,18 @@ class StrategyContext:
         return self._orders.venue
 
     @property
-    def data(self) -> PointInTimeData | None:
-        """Return the injected point-in-time data boundary."""
+    def data(self) -> StrategyHistory | PointInTimeData | None:
+        """Return the opaque, now-anchored point-in-time data capability.
+
+        Engine views are wrapped into :class:`StrategyHistory` at this
+        boundary, so the strategy-reachable surface takes no timestamps and
+        exposes no record, subscribe, attach, or clock handles.
+        """
         return self._data
 
     @property
-    def history(self) -> PointInTimeData | None:
-        """Alias for the point-in-time data boundary."""
+    def history(self) -> StrategyHistory | PointInTimeData | None:
+        """Alias for the point-in-time data capability."""
         return self._data
 
     @property
@@ -810,6 +886,7 @@ __all__ = [
     "ReadonlyClock",
     "Scheduler",
     "StateStore",
+    "StrategyHistory",
     "StructuredLog",
     "StructuredLogger",
     "Subscription",

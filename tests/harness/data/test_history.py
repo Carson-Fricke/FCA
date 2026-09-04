@@ -20,6 +20,7 @@ from harness.data.history import (
     HistoricalView,
     HistorySubscription,
     LookaheadError,
+    StrategyHistory,
     from_nanos,
     to_nanos,
 )
@@ -288,8 +289,7 @@ class LookaheadCanaryStrategy(Strategy):
 
     _context: StrategyContext
 
-    def __init__(self, history: HistoricalView) -> None:
-        self._history = history
+    def __init__(self) -> None:
         self.observed: list[str] = []
         self.reads: list[str] = []
         self.violations: list[str] = []
@@ -306,16 +306,19 @@ class LookaheadCanaryStrategy(Strategy):
 
     def _observe(self, event: QuoteEvent | TradeEvent) -> None:
         context = self._context
-        history = self._history
+        history = context.data
         head = context.clock.now()
         self.observed.append(event.event_id)
-        read = context.data.read(head, event.symbol) if context.data else None
+        if not isinstance(history, StrategyHistory):
+            self.violations.append(f"{event.event_id}:missing-capability")
+            return
+        read = history.read(event.symbol)
         if isinstance(read, QuoteEvent | TradeEvent):
             self.reads.append(read.event_id)
             if read.timestamp > head:
                 self.violations.append(f"{event.event_id}:future:{read.event_id}")
         try:
-            history.last_quotes(event.symbol, 1, to_nanos(head) + 1)
+            history.window(event.symbol, STAMP, to_nanos(head) + 1)
         except LookaheadError:
             self.lookahead_blocked += 1
         else:
@@ -340,7 +343,7 @@ def test_canary_strategy_never_sees_a_future_event() -> None:
         book_id="strategy",
         seed=1729,
     )
-    canary = LookaheadCanaryStrategy(view)
+    canary = LookaheadCanaryStrategy()
     StrategyBinding(canary, context).start()
     dispatched = [quote("q0", 0, 0), quote("q1", 0, 1), trade("t0", 0, 2)]
     future = [quote("future-0", 30, 3), quote("future-1", 60, 4)]

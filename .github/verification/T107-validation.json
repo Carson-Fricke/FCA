@@ -1,0 +1,25 @@
+{
+  "taskId": "T107",
+  "numTotalTests": 15,
+  "numPassedTests": 15,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "paper-shell-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/runtime/test_paper_shell.py",
+      "result": "15 passed: mock-live 3-hour inbox session with AT_CLOSE status and intact books, paper/backtest parity (identical event stream and fill config produce equal fills/fee_assessments/portfolio/dispatch_hash), halt/abort/teardown policies, risk rejection, extra latency, multi-strategy book routing, step-driven shutdown, feed and config validation"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and 1242-test pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "Reuses backtest internals (_RiskVenue, _GuardedBinding) deliberately for behavioral identity; the duck-typed engine protocol seam is a candidate later formalization",
+    "Kernel requires globally non-decreasing (timestamp, sequence) at the boundary; live inboxes must be pre-merged by the feed layer"
+  ]
+}

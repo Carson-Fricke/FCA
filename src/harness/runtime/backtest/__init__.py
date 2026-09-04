@@ -7,8 +7,9 @@ replay, a :class:`~harness.core.clock.SimClock`-driven
 :mod:`harness.strategy`, a :class:`~harness.venues.sim.SimulatedVenue` with a
 pessimistic fill plugin, fee application through :mod:`harness.fills`,
 portfolio accounting through :class:`~harness.portfolio.hub.PortfolioHub`, pre
-trade risk through :class:`~harness.risk.pipeline.RiskPipeline`, and an
-optional :class:`~harness.data.history.HistoricalView` look-ahead guard.
+trade risk through :class:`~harness.risk.pipeline.RiskPipeline`, and the
+structural :class:`~harness.data.history.StrategyHistory` look-ahead
+capability that denies future reads at the strategy boundary.
 
 Every run returns a :class:`BacktestManifest` carrying each reproducibility
 input and a :class:`BacktestResult` whose artifacts are byte-identical across

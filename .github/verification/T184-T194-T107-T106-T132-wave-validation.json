@@ -1,0 +1,41 @@
+{
+  "wave": "T184-T194-T107-T106-T132",
+  "timestamp": "2026-09-04T21:00:00Z",
+  "numTotalTests": 1254,
+  "numPassedTests": 1242,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "uv lock --check, repository Ruff lint, Ruff format across 395 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "1242 tests passed, 12 skipped (FCA_PERF-gated), in 86.93 seconds; pre-existing Starlette/httpx deprecation warning."
+    },
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "command": "zig fmt --check . ; zig build test",
+      "result": "Zig 0.16.0 clean; 41/41 native tests including the ported event kernel, OMS, and books."
+    },
+    {
+      "name": "integration-wiring",
+      "status": "passed",
+      "result": "Coordinator wired facades (gap-healing + security-master + StrategyHistory exports in harness.data; PaperShell exports in harness.runtime; StrategyHistory in harness.strategy), fixed the LookaheadStrategy adversary to the now-anchored window signature, and updated repository.md rows/status for data, runtime, strategy, lake.catalog, and lake.coverage."
+    }
+  ],
+  "integrationHistory": [
+    "Five-lane fan-out with exclusive file ownership: T184 Zig kernel, T194 StrategyHistory facade, T107 PaperShell, T106 gap healing, T132 SecurityMaster.",
+    "T194's facade changed the strategy-facing data signature; the one engine test adversary was updated at integration with the LookaheadViolationError abort path preserved.",
+    "Committed and pushed as 38cda80."
+  ],
+  "limitations": [
+    "Engine scheduler adoption and lookahead_guard removal deferred to T195; book-view scope to T196; ensure-path listings wiring is a lake follow-up."
+  ]
+}

@@ -201,7 +201,6 @@ def test_manifest_carries_every_reproducibility_input() -> None:
     assert manifest.fee_schedule == "harness-config"
     assert len(manifest.fee_fingerprint) == 64
     assert len(manifest.risk_pipeline_fingerprint) == 64
-    assert manifest.lookahead_guard is True
     strategy = manifest.strategies[0]
     assert strategy.instance_id == "spy-momentum"
     assert strategy.implementation == f"{STRATEGY_MODULE}:PeriodicMarketStrategy"
@@ -220,7 +219,6 @@ def test_manifest_carries_every_reproducibility_input() -> None:
         "fees",
         "risk",
         "fill_model",
-        "lookahead_guard",
         "data_source",
         "data_rows",
     ],
@@ -258,9 +256,6 @@ def test_changing_any_reproducibility_input_changes_the_manifest_hash(
     elif mutation == "fill_model":
         changed = configuration
         options = BacktestOptions(fill_model=FillModel.TRADE_THROUGH)
-    elif mutation == "lookahead_guard":
-        changed = configuration
-        options = BacktestOptions(lookahead_guard=False)
     elif mutation == "data_source":
         changed = configuration
     elif mutation == "data_rows":

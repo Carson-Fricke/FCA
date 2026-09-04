@@ -1,7 +1,7 @@
 """Backtest, paper, shadow, and live runtime composition.
 
-The backtest runtime is implemented; paper, shadow, and live composition
-remain reserved for later tasks.
+The backtest runtime and the shared paper simulation runtime are implemented;
+shadow and live composition remain reserved for later tasks.
 """
 
 from harness.runtime.backtest import (
@@ -38,6 +38,20 @@ from harness.runtime.backtest import (
     synthetic_fixture,
     write_synthetic_lake,
 )
+from harness.runtime.paper import (
+    InboxPaperFeed,
+    PaperConfigurationError,
+    PaperFeed,
+    PaperInbox,
+    PaperOptions,
+    PaperSessionPolicy,
+    PaperSessionResult,
+    PaperSessionStatus,
+    PaperShell,
+    PaperShellError,
+    ReplayPaperFeed,
+    run_paper_session,
+)
 
 __all__ = [
     "AbortPolicy",
@@ -53,8 +67,19 @@ __all__ = [
     "DataPreflightError",
     "FillModel",
     "FillModelOptions",
+    "InboxPaperFeed",
     "LookaheadViolationError",
+    "PaperConfigurationError",
+    "PaperFeed",
+    "PaperInbox",
+    "PaperOptions",
+    "PaperSessionPolicy",
+    "PaperSessionResult",
+    "PaperSessionStatus",
+    "PaperShell",
+    "PaperShellError",
     "ReplayFixture",
+    "ReplayPaperFeed",
     "StrategyExecutionError",
     "StrategyHalt",
     "StrategyHaltPolicy",
@@ -70,6 +95,7 @@ __all__ = [
     "preflight_data",
     "resolve_data_source",
     "run_backtest",
+    "run_paper_session",
     "synthetic_fixture",
     "write_synthetic_lake",
 ]

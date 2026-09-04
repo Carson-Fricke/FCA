@@ -1,4 +1,4 @@
-"""Reusable deterministic golden-run support for harness tests.
+"""Reusable determinism-harness support for harness tests.
 
 This module is deliberately an adapter for tests.  Each run owns its clock,
 event bus, venue, portfolio, and strategy binding; no process-wide clock,
@@ -138,7 +138,7 @@ class SyntheticFeed:
 
 
 class ToyStrategy(Strategy):
-    """Small quote-triggered strategy used by golden scenarios.
+    """Small quote-triggered strategy used by determinism scenarios.
 
     All order identity and order values are explicit constructor parameters.
     The strategy submits at most one order, making scripted venue scenarios
@@ -210,7 +210,7 @@ class VenueStateProbeStrategy(Strategy):
     such as ``remaining_steps``, ``calls``, ``state``, ``decisions_for``,
     ``active_orders``, ``latest_market``, and ``steps``. Every observed
     surface is logged with its concrete type name and every reachable
-    attribute is logged as a finding, so golden artifacts prove what strategy
+    attribute is logged as a finding, so determinism artifacts prove what strategy
     code can and cannot observe. The harness hands strategies the one-way
     :class:`~harness.runtime.backtest.strategies.StrategyVenue` capability,
     which exposes none of these attributes.
@@ -323,16 +323,16 @@ class OrderSignalStrategy(Strategy):
 
 
 @dataclass(frozen=True, slots=True)
-class GoldenScenario:
-    """Complete deterministic input for one fresh golden-harness run."""
+class DeterminismScenario:
+    """Complete deterministic input for one fresh determinism-harness run."""
 
     feed: SyntheticFeed
     venue_steps: tuple[ScriptedStep, ...] | Sequence[ScriptedStep]
     strategy_class: type[Strategy] = ToyStrategy
     strategy_parameters: Mapping[str, object] = MappingProxyType({})
     configuration: Mapping[str, object] = MappingProxyType({})
-    account_id: str = "golden-account"
-    book_id: str = "golden-strategy"
+    account_id: str = "determinism-account"
+    book_id: str = "determinism-strategy"
     initial_cash: Decimal | int | str = Decimal("100000")
     seed: int = 0
     start: datetime | None = None
@@ -423,13 +423,13 @@ class GoldenScenario:
             ],
         }
 
-    def run(self) -> GoldenRun:
+    def run(self) -> DeterminismRun:
         """Run this scenario with a fresh deterministic runtime."""
         return run_scenario(self)
 
 
 @dataclass(frozen=True, slots=True)
-class GoldenArtifact:
+class DeterminismArtifact:
     """One named canonical byte payload and its content digest."""
 
     name: str
@@ -510,9 +510,9 @@ class ArtifactCanonicalizer:
         }
 
     @classmethod
-    def artifacts(cls, values: Mapping[str, object]) -> tuple[GoldenArtifact, ...]:
+    def artifacts(cls, values: Mapping[str, object]) -> tuple[DeterminismArtifact, ...]:
         """Canonicalize named bytes, event streams, or structured values."""
-        artifacts: list[GoldenArtifact] = []
+        artifacts: list[DeterminismArtifact] = []
         for name, value in values.items():
             normalized_name = _validate_artifact_name(name)
             if isinstance(value, bytes):
@@ -523,18 +523,18 @@ class ArtifactCanonicalizer:
                 payload = cls.event_bytes((value,))
             else:
                 payload = cls.json_bytes(value)
-            artifacts.append(GoldenArtifact(normalized_name, payload))
+            artifacts.append(DeterminismArtifact(normalized_name, payload))
         return tuple(sorted(artifacts, key=lambda artifact: artifact.name))
 
     @staticmethod
     def manifest(
-        configuration: object, artifacts: Iterable[GoldenArtifact]
-    ) -> GoldenManifest:
+        configuration: object, artifacts: Iterable[DeterminismArtifact]
+    ) -> DeterminismManifest:
         """Build a manifest from canonical artifact bytes and config inputs."""
         values = tuple(artifacts)
-        if not all(isinstance(artifact, GoldenArtifact) for artifact in values):
-            raise TypeError("artifacts must contain GoldenArtifact values")
-        return GoldenManifest(
+        if not all(isinstance(artifact, DeterminismArtifact) for artifact in values):
+            raise TypeError("artifacts must contain DeterminismArtifact values")
+        return DeterminismManifest(
             configuration_hash=configuration_hash(_normalized(configuration)),
             artifacts=tuple(
                 ArtifactDigest(artifact.name, artifact.sha256, artifact.byte_length)
@@ -544,7 +544,7 @@ class ArtifactCanonicalizer:
 
 
 @dataclass(frozen=True, slots=True)
-class GoldenManifest:
+class DeterminismManifest:
     """Canonical manifest containing configuration and artifact digests."""
 
     configuration_hash: str
@@ -575,7 +575,7 @@ class GoldenManifest:
     def canonical_bytes(self) -> bytes:
         return canonical_configuration_bytes(
             {
-                "schema": "fca-golden-manifest-v1",
+                "schema": "fca-determinism-manifest-v1",
                 "configuration_hash": self.configuration_hash,
                 "artifacts": [
                     {
@@ -598,11 +598,11 @@ class GoldenManifest:
 
 
 @dataclass(frozen=True, slots=True)
-class GoldenRun:
+class DeterminismRun:
     """Inspectable output of one isolated scenario execution."""
 
-    manifest: GoldenManifest
-    artifacts: tuple[GoldenArtifact, ...]
+    manifest: DeterminismManifest
+    artifacts: tuple[DeterminismArtifact, ...]
     dispatch_hash: str
     dispatched_count: int
     final_clock: datetime
@@ -617,7 +617,7 @@ class GoldenRun:
     def artifact_hashes(self) -> tuple[tuple[str, str], ...]:
         return self.manifest.artifact_hashes
 
-    def artifact(self, name: str) -> GoldenArtifact:
+    def artifact(self, name: str) -> DeterminismArtifact:
         normalized_name = _validate_artifact_name(name)
         for artifact in self.artifacts:
             if artifact.name == normalized_name:
@@ -626,7 +626,7 @@ class GoldenRun:
 
 
 class DeterminismError(AssertionError):
-    """Raised when two golden runs do not have identical canonical output."""
+    """Raised when two determinism runs do not have identical canonical output."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -644,16 +644,17 @@ class ManifestComparison:
         return self.equal
 
 
-def _manifest(value: GoldenManifest | GoldenRun) -> GoldenManifest:
-    if isinstance(value, GoldenRun):
+def _manifest(value: DeterminismManifest | DeterminismRun) -> DeterminismManifest:
+    if isinstance(value, DeterminismRun):
         return value.manifest
-    if isinstance(value, GoldenManifest):
+    if isinstance(value, DeterminismManifest):
         return value
-    raise TypeError("comparison value must be a GoldenManifest or GoldenRun")
+    raise TypeError("comparison value must be a DeterminismManifest or DeterminismRun")
 
 
 def compare_manifests(
-    left: GoldenManifest | GoldenRun, right: GoldenManifest | GoldenRun
+    left: DeterminismManifest | DeterminismRun,
+    right: DeterminismManifest | DeterminismRun,
 ) -> ManifestComparison:
     """Compare config and artifact hashes without relying on filesystem paths."""
     left_manifest = _manifest(left)
@@ -678,27 +679,28 @@ def compare_manifests(
 
 
 def assert_manifest_equal(
-    left: GoldenManifest | GoldenRun, right: GoldenManifest | GoldenRun
+    left: DeterminismManifest | DeterminismRun,
+    right: DeterminismManifest | DeterminismRun,
 ) -> None:
     """Raise ``DeterminismError`` when manifest hashes or entries differ."""
     comparison = compare_manifests(left, right)
     if not comparison.equal:
         raise DeterminismError(
-            "golden manifests differ: " + ", ".join(comparison.differences)
+            "determinism manifests differ: " + ", ".join(comparison.differences)
         )
 
 
-def assert_same_artifacts(left: GoldenRun, right: GoldenRun) -> None:
+def assert_same_artifacts(left: DeterminismRun, right: DeterminismRun) -> None:
     """Assert both digest equality and byte equality for every artifact."""
     assert_manifest_equal(left, right)
     left_artifacts = {artifact.name: artifact for artifact in left.artifacts}
     right_artifacts = {artifact.name: artifact for artifact in right.artifacts}
     for name in sorted(left_artifacts):
         if left_artifacts[name].payload != right_artifacts[name].payload:
-            raise DeterminismError(f"golden artifact bytes differ: {name}")
+            raise DeterminismError(f"determinism artifact bytes differ: {name}")
 
 
-def run_scenario(scenario: GoldenScenario) -> GoldenRun:
+def run_scenario(scenario: DeterminismScenario) -> DeterminismRun:
     """Execute one scenario using only explicit deterministic dependencies.
 
     The scenario owns the concrete :class:`ScriptedVenue` and uses it for the
@@ -707,8 +709,8 @@ def run_scenario(scenario: GoldenScenario) -> GoldenRun:
     capability and the refusing :class:`StrategyScheduler`, so strategy code
     can neither observe venue state nor schedule fabricated market data.
     """
-    if not isinstance(scenario, GoldenScenario):
-        raise TypeError("scenario must be a GoldenScenario")
+    if not isinstance(scenario, DeterminismScenario):
+        raise TypeError("scenario must be a DeterminismScenario")
     start = scenario.clock_start
     assert start is not None
     clock = SimClock(start)
@@ -766,7 +768,7 @@ def run_scenario(scenario: GoldenScenario) -> GoldenRun:
         scenario.configuration_for_hash,
         artifact_values,
     )
-    return GoldenRun(
+    return DeterminismRun(
         manifest=manifest,
         artifacts=artifact_values,
         dispatch_hash=bus.dispatch_hash,
@@ -777,17 +779,19 @@ def run_scenario(scenario: GoldenScenario) -> GoldenRun:
     )
 
 
-def run_twice(scenario: GoldenScenario) -> tuple[GoldenRun, GoldenRun]:
+def run_twice(scenario: DeterminismScenario) -> tuple[DeterminismRun, DeterminismRun]:
     """Run a scenario twice, constructing an independent runtime each time."""
     return run_scenario(scenario), run_scenario(scenario)
 
 
-def assert_reproducible(scenario: GoldenScenario) -> tuple[GoldenRun, GoldenRun]:
+def assert_reproducible(
+    scenario: DeterminismScenario,
+) -> tuple[DeterminismRun, DeterminismRun]:
     """Run twice and assert byte-identical artifacts and identical manifests."""
     first, second = run_twice(scenario)
     assert_same_artifacts(first, second)
     if first.dispatch_hash != second.dispatch_hash:
-        raise DeterminismError("golden dispatch hashes differ")
+        raise DeterminismError("determinism dispatch hashes differ")
     return first, second
 
 
@@ -795,10 +799,10 @@ __all__ = [
     "ArtifactCanonicalizer",
     "ArtifactDigest",
     "DeterminismError",
-    "GoldenArtifact",
-    "GoldenManifest",
-    "GoldenRun",
-    "GoldenScenario",
+    "DeterminismArtifact",
+    "DeterminismManifest",
+    "DeterminismRun",
+    "DeterminismScenario",
     "ManifestComparison",
     "OrderSignalStrategy",
     "SyntheticFeed",

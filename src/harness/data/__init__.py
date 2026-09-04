@@ -22,6 +22,17 @@ from harness.data.bars import (
     build_bars,
     interval_delta,
 )
+from harness.data.gap_healing import (
+    CoverageCalendar,
+    CoverageGap,
+    HealingAction,
+    HealingStatus,
+    LakeGapBackfiller,
+    LakeSessionCalendar,
+    LiveGapDetector,
+    LiveGapHealer,
+    UncoveredGapError,
+)
 from harness.data.history import (
     DEFAULT_HISTORY_CAPACITY,
     HistoricalView,
@@ -29,6 +40,7 @@ from harness.data.history import (
     HistorySubscription,
     LookaheadError,
     Nanos,
+    StrategyHistory,
     from_nanos,
     to_nanos,
 )
@@ -76,6 +88,11 @@ from harness.data.replay import (
     ReplayFingerprints,
     ReplayStream,
 )
+from harness.data.security_master import (
+    ListingsCatalogPort,
+    SecurityMasterView,
+    SecuritySnapshot,
+)
 
 __all__ = (
     "AlpacaCryptoInbox",
@@ -91,6 +108,8 @@ __all__ = (
     "AsyncWebSocketConnection",
     "AsyncWebSocketTransport",
     "ContractsCatalogPort",
+    "CoverageCalendar",
+    "CoverageGap",
     "DEFAULT_EGRESS_WARNING_THRESHOLD_BYTES",
     "DEFAULT_HISTORY_CAPACITY",
     "DteFilter",
@@ -98,14 +117,21 @@ __all__ = (
     "HistoryAggregate",
     "HistoricalView",
     "HistorySubscription",
+    "HealingAction",
+    "HealingStatus",
     "IncompleteMarketDataError",
     "LakeClientPort",
+    "LakeGapBackfiller",
     "LakeRequest",
+    "LakeSessionCalendar",
     "LoadedMarketData",
     "LakeReplayFeed",
     "LiveObjectStore",
+    "LiveGapDetector",
+    "LiveGapHealer",
     "LiveRecorder",
     "LiveRecorderConfig",
+    "ListingsCatalogPort",
     "LocalLiveObjectStore",
     "LookaheadError",
     "MarketEvent",
@@ -127,9 +153,13 @@ __all__ = (
     "ReplayStream",
     "SelectionMode",
     "SessionResolver",
+    "SecurityMasterView",
+    "SecuritySnapshot",
     "StrikeFilter",
+    "StrategyHistory",
     "UnsupportedMarketDataError",
     "UnderlyingView",
+    "UncoveredGapError",
     "UtcDaySessionResolver",
     "XnysSessionResolver",
     "aggregate_trades",

@@ -8,10 +8,10 @@ import pytest
 from harness.core.symbols import Symbol
 from harness.core.types import QuoteEvent
 from harness.runtime.backtest.strategies import StrategyVenue
-from harness.testing.golden import (
+from harness.testing.determinism import (
     ArtifactCanonicalizer,
     DeterminismError,
-    GoldenScenario,
+    DeterminismScenario,
     SyntheticFeed,
     ToyStrategy,
     assert_manifest_equal,
@@ -34,7 +34,7 @@ def quote(event_id: str, offset: int = 0) -> QuoteEvent:
         bid_quantity=Decimal("10"),
         ask_price=Decimal("101"),
         ask_quantity=Decimal("10"),
-        venue="golden",
+        venue="determinism",
     )
 
 
@@ -43,13 +43,13 @@ def scenario(
     strategy_class: type[ToyStrategy] = ToyStrategy,
     strategy_parameters: dict[str, object] | None = None,
     feed: tuple[QuoteEvent, ...] = (quote("quote-1"),),
-) -> GoldenScenario:
+) -> DeterminismScenario:
     parameters = {
         "order_id": "toy-order",
         "quantity": Decimal("2"),
         **(strategy_parameters or {}),
     }
-    return GoldenScenario(
+    return DeterminismScenario(
         feed=SyntheticFeed(feed),
         venue_steps=(
             ScriptedStep(
@@ -61,7 +61,7 @@ def scenario(
         ),
         strategy_class=strategy_class,
         strategy_parameters=parameters,
-        configuration={"symbols": ["AAPL"], "mode": "golden"},
+        configuration={"symbols": ["AAPL"], "mode": "determinism"},
         start=STAMP,
     )
 
@@ -82,7 +82,7 @@ def test_synthetic_feed_preserves_explicit_event_order_and_clock() -> None:
     assert tuple(feed) == feed.events
     assert feed.start == STAMP
     with pytest.raises(ValueError, match="cannot precede"):
-        GoldenScenario(
+        DeterminismScenario(
             feed=feed, venue_steps=(), start=STAMP + timedelta(microseconds=1)
         )
 

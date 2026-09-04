@@ -24,7 +24,9 @@ planned. The pinned Zig 0.16.0
 toolchain is a first-class build component: the `build.zig` module builds the
 native core under `src/harness/native` (C ABI v1 with the Arrow C Data
 Interface bridge, pinned scale-18 fixed point, and the ported event kernel,
-OMS state machine, and virtual book accounting), the shared image compiles it
+OMS state machine, virtual book accounting, K-way replay merge, bar
+derivation, resting-order matching venue, and SimpleTouch, latency-size, and
+trade-through fill models), the shared image compiles it
 in a dedicated Zig build stage, and CI gates the native core with
 `zig fmt --check` and `zig build test` alongside the Python gates.
 
@@ -128,7 +130,7 @@ tests/lake/
 | `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies; plus the PaperShell shared simulation runtime composing the same kernel, venue, fills, fees, risk, and portfolio accounting against replay or live inbox feeds. |
 | `harness.strategy` | Mode-independent strategy callbacks, constrained context with capability-scoped surfaces (read-only clock, opaque engine-clocked data history, one-way venue commands, and provenance-restricted scheduling), deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
 | `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, and complete decision auditing. |
-| `harness.testing` | Deterministic synthetic feeds, golden artifact canonicalization, and reproducibility manifest comparison. |
+| `harness.testing` | Deterministic synthetic feeds, determinism artifact canonicalization, and reproducibility manifest comparison. |
 | `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, simulated top-of-book matching venue, and the options multi-leg matching engine with atomic all-leg fillability. |
 
 The event ordering contract is timestamp, source sequence, fixed serialized

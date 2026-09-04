@@ -132,7 +132,6 @@ class BacktestManifest:
     fee_schedule: str
     fee_fingerprint: str
     risk_pipeline_fingerprint: str
-    lookahead_guard: bool
     strategies: tuple[StrategyIdentity, ...]
 
     @property
@@ -167,7 +166,6 @@ class BacktestManifest:
             "fee_schedule": self.fee_schedule,
             "fee_fingerprint": self.fee_fingerprint,
             "risk_pipeline_fingerprint": self.risk_pipeline_fingerprint,
-            "lookahead_guard": self.lookahead_guard,
             "strategies": [strategy.to_json() for strategy in self.strategies],
         }
 

@@ -166,7 +166,6 @@ class PaperOptions:
     fill_options: FillModelOptions | None = None
     fee_precision: Decimal = DEFAULT_FEE_PRECISION
     asset_class: FeeAssetClass = FeeAssetClass.EQUITY
-    lookahead_guard: bool = True
     history_capacity: int = DEFAULT_HISTORY_CAPACITY
     abort_policy: AbortPolicy = AbortPolicy.STOP
     strategy_halt_policy: StrategyHaltPolicy = StrategyHaltPolicy.HALT_STRATEGY
@@ -607,7 +606,7 @@ class PaperShell:
             latency=fill_model_latency(plugin) + options.extra_latency,
         )
         self._view: HistoricalView | None = None
-        if options.lookahead_guard:
+        if options.history_capacity > 0:
             view = HistoricalView(self._clock, capacity=options.history_capacity)
             for symbol in _session_symbols(configuration):
                 view.subscribe(symbol)

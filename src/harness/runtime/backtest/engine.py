@@ -21,7 +21,12 @@ from harness.core.types import (
     SingleLegOrder,
     TradeEvent,
 )
-from harness.data import DEFAULT_HISTORY_CAPACITY, HistoricalView, ReplayFingerprints
+from harness.data import (
+    DEFAULT_HISTORY_CAPACITY,
+    HistoricalView,
+    ReplayFingerprints,
+    StrategyHistory,
+)
 from harness.fills import (
     AssetClass as FeeAssetClass,
 )
@@ -82,6 +87,7 @@ from harness.runtime.backtest.preflight import (
 )
 from harness.runtime.backtest.strategies import (
     StrategyLoader,
+    StrategyScheduler,
     _GuardedBinding,
     _RiskVenue,
     _strategy_identity,
@@ -114,7 +120,6 @@ class BacktestOptions:
     fill_options: FillModelOptions | None = None
     fee_precision: Decimal = DEFAULT_FEE_PRECISION
     asset_class: FeeAssetClass = FeeAssetClass.EQUITY
-    lookahead_guard: bool = True
     history_capacity: int = DEFAULT_HISTORY_CAPACITY
     abort_policy: AbortPolicy = AbortPolicy.RAISE
     strategy_halt_policy: StrategyHaltPolicy = StrategyHaltPolicy.HALT_STRATEGY
@@ -142,7 +147,6 @@ class _BacktestEngine:
         "_halted",
         "_hub",
         "_last_sequence",
-        "_lookahead_guard",
         "_manifest",
         "_market_events",
         "_options",
@@ -182,7 +186,6 @@ class _BacktestEngine:
         self._abort_policy = options.abort_policy
         self._halt_policy = options.strategy_halt_policy
         self._teardown_policy = options.teardown_policy
-        self._lookahead_guard = options.lookahead_guard
         self._preflight = preflight
         self._manifest = manifest
         self._fixture = fixture
@@ -217,16 +220,13 @@ class _BacktestEngine:
             clock=self._clock,
             latency=fill_model_latency(plugin),
         )
-        self._view: HistoricalView | None = None
-        if options.lookahead_guard:
-            view = HistoricalView(
-                self._clock,
-                capacity=options.history_capacity,
-            )
-            for symbol in configuration.data.symbols:
-                view.subscribe(symbol)
-            view.attach(self._bus)
-            self._view = view
+        self._view = HistoricalView(
+            self._clock,
+            capacity=options.history_capacity,
+        )
+        for symbol in configuration.data.symbols:
+            self._view.subscribe(symbol)
+        self._view.attach(self._bus)
 
         self._bus.subscribe(Event, self._observe)
         self._bus.subscribe(QuoteEvent, self._on_market)
@@ -322,7 +322,8 @@ class _BacktestEngine:
                 portfolio=self._hub,
                 venue=_RiskVenue(self, instance.instance_id, self._venue),
                 bus=self._bus,
-                data=self._view,
+                scheduler=StrategyScheduler(self._bus),
+                data=StrategyHistory(self._view, self._clock),
                 seed=self._configuration.seed,
                 universe=instance.symbols,
                 subscriptions=_SUBSCRIPTIONS,
@@ -562,8 +563,7 @@ def run_backtest(
     ``data_source`` accepts ``None`` for the deterministic synthetic benchmark
     fixture, a :class:`ReplayFixture`, a stream mapping, or a path to a
     user-supplied local Parquet lake directory.  ``options`` carries the fill
-    model, fee precision, look-ahead guard, and the abort, halt, and teardown
-    policies.
+    model, fee precision, and the abort, halt, and teardown policies.
 
     The runner composes replay, the simulated venue, the risk pipeline, the
     portfolio hub, and the strategies on one :class:`~harness.core.clock.SimClock`
@@ -667,7 +667,6 @@ def build_manifest(
                 "rules": tuple(rule.rule_id for rule in pipeline.rules),
             }
         ),
-        lookahead_guard=chosen.lookahead_guard,
         strategies=tuple(
             _strategy_identity(instance)
             for instance in configuration.strategy_instances
