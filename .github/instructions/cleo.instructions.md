@@ -60,6 +60,33 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
   for this call site). That plugin file is machine-local and is not tracked by
   the repository; recreate it from brain observation O-mtn8k38i-0 if absent.
 
+## CLEO Fork Install
+
+- The `cleo` binary on this machine is a locally patched fork, not the
+  published npm package: `Carson-Fricke/cleo`, branch
+  `fix/subsystem-defects-2026.8.9` (commit `310c4e986` on top of v2026.8.9),
+  installed globally from tarballs. It repairs upstream issues #1216 (openai-
+  compatible transport base URLs), #1217 (embedding activation deadlock),
+  #1218 (`graph sync` no-op + `graph discover` routing), and #1219 (transcript
+  extraction prompt/schema contradiction).
+- Clone lives at `<repo-sibling>/cleo` (`C:\Users\csfri\source\repos\cleo`).
+  Rebuild with `pnpm install --frozen-lockfile && pnpm run build` (the repo
+  pins `script-shell` to Git Bash for `rm -rf` build scripts), then
+  `pnpm --filter @cleocode/core pack` and `pnpm --filter @cleocode/cleo pack`,
+  and install both tarballs in one
+  `npm install -g <core.tgz> <cleo.tgz> --allow-scripts=@cleocode/core,tree-sitter,...`
+  invocation.
+- Revert to upstream with `npm install -g @cleocode/cleo@2026.8.9`. The clone
+  must keep `core.autocrlf false`: CRLF migration files hash differently from
+  the LF journal entries written by the npm install, which replays drizzle
+  migrations against existing tables.
+- When upstream ships fixes for #1216/#1217/#1218/#1219, reinstall the
+  published package, retire the local workarounds, and close T189/T205 per
+  their acceptance criteria. The global `cleo.db` journal was manually
+  reconciled on 2026-09-04 (t11363-consolidation + t11622-agent-registry-rename
+  marked applied) — if per-command "table already exists" reconciliation
+  warnings reappear, re-run that journal repair before re-probing DDL.
+
 ## Portable Paths
 
 - Paths persisted in tasks, acceptance criteria, notes, evidence, configuration, generated artifacts, or `.cleo-export.json` must be relative to the repository root and use `/` separators.
