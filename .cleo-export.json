@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-04T04:55:07.545Z",
+    "exportedAt": "2026-09-04T05:48:58.881Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 181
     },
-    "checksum": "33bd5a1e692623c4",
+    "checksum": "123f12fba5fc4a87",
     "taskCount": 180,
     "exportMode": "full"
   },
@@ -661,7 +661,7 @@
     "T104": {
       "type": "task",
       "title": "H4.2 Alpaca crypto WebSocket feed",
-      "status": "pending",
+      "status": "done",
       "parentId": "T072",
       "depends": [
         "T103"
@@ -701,7 +701,7 @@
     "T129": {
       "type": "task",
       "title": "H8.2 Performance and memory budgets",
-      "status": "pending",
+      "status": "done",
       "parentId": "T076",
       "depends": [
         "T096"
@@ -953,7 +953,7 @@
     "T105": {
       "type": "task",
       "title": "H4.3 Live event recorder in lake schema",
-      "status": "pending",
+      "status": "done",
       "parentId": "T072",
       "depends": [
         "T021",
@@ -976,7 +976,7 @@
     "T117": {
       "type": "task",
       "title": "H6.3 MidTouch and multi-leg matching",
-      "status": "pending",
+      "status": "done",
       "parentId": "T074",
       "depends": [
         "T091",
@@ -7206,7 +7206,7 @@
     {
       "id": "T104",
       "title": "H4.2 Alpaca crypto WebSocket feed",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T072",
@@ -7220,6 +7220,9 @@
         "harness.h027",
         "websocket",
         "crypto"
+      ],
+      "notes": [
+        "2026-09-04 05:45:39 UTC: Wave-verified Alpaca crypto WebSocket feed: AlpacaCryptoSubscription/Inbox/WebSocketFeed extending the T103 SIP surface with deployment-managed pair sourcing from strategy universes (runtime_only network enforcement, feed=crypto setting), exact fractional Decimal prices and sizes via the JSON parse path with Parquet round-trip, no-tape crypto quotes with x-exchange trades, continuous UTC-day semantics without session gating, reconnection across the day boundary with continuous sequence ids, and non-pair symbol rejection; SIP feed unchanged for equities."
       ],
       "acceptance": [
         "Mock reconnection spans a UTC-day boundary without loss or duplication",
@@ -7235,21 +7238,116 @@
         "T103"
       ],
       "createdAt": "2026-09-01T18:01:45.030Z",
-      "updatedAt": "2026-09-01T18:27:10.570Z",
+      "updatedAt": "2026-09-04T05:45:43.574Z",
+      "completedAt": "2026-09-04T05:45:39.651Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T05:44:11.476Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:45.030Z"
+        "initializedAt": "2026-09-01T18:01:45.030Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the crypto WebSocket feed: deployment-managed pair sourcing, exact fractional Decimals with Parquet round-trip, UTC-day continuous semantics, reconnection across the day boundary, and non-pair rejection"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T104-validation.json",
+                "sha256": "8831b87bb13558adfb51e02f8f2ad10133fb7b6facc1eaaef7f925f65d8b5cb3",
+                "passCount": 45,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:12.016Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the crypto WebSocket feed: deployment-managed pair sourcing, exact fractional Decimals with Parquet round-trip, UTC-day continuous semantics, reconnection across the day boundary, and non-pair rejection"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T104-validation.json",
+                "sha256": "8831b87bb13558adfb51e02f8f2ad10133fb7b6facc1eaaef7f925f65d8b5cb3",
+                "passCount": 45,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:12.016Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the crypto WebSocket feed: deployment-managed pair sourcing, exact fractional Decimals with Parquet round-trip, UTC-day continuous semantics, reconnection across the day boundary, and non-pair rejection"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T104-validation.json",
+                "sha256": "8831b87bb13558adfb51e02f8f2ad10133fb7b6facc1eaaef7f925f65d8b5cb3",
+                "passCount": 45,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:12.016Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -7630,7 +7728,7 @@
     {
       "id": "T129",
       "title": "H8.2 Performance and memory budgets",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T076",
@@ -7643,6 +7741,9 @@
         "milestone.m5",
         "harness.h051",
         "performance"
+      ],
+      "notes": [
+        "2026-09-04 05:47:32 UTC: Wave-verified performance and memory budget suite under tests/performance: stdlib-only (perf_counter, tracemalloc, statistics) benchmarks across narrow, medium, and wide tiers for replay throughput (164231/144946/136847 events per second), SimpleTouch and TradeThrough matching cost (3.35 and 3.52 microseconds per order), risk pipeline allow and reduce latency (41.49 and 35.75 microseconds per decision), recorder artifact writes (102404 rows per second), and streaming peak memory flat at about 2.46 MiB (257.5 to 259.0 bytes per event) confirming bounded lookahead and bounded recorder batches; direction-aware regression report flags greater-than-twenty-percent regressions against tests/performance/baselines.json, proven with a doctored baseline; FCA_PERF gate keeps the suite skipped by default so CI and the regular suite are unaffected; baselines and methodology published in .github/performance.md."
       ],
       "acceptance": [
         "Baseline throughput and memory guidance covers universe-width tiers",
@@ -7659,21 +7760,116 @@
         "T096"
       ],
       "createdAt": "2026-09-01T18:03:31.865Z",
-      "updatedAt": "2026-09-01T18:30:47.895Z",
+      "updatedAt": "2026-09-04T05:47:35.574Z",
+      "completedAt": "2026-09-04T05:47:31.933Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T05:44:36.880Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:31.865Z"
+        "initializedAt": "2026-09-01T18:03:31.865Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the performance suite: FCA_PERF-gated benchmarks captured baselines, skip-by-default confirmed, and the greater-than-twenty-percent regression report proven via a doctored baseline"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T129-validation.json",
+                "sha256": "603698c44e04b79bea99a933447914138190f3333e6dacd6eff9d776a834664b",
+                "passCount": 12,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:37.577Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the performance suite: FCA_PERF-gated benchmarks captured baselines, skip-by-default confirmed, and the greater-than-twenty-percent regression report proven via a doctored baseline"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T129-validation.json",
+                "sha256": "603698c44e04b79bea99a933447914138190f3333e6dacd6eff9d776a834664b",
+                "passCount": 12,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:37.577Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the performance suite: FCA_PERF-gated benchmarks captured baselines, skip-by-default confirmed, and the greater-than-twenty-percent regression report proven via a doctored baseline"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T129-validation.json",
+                "sha256": "603698c44e04b79bea99a933447914138190f3333e6dacd6eff9d776a834664b",
+                "passCount": 12,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:37.577Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -10291,7 +10487,7 @@
     {
       "id": "T105",
       "title": "H4.3 Live event recorder in lake schema",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T072",
@@ -10304,6 +10500,9 @@
         "milestone.m2",
         "harness.h028",
         "recording"
+      ],
+      "notes": [
+        "2026-09-04 05:46:32 UTC: Wave-verified LiveRecorder: exact market-lake schemas and partition layout under live/{deployment}, UTC-day crypto and XNYS equity session rotation with gap-midpoint attribution, atomic whole-object part replacement leaving every written file readable (tempfile, fsync, os.replace), flush-on-shutdown with optional injected-clock flush interval, earlier-session events raising, and fakes-only tests with no network or wall clock."
       ],
       "acceptance": [
         "A thirty-minute recording replays without schema conversion warnings",
@@ -10321,21 +10520,116 @@
         "T103"
       ],
       "createdAt": "2026-09-01T18:01:49.107Z",
-      "updatedAt": "2026-09-01T18:27:19.199Z",
+      "updatedAt": "2026-09-04T05:46:36.048Z",
+      "completedAt": "2026-09-04T05:46:32.020Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T05:44:19.834Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:01:49.107Z"
+        "initializedAt": "2026-09-01T18:01:49.107Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the LiveRecorder: exact lake schemas, UTC-day and XNYS session rotation, atomic readable partial parts, flush-on-shutdown, and error paths"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T105-validation.json",
+                "sha256": "3934a1049733e34cd6647f71740cbed04f28ac6bd36658a52b422aa1cea39272",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:20.518Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the LiveRecorder: exact lake schemas, UTC-day and XNYS session rotation, atomic readable partial parts, flush-on-shutdown, and error paths"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T105-validation.json",
+                "sha256": "3934a1049733e34cd6647f71740cbed04f28ac6bd36658a52b422aa1cea39272",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:20.518Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified the LiveRecorder: exact lake schemas, UTC-day and XNYS session rotation, atomic readable partial parts, flush-on-shutdown, and error paths"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T105-validation.json",
+                "sha256": "3934a1049733e34cd6647f71740cbed04f28ac6bd36658a52b422aa1cea39272",
+                "passCount": 21,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:20.518Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -10398,7 +10692,7 @@
     {
       "id": "T117",
       "title": "H6.3 MidTouch and multi-leg matching",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T074",
@@ -10412,6 +10706,9 @@
         "harness.h040",
         "options",
         "fill-model"
+      ],
+      "notes": [
+        "2026-09-04 05:47:05 UTC: Wave-verified MidTouch fill model and options multi-leg matching engine: the documented adverse midpoint rule (exact on-tick midpoints only when the far touch is marketable through the limit; market and stop orders take touch or trade print), tick, maximum-spread, adverse-touch, and displayed-size gates, stop arming, YAML configuration; and OptionsMatchingEngine with atomic all-leg fillability on one constituent quote update, staggered-quote atomicity, natural-touch and mid net debit or credit gates against the exact MultiLegOrderGroup net rule, displayed-size pools, ratio legs, IOC expiry, cancellation, and MultiLegOMS integration. Golden determinism preserved (no engine-path changes); venues-to-oms dependency is new and acyclic."
       ],
       "acceptance": [
         "Spread, tick, size, and net-limit scenario matrices cover single and multi-leg orders",
@@ -10430,21 +10727,116 @@
         "T116"
       ],
       "createdAt": "2026-09-01T18:02:41.552Z",
-      "updatedAt": "2026-09-01T18:29:02.609Z",
+      "updatedAt": "2026-09-04T05:47:08.999Z",
+      "completedAt": "2026-09-04T05:47:04.942Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-04T05:44:28.335Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:02:41.552Z"
+        "initializedAt": "2026-09-01T18:02:41.552Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified MidTouch constraints and atomic all-leg options matching including blocking-leg and net-limit matrices with determinism golden preserved"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T117-validation.json",
+                "sha256": "2dcda502ea031f6aa2481ed7971a5d4e75c1e4603dc6631b1b57043a5f965737",
+                "passCount": 58,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:29.026Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified MidTouch constraints and atomic all-leg options matching including blocking-leg and net-limit matrices with determinism golden preserved"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T117-validation.json",
+                "sha256": "2dcda502ea031f6aa2481ed7971a5d4e75c1e4603dc6631b1b57043a5f965737",
+                "passCount": 58,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:29.026Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a7531aaa3bf62d362a1affc95b595d9f4a132c73",
+                "shortSha": "a7531aa"
+              },
+              {
+                "kind": "note",
+                "note": "Wave integration verified MidTouch constraints and atomic all-leg options matching including blocking-leg and net-limit matrices with determinism golden preserved"
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T117-validation.json",
+                "sha256": "2dcda502ea031f6aa2481ed7971a5d4e75c1e4603dc6631b1b57043a5f965737",
+                "passCount": 58,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 180 CLEO tasks through T180.\n"
+              }
+            ],
+            "capturedAt": "2026-09-04T05:44:29.026Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260827022047_79c19b"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
