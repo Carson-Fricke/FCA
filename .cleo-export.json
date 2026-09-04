@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-04T05:48:58.881Z",
+    "exportedAt": "2026-09-04T18:17:27.367Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 181
+      "nextId": 190
     },
-    "checksum": "123f12fba5fc4a87",
-    "taskCount": 180,
+    "checksum": "bae9ff641080f725",
+    "taskCount": 189,
     "exportMode": "full"
   },
   "selection": {
@@ -46,6 +46,7 @@
       "T168",
       "T172",
       "T174",
+      "T182",
       "T003",
       "T014",
       "T017",
@@ -76,6 +77,7 @@
       "T169",
       "T173",
       "T175",
+      "T183",
       "T004",
       "T015",
       "T018",
@@ -105,6 +107,7 @@
       "T167",
       "T170",
       "T176",
+      "T184",
       "T005",
       "T019",
       "T024",
@@ -131,6 +134,7 @@
       "T164",
       "T171",
       "T177",
+      "T185",
       "T006",
       "T020",
       "T025",
@@ -151,6 +155,8 @@
       "T148",
       "T159",
       "T178",
+      "T186",
+      "T188",
       "T007",
       "T026",
       "T038",
@@ -166,6 +172,8 @@
       "T140",
       "T149",
       "T160",
+      "T187",
+      "T189",
       "T008",
       "T027",
       "T039",
@@ -194,6 +202,7 @@
       "T011",
       "T087",
       "T097",
+      "T181",
       "T012",
       "T137"
     ],
@@ -504,6 +513,13 @@
         "T178"
       ]
     },
+    "T182": {
+      "type": "task",
+      "title": "H10.1 Zig toolchain, image stage, and repository gates",
+      "status": "pending",
+      "parentId": "T181",
+      "depends": []
+    },
     "T003": {
       "type": "epic",
       "title": "E0 Repository and Python foundation",
@@ -807,6 +823,15 @@
         "T158"
       ]
     },
+    "T183": {
+      "type": "task",
+      "title": "H10.2 Zig core FFI seam, Arrow bridge, and fixed-point types",
+      "status": "pending",
+      "parentId": "T181",
+      "depends": [
+        "T182"
+      ]
+    },
     "T004": {
       "type": "epic",
       "title": "E1 Azure infrastructure and budget controls",
@@ -1102,6 +1127,15 @@
         "T161"
       ]
     },
+    "T184": {
+      "type": "task",
+      "title": "H10.3 Zig event kernel: clock, bus, OMS, and accounting books",
+      "status": "pending",
+      "parentId": "T181",
+      "depends": [
+        "T183"
+      ]
+    },
     "T005": {
       "type": "epic",
       "title": "E2 Lake core library",
@@ -1375,6 +1409,15 @@
         "T178"
       ]
     },
+    "T185": {
+      "type": "task",
+      "title": "H10.4 Zig replay merge, bars, matching, and fill models",
+      "status": "pending",
+      "parentId": "T181",
+      "depends": [
+        "T184"
+      ]
+    },
     "T006": {
       "type": "epic",
       "title": "E3 CI/CD and GitHub OIDC",
@@ -1587,6 +1630,22 @@
         "T158"
       ]
     },
+    "T186": {
+      "type": "task",
+      "title": "H10.5 Zig metrics port",
+      "status": "pending",
+      "parentId": "T181",
+      "depends": [
+        "T184"
+      ]
+    },
+    "T188": {
+      "type": "task",
+      "title": "Agent instructions for source folder READMEs and file purposes",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
+    },
     "T007": {
       "type": "epic",
       "title": "E4 Equities SIP ingest",
@@ -1753,6 +1812,23 @@
         "T158",
         "T159"
       ]
+    },
+    "T187": {
+      "type": "task",
+      "title": "H10.6 Zig parity oracle and runner integration",
+      "status": "pending",
+      "parentId": "T181",
+      "depends": [
+        "T185",
+        "T186"
+      ]
+    },
+    "T189": {
+      "type": "task",
+      "title": "Track CLEO LLM provider workaround and OpenRouter transport fix",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
     },
     "T008": {
       "type": "epic",
@@ -2071,6 +2147,15 @@
       "depends": [
         "T090",
         "T096"
+      ]
+    },
+    "T181": {
+      "type": "epic",
+      "title": "H10 M6 Zig core engine migration",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": [
+        "T069"
       ]
     },
     "T012": {
@@ -5368,6 +5453,59 @@
       "relates": []
     },
     {
+      "id": "T182",
+      "title": "H10.1 Zig toolchain, image stage, and repository gates",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T181",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Introduce a pinned Zig toolchain as a first-class build component: build.zig module, zig fmt and zig build test in CI alongside the Python gates, a Zig build stage in the shared image with all existing commands unchanged, and updated repository tooling guidance.",
+      "labels": [
+        "quant-harness",
+        "milestone.m6",
+        "harness.h059",
+        "zig",
+        "ci"
+      ],
+      "acceptance": [
+        "A pinned Zig toolchain builds the native core on Windows and linux with zig fmt --check and zig build test wired into CI alongside ruff, ty, and pytest",
+        "The shared image gains a Zig build stage while the existing lake, harness, api, backtest-job, and trader commands remain unchanged",
+        "Repository tooling instructions document the Zig gates without removing the Python gates",
+        "Market-lake (src/lake) and Thesis code paths are unchanged",
+        "Focused image and CI contract tests pass"
+      ],
+      "files": [
+        "build.zig",
+        "build.zig.zon",
+        "Dockerfile",
+        ".dockerignore",
+        ".github/workflows/publish-image.yml",
+        ".github/instructions/copilot-instructions.md"
+      ],
+      "createdAt": "2026-09-04T16:44:31.761Z",
+      "updatedAt": "2026-09-04T16:44:31.761Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T16:44:31.761Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T003",
       "title": "E0 Repository and Python foundation",
       "status": "done",
@@ -6635,7 +6773,8 @@
       ],
       "notes": [
         "2026-09-01 17:53:59 UTC: Reconciled from harness-plan.md and harness-cleo-tasks.md. This saga is planned work in the existing FCA repository; the market-data lake is also pending, so lake integrations carry explicit cross-saga dependencies.",
-        "2026-09-01 18:38:35 UTC: Reconciliation decisions: keep quant-harness in the existing FCA repository; do not assume the lake is deployed; reuse shared Python, Docker, Bicep, OIDC, storage, and auth patterns; gate lake access on T021/T023/T046/T048, options on T055/T056, and survivorship extensions on T024/T025/T034; add T121 for missing OPRA WebSocket coverage; use deterministic engine IDs and UUID7 only at the live broker boundary; order M3b before live eligibility."
+        "2026-09-01 18:38:35 UTC: Reconciliation decisions: keep quant-harness in the existing FCA repository; do not assume the lake is deployed; reuse shared Python, Docker, Bicep, OIDC, storage, and auth patterns; gate lake access on T021/T023/T046/T048, options on T055/T056, and survivorship extensions on T024/T025/T034; add T121 for missing OPRA WebSocket coverage; use deterministic engine IDs and UUID7 only at the live broker boundary; order M3b before live eligibility.",
+        "2026-09-04 16:45:28 UTC: Language decision 2026-09-04: the harness synchronous kernel (clock, event bus, OMS, accounting books, replay merge, bars, matching, fill models, metrics) will be ported to a Zig native core behind the existing Python facades via a stable C ABI and the Arrow C Data Interface. The completed Python M0 engine is the reference implementation; the determinism golden harness (T087) is the cross-language parity oracle. Market-lake stays Python unchanged; Thesis and the Python strategy surface stay Python. Roadmap: epic T181 with tasks T182-T187."
       ],
       "acceptance": [
         "The same strategy implementation runs in deterministic backtest, paper, shadow, and live shells without mode-specific strategy code",
@@ -6653,10 +6792,11 @@
         "Complete child T074: H6 M3 Options and atomic multi-leg",
         "Complete child T075: H7 M4 Live broker integration",
         "Complete child T076: H8 M5 Hardening, sweeps, and authoring",
-        "Complete child T077: H9 M3b Point-in-time equity universes"
+        "Complete child T077: H9 M3b Point-in-time equity universes",
+        "Complete child T181: H10 M6 Zig core engine migration"
       ],
       "createdAt": "2026-09-01T17:53:59.152Z",
-      "updatedAt": "2026-09-01T18:38:35.844Z",
+      "updatedAt": "2026-09-04T16:45:28.087Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -7170,6 +7310,9 @@
         "harness.h022",
         "metrics"
       ],
+      "notes": [
+        "2026-09-04 16:57:08 UTC: Zig boundary note (epic T181): implement in Python first as the parity reference for the Zig metrics port (T186); hand-computed vectors remain language-agnostic fixtures. The Python metrics also unblock T100 and T101 without coupling the results epic to the Zig toolchain."
+      ],
       "acceptance": [
         "Hand-computed vectors cover every metric including pathological drawdowns",
         "Slippage aggregates reconcile to fill-ledger costs within numeric tolerance",
@@ -7184,7 +7327,7 @@
         "T098"
       ],
       "createdAt": "2026-09-01T18:01:24.406Z",
-      "updatedAt": "2026-09-01T18:26:27.344Z",
+      "updatedAt": "2026-09-04T16:57:07.964Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -8869,6 +9012,61 @@
         "initializedAt": "2026-09-03T00:11:53.826Z"
       },
       "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T183",
+      "title": "H10.2 Zig core FFI seam, Arrow bridge, and fixed-point types",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T181",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Define the stable C ABI and the Arrow C Data Interface bridge between Python and the Zig core, port core domain types (symbols, deterministic IDs, records), pin the i128 fixed-point decimal scale and cross-language canonical serialization, and add the Python loader with explicit absence failure.",
+      "labels": [
+        "quant-harness",
+        "milestone.m6",
+        "harness.h060",
+        "zig",
+        "ffi",
+        "arrow"
+      ],
+      "acceptance": [
+        "A stable C ABI exposes native engine entry points behind a versioned header",
+        "Arrow C Data Interface import and export round-trip record batches in both directions",
+        "The fixed-point decimal (i128, documented scale) and canonical serialization contracts are property-tested against Python Decimal",
+        "The Python loader loads the compiled module and fails explicitly when it is absent",
+        "Cross-platform builds load in local tests on Windows and linux"
+      ],
+      "files": [
+        "src/harness/native/ffi.zig",
+        "src/harness/native/types.zig",
+        "src/harness/_native.py",
+        "tests/harness/native/"
+      ],
+      "depends": [
+        "T182"
+      ],
+      "createdAt": "2026-09-04T16:44:35.845Z",
+      "updatedAt": "2026-09-04T16:45:25.681Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T16:44:35.845Z"
+      },
+      "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -11819,6 +12017,60 @@
       "relates": []
     },
     {
+      "id": "T184",
+      "title": "H10.3 Zig event kernel: clock, bus, OMS, and accounting books",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T181",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Port the deterministic synchronous kernel to Zig: SimClock and WallClock boundary, the event queue/bus with its ordering contract, the execution-report-driven OMS state machine, and virtual book accounting on the pinned fixed-point type, validated against the Python engine's golden event sets.",
+      "labels": [
+        "quant-harness",
+        "milestone.m6",
+        "harness.h061",
+        "zig",
+        "determinism"
+      ],
+      "acceptance": [
+        "The Zig clock, event queue, and bus reproduce the Python engine's dispatch ordering and hash on the golden event set, including adversarial same-timestamp floods",
+        "The Zig OMS passes the Python engine's exhaustive transition, partial-fill, cancellation, and replacement matrices through the parity oracle",
+        "Accounting uses the pinned fixed-point type with exact ledgers and no float arithmetic",
+        "Fills, ledgers, and equity snapshots are byte-identical to the Python engine on the golden scenarios"
+      ],
+      "files": [
+        "src/harness/native/clock.zig",
+        "src/harness/native/bus.zig",
+        "src/harness/native/oms.zig",
+        "src/harness/native/books.zig",
+        "tests/harness/native/kernel/"
+      ],
+      "depends": [
+        "T183"
+      ],
+      "createdAt": "2026-09-04T16:44:39.889Z",
+      "updatedAt": "2026-09-04T16:45:26.613Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T16:44:39.889Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T005",
       "title": "E2 Lake core library",
       "status": "done",
@@ -14428,6 +14680,61 @@
       "relates": []
     },
     {
+      "id": "T185",
+      "title": "H10.4 Zig replay merge, bars, matching, and fill models",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T181",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Port the hot market-data and execution paths to Zig: the K-way replay merge consuming Arrow batches from pyarrow, bar derivation, the resting-order matching engine, and the SimpleTouch, pessimistic latency, and trade-through fill models.",
+      "labels": [
+        "quant-harness",
+        "milestone.m6",
+        "harness.h062",
+        "zig",
+        "replay"
+      ],
+      "acceptance": [
+        "The Zig K-way merge consumes Arrow C Data Interface batches and produces merge order identical to the Python LakeReplayFeed, including adversarial same-timestamp streams",
+        "Zig bars reconcile exactly to the Python bar golden tests across normal, half-day, and DST sessions",
+        "SimpleTouch, latency, and trade-through fill outcomes match the Python scenario matrices exactly with pessimistic semantics preserved",
+        "One year of SPY and QQQ quotes plus trades stays below the 1.5 GiB RSS budget across the whole pipeline",
+        "Parity oracle artifacts are byte-identical to the Python engine on the golden scenarios"
+      ],
+      "files": [
+        "src/harness/native/replay.zig",
+        "src/harness/native/bars.zig",
+        "src/harness/native/matching.zig",
+        "src/harness/native/fills.zig",
+        "tests/harness/native/execution/"
+      ],
+      "depends": [
+        "T184"
+      ],
+      "createdAt": "2026-09-04T16:44:44.270Z",
+      "updatedAt": "2026-09-04T16:45:27.726Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T16:44:44.270Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T006",
       "title": "E3 CI/CD and GitHub OIDC",
       "status": "done",
@@ -15876,6 +16183,9 @@
         "harness.h030",
         "paper-trading"
       ],
+      "notes": [
+        "2026-09-04 16:57:08 UTC: Zig boundary note (epic T181): PaperShell must not introduce a second kernel implementation. It consumes the same engine as backtests - the Python reference engine now, and the Zig core through the FFI seam once T187 lands - so paper and backtest stay behaviorally identical across engines."
+      ],
       "acceptance": [
         "A three-hour mock-live session exits cleanly with intact books and artifacts",
         "Identical event streams and fill configuration produce equivalent paper and backtest ledgers",
@@ -15894,7 +16204,7 @@
         "T103"
       ],
       "createdAt": "2026-09-01T18:01:57.398Z",
-      "updatedAt": "2026-09-01T18:27:36.405Z",
+      "updatedAt": "2026-09-04T16:57:08.160Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -15931,6 +16241,10 @@
         "options",
         "buying-power"
       ],
+      "notes": [
+        "2026-09-04 16:57:08 UTC: Zig boundary note (epic T181): options replay is data loading plus per-order collateral policy. Keep it in Python unless profiling shows the daily contract-churn replay is hot; revisit the Zig boundary for this task on measured evidence before implementing.",
+        "2026-09-04 17:27:58 UTC: Zig boundary refinement (epic T181): this task splits by the per-event rule. Python owns the per-day work unconditionally: catalog membership reads, listing/expiry transition scheduling, pyarrow batch assembly, settlement decisions per contract, and collateral policy (per-order rejection). The event path is NOT optional Python: the day's option and underlying batches must interleave through the shared Zig merge (T185 replay.zig, symbol-generic over lake schemas) and process through the shared kernel (T184), with per-fill exposure aggregation served from the Zig books. No new Zig modules belong to this task; it must not grow a second Python merge or kernel path."
+      ],
       "acceptance": [
         "A two-year SPY front-set run remains day-bounded in memory",
         "Vertical and iron-condor collateral properties are exact and naked shorts are rejected by default",
@@ -15949,7 +16263,7 @@
         "T115"
       ],
       "createdAt": "2026-09-01T18:02:50.285Z",
-      "updatedAt": "2026-09-01T18:29:19.864Z",
+      "updatedAt": "2026-09-04T17:27:58.468Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -16435,6 +16749,101 @@
         "lastUpdated": null,
         "failureLog": [],
         "initializedAt": "2026-09-03T00:36:49.814Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T186",
+      "title": "H10.5 Zig metrics port",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T181",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Port standard metrics and attribution to Zig on the fixed-point ledgers, sequenced last so the FFI pattern is proven on the kernel first; conventions and float policies must be documented.",
+      "labels": [
+        "quant-harness",
+        "milestone.m6",
+        "harness.h063",
+        "zig",
+        "metrics"
+      ],
+      "acceptance": [
+        "Zig metrics match the Python hand-computed vectors, including pathological drawdowns",
+        "Slippage and fee aggregates reconcile to the fill ledgers within the documented tolerance",
+        "Every metric is covered by the cross-language parity oracle and its float policy is documented"
+      ],
+      "files": [
+        "src/harness/native/metrics.zig",
+        "tests/harness/native/metrics/"
+      ],
+      "depends": [
+        "T184"
+      ],
+      "createdAt": "2026-09-04T16:44:48.313Z",
+      "updatedAt": "2026-09-04T16:45:25.977Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T16:44:48.313Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T188",
+      "title": "Agent instructions for source folder READMEs and file purposes",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T150",
+      "size": "small",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Add a standing repository agent-instruction file that makes per-folder source documentation a maintained rule. Create .github/instructions/source-documentation.instructions.md with frontmatter applyTo src/** and reference it from AGENTS.md alongside the other .github/instructions entries. The instruction file must require: (1) a README.md in every folder under src/ explaining the purpose and boundaries of its subfolders and the architecture and design decisions of that slice of the system; (2) an exact purpose statement for every code file at that folder level, recorded in that folder's README; (3) folder READMEs updated in the same change whenever files or subfolders are added, removed, renamed, or repurposed, so the documentation stays current as the code evolves. Authoring the initial README for each existing source folder is out of scope for this task; existing folders reach compliance through later work performed under the new rule.",
+      "labels": [
+        "documentation",
+        "agent-instructions"
+      ],
+      "acceptance": [
+        ".github/instructions/source-documentation.instructions.md exists with frontmatter applying it to src/**, and AGENTS.md references it alongside the other .github/instructions entries",
+        "The instruction file requires every folder under src/ to maintain a README.md explaining the purpose and boundaries of its subfolders plus the architecture and design decisions of that slice of the system",
+        "The instruction file requires each folder README to state the exact purpose of every code file at that folder level",
+        "The instruction file requires folder READMEs to be updated in the same change whenever files or subfolders are added, removed, renamed, or repurposed"
+      ],
+      "files": [
+        ".github/instructions/source-documentation.instructions.md",
+        "AGENTS.md"
+      ],
+      "createdAt": "2026-09-04T17:01:17.362Z",
+      "updatedAt": "2026-09-04T17:01:17.362Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T17:01:17.362Z"
       },
       "pipelineStage": "implementation",
       "kind": "work",
@@ -17509,6 +17918,9 @@
         "harness.h031",
         "state"
       ],
+      "notes": [
+        "2026-09-04 16:57:09 UTC: Zig boundary note (epic T181): the snapshot format is a cross-language contract. Pin it with the canonical serialization contract from T183 because after T184 the accounting books live natively in the Zig core and snapshots must round-trip across the FFI boundary without reimplementation."
+      ],
       "acceptance": [
         "Periodic, session-end, and stop snapshots round-trip to deep-equal runtime state",
         "Interrupted writes cannot replace the last valid snapshot",
@@ -17524,7 +17936,7 @@
         "T107"
       ],
       "createdAt": "2026-09-01T18:02:01.511Z",
-      "updatedAt": "2026-09-01T18:27:45.086Z",
+      "updatedAt": "2026-09-04T16:57:09.010Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -18148,6 +18560,98 @@
         "lastUpdated": null,
         "failureLog": [],
         "initializedAt": "2026-09-03T00:06:28.634Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T187",
+      "title": "H10.6 Zig parity oracle and runner integration",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T181",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Extend the determinism golden harness into the cross-language parity oracle and wire the Python backtest runner to execute the Zig core end to end in local mode, with byte-identical manifests, fills, ledgers, and Parquet artifacts between engines.",
+      "labels": [
+        "quant-harness",
+        "milestone.m6",
+        "harness.h064",
+        "zig",
+        "parity"
+      ],
+      "acceptance": [
+        "CI runs Python-versus-Zig parity on the golden harness for every ported component and fails on any artifact difference",
+        "The Python backtest runner can execute the Zig core end to end in local mode through the FFI seam",
+        "End-to-end backtest artifacts (manifest, orders, fills, ledgers, Parquet) are byte-identical between the Python and Zig engines on the golden scenario set",
+        "The Python strategy surface is unchanged and callbacks remain Python at bar or session granularity"
+      ],
+      "files": [
+        "tests/harness/golden/",
+        "src/harness/runtime/zig_backtest.py"
+      ],
+      "depends": [
+        "T185",
+        "T186"
+      ],
+      "createdAt": "2026-09-04T16:44:52.352Z",
+      "updatedAt": "2026-09-04T16:45:27.364Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T16:44:52.352Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T189",
+      "title": "Track CLEO LLM provider workaround and OpenRouter transport fix",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T150",
+      "size": "small",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Record and eventually retire the local CLEO LLM provider workaround. Current state on this machine: a valid OpenRouter credential is stored under provider 'openai' with label 'openrouter-glm'; the user environment variable OPENAI_BASE_URL=https://openrouter.ai/api/v1 redirects the openai-compatible transport to OpenRouter; the global default and all five BRAIN roles (extraction, consolidation, derivation, hygiene, judgement) are pinned to openai/z-ai/glm-5.3-flash; brain.llmExtraction.enabled is true in project config. This workaround exists because CLEO 2026.8.9 misroutes the openrouter transport to api.openai.com, ignores credential --base-url overrides, and has an inert llm.providers.<id>.baseUrl config key; filed upstream as kryptobaseddev/cleo#1216. Revisit after upgrading CLEO past 2026.8.9 once the fix ships: verify the native openrouter transport, migrate the default and roles back, then remove the environment-variable footgun and supersede the brain observations recording the workaround (O-mtn8k38i-0, O-mtn92j4t-0).",
+      "labels": [
+        "cleo",
+        "tooling"
+      ],
+      "acceptance": [
+        "Workaround inventory is recorded in the task: credential openai/openrouter-glm, user env var OPENAI_BASE_URL=https://openrouter.ai/api/v1, default and all five BRAIN roles pinned to openai/z-ai/glm-5.3-flash, and brain.llmExtraction.enabled true",
+        "After upgrading CLEO past 2026.8.9 with kryptobaseddev/cleo#1216 fixed, cleo llm stream openrouter succeeds and the global default plus all five BRAIN roles are migrated back to the openrouter provider with z-ai/glm-5.3-flash retained as the model",
+        "After migration, the OPENAI_BASE_URL user environment variable, the inert llm.providers.openai.baseUrl global config key, and the openai/openrouter-glm credential are removed, and brain observations O-mtn8k38i-0 and O-mtn92j4t-0 are superseded by a new observation recording the restored native configuration"
+      ],
+      "createdAt": "2026-09-04T18:09:15.014Z",
+      "updatedAt": "2026-09-04T18:09:15.014Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T18:09:15.014Z"
       },
       "pipelineStage": "implementation",
       "kind": "work",
@@ -19638,7 +20142,9 @@
         "Complete child T174: TH6.1 Azure Thesis deployment and workspace operations",
         "Complete child T175: TH6.2 Local and Azure security recovery hardening",
         "Complete child T176: TH6.3 Thesis UI design specification",
-        "Complete child T177: TH6.4 Publish Thesis architecture and repository boundaries"
+        "Complete child T177: TH6.4 Publish Thesis architecture and repository boundaries",
+        "Complete child T188: Agent instructions for source folder READMEs and file purposes",
+        "Complete child T189: Track CLEO LLM provider workaround and OpenRouter transport fix"
       ],
       "depends": [
         "T069",
@@ -19652,7 +20158,7 @@
         "T149"
       ],
       "createdAt": "2026-09-03T00:02:16.159Z",
-      "updatedAt": "2026-09-03T00:46:23.446Z",
+      "updatedAt": "2026-09-04T18:09:15.014Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -21329,6 +21835,9 @@
         "harness.h034",
         "parity"
       ],
+      "notes": [
+        "2026-09-04 16:57:08 UTC: Zig boundary note (epic T181): after T187, paper-to-backtest parity must also hold when the backtest runner executes the Zig core, so the parity harness compares artifacts across engines (Python paper vs Zig backtest), not only within the Python engine."
+      ],
       "acceptance": [
         "The reference recording is parity-clean",
         "A kernel behavior change that diverges paper and replay fails CI with a focused diff",
@@ -21346,7 +21855,7 @@
         "T107"
       ],
       "createdAt": "2026-09-01T18:02:14.507Z",
-      "updatedAt": "2026-09-01T18:28:10.811Z",
+      "updatedAt": "2026-09-04T16:57:08.764Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -21420,7 +21929,8 @@
         "golden-test"
       ],
       "notes": [
-        "2026-09-03 16:26:52 UTC: Completed reusable deterministic golden harness with canonical artifacts, manifests, and nondeterminism detection."
+        "2026-09-03 16:26:52 UTC: Completed reusable deterministic golden harness with canonical artifacts, manifests, and nondeterminism detection.",
+        "2026-09-04 16:45:27 UTC: Migration role: the determinism golden harness extends into the cross-language parity oracle for the Zig core migration (epic T181). Every ported component must produce byte-identical fills, ledgers, and artifacts against this Python reference engine before its port is accepted; see T187 for the CI integration."
       ],
       "acceptance": [
         "Two consecutive runs produce byte-identical artifact hashes",
@@ -21438,7 +21948,7 @@
         "T083"
       ],
       "createdAt": "2026-09-01T18:00:34.507Z",
-      "updatedAt": "2026-09-03T16:26:55.737Z",
+      "updatedAt": "2026-09-04T16:45:26.674Z",
       "completedAt": "2026-09-03T16:26:51.141Z",
       "verification": {
         "passed": true,
@@ -21931,6 +22441,44 @@
       "relates": []
     },
     {
+      "id": "T181",
+      "title": "H10 M6 Zig core engine migration",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 10,
+      "positionVersion": 0,
+      "description": "Port the harness synchronous kernel to a Zig native core behind the existing Python facades: toolchain and image integration, stable C ABI with the Arrow C Data Interface, fixed-point decimal and canonical serialization contracts, clock/event bus, OMS and accounting books, replay merge and bars, matching and fill models, metrics, and a cross-language parity oracle. Market-lake stays Python unchanged; Thesis and the Python strategy surface stay Python.",
+      "labels": [
+        "quant-harness",
+        "milestone.m6",
+        "zig",
+        "ffi"
+      ],
+      "acceptance": [
+        "The harness synchronous kernel (clock, event bus, OMS, accounting, replay, bars, matching, fills, metrics) runs as a Zig native core behind the existing Python facades",
+        "Every ported component produces byte-identical fills, ledgers, and artifacts against the Python reference engine through the cross-language parity oracle",
+        "Market-lake (src/lake) and Thesis (src/thesis, src/ui) are not modified by this epic",
+        "Complete child T182: H10.1 Zig toolchain, image stage, and repository gates",
+        "Complete child T183: H10.2 Zig core FFI seam, Arrow bridge, and fixed-point types",
+        "Complete child T184: H10.3 Zig event kernel: clock, bus, OMS, and accounting books",
+        "Complete child T185: H10.4 Zig replay merge, bars, matching, and fill models",
+        "Complete child T186: H10.5 Zig metrics port",
+        "Complete child T187: H10.6 Zig parity oracle and runner integration"
+      ],
+      "depends": [
+        "T069"
+      ],
+      "createdAt": "2026-09-04T16:28:43.028Z",
+      "updatedAt": "2026-09-04T16:44:52.352Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T012",
       "title": "E9 Client, operations, and hardening",
       "status": "pending",
@@ -22216,7 +22764,8 @@
         "T074",
         "T077",
         "T075",
-        "T076"
+        "T076",
+        "T181"
       ],
       "T069": [
         "T078",
@@ -22345,7 +22894,17 @@
         "T174",
         "T175",
         "T176",
-        "T177"
+        "T177",
+        "T188",
+        "T189"
+      ],
+      "T181": [
+        "T182",
+        "T183",
+        "T184",
+        "T185",
+        "T186",
+        "T187"
       ]
     },
     "dependencies": {
@@ -22590,6 +23149,9 @@
         "T157",
         "T158"
       ],
+      "T183": [
+        "T182"
+      ],
       "T004": [
         "T003"
       ],
@@ -22710,6 +23272,9 @@
         "T155",
         "T161"
       ],
+      "T184": [
+        "T183"
+      ],
       "T005": [
         "T003"
       ],
@@ -22826,6 +23391,9 @@
         "T176",
         "T178"
       ],
+      "T185": [
+        "T184"
+      ],
       "T006": [
         "T003",
         "T004"
@@ -22918,6 +23486,9 @@
         "T155",
         "T158"
       ],
+      "T186": [
+        "T184"
+      ],
       "T007": [
         "T004",
         "T005"
@@ -22993,6 +23564,10 @@
         "T157",
         "T158",
         "T159"
+      ],
+      "T187": [
+        "T185",
+        "T186"
       ],
       "T008": [
         "T003",
@@ -23143,6 +23718,9 @@
       "T097": [
         "T090",
         "T096"
+      ],
+      "T181": [
+        "T069"
       ],
       "T012": [
         "T004",
