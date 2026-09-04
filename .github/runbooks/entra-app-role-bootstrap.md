@@ -93,3 +93,23 @@ shown by `az identity show` is the service principal object ID.
   nothing to rotate.
 - The applications create no resource-group resources and appear in no Bicep
   deployment; this runbook is their record of truth.
+
+## API Enforcement Configuration
+
+The lake API enforces the token contract above through non-secret environment
+configuration. Bicep injects both variables into the API container only when an
+audience is configured (they arrive together or not at all):
+
+- `LAKE_API__AUTH__ENTRA_TENANT_ID`: the deployment tenant ID
+  (`6c199962-2933-4a4b-901f-46f1578826c4`), passed from `tenant().tenantId`.
+- `LAKE_API__AUTH__ENTRA_AUDIENCE`: the `fca-ml-lake-api` application client
+  ID `cbc572d2-ae2e-4501-af76-0515e2f73bcd`, the value tokens must name as
+  their audience.
+
+The enforced role value defaults to `Lake.Access` in
+`config/market-lake/settings.yaml` (`api.auth.entra_role`). An empty or absent
+audience keeps the API on static-bearer-only authentication, which remains the
+local development path; the shared bearer secret retires once every hosted
+caller authenticates with its managed identity. Clients mint tokens for the
+audience with an `azure-identity` `TokenCredential` such as
+`DefaultAzureCredential` (`lakeclient.LakeClient(credential=..., audience=...)`).

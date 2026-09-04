@@ -73,6 +73,13 @@ param allowPublicLogQuery bool = false
 @description('Whether the API and environment accept public ingress. The secure default keeps the API internal; enable explicitly only when the API authentication boundary is ready.')
 param enableExternalApiIngress bool = false
 
+@description('Entra tenant ID whose JWKS validates API caller tokens. Passed through unchanged from the deployment tenant.')
+@minLength(1)
+param lakeApiTenantId string
+
+@description('Entra application client ID the API accepts as token audience. Empty keeps the API on static bearer authentication only.')
+param lakeApiAudience string = ''
+
 var consumptionProfileName = 'Consumption'
 var apiContainerPort = 8000
 var apiContainerName = 'api'
@@ -128,7 +135,20 @@ var providerEnvironment = concat(baseRuntimeEnvironment, [
     secretRef: 'alpaca-api-secret'
   }
 ])
-var apiEnvironment = concat(providerEnvironment, [
+// Entra configuration is non-secret; both variables are set together only
+// when an audience is configured. An empty audience keeps the API on the
+// static bearer token for local development and transition.
+var apiEntraEnvironment = empty(lakeApiAudience) ? [] : [
+  {
+    name: 'LAKE_API__AUTH__ENTRA_TENANT_ID'
+    value: lakeApiTenantId
+  }
+  {
+    name: 'LAKE_API__AUTH__ENTRA_AUDIENCE'
+    value: lakeApiAudience
+  }
+]
+var apiEnvironment = concat(providerEnvironment, apiEntraEnvironment, [
   {
     name: 'LAKE_API__BEARER_TOKEN'
     secretRef: 'api-bearer-token'

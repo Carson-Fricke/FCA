@@ -58,6 +58,7 @@ jobs:
       ENABLE_EXTERNAL_API_INGRESS: ${{ vars.ENABLE_EXTERNAL_API_INGRESS }}
       INGEST_CRON_EXPRESSION: ${{ vars.INGEST_CRON_EXPRESSION }}
       INGEST_REPLICA_TIMEOUT_SECONDS: ${{ vars.INGEST_REPLICA_TIMEOUT_SECONDS }}
+      LAKE_API_AUDIENCE: ${{ vars.LAKE_API_AUDIENCE }}
       GITHUB_OWNER: ${{ github.event.repository.owner.login }}
       GITHUB_OWNER_ID: ${{ github.event.repository.owner.id }}
       GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
@@ -199,6 +200,8 @@ jobs:
             "enableExternalApiIngress=$ENABLE_EXTERNAL_API_INGRESS"
             "ingestCronExpression=$INGEST_CRON_EXPRESSION"
             "ingestReplicaTimeoutSeconds=$INGEST_REPLICA_TIMEOUT_SECONDS"
+            # Optional and non-secret; empty keeps the API on static bearer auth.
+            "lakeApiAudience=$LAKE_API_AUDIENCE"
           )
 
           az deployment group validate \

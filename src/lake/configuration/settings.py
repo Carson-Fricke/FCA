@@ -152,11 +152,39 @@ class SqlSettings(_StrictModel):
         return self
 
 
+class AuthSettings(_StrictModel):
+    """Non-secret Entra configuration for the lake API authentication boundary.
+
+    Both ``entra_tenant_id`` and ``entra_audience`` must be present to enable
+    Entra managed-identity JWT validation; otherwise the API stays on the
+    static bearer token only. These values are configuration, never secrets.
+    """
+
+    entra_tenant_id: str | None = None
+    entra_audience: str | None = None
+    entra_role: str = "Lake.Access"
+
+    @field_validator("entra_tenant_id", "entra_audience", mode="before")
+    @classmethod
+    def _blank_values_are_absent(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("entra_role", mode="before")
+    @classmethod
+    def _require_non_empty_role(cls, value: object) -> object:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("entra_role must be a non-empty string")
+        return value
+
+
 class ApiSettings(_StrictModel):
     ensure_wait_deadline_seconds: PositiveInteger
     catalog: CatalogSettings
     sas: SasSettings
     sql: SqlSettings
+    auth: AuthSettings = Field(default_factory=AuthSettings)
     # No YAML default; deployment may provide a plain secret or Key Vault ref.
     bearer_token: SecretStr | None = Field(default=None, repr=False)
 

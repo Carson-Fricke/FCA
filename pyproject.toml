@@ -19,6 +19,7 @@ dependencies = [
     "orjson>=3.10",
     "pyarrow>=17",
     "pydantic-settings>=2.5",
+    "pyjwt[crypto]>=2.9",
     "tenacity>=9.0",
     "typer>=0.16",
     "uvicorn>=0.30",

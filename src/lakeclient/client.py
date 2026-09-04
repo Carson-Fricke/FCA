@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Generator
 from typing import cast
 
 import httpx
+from azure.core.credentials import AccessToken, TokenCredential
 
 from lakeclient.models import (
     CoverageResponse,
@@ -49,23 +51,73 @@ class JobPollingTimeout(TimeoutError):
         super().__init__(f"job {job_id!r} did not finish before the polling deadline")
 
 
+class ManagedIdentityAuth(httpx.Auth):
+    """Attach managed-identity tokens and retry once after a rejection.
+
+    Tokens are acquired through ``credential.get_token(audience)`` for every
+    request; ``azure-identity`` caches internally so repeated calls do not
+    mint new tokens. A 401 response triggers exactly one retry with a freshly
+    acquired token before the response is surfaced to the caller.
+    """
+
+    def __init__(self, credential: TokenCredential, audience: str) -> None:
+        self._credential = credential
+        self._audience = audience
+
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response, None]:
+        request.headers["Authorization"] = f"Bearer {self._acquire().token}"
+        response = yield request
+        if response.status_code == 401:
+            request.headers["Authorization"] = f"Bearer {self._acquire().token}"
+            yield request
+
+    def _acquire(self) -> AccessToken:
+        return self._credential.get_token(self._audience)
+
+
 class LakeClient:
     """Thin synchronous client for ensure, polling, and file URL responses."""
 
     def __init__(
         self,
         base_url: str,
-        bearer_token: str,
+        bearer_token: str | None = None,
         *,
+        credential: TokenCredential | None = None,
+        audience: str | None = None,
         transport: httpx.BaseTransport | None = None,
         timeout: float | httpx.Timeout = 30.0,
     ) -> None:
         if not isinstance(base_url, str) or not base_url.strip():
             raise ValueError("base_url must be a non-empty string")
+        base_url = base_url.rstrip("/") + "/"
+        if credential is not None or audience is not None:
+            if bearer_token is not None:
+                raise ValueError(
+                    "provide exactly one of bearer_token or credential with audience"
+                )
+            if (
+                not isinstance(credential, TokenCredential)
+                or not isinstance(audience, str)
+                or not audience.strip()
+            ):
+                raise ValueError(
+                    "both credential and a non-empty audience are required"
+                    " for Entra authentication"
+                )
+            self._http = httpx.Client(
+                base_url=base_url,
+                auth=ManagedIdentityAuth(credential, audience),
+                timeout=timeout,
+                transport=transport,
+            )
+            return
         if not isinstance(bearer_token, str) or not bearer_token.strip():
             raise ValueError("bearer_token must be a non-empty string")
         self._http = httpx.Client(
-            base_url=base_url.rstrip("/") + "/",
+            base_url=base_url,
             headers={"Authorization": f"Bearer {bearer_token.strip()}"},
             timeout=timeout,
             transport=transport,
@@ -201,4 +253,5 @@ __all__ = [
     "LakeClient",
     "LakeClientError",
     "LakeProtocolError",
+    "ManagedIdentityAuth",
 ]

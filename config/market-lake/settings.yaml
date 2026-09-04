@@ -54,6 +54,12 @@ api:
     max_scan_bytes: 1073741824
     max_result_bytes: 33554432
     authorized_force_override_default: false
+  auth:
+    # Entra values arrive from the environment (LAKE_API__AUTH__ENTRA_*).
+    # Without both the API enforces the static bearer token only.
+    entra_tenant_id: null
+    entra_audience: null
+    entra_role: Lake.Access
 
 operations:
   monthly_budget_alerts_usd:

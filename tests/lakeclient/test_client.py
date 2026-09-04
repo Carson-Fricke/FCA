@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 import httpx
 import pytest
+from azure.core.credentials import AccessToken, TokenCredential
 
 from lakeclient import (
     AssetClass,
@@ -189,3 +191,126 @@ def test_dataset_request_validates_asset_specific_selection() -> None:
             start_date=date(2024, 1, 19),
             end_date=date(2024, 1, 19),
         )
+
+
+class _FakeCredential(TokenCredential):
+    def __init__(self, tokens: list[str]) -> None:
+        self._tokens = list(tokens)
+        self.audiences: list[str] = []
+
+    def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
+        del kwargs
+        self.audiences.append(scopes[0])
+        return AccessToken(self._tokens.pop(0), expires_on=2_000_000_000)
+
+
+def test_managed_identity_credential_attaches_audience_tokens() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer mi-token"
+        return httpx.Response(
+            200,
+            json={
+                "job_id": "ensure-aapl",
+                "state": "complete",
+                "created_at": "2024-01-19T21:01:00Z",
+                "updated_at": "2024-01-19T21:02:00Z",
+                "error_message": None,
+            },
+        )
+
+    credential = _FakeCredential(["mi-token"])
+    with LakeClient(
+        "https://lake.test",
+        credential=credential,
+        audience="api-audience",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        status = client.job("ensure-aapl")
+
+    assert status.state is JobState.COMPLETE
+    assert credential.audiences == ["api-audience"]
+
+
+def test_credential_without_audience_and_audience_without_credential_fail() -> None:
+    credential = _FakeCredential(["mi-token"])
+
+    with pytest.raises(ValueError, match="both credential and"):
+        LakeClient("https://lake.test", credential=credential)
+    with pytest.raises(ValueError, match="both credential and"):
+        LakeClient("https://lake.test", audience="api-audience")
+    with pytest.raises(ValueError, match="exactly one"):
+        LakeClient(
+            "https://lake.test",
+            "secret",
+            credential=credential,
+            audience="api-audience",
+        )
+    with pytest.raises(ValueError, match="bearer_token"):
+        LakeClient("https://lake.test")
+
+
+def test_401_response_is_retried_once_with_a_fresh_token() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.headers["Authorization"])
+        if len(requests) == 1:
+            return httpx.Response(
+                401,
+                json={
+                    "error": {
+                        "code": "unauthorized",
+                        "message": "a valid bearer token is required",
+                    }
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "job_id": "ensure-aapl",
+                "state": "complete",
+                "created_at": "2024-01-19T21:01:00Z",
+                "updated_at": "2024-01-19T21:02:00Z",
+                "error_message": None,
+            },
+        )
+
+    credential = _FakeCredential(["stale-token", "fresh-token"])
+    with LakeClient(
+        "https://lake.test",
+        credential=credential,
+        audience="api-audience",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        status = client.job("ensure-aapl")
+
+    assert status.state is JobState.COMPLETE
+    assert requests == ["Bearer stale-token", "Bearer fresh-token"]
+    assert credential.audiences == ["api-audience", "api-audience"]
+
+
+def test_persistent_401_surfaces_lake_client_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "code": "unauthorized",
+                    "message": "a valid bearer token is required",
+                }
+            },
+        )
+
+    credential = _FakeCredential(["first-token", "second-token"])
+    with LakeClient(
+        "https://lake.test",
+        credential=credential,
+        audience="api-audience",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(LakeClientError) as caught:
+            client.job("ensure-aapl")
+
+    assert caught.value.status_code == 401
+    assert caught.value.code == "unauthorized"

@@ -208,6 +208,11 @@ class VirtualBook:
         return len(self._fill_ids)
 
     @property
+    def positions(self) -> tuple[PositionSnapshot, ...]:
+        """Return current position snapshots in canonical symbol order."""
+        return self.snapshot.positions
+
+    @property
     def snapshot(self) -> BookSnapshot:
         """Return the current immutable book valuation."""
         positions = tuple(
@@ -299,6 +304,36 @@ class VirtualBook:
         self._fill_ids.append(fill.fill_id)
         self._seen_fill_ids.add(fill.fill_id)
         return self._position_snapshot(fill.symbol, next_ledger)
+
+    def retire_position(
+        self, symbol: str | Symbol, *, settlement_value: DecimalInput = 0
+    ) -> PositionSnapshot:
+        """Retire one expired contract ledger at its final settlement value.
+
+        Cash and cash flow move by ``settlement_value`` (negative when the
+        book pays, for example unassigned intrinsic value), and the ledger is
+        finalized exactly like a closing fill at that settlement value: flat
+        quantity, zero cost basis, and realized PnL equal to total cash flow.
+        Retiring an already flat ledger is refused so settlement effects stay
+        unambiguous.
+        """
+        canonical = canonical_symbol(symbol)
+        ledger = self._positions.get(canonical)
+        if ledger is None:
+            raise UnknownPositionError(canonical)
+        if ledger.quantity == _ZERO:
+            raise PortfolioError(f"position {canonical.value!r} is already flat")
+        value = exact_decimal(settlement_value, "settlement_value")
+        next_cash_flow = ledger.cash_flow + value
+        next_ledger = _PositionLedger(
+            quantity=_ZERO,
+            cost_basis=_ZERO,
+            cash_flow=next_cash_flow,
+            realized_pnl=next_cash_flow,
+        )
+        self._positions[canonical] = next_ledger
+        self._cash += value
+        return self._position_snapshot(canonical, next_ledger)
 
     def apply_marker(self, marker: PositionMarker) -> PositionMarker:
         """Apply one validated explicit marker."""

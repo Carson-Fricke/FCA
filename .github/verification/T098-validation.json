@@ -1,6 +1,5 @@
 {
   "taskId": "T098",
-  "timestamp": "2026-09-03T18:20:00Z",
   "numTotalTests": 27,
   "numPassedTests": 27,
   "numFailedTests": 0,
@@ -8,26 +7,23 @@
   "numTodoTests": 0,
   "testResults": [
     {
-      "name": "streaming-run-recorder",
+      "name": "streaming-recorder-and-audit-trail",
       "status": "passed",
-      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/results/test_recorder.py -q",
-      "result": "27 tests passed: a scripted run produces every required artifact with complete action-to-order-to-fill links, and a one-million-event stream stays memory bounded (pending rows capped at the batch size, ~10k) while writing exactly 1,000,000 rows."
+      "command": "uv run --python 3.12 --extra dev pytest tests/harness/results -q",
+      "result": "27 tests passed verifying the RunRecorder end-to-end against the acceptance criteria: referential link integrity across actions, orders, risk decisions, fills, and equity snapshots in a scripted run; bounded-memory streaming of one million events with bounded pending batches and tracemalloc peak below 64 MiB with full payloads; byte-identical reruns under the same seed and clock through the determinism manifest; and strategy Emitter protocol plus event-bus attachment integration. Artifacts carry per-artifact row counts and SHA-256 digests with a run digest, and read_artifact rejects schema drift"
     },
     {
-      "name": "determinism",
+      "name": "repository-quality-gates",
       "status": "passed",
-      "result": "Repeated identical scripted runs produce byte-identical artifacts including the manifest; execution_reports round-trips through the core ParquetCodec."
-    },
-    {
-      "name": "focused-quality",
-      "status": "passed",
-      "result": "Focused Ruff lint, format, and ty checks passed; the recorder implements the strategy Emitter protocol directly, uses EngineIdSource identity and injected clocks, and has no wall-clock, random, or network dependency."
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check src/harness tests/harness",
+        "uv run --python 3.12 --extra dev ty check"
+      ],
+      "result": "Scoped Ruff and repository-wide ty checks passed after wave integration"
     }
   ],
-  "decisions": [
-    "Eleven linked Parquet artifacts (actions, orders, risk_decisions, risk_audits, fills, execution_reports, position_transitions, equity, emissions, markers, events) stream one row group per batch for bounded memory.",
-    "The recorder is a submodule package behind the unchanged harness.results.recorder import surface; schemas extend core ORDER/FILL/REPORT schemas for referential integrity."
-  ],
-  "limitations": [],
-  "blockers": []
+  "limitations": [
+    "The implementation landed in commit 6460ef8 as the package src/harness/results/recorder/; this wave verified it against all acceptance criteria rather than reimplementing, and the CLEO file list was reconciled to the package path",
+    "Process RSS bounding is asserted through bounded pending batches plus tracemalloc peak rather than direct RSS measurement"
+  ]
 }

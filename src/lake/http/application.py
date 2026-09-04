@@ -21,7 +21,7 @@ from lake.catalog.memory import (
 )
 from lake.catalog.ports import CatalogRepository, ContractRepository, JobRepository
 from lake.configuration import load_settings
-from lake.http.auth import BearerAuthenticator
+from lake.http.auth import CombinedAuthenticator, EntraJwtAuthenticator
 from lake.http.models import AuthCheckResponse, ErrorResponse, HealthResponse
 from lake.http.routes.catalog import create_catalog_router
 from lake.http.routes.ensure import EnsureJobLauncher, create_ensure_router
@@ -80,8 +80,20 @@ def create_app(
     authorized_force_override: bool | None = None,
 ) -> FastAPI:
     """Build an API app with an injected, testable authentication dependency."""
-    authenticator = BearerAuthenticator(_configured_token(bearer_token))
     settings = load_settings()
+    auth = settings.api.auth
+    entra_authenticator = (
+        EntraJwtAuthenticator(
+            tenant_id=auth.entra_tenant_id,
+            audience=auth.entra_audience,
+            role=auth.entra_role,
+        )
+        if auth.entra_tenant_id is not None and auth.entra_audience is not None
+        else None
+    )
+    authenticator = CombinedAuthenticator(
+        _configured_token(bearer_token), entra=entra_authenticator
+    )
     application = FastAPI(
         title="Market Lake API",
         version="0.1.0",

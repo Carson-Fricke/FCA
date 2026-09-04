@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
+from typing import cast
 
 import pytest
 
 from harness.core.symbols import Symbol
 from harness.data.lake import (
     IncompleteMarketDataError,
+    LakeClientPort,
     MarketLakeAdapter,
     MarketLakeRequest,
     UnsupportedMarketDataError,
@@ -301,3 +303,63 @@ def test_market_request_canonicalizes_symbols_and_rejects_duplicates() -> None:
         MarketLakeRequest(
             AssetClass.EQUITY, DataType.QUOTE, ("AAPL", "aapl"), START, END
         )
+
+
+def test_client_factory_resolves_lazily_and_is_reused_across_loads() -> None:
+    constructions: list[int] = []
+
+    def factory() -> FakeLakeClient:
+        constructions.append(len(constructions))
+        return FakeLakeClient()
+
+    def reader(files: Iterable[FileQueryFile]) -> tuple[str, ...]:
+        return tuple(file.symbol for file in files)
+
+    adapter = MarketLakeAdapter(client_factory=factory, reader=reader)
+    assert constructions == []
+
+    first = adapter.load(_request())
+    second = adapter.load(_request(symbol="MSFT"))
+
+    assert constructions == [0]
+    assert first.value == ("AAPL", "AAPL", "AAPL", "AAPL", "AAPL")
+    assert second.value == ("MSFT", "MSFT", "MSFT", "MSFT", "MSFT")
+    assert len(first.files) == 5
+    assert len(second.files) == 5
+
+
+def test_client_factory_must_produce_a_lake_client_port_on_first_load() -> None:
+    class NotAClient:
+        pass
+
+    adapter = MarketLakeAdapter(
+        client_factory=cast("Callable[[], LakeClientPort]", NotAClient)
+    )
+
+    with pytest.raises(TypeError, match="LakeClientPort"):
+        adapter.load(_request())
+
+
+def test_client_factory_failure_surfaces_on_first_load_not_construction() -> None:
+    def factory() -> FakeLakeClient:
+        raise RuntimeError("credential bootstrap failed")
+
+    adapter = MarketLakeAdapter(client_factory=factory)
+
+    with pytest.raises(RuntimeError, match="credential bootstrap failed"):
+        adapter.load(_request())
+
+
+def test_constructor_requires_exactly_one_client_source() -> None:
+    client = FakeLakeClient()
+
+    with pytest.raises(TypeError, match="exactly one of client or client_factory"):
+        MarketLakeAdapter(client, client_factory=FakeLakeClient)
+
+    with pytest.raises(TypeError, match="exactly one of client or client_factory"):
+        MarketLakeAdapter()
+
+
+def test_client_factory_must_be_callable() -> None:
+    with pytest.raises(TypeError, match="client_factory must be callable"):
+        MarketLakeAdapter(client_factory=cast("Callable[[], LakeClientPort]", "x"))

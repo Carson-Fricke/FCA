@@ -156,10 +156,17 @@ def resolve_sessions(request: MarketLakeRequest) -> tuple[ExchangeSession, ...]:
 
 
 class MarketLakeAdapter:
-    """Prepare deterministic harness data through the published lakeclient API."""
+    """Prepare deterministic harness data through the published lakeclient API.
+
+    Exactly one of ``client`` or ``client_factory`` must be provided.  A
+    factory is resolved lazily on the first load and reused afterwards, so
+    credential, audience, and transport choices stay with the caller's closure
+    and no storage or provider client is created by the harness itself.
+    """
 
     __slots__ = (
         "_client",
+        "_client_factory",
         "_egress_warning_threshold_bytes",
         "_job_poll_interval",
         "_job_timeout",
@@ -169,8 +176,9 @@ class MarketLakeAdapter:
 
     def __init__(
         self,
-        client: LakeClientPort,
+        client: LakeClientPort | None = None,
         *,
+        client_factory: Callable[[], LakeClientPort] | None = None,
         reader: FileReader = read_files,
         warning: WarningSink | None = None,
         egress_warning_threshold_bytes: int
@@ -178,7 +186,12 @@ class MarketLakeAdapter:
         job_timeout: float = 60.0,
         job_poll_interval: float = 0.5,
     ) -> None:
-        _require_client_port(client)
+        if (client is None) == (client_factory is None):
+            raise TypeError("exactly one of client or client_factory must be provided")
+        if client is not None:
+            _require_client_port(client)
+        if client_factory is not None and not callable(client_factory):
+            raise TypeError("client_factory must be callable")
         if not callable(reader):
             raise TypeError("reader must be callable")
         if warning is not None and not callable(warning):
@@ -189,11 +202,23 @@ class MarketLakeAdapter:
         if isinstance(job_poll_interval, bool) or job_poll_interval < 0:
             raise ValueError("job_poll_interval must not be negative")
         self._client = client
+        self._client_factory = client_factory
         self._reader = reader
         self._warning = _default_warning if warning is None else warning
         self._egress_warning_threshold_bytes = egress_warning_threshold_bytes
         self._job_timeout = job_timeout
         self._job_poll_interval = job_poll_interval
+
+    def _resolved_client(self) -> LakeClientPort:
+        client = self._client
+        if client is None:
+            factory = self._client_factory
+            if factory is None:  # pragma: no cover - guarded by __init__
+                raise MarketLakeError("market-lake adapter has no lake client")
+            client = factory()
+            _require_client_port(client)
+            self._client = client
+        return client
 
     @property
     def egress_warning_threshold_bytes(self) -> int | None:
@@ -288,9 +313,10 @@ class MarketLakeAdapter:
         request: DatasetRequest,
         sessions: tuple[ExchangeSession, ...],
     ) -> None:
-        response = self._client.ensure(request)
+        client = self._resolved_client()
+        response = client.ensure(request)
         if isinstance(response, EnsureAccepted):
-            status = self._client.wait_for_job(
+            status = client.wait_for_job(
                 response.job_id,
                 timeout=self._job_timeout,
                 poll_interval=self._job_poll_interval,
@@ -311,7 +337,7 @@ class MarketLakeAdapter:
         request: DatasetRequest,
         sessions: tuple[ExchangeSession, ...],
     ) -> tuple[FileQueryFile, ...]:
-        response = self._client.query_files(request, ensure=False)
+        response = self._resolved_client().query_files(request, ensure=False)
         return _validate_file_response(response, request, sessions)
 
 

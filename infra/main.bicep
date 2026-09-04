@@ -57,6 +57,9 @@ param enableExternalApiIngress bool = false
 @description('Five-field UTC cron expression for the scheduled ingest job.')
 param ingestCronExpression string = '0 1 * * *'
 
+@description('Entra application client ID the API accepts as token audience. Empty keeps the API on static bearer authentication only.')
+param lakeApiAudience string = ''
+
 @description('Maximum seconds allowed for one ingest job replica execution.')
 param ingestReplicaTimeoutSeconds int = 3600
 
@@ -170,6 +173,8 @@ module containerApps './modules/container-apps.bicep' = {
     ingestMaxRecords: ingestMaxRecords
     allowPublicLogQuery: false
     enableExternalApiIngress: enableExternalApiIngress
+    lakeApiTenantId: tenant().tenantId
+    lakeApiAudience: lakeApiAudience
   }
 }
 

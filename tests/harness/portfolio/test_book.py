@@ -4,13 +4,20 @@ from typing import cast
 
 import pytest
 
-from harness.core.symbols import Symbol
+from harness.core.symbols import OsiSymbol, Symbol
 from harness.core.types.accounting import Fill
 from harness.core.types.orders import Side
-from harness.portfolio import DuplicateFillError, PositionMarker, VirtualBook
+from harness.portfolio import (
+    DuplicateFillError,
+    PortfolioError,
+    PositionMarker,
+    UnknownPositionError,
+    VirtualBook,
+)
 
 STAMP = datetime(2024, 1, 19, 14, 30, tzinfo=UTC)
 AAPL = Symbol("AAPL")
+OPTION = OsiSymbol("AAPL240119P00100000")
 ZERO = Decimal("0")
 
 
@@ -168,6 +175,42 @@ def test_duplicate_fill_and_invalid_marker_leave_book_unchanged() -> None:
         book.mark(AAPL, ZERO)
 
     assert book.snapshot == before
+
+
+def test_retire_position_finalizes_expired_contracts_exactly() -> None:
+    book = VirtualBook("expiry", Decimal("1000"))
+    book.apply_fill(
+        fill("buy-option", Side.BUY, Decimal("1"), Decimal("200"), symbol=OPTION)
+    )
+    worthless = book.retire_position(OPTION)
+
+    assert worthless.is_flat
+    assert worthless.cost_basis == ZERO
+    assert worthless.realized_pnl == Decimal("-200")
+    assert worthless.market_value == ZERO
+    assert book.cash == Decimal("800")
+    assert book.snapshot.equity == Decimal("800")
+    assert book.snapshot.total_pnl == Decimal("-200")
+
+    assigned = VirtualBook("assignment", Decimal("1000"))
+    assigned.apply_fill(
+        fill(
+            "sell-option",
+            Side.SELL,
+            Decimal("1"),
+            Decimal("100"),
+            symbol=OPTION,
+        )
+    )
+    settled = assigned.retire_position(OPTION, settlement_value=Decimal("-250"))
+
+    assert settled.realized_pnl == Decimal("-150")
+    assert assigned.cash == Decimal("850")
+
+    with pytest.raises(PortfolioError, match="already flat"):
+        book.retire_position(OPTION)
+    with pytest.raises(UnknownPositionError):
+        book.retire_position(AAPL)
 
 
 def generated_fill_sequences(count: int) -> tuple[tuple[Fill, ...], ...]:

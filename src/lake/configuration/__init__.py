@@ -2,6 +2,7 @@
 
 from lake.configuration.settings import (
     ApiSettings,
+    AuthSettings,
     BackfillSettings,
     LakeSettings,
     ProviderSettings,
@@ -20,6 +21,7 @@ from lake.configuration.universes import (
 
 __all__ = [
     "ApiSettings",
+    "AuthSettings",
     "BackfillSettings",
     "CryptoUniverse",
     "EquityUniverse",

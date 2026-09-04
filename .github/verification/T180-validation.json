@@ -1,0 +1,52 @@
+{
+  "taskId": "T180",
+  "numTotalTests": 116,
+  "numPassedTests": 116,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "entra-jwt-authenticator",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/lake/http -q",
+      "result": "New EntraJwtAuthenticator validated with locally minted RSA tokens and a network-free JWKS stub: v1 sts.windows.net and v2 login.microsoftonline.com issuer forms accepted, audience equality enforced, Lake.Access role claim required, expired/tampered/wrong-key/missing-role tokens rejected with the stable 401 shape, and combined authenticator falls back to the static bearer for non-JWT credentials while keeping bearer-only behavior when Entra configuration is absent or blank"
+    },
+    {
+      "name": "lakeclient-token-credential",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/lakeclient -q",
+      "result": "LakeClient accepts exactly one of bearer_token or credential+audience, attaches acquired tokens per request through an httpx auth flow, and retries once with a freshly acquired token on 401 before raising LakeClientError; fake TokenCredential tests run network-free"
+    },
+    {
+      "name": "hosted-composition-regression",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/lake/hosted tests/lake/configuration -q",
+      "result": "Hosted composition and configuration suites pass with the new auth settings model"
+    },
+    {
+      "name": "infrastructure-and-workflow",
+      "status": "passed",
+      "commands": [
+        "az bicep build --file infra/main.bicep",
+        "az bicep build --file infra/modules/container-apps.bicep"
+      ],
+      "result": "Both Bicep files compile; the API container receives LAKE_API__AUTH__ENTRA_TENANT_ID from tenant().tenantId and LAKE_API__AUTH__ENTRA_AUDIENCE conditionally when the lakeApiAudience parameter is non-empty; deploy-main.yml passes lakeApiAudience from vars.LAKE_API_AUDIENCE without adding it to the required-input gate so deploys stay green when unset"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check .",
+        "uv run --python 3.12 --extra dev ruff format --check .",
+        "uv run --python 3.12 --extra dev ty check",
+        "uv run --python 3.12 --extra dev pytest -q -p no:cacheprovider"
+      ],
+      "result": "Repository-wide Ruff lint, format check, ty type check, and the complete pytest suite passed with 894 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "A JWT-shaped static bearer string would be routed to Entra validation and rejected when Entra configuration is enabled; the static path is intended for local random secrets",
+    "Hosted enforcement activates only when the LAKE_API_AUDIENCE GitHub Environment variable and Bicep parameter are non-empty; empty keeps the deployment on static-bearer-only"
+  ]
+}

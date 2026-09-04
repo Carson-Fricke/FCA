@@ -19,3 +19,5 @@ param enableExternalApiIngress = false
 param ingestCronExpression = '0 1 * * *'
 param ingestReplicaTimeoutSeconds = 3600
 param ingestMaxRecords = 1000
+// fca-ml-lake-api application client ID from the Entra bootstrap runbook.
+param lakeApiAudience = 'cbc572d2-ae2e-4501-af76-0515e2f73bcd'

@@ -1,33 +1,28 @@
 {
   "taskId": "T088",
-  "timestamp": "2026-09-03T02:24:00Z",
-  "numTotalTests": 7,
-  "numPassedTests": 7,
+  "numTotalTests": 40,
+  "numPassedTests": 40,
   "numFailedTests": 0,
   "numPendingTests": 0,
   "numTodoTests": 0,
   "testResults": [
     {
-      "name": "market-lake-adapter",
+      "name": "market-lake-access-adapter",
       "status": "passed",
-      "command": "uv run --extra dev pytest tests/harness/data/test_lake.py -q",
-      "result": "7 tests passed for ensure/poll/load ordering, API-issued SAS URL consumption, XNYS half-day resolution, two-symbol loading, incomplete coverage rejection, unsupported assets, request validation, and projected egress warnings."
+      "command": "uv run --python 3.12 --extra dev pytest tests/harness/data -q",
+      "result": "40 tests passed covering the MarketLakeAdapter: ensure, terminal-job wait, and file query ordering before reader invocation, complete-coverage validation against canonical partition paths, projected egress warning before reader at the configurable threshold, injected client boundary with exactly-one-of client/client_factory validation, lazy factory resolution cached across loads, and factory failure surfacing on first load"
     },
     {
-      "name": "published-client-boundary",
+      "name": "repository-quality-gates",
       "status": "passed",
-      "result": "The adapter composes the published lakeclient contract and does not import Alpaca, duplicate HTTP, create storage credentials, or access wall-clock time in the synchronous boundary."
-    },
-    {
-      "name": "focused-quality",
-      "status": "passed",
-      "result": "Focused Ruff lint, format, and ty checks passed."
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check src/harness tests/harness",
+        "uv run --python 3.12 --extra dev ty check"
+      ],
+      "result": "Scoped Ruff and repository-wide ty checks passed after wave integration"
     }
   ],
-  "decisions": [
-    "Every requested symbol is ensured before file queries run, and all canonical sessions and API-issued read URLs are validated before the reader is called.",
-    "Market-lake requests support equity XNYS sessions and crypto UTC days; option data remains explicitly unsupported by this adapter."
-  ],
-  "limitations": [],
-  "blockers": []
+  "limitations": [
+    "The adapter takes an injected LakeClientPort or client_factory so managed-identity credential selection stays with the caller; the concurrent T180 LakeClient credential/audience kwargs are consumed through the caller's factory without adapter-side changes"
+  ]
 }

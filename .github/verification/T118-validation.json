@@ -1,0 +1,28 @@
+{
+  "taskId": "T118",
+  "numTotalTests": 24,
+  "numPassedTests": 24,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "option-expiry-exercise-assignment",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/harness/portfolio -q",
+      "result": "24 tests passed covering the OptionLifecycle: deterministic long exercise at exact strike-price settlement, pessimistic full in-the-money short assignment through the injectable AssignmentPolicy with cash settlement of any unassigned remainder, worthless and pinned expiry, days-to-expiry threshold events, contract retirement registry, rejection of orders in expired contracts, and expired-contract rejection on late fills; all money math is exact Decimal and timing flows through the injected clock"
+    },
+    {
+      "name": "repository-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check src/harness tests/harness",
+        "uv run --python 3.12 --extra dev ty check"
+      ],
+      "result": "Scoped Ruff and repository-wide ty checks passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "Option fills book cash exactly as quantity times price; the multiplier converts contracts to shares only at settlement, so fill producers must quote per-contract notional prices — T119 collateral checks and the runner must adopt the same convention"
+  ]
+}
