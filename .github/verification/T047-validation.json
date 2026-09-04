@@ -1,0 +1,76 @@
+{
+  "taskId": "T047",
+  "timestamp": "2026-09-04T00:05:00Z",
+  "numTotalTests": 7,
+  "numPassedTests": 7,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "api-revision-health",
+      "status": "passed",
+      "commands": [
+        "az containerapp revision list --name fca-ml-dev-api --resource-group fca-rg-westus2"
+      ],
+      "result": "The active API revision fca-ml-dev-api--0000060 reports Healthy with 1 replica; startup, liveness, and readiness probes target the unauthenticated /health endpoint on port 8000"
+    },
+    {
+      "name": "ingest-job-executions",
+      "status": "passed",
+      "commands": [
+        "az containerapp job execution list --name fca-ml-dev-ingest --resource-group fca-rg-westus2"
+      ],
+      "result": "The scheduled execution fca-ml-dev-ingest-29806620 succeeded in 35 seconds at 2026-09-03T01:00:00Z and a manual execution succeeded at 2026-09-02T20:37:02Z; the three failed executions from 2026-09-02 predate the final image and configuration and have not recurred"
+    },
+    {
+      "name": "managed-identity-wiring",
+      "status": "passed",
+      "commands": [
+        "az containerapp show --name fca-ml-dev-api --resource-group fca-rg-westus2",
+        "az containerapp job show --name fca-ml-dev-ingest --resource-group fca-rg-westus2"
+      ],
+      "result": "Both workloads use the user-assigned managed identity fca-ml-dev-runtime (principal 550d9d36-f59c-4af9-b228-71d1f51d0e9f, client 95caeb5c-e069-4c51-b97f-575ab481b0d6) with Main lifecycle identity settings and AZURE_CLIENT_ID runtime configuration; no passwords or connection strings are configured"
+    },
+    {
+      "name": "storage-registry-and-vault-rbac",
+      "status": "passed",
+      "commands": [
+        "az role assignment list --scope <storage-account-id>",
+        "az role assignment list --scope <registry-id>",
+        "az role assignment list --scope <key-vault-id>"
+      ],
+      "result": "The runtime identity holds Storage Blob, Queue, and Table Data Contributor on fcaobj3kwwfxxfxu, AcrPull on fcau7enxjst4w72u, and Key Vault Secrets User on fca-ml-dev-kv-obj3kww; role assignments are scoped to the exact resources"
+    },
+    {
+      "name": "key-vault-backed-secrets",
+      "status": "passed",
+      "commands": [
+        "az containerapp show --query properties.configuration.secrets",
+        "az containerapp job show --query properties.configuration.secrets"
+      ],
+      "result": "The API resolves alpaca-api-key, alpaca-api-secret, and api-bearer-token and the ingest job resolves the two Alpaca secrets through identity-bound Key Vault references; secret values are never present in container configuration"
+    },
+    {
+      "name": "budget-alert-contacts",
+      "status": "passed",
+      "commands": [
+        "az consumption budget list"
+      ],
+      "result": "The fca-ml-dev-budget-40usd and fca-ml-dev-budget-70usd resource-group budgets and the subscription SpendLimit budget notify Carson.Fricke@outlook.com; the earlier REPLACE_WITH_BUDGET_CONTACT_EMAIL placeholder is gone from the deployed budgets"
+    },
+    {
+      "name": "no-connection-string-by-design",
+      "status": "passed",
+      "commands": [
+        "az storage account show --name fcaobj3kwwfxxfxu --query allowSharedKeyAccess",
+        "probe of running API container via az containerapp exec"
+      ],
+      "result": "The storage account disables shared-key access and the ingest composition authenticates with DefaultAzureCredential(managed_identity_client_id=AZURE_CLIENT_ID), so the absence of AZURE_STORAGE_CONNECTION_STRING is the designed state, not a misconfiguration; the live /health probe returned 200 and the KV-backed bearer token authenticated successfully"
+    }
+  ],
+  "limitations": [
+    "The deployed API process currently composes in-memory catalog and job repositories because the production composition root does not yet consume the LAKE_* environment variables; this does not affect T047's managed-identity and health acceptance and is recorded as the blocker for T048",
+    "Container App ingress is internal-only, so hosted smoke checks were executed with az containerapp exec against localhost:8000"
+  ]
+}

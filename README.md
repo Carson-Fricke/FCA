@@ -69,6 +69,7 @@ later tasks own their implementation.
 |   |   |-- configuration/         Typed settings and universe loaders
 |   |   |-- contracts/             Paths, schemas, and market sessions
 |   |   |-- coverage/              Coverage classification and planning
+|   |   |-- hosted/                Hosted Azure composition for the API process
 |   |   |-- http/                  FastAPI composition and thin routes
 |   |   |-- ingestion/             Equity, option, and crypto workflows
 |   |   |-- local/                 Workstation API, ingest, and persistence

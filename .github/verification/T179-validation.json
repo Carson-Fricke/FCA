@@ -1,0 +1,37 @@
+{
+  "taskId": "T179",
+  "numTotalTests": 112,
+  "numPassedTests": 112,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "hosted-runtime-composition",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/lake/hosted -q",
+      "result": "10 focused tests passed: hosted_overrides is empty without LAKE_STORAGE_ACCOUNT_NAME, the runtime builds Azure Table catalog and job repositories plus the SAS issuer from environment configuration, create_app consumes the hosted overrides, equity ensure plans only closed XNYS sessions with canonical symbols, missing provider credentials raise HostedEnsureError, non-equity ensure is rejected, and the job launcher marks durable jobs succeeded while propagating failures for ensure_coverage failure marking"
+    },
+    {
+      "name": "cli-local-and-http-regression",
+      "status": "passed",
+      "command": "uv run --python 3.12 --extra dev pytest tests/lake/cli tests/lake/local tests/lake/http -q",
+      "result": "102 tests passed including the CLI ingest tests after the BoundedAlpacaClient move, the local-mode tests that forbid Azure authentication in workstation mode, and the HTTP application and route suites"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": [
+        "uv run --python 3.12 --extra dev ruff check .",
+        "uv run --python 3.12 --extra dev ruff format --check .",
+        "uv run --python 3.12 --extra dev ty check",
+        "uv run --python 3.12 --extra dev pytest -q -p no:cacheprovider"
+      ],
+      "result": "Repository-wide Ruff lint, format check, and ty type check passed, and the complete pytest suite passed with 845 tests"
+    }
+  ],
+  "limitations": [
+    "The hosted runtime composes Azure SDK clients lazily and construction performs no network access; live behavior is exercised by the T048 dev smoke against the deployed Container App",
+    "Crypto and option ensure requests are intentionally rejected with HostedEnsureError until their dedicated runtime tasks land"
+  ]
+}

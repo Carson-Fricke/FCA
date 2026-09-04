@@ -46,6 +46,7 @@ adapters, and orchestration details stay behind those boundaries.
 | `lake.configuration` | Strict YAML loading, typed settings, environment overrides, and normalized universes. |
 | `lake.contracts` | Stable partition paths, PyArrow schemas, and exchange or UTC session contracts. |
 | `lake.coverage` | Calendar-aware coverage classification, gap planning, and ensure-oriented application behavior. |
+| `lake.hosted` | Hosted Azure composition that wires the published Uvicorn target to Table catalog/jobs, SAS issuance, and bounded Alpaca ensure. |
 | `lake.http` | FastAPI composition, authentication, request models, and thin catalog, ensure, and query controllers. |
 | `lake.ingestion` | Shared ingest ports plus equity, option, and crypto planning, transactions, and worker construction. |
 | `lake.local` | Workstation-only API, Alpaca ingest, filesystem, and catalog composition. |
@@ -62,6 +63,7 @@ src/lake/
 |-- configuration/                 Settings and universe loading
 |-- contracts/                     Paths, schemas, and sessions
 |-- coverage/                      Coverage domain and application services
+|-- hosted/                        Hosted Azure composition for `lake.app:app`
 |-- http/
 |   `-- routes/                    Thin authenticated HTTP controllers
 |-- ingestion/
@@ -90,6 +92,7 @@ tests/lake/
 |-- configuration/
 |-- contracts/
 |-- coverage/
+|-- hosted/
 |-- http/routes/
 |-- ingestion/{equities,options,crypto}/
 |-- providers/alpaca/
