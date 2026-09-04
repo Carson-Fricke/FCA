@@ -38,6 +38,28 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - Session-end hygiene runs per session. It does not replace the wave-level
   Validation Checklist, which still runs once per reconciliation batch.
 
+## Transcript Extraction Via Opencode
+
+- opencode sessions are not hook-visible to CLEO, so `llmExtraction` never
+  fires on its own. Make transcripts available with
+  `node .github/scripts/convert-opencode-transcript.mjs` (optionally passing a
+  session id; it defaults to the most recent opencode session for this
+  repository). It writes Claude-format JSONL under `~/.claude/projects/` where
+  CLEO's transcript scanner finds it.
+- Run `cleo transcript extract <session-id> --dry-run` first, then without
+  `--dry-run` to store memories. This path is currently unreliable on CLEO
+  2026.8.9: the extraction prompt contradicts its own zod schema ("empty
+  array" vs. a `memories` object) and `response_format` is dropped on the
+  openai-compatible transport, so models return mismatched envelopes. Retry
+  opportunistically and re-run `node .github/scripts/backfill-brain-embeddings.mjs`
+  after any new BRAIN rows; see brain observation O-mtngiqim-0 for the full
+  root-cause chain.
+- The transcript path resolves the `openai` provider profile through
+  `CLEO_HOME/plugins/model-providers/openai-openrouter-redirect.mjs`, which
+  redirects its base URL to OpenRouter (works around kryptobaseddev/cleo#1216
+  for this call site). That plugin file is machine-local and is not tracked by
+  the repository; recreate it from brain observation O-mtn8k38i-0 if absent.
+
 ## Portable Paths
 
 - Paths persisted in tasks, acceptance criteria, notes, evidence, configuration, generated artifacts, or `.cleo-export.json` must be relative to the repository root and use `/` separators.
