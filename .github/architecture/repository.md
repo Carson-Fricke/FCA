@@ -14,13 +14,19 @@ kernel, OMS, strategy contract with sandbox lint and look-ahead guard, venues,
 fees, portfolio, risk, bars/scheduler, bounded lake replay, the deterministic
 backtest runner with reproducibility manifest, the streaming run recorder, the
 backtest results store with its run catalog, standard metrics and attribution,
-the point-in-time option contract universe, and the local `backtest-job` CLI
-are implemented; offline reports, the harness query API, paper/shadow/live
-runtimes, and CI/deployment orchestration remain planned. The pinned Zig 0.16.0
+the point-in-time option contract universe, the capability-scoped strategy
+boundary (read-only clock, opaque StrategyHistory data capability, one-way
+venue commands, provenance-restricted scheduling), live-feed gap healing, the
+SecurityMaster listings view, the PaperShell shared paper simulation runtime,
+and the local `backtest-job` CLI are implemented; offline reports, the harness
+query API, shadow/live runtimes, and CI/deployment orchestration remain
+planned. The pinned Zig 0.16.0
 toolchain is a first-class build component: the `build.zig` module builds the
-native core under `src/harness/native`, the shared image compiles it in a
-dedicated Zig build stage, and CI gates the native core with `zig fmt --check`
-and `zig build test` alongside the Python gates.
+native core under `src/harness/native` (C ABI v1 with the Arrow C Data
+Interface bridge, pinned scale-18 fixed point, and the ported event kernel,
+OMS state machine, and virtual book accounting), the shared image compiles it
+in a dedicated Zig build stage, and CI gates the native core with
+`zig fmt --check` and `zig build test` alongside the Python gates.
 
 ## Product Boundaries
 
@@ -46,11 +52,11 @@ adapters, and orchestration details stay behind those boundaries.
 
 | Package | Responsibility |
 | --- | --- |
-| `lake.catalog` | Coverage, job, contract, and front-set records; repository ports; memory and Azure Table adapters. |
+| `lake.catalog` | Coverage, job, contract, front-set, and listing records; repository ports; memory and Azure Table adapters. |
 | `lake.cli` | Console dispatch and API, ingest, or local process commands. |
 | `lake.configuration` | Strict YAML loading, typed settings, environment overrides, and normalized universes. |
 | `lake.contracts` | Stable partition paths, PyArrow schemas, and exchange or UTC session contracts. |
-| `lake.coverage` | Calendar-aware coverage classification, gap planning, and ensure-oriented application behavior. |
+| `lake.coverage` | Calendar-aware listings-aware coverage classification (including the terminal delisted state), gap planning, and ensure-oriented application behavior. |
 | `lake.hosted` | Hosted Azure composition that wires the published Uvicorn target to Table catalog/jobs, SAS issuance, and bounded Alpaca ensure. |
 | `lake.http` | FastAPI composition, authentication, request models, and thin catalog, ensure, and query controllers. |
 | `lake.ingestion` | Shared ingest ports plus equity, option, and crypto planning, transactions, and worker construction. |
@@ -115,12 +121,12 @@ tests/lake/
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
-| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, the look-ahead-guarded historical view, the point-in-time option contract universe over the market-lake contracts catalog (front-set and static-OSI modes, as-of DTE/strike/moneyness filters, expiry-indexed snapshots clipped to the engine clock), the market-lake access adapter for ensure/query-driven backtest data, Alpaca SIP and crypto WebSocket feeds with UTC-day crypto semantics, and the live event recorder writing lake-schema Parquet under `live/{deployment}`. |
+| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, the look-ahead-guarded historical view with the opaque engine-clocked StrategyHistory strategy capability, live-feed gap healing through market-lake backfill, the point-in-time option contract universe over the market-lake contracts catalog (front-set and static-OSI modes, as-of DTE/strike/moneyness filters, expiry-indexed snapshots clipped to the engine clock), the SecurityMaster point-in-time listings view, the market-lake access adapter for ensure/query-driven backtest data, Alpaca SIP and crypto WebSocket feeds with UTC-day crypto semantics, and the live event recorder writing lake-schema Parquet under `live/{deployment}`. |
 | `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, trade-through, and MidTouch option fill decisions. |
 | `harness.portfolio` | Strategy virtual books, shared-account aggregate accounting, and deterministic option expiry, exercise, and assignment settlement. |
 | `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts; standard metrics and attribution with documented conventions; and the backtest results store writing run artifacts under `backtests/{run_id}` with a filterable run catalog and prefix-complete cleanup. |
-| `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies. |
-| `harness.strategy` | Mode-independent strategy callbacks, constrained context, deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
+| `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies; plus the PaperShell shared simulation runtime composing the same kernel, venue, fills, fees, risk, and portfolio accounting against replay or live inbox feeds. |
+| `harness.strategy` | Mode-independent strategy callbacks, constrained context with capability-scoped surfaces (read-only clock, opaque engine-clocked data history, one-way venue commands, and provenance-restricted scheduling), deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
 | `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, and complete decision auditing. |
 | `harness.testing` | Deterministic synthetic feeds, golden artifact canonicalization, and reproducibility manifest comparison. |
 | `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, simulated top-of-book matching venue, and the options multi-leg matching engine with atomic all-leg fillability. |

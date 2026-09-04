@@ -8,6 +8,7 @@ from lake.catalog.models import (
     CoverageRecord,
     JobRecord,
     JobState,
+    ListingRecord,
     canonical_symbol,
 )
 from lake.contracts import AssetClass, DataType
@@ -124,8 +125,52 @@ def _is_active(record: ContractRecord, as_of: date | None) -> bool:
     )
 
 
+class InMemoryListingRepository:
+    """Deterministic process-local storage for security listing episodes."""
+
+    def __init__(self, records: Iterable[ListingRecord] = ()) -> None:
+        self._records = {record.key: record for record in records}
+
+    def get(self, entity_id: str, symbol: str) -> ListingRecord | None:
+        return self._records.get(
+            (_canonical_entity(entity_id), canonical_symbol(symbol))
+        )
+
+    def upsert(self, record: ListingRecord) -> ListingRecord:
+        self._records[record.key] = record
+        return record
+
+    def put(self, record: ListingRecord) -> ListingRecord:
+        return self.upsert(record)
+
+    def list(
+        self,
+        *,
+        entity_id: str | None = None,
+        symbol: str | None = None,
+        as_of: date | None = None,
+    ) -> tuple[ListingRecord, ...]:
+        entity_id = _canonical_entity(entity_id) if entity_id is not None else None
+        symbol = canonical_symbol(symbol) if symbol is not None else None
+        return tuple(
+            record
+            for record in sorted(self._records.values(), key=lambda item: item.key)
+            if (entity_id is None or record.entity_id == entity_id)
+            and (symbol is None or record.symbol == symbol)
+            and (as_of is None or record.is_known(as_of))
+        )
+
+
+def _canonical_entity(entity_id: str) -> str:
+    canonical = entity_id.strip().upper()
+    if not canonical:
+        raise ValueError("entity_id must not be empty")
+    return canonical
+
+
 __all__ = [
     "InMemoryCatalogRepository",
     "InMemoryContractRepository",
     "InMemoryJobRepository",
+    "InMemoryListingRepository",
 ]

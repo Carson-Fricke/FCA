@@ -12,8 +12,11 @@ from lake.catalog.models import (
     ContractRecord,
     CoverageRecord,
     CoverageStatus,
+    DelistingType,
     JobRecord,
     JobState,
+    ListingRecord,
+    ListingType,
     OptionType,
     canonical_symbol,
     table_key,
@@ -23,6 +26,7 @@ from lake.contracts import AssetClass, DataType
 _COVERAGE_PARTITION_PREFIX: Final = "coverage"
 _JOB_PARTITION_KEY: Final = "jobs"
 _CONTRACT_PARTITION_KEY: Final = "contracts"
+_LISTING_PARTITION_PREFIX: Final = "listings"
 
 
 def _canonical_symbol(symbol: str) -> str:
@@ -173,6 +177,56 @@ def contract_from_entity(entity: Mapping[str, object]) -> ContractRecord:
         multiplier=_integer(entity, "Multiplier", 100),
         listed_date=date.fromisoformat(listed_date) if listed_date else None,
         delisted_date=date.fromisoformat(delisted_date) if delisted_date else None,
+    )
+
+
+def listing_partition_key(record: ListingRecord) -> str:
+    """Build the Azure partition key shared by memory and Table adapters."""
+    return listing_partition_for(record.entity_id)
+
+
+def listing_partition_for(entity_id: str) -> str:
+    """Build the Azure partition key for one canonical entity identifier."""
+    return "|".join((_LISTING_PARTITION_PREFIX, _table_key(entity_id.strip().upper())))
+
+
+def listing_to_entity(record: ListingRecord) -> TableEntity:
+    """Map a listing episode to an Azure Table-compatible entity."""
+    entity = _entity()
+    entity.update(
+        {
+            "PartitionKey": record.partition_key,
+            "RowKey": record.row_key,
+            "EntityId": record.entity_id,
+            "Symbol": record.symbol,
+            "ListedDate": record.listed_date.isoformat(),
+            "ListingType": record.listing_type.value,
+        }
+    )
+    if record.delisted_date is not None:
+        entity["DelistedDate"] = record.delisted_date.isoformat()
+    if record.delisting_type is not None:
+        entity["DelistingType"] = record.delisting_type.value
+    if record.final_price is not None:
+        # Azure Tables have no decimal EDM type; strings preserve the exact
+        # price value instead of silently converting it to a float.
+        entity["FinalPrice"] = str(record.final_price)
+    return entity
+
+
+def listing_from_entity(entity: Mapping[str, object]) -> ListingRecord:
+    """Restore a listing episode from an Azure Table entity."""
+    delisted_date = _optional_string(entity, "DelistedDate")
+    final_price = _optional_string(entity, "FinalPrice")
+    delisting_type = _optional_string(entity, "DelistingType")
+    return ListingRecord(
+        entity_id=str(entity["EntityId"]),
+        symbol=str(entity["Symbol"]),
+        listed_date=date.fromisoformat(str(entity["ListedDate"])),
+        delisted_date=date.fromisoformat(delisted_date) if delisted_date else None,
+        listing_type=ListingType(str(entity["ListingType"])),
+        delisting_type=DelistingType(delisting_type) if delisting_type else None,
+        final_price=Decimal(final_price) if final_price else None,
     )
 
 
@@ -366,11 +420,78 @@ class AzureTableContractRepository:
         )
 
 
+def _listing_query(entity_id: str | None) -> tuple[str, dict[str, str]]:
+    if entity_id is not None:
+        return (
+            "PartitionKey eq @partition",
+            {"partition": listing_partition_for(entity_id)},
+        )
+    return (
+        "PartitionKey ge @start and PartitionKey lt @end",
+        {"start": "listings|", "end": "listings}"},
+    )
+
+
+class AzureTableListingRepository:
+    """Listing repository backed by an Azure Tables ``TableClient``."""
+
+    def __init__(self, table: TableClient) -> None:
+        self._table = table
+
+    def get(self, entity_id: str, symbol: str) -> ListingRecord | None:
+        entity_id = entity_id.strip().upper()
+        if not entity_id:
+            raise ValueError("entity_id must not be empty")
+        try:
+            entity = self._table.get_entity(
+                listing_partition_for(entity_id),
+                _table_key(_canonical_symbol(symbol)),
+            )
+        except ResourceNotFoundError:
+            return None
+        return listing_from_entity(entity)
+
+    def upsert(self, record: ListingRecord) -> ListingRecord:
+        self._table.upsert_entity(listing_to_entity(record), mode=UpdateMode.REPLACE)
+        return record
+
+    def put(self, record: ListingRecord) -> ListingRecord:
+        return self.upsert(record)
+
+    def list(
+        self,
+        *,
+        entity_id: str | None = None,
+        symbol: str | None = None,
+        as_of: date | None = None,
+    ) -> tuple[ListingRecord, ...]:
+        entity_id = entity_id.strip().upper() if entity_id is not None else None
+        if entity_id is not None and not entity_id:
+            raise ValueError("entity_id must not be empty")
+        query_filter, parameters = _listing_query(entity_id)
+        records = (
+            listing_from_entity(entity)
+            for entity in self._table.query_entities(
+                query_filter,
+                parameters=parameters,
+            )
+        )
+        symbol = _canonical_symbol(symbol) if symbol is not None else None
+        return tuple(
+            record
+            for record in sorted(records, key=lambda item: item.key)
+            if (entity_id is None or record.entity_id == entity_id)
+            and (symbol is None or record.symbol == symbol)
+            and (as_of is None or record.is_known(as_of))
+        )
+
+
 # Short names are convenient for dependency injection while the explicit names
 # make the Azure boundary obvious in application wiring.
 AzureCatalogRepository = AzureTableCatalogRepository
 AzureJobRepository = AzureTableJobRepository
 AzureContractRepository = AzureTableContractRepository
+AzureListingRepository = AzureTableListingRepository
 
 
 # Mapping aliases keep the conversion vocabulary discoverable at call sites.
@@ -380,3 +501,5 @@ to_job_entity = job_to_entity
 from_job_entity = job_from_entity
 to_contract_entity = contract_to_entity
 from_contract_entity = contract_from_entity
+to_listing_entity = listing_to_entity
+from_listing_entity = listing_from_entity

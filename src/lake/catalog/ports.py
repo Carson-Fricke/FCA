@@ -3,7 +3,13 @@
 from datetime import date
 from typing import Protocol
 
-from lake.catalog.models import ContractRecord, CoverageRecord, JobRecord, JobState
+from lake.catalog.models import (
+    ContractRecord,
+    CoverageRecord,
+    JobRecord,
+    JobState,
+    ListingRecord,
+)
 from lake.contracts import AssetClass, DataType
 
 
@@ -56,4 +62,25 @@ class ContractRepository(Protocol):
     ) -> tuple[ContractRecord, ...]: ...
 
 
-__all__ = ["CatalogRepository", "ContractRepository", "JobRepository"]
+class ListingRepository(Protocol):
+    """Persistence contract for point-in-time security listing episodes."""
+
+    def get(self, entity_id: str, symbol: str) -> ListingRecord | None: ...
+
+    def upsert(self, record: ListingRecord) -> ListingRecord: ...
+
+    def list(
+        self,
+        *,
+        entity_id: str | None = None,
+        symbol: str | None = None,
+        as_of: date | None = None,
+    ) -> tuple[ListingRecord, ...]: ...
+
+
+__all__ = [
+    "CatalogRepository",
+    "ContractRepository",
+    "JobRepository",
+    "ListingRepository",
+]
