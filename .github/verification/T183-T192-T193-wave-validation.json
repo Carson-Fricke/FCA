@@ -1,0 +1,47 @@
+{
+  "wave": "T183-T192-T193",
+  "timestamp": "2026-09-04T20:15:00Z",
+  "numTotalTests": 1099,
+  "numPassedTests": 1087,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "uv lock --check, repository Ruff lint, Ruff format across 385 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "1087 tests passed, 12 skipped (existing FCA_PERF-gated performance benchmarks), in 92.73 seconds; the pre-existing Starlette/httpx deprecation warning was emitted."
+    },
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "command": "zig fmt --check . ; zig build test",
+      "result": "Zig 0.16.0 format clean; 13/13 native tests pass including the new FFI, canonical-serialization, and Arrow bridge test surface."
+    },
+    {
+      "name": "focused-task-evidence",
+      "status": "passed",
+      "result": "T183 native bridge 17 passed (11 skipped without a built library by design); T192 clock/strategy 31 passed; T193 runtime/golden 60 passed."
+    },
+    {
+      "name": "integration-wiring",
+      "status": "passed",
+      "result": "Facade exports added by the coordinator: ReadonlyClock in harness.core and harness.strategy, StrategyVenue and StrategyScheduler in harness.runtime.backtest; market-lake and Thesis code paths unchanged."
+    }
+  ],
+  "integrationHistory": [
+    "Three-lane fan-out with exclusive file ownership: T183 Zig FFI/Arrow/fixed-point, T192 read-only strategy clock, T193 venue and scheduler capability narrowing.",
+    "T192 flagged the HistoricalView.clock raw-clock escape; T195/T196 own its closure. T193 flagged engine scheduler adoption; T195 owns the one-line engine change plus reserved-class enforcement.",
+    "The integrated repository run passed all 1087 tests plus the Zig gates; two commits pushed at 13a2424 (wave 1) and 089e756 (wave 2)."
+  ],
+  "limitations": [
+    "Docker/CI must distribute the new native dynamic library artifact for in-image bridge tests; first image publication will exercise it",
+    "Engine-path scheduler still permissive until T195; context.venue/orders.venue raw-object escape until T196"
+  ]
+}

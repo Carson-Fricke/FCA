@@ -1,0 +1,32 @@
+{
+  "taskId": "T183",
+  "numTotalTests": 30,
+  "numPassedTests": 17,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "zig-native-gates",
+      "status": "passed",
+      "commands": ["zig fmt --check .", "zig build test"],
+      "result": "Zig 0.16.0: format clean; 13/13 native tests pass including symbol/OSI backtracking, deterministic sha256 v5 IDs, i128 scale-18 fixed point with Python str(Decimal)-identical canonical text, and TradeRow canonical JSON"
+    },
+    {
+      "name": "python-native-bridge",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/native",
+      "result": "17 passed with the built library: FFI parity vs Python core, byte-identity vs codecs._row, pyarrow Arrow C Data Interface bridge (pyarrow 25.0.1, pa.Array._import_from_c), loader ABI validation; absence behavior: 6 passed / 11 skipped with NativeCoreUnavailable build-instruction message, default pytest stays green without a prior build"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": ["uv run --extra dev ruff check .", "uv run --extra dev ruff format --check .", "uv run --extra dev ty check", "uv run --extra dev pytest -p no:cacheprovider"],
+      "result": "Repository-wide gates passed with 1087 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "ABI version pinned at 1 (NATIVE_CORE/loader must bump together); dynamic library artifact now emitted to zig-out/bin (Windows) and zig-out/lib",
+    "Docker runtime stage must carry the native artifact for bridge tests to run in-image; CI pytest leg likewise (integration follow-up for T184 wave)"
+  ]
+}

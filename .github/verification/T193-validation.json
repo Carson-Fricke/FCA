@@ -1,0 +1,26 @@
+{
+  "taskId": "T193",
+  "numTotalTests": 60,
+  "numPassedTests": 60,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "runtime-and-golden-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/runtime tests/golden",
+      "result": "60 passed: StrategyVenue one-way 4-command capability with no venue-state surface, StrategyScheduler refusing the 7 reserved feed/outcome classes, golden boundary scenarios (probe blind, fabricated QuoteEvent scheduling raises TypeError, byte-identity via assert_reproducible), engine-path venue probing side-effect-free and reproducible"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": ["uv run --extra dev ruff check .", "uv run --extra dev ruff format --check .", "uv run --extra dev ty check", "uv run --extra dev pytest -p no:cacheprovider"],
+      "result": "Repository-wide gates passed with 1087 tests after wave integration"
+    }
+  ],
+  "limitations": [
+    "Engine-path scheduler adoption (scheduler=StrategyScheduler(self._bus) at engine.py:319-329) and OrdersView.venue/StrategyContext.venue narrowing are context.py/engine.py work deferred to T195/T196",
+    "remaining_steps closed at every sanctioned strategy-visible surface; concrete venue reachable only via private slots or direct harness.venues imports (lint/CI territory per audit R1)"
+  ]
+}

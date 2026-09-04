@@ -1,0 +1,26 @@
+{
+  "taskId": "T192",
+  "numTotalTests": 31,
+  "numPassedTests": 31,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "clock-and-strategy-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/core tests/harness/strategy",
+      "result": "31 passed (7 new): ReadonlyClock frozen capability delegation, no advance_to/advance_by/head on the strategy surface, adversarial probes across on_start + two quote callbacks all blocked by construction, engine clock advances only via engine-owned dispatch"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "commands": ["uv run --extra dev ruff check .", "uv run --extra dev ruff format --check .", "uv run --extra dev ty check", "uv run --extra dev pytest -p no:cacheprovider"],
+      "result": "Repository-wide gates passed with 1087 tests after wave integration; determinism golden suite included and green"
+    }
+  ],
+  "limitations": [
+    "HistoricalView.clock (data/history.py:316-319) remains a raw-clock escape through context.data until the T194 facade task closes it (recorded in T194)",
+    "harness.core and harness.strategy facades re-export ReadonlyClock (integration-owned wiring done by coordinator)"
+  ]
+}
