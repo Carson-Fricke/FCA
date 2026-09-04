@@ -14,6 +14,30 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - Run every `cleo` and repository `git` command with the resolved repository root as the tool working directory. Prefer the tool's `workdir` option over changing directories inside a shell command.
 - In PowerShell, capture a discovered root with `$repoRoot = git rev-parse --show-toplevel`. In POSIX shells, use `repo_root="$(git rev-parse --show-toplevel)"`. Do not persist the resulting absolute value.
 
+## Session Lifecycle And Handoff
+
+- Run `cleo briefing --json` once at session start, alongside the repository
+  discovery commands. It restores the last handoff, current task focus, next
+  tasks, blockers, and a BRAIN memory digest in one call.
+- Focus the session with `cleo start <task-id>` when picking up work, and clear
+  it with `cleo stop` when done. Do not leave a completed task focused;
+  `cleo current` and briefings otherwise report stale focus.
+- Record durable discoveries with `cleo memory observe` and session-scoped
+  decisions with `cleo session record-decision` as they happen, not
+  retroactively. Cross-session architectural decisions belong in
+  `cleo memory decision-store`.
+- Before ending a session or before context compaction, run `cleo memory
+  precompact-flush` to flush in-flight observations and checkpoint the WAL.
+- End working sessions with `cleo safestop --reason <text> --handoff` so the
+  next session's briefing has a handoff to restore. Use `--no-session-end` to
+  write the handoff without ending the session, or `cleo session suspend` to
+  pause a session that will resume in a different context window.
+- After significant BRAIN writes at session end, run `cleo memory consolidate`
+  (idempotent) and `cleo refresh-memory` so `.cleo/memory-bridge.md` reflects
+  current learnings and decisions.
+- Session-end hygiene runs per session. It does not replace the wave-level
+  Validation Checklist, which still runs once per reconciliation batch.
+
 ## Portable Paths
 
 - Paths persisted in tasks, acceptance criteria, notes, evidence, configuration, generated artifacts, or `.cleo-export.json` must be relative to the repository root and use `/` separators.

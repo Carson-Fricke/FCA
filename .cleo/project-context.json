@@ -1,10 +1,36 @@
 {
   "schemaVersion": "1.0.0",
-  "detectedAt": "2026-08-27T01:57:46.283Z",
+  "detectedAt": "2026-09-04T17:59:37.056Z",
   "projectTypes": [
-    "unknown"
+    "python"
   ],
+  "primaryType": "python",
   "monorepo": false,
+  "testing": {
+    "framework": "pytest",
+    "command": "pytest",
+    "testFilePatterns": [
+      "**/test_*.py",
+      "**/*_test.py"
+    ],
+    "directories": {
+      "integration": "tests/integration"
+    }
+  },
+  "directories": {
+    "source": "src",
+    "tests": "tests",
+    "docs": "docs"
+  },
+  "conventions": {
+    "fileNaming": "kebab-case"
+  },
+  "llmHints": {
+    "preferredTestStyle": "pytest with function-based tests (test_ prefix)",
+    "commonPatterns": [
+      "Use kebab-case for file names"
+    ]
+  },
   "audit": {
     "command": "node .github/scripts/validate-cleo-export.mjs"
   }
