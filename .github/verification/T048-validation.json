@@ -1,0 +1,57 @@
+{
+  "taskId": "T048",
+  "timestamp": "2026-09-04T03:25:00Z",
+  "numTotalTests": 5,
+  "numPassedTests": 5,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "hosted-health-and-bearer-auth",
+      "status": "passed",
+      "commands": [
+        "Invoke-RestMethod https://<public-fqdn>/health",
+        "Invoke-RestMethod https://<public-fqdn>/v1/auth/check (with and without bearer)"
+      ],
+      "result": "The deployed dev API returned /health status ok without credentials, rejected an unauthenticated /v1/auth/check with 401, and accepted the Key Vault-backed bearer token with 200; the check ran against the source-built image sha256:95146602 through the revision fca-ml-dev-api--0000064 composition wired by T179"
+    },
+    {
+      "name": "first-query-writes-data-through-ensure",
+      "status": "passed",
+      "commands": [
+        "POST /v1/catalog/ensure {asset_class:equity, data_type:trade, symbol:AAPL, start_date:2026-08-28, end_date:2026-08-28}"
+      ],
+      "result": "The hosted ensure performed a bounded, lease-protected Alpaca ingest for the missing session and returned a coverage report with state complete and 1000 rows at date=2026-08-28/asset_class=equity/data_type=trade/AAPL.parquet; both trade and quote Parquet objects for the session were created in the lake container at 2026-09-04T03:16:27Z"
+    },
+    {
+      "name": "file-query-returns-complete-partition-with-sas",
+      "status": "passed",
+      "commands": [
+        "POST /v1/query {mode:file, ensure:true, equity trade AAPL 2026-08-28}"
+      ],
+      "result": "The file query returned state complete with one complete catalog partition (1000 rows, 13614 bytes) and a read-only object-scoped SAS URL"
+    },
+    {
+      "name": "cached-repeat-serves-catalog-without-refetch",
+      "status": "passed",
+      "commands": [
+        "POST /v1/query {mode:file, AAPL trade 2026-08-28} (no ensure)",
+        "az storage blob list before and after the cached repeat"
+      ],
+      "result": "The cached repeat returned the identical partition (same object path, 1000 rows, same checksum c7d90179317caac67c4887dd002a2e837f76db9e12ec819302231fa20aa9ab8b) served from the catalog, and every lake blob etag and lastModified timestamp was unchanged across the repeat, proving no refetch or rewrite"
+    },
+    {
+      "name": "secure-posture-restored-after-smoke",
+      "status": "passed",
+      "commands": [
+        "az containerapp show, az containerapp env show"
+      ],
+      "result": "After the smoke, the API app was restored to internal-only ingress on the internal FQDN, the managed environment public network access was returned to Disabled, and the app scale minimum was restored to zero; the temporary public exposure existed only for the duration of the smoke with all non-health routes bearer-protected"
+    }
+  ],
+  "limitations": [
+    "The bounded ingest intentionally caps at LAKE_INGEST_MAX_RECORDS=1000 records per data type, so coverage records report partial rather than exhaustive session depth for active sessions and complete closed sessions carry the bounded row count",
+    "The public exposure was a temporary smoke posture; the documented dev posture is internal-only ingress, re-enableable via ENABLE_EXTERNAL_API_INGRESS=true plus environment public network access"
+  ]
+}
