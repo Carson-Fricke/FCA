@@ -1,6 +1,8 @@
 <script>
-	import BacktestView from '$lib/components/backtest-view/BacktestView.svelte';
+	import BacktestReport from '$lib/components/backtest-view/BacktestReport.svelte';
 	import { fixture } from '$lib/data/backtestFixture.js';
+
+	let camera = $state(null);
 
 	const wins = fixture.trades.filter((t) => t.pnl >= 0).length;
 	const pnl = fixture.trades.reduce((a, t) => a + t.pnl, 0);
@@ -16,10 +18,11 @@
 		{fixture.title} &middot; {fixture.trades.length} trades &middot; {wins}W/{fixture.trades.length - wins}L
 		&middot; realized PnL {pnl >= 0 ? '+' : ''}{pnl.toLocaleString('en-US', { maximumFractionDigits: 0 })}
 	</p>
-	<BacktestView title="Equity (fixture)" {...fixture} height={640} />
+	<BacktestReport report={fixture} bind:camera height={300} />
 	<p class="sub note">
 		Fixture data only. Real runs arrive through the harness recorder artifacts imported by the
-		workspace, served by the Thesis artifact-view endpoint (T207).
+		workspace, served by the Thesis artifact-view endpoint (T207). All chart sections share one
+		zoom camera: pan, zoom, or trim the axis grips on any chart and the others follow.
 	</p>
 </div>
 
