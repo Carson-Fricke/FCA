@@ -1,0 +1,91 @@
+name: Prune GHCR image versions
+
+on:
+  schedule:
+    # Weekly, Sundays 03:00 UTC — keeps private-package storage bounded.
+    cron: '0 3 * * 0'
+  workflow_dispatch: {}
+
+permissions:
+  packages: write
+  contents: read
+
+concurrency:
+  group: prune-ghcr
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Delete old image versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prune image versions (keep newest 10, never delete < 7 days)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_NAME: ${{ github.event.repository.name }}
+          KEEP_NEWEST: '10'
+          MIN_AGE_DAYS: '7'
+        run: |
+          set -euo pipefail
+
+          # Collect every version id + created_at (paginated).
+          page=1
+          tmp="$(mktemp)"
+          while :; do
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/user/packages/container/${PACKAGE_NAME}/versions?per_page=100&page=${page}" \
+              > "$tmp/page-$page.json"
+            count="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/page-$page.json','utf8')).length)")"
+            if [[ "$count" -eq 0 ]]; then
+              break
+            fi
+            page=$((page + 1))
+            if [[ "$page" -gt 30 ]]; then
+              echo "::error::Version listing exceeded 30 pages; aborting to stay bounded"
+              exit 1
+            fi
+          done
+
+          # Flatten to "id created_at epoch" pairs, newest first.
+          node -e '
+            const fs = require("fs");
+            const rows = [];
+            for (let p = 1; fs.existsSync(process.argv[1] + "/page-" + p + ".json"); p++) {
+              for (const v of JSON.parse(fs.readFileSync(process.argv[1] + "/page-" + p + ".json", "utf8"))) {
+                rows.push({ id: v.id, created: Date.parse(v.created_at), tags: v.metadata?.container?.tags ?? [] });
+              }
+            }
+            rows.sort((a, b) => b.created - a.created);
+            const minAgeMs = Number(process.env.MIN_AGE_DAYS) * 24 * 3600 * 1000;
+            const cutoff = Date.now() - minAgeMs;
+            const keep = new Set();
+            rows.slice(0, Number(process.env.KEEP_NEWEST)).forEach((r) => keep.add(r.id));
+            // Safety: never delete a version carrying a moving tag (future-proofing).
+            rows.filter((r) => r.tags.some((t) => t !== "latest" && !/^[0-9a-f]{40}$/.test(t)))
+              .slice(0, 5).forEach((r) => keep.add(r.id));
+            const deleteIds = rows
+              .filter((r) => !keep.has(r.id) && r.created < cutoff)
+              .map((r) => r.id);
+            console.log(JSON.stringify({ total: rows.length, deleting: deleteIds.length }));
+            fs.writeFileSync(process.argv[1] + "/delete-ids.json", JSON.stringify(deleteIds));
+          ' "$tmp"
+
+          delete_count="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/delete-ids.json','utf8')).length)")"
+          echo "Deleting ${delete_count} old image version(s)"
+
+          deleted=0
+          for id in $(node -e "JSON.parse(require('fs').readFileSync('$tmp/delete-ids.json','utf8')).forEach((id)=>console.log(id))"); do
+            if gh api -X DELETE \
+              -H "Accept: application/vnd.github+json" \
+              "/user/packages/container/${PACKAGE_NAME}/versions/${id}"; then
+              deleted=$((deleted + 1))
+            else
+              echo "::warning::Failed to delete version ${id} (continuing)"
+            fi
+          done
+
+          echo "::notice::GHCR prune complete: ${deleted}/${delete_count} version(s) deleted; newest ${KEEP_NEWEST} and anything younger than ${MIN_AGE_DAYS} days retained"
+          rm -rf "$tmp"
