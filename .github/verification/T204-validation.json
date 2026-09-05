@@ -1,0 +1,18 @@
+{
+  "taskId": "T204",
+  "numTotalTests": 0,
+  "numPassedTests": 0,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "architecture-correction",
+      "status": "passed",
+      "result": "repository.md corrected against implemented behavior: sandbox lint is a CI gate not a run-path check (verified at python-bicep-ci.yml and lint.py ViolationCategory); look-ahead guard wording replaced with the structural boundary (now-anchored StrategyHistory with no timestamp parameters; engine-side hard-capped queries raise LookaheadError rather than silently clipping); runner paragraph now says fail-loud look-ahead abort; Status paragraph records the ported metrics modules and the cross-language parity oracle with byte-identical determinism artifacts; historical verification records untouched"
+    }
+  ],
+  "limitations": [
+    "Shadow/live runtime scope left as planned wording (no shadow module exists in the tree)"
+  ]
+}

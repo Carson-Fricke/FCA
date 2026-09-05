@@ -1,0 +1,25 @@
+{
+  "taskId": "T191",
+  "numTotalTests": 41,
+  "numPassedTests": 40,
+  "numFailedTests": 0,
+  "numPendingTests": 1,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "results-store-and-lake-adapters",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/results/test_store.py tests/lake/storage/test_azure_readable.py tests/lake/catalog/test_run_repository.py tests/lake/results/test_backtest_results_integration.py",
+      "result": "40 passed + 1 credential-guarded skip: ReadableBlobStore port and AzureReadableBlobStore (read/list_prefix/delete_prefix over ContainerClient), lake RunRecord/RunRepository with memory and Azure Table adapters, LakeRunCatalogRepository re-pointing the harness store to lake ports with all 23 pre-existing store tests green, credential-guarded integration test network-free by default"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and the 1299-test pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "RunStatus (harness) deliberately not unified with lake JobState; RunState (lake) maps losslessly for row storage — documented in both docstrings",
+    "AzureTableRunRepository.delete does get-then-delete because the SDK delete_entity succeeds silently on missing rows"
+  ]
+}

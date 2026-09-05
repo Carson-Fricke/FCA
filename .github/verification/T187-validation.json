@@ -1,0 +1,31 @@
+{
+  "taskId": "T187",
+  "numTotalTests": 43,
+  "numPassedTests": 43,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "parity-oracle",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/determinism tests/harness/native",
+      "result": "43 passed: the canonical parity scenario (14 sessions, 252 events, real fills) run through run_backtest vs run_zig_backtest yields identical dispatch_hash, identical fills, identical outcome_digest, and byte-identical artifact JSON after normalizing engine_id; the Python bus reproduces bus.zig's pinned 10000-event golden digest; 5 parity tests skip cleanly without the native library (19 passed / 2 skipped verified with a missing-library override)"
+    },
+    {
+      "name": "native-and-zig-gates",
+      "status": "passed",
+      "commands": ["zig fmt --check .", "zig build test"],
+      "result": "Zig untouched by this task; 100/100 native tests still pass"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and the 1299-test pytest suite (1 strict xfail) passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "ABI v1 exports only the seven pure functions; the clock/bus/OMS/book state machines are driven Python-side with native digest arbitration. True C-ABI kernel driving is filed as the ABI-v2 follow-up task under T181",
+    "Exactly one manifest field may differ between engines: engine_id (harness.backtest.zig vs harness.backtest); everything else is pinned byte-identical"
+  ]
+}

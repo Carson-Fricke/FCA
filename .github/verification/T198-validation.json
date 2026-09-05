@@ -1,25 +1,24 @@
 {
   "taskId": "T198",
-  "numTotalTests": 16,
-  "numPassedTests": 16,
+  "numTotalTests": 5,
+  "numPassedTests": 4,
   "numFailedTests": 0,
   "numPendingTests": 0,
   "numTodoTests": 0,
   "testResults": [
     {
-      "name": "determinism-data-path",
+      "name": "import-boundary",
       "status": "passed",
-      "command": "uv run --extra dev pytest -p no:cacheprovider tests/determinism",
-      "result": "16 passed: DataProbeStrategy exercises read/read(type)/last/window/aggregate per callback with now-anchored expectations pinned per callback; FabricatedQuoteStrategy pins the structural refusal taxonomy deterministically; history-flag scenario proves artifacts identical while only configuration_hash moves; pre-existing scenario artifacts verified byte-identical via a disposable worktree digest probe (27 artifact lines + dispatch hashes identical)"
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/strategy/test_import_boundary.py",
+      "result": "4 passed + 1 strict xfail (load-bearing): runtime import boundary holds (harness.strategy never imports harness.runtime, transitively), public-name bindings clean after the coordinator removed SimClock and HistoricalView from the strategy-reachable __all__ surfaces, type-level separation proven both directions, dynamic engine-constructed-context canary clean; the annotation-scan layer is strict-xfail because EventBus/PortfolioHub/HistoricalView remain in strategy-reachable annotations (filed as the protocol-only-imports follow-up under T070)"
     },
     {
       "name": "repository-wide-quality-gates",
       "status": "passed",
-      "result": "Repository-wide gates and 1273-test pytest suite passed after wave integration"
+      "result": "Repository-wide gates and the 1299-test pytest suite passed after wave integration"
     }
   ],
   "limitations": [
-    "StrategyHistory.bars is not yet exercised in the determinism set (single-trade feed); a multi-trade bars scenario is a cheap follow-up",
-    "A LookaheadError future-window scenario through StrategyHistory could join the determinism set in a later wave"
+    "The annotation layer flips from xfail to pass when the protocol-only-imports refactor lands (strict=True makes the flip observable)"
   ]
 }

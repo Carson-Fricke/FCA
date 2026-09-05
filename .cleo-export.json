@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-05T01:06:11.862Z",
+    "exportedAt": "2026-09-05T01:37:50.621Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 209
     },
-    "checksum": "e712f1641dcd34c9",
+    "checksum": "47da3650e538fb5f",
     "taskCount": 205,
     "exportMode": "full"
   },
@@ -652,7 +652,7 @@
     "T070": {
       "type": "epic",
       "title": "H2 M1 Equities backtest engine",
-      "status": "pending",
+      "status": "done",
       "parentId": "T068",
       "depends": [
         "T005",
@@ -1649,7 +1649,7 @@
     "T186": {
       "type": "task",
       "title": "H10.5 Zig metrics port",
-      "status": "pending",
+      "status": "done",
       "parentId": "T181",
       "depends": [
         "T184"
@@ -1832,7 +1832,7 @@
     "T187": {
       "type": "task",
       "title": "H10.6 Zig parity oracle and runner integration",
-      "status": "pending",
+      "status": "done",
       "parentId": "T181",
       "depends": [
         "T185",
@@ -1849,7 +1849,7 @@
     "T191": {
       "type": "task",
       "title": "Production adapters for the backtest results store",
-      "status": "pending",
+      "status": "done",
       "parentId": "T071",
       "depends": []
     },
@@ -2213,7 +2213,7 @@
     "T181": {
       "type": "epic",
       "title": "H10 M6 Zig core engine migration",
-      "status": "pending",
+      "status": "done",
       "parentId": "T068",
       "depends": [
         "T069"
@@ -2302,7 +2302,7 @@
     "T198": {
       "type": "task",
       "title": "Import-boundary and type separation for the strategy surface",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T192"
@@ -2322,8 +2322,8 @@
     },
     "T200": {
       "type": "task",
-      "title": "Determinism data-path scenario coverage",
-      "status": "pending",
+      "title": "Determinism-data-path-scenario-coverage",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T193",
@@ -2333,7 +2333,7 @@
     "T204": {
       "type": "task",
       "title": "Architecture doc correction for structural look-ahead",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T199",
@@ -7179,7 +7179,7 @@
     {
       "id": "T070",
       "title": "H2 M1 Equities backtest engine",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T068",
@@ -7228,7 +7228,8 @@
         "T069"
       ],
       "createdAt": "2026-09-01T17:55:23.154Z",
-      "updatedAt": "2026-09-04T19:34:27.764Z",
+      "updatedAt": "2026-09-05T01:37:32.243Z",
+      "completedAt": "2026-09-05T01:37:32.243Z",
       "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
@@ -17567,7 +17568,7 @@
     {
       "id": "T186",
       "title": "H10.5 Zig metrics port",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T181",
@@ -17595,21 +17596,86 @@
         "T184"
       ],
       "createdAt": "2026-09-04T16:44:48.313Z",
-      "updatedAt": "2026-09-04T23:22:15.436Z",
+      "updatedAt": "2026-09-05T01:28:17.915Z",
+      "completedAt": "2026-09-05T01:28:13.371Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T01:27:42.491Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T16:44:48.313Z"
+        "initializedAt": "2026-09-04T16:44:48.313Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/native/metrics.zig",
+                    "sha256": "85b31025090f9672ef74f8f24a21138a6f6f7c800bffaaa239850f5edce4f929"
+                  },
+                  {
+                    "path": "src/harness/native/metrics/common.zig",
+                    "sha256": "8b31b052105c2b139d48e4e9ddf40e9a60872373c8db027550ff5b7f3dc72894"
+                  },
+                  {
+                    "path": "src/harness/native/metrics/equity.zig",
+                    "sha256": "777ed589fe90af3d0c25c9184bb2a324b9827be3baf77c1341b80ce1d803edb3"
+                  },
+                  {
+                    "path": "src/harness/native/metrics/risk.zig",
+                    "sha256": "ea30ea91e15ce5bca678caac79d066f7a132e04d2e9f295cae41e990cc7488b0"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T01:27:08.005Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T186-validation.json",
+                "sha256": "a9f3233ea5a491e20402d36ccb8dafeeafc5a9989353326f093655758cd0101a",
+                "passCount": 100,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-05T01:27:25.221Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T01:27:42.674Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "assignee": "zig-metrics",
       "kind": "work",
       "scope": "feature",
@@ -19437,7 +19503,7 @@
     {
       "id": "T187",
       "title": "H10.6 Zig parity oracle and runner integration",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T181",
@@ -19467,21 +19533,78 @@
         "T186"
       ],
       "createdAt": "2026-09-04T16:44:52.352Z",
-      "updatedAt": "2026-09-04T16:45:27.364Z",
+      "updatedAt": "2026-09-05T01:31:29.790Z",
+      "completedAt": "2026-09-05T01:31:25.821Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T01:30:53.745Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T16:44:52.352Z"
+        "initializedAt": "2026-09-04T16:44:52.352Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/runtime/zig_backtest.py",
+                    "sha256": "af5c145e7606cd0d084fd5a2c3ac5bfd6e4b8b934baa7b47e895877260029183"
+                  },
+                  {
+                    "path": "tests/determinism/test_parity_oracle.py",
+                    "sha256": "1816a86892500f364201d637a1365d7476da781fa07e7ff7b6d471625fa21e34"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T01:30:07.216Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T187-validation.json",
+                "sha256": "6a088c767aa4f369efe809ef316daabd49c6febf9ccf9a856ae86ea58015c09e",
+                "passCount": 43,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-05T01:30:36.377Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T01:30:53.857Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -19533,7 +19656,7 @@
     {
       "id": "T191",
       "title": "Production adapters for the backtest results store",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T071",
@@ -19555,21 +19678,90 @@
         "src/harness/results/store.py"
       ],
       "createdAt": "2026-09-04T19:31:06.778Z",
-      "updatedAt": "2026-09-04T19:31:06.778Z",
+      "updatedAt": "2026-09-05T01:35:36.469Z",
+      "completedAt": "2026-09-05T01:35:32.778Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T01:35:14.602Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:31:06.778Z"
+        "initializedAt": "2026-09-04T19:31:06.778Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/storage/ports.py",
+                    "sha256": "b6cae5cd5d2441749386ffa21cae77634fc22408432693d69e22fa12e876d6d3"
+                  },
+                  {
+                    "path": "src/lake/storage/azure.py",
+                    "sha256": "85f9ce264b70fa410cca692637a558ad7e993d0cb19fd06ed27e49659c5a2b36"
+                  },
+                  {
+                    "path": "src/lake/catalog/models.py",
+                    "sha256": "c47f34667d978f3ae248746a0955f830b9b8272067eb640f8981492a64585f5b"
+                  },
+                  {
+                    "path": "src/lake/catalog/azure.py",
+                    "sha256": "d39196005f0e73bb216791c339d7bdc6c45c581dad72710217a0bbe1142adc60"
+                  },
+                  {
+                    "path": "src/harness/results/store.py",
+                    "sha256": "a027feb195690c442ebb49bf2d3a6ee75460837dd13a43c0e0832e267186943c"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T01:34:29.297Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T191-validation.json",
+                "sha256": "e17db09ff8c388d7067482d9d06a4b658912f2ca273c77e6a5e221f437c529e5",
+                "passCount": 40,
+                "failCount": 0,
+                "skipCount": 1
+              }
+            ],
+            "capturedAt": "2026-09-05T01:34:57.366Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T01:35:14.713Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -22338,7 +22530,7 @@
       "size": "large",
       "position": 8,
       "positionVersion": 0,
-      "description": "Build the first Thesis UI component: an HTML5 canvas visualization of the workspace CLEO task hierarchy as a DAG (hierarchy containment plus dependency edges) with mouse pan and zoom, status-encoded nodes, and click-through to a task detail panel for leaf tasks. Include the read-only Thesis backend endpoint that projects the workspace CLEO plan through the coordinator's read path, and create the src/ui React app scaffold that this component and later UI tasks live in. A fixture-driven demo route must render the component without a live backend so it can be viewed immediately. This task is intended to be front-run before its parent epic starts.",
+      "description": "Build the Thesis UI CLEO task hierarchy component in SvelteKit: an HTML5 canvas visualization of the workspace CLEO task hierarchy as a DAG (hierarchy containment plus dependency edges) with mouse pan and zoom, status-encoded nodes, and click-through to a task detail panel for leaf tasks. Include the read-only Thesis backend endpoint that projects the workspace CLEO plan through the coordinator's read path, and own the ui app scaffold (SvelteKit) that this component and later UI tasks live in. A fixture-driven demo route must render the component without a live backend. Intended to be front-run before its parent epic starts.",
       "labels": [
         "thesis",
         "ui",
@@ -22347,7 +22539,8 @@
         "dag"
       ],
       "notes": [
-        "2026-09-04 23:31:32 UTC: First of the UI-owned implementation tasks deferred from T176; intended to be front-run before T150 starts. Owns the src/ui app scaffold: later UI tasks own only their own component subtrees and integrate against this scaffold. When the T176 design specification lands, align visual treatment with it."
+        "2026-09-04 23:31:32 UTC: First of the UI-owned implementation tasks deferred from T176; intended to be front-run before T150 starts. Owns the src/ui app scaffold: later UI tasks own only their own component subtrees and integrate against this scaffold. When the T176 design specification lands, align visual treatment with it.",
+        "2026-09-05 01:13:35 UTC: Stack decision 2026-09-05: Thesis UI is SvelteKit in ui/ (replaces React/src/ui). App scaffold (package.json, svelte.config.js, vite.config.js, app shell, layout, index route, fixtures) built during the T207 front-run and shared. Remaining for acceptance: task-dag component and demo route under ui/, plus the backend plan-projection endpoint (src/thesis/http/plan.py, src/thesis/cleo/plan_view.py) and focused tests. When the T176 design specification lands, align visual treatment with it."
       ],
       "acceptance": [
         "The component renders the workspace CLEO hierarchy as a DAG on HTML5 canvas: containment structure plus dependency edges, with nodes visually encoded by task status",
@@ -22358,8 +22551,8 @@
         "Focused tests pass: backend plan-projection endpoint tests and component tests for layout, pan, zoom, and selection behavior"
       ],
       "files": [
-        "src/ui/",
-        "src/ui/src/components/task-dag/",
+        "ui/components/task-dag/",
+        "ui/src/routes/demo/dag/",
         "src/thesis/http/plan.py",
         "src/thesis/cleo/plan_view.py",
         "tests/thesis/cleo/test_plan_view.py"
@@ -22370,7 +22563,7 @@
         "T155"
       ],
       "createdAt": "2026-09-04T23:31:30.684Z",
-      "updatedAt": "2026-09-04T23:33:45.020Z",
+      "updatedAt": "2026-09-05T01:13:35.128Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -22961,7 +23154,7 @@
       "size": "large",
       "position": 9,
       "positionVersion": 0,
-      "description": "Build the second Thesis UI component: a canvas-based backtest visualization that renders an equity/PnL curve with executed trades overlaid as entry/exit markers, plus price charts of the securities the strategy traded as panels above and below the PnL chart. All panels share a locked time axis: pan and zoom on any panel synchronizes the others horizontally while each panel keeps its own value axis. Include the read-only Thesis backend endpoint that serves equity curves, fills and orders, and per-instrument price series from the workspace's imported, hash-verified backtest artifacts and the workspace market-data clients. A fixture-driven demo route must render the component with sample backtest artifacts so it can be viewed immediately. This task is intended to be front-run before its parent epic starts and may start before or in parallel with TH6.5 (T206).",
+      "description": "Build the Thesis UI backtest visualization component in SvelteKit: a canvas-based view rendering an equity/PnL curve with executed trades overlaid as entry/exit markers, plus price charts of the securities the strategy traded as panels above and below the PnL chart. All panels share one locked time axis: pan and zoom on any panel synchronizes the others horizontally while each panel keeps its own value axis. Include the read-only Thesis backend endpoint that serves equity curves, fills and orders, and per-instrument price series from the workspace's imported, hash-verified backtest artifacts and the workspace market-data clients. A fixture-driven demo route must render the component with sample backtest artifacts so it can be viewed immediately without a backend. Intended to be front-run before its parent epic starts.",
       "labels": [
         "thesis",
         "ui",
@@ -22970,7 +23163,8 @@
         "charts"
       ],
       "notes": [
-        "2026-09-04 23:32:17 UTC: Second UI-owned implementation task deferred from T176; intended to be front-run before T150 starts. Owns only its component subtree and backend view endpoints. If it starts before TH6.5 (T206), develop and render through its own fixture entry point and integrate into the src/ui app scaffold once T206 lands; do not modify scaffold root files owned by T206. Trade and equity data come from T098 recorder artifacts imported by T159; price series come from workspace market-data clients (T158)."
+        "2026-09-04 23:32:17 UTC: Second UI-owned implementation task deferred from T176; intended to be front-run before T150 starts. Owns only its component subtree and backend view endpoints. If it starts before TH6.5 (T206), develop and render through its own fixture entry point and integrate into the src/ui app scaffold once T206 lands; do not modify scaffold root files owned by T206. Trade and equity data come from T098 recorder artifacts imported by T159; price series come from workspace market-data clients (T158).",
+        "2026-09-05 01:12:52 UTC: Front-run progress 2026-09-05: SvelteKit component implemented at ui/components/backtest-view with fixture-driven demo route rendering locally at /demo/backtest; app scaffolded per stack decision (SvelteKit replaces React). Remaining for acceptance: backend artifact-view endpoint (src/thesis/http/backtest_view.py, src/thesis/artifacts/view.py) plus focused endpoint and component tests. The dev app builds (vite build) and serves the fixture demo."
       ],
       "acceptance": [
         "The component renders a backtest's equity/PnL curve with executed trades overlaid as markers carrying side, quantity, and timestamp sourced from the harness recorder artifacts",
@@ -22982,7 +23176,8 @@
         "Focused tests pass: backend artifact-view endpoint tests and component tests for synchronized pan and zoom behavior"
       ],
       "files": [
-        "src/ui/src/components/backtest-view/",
+        "ui/components/backtest-view/",
+        "ui/src/routes/demo/backtest/",
         "src/thesis/http/backtest_view.py",
         "src/thesis/artifacts/view.py",
         "tests/thesis/artifacts/test_view.py"
@@ -22992,7 +23187,7 @@
         "T159"
       ],
       "createdAt": "2026-09-04T23:32:15.099Z",
-      "updatedAt": "2026-09-05T00:55:40.834Z",
+      "updatedAt": "2026-09-05T01:12:52.039Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -23581,7 +23776,7 @@
     {
       "id": "T181",
       "title": "H10 M6 Zig core engine migration",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T068",
@@ -23610,8 +23805,9 @@
         "T069"
       ],
       "createdAt": "2026-09-04T16:28:43.028Z",
-      "updatedAt": "2026-09-04T16:44:52.352Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-05T01:31:25.821Z",
+      "completedAt": "2026-09-05T01:31:25.821Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -24522,7 +24718,7 @@
     {
       "id": "T198",
       "title": "Import-boundary and type separation for the strategy surface",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T070",
@@ -24546,19 +24742,72 @@
         "T192"
       ],
       "createdAt": "2026-09-04T19:32:27.954Z",
-      "updatedAt": "2026-09-05T00:32:12.624Z",
+      "updatedAt": "2026-09-05T01:33:07.527Z",
+      "completedAt": "2026-09-05T01:33:03.818Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T01:32:45.406Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:32:27.954Z"
+        "initializedAt": "2026-09-04T19:32:27.954Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "tests/harness/strategy/test_import_boundary.py",
+                    "sha256": "a2a95c7f6485d36d5fb2abe7b6f1db1c3196903897173e05f2672cbcfc648075"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T01:31:47.588Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T198-validation.json",
+                "sha256": "5dd47b738ce8fe0ebcfb85f8d3ed547b3efb6c3924d324453fcb1de8d64f6990",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-05T01:32:16.219Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T01:32:45.520Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
       "assignee": "determinism-datapath",
@@ -24679,8 +24928,8 @@
     },
     {
       "id": "T200",
-      "title": "Determinism data-path scenario coverage",
-      "status": "pending",
+      "title": "Determinism-data-path-scenario-coverage",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -24705,19 +24954,76 @@
         "T195"
       ],
       "createdAt": "2026-09-04T19:33:35.009Z",
-      "updatedAt": "2026-09-05T00:50:58.849Z",
+      "updatedAt": "2026-09-05T01:29:42.970Z",
+      "completedAt": "2026-09-05T01:29:39.033Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T01:29:08.314Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:33:35.009Z"
+        "initializedAt": "2026-09-04T19:33:35.009Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/testing/determinism.py",
+                    "sha256": "777dc55933f23b57facdec0b9c75ba5a0a3d3a43fe9395441a2f5a6fb55f4681"
+                  },
+                  {
+                    "path": "tests/determinism/test_determinism_data_path.py",
+                    "sha256": "5b4296eaf53f7563f337feb5301ec2cbf7075947d354f98106890f708d090592"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T01:28:33.907Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T200-validation.json",
+                "sha256": "4b42a0f633bab1913065d89e92363e79303e213e5fe5156a22e23d05226bee45",
+                "passCount": 16,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-05T01:28:51.095Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T01:29:08.424Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
       "kind": "work",
@@ -24727,7 +25033,7 @@
     {
       "id": "T204",
       "title": "Architecture doc correction for structural look-ahead",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T070",
@@ -24752,19 +25058,72 @@
         "T200"
       ],
       "createdAt": "2026-09-04T19:34:27.764Z",
-      "updatedAt": "2026-09-04T19:34:27.764Z",
+      "updatedAt": "2026-09-05T01:37:35.940Z",
+      "completedAt": "2026-09-05T01:37:32.243Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T01:37:14.346Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:34:27.764Z"
+        "initializedAt": "2026-09-04T19:34:27.764Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/architecture/repository.md",
+                    "sha256": "9eb17e78912cdda55f372c454fd0b19bb9575e1196637951b9e6460947bf5a9c"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T01:33:32.509Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T01:33:54.154Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T187-T198-T204-T191-wave-validation.json",
+                "sha256": "3e60438e4b707f3466711807abe4693a8792441a4eb51d286438ca4dac67b733",
+                "passCount": 1299,
+                "failCount": 0,
+                "skipCount": 12
+              }
+            ],
+            "capturedAt": "2026-09-05T01:37:14.352Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
       "kind": "work",
