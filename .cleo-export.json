@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-04T23:23:12.971Z",
+    "exportedAt": "2026-09-05T01:06:11.862Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 206
+      "nextId": 209
     },
-    "checksum": "b213e30a696a55d7",
-    "taskCount": 202,
+    "checksum": "e712f1641dcd34c9",
+    "taskCount": 205,
     "exportMode": "full"
   },
   "selection": {
@@ -188,6 +188,7 @@
       "T142",
       "T150",
       "T205",
+      "T208",
       "T009",
       "T075",
       "T085",
@@ -196,11 +197,13 @@
       "T141",
       "T179",
       "T180",
+      "T206",
       "T010",
       "T076",
       "T086",
       "T096",
       "T111",
+      "T207",
       "T011",
       "T087",
       "T097",
@@ -848,7 +851,7 @@
     "T004": {
       "type": "epic",
       "title": "E1 Azure infrastructure and budget controls",
-      "status": "done",
+      "status": "pending",
       "parentId": "T001",
       "depends": [
         "T003"
@@ -1997,6 +2000,16 @@
       "parentId": "T150",
       "depends": []
     },
+    "T208": {
+      "type": "task",
+      "title": "E1.7 ACR image retention: keep latest and previous per service",
+      "status": "pending",
+      "parentId": "T004",
+      "depends": [
+        "T018",
+        "T031"
+      ]
+    },
     "T009": {
       "type": "epic",
       "title": "E6 Dev deployment and equities soak gate",
@@ -2084,6 +2097,17 @@
         "T179"
       ]
     },
+    "T206": {
+      "type": "task",
+      "title": "TH6.5 CLEO task DAG canvas component",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": [
+        "T152",
+        "T154",
+        "T155"
+      ]
+    },
     "T010": {
       "type": "epic",
       "title": "E7 Options front-set OPRA",
@@ -2141,6 +2165,16 @@
         "T096",
         "T105",
         "T107"
+      ]
+    },
+    "T207": {
+      "type": "task",
+      "title": "TH6.6 Backtest PnL and price chart component",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": [
+        "T158",
+        "T159"
       ]
     },
     "T011": {
@@ -2259,7 +2293,7 @@
     "T197": {
       "type": "task",
       "title": "Book-view scope and cross-book visibility decision",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T196"
@@ -2267,7 +2301,7 @@
     },
     "T198": {
       "type": "task",
-      "title": "Determinism data-path scenario coverage",
+      "title": "Import-boundary and type separation for the strategy surface",
       "status": "pending",
       "parentId": "T070",
       "depends": [
@@ -2277,7 +2311,7 @@
     "T199": {
       "type": "task",
       "title": "Adversarial look-ahead detector suite and lint CI sweep",
-      "status": "pending",
+      "status": "done",
       "parentId": "T070",
       "depends": [
         "T194",
@@ -2288,7 +2322,7 @@
     },
     "T200": {
       "type": "task",
-      "title": "Golden data-path scenario coverage",
+      "title": "Determinism data-path scenario coverage",
       "status": "pending",
       "parentId": "T070",
       "depends": [
@@ -9544,7 +9578,7 @@
     {
       "id": "T004",
       "title": "E1 Azure infrastructure and budget controls",
-      "status": "done",
+      "status": "pending",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -9556,6 +9590,10 @@
         "azure",
         "iac",
         "phase.0"
+      ],
+      "notes": [
+        "[2026-09-05T00:34:41.072Z] completion-history: completedAt=2026-09-02T20:39:46.093Z",
+        "[2026-09-05T00:34:41.072Z] Reopened by add of child T208 (done parent gained an unsatisfied child)"
       ],
       "acceptance": [
         "Bicep defines all Azure resources required by the service",
@@ -9571,8 +9609,7 @@
         "T003"
       ],
       "createdAt": "2026-09-01T03:15:24.964Z",
-      "updatedAt": "2026-09-02T20:39:46.093Z",
-      "completedAt": "2026-09-02T20:39:46.093Z",
+      "updatedAt": "2026-09-05T00:34:41.072Z",
       "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
@@ -19464,13 +19501,17 @@
         "cleo",
         "tooling"
       ],
+      "notes": [
+        "2026-09-04 23:54:05 UTC: Fork fix phase 1 complete 2026-09-04: forked kryptobaseddev/cleo to Carson-Fricke/cleo, branch fix/subsystem-defects-2026.8.9 (commit 310c4e986) repairs #1216/#1217/#1218/#1219; built and installed globally in place of @cleocode/cleo (revert: npm i -g @cleocode/cleo@2026.8.9). Verified end-to-end: llm test/stream openrouter natively without env var; brain maintenance embeds natively (23/23 covered); search-hybrid returns vector-ranked results; graph sync indexes for real (528 nodes/514 relations/407 files); transcript extract stored 7 memories on first try. Additional cleanup item discovered during adoption: the GLOBAL cleo.db journal was missing the t11363-consolidation and t11622-agent-registry-rename entries (their net effect was already applied; the agent_registry rename made the consolidation DDL probe un-satisfiable), causing per-command brain_attention 'table already exists' reconciliation spam and hard-failing all cleo graph paths. Repaired by backing up the global db and journaling both migrations as applied (temp backup: cleo-global-before-journal-repair.db). Post-upstream-fix cleanup when rolling forward: remove OPENAI_BASE_URL user env var, remove CLEO_HOME plugin openai-openrouter-redirect.mjs, migrate the openai/openrouter-glm credential and all roles to the native openrouter provider, optionally remove .github/scripts/backfill-brain-embeddings.mjs (T205), and confirm the global journal no longer spams reconciliation warnings.",
+        "2026-09-05 01:05:20 UTC: Fork follow-up 899c247e5 (2026-09-05): nexus parse-loop partitions TS/JS (worker pool) from Python/Go/Rust (inline) so symbol indexing works in worker-pool repos; graph search pattern-arg repair; FCA re-indexed to 5042 nodes/17432 relations with working impact analysis. Add to roll-forward cleanup: after upstream ships the full #1218 fix, verify symbol counts match the fork's before closing T189."
+      ],
       "acceptance": [
         "Workaround inventory is recorded in the task: credential openai/openrouter-glm, user env var OPENAI_BASE_URL=https://openrouter.ai/api/v1, default and all five BRAIN roles pinned to openai/z-ai/glm-5.3-flash, and brain.llmExtraction.enabled true",
         "After upgrading CLEO past 2026.8.9 with kryptobaseddev/cleo#1216 fixed, cleo llm stream openrouter succeeds and the global default plus all five BRAIN roles are migrated back to the openrouter provider with z-ai/glm-5.3-flash retained as the model",
         "After migration, the OPENAI_BASE_URL user environment variable, the inert llm.providers.openai.baseUrl global config key, and the openai/openrouter-glm credential are removed, and brain observations O-mtn8k38i-0 and O-mtn92j4t-0 are superseded by a new observation recording the restored native configuration"
       ],
       "createdAt": "2026-09-04T18:09:15.014Z",
-      "updatedAt": "2026-09-04T18:09:15.014Z",
+      "updatedAt": "2026-09-05T01:05:19.934Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -21020,7 +21061,9 @@
         "Complete child T177: TH6.4 Publish Thesis architecture and repository boundaries",
         "Complete child T188: Agent instructions for source folder READMEs and file purposes",
         "Complete child T189: Track CLEO LLM provider workaround and OpenRouter transport fix",
-        "Complete child T205: Retire BRAIN embedding backfill workaround after upstream fix #1217"
+        "Complete child T205: Retire BRAIN embedding backfill workaround after upstream fix #1217",
+        "Complete child T206: TH6.5 CLEO task DAG canvas component",
+        "Complete child T207: TH6.6 Backtest PnL and price chart component"
       ],
       "depends": [
         "T069",
@@ -21034,7 +21077,7 @@
         "T149"
       ],
       "createdAt": "2026-09-03T00:02:16.159Z",
-      "updatedAt": "2026-09-04T20:39:12.326Z",
+      "updatedAt": "2026-09-04T23:32:15.099Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -21082,6 +21125,59 @@
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T208",
+      "title": "E1.7 ACR image retention: keep latest and previous per service",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T004",
+      "size": "small",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Implement image retention for the private Azure Container Registry so each service repository retains only the latest and previous mirrored images. The ACR is a pull-through mirror of the canonical, immutable, commit-addressed GHCR archive, so pruning it loses nothing. Today a single shared market-lake image (api, ingest, and future harness commands) is mirrored per deployment; the quant runtime (T112-T114) and Thesis backend (T178/T174) images must adopt the same per-service pattern when they land. Implement via a declarative registry-level retention policy in the container-registry Bicep module plus a post-deploy prune step in the main deploy workflow that untags or deletes superseded mirrors. Pruning must never delete a digest referenced by an active or rollback Container App revision; the previous-image buffer covers scale-from-zero repulls and rollback under single-revision mode.",
+      "labels": [
+        "azure",
+        "acr",
+        "cost-controls",
+        "lifecycle",
+        "infrastructure"
+      ],
+      "acceptance": [
+        "After every deployment, each service repository in the Azure Container Registry retains only the latest and previous mirrored images, and repeated deployments are idempotent",
+        "Pruning never deletes an image digest still referenced by an active or rollback Container App revision, and the previous-image buffer covers scale-from-zero repulls and rollback",
+        "The registry-level retention policy is declared in the container-registry Bicep module and applies without manual portal changes",
+        "The per-service retention pattern is documented so the quant runtime and Thesis backend images adopt it when their deployment tasks land (T112-T114, T174, T178)",
+        "Focused Bicep validation and workflow checks pass without requiring live Azure mutations in CI"
+      ],
+      "files": [
+        "infra/modules/container-registry.bicep",
+        ".github/workflows/deploy-main.yml"
+      ],
+      "depends": [
+        "T018",
+        "T031"
+      ],
+      "createdAt": "2026-09-05T00:34:41.072Z",
+      "updatedAt": "2026-09-05T00:34:41.072Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-05T00:34:41.072Z"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "unit",
       "relates": []
     },
     {
@@ -22233,6 +22329,67 @@
       "relates": []
     },
     {
+      "id": "T206",
+      "title": "TH6.5 CLEO task DAG canvas component",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "large",
+      "position": 8,
+      "positionVersion": 0,
+      "description": "Build the first Thesis UI component: an HTML5 canvas visualization of the workspace CLEO task hierarchy as a DAG (hierarchy containment plus dependency edges) with mouse pan and zoom, status-encoded nodes, and click-through to a task detail panel for leaf tasks. Include the read-only Thesis backend endpoint that projects the workspace CLEO plan through the coordinator's read path, and create the src/ui React app scaffold that this component and later UI tasks live in. A fixture-driven demo route must render the component without a live backend so it can be viewed immediately. This task is intended to be front-run before its parent epic starts.",
+      "labels": [
+        "thesis",
+        "ui",
+        "cleo",
+        "canvas",
+        "dag"
+      ],
+      "notes": [
+        "2026-09-04 23:31:32 UTC: First of the UI-owned implementation tasks deferred from T176; intended to be front-run before T150 starts. Owns the src/ui app scaffold: later UI tasks own only their own component subtrees and integrate against this scaffold. When the T176 design specification lands, align visual treatment with it."
+      ],
+      "acceptance": [
+        "The component renders the workspace CLEO hierarchy as a DAG on HTML5 canvas: containment structure plus dependency edges, with nodes visually encoded by task status",
+        "Mouse wheel zoom and drag pan work smoothly at the current roadmap scale (200+ tasks) without visual degradation",
+        "Clicking a leaf task opens a detail panel showing title, status, priority, dependencies, owned files, notes, and acceptance criteria sourced from a read-only backend endpoint",
+        "The backend projects the plan through the workspace CLEO coordinator's read path only; the UI never accesses the CLEO database or runtime state directly",
+        "A fixture-driven demo route renders the full component with sample plan data and no live backend or provider credentials",
+        "Focused tests pass: backend plan-projection endpoint tests and component tests for layout, pan, zoom, and selection behavior"
+      ],
+      "files": [
+        "src/ui/",
+        "src/ui/src/components/task-dag/",
+        "src/thesis/http/plan.py",
+        "src/thesis/cleo/plan_view.py",
+        "tests/thesis/cleo/test_plan_view.py"
+      ],
+      "depends": [
+        "T152",
+        "T154",
+        "T155"
+      ],
+      "createdAt": "2026-09-04T23:31:30.684Z",
+      "updatedAt": "2026-09-04T23:33:45.020Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T23:31:30.684Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T010",
       "title": "E7 Options front-set OPRA",
       "status": "pending",
@@ -22792,6 +22949,67 @@
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "unit",
+      "relates": []
+    },
+    {
+      "id": "T207",
+      "title": "TH6.6 Backtest PnL and price chart component",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "large",
+      "position": 9,
+      "positionVersion": 0,
+      "description": "Build the second Thesis UI component: a canvas-based backtest visualization that renders an equity/PnL curve with executed trades overlaid as entry/exit markers, plus price charts of the securities the strategy traded as panels above and below the PnL chart. All panels share a locked time axis: pan and zoom on any panel synchronizes the others horizontally while each panel keeps its own value axis. Include the read-only Thesis backend endpoint that serves equity curves, fills and orders, and per-instrument price series from the workspace's imported, hash-verified backtest artifacts and the workspace market-data clients. A fixture-driven demo route must render the component with sample backtest artifacts so it can be viewed immediately. This task is intended to be front-run before its parent epic starts and may start before or in parallel with TH6.5 (T206).",
+      "labels": [
+        "thesis",
+        "ui",
+        "backtest",
+        "canvas",
+        "charts"
+      ],
+      "notes": [
+        "2026-09-04 23:32:17 UTC: Second UI-owned implementation task deferred from T176; intended to be front-run before T150 starts. Owns only its component subtree and backend view endpoints. If it starts before TH6.5 (T206), develop and render through its own fixture entry point and integrate into the src/ui app scaffold once T206 lands; do not modify scaffold root files owned by T206. Trade and equity data come from T098 recorder artifacts imported by T159; price series come from workspace market-data clients (T158)."
+      ],
+      "acceptance": [
+        "The component renders a backtest's equity/PnL curve with executed trades overlaid as markers carrying side, quantity, and timestamp sourced from the harness recorder artifacts",
+        "Price charts of the instruments the strategy traded render as panels above and below the PnL chart",
+        "All panels share one locked time axis: pan or zoom on any panel synchronizes the others horizontally while each panel keeps an independent value axis",
+        "Rendering stays smooth over a full multi-year run using canvas or GPU-backed drawing rather than per-element DOM nodes",
+        "A read-only backend endpoint assembles equity curves, fills and orders, and per-instrument series from imported backtest artifacts and workspace market-data clients without mutating artifacts",
+        "A fixture-driven demo route renders the full component with sample backtest artifacts and no live harness run",
+        "Focused tests pass: backend artifact-view endpoint tests and component tests for synchronized pan and zoom behavior"
+      ],
+      "files": [
+        "src/ui/src/components/backtest-view/",
+        "src/thesis/http/backtest_view.py",
+        "src/thesis/artifacts/view.py",
+        "tests/thesis/artifacts/test_view.py"
+      ],
+      "depends": [
+        "T158",
+        "T159"
+      ],
+      "createdAt": "2026-09-04T23:32:15.099Z",
+      "updatedAt": "2026-09-05T00:55:40.834Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-04T23:32:15.099Z"
+      },
+      "pipelineStage": "implementation",
+      "assignee": "local",
+      "kind": "work",
+      "scope": "feature",
       "relates": []
     },
     {
@@ -24103,7 +24321,7 @@
       "size": "medium",
       "position": 16,
       "positionVersion": 0,
-      "description": "Tag strategy-scheduled events with provenance so the bus, venues, and recorders distinguish fabricated market data from feed events; the venue matcher rejects strategy-emitted market-data impersonation.",
+      "description": "Superseded design: rather than tagging strategy-scheduled events with provenance (original design), the shipped structural mechanism refuses the seven reserved feed/outcome classes at both scheduler capability surfaces (StrategyScheduler in runtime/backtest/strategies.py adopted by the engine, and the context-internal EventScheduler in strategy/context.py), so fabricated market data cannot reach the bus, venue matcher, or recorders from any strategy-reachable path. Provenance tagging is unnecessary for the guarantee and remains available if richer telemetry is needed later.",
       "labels": [
         "look-ahead",
         "wave.3"
@@ -24122,7 +24340,7 @@
         "T192"
       ],
       "createdAt": "2026-09-04T19:32:00.518Z",
-      "updatedAt": "2026-09-04T23:21:17.606Z",
+      "updatedAt": "2026-09-05T00:23:36.856Z",
       "completedAt": "2026-09-04T23:21:08.366Z",
       "verification": {
         "passed": true,
@@ -24201,7 +24419,7 @@
     {
       "id": "T197",
       "title": "Book-view scope and cross-book visibility decision",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T070",
@@ -24225,19 +24443,76 @@
         "T196"
       ],
       "createdAt": "2026-09-04T19:32:20.313Z",
-      "updatedAt": "2026-09-04T19:32:20.313Z",
+      "updatedAt": "2026-09-05T00:44:17.891Z",
+      "completedAt": "2026-09-05T00:44:12.814Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T00:38:44.275Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:32:20.313Z"
+        "initializedAt": "2026-09-04T19:32:20.313Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/strategy/context.py",
+                    "sha256": "ea51ea821a8690b07ed5ce64092f3145883a26ac948280e37228a07472ba3dd6"
+                  },
+                  {
+                    "path": "tests/harness/strategy/test_book_view_scope.py",
+                    "sha256": "bcadf8cae870de5ea71af52093371e1f35f6f8c69726191d759351d351c4b1c4"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T00:24:32.985Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T197-validation.json",
+                "sha256": "40ddb72b86845ab14bdf8253d04edd8a536bf78b12baaf34204d4b844efeb6e2",
+                "passCount": 40,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-05T00:38:20.034Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T00:38:44.472Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
       "kind": "work",
@@ -24246,7 +24521,7 @@
     },
     {
       "id": "T198",
-      "title": "Determinism data-path scenario coverage",
+      "title": "Import-boundary and type separation for the strategy surface",
       "status": "pending",
       "priority": "medium",
       "type": "task",
@@ -24271,7 +24546,7 @@
         "T192"
       ],
       "createdAt": "2026-09-04T19:32:27.954Z",
-      "updatedAt": "2026-09-04T23:22:51.989Z",
+      "updatedAt": "2026-09-05T00:32:12.624Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -24294,7 +24569,7 @@
     {
       "id": "T199",
       "title": "Adversarial look-ahead detector suite and lint CI sweep",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T070",
@@ -24321,19 +24596,80 @@
         "T197"
       ],
       "createdAt": "2026-09-04T19:33:27.248Z",
-      "updatedAt": "2026-09-04T23:22:34.594Z",
+      "updatedAt": "2026-09-05T00:44:56.102Z",
+      "completedAt": "2026-09-05T00:44:51.882Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T00:16:12.071Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T19:33:27.248Z"
+        "initializedAt": "2026-09-04T19:33:27.248Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "tests/harness/strategy/test_adversarial_lookahead.py",
+                    "sha256": "0cf92089c5ca8f1b81eb941f9dbfb790899522885d27bd8d52c776b7bff571bc"
+                  },
+                  {
+                    "path": "tests/strategy_lint/test_lint_sweep.py",
+                    "sha256": "0f186b8195538916f10a47c3e1239e118e2fac2153ddc203cab18a4ddf1137ff"
+                  },
+                  {
+                    "path": ".github/workflows/python-bicep-ci.yml",
+                    "sha256": "752b97e38663323b960bfdca4bcc7c5b21b80abde48754164a5f9bd95bb1a56b"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T00:05:47.655Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T199-validation.json",
+                "sha256": "608a53076a6a8c60f5d3952d48483914539916ff7876f4276721bc7c8197edce",
+                "passCount": 74,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-05T00:06:06.466Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 204 CLEO tasks through T207.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T00:16:12.264Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
       "assignee": "adversarial-suite",
@@ -24343,7 +24679,7 @@
     },
     {
       "id": "T200",
-      "title": "Golden data-path scenario coverage",
+      "title": "Determinism data-path scenario coverage",
       "status": "pending",
       "priority": "high",
       "type": "task",
@@ -24369,7 +24705,7 @@
         "T195"
       ],
       "createdAt": "2026-09-04T19:33:35.009Z",
-      "updatedAt": "2026-09-04T19:33:35.009Z",
+      "updatedAt": "2026-09-05T00:50:58.849Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -24463,7 +24799,8 @@
         "T018",
         "T019",
         "T020",
-        "T140"
+        "T140",
+        "T208"
       ],
       "T005": [
         "T021",
@@ -24687,7 +25024,9 @@
         "T177",
         "T188",
         "T189",
-        "T205"
+        "T205",
+        "T206",
+        "T207"
       ],
       "T181": [
         "T182",
@@ -25428,6 +25767,10 @@
         "T148",
         "T149"
       ],
+      "T208": [
+        "T018",
+        "T031"
+      ],
       "T009": [
         "T004",
         "T006",
@@ -25466,6 +25809,11 @@
         "T061",
         "T179"
       ],
+      "T206": [
+        "T152",
+        "T154",
+        "T155"
+      ],
       "T010": [
         "T005",
         "T007",
@@ -25494,6 +25842,10 @@
         "T096",
         "T105",
         "T107"
+      ],
+      "T207": [
+        "T158",
+        "T159"
       ],
       "T011": [
         "T005",

@@ -1,0 +1,25 @@
+{
+  "taskId": "T198",
+  "numTotalTests": 16,
+  "numPassedTests": 16,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "determinism-data-path",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/determinism",
+      "result": "16 passed: DataProbeStrategy exercises read/read(type)/last/window/aggregate per callback with now-anchored expectations pinned per callback; FabricatedQuoteStrategy pins the structural refusal taxonomy deterministically; history-flag scenario proves artifacts identical while only configuration_hash moves; pre-existing scenario artifacts verified byte-identical via a disposable worktree digest probe (27 artifact lines + dispatch hashes identical)"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and 1273-test pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "StrategyHistory.bars is not yet exercised in the determinism set (single-trade feed); a multi-trade bars scenario is a cheap follow-up",
+    "A LookaheadError future-window scenario through StrategyHistory could join the determinism set in a later wave"
+  ]
+}
