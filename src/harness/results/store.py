@@ -1,11 +1,13 @@
 """Backtest results store: run artifacts plus a fast run catalog.
 
 The store writes one run's artifacts below the blob prefix
-``backtests/{run_id}/`` through the lake blob-store port and keeps one
-catalog row per run through a repository port shaped for the existing
-Azure Table adapter pattern. This is infrastructure code, not the
-synchronous kernel: all I/O happens through the ports, and the in-memory
-adapters keep tests free of network access and Azure credentials.
+``backtests/{run_id}/`` through the lake readable-blob port and keeps one
+catalog row per run through the lake run-record repository port
+(:class:`~lake.catalog.ports.RunRepository`), adapted to the harness
+record type by :class:`LakeRunCatalogRepository`. This is infrastructure
+code, not the synchronous kernel: all I/O happens through the ports, and
+the in-memory adapters keep tests free of network access and Azure
+credentials.
 
 Artifact digests reuse the repository's SHA-256 hex convention, and the
 run digest is a domain-separated hash over the canonical JSON of the
@@ -13,6 +15,12 @@ per-artifact digests produced by :mod:`harness.configuration.hashing`.
 Run identity comes from callers, and every stored value is derived from
 supplied bytes: no wall-clock reads, unseeded randomness, or network
 calls occur inside this module.
+
+Run lifecycle state is deliberately a harness-side :class:`RunStatus`
+enum rather than the lake :class:`~lake.catalog.models.JobState`: runs
+are stored artifacts of completed simulations, not asynchronous ensure
+or backfill jobs. The lake ``RunState`` mirrors the same four values so
+catalog rows map across the boundary without translation.
 """
 
 from __future__ import annotations
@@ -27,7 +35,9 @@ from typing import Final, Protocol, runtime_checkable
 
 from harness.configuration.hashing import canonical_configuration_bytes
 from harness.core.types.common import text
-from lake.storage.ports import BlobStore
+from lake.catalog.models import RunRecord, RunState
+from lake.catalog.ports import RunRepository
+from lake.storage.ports import ReadableBlobStore
 
 _RUN_PREFIX: Final = "backtests"
 _RUN_DIGEST_DOMAIN: Final = b"fca:harness-results:run:v1\0"
@@ -147,24 +157,25 @@ class RunCatalogRecord:
 
 
 @runtime_checkable
-class RunBlobStore(BlobStore, Protocol):
+class RunBlobStore(ReadableBlobStore, Protocol):
     """Blob boundary for run artifacts.
 
-    Extends the lake :class:`~lake.storage.ports.BlobStore` whole-object
-    replacement port with the read and prefix operations the results
-    store needs.
+    Named re-point of the results store to the lake
+    :class:`~lake.storage.ports.ReadableBlobStore` port: whole-object
+    replacement plus the read, prefix-list, and prefix-delete operations
+    the store needs.
     """
-
-    def read(self, relative_path: str) -> bytes: ...
-
-    def list_prefix(self, prefix: str) -> tuple[str, ...]: ...
-
-    def delete_prefix(self, prefix: str) -> int: ...
 
 
 @runtime_checkable
 class RunCatalogRepository(Protocol):
-    """Catalog boundary for backtest run metadata rows."""
+    """Catalog boundary for backtest run metadata rows.
+
+    The lake :class:`~lake.catalog.ports.RunRepository` port is the
+    production persistence boundary;
+    :class:`LakeRunCatalogRepository` adapts it to this harness-facing
+    record type.
+    """
 
     def get(self, run_id: str) -> RunCatalogRecord | None: ...
 
@@ -241,6 +252,79 @@ class InMemoryRunCatalogRepository:
 
     def delete(self, run_id: str) -> bool:
         return self._records.pop(_path_segment(run_id, "run_id"), None) is not None
+
+
+def _to_run_record(record: RunCatalogRecord) -> RunRecord:
+    """Map a harness catalog row onto the lake run-record model."""
+    return RunRecord(
+        run_id=record.run_id,
+        status=RunState(record.status.value),
+        strategy_id=record.strategy_id,
+        data_start=record.data_start,
+        data_end=record.data_end,
+        run_digest=record.run_digest,
+        configuration_digest=record.configuration_digest,
+        artifact_count=record.artifact_count,
+        total_bytes=record.total_bytes,
+        metrics=dict(record.metrics),
+    )
+
+
+def _from_run_record(record: RunRecord) -> RunCatalogRecord:
+    """Map a lake run-record row back onto the harness catalog record."""
+    return RunCatalogRecord(
+        run_id=record.run_id,
+        status=RunStatus(record.status.value),
+        strategy_id=record.strategy_id,
+        data_start=record.data_start,
+        data_end=record.data_end,
+        run_digest=record.run_digest,
+        configuration_digest=record.configuration_digest,
+        artifact_count=record.artifact_count,
+        total_bytes=record.total_bytes,
+        metrics=dict(record.metrics),
+    )
+
+
+class LakeRunCatalogRepository:
+    """Catalog boundary over the lake run-record repository port.
+
+    Wraps a :class:`~lake.catalog.ports.RunRepository` implementation —
+    the in-memory adapter for tests or
+    :class:`~lake.catalog.azure.AzureTableRunRepository` for production —
+    and maps between the lake :class:`~lake.catalog.models.RunRecord`
+    rows and the harness :class:`RunCatalogRecord` so
+    :class:`BacktestResultsStore` runs unchanged against either.
+    """
+
+    def __init__(self, repository: RunRepository) -> None:
+        self._repository = repository
+
+    def get(self, run_id: str) -> RunCatalogRecord | None:
+        found = self._repository.get(run_id)
+        return None if found is None else _from_run_record(found)
+
+    def upsert(self, record: RunCatalogRecord) -> RunCatalogRecord:
+        self._repository.upsert(_to_run_record(record))
+        return record
+
+    def list(
+        self,
+        *,
+        status: RunStatus | None = None,
+        strategy_id: str | None = None,
+    ) -> tuple[RunCatalogRecord, ...]:
+        lake_status = RunState(status.value) if status is not None else None
+        return tuple(
+            _from_run_record(row)
+            for row in self._repository.list(
+                status=lake_status,
+                strategy_id=strategy_id,
+            )
+        )
+
+    def delete(self, run_id: str) -> bool:
+        return self._repository.delete(run_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,6 +423,7 @@ __all__ = [
     "BacktestResultsStore",
     "InMemoryRunBlobStore",
     "InMemoryRunCatalogRepository",
+    "LakeRunCatalogRepository",
     "RunBlobStore",
     "RunCatalogRecord",
     "RunCatalogRepository",

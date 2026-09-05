@@ -9,6 +9,8 @@ from lake.catalog.models import (
     JobRecord,
     JobState,
     ListingRecord,
+    RunRecord,
+    RunState,
     canonical_symbol,
 )
 from lake.contracts import AssetClass, DataType
@@ -86,6 +88,39 @@ class InMemoryJobRepository:
             for record in sorted(self._records.values(), key=lambda item: item.job_id)
             if state is None or record.state == state
         )
+
+
+class InMemoryRunRepository:
+    def __init__(self, records: Iterable[RunRecord] = ()) -> None:
+        self._records = {record.run_id: record for record in records}
+
+    def get(self, run_id: str) -> RunRecord | None:
+        return self._records.get(run_id.strip())
+
+    def upsert(self, record: RunRecord) -> RunRecord:
+        self._records[record.run_id] = record
+        return record
+
+    def put(self, record: RunRecord) -> RunRecord:
+        return self.upsert(record)
+
+    def list(
+        self,
+        *,
+        status: RunState | None = None,
+        strategy_id: str | None = None,
+    ) -> tuple[RunRecord, ...]:
+        status = RunState(status) if status is not None else None
+        strategy_id = strategy_id.strip() if strategy_id is not None else None
+        return tuple(
+            record
+            for record in sorted(self._records.values(), key=lambda item: item.run_id)
+            if (status is None or record.status == status)
+            and (strategy_id is None or record.strategy_id == strategy_id)
+        )
+
+    def delete(self, run_id: str) -> bool:
+        return self._records.pop(run_id.strip(), None) is not None
 
 
 class InMemoryContractRepository:
@@ -173,4 +208,5 @@ __all__ = [
     "InMemoryContractRepository",
     "InMemoryJobRepository",
     "InMemoryListingRepository",
+    "InMemoryRunRepository",
 ]

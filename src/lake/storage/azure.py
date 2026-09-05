@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 from urllib.parse import quote
 
 from azure.core.credentials import TokenCredential
+from azure.core.exceptions import ResourceNotFoundError
 from azure.data.tables import TableClient
 from azure.storage.blob import (
     BlobSasPermissions,
@@ -65,6 +66,42 @@ class AzureBlobStore:
         """Replace one blob in full, without exposing a read operation."""
         path = _object_path(relative_path)
         self._container.get_blob_client(path).upload_blob(payload, overwrite=True)
+
+
+class AzureReadableBlobStore(AzureBlobStore):
+    """Blob adapter that also reads, lists, and deletes whole prefixes.
+
+    Backs consumers owning entire object prefixes, such as the backtest
+    results store: the replace-only :class:`AzureBlobStore` stays read-free
+    for the Parquet writer, while this subclass adds the read, prefix-list,
+    and prefix-delete surface required to fetch and clean up run artifacts.
+    """
+
+    def read(self, relative_path: str) -> bytes:
+        """Return one blob's payload."""
+        path = _object_path(relative_path)
+        try:
+            return self._container.download_blob(path).readall()
+        except ResourceNotFoundError:
+            raise KeyError(f"object not found: {path}") from None
+
+    def list_prefix(self, prefix: str) -> tuple[str, ...]:
+        """Return blob names below ``prefix`` in sorted order."""
+        return tuple(
+            sorted(
+                blob.name
+                for blob in self._container.list_blobs(name_starts_with=prefix)
+            )
+        )
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete every blob below ``prefix`` and return how many went away."""
+        names = [
+            blob.name for blob in self._container.list_blobs(name_starts_with=prefix)
+        ]
+        for name in names:
+            self._container.delete_blob(name)
+        return len(names)
 
 
 class AzureQueueSender:
@@ -227,6 +264,7 @@ __all__ = [
     "AzureJobStore",
     "AzureQueueMessageSender",
     "AzureQueueSender",
+    "AzureReadableBlobStore",
     "BlobStore",
     "JobStorage",
     "QueueSender",

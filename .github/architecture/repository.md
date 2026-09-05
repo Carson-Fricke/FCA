@@ -10,7 +10,8 @@ storage, identity, and Container Apps modules, and the market-lake
 resource-group infrastructure entry point are implemented. Versioned lake
 configuration, partition/schema/calendar contracts, and reusable image
 publication are also implemented. The quant-harness core records, event
-kernel, OMS, strategy contract with sandbox lint and look-ahead guard, venues,
+kernel, OMS, strategy contract with CI-gated sandbox lint and the structural
+look-ahead boundary, venues,
 fees, portfolio, risk, bars/scheduler, bounded lake replay, the deterministic
 backtest runner with reproducibility manifest, the streaming run recorder, the
 backtest results store with its run catalog, standard metrics and attribution,
@@ -25,10 +26,14 @@ toolchain is a first-class build component: the `build.zig` module builds the
 native core under `src/harness/native` (C ABI v1 with the Arrow C Data
 Interface bridge, pinned scale-18 fixed point, and the ported event kernel,
 OMS state machine, virtual book accounting, K-way replay merge, bar
-derivation, resting-order matching venue, and SimpleTouch, latency-size, and
-trade-through fill models), the shared image compiles it
+derivation, resting-order matching venue, SimpleTouch, latency-size, and
+trade-through fill models, and the ported metrics modules), the shared image
+compiles it
 in a dedicated Zig build stage, and CI gates the native core with
-`zig fmt --check` and `zig build test` alongside the Python gates.
+`zig fmt --check` and `zig build test` alongside the Python gates. The
+cross-language parity oracle drives the native core through a Zig-core runner
+(`zig_backtest`) and asserts byte-identical determinism artifacts against the
+pure-Python engine.
 
 ## Product Boundaries
 
@@ -54,7 +59,7 @@ adapters, and orchestration details stay behind those boundaries.
 
 | Package | Responsibility |
 | --- | --- |
-| `lake.catalog` | Coverage, job, contract, front-set, and listing records; repository ports; memory and Azure Table adapters. |
+| `lake.catalog` | Coverage, job, contract, front-set, listing, and run records; repository ports; memory and Azure Table adapters. |
 | `lake.cli` | Console dispatch and API, ingest, or local process commands. |
 | `lake.configuration` | Strict YAML loading, typed settings, environment overrides, and normalized universes. |
 | `lake.contracts` | Stable partition paths, PyArrow schemas, and exchange or UTC session contracts. |
@@ -66,7 +71,7 @@ adapters, and orchestration details stay behind those boundaries.
 | `lake.providers.alpaca` | Async Alpaca transport, pagination/retry behavior, and normalized provider records. |
 | `lake.query` | File-query orchestration and bounded DuckDB execution over ensured objects. |
 | `lake.queue` | Durable delivery policy, Azure queue adapter, dead-letter envelopes, and explicit replay. |
-| `lake.storage` | Storage ports, Parquet serialization, Azure blob/SAS adapters, capacity guards, and leases. |
+| `lake.storage` | Storage ports, Parquet serialization, Azure blob/SAS adapters, the readable blob surface (read, list, prefix delete), capacity guards, and leases. |
 
 ```text
 src/lake/
@@ -123,10 +128,10 @@ tests/lake/
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
-| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, the look-ahead-guarded historical view with the opaque engine-clocked StrategyHistory strategy capability, live-feed gap healing through market-lake backfill, the point-in-time option contract universe over the market-lake contracts catalog (front-set and static-OSI modes, as-of DTE/strike/moneyness filters, expiry-indexed snapshots clipped to the engine clock), the SecurityMaster point-in-time listings view, the market-lake access adapter for ensure/query-driven backtest data, Alpaca SIP and crypto WebSocket feeds with UTC-day crypto semantics, and the live event recorder writing lake-schema Parquet under `live/{deployment}`. |
+| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay, the engine-side HistoricalView with engine-clock-capped queries (future reads raise `LookaheadError`) plus the opaque engine-clocked StrategyHistory strategy capability whose now-anchored reads take no timestamp parameters so future data is unrepresentable, live-feed gap healing through market-lake backfill, the point-in-time option contract universe over the market-lake contracts catalog (front-set and static-OSI modes, as-of DTE/strike/moneyness filters, expiry-indexed snapshots clipped to the engine clock), the SecurityMaster point-in-time listings view, the market-lake access adapter for ensure/query-driven backtest data, Alpaca SIP and crypto WebSocket feeds with UTC-day crypto semantics, and the live event recorder writing lake-schema Parquet under `live/{deployment}`. |
 | `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, trade-through, and MidTouch option fill decisions. |
 | `harness.portfolio` | Strategy virtual books, shared-account aggregate accounting, and deterministic option expiry, exercise, and assignment settlement. |
-| `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts; standard metrics and attribution with documented conventions; and the backtest results store writing run artifacts under `backtests/{run_id}` with a filterable run catalog and prefix-complete cleanup. |
+| `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts; standard metrics and attribution with documented conventions; and the backtest results store writing run artifacts under `backtests/{run_id}` with a filterable run catalog and prefix-complete cleanup, wired to the lake run-catalog and readable-blob ports for production Azure adapters. |
 | `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies; plus the PaperShell shared simulation runtime composing the same kernel, venue, fills, fees, risk, and portfolio accounting against replay or live inbox feeds. |
 | `harness.strategy` | Mode-independent strategy callbacks, constrained context with capability-scoped surfaces (read-only clock, opaque engine-clocked data history, one-way venue commands, and provenance-restricted scheduling), deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
 | `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, and complete decision auditing. |
@@ -139,13 +144,18 @@ explicit events; `WallClock` is an adapter boundary and is not used by the
 synchronous simulation kernel. OMS status and fill-ledger changes occur only by
 applying validated execution reports. Configuration hashes normalize mapping
 order, exact decimals, and UTC timestamps, and reject resolved secret values.
-Historical queries hard-clip to the engine clock, and strategy sandbox lint
-rejects wall-clock, sleep, network, subprocess, unseeded-random, asyncio, and
-concurrency patterns before a strategy can run.
+Historical queries are hard-capped at the engine clock head: a query for data
+newer than the head raises `LookaheadError` rather than silently clipping,
+and the strategy-facing capability takes no timestamp parameters, so future
+reads are structurally unrepresentable (supplied future window ends still
+raise `LookaheadError` as defense-in-depth). Strategy sandbox lint checks
+wall-clock, sleep, network, subprocess, unseeded-random, asyncio, and
+concurrency patterns as a CI gate over the strategy examples, not as a
+run-path check.
 
 The deterministic backtest runner composes lake replay, the simulated venue,
-fees, risk, portfolio accounting, and the look-ahead guard behind one
-`SimClock`, and emits a reproducibility manifest covering configuration, code,
+fees, risk, portfolio accounting, and the fail-loud look-ahead abort behind
+one `SimClock`, and emits a reproducibility manifest covering configuration, code,
 seed, data, fill-model, fee, and risk fingerprints. `backtest-job --config`
 runs it locally over the built-in deterministic synthetic benchmark fixture or
 a user-supplied local Parquet lake directory, writing canonical run artifacts

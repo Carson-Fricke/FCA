@@ -99,4 +99,4 @@ class WallClock:
         return datetime.now(UTC)
 
 
-__all__ = ["AdvanceableClock", "Clock", "ReadonlyClock", "SimClock", "WallClock"]
+__all__ = ["AdvanceableClock", "Clock", "ReadonlyClock", "WallClock"]

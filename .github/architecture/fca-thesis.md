@@ -65,10 +65,10 @@ product:
 | `market-lake` | `src/lake` | Point-in-time market data, catalog, coverage, ensure, and query contracts. |
 | `quant-harness` | `src/harness` | Deterministic backtests, results, sweeps, paper/shadow/live runtimes, risk, and broker integration. |
 | `FCA Thesis` | `src/thesis` | Workspace, chat, agent orchestration, workflows, evidence, knowledge retrieval, protected-test coordination, and activation requests. |
-| `FCA Thesis UI` | `src/ui` | React chat and workspace application, live execution status, plans, artifacts, evidence, and consent controls. |
+| `FCA Thesis UI` | `ui` | SvelteKit chat and workspace application, live execution status, plans, artifacts, evidence, and consent controls. |
 
 `src/thesis` is a Python service so it can use FCA's typed Python clients and
-tooling. `src/ui` is a separate TypeScript/React application and deployable.
+tooling. `ui` is a separate SvelteKit/TypeScript application and deployable.
 They are peers even though the UI depends on the Thesis API.
 
 The global knowledge library is ultimately an organized collection of Markdown
@@ -113,7 +113,7 @@ workspace strategy into the FCA source checkout as part of normal operation.
 Local mode is a first-class supported runtime, not a development-only stub. In
 local mode:
 
-- the Python Thesis API and React UI run on the operator's machine;
+- the Python Thesis API and SvelteKit UI run on the operator's machine;
 - each workspace is a separate local directory and Git repository;
 - the durable queue and workspace coordinator run locally and recover across
   API or UI restarts;
@@ -981,13 +981,13 @@ The first release is for one authenticated local operator. The data model still
 uses explicit workspace ownership so future authorization does not require
 collapsing existing boundaries.
 
-The React UI should provide the chat-first workspace experience described here,
+The Thesis UI should provide the chat-first workspace experience described here,
 but its visual design and detailed interaction design are intentionally deferred
 to a later UI design effort. This architecture calls out the UI boundary and
 required capabilities without locking layouts, navigation, or component
 styling.
 
-The React UI should eventually provide:
+The Thesis UI should eventually provide:
 
 - workspace creation, selection, archive, and policy/budget settings;
 - multiple persistent chat threads per workspace, with create, rename, archive,
@@ -1097,7 +1097,7 @@ metric values in prose.
 
 ### Phase 0: Contracts And Scaffold
 
-- Add `src/thesis` and `src/ui` product scaffolds and path-focused tooling.
+- Add `src/thesis` and `ui` product scaffolds and path-focused tooling.
 - Define local loopback and Azure runtime profiles, including Entra/Foundry
   authentication, browser-session security, and offline/auth-failure behavior.
 - Define workspace, chat, investigation, workflow execution, event, experiment,
@@ -1140,7 +1140,7 @@ create workspace
   and the authenticated remote harness API used by Azure once T102/T112-T114
   are available.
 - Expose strategy diffs, jobs, artifacts, experiment cards, and final reports
-  through the backend/API contracts. Detailed React rendering remains deferred
+  through the backend/API contracts. Detailed UI rendering remains deferred
   to the UI design and implementation work.
 - Define the API requirements for multiple persistent threads, explicit
   investigation links, ordered event replay, workspace switching, and

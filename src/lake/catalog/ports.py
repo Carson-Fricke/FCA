@@ -9,6 +9,8 @@ from lake.catalog.models import (
     JobRecord,
     JobState,
     ListingRecord,
+    RunRecord,
+    RunState,
 )
 from lake.contracts import AssetClass, DataType
 
@@ -47,6 +49,23 @@ class JobRepository(Protocol):
     def list(self, *, state: JobState | None = None) -> tuple[JobRecord, ...]: ...
 
 
+class RunRepository(Protocol):
+    """Persistence contract for stored backtest run metadata."""
+
+    def get(self, run_id: str) -> RunRecord | None: ...
+
+    def upsert(self, record: RunRecord) -> RunRecord: ...
+
+    def list(
+        self,
+        *,
+        status: RunState | None = None,
+        strategy_id: str | None = None,
+    ) -> tuple[RunRecord, ...]: ...
+
+    def delete(self, run_id: str) -> bool: ...
+
+
 class ContractRepository(Protocol):
     """Persistence contract for option contract metadata."""
 
@@ -83,4 +102,5 @@ __all__ = [
     "ContractRepository",
     "JobRepository",
     "ListingRepository",
+    "RunRepository",
 ]

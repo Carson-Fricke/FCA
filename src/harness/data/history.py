@@ -815,7 +815,6 @@ __all__ = [
     "DEFAULT_HISTORY_CAPACITY",
     "HistoryAggregate",
     "HistorySubscription",
-    "HistoricalView",
     "LookaheadError",
     "Nanos",
     "StrategyHistory",

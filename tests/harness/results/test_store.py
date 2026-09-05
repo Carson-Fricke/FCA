@@ -17,6 +17,7 @@ from harness.results.store import (
     BacktestResultsStore,
     InMemoryRunBlobStore,
     InMemoryRunCatalogRepository,
+    LakeRunCatalogRepository,
     RunBlobStore,
     RunCatalogRecord,
     RunCatalogRepository,
@@ -26,6 +27,8 @@ from harness.results.store import (
     run_digest,
     run_prefix,
 )
+from lake.catalog import InMemoryRunRepository
+from lake.storage import ReadableBlobStore
 
 RUN_ID: Final = "run-2024-01-02"
 
@@ -259,6 +262,41 @@ def test_in_memory_adapters_satisfy_the_store_ports() -> None:
 
     assert isinstance(blobs, RunBlobStore)
     assert isinstance(catalog, RunCatalogRepository)
+
+
+def test_store_ports_are_repointed_to_the_lake_ports() -> None:
+    blobs: RunBlobStore = InMemoryRunBlobStore()
+    catalog: RunCatalogRepository = LakeRunCatalogRepository(InMemoryRunRepository())
+
+    assert isinstance(blobs, ReadableBlobStore)
+    assert isinstance(catalog, RunCatalogRepository)
+
+
+def test_store_round_trips_through_the_lake_run_repository() -> None:
+    blobs = InMemoryRunBlobStore()
+    store = BacktestResultsStore(
+        blobs,
+        LakeRunCatalogRepository(InMemoryRunRepository()),
+    )
+
+    stored = store.put(make_record(), make_artifacts())
+
+    assert store.get(RUN_ID) == stored
+    assert stored.run_digest is not None
+    assert stored.artifact_count == 2
+    assert stored.metrics["sharpe"] == "1.2345"
+    fetched = store.fetch(RUN_ID)
+    assert fetched.record == stored
+    assert dict(fetched.artifacts) == make_artifacts()
+    assert tuple(row.run_id for row in store.list(status=RunStatus.COMPLETE)) == (
+        RUN_ID,
+    )
+    assert store.list(strategy_id="mean-revert") == ()
+    assert store.delete("missing-run") is False
+    assert store.delete(RUN_ID) is True
+    assert store.get(RUN_ID) is None
+    assert blobs.list_prefix(f"{run_prefix(RUN_ID)}/") == ()
+    assert store.delete(RUN_ID) is False
 
 
 @pytest.mark.parametrize(

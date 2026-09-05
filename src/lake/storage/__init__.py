@@ -8,6 +8,7 @@ from lake.storage.azure import (
     AzureJobStore,
     AzureQueueMessageSender,
     AzureQueueSender,
+    AzureReadableBlobStore,
     as_job_storage,
 )
 from lake.storage.parquet import (
@@ -17,7 +18,13 @@ from lake.storage.parquet import (
     ParquetWriter,
     normalize_records,
 )
-from lake.storage.ports import BlobStore, JobStorage, QueueSender, SasIssuer
+from lake.storage.ports import (
+    BlobStore,
+    JobStorage,
+    QueueSender,
+    ReadableBlobStore,
+    SasIssuer,
+)
 
 __all__ = [
     "AzureBlobObjectStore",
@@ -27,6 +34,7 @@ __all__ = [
     "AzureJobStore",
     "AzureQueueMessageSender",
     "AzureQueueSender",
+    "AzureReadableBlobStore",
     "BlobStore",
     "JobStorage",
     "LocalFilesystemStore",
@@ -34,6 +42,7 @@ __all__ = [
     "ParquetMetadata",
     "ParquetWriter",
     "QueueSender",
+    "ReadableBlobStore",
     "SasIssuer",
     "as_job_storage",
     "normalize_records",

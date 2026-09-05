@@ -1,5 +1,6 @@
 """Azure Table mappings and adapters for the catalog ports."""
 
+import json
 from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal
@@ -18,6 +19,8 @@ from lake.catalog.models import (
     ListingRecord,
     ListingType,
     OptionType,
+    RunRecord,
+    RunState,
     canonical_symbol,
     table_key,
 )
@@ -25,6 +28,7 @@ from lake.contracts import AssetClass, DataType
 
 _COVERAGE_PARTITION_PREFIX: Final = "coverage"
 _JOB_PARTITION_KEY: Final = "jobs"
+_RUN_PARTITION_KEY: Final = "runs"
 _CONTRACT_PARTITION_KEY: Final = "contracts"
 _LISTING_PARTITION_PREFIX: Final = "listings"
 
@@ -137,6 +141,68 @@ def job_from_entity(entity: Mapping[str, object]) -> JobRecord:
         created_at=created_at,
         updated_at=updated_at,
         error_message=_optional_string(entity, "ErrorMessage"),
+    )
+
+
+def _metrics_json(metrics: Mapping[str, str]) -> str:
+    """Serialize metric values into one canonical, string-exact JSON column."""
+    return json.dumps(
+        dict(metrics),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def run_to_entity(record: RunRecord) -> TableEntity:
+    """Map run metadata and canonical metrics JSON to a Table entity."""
+    entity = _entity()
+    entity.update(
+        {
+            "PartitionKey": _RUN_PARTITION_KEY,
+            "RowKey": record.row_key,
+            "RunId": record.run_id,
+            "Status": record.status.value,
+            "StrategyId": record.strategy_id,
+            "ArtifactCount": record.artifact_count,
+            "TotalBytes": record.total_bytes,
+            "Metrics": _metrics_json(record.metrics),
+        }
+    )
+    if record.data_start is not None:
+        entity["DataStart"] = record.data_start.isoformat()
+    if record.data_end is not None:
+        entity["DataEnd"] = record.data_end.isoformat()
+    if record.run_digest is not None:
+        entity["RunDigest"] = record.run_digest
+    if record.configuration_digest is not None:
+        entity["ConfigurationDigest"] = record.configuration_digest
+    return entity
+
+
+def run_from_entity(entity: Mapping[str, object]) -> RunRecord:
+    """Restore a run record from an Azure Table entity."""
+    data_start = _optional_string(entity, "DataStart")
+    data_end = _optional_string(entity, "DataEnd")
+    decoded: object = json.loads(_optional_string(entity, "Metrics") or "{}")
+    if not isinstance(decoded, dict):
+        raise TypeError("run entity metrics must decode to a JSON object")
+    metrics: dict[str, str] = {}
+    for key, value in decoded.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise TypeError("run entity metrics must be a string mapping")
+        metrics[key] = value
+    return RunRecord(
+        run_id=str(entity["RunId"]),
+        status=RunState(str(entity["Status"])),
+        strategy_id=str(entity["StrategyId"]),
+        data_start=date.fromisoformat(data_start) if data_start else None,
+        data_end=date.fromisoformat(data_end) if data_end else None,
+        run_digest=_optional_string(entity, "RunDigest"),
+        configuration_digest=_optional_string(entity, "ConfigurationDigest"),
+        artifact_count=_integer(entity, "ArtifactCount", 0),
+        total_bytes=_integer(entity, "TotalBytes", 0),
+        metrics=metrics,
     )
 
 
@@ -376,6 +442,61 @@ class AzureTableJobRepository:
         )
 
 
+class AzureTableRunRepository:
+    """Run repository backed by an Azure Tables ``TableClient``."""
+
+    def __init__(self, table: TableClient) -> None:
+        self._table = table
+
+    def get(self, run_id: str) -> RunRecord | None:
+        run_id = run_id.strip()
+        try:
+            entity = self._table.get_entity(_RUN_PARTITION_KEY, _table_key(run_id))
+        except ResourceNotFoundError:
+            return None
+        return run_from_entity(entity)
+
+    def upsert(self, record: RunRecord) -> RunRecord:
+        self._table.upsert_entity(run_to_entity(record), mode=UpdateMode.REPLACE)
+        return record
+
+    def put(self, record: RunRecord) -> RunRecord:
+        return self.upsert(record)
+
+    def list(
+        self,
+        *,
+        status: RunState | None = None,
+        strategy_id: str | None = None,
+    ) -> tuple[RunRecord, ...]:
+        records = (
+            run_from_entity(entity)
+            for entity in self._table.query_entities(
+                "PartitionKey eq @partition",
+                parameters={"partition": _RUN_PARTITION_KEY},
+            )
+        )
+        status = RunState(status) if status is not None else None
+        strategy_id = strategy_id.strip() if strategy_id is not None else None
+        return tuple(
+            record
+            for record in sorted(records, key=lambda item: item.run_id)
+            if (status is None or record.status == status)
+            and (strategy_id is None or record.strategy_id == strategy_id)
+        )
+
+    def delete(self, run_id: str) -> bool:
+        run_id = run_id.strip()
+        try:
+            self._table.get_entity(_RUN_PARTITION_KEY, _table_key(run_id))
+        except ResourceNotFoundError:
+            return False
+        # The SDK's delete_entity succeeds silently for missing entities, so
+        # existence is confirmed by the lookup above before the delete call.
+        self._table.delete_entity(_RUN_PARTITION_KEY, _table_key(run_id))
+        return True
+
+
 class AzureTableContractRepository:
     """Contract repository backed by an Azure Tables ``TableClient``."""
 
@@ -490,6 +611,7 @@ class AzureTableListingRepository:
 # make the Azure boundary obvious in application wiring.
 AzureCatalogRepository = AzureTableCatalogRepository
 AzureJobRepository = AzureTableJobRepository
+AzureRunRepository = AzureTableRunRepository
 AzureContractRepository = AzureTableContractRepository
 AzureListingRepository = AzureTableListingRepository
 
@@ -499,6 +621,8 @@ to_coverage_entity = coverage_to_entity
 from_coverage_entity = coverage_from_entity
 to_job_entity = job_to_entity
 from_job_entity = job_from_entity
+to_run_entity = run_to_entity
+from_run_entity = run_from_entity
 to_contract_entity = contract_to_entity
 from_contract_entity = contract_from_entity
 to_listing_entity = listing_to_entity

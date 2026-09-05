@@ -1,9 +1,12 @@
 """Provider-independent catalog records."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
+from types import MappingProxyType
+from typing import Final
 from urllib.parse import quote
 
 from lake.contracts import AssetClass, DataType
@@ -29,6 +32,23 @@ class JobState(StrEnum):
     CANCELLED = "cancelled"
     COMPLETED = "complete"
     ERROR = "failed"
+
+
+class RunState(StrEnum):
+    """Lifecycle states for one stored backtest run.
+
+    Deliberately distinct from :class:`JobState`: jobs track asynchronous
+    ensure and backfill work, while runs are stored artifacts of completed
+    simulations with no launcher, retries, or cancellation semantics. The
+    values intentionally mirror the harness ``RunStatus`` vocabulary so run
+    rows map between the harness results store and this port without
+    translation.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
 
 
 class OptionType(StrEnum):
@@ -74,6 +94,9 @@ def canonical_symbol(symbol: str) -> str:
 def table_key(value: str) -> str:
     """Encode values used in Azure Table keys without changing their identity."""
     return quote(value, safe="._-~")
+
+
+_EMPTY_RUN_METRICS: Final[Mapping[str, str]] = MappingProxyType({})
 
 
 def utc_datetime(value: datetime) -> datetime:
@@ -150,6 +173,59 @@ class JobRecord:
     @property
     def row_key(self) -> str:
         return table_key(self.job_id)
+
+
+@dataclass(frozen=True, slots=True)
+class RunRecord:
+    """Catalog row for one stored backtest run.
+
+    Mirrors the harness ``RunCatalogRecord`` row so the results store maps
+    to and from this lake-side record without information loss. ``metrics``
+    stay string-exact; the harness record keeps the stricter non-empty and
+    whitespace rules for metric names and values.
+    """
+
+    run_id: str
+    status: RunState
+    strategy_id: str
+    data_start: date | None = None
+    data_end: date | None = None
+    run_digest: str | None = None
+    configuration_digest: str | None = None
+    artifact_count: int = 0
+    total_bytes: int = 0
+    metrics: Mapping[str, str] = _EMPTY_RUN_METRICS
+
+    def __post_init__(self) -> None:
+        if isinstance(self.data_start, datetime) or isinstance(self.data_end, datetime):
+            raise TypeError("run data bounds must be dates, not datetimes")
+        run_id = self.run_id.strip()
+        if not run_id:
+            raise ValueError("run_id must not be empty")
+        strategy_id = self.strategy_id.strip()
+        if not strategy_id:
+            raise ValueError("strategy_id must not be empty")
+        if (
+            self.data_start is not None
+            and self.data_end is not None
+            and self.data_start > self.data_end
+        ):
+            raise ValueError("data_start must be on or before data_end")
+        if self.artifact_count < 0 or self.total_bytes < 0:
+            raise ValueError("artifact_count and total_bytes must not be negative")
+        if not isinstance(self.metrics, Mapping):
+            raise TypeError("metrics must be a mapping")
+        for key, value in self.metrics.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise TypeError("metric names and values must be strings")
+        object.__setattr__(self, "run_id", run_id)
+        object.__setattr__(self, "status", RunState(self.status))
+        object.__setattr__(self, "strategy_id", strategy_id)
+        object.__setattr__(self, "metrics", MappingProxyType(dict(self.metrics)))
+
+    @property
+    def row_key(self) -> str:
+        return table_key(self.run_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,4 +377,6 @@ __all__ = [
     "ListingRecord",
     "ListingType",
     "OptionType",
+    "RunRecord",
+    "RunState",
 ]
