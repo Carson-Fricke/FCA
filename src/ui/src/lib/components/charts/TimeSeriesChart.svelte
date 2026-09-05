@@ -24,6 +24,7 @@
 	let size = $state(null);
 	let hover = $state(null);
 	let drag = null;
+	let hintExpanded = $state(true);
 
 	const hasBars = $derived(data.length > 0 && 'close' in data[0]);
 	const extent = $derived.by(() => {
@@ -190,7 +191,7 @@
 		else drawLine(ctx, w, h, r);
 		drawMarkers(ctx, w, h, r);
 		drawAxis(ctx, w, h);
-		if (hover) drawCrosshair(ctx, w, h, r);
+		if (hover) drawCrosshair(ctx, w, h);
 	});
 
 	function drawFrame(ctx, w, h, r) {
@@ -322,26 +323,58 @@
 		return new Date(t).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
 	}
 
-	function drawCrosshair(ctx, w, h, r) {
-		const { x, y } = hover;
+	function shortDay(t) {
+		return new Date(t).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: '2-digit' });
+	}
+
+	function nearestPoint(t) {
+		let best = null;
+		let bestDist = Infinity;
+		for (const p of data) {
+			const d = Math.abs(p.t - t);
+			if (d < bestDist) {
+				bestDist = d;
+				best = p;
+			}
+		}
+		return best;
+	}
+
+	function drawCrosshair(ctx, w, h) {
+		const { x, y, point } = hover;
 		ctx.strokeStyle = 'rgba(230, 237, 243, 0.35)';
 		ctx.beginPath();
 		ctx.moveTo(x, PAD.top);
 		ctx.lineTo(x, h - PAD.bottom);
+		ctx.moveTo(PAD.left, y);
+		ctx.lineTo(w - PAD.right, y);
 		ctx.stroke();
-		const v = valueAtY(y, h, r);
-		if (v !== undefined && y >= PAD.top && y <= h - PAD.bottom) {
-			ctx.fillStyle = '#161b22';
-			ctx.fillRect(w - PAD.right + 3, y - 7, PAD.right - 6, 14);
-			ctx.fillStyle = '#e6edf3';
-			ctx.fillText(fmtValue(v), w - PAD.right + 7, y + 4);
+		ctx.fillStyle = '#161b22';
+		ctx.fillRect(w - PAD.right + 3, y - 7, PAD.right - 6, 14);
+		ctx.fillStyle = '#e6edf3';
+		ctx.fillText(fmtValue(pointValue(point)), w - PAD.right + 7, y + 4);
+		const label = shortDay(hover.t);
+		const tw = ctx.measureText(label).width + 10;
+		const tx = Math.min(Math.max(x - tw / 2, PAD.left), w - PAD.right - tw);
+		ctx.fillStyle = '#161b22';
+		ctx.fillRect(tx, h - PAD.bottom + 1, tw, 13);
+		ctx.fillStyle = '#e6edf3';
+		ctx.fillText(label, tx + 5, h - PAD.bottom + 11);
+		if (hasBars) {
+			const up = point.close >= point.open;
+			ctx.fillStyle = up ? UP : DOWN;
+			ctx.fillText(
+				`O ${fmtValue(point.open)}  H ${fmtValue(point.high)}  L ${fmtValue(point.low)}  C ${fmtValue(point.close)}`,
+				PAD.left + 8,
+				PAD.top + 30
+			);
 		}
 		if (hover.tooltip) {
 			const lines = hover.tooltip.lines;
 			const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
 			const bh = 14 * lines.length + 8;
-			const bx = Math.min(x + 12, w - PAD.right - bw);
-			const by = Math.max(PAD.top + 2, Math.min(y - bh - 10, h - PAD.bottom - bh - 2));
+			const bx = Math.min(hover.tooltip.x + 12, w - PAD.right - bw);
+			const by = Math.max(PAD.top + 2, Math.min(hover.tooltip.y - bh - 10, h - PAD.bottom - bh - 2));
 			ctx.fillStyle = 'rgba(22, 27, 34, 0.95)';
 			ctx.fillRect(bx, by, bw, bh);
 			ctx.strokeStyle = FRAME;
@@ -455,18 +488,21 @@
 			return;
 		}
 		const t = tFor(x, rect.width);
-		let tooltip = null;
+		const point = nearestPoint(t);
 		const r = effectiveRange(rect.height);
-		for (const m of markers) {
-			if (m.t < camera.t0 || m.t > camera.t1 || !m.label) continue;
-			const mx = xFor(m.t, rect.width);
-			const my = yFor(m.v, r, rect.height);
-			if (Math.abs(mx - x) < 7 && Math.abs(my - y) < 7) {
-				tooltip = { x: mx, y: my, lines: Array.isArray(m.label) ? m.label : [m.label] };
-				break;
-			}
+		if (!point || !r) {
+			hover = null;
+			return;
 		}
-		hover = { x, y, t, tooltip };
+		const px = xFor(point.t, rect.width);
+		const py = yFor(pointValue(point), r, rect.height);
+		const lines = [];
+		for (const m of markers) {
+			if (m.t !== point.t || !m.label) continue;
+			const ml = Array.isArray(m.label) ? m.label : [m.label];
+			lines.push(...ml);
+		}
+		hover = { x: px, y: py, t: point.t, point, tooltip: lines.length ? { x: px, y: py, lines } : null };
 	}
 
 	function handleUp() {
@@ -501,7 +537,13 @@
 		{#if camera && showHud}
 			<div class="hud">
 				{shortDate(camera.t0)} &rarr; {shortDate(camera.t1)}
-				<span class="hint">wheel zoom &middot; shift+wheel stretch &middot; drag pan &middot; grips trim &middot; overview click/drag to jump &middot; double-click reset</span>
+				{#if hintExpanded}
+					<button class="hint" type="button" onclick={() => (hintExpanded = false)} title="Hide controls">
+						wheel zoom &middot; shift+wheel stretch &middot; drag pan &middot; grips trim &middot; overview click/drag to jump &middot; double-click reset
+					</button>
+				{:else}
+					<button class="hint compact" type="button" onclick={() => (hintExpanded = true)} title="Show controls">?</button>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -546,5 +588,20 @@
 	.hint {
 		color: var(--muted);
 		margin-left: 10px;
+		pointer-events: auto;
+		background: transparent;
+		border: none;
+		padding: 0;
+		font-family: inherit;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.hint.compact {
+		margin-left: 6px;
+		color: var(--text);
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		padding: 0 5px;
+		line-height: 1.4;
 	}
 </style>

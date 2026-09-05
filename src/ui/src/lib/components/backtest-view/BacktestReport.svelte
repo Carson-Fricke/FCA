@@ -26,6 +26,15 @@
 	const equity = $derived(report?.equity ?? []);
 	const trades = $derived(report?.trades ?? []);
 	const instruments = $derived(report?.instruments ?? []);
+	const stats = $derived(report?.stats ?? null);
+
+	function fmtPct(v) {
+		return v == null || !Number.isFinite(v) ? '—' : `${(v * 100).toFixed(1)}%`;
+	}
+
+	function fmtRatio(v) {
+		return v == null || !Number.isFinite(v) ? '—' : v.toFixed(2);
+	}
 
 	const summary = $derived.by(() => {
 		const wins = trades.filter((t) => t.pnl >= 0).length;
@@ -204,6 +213,24 @@
 			<span class="k">Final equity</span>
 			<span class="v">{summary.finalEquity.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
 		</div>
+		{#if stats}
+			<div class="stat">
+				<span class="k">Win rate</span>
+				<span class="v">{fmtPct(stats.winRate)}</span>
+			</div>
+			<div class="stat">
+				<span class="k">CAGR</span>
+				<span class="v" class:pos={stats.cagr >= 0} class:neg={stats.cagr < 0}>{fmtPct(stats.cagr)}</span>
+			</div>
+			<div class="stat">
+				<span class="k">Sharpe</span>
+				<span class="v">{fmtRatio(stats.sharpe)}</span>
+			</div>
+			<div class="stat">
+				<span class="k">Sortino</span>
+				<span class="v">{fmtRatio(stats.sortino)}</span>
+			</div>
+		{/if}
 	</header>
 
 	{#each sections as sec (sec.id)}
