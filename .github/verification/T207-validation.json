@@ -1,0 +1,24 @@
+{
+  "taskId": "T207",
+  "numTotalTests": 3,
+  "numPassedTests": 3,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "ui-production-build",
+      "status": "passed",
+      "command": "cd ui && npm run build",
+      "result": "BacktestView canvas component builds and renders: PnL/equity curve with entry/exit trade markers, per-instrument price panels above and below, single locked time axis with synchronized pan/zoom and independent value axes, fixture-driven demo route without a backend"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates passed after the UI scaffold landed"
+    }
+  ],
+  "limitations": [
+    "The read-only Thesis backend endpoint serving equity/fills/price series from imported artifacts is a backend follow-up; the demo renders from fixtures"
+  ]
+}

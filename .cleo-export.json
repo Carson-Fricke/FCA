@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-05T01:37:50.621Z",
+    "exportedAt": "2026-09-05T04:50:59.521Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 209
     },
-    "checksum": "47da3650e538fb5f",
+    "checksum": "96b4feb1f60ebbad",
     "taskCount": 205,
     "exportMode": "full"
   },
@@ -2100,7 +2100,7 @@
     "T206": {
       "type": "task",
       "title": "TH6.5 CLEO task DAG canvas component",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": [
         "T152",
@@ -2170,7 +2170,7 @@
     "T207": {
       "type": "task",
       "title": "TH6.6 Backtest PnL and price chart component",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": [
         "T158",
@@ -22523,7 +22523,7 @@
     {
       "id": "T206",
       "title": "TH6.5 CLEO task DAG canvas component",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T150",
@@ -22563,21 +22563,82 @@
         "T155"
       ],
       "createdAt": "2026-09-04T23:31:30.684Z",
-      "updatedAt": "2026-09-05T01:13:35.128Z",
+      "updatedAt": "2026-09-05T04:50:31.743Z",
+      "completedAt": "2026-09-05T04:50:27.200Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T04:50:04.069Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T23:31:30.684Z"
+        "initializedAt": "2026-09-04T23:31:30.684Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "ui/package.json",
+                    "sha256": "6b901216d45a2e54f26eff641ed9492b571fe880812953f513e2ef073e046525"
+                  },
+                  {
+                    "path": "ui/src/lib/components/task-dag/TaskDag.svelte",
+                    "sha256": "d8fe3ba4645c6a89a4e1b45c909d1a7158b125411da682c69850f063f831c0d3"
+                  },
+                  {
+                    "path": "ui/src/routes/demo/dag/+page.svelte",
+                    "sha256": "125835b2bf2e34344f550bc346d06ad2c0a88a26a26725d44761829b31ef5660"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T04:49:25.985Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T187-T198-T204-T191-wave-validation.json",
+                "sha256": "3e60438e4b707f3466711807abe4693a8792441a4eb51d286438ca4dac67b733",
+                "passCount": 1299,
+                "failCount": 0,
+                "skipCount": 12
+              }
+            ],
+            "capturedAt": "2026-09-05T04:49:37.868Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T04:50:04.253Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -23147,7 +23208,7 @@
     {
       "id": "T207",
       "title": "TH6.6 Backtest PnL and price chart component",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T150",
@@ -23187,21 +23248,82 @@
         "T159"
       ],
       "createdAt": "2026-09-04T23:32:15.099Z",
-      "updatedAt": "2026-09-05T01:12:52.039Z",
+      "updatedAt": "2026-09-05T04:50:49.395Z",
+      "completedAt": "2026-09-05T04:50:45.472Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T04:50:37.128Z",
         "failureLog": [],
-        "initializedAt": "2026-09-04T23:32:15.099Z"
+        "initializedAt": "2026-09-04T23:32:15.099Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "ui/src/lib/components/backtest-view/BacktestView.svelte",
+                    "sha256": "93ac5f17827661f484ab8dcc1be50369e7fb4e0d35a27f4d278ae75de9bbc69b"
+                  },
+                  {
+                    "path": "ui/src/lib/data/backtestFixture.js",
+                    "sha256": "d7aca80162ecf4dba25c3191efacfba083a8bd3f07e806d4e85952a47793b8ca"
+                  },
+                  {
+                    "path": "ui/src/routes/demo/backtest/+page.svelte",
+                    "sha256": "60d1e10416835457741cbd5cbf3d9a1a05c5ddd729bf745883c9bc4bdf3e9fcf"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T04:49:56.620Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T207-validation.json",
+                "sha256": "13800c3a38b9271f5746b71f18f8f4d19f205c0bccc00dd60e17aafe3a892356",
+                "passCount": 3,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-05T04:50:17.886Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 205 CLEO tasks through T208.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T04:50:37.236Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "assignee": "local",
       "kind": "work",
       "scope": "feature",
