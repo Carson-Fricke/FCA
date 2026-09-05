@@ -7,6 +7,17 @@ the design basis for the CLEO Thesis saga `T143` and its current descendants
 through `T178`. The presence of those pending tasks records planned work; it
 does not claim that the described services are implemented.
 
+Implemented within this roadmap so far: the strategy-development vertical
+workflow (`thesis.workflows`, T160), the hypothesis validation workflow with
+verdict evidence (T161), bounded autonomous discovery with budget guards and
+candidate accounting (T162, plus `thesis.agent.search_policy`), the RCA and
+strategy revision loop with revision lineage (`thesis.workflows.rca`,
+`thesis.research`, T163), and the statistical-discipline substrate
+(`thesis.experiments`: pre-registered experiment contracts, dependency-interval
+audits, hash-chained attempt and influence ledgers, evidence grades with
+explicit downgrade semantics — T164). The backend process boundary
+(`thesis` entrypoint, `Dockerfile.thesis`) is implemented (T178).
+
 FCA Thesis is a workspace-scoped chat agent for generating, implementing,
 testing, evaluating, and improving stock, option, and crypto hypotheses and
 trading strategies. Its backend and UI are separate peers of `market-lake` and

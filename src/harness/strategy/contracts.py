@@ -1,4 +1,15 @@
-"""Public strategy callback contract and its documented event ordering."""
+"""Public strategy callback contract and its documented event ordering.
+
+Bus-dispatched callbacks receive immutable market, order, and portfolio
+events through the event bus.  ``on_corporate_action`` is engine-delivered
+instead: the engine derives listing lifecycle events from the listings
+catalog (delistings and renames) and calls the hook after the last
+dispatched event of the event's knowledge date and before the first event
+of any later date, in :meth:`harness.data.listing_events.CorporateActionEvent.sort_key`
+order.  Engine machinery -- order cancellation on the delisted symbol,
+pessimistic settlement, and rename migration -- is applied before delivery,
+exactly as portfolio mutation precedes ``on_fill``.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +28,7 @@ from harness.core.types import (
 )
 
 if TYPE_CHECKING:
+    from harness.data.listing_events import CorporateActionEvent
     from harness.strategy.context import StrategyContext
 
 
@@ -30,6 +42,7 @@ CALLBACK_ORDER = (
     "on_position",
     "on_book",
     "on_account",
+    "on_corporate_action",
     "on_stop",
 )
 
@@ -71,6 +84,21 @@ class Strategy:
 
     def on_account(self, event: AccountSnapshot) -> None:
         """Handle a subscribed account snapshot."""
+
+    def on_corporate_action(
+        self, event: CorporateActionEvent, context: StrategyContext
+    ) -> None:
+        """Handle one engine-delivered listing lifecycle event.
+
+        ``event`` is a
+        :class:`~harness.data.listing_events.DelistingEvent` or
+        :class:`~harness.data.listing_events.RenameEvent`.  Delistings are
+        delivered on their delisting date, renames on the successor symbol's
+        first session, always after the engine has cancelled open orders on
+        the delisted symbol, settled delisted positions pessimistically, and
+        migrated renamed positions.  Strategies use ``context.orders`` and
+        ``context.books`` here to observe or react to the settled state.
+        """
 
     def on_stop(self, context: StrategyContext) -> None:
         """Finalize strategy state after the final event."""

@@ -1,4 +1,5 @@
-"""Orchestrated Thesis workflows, starting with strategy development."""
+"""Orchestrated Thesis workflows: strategy development, hypothesis
+validation, discovery, and RCA revision loops."""
 
 from thesis.workflows.backtests import (
     BacktestMode,
@@ -9,6 +10,15 @@ from thesis.workflows.backtests import (
     HarnessBacktestRunner,
     HarnessError,
 )
+from thesis.workflows.discovery import (
+    DiscoveryBudget,
+    DiscoveryOutcome,
+    DiscoveryPhase,
+    DiscoveryReport,
+    DiscoveryState,
+    DiscoveryWorkflow,
+    SearchPolicy,
+)
 from thesis.workflows.evidence import (
     EVIDENCE_GRADE,
     EXPLORATORY_DISCLOSURE,
@@ -16,6 +26,27 @@ from thesis.workflows.evidence import (
     EvidenceReport,
     EvidenceReportError,
     build_evidence_report,
+)
+from thesis.workflows.hypothesis_validation import (
+    HYPOTHESIS_VALIDATION_PHASES,
+    HYPOTHESIS_VALIDATION_WORKFLOW,
+    VERDICT_INCONCLUSIVE,
+    VERDICT_REFUTED,
+    VERDICT_SUPPORTED,
+    HypothesisEvidenceReport,
+    HypothesisSpecification,
+    HypothesisValidationPhase,
+    HypothesisValidationState,
+    HypothesisValidationWorkflow,
+    HypothesisVerdict,
+    JsonHypothesisComposer,
+)
+from thesis.workflows.rca import (
+    FailureClass,
+    RcaIntakeError,
+    RcaLoopPhase,
+    RcaRevisionLoopState,
+    RcaRevisionLoopWorkflow,
 )
 from thesis.workflows.strategy_development import (
     STRATEGY_DEVELOPMENT_PHASES,
@@ -38,6 +69,8 @@ __all__ = [
     "EVIDENCE_GRADE",
     "EXPLORATORY_DISCLOSURE",
     "HISTORICAL_PHASE_LABEL",
+    "HYPOTHESIS_VALIDATION_PHASES",
+    "HYPOTHESIS_VALIDATION_WORKFLOW",
     "STRATEGY_DEVELOPMENT_PHASES",
     "STRATEGY_DEVELOPMENT_WORKFLOW",
     "BacktestMode",
@@ -45,13 +78,32 @@ __all__ = [
     "BacktestRunRequest",
     "BacktestRunResult",
     "BacktestRunner",
+    "DiscoveryBudget",
+    "DiscoveryOutcome",
+    "DiscoveryPhase",
+    "DiscoveryReport",
+    "DiscoveryState",
+    "DiscoveryWorkflow",
     "EvidenceReport",
     "EvidenceReportError",
+    "FailureClass",
     "HarnessBacktestRunner",
     "HarnessError",
+    "HypothesisEvidenceReport",
+    "HypothesisSpecification",
+    "HypothesisValidationPhase",
+    "HypothesisValidationState",
+    "HypothesisValidationWorkflow",
+    "HypothesisVerdict",
     "InvalidPhaseTransition",
+    "JsonHypothesisComposer",
     "JsonStrategyComposer",
     "PhaseTransition",
+    "RcaIntakeError",
+    "RcaLoopPhase",
+    "RcaRevisionLoopState",
+    "RcaRevisionLoopWorkflow",
+    "SearchPolicy",
     "StrategyComposer",
     "StrategyDevelopmentOutcome",
     "StrategyDevelopmentPhase",
@@ -59,6 +111,9 @@ __all__ = [
     "StrategyDevelopmentState",
     "StrategyDevelopmentWorkflow",
     "StrategyGenerationError",
+    "VERDICT_INCONCLUSIVE",
+    "VERDICT_REFUTED",
+    "VERDICT_SUPPORTED",
     "WorkflowError",
     "build_evidence_report",
     "transition_phase",

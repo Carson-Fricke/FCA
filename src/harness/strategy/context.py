@@ -25,6 +25,7 @@ from harness.core.types import (
 )
 from harness.core.types.orders import OrderRequest
 from harness.data.history import HistoricalView, StrategyHistory
+from harness.data.listing_events import CorporateActionEvent
 from harness.portfolio import (
     BookSnapshot,
     DuplicateFillError,
@@ -618,10 +619,11 @@ class OrdersView:
 class StrategyContext:
     """Mode-independent, constrained dependencies for one strategy instance.
 
-    Callback order is ``on_start``, quote/trade/order/report/fill/position/book/
-    account callbacks in the event-bus order, then ``on_stop``.  The context
-    never creates a clock, reads wall time, opens a network connection, or uses
-    process-global randomness.
+    Callback order is ``on_start``, quote/trade/order/report/fill/position/
+    book/account callbacks in the event-bus order, then engine-delivered
+    corporate actions (``on_corporate_action``) on their knowledge dates, and
+    finally ``on_stop``.  The context never creates a clock, reads wall time,
+    opens a network connection, or uses process-global randomness.
     """
 
     __slots__ = (
@@ -629,6 +631,7 @@ class StrategyContext:
         "_book_id",
         "_bus",
         "_clock",
+        "_corporate_actions",
         "_data",
         "_emissions",
         "_log",
@@ -701,6 +704,7 @@ class StrategyContext:
             clock if isinstance(clock, ReadonlyClock) else ReadonlyClock(clock)
         )
         self._bus = bus
+        self._corporate_actions: tuple[CorporateActionEvent, ...] = ()
         self._portfolio = hub
         self._book_id = selected_book
         if data is None:
@@ -871,6 +875,28 @@ class StrategyContext:
 
     def _account_event(self, event: AccountSnapshot) -> None:
         self._account.update(event)
+
+    def _deliver_corporate_action(self, event: CorporateActionEvent) -> bool:
+        """Record one engine-delivered lifecycle event on the context surface.
+
+        The strategy binding calls this immediately before invoking the
+        strategy's ``on_corporate_action`` hook with ``(event, self)``.  The
+        context-side record makes delivery idempotent -- a repeated event is
+        refused and never re-recorded -- so strategies and artifacts observe
+        each lifecycle event exactly once.  Returns whether the event was
+        newly delivered.
+        """
+        if not isinstance(event, CorporateActionEvent):
+            raise TypeError("event must be a CorporateActionEvent")
+        if event in self._corporate_actions:
+            return False
+        self._corporate_actions = (*self._corporate_actions, event)
+        return True
+
+    @property
+    def corporate_actions(self) -> tuple[CorporateActionEvent, ...]:
+        """Return engine-delivered lifecycle events in delivery order."""
+        return self._corporate_actions
 
 
 __all__ = [
