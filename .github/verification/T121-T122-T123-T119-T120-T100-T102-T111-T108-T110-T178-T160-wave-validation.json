@@ -1,0 +1,48 @@
+{
+  "wave": "T121-T122-T123-T119-T120-T100-T102-T111-T108-T110-T178-T160",
+  "timestamp": "2026-09-05T03:30:00Z",
+  "numTotalTests": 1563,
+  "numPassedTests": 1549,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "Repository Ruff lint (2 coordinator import-sort fixes), Ruff format across 445 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "1549 tests passed (up 250 from the prior wave), 13 skipped, 1 strict xfailed, in 96.54 seconds."
+    },
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "command": "zig fmt --check . ; zig build test",
+      "result": "Zig 0.16.0 clean; 100/100 native tests."
+    },
+    {
+      "name": "focused-task-evidence",
+      "status": "passed",
+      "result": "T121 OPRA 12 passed; T122 AlpacaVenue equities 28 passed; T123 AlpacaVenue crypto 27 passed; T119 options replay+collateral 33 passed; T120 short-put-spread 9 passed + lint sweep; T100 HTML report 19 passed; T102 query API 51 passed; T111 paper parity 17 passed; T108 state store 20 passed; T110 kill switch 14 passed; T178 thesis packaging 23 passed; T160 strategy-development workflow 11 passed."
+    },
+    {
+      "name": "integration-wiring",
+      "status": "passed",
+      "result": "Coordinator wired facades: venues/__init__ (Alpaca broker + crypto venue surfaces), risk/__init__ (collateral + kill switch), runtime/__init__ (state store), testing/__init__ (paper parity), results/__init__ (offline HTML report), data/__init__ (OPRA + options replay); repository.md rows updated for harness.http, harness.venues, harness.risk, harness.testing, harness.results, harness.runtime, thesis.workflows, and the thesis process boundary/image."
+    }
+  ],
+  "integrationHistory": [
+    "Eleven-lane fan-out with exclusive file ownership across H6/H7, harness H3/H4, and Thesis TH1/TH6.",
+    "Key findings carried to follow-ups: options multi-leg is not yet runnable through the backtest runner (T120 hand-composed the kernel in tests; runner options-venue wiring is the gap), MarketLakeAdapter rejects asset_class=OPTION (options replay needs a lakeclient-backed partition port), risk pipeline _BUILTINS lacks aliases for the new rules, PaperShell capability surfaces trail the backtest engine (plain EventScheduler/HistoricalView vs StrategyScheduler/StrategyHistory), Dockerfile.thesis needs CI publication wiring, remote backtest polling loop deferred, and MultiLegOrder cannot express net-credit/debit without a venue-adapter mapping convention.",
+    "Committed and pushed as 773dedd."
+  ],
+  "limitations": [
+    "Live broker venues are untested against the real Alpaca API (deterministic fakes only, per repo policy); first live-paper contact is a gated operations task under H7.",
+    "Kill switch ships the explicit in-runtime switch; Azure-flag polling and authenticated CLI controls per the T110 spec are separate cloud/CLI work.",
+    "StateStore restore is state-identical but not event-identical for subsequent strategy callbacks until PaperShell exposes binding capture (documented in T108 findings)."
+  ]
+}
