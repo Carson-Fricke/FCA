@@ -30,9 +30,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Collect every version id + created_at (paginated).
+          # GHCR package names are lowercase.
+          PACKAGE_NAME="${PACKAGE_NAME,,}"
+
+          # Collect every version id + created_at (paginated). mktemp -d for a
+          # scratch DIRECTORY (plain mktemp yields a file, not a directory).
           page=1
-          tmp="$(mktemp)"
+          tmp="$(mktemp -d)"
           while :; do
             gh api \
               -H "Accept: application/vnd.github+json" \
