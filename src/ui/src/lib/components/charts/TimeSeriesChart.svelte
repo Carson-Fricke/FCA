@@ -454,7 +454,7 @@
 	{#if title}
 		<figcaption>{title}</figcaption>
 	{/if}
-	<div class="holder" style="height: {height}px">
+	<div class="holder" bind:this={holder} style="height: {height}px">
 		<canvas
 			bind:this={canvas}
 			onpointerdown={handleDown}
