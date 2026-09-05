@@ -1,5 +1,21 @@
 """Pre-trade, portfolio, and operational risk capabilities."""
 
+from harness.risk.collateral import (
+    ContractCollateral,
+    NoNakedShortOptions,
+    OptionCollateralLimit,
+    OptionCollateralReport,
+    OptionGroupCollateral,
+    option_collateral_report,
+)
+from harness.risk.kill_switch import (
+    DEFAULT_KILL_SWITCH_RULE_ID,
+    GlobalKillSwitch,
+    KillSwitch,
+    KillSwitchAction,
+    KillSwitchEvent,
+    KillSwitchState,
+)
 from harness.risk.limits import (
     ConfiguredRiskRule,
     DailyLossHalt,
@@ -44,6 +60,17 @@ from harness.risk.pipeline import RiskEngine, RiskPipeline
 
 __all__ = [
     "ConfiguredRiskRule",
+    "ContractCollateral",
+    "DEFAULT_KILL_SWITCH_RULE_ID",
+    "GlobalKillSwitch",
+    "KillSwitch",
+    "KillSwitchAction",
+    "KillSwitchEvent",
+    "KillSwitchState",
+    "NoNakedShortOptions",
+    "OptionCollateralLimit",
+    "OptionCollateralReport",
+    "OptionGroupCollateral",
     "DailyLossHalt",
     "DailyLossLimit",
     "DailyLossRule",
@@ -62,6 +89,10 @@ __all__ = [
     "MaxQuantity",
     "NetExposureLimit",
     "NetExposureRule",
+    "NoNakedShortOptions",
+    "OptionCollateralLimit",
+    "OptionCollateralReport",
+    "OptionGroupCollateral",
     "OrderCountLimit",
     "OrderCountRule",
     "OrderSizeLimit",
@@ -71,6 +102,7 @@ __all__ = [
     "RiskAudit",
     "RiskContext",
     "RiskDecision",
+    "option_collateral_report",
     "RiskEngine",
     "RiskPipeline",
     "RiskRule",

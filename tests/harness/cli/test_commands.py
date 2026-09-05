@@ -44,7 +44,7 @@ def test_process_group_help(command: str, description: str) -> None:
     assert description in result.stdout
 
 
-@pytest.mark.parametrize("command", ["api", "trader"])
+@pytest.mark.parametrize("command", ["trader"])
 def test_unimplemented_process_fails_explicitly(command: str) -> None:
     result = runner.invoke(cli.app, [command])
 
@@ -57,6 +57,49 @@ def test_backtest_job_requires_a_configuration() -> None:
 
     assert result.exit_code == 2
     assert "--config" in result.stderr
+
+
+def test_api_requires_a_configuration() -> None:
+    result = runner.invoke(cli.app, ["api"])
+
+    assert result.exit_code == 2
+    assert "--config" in result.stderr
+
+
+def test_api_rejects_a_non_api_shell(tmp_path) -> None:
+    config_path = tmp_path / "backtest.yaml"
+    config_path.write_text(
+        (Path(__file__).parents[3] / "config" / "harness" / "backtest.yaml").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["api", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 2
+    assert "shell must be 'api'" in result.stderr
+
+
+def test_api_fails_clearly_when_the_bearer_variable_is_missing(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "api.yaml"
+    config_path.write_text(
+        (Path(__file__).parents[3] / "config" / "harness" / "api.yaml").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("HARNESS_API_BEARER_TOKEN", raising=False)
+
+    result = runner.invoke(cli.app, ["api", "--config", str(config_path)])
+
+    assert result.exit_code == 2
+    assert "HARNESS_API_BEARER_TOKEN" in result.stderr
 
 
 def test_backtest_job_rejects_a_non_backtest_shell(tmp_path) -> None:

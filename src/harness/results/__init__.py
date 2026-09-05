@@ -1,8 +1,8 @@
 """Run recording, metrics, reports, and result access.
 
-The streaming run recorder, standard metrics and attribution, and the
-backtest results store with its run catalog are implemented; offline
-reports and the query surface remain reserved for later tasks.
+The streaming run recorder, standard metrics and attribution, the
+backtest results store with its run catalog, and offline static HTML
+reports are implemented; the query surface lives in harness.http.
 """
 
 from harness.results.metrics import (
@@ -46,6 +46,16 @@ from harness.results.recorder import (
     read_artifact,
     read_rows,
 )
+from harness.results.report import (
+    ReportHeader,
+    ReportInput,
+    ReportPositionRow,
+    ReportRiskEvent,
+    ReportTrade,
+    render_report,
+    render_report_bytes,
+    report_input_from_directory,
+)
 from harness.results.store import (
     BacktestResultsStore,
     InMemoryRunBlobStore,
@@ -87,6 +97,11 @@ __all__ = [
     "RunRecorder",
     "RunStatus",
     "RecorderConfig",
+    "ReportHeader",
+    "ReportInput",
+    "ReportPositionRow",
+    "ReportRiskEvent",
+    "ReportTrade",
     "StoredRun",
     "StrategyAttribution",
     "TradeRow",
@@ -105,6 +120,9 @@ __all__ = [
     "per_strategy_attribution",
     "read_artifact",
     "read_rows",
+    "render_report",
+    "render_report_bytes",
+    "report_input_from_directory",
     "run_digest",
     "run_prefix",
     "sharpe",

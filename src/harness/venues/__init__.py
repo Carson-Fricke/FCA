@@ -1,5 +1,32 @@
 """Simulated and live execution-venue capabilities."""
 
+from harness.venues.alpaca import (
+    AlpacaBroker,
+    AlpacaBrokerHTTPError,
+    AlpacaBrokerRest,
+    AlpacaClientOrderIdSource,
+    AlpacaCommandReceipt,
+    AlpacaExecutionInbox,
+    AlpacaOrderBinding,
+    AlpacaOrderDirectory,
+    AlpacaVenue,
+    AlpacaVenueError,
+    AlpacaVenueProtocolError,
+    AsyncBrokerTransport,
+    UnknownAlpacaOrderError,
+)
+from harness.venues.alpaca_crypto import (
+    AlpacaCryptoFeeMismatchError,
+    AlpacaCryptoFeeSchedule,
+    AlpacaCryptoVenue,
+    AlpacaCryptoVenueError,
+    CryptoFeeLedgerEntry,
+    CryptoOrderState,
+    CryptoVenue,
+    DuplicateCryptoOrderError,
+    UnknownCryptoOrderError,
+    is_crypto_pair,
+)
 from harness.venues.base import ExecutionVenue
 from harness.venues.options_matching import (
     DuplicateOptionsGroupError,
@@ -24,6 +51,26 @@ from harness.venues.sim import (
 )
 
 __all__ = (
+    "AlpacaBroker",
+    "AlpacaBrokerHTTPError",
+    "AlpacaBrokerRest",
+    "AlpacaClientOrderIdSource",
+    "AlpacaCommandReceipt",
+    "AlpacaCryptoFeeMismatchError",
+    "AlpacaCryptoFeeSchedule",
+    "AlpacaCryptoVenue",
+    "AlpacaCryptoVenueError",
+    "AlpacaExecutionInbox",
+    "AlpacaOrderBinding",
+    "AlpacaOrderDirectory",
+    "AlpacaVenue",
+    "AlpacaVenueError",
+    "AlpacaVenueProtocolError",
+    "AsyncBrokerTransport",
+    "CryptoFeeLedgerEntry",
+    "CryptoOrderState",
+    "CryptoVenue",
+    "DuplicateCryptoOrderError",
     "DuplicateOptionsGroupError",
     "ExecutionVenue",
     "OptionsMatchingEngine",
@@ -36,8 +83,11 @@ __all__ = (
     "SimVenueError",
     "SimulatedVenue",
     "UnexpectedVenueCall",
+    "UnknownAlpacaOrderError",
+    "UnknownCryptoOrderError",
     "UnknownOptionsGroupError",
     "UnknownSimOrderError",
     "VenueCall",
     "VenueOperation",
+    "is_crypto_pair",
 )

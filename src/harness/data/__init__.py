@@ -70,6 +70,18 @@ from harness.data.live_recorder import (
     XnysSessionResolver,
     live_part_path,
 )
+from harness.data.opra_ws import (
+    AlpacaOpraInbox,
+    AlpacaOpraSubscription,
+    AlpacaOpraWebSocketFeed,
+    OpraRotationDelta,
+    rotation_delta,
+)
+from harness.data.options_replay import (
+    OptionPartitionPort,
+    OptionsDayPlan,
+    OptionsReplayFeed,
+)
 from harness.data.options_universe import (
     ContractsCatalogPort,
     DteFilter,
@@ -144,9 +156,16 @@ __all__ = (
     "Nanos",
     "OHLCV",
     "OHLCVBar",
+    "OptionPartitionPort",
+    "OptionsDayPlan",
+    "OptionsReplayFeed",
     "OptionUniverseSnapshot",
     "OptionUniverseSpec",
     "OptionUniverseView",
+    "AlpacaOpraInbox",
+    "AlpacaOpraSubscription",
+    "AlpacaOpraWebSocketFeed",
+    "OpraRotationDelta",
     "ProjectedEgressWarning",
     "ParquetReader",
     "ReplayFingerprints",
@@ -169,5 +188,6 @@ __all__ = (
     "interval_delta",
     "live_part_path",
     "resolve_sessions",
+    "rotation_delta",
     "to_nanos",
 )

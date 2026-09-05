@@ -1,4 +1,4 @@
-"""Determinism and runtime-parity test support."""
+"""Determinism, runtime-parity, and paper-parity test support."""
 
 from harness.testing.determinism import (
     ArtifactCanonicalizer,
@@ -18,6 +18,18 @@ from harness.testing.determinism import (
     run_scenario,
     run_twice,
 )
+from harness.testing.paper_parity import (
+    EXCLUDED_DIMENSIONS,
+    PaperParityConfigurationError,
+    PaperParityError,
+    PaperParityReport,
+    PaperParityScenario,
+    ParityDimension,
+    ParityDivergence,
+    assert_paper_parity,
+    compare_paper_backtest,
+    run_paper_parity,
+)
 
 __all__ = [
     "ArtifactCanonicalizer",
@@ -27,13 +39,23 @@ __all__ = [
     "DeterminismManifest",
     "DeterminismRun",
     "DeterminismScenario",
+    "EXCLUDED_DIMENSIONS",
     "ManifestComparison",
+    "PaperParityConfigurationError",
+    "PaperParityError",
+    "PaperParityReport",
+    "PaperParityScenario",
+    "ParityDimension",
+    "ParityDivergence",
     "SyntheticFeed",
     "ToyStrategy",
     "assert_manifest_equal",
+    "assert_paper_parity",
     "assert_reproducible",
     "assert_same_artifacts",
     "compare_manifests",
+    "compare_paper_backtest",
+    "run_paper_parity",
     "run_scenario",
     "run_twice",
 ]
