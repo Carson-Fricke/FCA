@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-05T05:51:34.590Z",
+    "exportedAt": "2026-09-05T14:27:43.354Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 210
     },
-    "checksum": "1908c67702d78c8d",
+    "checksum": "d7aa13225c4f34fe",
     "taskCount": 206,
     "exportMode": "full"
   },
@@ -473,7 +473,7 @@
     "T161": {
       "type": "task",
       "title": "TH2.1 Hypothesis validation workflow",
-      "status": "pending",
+      "status": "done",
       "parentId": "T146",
       "depends": [
         "T155",
@@ -783,7 +783,7 @@
     "T162": {
       "type": "task",
       "title": "TH2.2 Autonomous strategy discovery workflow",
-      "status": "pending",
+      "status": "done",
       "parentId": "T146",
       "depends": [
         "T155",
@@ -1028,7 +1028,7 @@
     "T124": {
       "type": "task",
       "title": "H7.3 AlpacaVenue options and capability matrix",
-      "status": "pending",
+      "status": "done",
       "parentId": "T075",
       "depends": [
         "T116",
@@ -1050,7 +1050,7 @@
     "T134": {
       "type": "task",
       "title": "H9.3 Delisting and rename events with settlement",
-      "status": "pending",
+      "status": "done",
       "parentId": "T077",
       "depends": [
         "T083",
@@ -1068,7 +1068,7 @@
     "T146": {
       "type": "epic",
       "title": "TH2 Research workflows and evidence",
-      "status": "pending",
+      "status": "done",
       "parentId": "T143",
       "depends": [
         "T145"
@@ -1096,7 +1096,7 @@
     "T163": {
       "type": "task",
       "title": "TH2.3 RCA and strategy iteration loop",
-      "status": "pending",
+      "status": "done",
       "parentId": "T146",
       "depends": [
         "T155",
@@ -1264,7 +1264,7 @@
     "T072": {
       "type": "epic",
       "title": "H4 M2 Live data and paper runtime",
-      "status": "pending",
+      "status": "done",
       "parentId": "T068",
       "depends": [
         "T005",
@@ -1327,7 +1327,7 @@
     "T125": {
       "type": "task",
       "title": "H7.4 Continuous and boot reconciler",
-      "status": "pending",
+      "status": "done",
       "parentId": "T075",
       "depends": [
         "T108",
@@ -1347,7 +1347,7 @@
     "T135": {
       "type": "task",
       "title": "H9.4 Point-in-time UniverseView and dynamic subscriptions",
-      "status": "pending",
+      "status": "done",
       "parentId": "T077",
       "depends": [
         "T083",
@@ -1390,7 +1390,7 @@
     "T164": {
       "type": "task",
       "title": "TH2.4 Statistical discipline and evidence ledger",
-      "status": "pending",
+      "status": "done",
       "parentId": "T146",
       "depends": [
         "T155",
@@ -1937,7 +1937,7 @@
     "T109": {
       "type": "task",
       "title": "H4.7 Recovery policies and chaos tests",
-      "status": "pending",
+      "status": "done",
       "parentId": "T072",
       "depends": [
         "T108"
@@ -5509,7 +5509,7 @@
     {
       "id": "T161",
       "title": "TH2.1 Hypothesis validation workflow",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T146",
@@ -5542,21 +5542,75 @@
         "T159"
       ],
       "createdAt": "2026-09-03T00:08:11.841Z",
-      "updatedAt": "2026-09-03T00:08:11.841Z",
+      "updatedAt": "2026-09-05T14:27:06.363Z",
+      "completedAt": "2026-09-05T14:27:01.743Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:24:35.416Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:08:11.841Z"
+        "initializedAt": "2026-09-03T00:08:11.841Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/workflows/hypothesis_validation.py",
+                    "sha256": "dd83df69112f07fea68b918707b30bf9b4a59e6af82e5928404fcbdd4e71723b"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:24:19.941Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:24:27.635Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:24:35.533Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "th-hypothesis",
       "kind": "research",
       "scope": "feature",
       "relates": []
@@ -9283,7 +9337,7 @@
     {
       "id": "T162",
       "title": "TH2.2 Autonomous strategy discovery workflow",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T146",
@@ -9318,21 +9372,79 @@
         "T159"
       ],
       "createdAt": "2026-09-03T00:08:16.478Z",
-      "updatedAt": "2026-09-03T00:08:16.478Z",
+      "updatedAt": "2026-09-05T14:27:16.889Z",
+      "completedAt": "2026-09-05T14:27:12.860Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:24:58.725Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:08:16.478Z"
+        "initializedAt": "2026-09-03T00:08:16.478Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/workflows/discovery.py",
+                    "sha256": "f1b9f501d623ab0083e64bd5956453d94a0dd579fb619f3cbf4ca88916f50aa3"
+                  },
+                  {
+                    "path": "src/thesis/agent/search_policy.py",
+                    "sha256": "dd559f46d0111667b006f58fb025ac2700ce4ee74f8404eae5fac8c43369ba37"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:24:43.376Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:24:51.076Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:24:58.840Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "th-discovery",
       "kind": "research",
       "scope": "feature",
       "relates": []
@@ -11723,7 +11835,7 @@
     {
       "id": "T124",
       "title": "H7.3 AlpacaVenue options and capability matrix",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T075",
@@ -11755,21 +11867,79 @@
         "T122"
       ],
       "createdAt": "2026-09-01T18:03:11.414Z",
-      "updatedAt": "2026-09-01T18:30:03.964Z",
+      "updatedAt": "2026-09-05T14:26:55.323Z",
+      "completedAt": "2026-09-05T14:26:51.275Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:24:11.910Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:11.414Z"
+        "initializedAt": "2026-09-01T18:03:11.414Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/venues/alpaca_options.py",
+                    "sha256": "883f664994d78359b816be2a1928fcece73297fa335b207c33a6db0bf59f00e1"
+                  },
+                  {
+                    "path": "src/harness/venues/CAPABILITY_MATRIX.md",
+                    "sha256": "7219003a9b0fadf4b4c8474af841ec8f114328b68f3a0898b7cac39955866eb0"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:23:56.550Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:24:04.155Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:24:12.026Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "h7-options",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -11830,7 +12000,7 @@
     {
       "id": "T134",
       "title": "H9.3 Delisting and rename events with settlement",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T077",
@@ -11862,21 +12032,83 @@
         "T132"
       ],
       "createdAt": "2026-09-01T18:03:52.219Z",
-      "updatedAt": "2026-09-01T18:34:33.509Z",
+      "updatedAt": "2026-09-05T14:26:33.779Z",
+      "completedAt": "2026-09-05T14:26:29.765Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:23:24.805Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:52.219Z"
+        "initializedAt": "2026-09-01T18:03:52.219Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/data/listing_events.py",
+                    "sha256": "4aa470066e16b5098ec12817f4af9ce36c4d34bf81371888284217983ccf4da4"
+                  },
+                  {
+                    "path": "src/harness/strategy/contracts.py",
+                    "sha256": "1986684bf4f07219ca3a52505e99a2271370cfb9457382a590a2107dc33ab92b"
+                  },
+                  {
+                    "path": "src/harness/strategy/context.py",
+                    "sha256": "a331964995fda96fa0f40c392e468a336fb608a6dad8f5d4bcad5d5f69a29ddf"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:23:09.428Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:23:17.136Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:23:24.921Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "h9-lifecycle",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -11927,7 +12159,7 @@
     {
       "id": "T146",
       "title": "TH2 Research workflows and evidence",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T143",
@@ -11954,8 +12186,9 @@
         "T145"
       ],
       "createdAt": "2026-09-03T00:02:00.080Z",
-      "updatedAt": "2026-09-03T00:39:13.338Z",
-      "pipelineStage": "implementation",
+      "updatedAt": "2026-09-05T14:27:34.088Z",
+      "completedAt": "2026-09-05T14:27:34.088Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -12476,7 +12709,7 @@
     {
       "id": "T163",
       "title": "TH2.3 RCA and strategy iteration loop",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T146",
@@ -12510,21 +12743,79 @@
         "T159"
       ],
       "createdAt": "2026-09-03T00:08:21.730Z",
-      "updatedAt": "2026-09-03T00:08:21.730Z",
+      "updatedAt": "2026-09-05T14:27:38.158Z",
+      "completedAt": "2026-09-05T14:27:34.088Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:25:45.549Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:08:21.730Z"
+        "initializedAt": "2026-09-03T00:08:21.730Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/workflows/rca.py",
+                    "sha256": "cf134e76773693f2ace3cab65abca617414ee66194e5eae7217caa94afb3af1d"
+                  },
+                  {
+                    "path": "src/thesis/research/lineage.py",
+                    "sha256": "08e97ddb4fedd872cba8ab6c4942a93785c5dc0f9613419003b926ebc5b703df"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:25:29.991Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:25:37.820Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:25:45.667Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "th-rca",
       "kind": "research",
       "scope": "feature",
       "relates": []
@@ -13799,7 +14090,7 @@
     {
       "id": "T072",
       "title": "H4 M2 Live data and paper runtime",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T068",
@@ -13833,8 +14124,9 @@
         "T071"
       ],
       "createdAt": "2026-09-01T17:55:29.643Z",
-      "updatedAt": "2026-09-01T18:22:34.598Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-05T14:26:07.708Z",
+      "completedAt": "2026-09-05T14:26:07.708Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -14637,7 +14929,7 @@
     {
       "id": "T125",
       "title": "H7.4 Continuous and boot reconciler",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T075",
@@ -14666,21 +14958,75 @@
         "T122"
       ],
       "createdAt": "2026-09-01T18:03:15.642Z",
-      "updatedAt": "2026-09-01T18:30:12.774Z",
+      "updatedAt": "2026-09-05T14:26:23.294Z",
+      "completedAt": "2026-09-05T14:26:18.986Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:23:01.411Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:15.642Z"
+        "initializedAt": "2026-09-01T18:03:15.642Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/runtime/reconciler.py",
+                    "sha256": "4002b193d840fe82ab8cc3e760d93a885244dc4abec66ded2de5e020f797be0a"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:22:45.969Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:22:53.678Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:23:01.527Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "h7-reconciler",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -14739,7 +15085,7 @@
     {
       "id": "T135",
       "title": "H9.4 Point-in-time UniverseView and dynamic subscriptions",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T077",
@@ -14771,21 +15117,75 @@
         "T132"
       ],
       "createdAt": "2026-09-01T18:03:56.262Z",
-      "updatedAt": "2026-09-01T18:31:39.329Z",
+      "updatedAt": "2026-09-05T14:26:44.790Z",
+      "completedAt": "2026-09-05T14:26:40.292Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:23:48.523Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:56.262Z"
+        "initializedAt": "2026-09-01T18:03:56.262Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/data/universe_view.py",
+                    "sha256": "ac7235ee9ad64357ad70d6376595582616cd32f398299a76043831909ef0f802"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:23:33.017Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:23:40.781Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:23:48.643Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "h9-universe",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -15364,7 +15764,7 @@
     {
       "id": "T164",
       "title": "TH2.4 Statistical discipline and evidence ledger",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T146",
@@ -15400,21 +15800,83 @@
         "T158"
       ],
       "createdAt": "2026-09-03T00:08:26.970Z",
-      "updatedAt": "2026-09-03T00:08:26.970Z",
+      "updatedAt": "2026-09-05T14:27:27.629Z",
+      "completedAt": "2026-09-05T14:27:23.309Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:25:22.045Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:08:26.970Z"
+        "initializedAt": "2026-09-03T00:08:26.970Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/experiments/contracts.py",
+                    "sha256": "2de1bc1d15e1b1c606667dbec9107c5b96b72fb6cb57115289bcbaaf61dfa832"
+                  },
+                  {
+                    "path": "src/thesis/experiments/ledger.py",
+                    "sha256": "2bf4ec7dacf9a6f3dda4b1bb63aef0cda7bbd6b36b26194d16b893e447e5b33f"
+                  },
+                  {
+                    "path": "src/thesis/experiments/grades.py",
+                    "sha256": "019850095d351ed41c11aece275dd21895c813e2c4f855eecffb3cfd6a358fe3"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:25:06.609Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:25:14.339Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:25:22.162Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "th-evidence",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -21309,7 +21771,7 @@
     {
       "id": "T109",
       "title": "H4.7 Recovery policies and chaos tests",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T072",
@@ -21339,21 +21801,75 @@
         "T108"
       ],
       "createdAt": "2026-09-01T18:02:05.524Z",
-      "updatedAt": "2026-09-01T18:27:53.652Z",
+      "updatedAt": "2026-09-05T14:26:12.093Z",
+      "completedAt": "2026-09-05T14:26:07.708Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T14:22:37.935Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:02:05.524Z"
+        "initializedAt": "2026-09-01T18:02:05.524Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/runtime/recovery.py",
+                    "sha256": "2a4bd15edd6c8bb32e5d58b1ed8c92dd87bd333293ecb91d9bd8daa227531641"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T14:22:22.178Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T109-T124-T125-T134-T135-T161-T162-T163-T164-wave-validation.json",
+                "sha256": "fb153a378b3002d91f298bf7f78b4d7d04a64ea29d876d40b4e9c3a42e08db5b",
+                "passCount": 1865,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T14:22:30.153Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T14:22:38.126Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "h4-recovery",
       "kind": "work",
       "scope": "unit",
       "relates": []

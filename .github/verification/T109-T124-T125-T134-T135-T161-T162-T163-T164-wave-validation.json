@@ -1,0 +1,49 @@
+{
+  "wave": "T109-T124-T125-T134-T135-T161-T162-T163-T164",
+  "timestamp": "2026-09-05T05:00:00Z",
+  "numTotalTests": 1879,
+  "numPassedTests": 1865,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "Repository Ruff lint (coordinator facade fixes), Ruff format across 475 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "1865 tests passed (up 316 from the prior wave), 13 skipped, 1 strict xfailed, in 103.01 seconds."
+    },
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "command": "zig fmt --check . ; zig build test",
+      "result": "Zig 0.16.0 clean; 100/100 native tests."
+    },
+    {
+      "name": "focused-task-evidence",
+      "status": "passed",
+      "result": "T109 recovery+chaos 46 passed; T125 reconciler 36 passed; T134 listing events+corporate actions 26 passed; T135 universe view 24 passed; T124 alpaca options 52 passed; T161 hypothesis validation 32 passed; T162 discovery 16 passed; T163 RCA+lineage 32 passed; T164 experiments 52 passed."
+    },
+    {
+      "name": "integration-wiring",
+      "status": "passed",
+      "result": "Coordinator wired facades: runtime/__init__ (recovery + reconciler), venues/__init__ (alpaca_options + capability matrix), data/__init__ (listing events + universe view), strategy/__init__ (corporate-action vocabulary), thesis/workflows/__init__ (all four workflow facades); repository.md and fca-thesis.md Status/rows updated for the new capabilities."
+    }
+  ],
+  "integrationHistory": [
+    "Nine-lane fan-out: H4.7 recovery/chaos, H7.4 reconciler, H9.3 listing lifecycle, H9.4 universe view, H7.3 alpaca options + capability matrix, TH2.1 hypothesis validation, TH2.2 discovery, TH2.3 RCA revision loop, TH2.4 statistical discipline.",
+    "Two lanes (T109, T163) failed silently on first dispatch and were re-run; T124's first attempt left partial files that the retry assessed and completed.",
+    "Key integration findings recorded: T134 delivered the on_corporate_action contract hook with engine wiring points documented (engine.py:354-361 poll-deliver, binding.py dispatch, portfolio listing_lifecycle composition point for settlement; rename needs a VirtualBook.migrate_symbol seam that does not exist yet); T135 pinned subscription boundary semantics (next-event delivery, no determinism violation); T162's local ledger interfaces have a documented mechanical adapter onto thesis.experiments.ledger (needs an exploratory no-contract mode decision); T163 established workflows -> research -> experiments dependency direction.",
+    "Committed and pushed as 72fd987."
+  ],
+  "limitations": [
+    "Corporate-action engine dispatch (deriver construction, settlement composition, order cancellation before delivery) is documented but not yet wired into engine.py — a T134 follow-up owns the wiring.",
+    "Rename continuity requires a VirtualBook.migrate_symbol seam (portfolio-owned) before rename events can preserve cost basis through the engine path.",
+    "Discovery accounting uses local ledger interfaces pending the exploratory-mode adapter onto thesis.experiments.ledger."
+  ]
+}
