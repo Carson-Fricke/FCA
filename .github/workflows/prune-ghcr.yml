@@ -3,7 +3,7 @@ name: Prune GHCR image versions
 on:
   schedule:
     # Weekly Sundays 03:00 UTC - keeps private-package storage bounded.
-    cron: '0 3 * * 0'
+    - cron: '0 3 * * 0'
   workflow_dispatch:
 
 permissions:
