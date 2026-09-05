@@ -1,0 +1,57 @@
+{
+  "wave": "T112-T049-T126-T128-T168-T169-T211",
+  "timestamp": "2026-09-05T07:30:00Z",
+  "numTotalTests": 2029,
+  "numPassedTests": 2015,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "Repository Ruff lint, Ruff format across 513 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2015 tests passed (up 150 from the prior wave), 13 skipped, 1 strict xfailed, in 140.04 seconds."
+    },
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "command": "zig fmt --check . ; zig build test",
+      "result": "Zig 0.16.0 clean; 100/100 native tests."
+    },
+    {
+      "name": "bicep-gates",
+      "status": "passed",
+      "command": "az bicep build + az bicep lint on main.bicep and all changed modules",
+      "result": "az CLI 2.89.1 present: zero warnings; build-params on dev.bicepparam OK; compiled ARM inspected (scale-to-zero quant API, RTH cron scale rule, crypto flag gate, Manual backtest job, killswitch table, quant role assignments); workflow YAML parsed."
+    },
+    {
+      "name": "focused-task-evidence",
+      "status": "passed",
+      "result": "T112 Bicep runtime (bicep gates above); T049 soak: live bounded launch 8/8 sessions complete (8000 rows, 95615 bytes, $0.000231 projected), full run proven by dry-run (2684 sessions/stream, resumable), runbook + launch record landed; T126 shadow+go-live 34 passed; T128 sweeps 33 passed incl. real 50-config grid; T168 registry 36 passed; T169 protected client 26 passed; T211 thesis HTTP 21 passed + 96 chat/workflow regression."
+    },
+    {
+      "name": "integration-wiring",
+      "status": "passed",
+      "result": "Coordinator wired harness/runtime facade (ShadowShell, GoLiveGate, run_shadow_session, validate_live_deployment); T211 reworked thesis.http per the corrected chat/execution boundary (steering percolates from chat messages via intent epochs; SSE stream with Last-Event-ID resume; start/stop/cancel remain control plane); fca-thesis.md boundary section updated."
+    }
+  ],
+  "integrationHistory": [
+    "Seven-lane fan-out: T112 Bicep quant runtime, T049 soak tooling + bounded live launch, T126 shadow/go-live, T128 sweep runner, T168 model registry, T169 protected-test authority client, T211 chat-owned steering + SSE.",
+    "T112 live costs: quant identity, harness-results/harness-state containers, killswitch table, quant API (scale-to-zero), RTH trader (KEDA cron), optional crypto trader, backtest Container Apps Job; secrets must be seeded before first start (alpaca-paper/live keys, harness-api-bearer-token).",
+    "T049 launched a live bounded soak against the dev API (temporary external-ingress posture applied and fully restored); the full 2016-to-today run is one command and resumable; lake row-cap gap (1000 records/data-type ingest bound) recorded for T050 cost math.",
+    "T211 fixed a latent bug: the thesis chat router's Depends() silently degraded to a query parameter under postponed annotations, making the router unusable; fixed via module-level get_chat_service reading app.state (lake composition pattern).",
+    "Committed and pushed as 87ebb09."
+  ],
+  "limitations": [
+    "Trader containers fail-loop until the trader runtime composition lands (harness trader is scaffolded-only); per-run backtest config must be supplied via job-start container-arg override (sweep runner contract documented).",
+    "Shadow intents cover order submissions only (cancel/replace unobservable through PaperShell without a venue-factory seam); kill-switch remains in-process pending the T112 table client.",
+    "Registry-to-foundry deployment enforcement and the cutoff-overlap evidence modifier are follow-up seams; T169's registry wiring into submissions is a small integration task.",
+    "Chat-message SSE frames are ephemeral (no durable per-message cursor) pending a chat contracts schema change."
+  ]
+}

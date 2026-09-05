@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-05T14:27:43.354Z",
+    "exportedAt": "2026-09-05T23:21:57.868Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 210
+      "nextId": 213
     },
-    "checksum": "d7aa13225c4f34fe",
-    "taskCount": 206,
+    "checksum": "b9ec45d1f3d289d2",
+    "taskCount": 209,
     "exportMode": "full"
   },
   "selection": {
@@ -212,7 +212,10 @@
       "T012",
       "T137",
       "T190",
+      "T210",
+      "T211",
       "T192",
+      "T212",
       "T193",
       "T194",
       "T195",
@@ -390,7 +393,7 @@
     "T112": {
       "type": "task",
       "title": "H5.1 Extend Bicep for quant runtime",
-      "status": "pending",
+      "status": "done",
       "parentId": "T073",
       "depends": [
         "T020",
@@ -421,7 +424,7 @@
     "T128": {
       "type": "task",
       "title": "H8.1 Reproducible parameter sweep runner",
-      "status": "pending",
+      "status": "done",
       "parentId": "T076",
       "depends": [
         "T096",
@@ -494,7 +497,7 @@
     "T168": {
       "type": "task",
       "title": "TH4.1 Model registry and RCA evidence tiers",
-      "status": "pending",
+      "status": "done",
       "parentId": "T148",
       "depends": [
         "T145",
@@ -804,7 +807,7 @@
     "T169": {
       "type": "task",
       "title": "TH4.2 Protected test authority client and exposure ledger",
-      "status": "pending",
+      "status": "done",
       "parentId": "T148",
       "depends": [
         "T145",
@@ -919,7 +922,7 @@
     "T049": {
       "type": "task",
       "title": "E6.3 Full-history AAPL and SPY soak",
-      "status": "pending",
+      "status": "done",
       "parentId": "T009",
       "depends": [
         "T048"
@@ -1596,7 +1599,7 @@
     "T126": {
       "type": "task",
       "title": "H7.5 Shadow mode and enforced go-live gate",
-      "status": "pending",
+      "status": "done",
       "parentId": "T075",
       "depends": [
         "T111",
@@ -2257,11 +2260,32 @@
       "parentId": "T070",
       "depends": []
     },
+    "T210": {
+      "type": "task",
+      "title": "TH6.7 Base chart component and backtest report composition",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
+    },
+    "T211": {
+      "type": "task",
+      "title": "Chat-owned messaging with percolated steering and SSE streaming for the Thesis backend",
+      "status": "done",
+      "parentId": "T150",
+      "depends": []
+    },
     "T192": {
       "type": "task",
       "title": "Capability-scoped read-only strategy clock",
       "status": "done",
       "parentId": "T070",
+      "depends": []
+    },
+    "T212": {
+      "type": "task",
+      "title": "Prune GHCR image versions on a schedule",
+      "status": "pending",
+      "parentId": "T150",
       "depends": []
     },
     "T193": {
@@ -4514,7 +4538,7 @@
     {
       "id": "T112",
       "title": "H5.1 Extend Bicep for quant runtime",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T073",
@@ -4551,21 +4575,87 @@
         "T107"
       ],
       "createdAt": "2026-09-01T18:02:19.009Z",
-      "updatedAt": "2026-09-03T00:39:17.018Z",
+      "updatedAt": "2026-09-05T23:20:44.198Z",
+      "completedAt": "2026-09-05T23:20:38.829Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T23:17:39.335Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:02:19.009Z"
+        "initializedAt": "2026-09-01T18:02:19.009Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/container-apps.bicep",
+                    "sha256": "ee264330dff492f39f680984becc00d7e69ba4a7687827f0fba9a88d477ceca1"
+                  },
+                  {
+                    "path": "infra/modules/storage.bicep",
+                    "sha256": "a73273ad204fbc202211b4169d72e61e38f5113fdb5df80e32015ddc04fdc16c"
+                  },
+                  {
+                    "path": "infra/main.bicep",
+                    "sha256": "f1b517ad1970dc4a3a04051178098c8c2bd83a9a0604ffaf77e3e1a2d49bead5"
+                  },
+                  {
+                    "path": "infra/parameters/dev.bicepparam",
+                    "sha256": "56ba9102c782d16e9482dc60009360febb9b8ff8cde0d3493c94a200ba1bc53a"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T23:17:23.869Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T112-T049-T126-T128-T168-T169-T211-wave-validation.json",
+                "sha256": "aae3ecf8762b3b81768ba1310519ce8fa38d4f90aa1d804a58988feb635d9038",
+                "passCount": 2015,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T23:17:31.663Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T23:17:39.534Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "h5-bicep",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -4789,7 +4879,7 @@
     {
       "id": "T128",
       "title": "H8.1 Reproducible parameter sweep runner",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T076",
@@ -4819,21 +4909,83 @@
         "T102"
       ],
       "createdAt": "2026-09-01T18:03:27.807Z",
-      "updatedAt": "2026-09-01T18:30:39.329Z",
+      "updatedAt": "2026-09-05T23:21:17.033Z",
+      "completedAt": "2026-09-05T23:21:12.572Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T23:18:52.369Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:27.807Z"
+        "initializedAt": "2026-09-01T18:03:27.807Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/sweeps/spec.py",
+                    "sha256": "bad068456ec76018e8de6df5c28c65c537f2d1fd6db35961b40c84e6d874f36b"
+                  },
+                  {
+                    "path": "src/harness/sweeps/runner.py",
+                    "sha256": "c607595ee701a60970acc056475ae86cb11cebb1dfe48e030d40840ecd7e49e6"
+                  },
+                  {
+                    "path": "src/harness/sweeps/sensitivity.py",
+                    "sha256": "ad47f9500f517459cf9add53e5efd41536e82e9e6d2f42e78450a85ddbd0f3bb"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T23:18:36.485Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T112-T049-T126-T128-T168-T169-T211-wave-validation.json",
+                "sha256": "aae3ecf8762b3b81768ba1310519ce8fa38d4f90aa1d804a58988feb635d9038",
+                "passCount": 2015,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T23:18:44.139Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T23:18:52.482Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "h8-sweeps",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -5672,7 +5824,7 @@
     {
       "id": "T168",
       "title": "TH4.1 Model registry and RCA evidence tiers",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T148",
@@ -5705,21 +5857,83 @@
         "T161"
       ],
       "createdAt": "2026-09-03T00:11:20.086Z",
-      "updatedAt": "2026-09-03T00:15:50.737Z",
+      "updatedAt": "2026-09-05T23:21:28.937Z",
+      "completedAt": "2026-09-05T23:21:23.898Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T23:19:16.000Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:11:20.086Z"
+        "initializedAt": "2026-09-03T00:11:20.086Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/registry/models.py",
+                    "sha256": "3e0d8921c199f4cb19f3d7550383a2396d19b70b0b2c11bdc6f05216c3b740e3"
+                  },
+                  {
+                    "path": "src/thesis/registry/tiers.py",
+                    "sha256": "158966cc0d7d0d0ae0a40be5ba5ca05c2437e79b3fefd43093156b2eda182751"
+                  },
+                  {
+                    "path": "src/thesis/registry/attestation.py",
+                    "sha256": "eb4606ecb824a8ab129e8f74e8a1db24823f189d4c7c456baaf566cccfa0f7f1"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T23:19:00.273Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T112-T049-T126-T128-T168-T169-T211-wave-validation.json",
+                "sha256": "aae3ecf8762b3b81768ba1310519ce8fa38d4f90aa1d804a58988feb635d9038",
+                "passCount": 2015,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T23:19:08.171Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T23:19:16.193Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "th4-registry",
       "kind": "research",
       "scope": "feature",
       "relates": []
@@ -9507,7 +9721,7 @@
     {
       "id": "T169",
       "title": "TH4.2 Protected test authority client and exposure ledger",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T148",
@@ -9542,21 +9756,83 @@
         "T164"
       ],
       "createdAt": "2026-09-03T00:11:24.776Z",
-      "updatedAt": "2026-09-03T00:15:46.423Z",
+      "updatedAt": "2026-09-05T23:21:40.992Z",
+      "completedAt": "2026-09-05T23:21:35.898Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T23:19:39.221Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:11:24.776Z"
+        "initializedAt": "2026-09-03T00:11:24.776Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/protected/client.py",
+                    "sha256": "c200d4346a55f66ea9ce1a7fa044ecefbf2be4e72c6a672919f1e0b7863d6d05"
+                  },
+                  {
+                    "path": "src/thesis/protected/facts.py",
+                    "sha256": "70485fe2fe5d5decfa59e139d5b217ec060337db108ef11478ab771924094a62"
+                  },
+                  {
+                    "path": "src/thesis/protected/exposure.py",
+                    "sha256": "893825b3ffa5046fdb84147aa35af89bfc181b2879f06c21a235b5dee215ba00"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T23:19:23.918Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T112-T049-T126-T128-T168-T169-T211-wave-validation.json",
+                "sha256": "aae3ecf8762b3b81768ba1310519ce8fa38d4f90aa1d804a58988feb635d9038",
+                "passCount": 2015,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T23:19:31.500Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T23:19:39.336Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "th4-authority",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -10537,7 +10813,7 @@
     {
       "id": "T049",
       "title": "E6.3 Full-history AAPL and SPY soak",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T009",
@@ -10556,21 +10832,83 @@
         "T048"
       ],
       "createdAt": "2026-09-01T03:22:54.229Z",
-      "updatedAt": "2026-09-01T03:28:34.689Z",
+      "updatedAt": "2026-09-05T23:20:55.234Z",
+      "completedAt": "2026-09-05T23:20:50.915Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T23:18:03.275Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:54.229Z"
+        "initializedAt": "2026-09-01T03:22:54.229Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "scripts/soak/run_soak.py",
+                    "sha256": "23e6164a65ffd0bbd77176fb5e7c91560878f0f525acd07faee63859774744a8"
+                  },
+                  {
+                    "path": ".github/runbooks/e6-full-history-soak.md",
+                    "sha256": "f585a709ecd44a4cf583475b0bfedbf81bc9989bff05c8e4ebe6c1de7c797871"
+                  },
+                  {
+                    "path": "config/lake/soak-aapl-spy.yaml",
+                    "sha256": "792e1b67a6a4d8f6d10be3b181db39a54205a35b405c25c4f7dc3abdaf79b741"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T23:17:47.494Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T112-T049-T126-T128-T168-T169-T211-wave-validation.json",
+                "sha256": "aae3ecf8762b3b81768ba1310519ce8fa38d4f90aa1d804a58988feb635d9038",
+                "passCount": 2015,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T23:17:55.523Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T23:18:03.465Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "e6-soak",
       "kind": "experiment",
       "scope": "unit",
       "relates": []
@@ -17843,7 +18181,7 @@
     {
       "id": "T126",
       "title": "H7.5 Shadow mode and enforced go-live gate",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T075",
@@ -17875,21 +18213,79 @@
         "T135"
       ],
       "createdAt": "2026-09-01T18:03:19.628Z",
-      "updatedAt": "2026-09-01T18:30:21.735Z",
+      "updatedAt": "2026-09-05T23:21:06.049Z",
+      "completedAt": "2026-09-05T23:21:01.720Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T23:18:28.289Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:03:19.628Z"
+        "initializedAt": "2026-09-01T18:03:19.628Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/runtime/shadow.py",
+                    "sha256": "98a531ea879a0a8f4e26765b76f64eb25e676c10df4e536905505085f95c04a3"
+                  },
+                  {
+                    "path": "src/harness/runtime/go_live.py",
+                    "sha256": "f5204fbc0bcb612ffa30d9a6eecd3541561d17b0beaf1e281ac736f722c02a53"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T23:18:11.883Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T112-T049-T126-T128-T168-T169-T211-wave-validation.json",
+                "sha256": "aae3ecf8762b3b81768ba1310519ce8fa38d4f90aa1d804a58988feb635d9038",
+                "passCount": 2015,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T23:18:19.898Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T23:18:28.411Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "h7-shadow",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -22333,7 +22729,9 @@
         "Complete child T205: Retire BRAIN embedding backfill workaround after upstream fix #1217",
         "Complete child T206: TH6.5 CLEO task DAG canvas component",
         "Complete child T207: TH6.6 Backtest PnL and price chart component",
-        "Complete child T209: Relocate Thesis UI into the src/ui product namespace"
+        "Complete child T209: Relocate Thesis UI into the src/ui product namespace",
+        "Complete child T211: Chat-owned messaging with percolated steering and SSE streaming for the Thesis backend",
+        "Complete child T212: Prune GHCR image versions on a schedule"
       ],
       "depends": [
         "T069",
@@ -22347,7 +22745,7 @@
         "T149"
       ],
       "createdAt": "2026-09-03T00:02:16.159Z",
-      "updatedAt": "2026-09-05T05:04:40.127Z",
+      "updatedAt": "2026-09-05T23:18:23.862Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -25522,6 +25920,177 @@
       "relates": []
     },
     {
+      "id": "T210",
+      "title": "TH6.7 Base chart component and backtest report composition",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 11,
+      "positionVersion": 0,
+      "description": "Refactor the Thesis backtest UI around a base single-dataset chart component and a composite report component. The base chart owns pan and zoom grip handles, a bindable camera position (time window plus optional explicit value window), and explicit vertical scaling behavior (auto-fit with shift+wheel override), and renders candlesticks by default with a line mode for curves. The backtest visualizer page composes separate chart instances for the PnL curve, orders and their fills, and each traded security or underlying, all tied to one shared zoom camera. A backtest report component stacks those instances in an accordion layout with a summary header and a fills table, works standalone on a page, and embeds cleanly as a chat-context element with no router or page dependencies. The fixture moves to OHLC bars so candles render from real bar shapes.",
+      "labels": [
+        "thesis",
+        "ui",
+        "backtest",
+        "charts"
+      ],
+      "notes": [
+        "2026-09-05 22:31:17 UTC: 2026-09-05 05:25:00 UTC: Created from orchestrator design notes on the backtest UI. Supersedes the monolithic BacktestView composition from T207; T207 remains done and its backend artifact-view endpoint scope is unaffected. Task stays open until the orchestrator confirms the components match the intended design; do not auto-complete.",
+        "2026-09-05 22:41:09 UTC: 2026-09-05 22:40 UTC: First implementation landed in commit 7df8a1b: base TimeSeriesChart component (src/ui/src/lib/components/charts/) with bindable camera {t0,t1,lo,hi}, pan/zoom axis grip handles, wheel time-zoom, shift+wheel vertical stretch with explicit value-window override, auto-fit vertical scaling, candles render mode on by default and line mode for curves, and single-dataset data prop. BacktestReport component (src/ui/src/lib/components/backtest-view/) composes the PnL curve, orders-and-fills (execution markers plus fills table), and per-security candlestick charts in an accordion with a summary header; camera binding is forwarded so all instances share one zoom. demo/backtest page renders the report with the page-owned camera. OHLC fixture replaces the price-line fixture; monolithic BacktestView removed. Task stays open for orchestrator review.",
+        "2026-09-05 22:47:51 UTC: 2026-09-05 22:55 UTC: Fixed the bottom overview/time-frame strip in commit 9ea190e. Root causes: (1) the canvas backing store was sized from the figure element including the figcaption, vertically squashing the rendered chart; the ResizeObserver now observes the chart holder so the bitmap matches the CSS box. (2) the blue track only drew the visible window with no full-range context, so it floated and shrank oddly when zoomed; the strip is now a proper overview selector: faint full-extent track, blue highlight for the visible window, grip handles at the window edges, and click/drag on the track to jump the window. Grip hit-testing remapped to the extent-based positions.",
+        "2026-09-05 22:50:02 UTC: 2026-09-05 23:05 UTC: Fixed blank charts in commit 11c6252. The overview-strip fix (9ea190e) moved the ResizeObserver from the figure to the chart holder but omitted bind:this on the holder div, so the observer never attached, size stayed null, and the draw effect returned before painting any chart. Holder reference is now bound; build verified.",
+        "2026-09-05 22:55:02 UTC: 2026-09-05 23:20 UTC: Fixed blue overview window bar interaction in commit 2d68d0b. Dragging inside the bar previously reused the plot-pan mapping (pixels scaled by the window span), so the bar lagged or jumped instead of following the mouse; it is now a dedicated slide mode mapping pixels against the full extent with a grab offset so the window tracks the cursor one-to-one. Added cursor affordances: ew-resize on the grips, pointer on the empty overview track, grab on the window bar, grabbing while dragging, crosshair on the plot.",
+        "2026-09-05 23:06:18 UTC: 2026-09-05 23:45 UTC: Commit 844beaa. (1) Hover readout: the crosshair now snaps to the nearest data point, shows a value pill on the right axis at the series value, a date pill on the bottom axis, and an OHLC readout under the title on candle charts; fill-marker tooltips appear when the hovered bar time matches a fill. (2) The controls instructions in the HUD are clickable to minimize into a compact ? chip and expand again, per chart. (3) Win rate, CAGR, Sharpe, and Sortino tiles were added to the report summary header, consumed from report.stats passed in with the result (contract: winRate and cagr as decimal fractions, sharpe and sortino as ratios; missing fields render as em dash, and the tiles are hidden entirely when stats is absent). The component never calculates these metrics; the fixture carries placeholder values shaped like the future backend artifact-view payload until T207's endpoint supplies real ones.",
+        "2026-09-05 23:18:12 UTC: 2026-09-05 23:20 UTC: Multi-series chart support and cursor legend landed. TimeSeriesChart now accepts a series prop: an array of { name, data, color?, render? } entries rendered on one shared time axis with union extent/value scaling and a palette; the legacy single data prop still works as an unnamed series. The title-row legend shows every series' value at the hovered time (falling back to the window edge when not hovering), which fixes the PnL charts not showing equity at the cursor; the right-axis pill, date pill, and per-series OHLC readout snap to the nearest point across all series. BacktestReport passes the PnL and executions charts as a named Equity series and adds a Max drawdown tile. Stats contract now: winRate, cagr, maxDrawdown as decimal fractions (drawdown as positive loss magnitude), sharpe and sortino as ratios, all supplied by the backend result via report.stats; the component only formats. Note: these files were committed by the concurrent wave in commit 87ebb09 (they were build-verified before landing); no separate T210 commit exists for this batch."
+      ],
+      "acceptance": [
+        "A base single-dataset chart component exposes pan and zoom grip handles, a bindable camera position, and an explicit vertical scaling model (auto-fit by default with an explicit value-window override)",
+        "The base chart renders candlesticks with candles enabled by default and a line mode for curve data such as the PnL curve",
+        "The backtest visualizer page renders the equity curve, orders and fills, and each traded security as separate chart instances sharing one zoom camera",
+        "The backtest report component composes multiple chart instances covering the PnL curve, orders and their fills, and traded securities with their underlyings in an accordion layout",
+        "The report component works standalone on a page and embeds in a chat context with no router or page dependencies",
+        "npm run build succeeds from src/ui with the new chart composition in place of the monolithic BacktestView"
+      ],
+      "files": [
+        "src/ui/src/lib/components/charts/",
+        "src/ui/src/lib/components/backtest-view/",
+        "src/ui/src/routes/demo/backtest/",
+        "src/ui/src/lib/data/backtestFixture.js"
+      ],
+      "createdAt": "2026-09-05T22:31:16.575Z",
+      "updatedAt": "2026-09-05T23:18:11.906Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-05T22:31:16.575Z"
+      },
+      "pipelineStage": "implementation",
+      "assignee": "local",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T211",
+      "title": "Chat-owned messaging with percolated steering and SSE streaming for the Thesis backend",
+      "status": "done",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "large",
+      "position": 11,
+      "positionVersion": 0,
+      "description": "Codify the corrected chat/execution breakdown: the chat is the sole messaging surface (user AND agent narration are chat messages); an execution is a work unit with a machine timeline rendered inline in the chat. Steering is expressed by posting a chat message (optionally targeting an execution via structured fields like targets_execution); the orchestrator percolates it down to the targeted or active execution(s): durable ack, intent-epoch bump, replan at the next safe model/tool boundary, late tool results attach as evidence. Execution-scoped routes remain only for the control plane (start/stop/cancel) and the machine event timeline. Fold /executions/{id}/steer into chat messaging (thin alias at most). Add SSE event streaming (GET /v1/workspaces/{ws}/executions/{id}/events/stream with Last-Event-ID cursor resume) fanning out both surfaces: chat messages and execution machine events, including provider token deltas as ephemeral events during model phases. Update the architecture doc for the corrected boundary. The test for the boundary: would this be part of the conversation with a human analyst? Steer/interrupt/context = chat message; start/stop/cancel = control command; phase/tool/log detail = execution timeline.",
+      "labels": [
+        "thesis.api",
+        "chat",
+        "steering",
+        "sse"
+      ],
+      "acceptance": [
+        "All steering enters through chat messages and percolates to executions via intent epochs with durable ack; no execution-scoped messaging surface remains",
+        "SSE stream fans out chat messages and execution machine events with cursor resume and works through reconnects",
+        "Agent narration is delivered as chat messages; execution events hold only machine state",
+        "Architecture doc captures the corrected chat/execution boundary"
+      ],
+      "files": [
+        "src/thesis/http/application.py",
+        "src/thesis/http/chat.py",
+        "src/thesis/http/streaming.py"
+      ],
+      "createdAt": "2026-09-05T22:31:16.621Z",
+      "updatedAt": "2026-09-05T23:21:52.259Z",
+      "completedAt": "2026-09-05T23:21:47.685Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-05T23:20:02.184Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-05T22:31:16.621Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D003"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/http/application.py",
+                    "sha256": "0bdaea40b748e52bee03b997b9d16141ae4659c5dacf9fa7e07b6a9785aa58f1"
+                  },
+                  {
+                    "path": "src/thesis/http/streaming.py",
+                    "sha256": "4509feb3d08d0f6ac9aa97199aa131b9f93249cfb9094fd07f22a2507cda0859"
+                  },
+                  {
+                    "path": "src/thesis/chat/service.py",
+                    "sha256": "ddf4d5f699e48f21904474126a2773a10f8a8ffa598fc5c3060414aa9cab5ff6"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-05T23:19:46.994Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T112-T049-T126-T128-T168-T169-T211-wave-validation.json",
+                "sha256": "aae3ecf8762b3b81768ba1310519ce8fa38d4f90aa1d804a58988feb635d9038",
+                "passCount": 2015,
+                "failCount": 0,
+                "skipCount": 13
+              }
+            ],
+            "capturedAt": "2026-09-05T23:19:54.583Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 206 CLEO tasks through T209.\n"
+              }
+            ],
+            "capturedAt": "2026-09-05T23:20:02.297Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "thesis-api",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T192",
       "title": "Capability-scoped read-only strategy clock",
       "status": "done",
@@ -25624,6 +26193,51 @@
       },
       "pipelineStage": "contribution",
       "assignee": "clock-capability",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T212",
+      "title": "Prune GHCR image versions on a schedule",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T150",
+      "size": "small",
+      "position": 12,
+      "positionVersion": 0,
+      "description": "The private GHCR package accumulates one immutable SHA-tagged image per deploy with no retention. At the current wave velocity (31 deploys in 4 days, ~300MB/image) private-package storage grows by roughly 9GB per 4 days with no ceiling, which is the compounding term in the GHCR bill ($0.008/GB/day after the 500MB private free tier). Add a weekly scheduled workflow (.github/workflows/prune-ghcr.yml) that deletes image versions beyond the newest 10, never deleting versions younger than 7 days so the Azure rollback window and the currently deployed digest are always retained. Workflow runs on GitHub cron and manual dispatch with GITHUB_TOKEN packages:write; it is dependency-free (gh api + node). Storage cost after this lands is bounded at roughly keep-newest x image size. Note: pruning caps storage growth but not the per-deploy private-image pull bandwidth from Azure deployments; image slimming (multi-stage Dockerfile review) is the separate second lever if the bill stays high.",
+      "labels": [
+        "github-actions",
+        "cost-control",
+        "azure"
+      ],
+      "acceptance": [
+        ".github/workflows/prune-ghcr.yml exists with a weekly cron trigger and manual workflow_dispatch, scoped to the repository's GHCR package",
+        "The prune policy retains the newest 10 versions and never deletes versions younger than 7 days, preserving the Azure rollback window and the deployed digest",
+        "A manual workflow run completes successfully and its log reports the version count surveyed and the deletion count",
+        "Storage growth is bounded going forward (the schedule keeps the package near the keep-newest ceiling at the current deploy cadence)"
+      ],
+      "files": [
+        ".github/workflows/prune-ghcr.yml"
+      ],
+      "createdAt": "2026-09-05T23:18:23.862Z",
+      "updatedAt": "2026-09-05T23:18:23.862Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-05T23:18:23.862Z"
+      },
+      "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -26820,7 +27434,10 @@
         "T205",
         "T206",
         "T207",
-        "T209"
+        "T209",
+        "T210",
+        "T211",
+        "T212"
       ],
       "T181": [
         "T182",
