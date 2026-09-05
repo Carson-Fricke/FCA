@@ -2,6 +2,7 @@
 	let {
 		title = '',
 		data = [],
+		series = null,
 		render = 'candles',
 		camera = $bindable(null),
 		markers = [],
@@ -18,6 +19,7 @@
 	const DOWN = '#f85149';
 	const ACCENT = '#58a6ff';
 	const HANDLE = 'rgba(88, 166, 255, 0.35)';
+	const PALETTE = ['#58a6ff', '#f778ba', '#d29922', '#3fb950', '#ab7df1'];
 
 	let holder;
 	let canvas;
@@ -26,16 +28,30 @@
 	let drag = null;
 	let hintExpanded = $state(true);
 
-	const hasBars = $derived(data.length > 0 && 'close' in data[0]);
+	const plots = $derived.by(() => {
+		if (series && series.length) {
+			return series.map((s, i) => ({
+				name: s.name ?? '',
+				data: s.data ?? [],
+				color: s.color ?? PALETTE[i % PALETTE.length],
+				render: s.render ?? render
+			}));
+		}
+		return data.length ? [{ name: '', data, color: ACCENT, render }] : [];
+	});
+
 	const extent = $derived.by(() => {
 		let t0 = Infinity;
 		let t1 = -Infinity;
-		for (const p of data) {
-			if (p.t < t0) t0 = p.t;
-			if (p.t > t1) t1 = p.t;
+		for (const plot of plots) {
+			for (const p of plot.data) {
+				if (p.t < t0) t0 = p.t;
+				if (p.t > t1) t1 = p.t;
+			}
 		}
 		return Number.isFinite(t0) && t1 > t0 ? { t0, t1 } : null;
 	});
+
 	const fixedRange = $derived(
 		camera && camera.lo != null && camera.hi != null && camera.hi > camera.lo
 			? { lo: camera.lo, hi: camera.hi }
@@ -90,6 +106,23 @@
 		};
 	});
 
+	function isBars(plot) {
+		return plot.data.length > 0 && 'close' in plot.data[0];
+	}
+
+	function plotValue(plot, p) {
+		return isBars(plot) ? p.close : (p.v ?? p.close);
+	}
+
+	function plotValueAt(plot, t) {
+		let prev = null;
+		for (const p of plot.data) {
+			if (p.t > t) break;
+			prev = p;
+		}
+		return prev ? plotValue(plot, prev) : undefined;
+	}
+
 	function clampWindow(t0, t1) {
 		const full = extent.t1 - extent.t0;
 		let span = Math.min(Math.max(t1 - t0, minSpan), full);
@@ -120,25 +153,21 @@
 		);
 	}
 
-	function valueKey() {
-		return hasBars ? 'close' : 'v';
-	}
-
-	function pointValue(p) {
-		return hasBars ? p.close : p.v;
-	}
-
 	function rangeFor(t0, t1) {
 		let lo = Infinity;
 		let hi = -Infinity;
-		for (const p of data) {
-			if (p.t < t0 || p.t > t1) continue;
-			if (hasBars) {
-				if (p.low < lo) lo = p.low;
-				if (p.high > hi) hi = p.high;
-			} else {
-				if (p.v < lo) lo = p.v;
-				if (p.v > hi) hi = p.v;
+		for (const plot of plots) {
+			const bars = isBars(plot);
+			for (const p of plot.data) {
+				if (p.t < t0 || p.t > t1) continue;
+				if (bars) {
+					if (p.low < lo) lo = p.low;
+					if (p.high > hi) hi = p.high;
+				} else {
+					const v = p.v ?? p.close;
+					if (v < lo) lo = v;
+					if (v > hi) hi = v;
+				}
 			}
 		}
 		if (!Number.isFinite(lo) || lo === hi) return null;
@@ -165,13 +194,16 @@
 		return r.hi - ((y - PAD.top) / plotH(h)) * (r.hi - r.lo);
 	}
 
-	function lastValueAt(t) {
-		let prev = null;
-		for (const p of data) {
-			if (p.t > t) break;
-			prev = p;
+	function nearestPoint(t) {
+		let best = null;
+		for (let pi = 0; pi < plots.length; pi++) {
+			for (const p of plots[pi].data) {
+				if (!best || Math.abs(p.t - t) < Math.abs(best.point.t - t)) {
+					best = { pi, point: p };
+				}
+			}
 		}
-		return prev ? pointValue(prev) : undefined;
+		return best;
 	}
 
 	$effect(() => {
@@ -187,11 +219,13 @@
 		const r = effectiveRange(h);
 		if (!r) return;
 		drawFrame(ctx, w, h, r);
-		if (render === 'candles' && hasBars) drawCandles(ctx, w, h, r);
-		else drawLine(ctx, w, h, r);
+		for (const plot of plots) {
+			if (plot.render === 'candles' && isBars(plot)) drawCandles(ctx, w, h, r, plot);
+			else drawLine(ctx, w, h, r, plot);
+		}
 		drawMarkers(ctx, w, h, r);
 		drawAxis(ctx, w, h);
-		if (hover) drawCrosshair(ctx, w, h);
+		if (hover) drawCrosshair(ctx, w, h, r);
 	});
 
 	function drawFrame(ctx, w, h, r) {
@@ -210,20 +244,32 @@
 			ctx.fillText(fmtValue(v), 6, y + 4);
 			ctx.fillText(fmtValue(v), w - PAD.right + 6, y + 4);
 		}
-		const label = `${title}   ${fmtValue(lastValueAt(camera.t1))}`;
-		ctx.fillStyle = '#e6edf3';
-		ctx.fillText(label, PAD.left + 8, PAD.top + 15);
+		const readoutT = hover ? hover.t : camera.t1;
+		let lx = PAD.left + 8;
+		if (title) {
+			ctx.fillStyle = '#e6edf3';
+			ctx.fillText(title, lx, PAD.top + 15);
+			lx += ctx.measureText(title).width + 12;
+		}
+		for (const plot of plots) {
+			const seg = `${plot.name ? plot.name + ' ' : ''}${fmtValue(plotValueAt(plot, readoutT))}`;
+			const segW = ctx.measureText(seg).width;
+			if (lx + segW > w - PAD.right - 8) break;
+			ctx.fillStyle = plot.color;
+			ctx.fillText(seg, lx, PAD.top + 15);
+			lx += segW + 12;
+		}
 	}
 
-	function drawLine(ctx, w, h, r) {
-		ctx.strokeStyle = ACCENT;
+	function drawLine(ctx, w, h, r, plot) {
+		ctx.strokeStyle = plot.color;
 		ctx.lineWidth = 1.4;
 		ctx.beginPath();
 		let started = false;
-		for (const p of data) {
+		for (const p of plot.data) {
 			if (p.t < camera.t0 || p.t > camera.t1) continue;
 			const x = xFor(p.t, w);
-			const y = yFor(pointValue(p), r, h);
+			const y = yFor(plotValue(plot, p), r, h);
 			if (!started) {
 				ctx.moveTo(x, y);
 				started = true;
@@ -233,8 +279,8 @@
 		ctx.lineWidth = 1;
 	}
 
-	function drawCandles(ctx, w, h, r) {
-		const visible = data.filter((p) => p.t >= camera.t0 && p.t <= camera.t1);
+	function drawCandles(ctx, w, h, r, plot) {
+		const visible = plot.data.filter((p) => p.t >= camera.t0 && p.t <= camera.t1);
 		if (visible.length === 0) return;
 		const plotW = w - PAD.left - PAD.right;
 		const bodyW = Math.max(1, Math.min(13, (plotW / visible.length) * 0.66));
@@ -327,21 +373,9 @@
 		return new Date(t).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: '2-digit' });
 	}
 
-	function nearestPoint(t) {
-		let best = null;
-		let bestDist = Infinity;
-		for (const p of data) {
-			const d = Math.abs(p.t - t);
-			if (d < bestDist) {
-				bestDist = d;
-				best = p;
-			}
-		}
-		return best;
-	}
-
-	function drawCrosshair(ctx, w, h) {
-		const { x, y, point } = hover;
+	function drawCrosshair(ctx, w, h, r) {
+		const { x, y, pi, point } = hover;
+		const plot = plots[pi];
 		ctx.strokeStyle = 'rgba(230, 237, 243, 0.35)';
 		ctx.beginPath();
 		ctx.moveTo(x, PAD.top);
@@ -352,7 +386,7 @@
 		ctx.fillStyle = '#161b22';
 		ctx.fillRect(w - PAD.right + 3, y - 7, PAD.right - 6, 14);
 		ctx.fillStyle = '#e6edf3';
-		ctx.fillText(fmtValue(pointValue(point)), w - PAD.right + 7, y + 4);
+		ctx.fillText(fmtValue(plotValue(plot, point)), w - PAD.right + 7, y + 4);
 		const label = shortDay(hover.t);
 		const tw = ctx.measureText(label).width + 10;
 		const tx = Math.min(Math.max(x - tw / 2, PAD.left), w - PAD.right - tw);
@@ -360,7 +394,7 @@
 		ctx.fillRect(tx, h - PAD.bottom + 1, tw, 13);
 		ctx.fillStyle = '#e6edf3';
 		ctx.fillText(label, tx + 5, h - PAD.bottom + 11);
-		if (hasBars) {
+		if (plot && isBars(plot)) {
 			const up = point.close >= point.open;
 			ctx.fillStyle = up ? UP : DOWN;
 			ctx.fillText(
@@ -488,21 +522,28 @@
 			return;
 		}
 		const t = tFor(x, rect.width);
-		const point = nearestPoint(t);
+		const found = nearestPoint(t);
 		const r = effectiveRange(rect.height);
-		if (!point || !r) {
+		if (!found || !r) {
 			hover = null;
 			return;
 		}
-		const px = xFor(point.t, rect.width);
-		const py = yFor(pointValue(point), r, rect.height);
+		const px = xFor(found.point.t, rect.width);
+		const py = yFor(plotValue(plots[found.pi], found.point), r, rect.height);
 		const lines = [];
 		for (const m of markers) {
-			if (m.t !== point.t || !m.label) continue;
+			if (m.t !== found.point.t || !m.label) continue;
 			const ml = Array.isArray(m.label) ? m.label : [m.label];
 			lines.push(...ml);
 		}
-		hover = { x: px, y: py, t: point.t, point, tooltip: lines.length ? { x: px, y: py, lines } : null };
+		hover = {
+			x: px,
+			y: py,
+			t: found.point.t,
+			pi: found.pi,
+			point: found.point,
+			tooltip: lines.length ? { x: px, y: py, lines } : null
+		};
 	}
 
 	function handleUp() {

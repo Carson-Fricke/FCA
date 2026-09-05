@@ -7,7 +7,6 @@ details; applications inject a :class:`ChatService` through app state.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
@@ -55,6 +54,8 @@ class CreateMessageRequest(ChatHTTPModel):
     investigation_ids: tuple[str, ...] = ()
     execution_id: str | None = None
     intent_epoch: int = Field(default=0, ge=0)
+    targets_execution_id: str | None = None
+    steering_intent: str | None = Field(default=None, max_length=256)
 
 
 class MessageStateRequest(ChatHTTPModel):
@@ -140,20 +141,19 @@ def _service_error(error: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="chat service request failed")
 
 
-def create_chat_router(
-    service: ChatService | None = None,
-    *,
-    service_dependency: Callable[[Request], ChatService] = get_chat_service,
-) -> APIRouter:
-    """Create the UI-facing router without binding it to a storage adapter."""
+def create_chat_router() -> APIRouter:
+    """Create the UI-facing router.
+
+    The router resolves the service from ``app.state.chat_service`` so
+    applications control persistence by setting the service on app state.
+    """
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["chat"])
-    dependency = (lambda: service) if service is not None else service_dependency
 
     @router.post("/chats")
     async def create_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateChatRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             chat = chat_service.create_chat(
@@ -171,7 +171,7 @@ def create_chat_router(
     @router.get("/chats")
     async def list_chats(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         return {
             "items": [chat.as_dict() for chat in chat_service.list_chats(workspace_id)]
@@ -181,7 +181,7 @@ def create_chat_router(
     async def get_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             return chat_service.get_chat(workspace_id, chat_id).as_dict()
@@ -192,7 +192,7 @@ def create_chat_router(
     async def archive_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             chat = chat_service.archive_chat(workspace_id, chat_id)
@@ -205,29 +205,72 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateMessageRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
+        """Post a chat message and percolate steering when fields are present.
+
+        Steering is expressed only through chat messages: the persisted
+        message is the durable acknowledgement, and the service bumps the
+        intent epoch of the targeted (or all active) executions so the
+        orchestrator replans at the next safe model or tool boundary.
+        """
+        steering = (
+            request.targets_execution_id is not None
+            or request.steering_intent is not None
+        )
         try:
-            message = chat_service.create_message(
-                workspace_id,
-                chat_id,
-                actor_id=request.actor_id,
-                body=request.body,
-                role=request.role,
-                attachment_ids=request.attachment_ids,
-                investigation_ids=request.investigation_ids,
-                execution_id=request.execution_id,
-                intent_epoch=request.intent_epoch,
-            )
+            if steering:
+                if (
+                    request.execution_id is not None
+                    and request.execution_id != request.targets_execution_id
+                ):
+                    raise ValueError("execution_id conflicts with targets_execution_id")
+                percolation = chat_service.post_steering_message(
+                    workspace_id,
+                    chat_id,
+                    actor_id=request.actor_id,
+                    body=request.body,
+                    role=request.role,
+                    attachment_ids=request.attachment_ids,
+                    investigation_ids=request.investigation_ids or None,
+                    targets_execution_id=request.targets_execution_id,
+                    steering_intent=request.steering_intent,
+                )
+            else:
+                message = chat_service.create_message(
+                    workspace_id,
+                    chat_id,
+                    actor_id=request.actor_id,
+                    body=request.body,
+                    role=request.role,
+                    attachment_ids=request.attachment_ids,
+                    investigation_ids=request.investigation_ids,
+                    execution_id=request.execution_id,
+                    intent_epoch=request.intent_epoch,
+                )
         except Exception as error:
             raise _service_error(error) from error
-        return message.as_dict()
+        if not steering:
+            return message.as_dict()
+        result = percolation.message.as_dict()
+        result["steering"] = {
+            "intent": request.steering_intent,
+            "targetsExecutionId": request.targets_execution_id,
+            "percolatedTo": [
+                {
+                    "executionId": execution.execution_id,
+                    "intentEpoch": execution.intent_epoch,
+                }
+                for execution in percolation.executions
+            ],
+        }
+        return result
 
     @router.get("/chats/{chat_id}/messages")
     async def list_messages(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             messages = chat_service.list_messages(workspace_id, chat_id)
@@ -241,7 +284,7 @@ def create_chat_router(
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         message_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: MessageStateRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             message = chat_service.get_message(workspace_id, message_id)
@@ -261,7 +304,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateAttachmentRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             attachment = chat_service.create_attachment(
@@ -281,7 +324,7 @@ def create_chat_router(
     async def list_attachments(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             attachments = chat_service.list_attachments(workspace_id, chat_id)
@@ -294,7 +337,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         attachment_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: UploadAttachmentRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             attachment = chat_service.upload_attachment(
@@ -312,7 +355,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         attachment_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ScanAttachmentRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             attachment = chat_service.scan_attachment(
@@ -329,7 +372,7 @@ def create_chat_router(
     async def create_investigation(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateInvestigationRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             investigation = chat_service.create_investigation(
@@ -348,7 +391,7 @@ def create_chat_router(
     @router.get("/investigations")
     async def list_investigations(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         return {
             "items": [
@@ -361,7 +404,7 @@ def create_chat_router(
     async def get_investigation(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         investigation_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             investigation = chat_service.get_investigation(
@@ -376,7 +419,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: WorkflowRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             execution = chat_service.launch_workflow(
@@ -399,13 +442,24 @@ def create_chat_router(
             raise _service_error(error) from error
         return execution.as_dict()
 
-    @router.post("/executions/{execution_id}/steer")
+    @router.post(
+        "/executions/{execution_id}/steer",
+        deprecated=True,
+        summary="Post a steering message into the execution's chat",
+    )
     async def steer_workflow(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: SteerWorkflowRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
+        """Deprecated chat-scoped alias.
+
+        All steering enters through chat messages; this route remains only so
+        transcripts hold every steering act.  It posts a steering message into
+        the execution's originating chat, which durably acknowledges the
+        intent and bumps the execution's intent epoch.
+        """
         try:
             execution = chat_service.steer_workflow(
                 workspace_id,
@@ -423,7 +477,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             execution = chat_service.start_workflow(
@@ -438,7 +492,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             execution = chat_service.stop_workflow(
@@ -453,7 +507,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             execution = chat_service.cancel_workflow(
@@ -466,7 +520,7 @@ def create_chat_router(
     @router.get("/executions")
     async def list_executions(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         return {
             "items": [
@@ -479,7 +533,7 @@ def create_chat_router(
     async def get_execution(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             execution = chat_service.get_execution(workspace_id, execution_id)
@@ -492,7 +546,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: SubmitToolJobRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             job = chat_service.submit_tool_job(
@@ -513,7 +567,7 @@ def create_chat_router(
     async def replay_events(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
         after_cursor: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int | None, Query(ge=1, le=1_000)] = None,
     ) -> dict[str, object]:
@@ -533,7 +587,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         tool_job_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ToolResultRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             job = chat_service.record_tool_result(
@@ -554,7 +608,7 @@ def create_chat_router(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         tool_job_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,
-        chat_service: Annotated[ChatService, Depends(dependency)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             job = chat_service.start_tool_job(

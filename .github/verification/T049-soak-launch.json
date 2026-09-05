@@ -1,0 +1,52 @@
+{
+  "taskId": "T049",
+  "recordType": "soak-launch",
+  "timestamp": "2026-09-05T23:20:00Z",
+  "launched": {
+    "summary": "Bounded live soak launch executed against the dev deployment; full multi-day backfill deferred with resumable tooling in place",
+    "mode": "live via lakeclient against fca-ml-dev-api (temporary external ingress posture, same as the T048 smoke)",
+    "window": "2 most recent closed XNYS sessions (2026-09-03, 2026-09-04) x AAPL/SPY x trade/quote = 8 ensure requests",
+    "result": "8 of 8 sessions terminal (complete); 8000 rows; 95615 bytes; 8 estimated pages; 16.249 s of API duration; projected incremental Azure cost USD 0.000231",
+    "driverExitCode": 0,
+    "artifacts": [
+      ".local/soak/state.json (8 completed session keys; resumable)",
+      ".local/soak/results.jsonl (8 per-session audit lines with rows, bytes, pages_estimated, duration_ms, object_path)",
+      ".local/soak/summary.json (aggregate + cost projection)"
+    ]
+  },
+  "deferred": {
+    "fullHistoryRun": "2016-01-01 through latest closed session: 2684 closed sessions per stream (2016-01-04 to 2026-09-04), 10736 ensure requests, planned at assumed ~315 GB. Deferred: multi-day wall time (measured 2-6 s per request implies roughly 6-15 hours) and requires either repeated temporary ingress flips or an in-cluster runner. Resume by re-running the runbook launch command; the state file skips the 8 already-completed sessions.",
+    "reason": "A multi-day Azure backfill exceeds this task session; the launch proves the end-to-end path and the state file makes the remainder resumable in one command."
+  },
+  "postureChangeRecord": {
+    "flip": "az containerapp env update (publicNetworkAccess Enabled) + az containerapp ingress enable (external, port 8000), 2026-09-05T22:55-23:05Z window only",
+    "restore": "az containerapp ingress enable (internal, port 8000) + az containerapp env update (publicNetworkAccess Disabled). Note: az containerapp ingress disable removes ingress entirely; internal --type enable restores the documented posture.",
+    "restoredState": {
+      "environmentPublicNetworkAccess": "Disabled",
+      "apiIngress": "internal, external=false, fqdn=fca-ml-dev-api.internal.lemonhill-3b437822.westus2.azurecontainerapps.io, targetPort 8000",
+      "activeRevision": "fca-ml-dev-api--0000095 health=Healthy trafficWeight=100"
+    },
+    "secretsHandling": "api-bearer-token fetched from fca-ml-dev-kv-obj3kww into the process environment only; never printed, redirected, or persisted"
+  },
+  "verification": {
+    "ruff": "uv run --extra dev ruff check scripts/soak/run_soak.py — passed; ruff format --check — passed",
+    "ty": "uv run --extra dev ty check scripts/soak/run_soak.py — passed",
+    "configLoader": "config/lake/soak-aapl-spy.yaml parsed by lake.configuration.loader.load_yaml_mapping (strict subset, no secret-bearing keys) — passed",
+    "dryRun": "Full-window dry-run proves the calendar-aware plan math: 2684 closed sessions per stream, newest-first, cost line items computed from recorded prices; bounded dry-run (5 sessions) verifies window selection and resume counting",
+    "resume": "Post-launch dry-run reports already_completed=8 and zero pending, proving state-file resumability"
+  },
+  "costPriceAssumptions": {
+    "source": "Azure Retail Prices API (prices.azure.com, api-version 2023-01-01-preview), westus2, USD, retrieved 2026-09-05",
+    "blob": "General Block Blob v2 Hierarchical Namespace Hot LRS (dev account fcaobj3kwwfxxfxu has isHnsEnabled=true): stored 0.018/GB-month, write 0.065/10K, read/other 0.005/10K",
+    "tables": "Standard LRS: stored 0.045/GB-month, transactions 0.00036/10K",
+    "containerApps": "Consumption: vCPU 0.000034/s, memory 0.000004/GiB-s, requests 0.40/1M, environment 0.10/hour (fixed cost excluded from incremental projection)",
+    "logAnalytics": "PerGB2018: 2.30/GB ingestion, first 5 GB/month free",
+    "pages": "pages_estimated = ceil(rows / 10000); ensure responses do not expose provider pagination, so this is an estimate"
+  },
+  "limitations": [
+    "The deployed ingest is bounded at LAKE_INGEST_MAX_RECORDS=1000 records per data type, so recorded rows and bytes are lower bounds on full SIP depth; T050 should pair recorded bytes with the config's assumed_bytes_per_session planning values until an unbounded ingest path exists (lake finding).",
+    "Dev API ingress is internal-only and the app scales to zero, so workstation runs require the temporary posture flip documented in the runbook; in-cluster runners avoid it.",
+    "The local lake composition cannot host the full soak: lake local ingest is bounded at 10000 records per invocation, marks every session partial, and handles one session per call (lake finding).",
+    "Pages are estimated from row counts, not observed provider pagination; a future lake capability could expose real page counts for exact request-cost math."
+  ]
+}

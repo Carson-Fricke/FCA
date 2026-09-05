@@ -5,6 +5,11 @@ targetScope = 'resourceGroup'
 @maxLength(36)
 param runtimePrincipalId string
 
+@description('Object/principal ID of the quant-harness runtime user-assigned managed identity.')
+@minLength(36)
+@maxLength(36)
+param quantPrincipalId string
+
 @description('Object/principal ID of the GitHub deployer user-assigned managed identity.')
 @minLength(36)
 @maxLength(36)
@@ -62,8 +67,9 @@ resource roleBasedAccessControlAdministratorRole 'Microsoft.Authorization/roleDe
   name: 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
 }
 
-var githubDeployerStorageRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {${runtimePrincipalId}})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {${runtimePrincipalId}}))'
-var githubDeployerKeyVaultRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {4633458b-17de-408a-b874-0445c86b69e6} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {${runtimePrincipalId}})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {4633458b-17de-408a-b874-0445c86b69e6} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {${runtimePrincipalId}}))'
+var githubDeployerStorageRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals ${dataRolePrincipalGuids})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals ${dataRolePrincipalGuids}))'
+var githubDeployerKeyVaultRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {4633458b-17de-408a-b874-0445c86b69e6} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals ${dataRolePrincipalGuids})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {4633458b-17de-408a-b874-0445c86b69e6} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals ${dataRolePrincipalGuids}))'
+var dataRolePrincipalGuids = '{${runtimePrincipalId}, ${quantPrincipalId}}'
 
 resource runtimeBlobAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: storageAccount
@@ -100,6 +106,36 @@ resource runtimeSecretAccess 'Microsoft.Authorization/roleAssignments@2022-04-01
   name: guid(keyVault.id, runtimePrincipalId, keyVaultSecretsUserRole.id)
   properties: {
     principalId: runtimePrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: keyVaultSecretsUserRole.id
+  }
+}
+
+resource quantBlobAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: storageAccount
+  name: guid(storageAccount.id, quantPrincipalId, storageBlobDataContributorRole.id)
+  properties: {
+    principalId: quantPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: storageBlobDataContributorRole.id
+  }
+}
+
+resource quantTableAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: storageAccount
+  name: guid(storageAccount.id, quantPrincipalId, storageTableDataContributorRole.id)
+  properties: {
+    principalId: quantPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: storageTableDataContributorRole.id
+  }
+}
+
+resource quantSecretAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: keyVault
+  name: guid(keyVault.id, quantPrincipalId, keyVaultSecretsUserRole.id)
+  properties: {
+    principalId: quantPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: keyVaultSecretsUserRole.id
   }
@@ -161,6 +197,26 @@ output runtimeRoleAssignments object = {
   ]
 }
 
+@description('Least-privilege data roles for the quant-harness runtime identity. Blob covers results and state artifacts, tables cover the kill-switch and run-catalog tables, and Key Vault Secrets User covers trader credential reads. Queue access is intentionally not granted.')
+output quantRoleAssignments object = {
+  storageAccountId: storageAccount.id
+  keyVaultId: keyVault.id
+  assignments: [
+    {
+      roleName: 'Storage Blob Data Contributor'
+      roleAssignmentId: quantBlobAccess.id
+    }
+    {
+      roleName: 'Storage Table Data Contributor'
+      roleAssignmentId: quantTableAccess.id
+    }
+    {
+      roleName: 'Key Vault Secrets User'
+      roleAssignmentId: quantSecretAccess.id
+    }
+  ]
+}
+
 @description('Deployer bootstrap state. An authorized caller must deploy once with assignments enabled, then recurring GitHub deployments must use false. Contributor manages resource-group resources; conditioned RBAC Administrator can assign only the required data roles to the runtime principal at the exact storage account and Key Vault scopes.')
 output githubDeployerBootstrap object = {
   assignmentsEnabled: assignGithubDeployerRoles
@@ -185,5 +241,5 @@ output githubDeployerBootstrap object = {
   ]
   bootstrapCallerRequires: 'Microsoft.Authorization/roleAssignments/write at the resource-group scope'
   recurringGithubValue: false
-  rebootstrapWhen: 'The runtime principal ID or the set of roles assigned by this module changes'
+  rebootstrapWhen: 'The runtime or quant-harness principal IDs or the set of roles assigned by this module changes'
 }

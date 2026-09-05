@@ -58,6 +58,14 @@ jobs:
       ENABLE_EXTERNAL_API_INGRESS: ${{ vars.ENABLE_EXTERNAL_API_INGRESS }}
       INGEST_CRON_EXPRESSION: ${{ vars.INGEST_CRON_EXPRESSION }}
       INGEST_REPLICA_TIMEOUT_SECONDS: ${{ vars.INGEST_REPLICA_TIMEOUT_SECONDS }}
+      ENABLE_CRYPTO_TRADER: ${{ vars.ENABLE_CRYPTO_TRADER }}
+      RTH_TRADER_CREDENTIAL_MODE: ${{ vars.RTH_TRADER_CREDENTIAL_MODE }}
+      CRYPTO_TRADER_CREDENTIAL_MODE: ${{ vars.CRYPTO_TRADER_CREDENTIAL_MODE }}
+      RTH_SCHEDULE_TIMEZONE: ${{ vars.RTH_SCHEDULE_TIMEZONE }}
+      RTH_SCHEDULE_START: ${{ vars.RTH_SCHEDULE_START }}
+      RTH_SCHEDULE_END: ${{ vars.RTH_SCHEDULE_END }}
+      RTH_TRADER_REPLICAS: ${{ vars.RTH_TRADER_REPLICAS }}
+      BACKTEST_REPLICA_TIMEOUT_SECONDS: ${{ vars.BACKTEST_REPLICA_TIMEOUT_SECONDS }}
       LAKE_API_AUDIENCE: ${{ vars.LAKE_API_AUDIENCE }}
       GITHUB_OWNER: ${{ github.event.repository.owner.login }}
       GITHUB_OWNER_ID: ${{ github.event.repository.owner.id }}
@@ -94,6 +102,14 @@ jobs:
             ENABLE_EXTERNAL_API_INGRESS
             INGEST_CRON_EXPRESSION
             INGEST_REPLICA_TIMEOUT_SECONDS
+            ENABLE_CRYPTO_TRADER
+            RTH_TRADER_CREDENTIAL_MODE
+            CRYPTO_TRADER_CREDENTIAL_MODE
+            RTH_SCHEDULE_TIMEZONE
+            RTH_SCHEDULE_START
+            RTH_SCHEDULE_END
+            RTH_TRADER_REPLICAS
+            BACKTEST_REPLICA_TIMEOUT_SECONDS
             GITHUB_OWNER
             GITHUB_OWNER_ID
             GITHUB_REPOSITORY_NAME
@@ -119,7 +135,7 @@ jobs:
             exit 1
           fi
 
-          for boolean in ALLOW_PUBLIC_NETWORK_ACCESS ENABLE_EXTERNAL_API_INGRESS; do
+          for boolean in ALLOW_PUBLIC_NETWORK_ACCESS ENABLE_EXTERNAL_API_INGRESS ENABLE_CRYPTO_TRADER; do
             case "${!boolean,,}" in
               true|false) ;;
               *)
@@ -128,6 +144,26 @@ jobs:
                 ;;
             esac
           done
+
+          for mode in RTH_TRADER_CREDENTIAL_MODE CRYPTO_TRADER_CREDENTIAL_MODE; do
+            case "${!mode,,}" in
+              paper|live) ;;
+              *)
+                echo "::error::$mode must be exactly paper or live"
+                exit 1
+                ;;
+            esac
+          done
+
+          if ! [[ "$RTH_TRADER_REPLICAS" =~ ^[1-4]$ ]]; then
+            echo "::error::RTH_TRADER_REPLICAS must be an integer between 1 and 4"
+            exit 1
+          fi
+          if ! [[ "$BACKTEST_REPLICA_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || \
+             [[ "$BACKTEST_REPLICA_TIMEOUT_SECONDS" -lt 60 || "$BACKTEST_REPLICA_TIMEOUT_SECONDS" -gt 86400 ]]; then
+            echo "::error::BACKTEST_REPLICA_TIMEOUT_SECONDS must be an integer between 60 and 86400"
+            exit 1
+          fi
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
@@ -200,6 +236,14 @@ jobs:
             "enableExternalApiIngress=$ENABLE_EXTERNAL_API_INGRESS"
             "ingestCronExpression=$INGEST_CRON_EXPRESSION"
             "ingestReplicaTimeoutSeconds=$INGEST_REPLICA_TIMEOUT_SECONDS"
+            "enableCryptoTrader=$ENABLE_CRYPTO_TRADER"
+            "rthTraderMode=$RTH_TRADER_CREDENTIAL_MODE"
+            "cryptoTraderMode=$CRYPTO_TRADER_CREDENTIAL_MODE"
+            "rthScheduleTimezone=$RTH_SCHEDULE_TIMEZONE"
+            "rthScheduleStart=$RTH_SCHEDULE_START"
+            "rthScheduleEnd=$RTH_SCHEDULE_END"
+            "rthTraderReplicas=$RTH_TRADER_REPLICAS"
+            "backtestReplicaTimeoutSeconds=$BACKTEST_REPLICA_TIMEOUT_SECONDS"
             # Optional and non-secret; empty keeps the API on static bearer auth.
             "lakeApiAudience=$LAKE_API_AUDIENCE"
           )
@@ -229,6 +273,10 @@ jobs:
           normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
           api_app_name="${normalized_prefix}-${normalized_environment}-api"
           ingest_job_name="${normalized_prefix}-${normalized_environment}-ingest"
+          quant_api_app_name="${normalized_prefix}-${normalized_environment}-quant-api"
+          rth_trader_app_name="${normalized_prefix}-${normalized_environment}-rth-trader"
+          crypto_trader_app_name="${normalized_prefix}-${normalized_environment}-crypto-trader"
+          backtest_job_name="${normalized_prefix}-${normalized_environment}-backtest"
           acr_login_server="$(az acr list \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].loginServer | [0]" \
@@ -253,6 +301,48 @@ jobs:
           if [[ "$ingest_image" != "$expected_runtime_image" ]]; then
             echo "::error::The ingest job does not use the published immutable image reference"
             exit 1
+          fi
+
+          quant_api_image="$(az containerapp show \
+            --name "$quant_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='api'].image | [0]" \
+            --output tsv)"
+          if [[ "$quant_api_image" != "$expected_runtime_image" ]]; then
+            echo "::error::The quant API does not use the published immutable image reference"
+            exit 1
+          fi
+
+          rth_trader_image="$(az containerapp show \
+            --name "$rth_trader_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='trader'].image | [0]" \
+            --output tsv)"
+          if [[ "$rth_trader_image" != "$expected_runtime_image" ]]; then
+            echo "::error::The RTH trader does not use the published immutable image reference"
+            exit 1
+          fi
+
+          backtest_image="$(az containerapp job show \
+            --name "$backtest_job_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='backtest'].image | [0]" \
+            --output tsv)"
+          if [[ "$backtest_image" != "$expected_runtime_image" ]]; then
+            echo "::error::The backtest job does not use the published immutable image reference"
+            exit 1
+          fi
+
+          if [[ "${ENABLE_CRYPTO_TRADER,,}" == "true" ]]; then
+            crypto_trader_image="$(az containerapp show \
+              --name "$crypto_trader_app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "properties.template.containers[?name=='trader'].image | [0]" \
+              --output tsv)"
+            if [[ "$crypto_trader_image" != "$expected_runtime_image" ]]; then
+              echo "::error::The crypto trader does not use the published immutable image reference"
+              exit 1
+            fi
           fi
 
           api_fqdn="$(az containerapp show \

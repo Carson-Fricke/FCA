@@ -1,0 +1,90 @@
+# E6.3 full-history soak configuration for AAPL and SPY.
+# Non-secret defaults only: credentials come from the environment
+# (LAKE_API__BEARER_TOKEN) and the dev deployment, never from this file.
+# This file must stay inside the strict YAML subset parsed by
+# lake.configuration.loader.load_yaml_mapping (no anchors, no tabs, no
+# secret-bearing keys).
+#
+# Cost prices are published Azure list prices for westus2 retrieved from the
+# Azure Retail Prices API (prices.azure.com, api-version 2023-01-01-preview)
+# on 2026-09-05. The dev storage account fcaobj3kwwfxxfxu is StorageV2 with
+# isHnsEnabled=true, so Blob prices use the "General Block Blob v2
+# Hierarchical Namespace" meters. Verify prices again before any long soak.
+schema_version: 1
+
+soak:
+  id: e6-full-history-aapl-spy
+  universe: config/market-lake/universes.yaml equities.soak
+  symbols:
+    - AAPL
+    - SPY
+  data_types:
+    - trade
+    - quote
+  window:
+    # Alpaca v2 equity historical coverage is documented from 2016-01-01.
+    # Sessions earlier than real provider availability surface as empty or
+    # error coverage entries and are recorded without failing the soak.
+    default_start: "2016-01-01"
+    end: latest_closed_session
+  chunking:
+    # One XNYS session per ensure request; the dev API catalog limit is 366
+    # days and per-session requests keep every call well inside it.
+    sessions_per_request: 1
+    order: newest_first
+  run:
+    state_file: .local/soak/state.json
+    results_file: .local/soak/results.jsonl
+    summary_file: .local/soak/summary.json
+    max_requests_per_invocation: 2000
+    job_wait_deadline_seconds: 300
+    poll_interval_seconds: 2.0
+    coverage_recheck_attempts: 3
+    inter_request_pause_seconds: 0.25
+  pages:
+    # Alpaca v2 historical endpoints return up to 10,000 items per page.
+    # Ensure responses do not expose provider page counts, so pages are
+    # estimated from recorded row counts as ceil(rows / items_per_page).
+    assumed_items_per_page: 10000
+  estimate:
+    # Dry-run-only planning bytes per closed session per symbol and data
+    # type (zstd Parquet). Order-of-magnitude from public SIP volume
+    # knowledge; replace with recorded soak bytes for real projections.
+    assumed_bytes_per_session:
+      AAPL:
+        trade: 1500000
+        quote: 30000000
+      SPY:
+        trade: 6000000
+        quote: 80000000
+    # Dev API container resources (az containerapp show, 2026-09-05).
+    api_vcores: 0.25
+    api_memory_gib: 0.5
+    # Rough operator estimate for Log Analytics ingestion per 1000 HTTP
+    # requests served by the API; refine from the workspace after the soak.
+    log_analytics_gb_per_1000_requests: 0.25
+    # Retention horizon used to prorate Blob and Table stored-data cost.
+    storage_retention_days: 90
+  cost:
+    currency: USD
+    region: westus2
+    blob_hns_lrs:
+      stored_usd_per_gb_month: 0.018
+      write_usd_per_10k: 0.065
+      read_usd_per_10k: 0.005
+      other_usd_per_10k: 0.005
+    tables_lrs:
+      stored_usd_per_gb_month: 0.045
+      transaction_usd_per_10k: 0.00036
+    queue_v2_lrs:
+      stored_usd_per_gb_month: 0.045
+      class1_usd_per_10k: 0.004
+    container_apps_consumption:
+      vcpu_usd_per_second: 0.000034
+      memory_usd_per_gib_second: 0.000004
+      requests_usd_per_million: 0.4
+      environment_usd_per_hour: 0.1
+    log_analytics:
+      ingestion_usd_per_gb: 2.3
+      retention_usd_per_gb_month: 0.1
+      included_free_gb_per_month: 5.0

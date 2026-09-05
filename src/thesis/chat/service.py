@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol, TypeVar, cast
 
@@ -42,6 +43,22 @@ Record = (
 )
 RecordType = type[Record]
 RecordT = TypeVar("RecordT", bound=Record)
+
+_STEERABLE_EXECUTION_STATES = frozenset(
+    {
+        WorkflowExecutionState.QUEUED,
+        WorkflowExecutionState.RUNNING,
+        WorkflowExecutionState.PAUSED,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SteeringPercolation:
+    """A durably acknowledged steering message and its targeted executions."""
+
+    message: ChatMessage
+    executions: tuple[WorkflowExecution, ...]
 
 
 class ChatPersistence(Protocol):
@@ -717,6 +734,84 @@ class ChatService:
     def list_executions(self, workspace_id: str) -> tuple[WorkflowExecution, ...]:
         return self._list(WorkflowExecution, workspace_id)
 
+    def post_steering_message(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        *,
+        actor_id: str,
+        body: str,
+        role: MessageRole = MessageRole.USER,
+        attachment_ids: tuple[str, ...] = (),
+        investigation_ids: tuple[str, ...] | None = None,
+        targets_execution_id: str | None = None,
+        steering_intent: str | None = None,
+    ) -> SteeringPercolation:
+        """Post a chat message and percolate its steering intent downward.
+
+        The chat is the sole messaging surface: the message is persisted first
+        as a first-class transcript entry and doubles as the durable steering
+        acknowledgement.  When steering fields are present, every targeted
+        (or, without an explicit target, every active) execution of the chat
+        has its intent epoch bumped once and a ``workflow.steered`` event
+        signals the orchestrator to replan at the next safe model or tool
+        boundary.  Late tool results attach as evidence through
+        :meth:`record_tool_result` without being discarded.
+        """
+        steering = targets_execution_id is not None or steering_intent is not None
+        if steering and role is not MessageRole.USER:
+            raise ValueError("only user messages can steer executions")
+        targets: tuple[WorkflowExecution, ...] = ()
+        if targets_execution_id is not None:
+            target = self.get_execution(workspace_id, targets_execution_id)
+            if target.chat_id != chat_id:
+                raise CrossWorkspaceLinkError(
+                    "target execution does not belong to the selected chat"
+                )
+            if target.state not in _STEERABLE_EXECUTION_STATES:
+                raise InvalidLifecycleTransition(
+                    f"execution cannot be steered while {target.state.value}"
+                )
+            targets = (target,)
+        elif steering:
+            targets = tuple(
+                execution
+                for execution in self._list(WorkflowExecution, workspace_id)
+                if execution.chat_id == chat_id
+                and execution.state in _STEERABLE_EXECUTION_STATES
+            )
+        next_epochs = [execution.intent_epoch + 1 for execution in targets]
+        if investigation_ids is None:
+            derived: list[str] = [
+                execution.investigation_id
+                for execution in targets
+                if execution.investigation_id is not None
+            ]
+            message_investigation_ids = tuple(dict.fromkeys(derived))
+        else:
+            message_investigation_ids = tuple(investigation_ids)
+        message = self.create_message(
+            workspace_id,
+            chat_id,
+            actor_id=actor_id,
+            body=body,
+            role=role,
+            attachment_ids=attachment_ids,
+            investigation_ids=message_investigation_ids,
+            execution_id=None if targets_execution_id is None else targets_execution_id,
+            intent_epoch=max(next_epochs, default=0),
+        )
+        percolated = tuple(
+            self._apply_steering(
+                execution,
+                message,
+                intent_epoch=epoch,
+                steering_intent=steering_intent,
+            )
+            for execution, epoch in zip(targets, next_epochs, strict=True)
+        )
+        return SteeringPercolation(message=message, executions=percolated)
+
     def steer_workflow(
         self,
         workspace_id: str,
@@ -726,31 +821,29 @@ class ChatService:
         body: str,
         message_id: str | None = None,
     ) -> WorkflowExecution:
-        """Acknowledge a steering message immediately and advance intent epoch."""
+        """Steer one execution through its originating chat transcript.
+
+        Internal primitive shared by the deprecated execution-scoped HTTP
+        alias and workflow adapters.  New clients should post a steering chat
+        message with ``targets_execution_id`` instead; this method still
+        records every steering act as a chat message so transcripts hold all
+        steering.
+        """
         execution = self.get_execution(workspace_id, execution_id)
-        if execution.state not in {
-            WorkflowExecutionState.QUEUED,
-            WorkflowExecutionState.RUNNING,
-            WorkflowExecutionState.PAUSED,
-        }:
-            raise InvalidLifecycleTransition(
-                f"execution cannot be steered while {execution.state.value}"
-            )
-        message = (
-            self.create_message(
+        if message_id is None:
+            percolation = self.post_steering_message(
                 workspace_id,
                 execution.chat_id,
                 actor_id=actor_id,
                 body=body,
-                execution_id=execution_id,
-                investigation_ids=()
-                if execution.investigation_id is None
-                else (execution.investigation_id,),
-                intent_epoch=execution.intent_epoch + 1,
+                targets_execution_id=execution_id,
             )
-            if message_id is None
-            else self.get_message(workspace_id, message_id)
-        )
+            return next(
+                item
+                for item in percolation.executions
+                if item.execution_id == execution_id
+            )
+        message = self.get_message(workspace_id, message_id)
         if message.chat_id != execution.chat_id:
             raise CrossWorkspaceLinkError(
                 "steering message does not belong to the execution chat"
@@ -765,26 +858,12 @@ class ChatService:
                     message, execution_id=execution_id, updated_at=self._now()
                 )
             )
-        updated = replace_record(
+        return self._apply_steering(
             execution,
+            message,
             intent_epoch=execution.intent_epoch + 1,
-            steering_message_ids=(*execution.steering_message_ids, message.message_id),
-            updated_at=self._now(),
+            steering_intent=None,
         )
-        self._save(updated)
-        self._append_event(
-            updated,
-            ExecutionEventType.WORKFLOW_STEERED,
-            correlation_id=message.message_id,
-            actor_id=actor_id,
-            actor_scope=ActorScope.USER,
-            payload={
-                "messageId": message.message_id,
-                "intentEpoch": updated.intent_epoch,
-            },
-            intent_epoch=updated.intent_epoch,
-        )
-        return updated
 
     def stop_workflow(
         self, workspace_id: str, execution_id: str, *, actor_id: str
@@ -1057,6 +1136,46 @@ class ChatService:
             raise CrossWorkspaceLinkError("event stream crosses workspace boundaries")
         return replay
 
+    def _apply_steering(
+        self,
+        execution: WorkflowExecution,
+        message: ChatMessage,
+        *,
+        intent_epoch: int,
+        steering_intent: str | None,
+    ) -> WorkflowExecution:
+        """Bump one execution's intent epoch for an acknowledged steering message."""
+        if execution.state not in _STEERABLE_EXECUTION_STATES:
+            raise InvalidLifecycleTransition(
+                f"execution cannot be steered while {execution.state.value}"
+            )
+        updated = self._save(
+            replace_record(
+                execution,
+                intent_epoch=intent_epoch,
+                steering_message_ids=(
+                    *execution.steering_message_ids,
+                    message.message_id,
+                ),
+                updated_at=self._now(),
+            )
+        )
+        self._append_event(
+            updated,
+            ExecutionEventType.WORKFLOW_STEERED,
+            correlation_id=message.message_id,
+            actor_id=message.actor_id,
+            actor_scope=ActorScope.USER,
+            payload={
+                "chatId": message.chat_id,
+                "messageId": message.message_id,
+                "intentEpoch": intent_epoch,
+                "steeringIntent": steering_intent,
+            },
+            intent_epoch=intent_epoch,
+        )
+        return updated
+
     def _finish_workflow(
         self,
         workspace_id: str,
@@ -1162,4 +1281,9 @@ class ChatService:
         )
 
 
-__all__ = ["ChatPersistence", "ChatService", "InMemoryChatPersistence"]
+__all__ = [
+    "ChatPersistence",
+    "ChatService",
+    "InMemoryChatPersistence",
+    "SteeringPercolation",
+]

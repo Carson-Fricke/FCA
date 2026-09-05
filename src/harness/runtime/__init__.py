@@ -38,6 +38,13 @@ from harness.runtime.backtest import (
     synthetic_fixture,
     write_synthetic_lake,
 )
+from harness.runtime.go_live import (
+    GateCriterion,
+    GateDecision,
+    GoLiveGate,
+    GoLiveRefused,
+    validate_live_deployment,
+)
 from harness.runtime.paper import (
     InboxPaperFeed,
     PaperConfigurationError,
@@ -97,6 +104,12 @@ from harness.runtime.recovery import (
     RuntimeRecovery,
     cancel_all,
     flatten_positions,
+)
+from harness.runtime.shadow import (
+    ObserveOnlyBrokerSink,
+    ShadowReport,
+    ShadowShell,
+    run_shadow_session,
 )
 from harness.runtime.state_store import (
     FORMAT_VERSION,
@@ -194,8 +207,13 @@ __all__ = [
     "DataPreflightError",
     "FillModel",
     "FillModelOptions",
+    "GateCriterion",
+    "GateDecision",
+    "GoLiveGate",
+    "GoLiveRefused",
     "InboxPaperFeed",
     "LookaheadViolationError",
+    "ObserveOnlyBrokerSink",
     "PaperConfigurationError",
     "PaperFeed",
     "PaperInbox",
@@ -209,6 +227,8 @@ __all__ = [
     "ReplayFixture",
     "ReplayPaperFeed",
     "RiskState",
+    "ShadowReport",
+    "ShadowShell",
     "build_fill_model",
     "build_manifest",
     "cancel_all",
@@ -220,6 +240,8 @@ __all__ = [
     "resolve_data_source",
     "run_backtest",
     "run_paper_session",
+    "run_shadow_session",
     "synthetic_fixture",
+    "validate_live_deployment",
     "write_synthetic_lake",
 ]

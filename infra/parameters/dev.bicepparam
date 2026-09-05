@@ -19,5 +19,16 @@ param enableExternalApiIngress = false
 param ingestCronExpression = '0 1 * * *'
 param ingestReplicaTimeoutSeconds = 3600
 param ingestMaxRecords = 1000
+// Crypto compute stays absent in dev until the always-on trader is enabled explicitly.
+param enableCryptoTrader = false
+// Dev traders consume the paper credential pair only; live is enabled per environment.
+param rthTraderMode = 'paper'
+param cryptoTraderMode = 'paper'
+// RTH schedule: XNYS regular trading hours, Monday through Friday, New York time.
+param rthScheduleTimezone = 'America/New_York'
+param rthScheduleStart = '30 9 * * 1-5'
+param rthScheduleEnd = '0 16 * * 1-5'
+param rthTraderReplicas = 1
+param backtestReplicaTimeoutSeconds = 3600
 // fca-ml-lake-api application client ID from the Entra bootstrap runbook.
 param lakeApiAudience = 'cbc572d2-ae2e-4501-af76-0515e2f73bcd'

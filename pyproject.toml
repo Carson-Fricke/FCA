@@ -38,6 +38,7 @@ harness = "harness.cli:main"
 api = "harness.cli.api:main"
 backtest-job = "harness.cli.backtest_job:main"
 trader = "harness.cli.trader:main"
+thesis = "thesis.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src", "strategies" = "strategies" }

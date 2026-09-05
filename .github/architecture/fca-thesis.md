@@ -359,13 +359,33 @@ Workflow phases are defined independently for each workflow. Thesis does not
 force unrelated research requests through one superficial phase taxonomy. The
 UI renders whatever phases the selected workflow declares.
 
-### Immediate Steering
+### Chat And Execution Boundary
 
-User messages steer active work immediately. Thesis durably acknowledges the
-message immediately, increments a monotonically increasing intent epoch, and
-causes the orchestrator to replan at the next safe model/tool boundary. It does
-not cancel already submitted backtests, searches, or other tool jobs unless the
-user explicitly requests cancellation.
+The chat is the sole messaging surface. User messages and agent narration are
+all chat messages on a `ChatThread`; the test for the boundary is whether a
+record would be part of the conversation with a human analyst. An execution is
+a work unit, not a messaging surface: it owns a machine event timeline (phase
+transitions, tool submissions and results, steering acknowledgements) that the
+UI renders inline in the chat, plus execution-scoped control-plane commands
+(start, pause, stop, cancel). Steer, interrupt, and context requests are chat
+messages; start/stop/cancel are control commands; phase, tool, and log detail
+belongs to the execution timeline.
+
+Steering is expressed by posting a chat message that optionally carries
+structured steering fields (for example `targets_execution_id` and a
+steering-intent token). Posting the message is the durable acknowledgement;
+the service then percolates the intent down to executions:
+
+- an explicit target must belong to the chat and be in a steerable state
+  (queued, running, or paused);
+- without an explicit target the intent percolates to every active execution
+  of the chat;
+- each targeted execution gets exactly one monotonically increasing intent
+  epoch per steering message, and a `workflow.steered` event records the
+  message link, the new epoch, and the steering intent for the orchestrator;
+- the orchestrator observes the event and replans at the next safe model/tool
+  boundary; steering does not cancel already submitted backtests, searches, or
+  other tool jobs unless the user explicitly requests cancellation.
 
 When an earlier tool completes after steering:
 
@@ -385,6 +405,23 @@ or cancellation.
 Stop and cancel are separate explicit controls. A UI disconnect or Thesis
 service restart does not stop an execution; the durable queue and checkpoints
 resume it.
+
+The UI-facing HTTP surface follows this split. `POST
+/v1/workspaces/{ws}/chats/{chat}/messages` is the steering entry point and
+returns the persisted message plus the percolation result; the execution
+route `POST /v1/workspaces/{ws}/executions/{id}/steer` survives only as a
+deprecated alias that posts a steering message into the execution's
+originating chat so transcripts hold every steering act.
+
+Executions are streamed over Server-Sent Events at `GET
+/v1/workspaces/{ws}/executions/{id}/events/stream`. The stream fans out both
+surfaces: durable execution machine events (SSE `id` is the replay cursor, so
+`Last-Event-ID` resume reuses the existing cursor semantics through
+reconnects) and, per chat subscription, chat message events as ephemeral
+frames without an `id` that clients deduplicate by message ID. Provider token
+deltas are allowed as a documented ephemeral `provider.delta` event kind
+during model phases; ephemeral events are never replayed from the event
+store.
 
 ### Model Router
 

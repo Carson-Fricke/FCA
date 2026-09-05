@@ -170,14 +170,14 @@
 				id: 'pnl',
 				label: 'PnL curve',
 				meta: `${summary.realized >= 0 ? '+' : ''}${summary.realized.toLocaleString('en-US', { maximumFractionDigits: 0 })} realized`,
-				charts: [{ key: 'equity', chart: { title: 'Equity / cumulative PnL', data: equity, render: 'line', markers: pnlMarkers, height } }],
+				charts: [{ key: 'equity', chart: { title: 'Equity / cumulative PnL', series: [{ name: 'Equity', data: equity }], render: 'line', markers: pnlMarkers, height } }],
 				table: false
 			},
 			{
 				id: 'fills',
 				label: 'Orders and fills',
 				meta: `${summary.trades} orders`,
-				charts: [{ key: 'fills', chart: { title: 'Executions', data: equity, render: 'line', markers: fillMarkers, height } }],
+				charts: [{ key: 'fills', chart: { title: 'Executions', series: [{ name: 'Equity', data: equity }], render: 'line', markers: fillMarkers, height } }],
 				table: true
 			},
 			{
@@ -230,6 +230,10 @@
 				<span class="k">Sortino</span>
 				<span class="v">{fmtRatio(stats.sortino)}</span>
 			</div>
+			<div class="stat">
+				<span class="k">Max drawdown</span>
+				<span class="v">{fmtPct(stats.maxDrawdown)}</span>
+			</div>
 		{/if}
 	</header>
 
@@ -247,6 +251,7 @@
 							bind:camera
 							title={entry.chart.title}
 							data={entry.chart.data}
+							series={entry.chart.series}
 							render={entry.chart.render}
 							markers={entry.chart.markers}
 							height={entry.chart.height}

@@ -5,6 +5,11 @@ targetScope = 'resourceGroup'
 @maxLength(128)
 param runtimeIdentityName string
 
+@description('Name of the separate user-assigned managed identity attached to quant-harness runtime workloads. Keeping it distinct from the lake runtime identity bounds the blast radius of trader credentials and results access.')
+@minLength(3)
+@maxLength(128)
+param quantRuntimeIdentityName string
+
 @description('Name of the separate user-assigned managed identity used by GitHub Actions deployments.')
 @minLength(3)
 @maxLength(128)
@@ -47,6 +52,12 @@ resource runtimeIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-
   tags: tags
 }
 
+resource quantRuntimeIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
+  name: quantRuntimeIdentityName
+  location: location
+  tags: tags
+}
+
 resource githubDeployerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
   name: githubDeployerIdentityName
   location: location
@@ -70,6 +81,13 @@ output runtimeIdentity object = {
   resourceId: runtimeIdentity.id
   clientId: runtimeIdentity.properties.clientId
   principalId: runtimeIdentity.properties.principalId
+}
+
+output quantRuntimeIdentity object = {
+  name: quantRuntimeIdentity.name
+  resourceId: quantRuntimeIdentity.id
+  clientId: quantRuntimeIdentity.properties.clientId
+  principalId: quantRuntimeIdentity.properties.principalId
 }
 
 output githubDeployerIdentity object = {

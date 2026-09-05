@@ -23,11 +23,18 @@ param enableColdTier bool = false
 param coldAfterDays int = 90
 
 var lakeContainerName = 'lake'
+var harnessContainerNames = {
+  results: 'harness-results'
+  state: 'harness-state'
+}
 var tableNames = {
   coverage: 'coverage'
   jobs: 'jobs'
   contracts: 'contracts'
   backtests: 'backtests'
+  // Azure Table names allow alphanumeric characters only, so the kill-switch
+  // control table cannot carry a hyphen.
+  killSwitch: 'killswitch'
 }
 var queueNames = {
   backfill: 'backfill'
@@ -77,6 +84,14 @@ resource lakeContainer 'Microsoft.Storage/storageAccounts/blobServices/container
     publicAccess: 'None'
   }
 }
+
+resource harnessContainers 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = [for containerName in items(harnessContainerNames): {
+  name: containerName.value
+  parent: blobService
+  properties: {
+    publicAccess: 'None'
+  }
+}]
 
 resource queueService 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' = {
   name: 'default'
@@ -147,6 +162,7 @@ output endpoints object = {
 }
 output resourceNames object = {
   lakeContainer: lakeContainer.name
+  harnessContainers: harnessContainerNames
   queues: queueNames
   tables: tableNames
 }

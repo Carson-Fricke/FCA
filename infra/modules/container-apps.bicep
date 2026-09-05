@@ -80,6 +80,70 @@ param lakeApiTenantId string
 @description('Entra application client ID the API accepts as token audience. Empty keeps the API on static bearer authentication only.')
 param lakeApiAudience string = ''
 
+@description('Name of the scale-to-zero quant-harness API Container App.')
+@minLength(2)
+param quantApiAppName string
+
+@description('Name of the scheduled RTH quant-harness trader Container App.')
+@minLength(2)
+param rthTraderAppName string
+
+@description('Name of the optional always-on crypto quant-harness trader Container App.')
+@minLength(2)
+param cryptoTraderAppName string
+
+@description('Name of the manually triggered quant-harness backtest Container Apps job.')
+@minLength(1)
+param backtestJobName string
+
+@description('Full resource ID of the quant-harness user-assigned managed identity.')
+@minLength(1)
+param quantIdentityResourceId string
+
+@description('Client ID of the quant-harness user-assigned managed identity. Exposed to Azure Identity as non-secret process configuration.')
+@minLength(36)
+@maxLength(36)
+param quantIdentityClientId string
+
+@description('Whether the always-on crypto trader Container App is deployed at all. False leaves no crypto compute in the resource group.')
+param enableCryptoTrader bool = false
+
+@allowed([
+  'paper'
+  'live'
+])
+@description('Which Key Vault Alpaca credential pair the scheduled RTH trader consumes. Secret values stay in Key Vault; only the referenced secret names change.')
+param rthTraderMode string = 'paper'
+
+@allowed([
+  'paper'
+  'live'
+])
+@description('Which Key Vault Alpaca credential pair the crypto trader consumes.')
+param cryptoTraderMode string = 'paper'
+
+@description('IANA timezone applied to the RTH schedule scale rule.')
+@minLength(1)
+param rthScheduleTimezone string = 'America/New_York'
+
+@description('Five-field cron expression that opens the RTH scale window at the equity session start.')
+@minLength(9)
+param rthScheduleStart string = '30 9 * * 1-5'
+
+@description('Five-field cron expression that closes the RTH scale window at the equity session end.')
+@minLength(9)
+param rthScheduleEnd string = '0 16 * * 1-5'
+
+@description('Replica count the RTH schedule rule applies while the session window is open. Outside the window the app scales back to zero.')
+@minValue(1)
+@maxValue(4)
+param rthTraderReplicas int = 1
+
+@description('Maximum seconds allowed for one backtest job replica execution. Per-run container argument overrides supply the backtest configuration at start time.')
+@minValue(60)
+@maxValue(86400)
+param backtestReplicaTimeoutSeconds int = 3600
+
 var consumptionProfileName = 'Consumption'
 var apiContainerPort = 8000
 var apiContainerName = 'api'
@@ -152,6 +216,100 @@ var apiEnvironment = concat(providerEnvironment, apiEntraEnvironment, [
   {
     name: 'LAKE_API__BEARER_TOKEN'
     secretRef: 'api-bearer-token'
+  }
+])
+
+// Quant-harness workloads share the Container Apps environment and Log
+// Analytics workspace with the lake but run under the dedicated quant
+// identity and consume their own Key Vault secret names.
+var quantContainerPort = 8000
+var quantApiContainerName = 'api'
+var traderContainerName = 'trader'
+var backtestContainerName = 'backtest'
+var harnessResultsContainerName = 'harness-results'
+var harnessStateContainerName = 'harness-state'
+var killSwitchTableName = 'killswitch'
+var paperTraderSecrets = [
+  {
+    name: 'alpaca-paper-api-key'
+    keyVaultUrl: '${keyVaultUri}secrets/alpaca-paper-api-key'
+    identity: quantIdentityResourceId
+  }
+  {
+    name: 'alpaca-paper-api-secret'
+    keyVaultUrl: '${keyVaultUri}secrets/alpaca-paper-api-secret'
+    identity: quantIdentityResourceId
+  }
+]
+var liveTraderSecrets = [
+  {
+    name: 'alpaca-live-api-key'
+    keyVaultUrl: '${keyVaultUri}secrets/alpaca-live-api-key'
+    identity: quantIdentityResourceId
+  }
+  {
+    name: 'alpaca-live-api-secret'
+    keyVaultUrl: '${keyVaultUri}secrets/alpaca-live-api-secret'
+    identity: quantIdentityResourceId
+  }
+]
+var quantApiSecrets = [
+  {
+    name: 'harness-api-bearer-token'
+    keyVaultUrl: '${keyVaultUri}secrets/harness-api-bearer-token'
+    identity: quantIdentityResourceId
+  }
+]
+// The environment variable names stay stable across modes; only the Key
+// Vault secret names behind them switch between the paper and live pairs.
+var rthTraderSecrets = rthTraderMode == 'paper' ? paperTraderSecrets : liveTraderSecrets
+var cryptoTraderSecrets = cryptoTraderMode == 'paper' ? paperTraderSecrets : liveTraderSecrets
+var quantBaseEnvironment = [
+  {
+    name: 'AZURE_CLIENT_ID'
+    value: quantIdentityClientId
+  }
+  {
+    name: 'LAKE_STORAGE_ACCOUNT_NAME'
+    value: storageAccountName
+  }
+  {
+    name: 'HARNESS_RESULTS_CONTAINER'
+    value: harnessResultsContainerName
+  }
+  {
+    name: 'HARNESS_STATE_CONTAINER'
+    value: harnessStateContainerName
+  }
+  {
+    name: 'HARNESS_KILL_SWITCH_TABLE'
+    value: killSwitchTableName
+  }
+]
+var quantApiEnvironment = concat(quantBaseEnvironment, [
+  {
+    name: 'HARNESS_API_BEARER_TOKEN'
+    secretRef: 'harness-api-bearer-token'
+  }
+])
+var rthTraderEnvironment = concat(quantBaseEnvironment, [
+  {
+    name: 'HARNESS_ALPACA_API_KEY'
+    secretRef: rthTraderMode == 'paper' ? 'alpaca-paper-api-key' : 'alpaca-live-api-key'
+  }
+  {
+    name: 'HARNESS_ALPACA_API_SECRET'
+    secretRef: rthTraderMode == 'paper' ? 'alpaca-paper-api-secret' : 'alpaca-live-api-secret'
+  }
+])
+var cryptoTraderEnvironment = concat(quantBaseEnvironment, [
+  {
+    name: 'HARNESS_ALPACA_API_KEY'
+    secretRef: cryptoTraderMode == 'paper' ? 'alpaca-paper-api-key' : 'alpaca-live-api-key'
+  }
+  {
+    name: 'HARNESS_ALPACA_API_SECRET'
+    secretRef: cryptoTraderMode == 'paper' ? 'alpaca-paper-api-secret' : 'alpaca-live-api-secret'
   }
 ])
 
@@ -383,6 +541,314 @@ resource ingestJob 'Microsoft.App/jobs@2025-07-01' = {
   }
 }
 
+resource quantApiApp 'Microsoft.App/containerApps@2025-07-01' = {
+  name: quantApiAppName
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${quantIdentityResourceId}': {}
+    }
+  }
+  properties: {
+    environmentId: containerAppsEnvironment.id
+    workloadProfileName: consumptionProfileName
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: [
+        {
+          server: registryLoginServer
+          identity: quantIdentityResourceId
+        }
+      ]
+      secrets: quantApiSecrets
+      identitySettings: [
+        {
+          identity: quantIdentityResourceId
+          lifecycle: 'Main'
+        }
+      ]
+      ingress: {
+        external: enableExternalApiIngress
+        allowInsecure: false
+        targetPort: quantContainerPort
+        transport: 'http'
+        traffic: [
+          {
+            latestRevision: true
+            weight: 100
+          }
+        ]
+      }
+    }
+    template: {
+      containers: [
+        {
+          name: quantApiContainerName
+          image: sharedImageReference
+          // The shared image ENTRYPOINT is `lake`; the harness shells are
+          // sibling console scripts reached through the `harness` entrypoint.
+          command: [
+            'harness'
+          ]
+          args: [
+            'api'
+            '--config'
+            'config/harness/api.yaml'
+            '--host'
+            '0.0.0.0'
+            '--port'
+            string(quantContainerPort)
+          ]
+          env: quantApiEnvironment
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          probes: [
+            {
+              type: 'Startup'
+              httpGet: {
+                path: '/health'
+                port: quantContainerPort
+                scheme: 'HTTP'
+              }
+              failureThreshold: 10
+              initialDelaySeconds: 1
+              periodSeconds: 3
+              timeoutSeconds: 1
+            }
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/health'
+                port: quantContainerPort
+                scheme: 'HTTP'
+              }
+              failureThreshold: 3
+              periodSeconds: 30
+              timeoutSeconds: 2
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/health'
+                port: quantContainerPort
+                scheme: 'HTTP'
+              }
+              failureThreshold: 3
+              periodSeconds: 10
+              timeoutSeconds: 2
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 2
+        rules: [
+          {
+            name: 'http-requests'
+            http: {
+              metadata: {
+                concurrentRequests: '25'
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+resource rthTraderApp 'Microsoft.App/containerApps@2025-07-01' = {
+  name: rthTraderAppName
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${quantIdentityResourceId}': {}
+    }
+  }
+  properties: {
+    environmentId: containerAppsEnvironment.id
+    workloadProfileName: consumptionProfileName
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: [
+        {
+          server: registryLoginServer
+          identity: quantIdentityResourceId
+        }
+      ]
+      secrets: rthTraderSecrets
+      identitySettings: [
+        {
+          identity: quantIdentityResourceId
+          lifecycle: 'Main'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: traderContainerName
+          image: sharedImageReference
+          command: [
+            'harness'
+          ]
+          args: [
+            'trader'
+          ]
+          env: rthTraderEnvironment
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: rthTraderReplicas
+        rules: [
+          {
+            name: 'rth-schedule'
+            // The cron scaler is a KEDA custom scaler; the API models it
+            // through custom.type rather than a first-class cron property.
+            custom: {
+              type: 'cron'
+              metadata: {
+                timezone: rthScheduleTimezone
+                start: rthScheduleStart
+                end: rthScheduleEnd
+                value: string(rthTraderReplicas)
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+resource cryptoTraderApp 'Microsoft.App/containerApps@2025-07-01' = if (enableCryptoTrader) {
+  name: cryptoTraderAppName
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${quantIdentityResourceId}': {}
+    }
+  }
+  properties: {
+    environmentId: containerAppsEnvironment.id
+    workloadProfileName: consumptionProfileName
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: [
+        {
+          server: registryLoginServer
+          identity: quantIdentityResourceId
+        }
+      ]
+      secrets: cryptoTraderSecrets
+      identitySettings: [
+        {
+          identity: quantIdentityResourceId
+          lifecycle: 'Main'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: traderContainerName
+          image: sharedImageReference
+          command: [
+            'harness'
+          ]
+          args: [
+            'trader'
+          ]
+          env: cryptoTraderEnvironment
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+        }
+      ]
+      // Crypto sessions run continuously, so the trader stays always-on at a
+      // single bounded replica with no autoscaling rules.
+      scale: {
+        minReplicas: 1
+        maxReplicas: 1
+        rules: []
+      }
+    }
+  }
+}
+
+resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
+  name: backtestJobName
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${quantIdentityResourceId}': {}
+    }
+  }
+  properties: {
+    environmentId: containerAppsEnvironment.id
+    workloadProfileName: consumptionProfileName
+    configuration: {
+      triggerType: 'Manual'
+      registries: [
+        {
+          server: registryLoginServer
+          identity: quantIdentityResourceId
+        }
+      ]
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      replicaRetryLimit: 1
+      replicaTimeout: backtestReplicaTimeoutSeconds
+      identitySettings: [
+        {
+          identity: quantIdentityResourceId
+          lifecycle: 'Main'
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: backtestContainerName
+          image: sharedImageReference
+          command: [
+            'harness'
+          ]
+          // Per-run configuration is supplied by the job start operation's
+          // container argument override (backtest-job --config <path>).
+          args: [
+            'backtest-job'
+          ]
+          env: quantBaseEnvironment
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+        }
+      ]
+    }
+  }
+}
+
 output logAnalyticsWorkspace object = {
   name: logAnalyticsWorkspace.name
   resourceId: logAnalyticsWorkspace.id
@@ -405,4 +871,37 @@ output ingest object = {
   name: ingestJob.name
   resourceId: ingestJob.id
   cronExpression: ingestCronExpression
+}
+
+@description('Scale-to-zero quant-harness results and job API.')
+output quantApi object = {
+  name: quantApiApp.name
+  resourceId: quantApiApp.id
+  fqdn: quantApiApp.properties.configuration.ingress.fqdn
+}
+
+@description('Scheduled RTH trader that scales from zero on the session cron window.')
+output rthTrader object = {
+  name: rthTraderApp.name
+  resourceId: rthTraderApp.id
+  schedule: {
+    timezone: rthScheduleTimezone
+    start: rthScheduleStart
+    end: rthScheduleEnd
+    replicas: rthTraderReplicas
+  }
+}
+
+@description('Crypto trader resource. Empty when the crypto trader is disabled, in which case no crypto compute exists.')
+output cryptoTrader object = {
+  enabled: enableCryptoTrader
+  name: enableCryptoTrader ? cryptoTraderApp.name : ''
+  resourceId: enableCryptoTrader ? cryptoTraderApp.id : ''
+}
+
+@description('Use this name or resource ID with the Container Apps job start operation; supply the backtest configuration through the container argument override.')
+output backtest object = {
+  name: backtestJob.name
+  resourceId: backtestJob.id
+  replicaTimeoutSeconds: backtestReplicaTimeoutSeconds
 }

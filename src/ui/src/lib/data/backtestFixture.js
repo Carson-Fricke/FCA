@@ -84,6 +84,6 @@ export const fixture = (() => {
 		equity,
 		trades,
 		instruments: [spy, qqq],
-		stats: { winRate: 0.641, cagr: 0.142, sharpe: 1.87, sortino: 2.31 }
+		stats: { winRate: 0.641, cagr: 0.142, sharpe: 1.87, sortino: 2.31, maxDrawdown: 0.098 }
 	};
 })();

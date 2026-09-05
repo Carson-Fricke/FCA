@@ -68,6 +68,45 @@ param ingestReplicaTimeoutSeconds int = 3600
 @maxValue(100000)
 param ingestMaxRecords int = 1000
 
+@description('Whether to deploy the always-on crypto trader Container App. The scheduled RTH equities trader is always deployed; false leaves no crypto compute in the resource group.')
+param enableCryptoTrader bool = false
+
+@allowed([
+  'paper'
+  'live'
+])
+@description('Which Key Vault Alpaca credential pair the scheduled RTH trader consumes. Secret values stay in Key Vault; only the referenced secret names change.')
+param rthTraderMode string = 'paper'
+
+@allowed([
+  'paper'
+  'live'
+])
+@description('Which Key Vault Alpaca credential pair the crypto trader consumes.')
+param cryptoTraderMode string = 'paper'
+
+@description('IANA timezone applied to the RTH schedule scale rule.')
+@minLength(1)
+param rthScheduleTimezone string = 'America/New_York'
+
+@description('Five-field cron expression that opens the RTH scale window at the equity session start.')
+@minLength(9)
+param rthScheduleStart string = '30 9 * * 1-5'
+
+@description('Five-field cron expression that closes the RTH scale window at the equity session end.')
+@minLength(9)
+param rthScheduleEnd string = '0 16 * * 1-5'
+
+@description('Replica count the RTH schedule rule applies while the session window is open.')
+@minValue(1)
+@maxValue(4)
+param rthTraderReplicas int = 1
+
+@description('Maximum seconds allowed for one backtest job replica execution.')
+@minValue(60)
+@maxValue(86400)
+param backtestReplicaTimeoutSeconds int = 3600
+
 var normalizedPrefix = toLower(resourceNamePrefix)
 var normalizedEnvironment = toLower(environmentName)
 var namePrefix = '${normalizedPrefix}-${normalizedEnvironment}'
@@ -76,12 +115,17 @@ var deterministicSuffix = uniqueString(resourceGroup().id, namePrefix)
 var storageAccountName = 'fca${take(deterministicSuffix, 18)}'
 var keyVaultName = '${shortNamePrefix}-kv-${take(deterministicSuffix, 7)}'
 var runtimeIdentityName = '${namePrefix}-runtime'
+var quantRuntimeIdentityName = '${namePrefix}-quant-runtime'
 var githubDeployerIdentityName = '${namePrefix}-github-deployer'
 var containerRegistryName = 'fca${take(uniqueString(resourceGroup().id, namePrefix, 'registry'), 18)}'
 var logAnalyticsWorkspaceName = '${namePrefix}-logs'
 var containerAppsEnvironmentName = '${namePrefix}-cae'
 var apiAppName = '${namePrefix}-api'
 var ingestJobName = '${namePrefix}-ingest'
+var quantApiAppName = '${namePrefix}-quant-api'
+var rthTraderAppName = '${namePrefix}-rth-trader'
+var cryptoTraderAppName = '${namePrefix}-crypto-trader'
+var backtestJobName = '${namePrefix}-backtest'
 var budgetName = '${namePrefix}-budget'
 // The PerGB2018 Log Analytics SKU requires at least 30 days.
 var logRetentionDays = 30
@@ -107,6 +151,7 @@ module identities './modules/identities.bicep' = {
   name: 'market-lake-identities'
   params: {
     runtimeIdentityName: runtimeIdentityName
+    quantRuntimeIdentityName: quantRuntimeIdentityName
     githubDeployerIdentityName: githubDeployerIdentityName
     location: location
     tags: tags
@@ -142,6 +187,7 @@ module access './modules/access.bicep' = {
   name: 'market-lake-access'
   params: {
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
+    quantPrincipalId: identities.outputs.quantRuntimeIdentity.principalId
     githubDeployerPrincipalId: identities.outputs.githubDeployerIdentity.principalId
     storageAccountResourceId: storage.outputs.storageAccountId
     keyVaultResourceId: keyVault.outputs.keyVaultId
@@ -175,6 +221,20 @@ module containerApps './modules/container-apps.bicep' = {
     enableExternalApiIngress: enableExternalApiIngress
     lakeApiTenantId: tenant().tenantId
     lakeApiAudience: lakeApiAudience
+    quantApiAppName: quantApiAppName
+    rthTraderAppName: rthTraderAppName
+    cryptoTraderAppName: cryptoTraderAppName
+    backtestJobName: backtestJobName
+    quantIdentityResourceId: identities.outputs.quantRuntimeIdentity.resourceId
+    quantIdentityClientId: identities.outputs.quantRuntimeIdentity.clientId
+    enableCryptoTrader: enableCryptoTrader
+    rthTraderMode: rthTraderMode
+    cryptoTraderMode: cryptoTraderMode
+    rthScheduleTimezone: rthScheduleTimezone
+    rthScheduleStart: rthScheduleStart
+    rthScheduleEnd: rthScheduleEnd
+    rthTraderReplicas: rthTraderReplicas
+    backtestReplicaTimeoutSeconds: backtestReplicaTimeoutSeconds
   }
 }
 
@@ -198,7 +258,7 @@ module costControls './modules/cost-controls.bicep' = {
   }
 }
 
-@description('Non-secret summary of the composed market-lake resources and identity wiring.')
+@description('Non-secret summary of the composed market-lake and quant-harness resources, identity wiring, and additive cost controls.')
 output deploymentSummary object = {
   environment: environmentName
   location: location
@@ -206,11 +266,16 @@ output deploymentSummary object = {
     storageAccount: storage.outputs.storageAccountName
     keyVault: keyVault.outputs.keyVaultName
     runtimeIdentity: identities.outputs.runtimeIdentity.name
+    quantRuntimeIdentity: identities.outputs.quantRuntimeIdentity.name
     githubDeployerIdentity: identities.outputs.githubDeployerIdentity.name
     logAnalyticsWorkspace: logAnalyticsWorkspaceName
     containerAppsEnvironment: containerAppsEnvironmentName
     api: apiAppName
     ingestJob: ingestJobName
+    quantApi: quantApiAppName
+    rthTrader: rthTraderAppName
+    cryptoTrader: cryptoTraderAppName
+    backtestJob: backtestJobName
     containerRegistry: containerRegistry.outputs.registry.name
   }
   image: {
@@ -218,9 +283,18 @@ output deploymentSummary object = {
     pinnedByDigest: contains(sharedImageReference, '@sha256:')
   }
   runtimeIdentity: identities.outputs.runtimeIdentity
+  quantRuntimeIdentity: identities.outputs.quantRuntimeIdentity
   containerRegistry: containerRegistry.outputs.registry
   roleAssignments: access.outputs.runtimeRoleAssignments
+  quantRoleAssignments: access.outputs.quantRoleAssignments
   keyVaultNetwork: keyVault.outputs.networkAccess
   containerApps: containerApps.outputs
   costControls: costControls.outputs
+  quantCostControls: {
+    cryptoComputeEnabled: enableCryptoTrader
+    rthTraderMaxReplicas: rthTraderReplicas
+    backtestReplicaTimeoutSeconds: backtestReplicaTimeoutSeconds
+    logRetentionDays: logRetentionDays
+    monthlyBudgetAlertsUsd: costControls.outputs.monthlyBudgetAlerts.amountsUsd
+  }
 }
