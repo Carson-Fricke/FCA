@@ -361,11 +361,24 @@
 			const wx1 = extentX(camera.t1, rect.width);
 			if (Math.abs(x - wx0) < 8) return 'gripL';
 			if (Math.abs(x - wx1) < 8) return 'gripR';
-			if (x >= PAD.left && x <= rect.width - PAD.right && (x < wx0 || x > wx1)) return 'scrub';
-			return 'pan';
+			if (x >= PAD.left && x <= rect.width - PAD.right) {
+				return x < wx0 || x > wx1 ? 'scrub' : 'slide';
+			}
+			return null;
 		}
 		if (x >= PAD.left && x <= rect.width - PAD.right && y >= PAD.top && y <= axisY) return 'pan';
 		return null;
+	}
+
+	function cursorFor(x, y, w, h) {
+		const axisY = h - PAD.bottom;
+		if (y > axisY) {
+			const wx0 = extentX(camera.t0, w);
+			const wx1 = extentX(camera.t1, w);
+			if (Math.abs(x - wx0) < 8 || Math.abs(x - wx1) < 8) return 'ew-resize';
+			if (x >= PAD.left && x <= w - PAD.right) return x < wx0 || x > wx1 ? 'pointer' : 'grab';
+		}
+		return 'crosshair';
 	}
 
 	function handleDown(e) {
@@ -383,8 +396,10 @@
 		drag = {
 			mode,
 			startX: x,
-			startView: { ...camera }
+			startView: { ...camera },
+			grabOffset: mode === 'slide' ? extentTimeAt(x, rect.width) - camera.t0 : 0
 		};
+		canvas.style.cursor = 'grabbing';
 		canvas.setPointerCapture(e.pointerId);
 	}
 
@@ -393,6 +408,7 @@
 		const x = e.clientX - rect.left;
 		const y = e.clientY - rect.top;
 		if (drag) {
+			canvas.style.cursor = 'grabbing';
 			const plotW = Math.max(1, rect.width - PAD.left - PAD.right);
 			if (drag.mode === 'pan') {
 				const span = drag.startView.t1 - drag.startView.t0;
@@ -416,11 +432,17 @@
 				const span = drag.startView.t1 - drag.startView.t0;
 				const win = clampWindow(t - span / 2, t + span / 2);
 				camera = { ...camera, t0: win.t0, t1: win.t1 };
+			} else if (drag.mode === 'slide') {
+				const span = drag.startView.t1 - drag.startView.t0;
+				const t0 = extentTimeAt(x, rect.width) - drag.grabOffset;
+				const win = clampWindow(t0, t0 + span);
+				camera = { ...camera, t0: win.t0, t1: win.t1 };
 			}
 			hover = null;
 			return;
 		}
 		if (!camera || !extent) return;
+		canvas.style.cursor = cursorFor(x, y, rect.width, rect.height);
 		const t = tFor(x, rect.width);
 		let tooltip = null;
 		const r = effectiveRange(rect.height);
@@ -438,11 +460,13 @@
 
 	function handleUp() {
 		drag = null;
+		canvas.style.cursor = 'crosshair';
 	}
 
 	function handleLeave() {
 		hover = null;
 		drag = null;
+		canvas.style.cursor = 'crosshair';
 	}
 
 	function reset() {
