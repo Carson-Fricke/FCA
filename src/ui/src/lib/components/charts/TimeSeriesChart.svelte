@@ -19,7 +19,7 @@
 	const ACCENT = '#58a6ff';
 	const HANDLE = 'rgba(88, 166, 255, 0.35)';
 
-	let wrap;
+	let holder;
 	let canvas;
 	let size = $state(null);
 	let hover = $state(null);
@@ -46,7 +46,7 @@
 	});
 
 	$effect(() => {
-		const el = wrap;
+		const el = holder;
 		const cv = canvas;
 		if (!el || !cv) return;
 		const ro = new ResizeObserver((entries) => {
@@ -106,6 +106,17 @@
 		const span = camera ? camera.t1 - camera.t0 : extent.t1 - extent.t0;
 		const t0 = camera ? camera.t0 : extent.t0;
 		return t0 + ((x - PAD.left) / Math.max(1, w - PAD.left - PAD.right)) * span;
+	}
+
+	function extentX(t, w) {
+		return PAD.left + ((t - extent.t0) / (extent.t1 - extent.t0)) * (w - PAD.left - PAD.right);
+	}
+
+	function extentTimeAt(x, w) {
+		return (
+			extent.t0 +
+			((x - PAD.left) / Math.max(1, w - PAD.left - PAD.right)) * (extent.t1 - extent.t0)
+		);
 	}
 
 	function valueKey() {
@@ -289,14 +300,17 @@
 			const x = xFor(t, w);
 			ctx.fillText(shortDate(t), Math.min(x + 3, w - PAD.right - 40), axisY + 10);
 		}
-		const x0 = xFor(camera.t0, w);
-		const x1 = xFor(camera.t1, w);
 		const trackY = axisY + 20;
+		const plotW = w - PAD.left - PAD.right;
+		ctx.fillStyle = 'rgba(139, 148, 158, 0.25)';
+		ctx.fillRect(PAD.left, trackY - 2, plotW, 4);
+		const wx0 = extentX(camera.t0, w);
+		const wx1 = extentX(camera.t1, w);
 		ctx.fillStyle = HANDLE;
-		ctx.fillRect(x0 + 6, trackY - 3, Math.max(0, x1 - x0 - 12), 6);
+		ctx.fillRect(wx0, trackY - 4, Math.max(2, wx1 - wx0), 8);
 		ctx.fillStyle = ACCENT;
-		ctx.fillRect(x0 - 5, trackY - 6, 10, 12);
-		ctx.fillRect(x1 - 5, trackY - 6, 10, 12);
+		ctx.fillRect(wx0 - 2, trackY - 7, 5, 14);
+		ctx.fillRect(wx1 - 3, trackY - 7, 5, 14);
 	}
 
 	function fmtValue(v) {
@@ -343,12 +357,12 @@
 		const y = e.clientY - rect.top;
 		const axisY = rect.height - PAD.bottom;
 		if (y > axisY) {
-			const x0 = xFor(camera.t0, rect.width);
-			const x1 = xFor(camera.t1, rect.width);
-			if (Math.abs(x - x0) < 8) return 'gripL';
-			if (Math.abs(x - x1) < 8) return 'gripR';
-			if (x > x0 && x < x1) return 'pan';
-			return null;
+			const wx0 = extentX(camera.t0, rect.width);
+			const wx1 = extentX(camera.t1, rect.width);
+			if (Math.abs(x - wx0) < 8) return 'gripL';
+			if (Math.abs(x - wx1) < 8) return 'gripR';
+			if (x >= PAD.left && x <= rect.width - PAD.right && (x < wx0 || x > wx1)) return 'scrub';
+			return 'pan';
 		}
 		if (x >= PAD.left && x <= rect.width - PAD.right && y >= PAD.top && y <= axisY) return 'pan';
 		return null;
@@ -359,9 +373,16 @@
 		const mode = hitMode(e);
 		if (!mode) return;
 		const rect = canvas.getBoundingClientRect();
+		const x = e.clientX - rect.left;
+		if (mode === 'scrub') {
+			const t = extentTimeAt(x, rect.width);
+			const span = camera.t1 - camera.t0;
+			const win = clampWindow(t - span / 2, t + span / 2);
+			camera = { ...camera, t0: win.t0, t1: win.t1 };
+		}
 		drag = {
 			mode,
-			startX: e.clientX - rect.left,
+			startX: x,
 			startView: { ...camera }
 		};
 		canvas.setPointerCapture(e.pointerId);
@@ -390,6 +411,11 @@
 					...camera,
 					t1: Math.min(extent.t1, Math.max(t, camera.t0 + minSpan))
 				};
+			} else if (drag.mode === 'scrub') {
+				const t = extentTimeAt(x, rect.width);
+				const span = drag.startView.t1 - drag.startView.t0;
+				const win = clampWindow(t - span / 2, t + span / 2);
+				camera = { ...camera, t0: win.t0, t1: win.t1 };
 			}
 			hover = null;
 			return;
@@ -424,7 +450,7 @@
 	}
 </script>
 
-<figure bind:this={wrap} class="wrap">
+<figure class="wrap">
 	{#if title}
 		<figcaption>{title}</figcaption>
 	{/if}
@@ -440,7 +466,7 @@
 		{#if camera && showHud}
 			<div class="hud">
 				{shortDate(camera.t0)} &rarr; {shortDate(camera.t1)}
-				<span class="hint">wheel zoom &middot; shift+wheel stretch &middot; drag pan &middot; grips trim &middot; double-click reset</span>
+				<span class="hint">wheel zoom &middot; shift+wheel stretch &middot; drag pan &middot; grips trim &middot; overview click/drag to jump &middot; double-click reset</span>
 			</div>
 		{/if}
 	</div>
