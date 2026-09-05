@@ -65,10 +65,10 @@ product:
 | `market-lake` | `src/lake` | Point-in-time market data, catalog, coverage, ensure, and query contracts. |
 | `quant-harness` | `src/harness` | Deterministic backtests, results, sweeps, paper/shadow/live runtimes, risk, and broker integration. |
 | `FCA Thesis` | `src/thesis` | Workspace, chat, agent orchestration, workflows, evidence, knowledge retrieval, protected-test coordination, and activation requests. |
-| `FCA Thesis UI` | `ui` | SvelteKit chat and workspace application, live execution status, plans, artifacts, evidence, and consent controls. |
+| `FCA Thesis UI` | `src/ui` | SvelteKit chat and workspace application, live execution status, plans, artifacts, evidence, and consent controls. |
 
 `src/thesis` is a Python service so it can use FCA's typed Python clients and
-tooling. `ui` is a separate SvelteKit/TypeScript application and deployable.
+tooling. `src/ui` is a separate SvelteKit/TypeScript application and deployable.
 They are peers even though the UI depends on the Thesis API.
 
 The global knowledge library is ultimately an organized collection of Markdown
@@ -1097,7 +1097,7 @@ metric values in prose.
 
 ### Phase 0: Contracts And Scaffold
 
-- Add `src/thesis` and `ui` product scaffolds and path-focused tooling.
+- Add `src/thesis` and `src/ui` product scaffolds and path-focused tooling.
 - Define local loopback and Azure runtime profiles, including Entra/Foundry
   authentication, browser-session security, and offline/auth-failure behavior.
 - Define workspace, chat, investigation, workflow execution, event, experiment,

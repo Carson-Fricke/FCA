@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-05T04:50:59.521Z",
+    "exportedAt": "2026-09-05T04:52:37.095Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 209
     },
-    "checksum": "96b4feb1f60ebbad",
+    "checksum": "8c23d92870ea8abe",
     "taskCount": 205,
     "exportMode": "full"
   },
@@ -22540,7 +22540,8 @@
       ],
       "notes": [
         "2026-09-04 23:31:32 UTC: First of the UI-owned implementation tasks deferred from T176; intended to be front-run before T150 starts. Owns the src/ui app scaffold: later UI tasks own only their own component subtrees and integrate against this scaffold. When the T176 design specification lands, align visual treatment with it.",
-        "2026-09-05 01:13:35 UTC: Stack decision 2026-09-05: Thesis UI is SvelteKit in ui/ (replaces React/src/ui). App scaffold (package.json, svelte.config.js, vite.config.js, app shell, layout, index route, fixtures) built during the T207 front-run and shared. Remaining for acceptance: task-dag component and demo route under ui/, plus the backend plan-projection endpoint (src/thesis/http/plan.py, src/thesis/cleo/plan_view.py) and focused tests. When the T176 design specification lands, align visual treatment with it."
+        "2026-09-05 01:13:35 UTC: Stack decision 2026-09-05: Thesis UI is SvelteKit in ui/ (replaces React/src/ui). App scaffold (package.json, svelte.config.js, vite.config.js, app shell, layout, index route, fixtures) built during the T207 front-run and shared. Remaining for acceptance: task-dag component and demo route under ui/, plus the backend plan-projection endpoint (src/thesis/http/plan.py, src/thesis/cleo/plan_view.py) and focused tests. When the T176 design specification lands, align visual treatment with it.",
+        "2026-09-05 04:51:56 UTC: Location correction 2026-09-05: the UI lives at src/ui (product namespace), not a top-level ui/ directory; refs updated. App scaffold at src/ui is SvelteKit (package.json, svelte.config.js, vite.config.js, app shell, layout, index route, fixtures) built during the T207 front-run and shared. Remaining for acceptance: task-dag component and demo route already implemented under src/ui, plus the backend plan-projection endpoint (src/thesis/http/plan.py, src/thesis/cleo/plan_view.py) and focused tests. When the T176 design specification lands, align visual treatment with it."
       ],
       "acceptance": [
         "The component renders the workspace CLEO hierarchy as a DAG on HTML5 canvas: containment structure plus dependency edges, with nodes visually encoded by task status",
@@ -22551,8 +22552,8 @@
         "Focused tests pass: backend plan-projection endpoint tests and component tests for layout, pan, zoom, and selection behavior"
       ],
       "files": [
-        "ui/components/task-dag/",
-        "ui/src/routes/demo/dag/",
+        "src/ui/components/task-dag/",
+        "src/ui/src/routes/demo/dag/",
         "src/thesis/http/plan.py",
         "src/thesis/cleo/plan_view.py",
         "tests/thesis/cleo/test_plan_view.py"
@@ -22563,7 +22564,7 @@
         "T155"
       ],
       "createdAt": "2026-09-04T23:31:30.684Z",
-      "updatedAt": "2026-09-05T04:50:31.743Z",
+      "updatedAt": "2026-09-05T04:51:56.345Z",
       "completedAt": "2026-09-05T04:50:27.200Z",
       "verification": {
         "passed": true,
@@ -23225,7 +23226,8 @@
       ],
       "notes": [
         "2026-09-04 23:32:17 UTC: Second UI-owned implementation task deferred from T176; intended to be front-run before T150 starts. Owns only its component subtree and backend view endpoints. If it starts before TH6.5 (T206), develop and render through its own fixture entry point and integrate into the src/ui app scaffold once T206 lands; do not modify scaffold root files owned by T206. Trade and equity data come from T098 recorder artifacts imported by T159; price series come from workspace market-data clients (T158).",
-        "2026-09-05 01:12:52 UTC: Front-run progress 2026-09-05: SvelteKit component implemented at ui/components/backtest-view with fixture-driven demo route rendering locally at /demo/backtest; app scaffolded per stack decision (SvelteKit replaces React). Remaining for acceptance: backend artifact-view endpoint (src/thesis/http/backtest_view.py, src/thesis/artifacts/view.py) plus focused endpoint and component tests. The dev app builds (vite build) and serves the fixture demo."
+        "2026-09-05 01:12:52 UTC: Front-run progress 2026-09-05: SvelteKit component implemented at ui/components/backtest-view with fixture-driven demo route rendering locally at /demo/backtest; app scaffolded per stack decision (SvelteKit replaces React). Remaining for acceptance: backend artifact-view endpoint (src/thesis/http/backtest_view.py, src/thesis/artifacts/view.py) plus focused endpoint and component tests. The dev app builds (vite build) and serves the fixture demo.",
+        "2026-09-05 04:52:14 UTC: Front-run progress 2026-09-05: SvelteKit component implemented at src/ui/components/backtest-view with fixture-driven demo route; stack decision: SvelteKit replaces React. Relocated to src/ui (product namespace). Remaining for acceptance: backend artifact-view endpoint (src/thesis/http/backtest_view.py, src/thesis/artifacts/view.py) plus focused endpoint and component tests. The dev app builds (vite build) and serves the fixture demo at /demo/backtest."
       ],
       "acceptance": [
         "The component renders a backtest's equity/PnL curve with executed trades overlaid as markers carrying side, quantity, and timestamp sourced from the harness recorder artifacts",
@@ -23237,8 +23239,8 @@
         "Focused tests pass: backend artifact-view endpoint tests and component tests for synchronized pan and zoom behavior"
       ],
       "files": [
-        "ui/components/backtest-view/",
-        "ui/src/routes/demo/backtest/",
+        "src/ui/components/backtest-view/",
+        "src/ui/src/routes/demo/backtest/",
         "src/thesis/http/backtest_view.py",
         "src/thesis/artifacts/view.py",
         "tests/thesis/artifacts/test_view.py"
@@ -23248,7 +23250,7 @@
         "T159"
       ],
       "createdAt": "2026-09-04T23:32:15.099Z",
-      "updatedAt": "2026-09-05T04:50:49.395Z",
+      "updatedAt": "2026-09-05T04:52:13.594Z",
       "completedAt": "2026-09-05T04:50:45.472Z",
       "verification": {
         "passed": true,

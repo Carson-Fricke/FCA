@@ -1,0 +1,38 @@
+{
+  "taskId": "T209",
+  "numTotalTests": 4,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "ui-directory-relocation-pure-renames",
+      "status": "passed",
+      "command": "git diff --cached -M100% --name-status",
+      "result": "All 18 relocated files are recorded as R100 pure renames from ui/ to src/ui/ with no content changes; no top-level ui/ path remains in the repository"
+    },
+    {
+      "name": "gitignore-exclusion-at-new-location",
+      "status": "passed",
+      "command": "git check-ignore -v src/ui/node_modules/svelte/package.json",
+      "result": "The relocated src/ui/.gitignore (content-identical to the previous ui/.gitignore) ignores node_modules/, .svelte-kit/, build/, dist/, and env files from the new location; the staged change set contains no node_modules entries"
+    },
+    {
+      "name": "ui-production-build-from-src-ui",
+      "status": "passed",
+      "command": "cd src/ui && npm run build",
+      "result": "vite build completes from src/ui: 158 SSR and 171 client modules transformed, static adapter writes the site to build/ including the demo/dag and demo/backtest routes"
+    },
+    {
+      "name": "cleo-export-portability",
+      "status": "passed",
+      "command": "node .github/scripts/validate-cleo-export.mjs",
+      "result": "Validated 205 CLEO tasks through T208; the published export carries the corrected src/ui locations in the T206 and T207 records"
+    }
+  ],
+  "limitations": [
+    "The staged diff touches only the UI relocation, .github/architecture/fca-thesis.md, and .cleo-export.json; no Python sources changed, so the uv-based ruff, format, ty, and pytest gates were not applicable to this change",
+    "cleo deps validate --scope all reports only pre-existing findings: the known root-saga E_ORPHAN defects for T001, T068, and T143, plus the pre-existing E_CROSS_EPIC_GAP for T208 depending on T031; T209 introduces no dependency edges"
+  ]
+}
