@@ -1,0 +1,25 @@
+{
+  "taskId": "T186",
+  "numTotalTests": 100,
+  "numPassedTests": 100,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "zig-metrics-port",
+      "status": "passed",
+      "commands": ["zig fmt --check .", "zig build test --summary all"],
+      "result": "100/100 native tests: the full metric set ported on the scale-18 kernel in a metrics/ folder (common, equity, risk, trades, execution, attribution) with tests colocated next to each module; hand-computed Python vectors pinned including pathological cases, slippage reconciliation exact, scale-18 half-even square root, documented pinned-scale rounding divergences (130/70 -> ...143)"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide Ruff/format/ty and the pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "Float appears only in the final annualization steps (Sharpe/Sortino sqrt multiply, CAGR exponent), mirroring the Python float policy",
+    "Per-strategy attribution takes annotated ledger rows and allocates via a caller-provided allocator (metrics are not part of the no-alloc hot kernel path)"
+  ]
+}

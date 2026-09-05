@@ -1,0 +1,40 @@
+{
+  "wave": "T186-T199-T198",
+  "timestamp": "2026-09-04T23:00:00Z",
+  "numTotalTests": 1389,
+  "numPassedTests": 1373,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "repository-lock-and-quality",
+      "status": "passed",
+      "result": "Repository Ruff lint, Ruff format across 399 files, and ty passed."
+    },
+    {
+      "name": "repository-pytest",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "1273 tests passed, 12 skipped (FCA_PERF-gated), in 94.00 seconds."
+    },
+    {
+      "name": "native-core-gates",
+      "status": "passed",
+      "command": "zig fmt --check . ; zig build test",
+      "result": "Zig 0.16.0 clean; 100/100 native tests including the metrics/ folder port (common, equity, risk, trades, execution, attribution) with tests colocated next to each module."
+    },
+    {
+      "name": "integration-wiring",
+      "status": "passed",
+      "result": "metrics.zig became the folder facade; root.zig test collection updated; adversarial suite and CI lint sweep verified together with the determinism data-path scenarios."
+    }
+  ],
+  "integrationHistory": [
+    "Three-lane fan-out: T186 Zig metrics port (user-directed metrics/ folder restructure with colocated tests, implemented by the coordinator after two silent subagent failures), T199 adversarial suite + CI lint sweep, T198 determinism data-path scenarios.",
+    "The T186 port pinned the same hand-computed vectors as tests/harness/results/test_metrics.py and documented the scale-18 rounding divergence for non-terminating quotients and square roots."
+  ],
+  "limitations": [
+    "StrategyHistory.bars determinism scenario and a harness-lint-strategies CLI entrypoint are cheap follow-ups."
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "taskId": "T199",
+  "numTotalTests": 74,
+  "numPassedTests": 74,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "adversarial-and-lint-focused",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/strategy tests/strategy_lint",
+      "result": "74 passed: consolidated adversarial matrix over 6 attack families (clock advance, time-travel reads, history poisoning, fabricated reserved events x7 on both schedule surfaces, venue-state introspection, cross-book snooping) all rejected structurally; CI lint sweep proves clean on strategies/ and fails on dirty negative-control fixtures"
+    },
+    {
+      "name": "ci-gate",
+      "status": "passed",
+      "result": "Strategy sandbox lint sweep step added to python-bicep-ci.yml alongside the Python gates (uv run python -c via harness.strategy.lint directory API with report.raise_for_status())"
+    },
+    {
+      "name": "repository-wide-quality-gates",
+      "status": "passed",
+      "result": "Repository-wide gates and 1273-test pytest suite passed after wave integration"
+    }
+  ],
+  "limitations": [
+    "No CLI entrypoint exists for the strategy lint; the CI step uses the directory API via python -c (a harness-lint-strategies entrypoint is the cleaner later shape)",
+    "Private-slot escapes are out of contract per audit R1; the suite asserts sanctioned surfaces only"
+  ]
+}

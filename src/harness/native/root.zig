@@ -31,6 +31,7 @@ pub const matching = @import("matching.zig");
 pub const bars = @import("bars.zig");
 pub const arrow_batch = @import("arrow_batch.zig");
 pub const replay = @import("replay.zig");
+pub const metrics = @import("metrics.zig");
 
 /// Returns the sum of two i64 values, saturating at the type bounds.
 pub fn saturatingAdd(a: i64, b: i64) i64 {
@@ -64,6 +65,7 @@ test {
     _ = bars;
     _ = arrow_batch;
     _ = replay;
+    _ = metrics;
 }
 
 // Force analysis of the C ABI exports so the shared-library artifact always
