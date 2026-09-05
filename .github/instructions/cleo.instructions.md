@@ -38,6 +38,37 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - Session-end hygiene runs per session. It does not replace the wave-level
   Validation Checklist, which still runs once per reconciliation batch.
 
+## Fast Lookups: BRAIN And Nexus
+
+The local CLEO fork makes BRAIN semantic memory and the nexus code graph
+fully functional. Consult them BEFORE re-deriving knowledge the hard way —
+these read-only commands are safe for every agent and subagent, including
+subagents doing focused task work.
+
+- Search durable knowledge first: `cleo memory find "<query>"` (BM25 across
+  observations/decisions/learnings/patterns), `cleo memory search-hybrid
+  "<query>"` (adds vector ranking), and `cleo memory decision-find "<topic>"`
+  before grepping for architectural rationale. Decisions D001+ record the
+  ruff/ty-only rule, uv-only verification, wave ownership policy, and the
+  SQLite-repair policy.
+- Trace a symbol's knowledge: `cleo memory code-memories-for-code <symbol>`
+  lists memories anchored to code, and `cleo graph context <symbol>` shows the
+  graph neighborhood. Graph node IDs are prefixed — use `decision:D001`, not
+  `D001`, in `memory related|context|trace`; bare IDs silently return empty.
+- Check code structure before structural changes: `cleo graph search <name>`,
+  `cleo graph resolve <symbol>`, `cleo graph deps <symbol>` (callers/callees),
+  and `cleo graph impact <symbol>` for blast radius before moving or renaming
+  public symbols. `cleo graph clusters|flows|hot-paths` summarize architecture;
+  `cleo graph discover` is the quick structural overview. Re-index after large
+  refactor waves with `cleo graph sync` (add `--incremental` for small edits).
+- Session context: `cleo briefing` (session start) already includes a BRAIN
+  digest; `cleo memory digest --json` and `cleo memory recent --since 24h`
+  give focused memory recaps mid-session.
+- Write-backs are covered by the Session Lifecycle section above: observe
+  durable discoveries (`cleo memory observe`), store architectural decisions
+  (`cleo memory decision-store`), and keep embeddings current with
+  `cleo brain maintenance` or the backfill script after bulk writes.
+
 ## Transcript Extraction Via Opencode
 
 - opencode sessions are not hook-visible to CLEO, so `llmExtraction` never
@@ -47,13 +78,14 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
   repository). It writes Claude-format JSONL under `~/.claude/projects/` where
   CLEO's transcript scanner finds it.
 - Run `cleo transcript extract <session-id> --dry-run` first, then without
-  `--dry-run` to store memories. This path is currently unreliable on CLEO
-  2026.8.9: the extraction prompt contradicts its own zod schema ("empty
-  array" vs. a `memories` object) and `response_format` is dropped on the
-  openai-compatible transport, so models return mismatched envelopes. Retry
-  opportunistically and re-run `node .github/scripts/backfill-brain-embeddings.mjs`
-  after any new BRAIN rows; see brain observation O-mtngiqim-0 for the full
-  root-cause chain.
+  `--dry-run` to store memories. Reliable on the local fork (which fixes the
+  upstream prompt/schema contradiction, kryptobaseddev/cleo#1219); on the
+  published 2026.8.9 package it fails with "response did not match schema" —
+  the root-cause chain is preserved in brain observation O-mtngiqim-0.
+  Extraction pins the `extraction` role; keep it on a schema-disciplined
+  model. The source JSONL is deleted after successful extraction, and a
+  re-run of `node .github/scripts/backfill-brain-embeddings.mjs` (or
+  `cleo brain maintenance` on the fork) embeds the new rows.
 - The transcript path resolves the `openai` provider profile through
   `CLEO_HOME/plugins/model-providers/openai-openrouter-redirect.mjs`, which
   redirects its base URL to OpenRouter (works around kryptobaseddev/cleo#1216

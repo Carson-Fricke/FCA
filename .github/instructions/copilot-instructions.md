@@ -92,6 +92,11 @@ or bootstrapping the environment.
 
 - Work only within the task's assigned files and behavior.
 - Run focused tests and focused Ruff and ty checks only.
+- Orient before exploring: use the Fast Lookups commands from
+  `.github/instructions/cleo.instructions.md` — `cleo memory find` /
+  `decision-find` for prior knowledge, `cleo graph search` / `impact` /
+  `deps` for code structure and blast radius. These read-only BRAIN and nexus
+  queries are safe for subagents and cheaper than re-deriving context.
 - Do not run the complete repository suite unless acting as the integration
   owner.
 - Use the Canonical Commands table above instead of ad-hoc interpreter or
