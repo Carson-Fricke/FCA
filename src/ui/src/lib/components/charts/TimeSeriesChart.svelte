@@ -397,7 +397,12 @@
 			mode,
 			startX: x,
 			startView: { ...camera },
-			grabOffset: mode === 'slide' ? extentTimeAt(x, rect.width) - camera.t0 : 0
+			grabOffset:
+				mode === 'slide' || mode === 'gripL'
+					? extentTimeAt(x, rect.width) - camera.t0
+					: mode === 'gripR'
+						? extentTimeAt(x, rect.width) - camera.t1
+						: 0
 		};
 		canvas.style.cursor = 'grabbing';
 		canvas.setPointerCapture(e.pointerId);
@@ -416,16 +421,16 @@
 				const w = clampWindow(drag.startView.t0 - dt, drag.startView.t1 - dt);
 				camera = { ...camera, t0: w.t0, t1: w.t1 };
 			} else if (drag.mode === 'gripL') {
-				const t = tFor(x, rect.width);
+				const t0 = extentTimeAt(x, rect.width) - drag.grabOffset;
 				camera = {
 					...camera,
-					t0: Math.max(extent.t0, Math.min(t, camera.t1 - minSpan))
+					t0: Math.max(extent.t0, Math.min(t0, camera.t1 - minSpan))
 				};
 			} else if (drag.mode === 'gripR') {
-				const t = tFor(x, rect.width);
+				const t1 = extentTimeAt(x, rect.width) - drag.grabOffset;
 				camera = {
 					...camera,
-					t1: Math.min(extent.t1, Math.max(t, camera.t0 + minSpan))
+					t1: Math.min(extent.t1, Math.max(t1, camera.t0 + minSpan))
 				};
 			} else if (drag.mode === 'scrub') {
 				const t = extentTimeAt(x, rect.width);
@@ -443,6 +448,12 @@
 		}
 		if (!camera || !extent) return;
 		canvas.style.cursor = cursorFor(x, y, rect.width, rect.height);
+		const plotR = rect.width - PAD.right;
+		const plotB = rect.height - PAD.bottom;
+		if (x < PAD.left || x > plotR || y < PAD.top || y > plotB) {
+			hover = null;
+			return;
+		}
 		const t = tFor(x, rect.width);
 		let tooltip = null;
 		const r = effectiveRange(rect.height);
