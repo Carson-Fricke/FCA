@@ -114,13 +114,13 @@
 		return isBars(plot) ? p.close : (p.v ?? p.close);
 	}
 
-	function plotValueAt(plot, t) {
+	function pointAt(plot, t) {
 		let prev = null;
 		for (const p of plot.data) {
 			if (p.t > t) break;
 			prev = p;
 		}
-		return prev ? plotValue(plot, prev) : undefined;
+		return prev;
 	}
 
 	function clampWindow(t0, t1) {
@@ -252,10 +252,22 @@
 			lx += ctx.measureText(title).width + 12;
 		}
 		for (const plot of plots) {
-			const seg = `${plot.name ? plot.name + ' ' : ''}${fmtValue(plotValueAt(plot, readoutT))}`;
+			const bars = isBars(plot);
+			const pt = pointAt(plot, readoutT);
+			let seg = plot.name ?? '';
+			let color = plot.color;
+			if (pt) {
+				if (bars && hover) {
+					const up = pt.close >= pt.open;
+					color = up ? UP : DOWN;
+					seg = `${plot.name ? plot.name + ' ' : ''}O ${fmtValue(pt.open)} H ${fmtValue(pt.high)} L ${fmtValue(pt.low)} C ${fmtValue(pt.close)}`;
+				} else {
+					seg = `${plot.name ? plot.name + ' ' : ''}${fmtValue(plotValue(plot, pt))}`;
+				}
+			}
 			const segW = ctx.measureText(seg).width;
 			if (lx + segW > w - PAD.right - 8) break;
-			ctx.fillStyle = plot.color;
+			ctx.fillStyle = color;
 			ctx.fillText(seg, lx, PAD.top + 15);
 			lx += segW + 12;
 		}
@@ -394,15 +406,6 @@
 		ctx.fillRect(tx, h - PAD.bottom + 1, tw, 13);
 		ctx.fillStyle = '#e6edf3';
 		ctx.fillText(label, tx + 5, h - PAD.bottom + 11);
-		if (plot && isBars(plot)) {
-			const up = point.close >= point.open;
-			ctx.fillStyle = up ? UP : DOWN;
-			ctx.fillText(
-				`O ${fmtValue(point.open)}  H ${fmtValue(point.high)}  L ${fmtValue(point.low)}  C ${fmtValue(point.close)}`,
-				PAD.left + 8,
-				PAD.top + 30
-			);
-		}
 		if (hover.tooltip) {
 			const lines = hover.tooltip.lines;
 			const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
