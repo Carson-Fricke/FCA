@@ -26,7 +26,7 @@
 	let size = $state(null);
 	let hover = $state(null);
 	let drag = null;
-	let hintExpanded = $state(true);
+	let hintExpanded = $state(false);
 
 	const plots = $derived.by(() => {
 		if (series && series.length) {
@@ -257,9 +257,8 @@
 			let seg = plot.name ?? '';
 			let color = plot.color;
 			if (pt) {
-				if (bars && hover) {
-					const up = pt.close >= pt.open;
-					color = up ? UP : DOWN;
+				if (bars) {
+					if (hover) color = pt.close >= pt.open ? UP : DOWN;
 					seg = `${plot.name ? plot.name + ' ' : ''}O ${fmtValue(pt.open)} H ${fmtValue(pt.high)} L ${fmtValue(pt.low)} C ${fmtValue(pt.close)}`;
 				} else {
 					seg = `${plot.name ? plot.name + ' ' : ''}${fmtValue(plotValue(plot, pt))}`;
