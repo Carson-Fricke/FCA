@@ -12,6 +12,7 @@
 	} = $props();
 
 	const PAD = { top: 10, right: 70, bottom: 30, left: 70 };
+	const XPAD = 12;
 	const FRAME = '#30363d';
 	const GRID = 'rgba(48, 54, 61, 0.45)';
 	const AXIS = '#8b949e';
@@ -133,13 +134,15 @@
 	function xFor(t, w) {
 		const span = camera ? camera.t1 - camera.t0 : extent.t1 - extent.t0;
 		const t0 = camera ? camera.t0 : extent.t0;
-		return PAD.left + ((t - t0) / span) * (w - PAD.left - PAD.right);
+		const inner = w - PAD.left - PAD.right - XPAD * 2;
+		return PAD.left + XPAD + ((t - t0) / span) * inner;
 	}
 
 	function tFor(x, w) {
 		const span = camera ? camera.t1 - camera.t0 : extent.t1 - extent.t0;
 		const t0 = camera ? camera.t0 : extent.t0;
-		return t0 + ((x - PAD.left) / Math.max(1, w - PAD.left - PAD.right)) * span;
+		const inner = Math.max(1, w - PAD.left - PAD.right - XPAD * 2);
+		return t0 + ((x - PAD.left - XPAD) / inner) * span;
 	}
 
 	function extentX(t, w) {
@@ -258,7 +261,7 @@
 			let color = plot.color;
 			if (pt) {
 				if (bars) {
-					if (hover) color = pt.close >= pt.open ? UP : DOWN;
+					color = pt.close >= pt.open ? UP : DOWN;
 					seg = `${plot.name ? plot.name + ' ' : ''}O ${fmtValue(pt.open)} H ${fmtValue(pt.high)} L ${fmtValue(pt.low)} C ${fmtValue(pt.close)}`;
 				} else {
 					seg = `${plot.name ? plot.name + ' ' : ''}${fmtValue(plotValue(plot, pt))}`;
