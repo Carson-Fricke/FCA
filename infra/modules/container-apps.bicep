@@ -724,7 +724,6 @@ resource rthTraderApp 'Microsoft.App/containerApps@2025-07-01' = {
                 start: rthScheduleStart
                 end: rthScheduleEnd
                 desiredReplicas: string(rthTraderReplicas)
-                value: string(rthTraderReplicas)
               }
             }
           }
