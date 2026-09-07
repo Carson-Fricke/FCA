@@ -36,7 +36,6 @@ soak:
     state_file: .local/soak/state.json
     results_file: .local/soak/results.jsonl
     summary_file: .local/soak/summary.json
-    max_requests_per_invocation: 2000
     job_wait_deadline_seconds: 300
     poll_interval_seconds: 2.0
     coverage_recheck_attempts: 3

@@ -135,15 +135,15 @@ uv run --extra dev python scripts/soak/run_soak.py `
     --config config/lake/soak-aapl-spy.yaml --base-url https://<api-fqdn> `
     --limit-sessions 2
 
-# 3. Full-history soak, chunked by the config guard of 2000 requests per
-#    invocation. Re-run the same command until the summary reports no
-#    pending sessions; the state file resumes exactly where it stopped.
+# 3. Full-history soak. A single invocation loads every pending session in
+#    the window; the state file resumes exactly where a previous run
+#    stopped, so re-running the same command is always safe.
 uv run --extra dev python scripts/soak/run_soak.py `
     --config config/lake/soak-aapl-spy.yaml --base-url https://<api-fqdn>
 ```
 
 Window overrides: `--start-date`/`--end-date` (ISO dates), `--symbols
-AAPL,SPY`, `--limit-sessions N`, `--max-requests N`. Exit code 0 means every
+AAPL,SPY`, `--limit-sessions N`. Exit code 0 means every
 attempted session reached a terminal state; exit code 1 means failures were
 recorded (inspect `results.jsonl`, fix, re-run). Full history from the
 config default of 2016-01-01 plans 2,684 closed sessions per symbol and data

@@ -63,7 +63,6 @@ class RunPaths:
 
 @dataclass(frozen=True, slots=True)
 class RunSettings:
-    max_requests: int
     job_wait_deadline_seconds: float
     poll_interval_seconds: float
     coverage_recheck_attempts: int
@@ -310,7 +309,6 @@ def load_soak_config(path: Path) -> SoakConfig:
         summary_file=Path(_text(run_section, "summary_file", "soak.run")),
     )
     run = RunSettings(
-        max_requests=_integer(run_section, "max_requests_per_invocation", "soak.run"),
         job_wait_deadline_seconds=_number(
             run_section, "job_wait_deadline_seconds", "soak.run"
         ),
@@ -541,7 +539,6 @@ def run_live(
     symbols: tuple[str, ...],
     sessions: tuple[date, ...],
     state: SoakState,
-    max_requests: int,
 ) -> tuple[Aggregate, int]:
     """Ensure every pending session, newest first; return the aggregate."""
     aggregate = Aggregate()
@@ -553,8 +550,6 @@ def run_live(
                 key = state_key(symbol, data_type, session_date)
                 if key in state.completed:
                     continue
-                if requests >= max_requests:
-                    return aggregate, requests
                 requests += 1
                 outcome = ensure_session(
                     client, symbol, data_type, session_date, config
@@ -769,11 +764,6 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         help="bound the plan to the N most recent closed sessions",
     )
-    parser.add_argument(
-        "--max-requests",
-        type=int,
-        help="bound ensure requests in this invocation (default from config)",
-    )
     parser.add_argument("--state-file", type=Path, help="override state file path")
     parser.add_argument("--results-file", type=Path, help="override results path")
     parser.add_argument("--summary-file", type=Path, help="override summary path")
@@ -795,11 +785,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.summary_file:
         paths = replace(paths, summary_file=args.summary_file)
     config = replace(config, paths=paths)
-    if args.max_requests is not None:
-        config = replace(
-            config,
-            run=replace(config.run, max_requests=args.max_requests),
-        )
 
     symbols = config.symbols
     if args.symbols:
@@ -843,7 +828,6 @@ def main(argv: list[str] | None = None) -> int:
                 symbols,
                 sessions,
                 state,
-                config.run.max_requests,
             )
     except (LakeClientError, OSError) as error:
         print(f"run_soak: live soak failed: {error}", file=sys.stderr)
