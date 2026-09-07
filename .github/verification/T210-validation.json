@@ -1,0 +1,34 @@
+{
+  "taskId": "T210",
+  "numTotalTests": 4,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "ui-production-build",
+      "status": "passed",
+      "command": "cd src/ui && npm run build",
+      "result": "exit=0 with adapter-static prerender of build/demo/backtest.html and build/demo/dag.html; repeated clean across all iterations including commit 92d7f2c"
+    },
+    {
+      "name": "report-card-composition",
+      "status": "passed",
+      "result": "BacktestReport renders as a collapsible chat card: headline stat strip plus PnL preview with fill markers collapsed; tabbed body expanded with PnL & orders (equity curve plus fills table), Securities per-instrument candles, Risk analysis (risk tiles, equity and drawdown charts, PnL histogram), model-provided panel groups, and Statistics last"
+    },
+    {
+      "name": "stats-table-and-fixture",
+      "status": "passed",
+      "result": "StatsTable renders the backend metrics dict as grouped tables with percent/ratio/money/ms/duration/bool formatting and an Other group for unknown keys; fixture carries the full T207-shaped stats dict and a model-provided benchmark panel"
+    },
+    {
+      "name": "theme-and-render-qa",
+      "status": "passed",
+      "result": "Navy opaque surface ladder (bg #0a0f1a, card #151d30 with shadow, wells #0c1220); headless-Edge render of /demo/backtest pixel-sampled chart cards: header and chart body identical rgb(12,18,32); risk-tab y-scaling includes visible extremes (flex-shrink fix); canvases paint opaque well backgrounds; charts share one time camera with per-chart value zoom"
+    }
+  ],
+  "limitations": [
+    "Live data arrives through the T207 artifact-view payload; the demo renders from the deterministic fixture"
+  ]
+}
