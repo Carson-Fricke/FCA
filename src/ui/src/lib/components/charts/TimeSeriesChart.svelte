@@ -7,27 +7,26 @@
 		camera = $bindable(null),
 		markers = [],
 		height = 320,
-		minSpan = 5 * 24 * 60 * 60 * 1000,
-		showHud = true
+		minSpan = 5 * 24 * 60 * 60 * 1000
 	} = $props();
 
 	const PAD = { top: 10, right: 70, bottom: 30, left: 70 };
 	const XPAD = 12;
-	const FRAME = '#30363d';
-	const GRID = 'rgba(48, 54, 61, 0.45)';
-	const AXIS = '#8b949e';
-	const UP = '#3fb950';
-	const DOWN = '#f85149';
-	const ACCENT = '#58a6ff';
-	const HANDLE = 'rgba(88, 166, 255, 0.35)';
-	const PALETTE = ['#58a6ff', '#f778ba', '#d29922', '#3fb950', '#ab7df1'];
+	const FRAME = '#243044';
+	const GRID = 'rgba(148, 163, 184, 0.1)';
+	const AXIS = '#64748b';
+	const UP = '#34d399';
+	const DOWN = '#f87171';
+	const ACCENT = '#22d3ee';
+	const HANDLE = 'rgba(34, 211, 238, 0.35)';
+	const PALETTE = ['#22d3ee', '#f472b6', '#fbbf24', '#34d399', '#a78bfa'];
 
 	let holder;
 	let canvas;
 	let size = $state(null);
 	let hover = $state(null);
+	let valueWindow = $state(null);
 	let drag = null;
-	let hintExpanded = $state(false);
 
 	const plots = $derived.by(() => {
 		if (series && series.length) {
@@ -35,10 +34,11 @@
 				name: s.name ?? '',
 				data: s.data ?? [],
 				color: s.color ?? PALETTE[i % PALETTE.length],
-				render: s.render ?? render
+				render: s.render ?? render,
+				fill: s.fill ?? false
 			}));
 		}
-		return data.length ? [{ name: '', data, color: ACCENT, render }] : [];
+		return data.length ? [{ name: '', data, color: ACCENT, render, fill: false }] : [];
 	});
 
 	const extent = $derived.by(() => {
@@ -54,13 +54,13 @@
 	});
 
 	const fixedRange = $derived(
-		camera && camera.lo != null && camera.hi != null && camera.hi > camera.lo
-			? { lo: camera.lo, hi: camera.hi }
+		valueWindow && valueWindow.hi > valueWindow.lo
+			? { lo: valueWindow.lo, hi: valueWindow.hi }
 			: null
 	);
 
 	$effect(() => {
-		if (extent && !camera) camera = { t0: extent.t0, t1: extent.t1, lo: null, hi: null };
+		if (extent && !camera) camera = { t0: extent.t0, t1: extent.t1 };
 	});
 
 	$effect(() => {
@@ -69,7 +69,7 @@
 		if (!el || !cv) return;
 		const ro = new ResizeObserver((entries) => {
 			const r = entries[0].contentRect;
-			size = { w: Math.max(320, r.width), h: Math.max(220, r.height) };
+			size = { w: Math.max(320, r.width), h: Math.max(120, r.height) };
 		});
 		ro.observe(el);
 		const onWheel = (e) => {
@@ -86,7 +86,7 @@
 				const lo = v - (v - r.lo) * k;
 				const hi = v + (r.hi - v) * k;
 				if (hi - lo < 1e-9) return;
-				camera = { ...camera, lo, hi };
+				valueWindow = { lo, hi };
 				return;
 			}
 			const frac = (x - PAD.left) / Math.max(1, rect.width - PAD.left - PAD.right);
@@ -173,7 +173,11 @@
 				}
 			}
 		}
-		if (!Number.isFinite(lo) || lo === hi) return null;
+		if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+		if (lo === hi) {
+			const d = Math.abs(lo) * 0.1 || 1;
+			return { lo: lo - d, hi: hi + d };
+		}
 		const pad = (hi - lo) * 0.08;
 		return { lo: lo - pad, hi: hi + pad };
 	}
@@ -217,7 +221,8 @@
 		canvas.height = Math.round(h * dpr);
 		const ctx = canvas.getContext('2d');
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-		ctx.clearRect(0, 0, w, h);
+		ctx.fillStyle = '#0c1220';
+		ctx.fillRect(0, 0, w, h);
 		ctx.font = '11px system-ui, sans-serif';
 		const r = effectiveRange(h);
 		if (!r) return;
@@ -232,9 +237,6 @@
 	});
 
 	function drawFrame(ctx, w, h, r) {
-		ctx.strokeStyle = FRAME;
-		ctx.lineWidth = 1;
-		ctx.strokeRect(PAD.left - 0.5, PAD.top - 0.5, w - PAD.left - PAD.right + 1, plotH(h) + 1);
 		ctx.strokeStyle = GRID;
 		ctx.fillStyle = AXIS;
 		for (let i = 0; i <= 3; i++) {
@@ -249,11 +251,6 @@
 		}
 		const readoutT = hover ? hover.t : camera.t1;
 		let lx = PAD.left + 8;
-		if (title) {
-			ctx.fillStyle = '#e6edf3';
-			ctx.fillText(title, lx, PAD.top + 15);
-			lx += ctx.measureText(title).width + 12;
-		}
 		for (const plot of plots) {
 			const bars = isBars(plot);
 			const pt = pointAt(plot, readoutT);
@@ -276,21 +273,39 @@
 	}
 
 	function drawLine(ctx, w, h, r, plot) {
-		ctx.strokeStyle = plot.color;
-		ctx.lineWidth = 1.4;
-		ctx.beginPath();
-		let started = false;
+		const points = [];
 		for (const p of plot.data) {
 			if (p.t < camera.t0 || p.t > camera.t1) continue;
-			const x = xFor(p.t, w);
-			const y = yFor(plotValue(plot, p), r, h);
-			if (!started) {
-				ctx.moveTo(x, y);
-				started = true;
-			} else ctx.lineTo(x, y);
+			points.push([xFor(p.t, w), yFor(plotValue(plot, p), r, h)]);
 		}
+		if (!points.length) return;
+		if (plot.fill) {
+			const bottom = h - PAD.bottom;
+			const grad = ctx.createLinearGradient(0, PAD.top, 0, bottom);
+			grad.addColorStop(0, withAlpha(plot.color, 0.26));
+			grad.addColorStop(1, withAlpha(plot.color, 0));
+			ctx.beginPath();
+			ctx.moveTo(points[0][0], bottom);
+			for (const [x, y] of points) ctx.lineTo(x, y);
+			ctx.lineTo(points.at(-1)[0], bottom);
+			ctx.closePath();
+			ctx.fillStyle = grad;
+			ctx.fill();
+		}
+		ctx.strokeStyle = plot.color;
+		ctx.lineWidth = 1.6;
+		ctx.beginPath();
+		ctx.moveTo(points[0][0], points[0][1]);
+		for (const [x, y] of points) ctx.lineTo(x, y);
 		ctx.stroke();
 		ctx.lineWidth = 1;
+	}
+
+	function withAlpha(hex, alpha) {
+		const r = parseInt(hex.slice(1, 3), 16);
+		const g = parseInt(hex.slice(3, 5), 16);
+		const b = parseInt(hex.slice(5, 7), 16);
+		return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 	}
 
 	function drawCandles(ctx, w, h, r, plot) {
@@ -314,9 +329,8 @@
 				ctx.fillStyle = UP;
 				ctx.fillRect(x - bodyW / 2, top, bodyW, bh);
 			} else {
-				ctx.fillStyle = '#161b22';
+				ctx.fillStyle = DOWN;
 				ctx.fillRect(x - bodyW / 2, top, bodyW, bh);
-				ctx.strokeRect(x - bodyW / 2, top, bodyW, bh);
 			}
 		}
 	}
@@ -390,23 +404,23 @@
 	function drawCrosshair(ctx, w, h, r) {
 		const { x, y, pi, point } = hover;
 		const plot = plots[pi];
-		ctx.strokeStyle = 'rgba(230, 237, 243, 0.35)';
+		ctx.strokeStyle = 'rgba(226, 232, 240, 0.35)';
 		ctx.beginPath();
 		ctx.moveTo(x, PAD.top);
 		ctx.lineTo(x, h - PAD.bottom);
 		ctx.moveTo(PAD.left, y);
 		ctx.lineTo(w - PAD.right, y);
 		ctx.stroke();
-		ctx.fillStyle = '#161b22';
+		ctx.fillStyle = '#0c1220';
 		ctx.fillRect(w - PAD.right + 3, y - 7, PAD.right - 6, 14);
-		ctx.fillStyle = '#e6edf3';
+		ctx.fillStyle = '#f1f5f9';
 		ctx.fillText(fmtValue(plotValue(plot, point)), w - PAD.right + 7, y + 4);
 		const label = shortDay(hover.t);
 		const tw = ctx.measureText(label).width + 10;
 		const tx = Math.min(Math.max(x - tw / 2, PAD.left), w - PAD.right - tw);
-		ctx.fillStyle = '#161b22';
+		ctx.fillStyle = '#0c1220';
 		ctx.fillRect(tx, h - PAD.bottom + 1, tw, 13);
-		ctx.fillStyle = '#e6edf3';
+		ctx.fillStyle = '#f1f5f9';
 		ctx.fillText(label, tx + 5, h - PAD.bottom + 11);
 		if (hover.tooltip) {
 			const lines = hover.tooltip.lines;
@@ -414,11 +428,11 @@
 			const bh = 14 * lines.length + 8;
 			const bx = Math.min(hover.tooltip.x + 12, w - PAD.right - bw);
 			const by = Math.max(PAD.top + 2, Math.min(hover.tooltip.y - bh - 10, h - PAD.bottom - bh - 2));
-			ctx.fillStyle = 'rgba(22, 27, 34, 0.95)';
+			ctx.fillStyle = 'rgba(12, 18, 32, 0.95)';
 			ctx.fillRect(bx, by, bw, bh);
 			ctx.strokeStyle = FRAME;
 			ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
-			ctx.fillStyle = '#e6edf3';
+			ctx.fillStyle = '#f1f5f9';
 			lines.forEach((l, i) => ctx.fillText(l, bx + 8, by + 18 + i * 14));
 		}
 	}
@@ -563,13 +577,14 @@
 	}
 
 	function reset() {
-		if (extent) camera = { t0: extent.t0, t1: extent.t1, lo: null, hi: null };
+		if (extent) camera = { t0: extent.t0, t1: extent.t1 };
+		valueWindow = null;
 	}
 </script>
 
 <figure class="wrap">
 	{#if title}
-		<figcaption>{title}</figcaption>
+		<figcaption><span class="tick" aria-hidden="true"></span>{title}</figcaption>
 	{/if}
 	<div class="holder" bind:this={holder} style="height: {height}px">
 		<canvas
@@ -580,34 +595,32 @@
 			onpointerleave={handleLeave}
 			ondblclick={reset}
 		></canvas>
-		{#if camera && showHud}
-			<div class="hud">
-				{shortDate(camera.t0)} &rarr; {shortDate(camera.t1)}
-				{#if hintExpanded}
-					<button class="hint" type="button" onclick={() => (hintExpanded = false)} title="Hide controls">
-						wheel zoom &middot; shift+wheel stretch &middot; drag pan &middot; grips trim &middot; overview click/drag to jump &middot; double-click reset
-					</button>
-				{:else}
-					<button class="hint compact" type="button" onclick={() => (hintExpanded = true)} title="Show controls">?</button>
-				{/if}
-			</div>
-		{/if}
 	</div>
 </figure>
 
 <style>
 	.wrap {
 		margin: 0;
-		background: var(--panel);
-		border: 1px solid var(--border);
-		border-radius: 8px;
+		background: var(--surface-well);
+		border-radius: 10px;
 		overflow: hidden;
 	}
 	figcaption {
-		padding: 8px 12px;
-		font-size: 13px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 7px 12px;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
 		color: var(--muted);
-		border-bottom: 1px solid var(--border);
+	}
+	.tick {
+		width: 14px;
+		height: 2px;
+		border-radius: 1px;
+		background: var(--accent);
 	}
 	.holder {
 		position: relative;
@@ -618,36 +631,5 @@
 		width: 100%;
 		height: 100%;
 		cursor: crosshair;
-	}
-	.hud {
-		position: absolute;
-		top: 6px;
-		right: 10px;
-		font-size: 12px;
-		color: var(--text);
-		background: rgba(22, 27, 34, 0.85);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		padding: 3px 8px;
-		pointer-events: none;
-	}
-	.hint {
-		color: var(--muted);
-		margin-left: 10px;
-		pointer-events: auto;
-		background: transparent;
-		border: none;
-		padding: 0;
-		font-family: inherit;
-		font-size: 12px;
-		cursor: pointer;
-	}
-	.hint.compact {
-		margin-left: 6px;
-		color: var(--text);
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		padding: 0 5px;
-		line-height: 1.4;
 	}
 </style>

@@ -18,11 +18,14 @@
 		{fixture.title} &middot; {fixture.trades.length} trades &middot; {wins}W/{fixture.trades.length - wins}L
 		&middot; realized PnL {pnl >= 0 ? '+' : ''}{pnl.toLocaleString('en-US', { maximumFractionDigits: 0 })}
 	</p>
-	<BacktestReport report={fixture} bind:camera height={300} />
+	<BacktestReport report={fixture} bind:camera height={300} defaultExpanded />
 	<p class="sub note">
 		Fixture data only. Real runs arrive through the harness recorder artifacts imported by the
-		workspace, served by the Thesis artifact-view endpoint (T207). All chart sections share one
-		zoom camera: pan, zoom, or trim the axis grips on any chart and the others follow.
+		workspace, served by the Thesis artifact-view endpoint (T207). In chat this card starts
+		collapsed showing the PnL preview; click the header to expand the tabbed view (PnL &amp; orders,
+		securities, risk analysis with drawdown and PnL distribution, model-provided panels, and
+		backend-computed statistics). All charts share one zoom camera: pan, zoom, or trim the axis
+		grips on any chart and the others follow.
 	</p>
 </div>
 

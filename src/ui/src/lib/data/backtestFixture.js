@@ -72,6 +72,52 @@ function buildTrades(rand, instruments, equity) {
 	return trades;
 }
 
+function drawdownStats(equity) {
+	let peak = equity[0]?.v ?? 0;
+	let maxDd = 0;
+	let maxStart = 0;
+	let maxTrough = 0;
+	let startT = equity[0]?.t ?? 0;
+	let troughT = equity[0]?.t ?? 0;
+	let spanStart = equity[0]?.t ?? 0;
+	let spanNs = 0;
+	for (const p of equity) {
+		if (p.v >= peak) {
+			peak = p.v;
+			startT = p.t;
+		} else {
+			const dd = (peak - p.v) / peak;
+			if (dd > maxDd) {
+				maxDd = dd;
+				maxStart = startT;
+				maxTrough = p.t;
+			}
+			if (p.t - Math.max(spanStart, startT) > spanNs) {
+				spanStart = startT;
+				spanNs = p.t - startT;
+			}
+		}
+	}
+	return { maxDd, maxStart, maxTrough, spanNs };
+}
+
+function annualizedRatios(equity, periodsPerYear) {
+	const returns = [];
+	for (let i = 1; i < equity.length; i++) {
+		if (equity[i - 1].v > 0) returns.push(equity[i].v / equity[i - 1].v - 1);
+	}
+	const mean = returns.reduce((a, r) => a + r, 0) / returns.length;
+	const variance = returns.reduce((a, r) => a + (r - mean) * (r - mean), 0) / returns.length;
+	const sd = Math.sqrt(variance);
+	const downside = returns.filter((r) => r < 0);
+	const dsd = Math.sqrt(
+		downside.reduce((a, r) => a + r * r, 0) / (downside.length || 1)
+	);
+	const sharpe = sd > 0 ? (mean / sd) * Math.sqrt(periodsPerYear) : null;
+	const sortino = dsd > 0 ? (mean / dsd) * Math.sqrt(periodsPerYear) : null;
+	return { sharpe, sortino };
+}
+
 export const fixture = (() => {
 	const rand = mulberry32(20260905);
 	const days = 780;
@@ -79,11 +125,69 @@ export const fixture = (() => {
 	const qqq = { symbol: 'QQQ', underlying: 'QQQ', series: walk(rand, days, 315, 0.00055, 0.014) };
 	const equity = spy.series.map((p) => ({ t: p.t, v: 100000 }));
 	const trades = buildTrades(rand, [spy, qqq], equity);
+
+	const first = equity[0].v;
+	const last = equity.at(-1).v;
+	const years = (equity.at(-1).t - equity[0].t) / (365.25 * 24 * 60 * 60 * 1000);
+	const dd = drawdownStats(equity);
+	const ratios = annualizedRatios(equity, 252);
+	const wins = trades.filter((t) => t.pnl >= 0);
+	const losses = trades.filter((t) => t.pnl < 0);
+	const grossProfit = wins.reduce((a, t) => a + t.pnl, 0);
+	const grossLoss = losses.reduce((a, t) => a + t.pnl, 0);
+	const fills = trades.length * 2;
+	const firstClose = spy.series[0].close;
+	const benchmark = equity.map((p, i) => ({
+		t: p.t,
+		v: 100000 * (spy.series[i].close / firstClose)
+	}));
+
 	return {
 		title: 'Reference equity strategy (fixture)',
 		equity,
 		trades,
 		instruments: [spy, qqq],
-		stats: { winRate: 0.641, cagr: 0.142, sharpe: 1.87, sortino: 2.31, maxDrawdown: 0.098 }
+		stats: {
+			totalReturn: last / first - 1,
+			cagr: Math.pow(last / first, 1 / years) - 1,
+			maxDrawdown: dd.maxDd,
+			maxDrawdownDurationNs: dd.spanNs * 1e6,
+			maxDrawdownRecovered: true,
+			sharpe: ratios.sharpe,
+			sortino: ratios.sortino,
+			tradeCount: trades.length,
+			winCount: wins.length,
+			lossCount: losses.length,
+			hitRate: wins.length / trades.length,
+			totalPnl: last - first,
+			grossProfit,
+			grossLoss,
+			profitFactor: grossProfit / Math.abs(grossLoss),
+			averageWin: grossProfit / wins.length,
+			averageLoss: grossLoss / losses.length,
+			largestWin: Math.max(...wins.map((t) => t.pnl)),
+			largestLoss: Math.min(...losses.map((t) => t.pnl)),
+			fillCount: fills,
+			feesTotal: fills * 1.0,
+			slippageTotal: fills * 0.8,
+			latencyMeanNs: 840_000,
+			latencyMaxNs: 3_100_000,
+			ordersTotal: fills,
+			ordersFilled: fills,
+			ordersRejected: 0,
+			ordersCancelled: 0
+		},
+		panels: [
+			{
+				id: 'benchmark',
+				group: 'Benchmark',
+				label: 'Equity vs buy-and-hold SPY',
+				render: 'line',
+				series: [
+					{ name: 'Strategy', data: equity },
+					{ name: 'SPY B&H', data: benchmark, color: '#94a3b8' }
+				]
+			}
+		]
 	};
 })();
