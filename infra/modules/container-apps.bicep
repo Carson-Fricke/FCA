@@ -229,27 +229,15 @@ var backtestContainerName = 'backtest'
 var harnessResultsContainerName = 'harness-results'
 var harnessStateContainerName = 'harness-state'
 var killSwitchTableName = 'killswitch'
-var paperTraderSecrets = [
+var traderSecrets = [
   {
-    name: 'alpaca-paper-api-key'
-    keyVaultUrl: '${keyVaultUri}secrets/alpaca-paper-api-key'
+    name: 'alpaca-api-key'
+    keyVaultUrl: '${keyVaultUri}secrets/alpaca-api-key'
     identity: quantIdentityResourceId
   }
   {
-    name: 'alpaca-paper-api-secret'
-    keyVaultUrl: '${keyVaultUri}secrets/alpaca-paper-api-secret'
-    identity: quantIdentityResourceId
-  }
-]
-var liveTraderSecrets = [
-  {
-    name: 'alpaca-live-api-key'
-    keyVaultUrl: '${keyVaultUri}secrets/alpaca-live-api-key'
-    identity: quantIdentityResourceId
-  }
-  {
-    name: 'alpaca-live-api-secret'
-    keyVaultUrl: '${keyVaultUri}secrets/alpaca-live-api-secret'
+    name: 'alpaca-api-secret'
+    keyVaultUrl: '${keyVaultUri}secrets/alpaca-api-secret'
     identity: quantIdentityResourceId
   }
 ]
@@ -260,10 +248,10 @@ var quantApiSecrets = [
     identity: quantIdentityResourceId
   }
 ]
-// The environment variable names stay stable across modes; only the Key
-// Vault secret names behind them switch between the paper and live pairs.
-var rthTraderSecrets = rthTraderMode == 'paper' ? paperTraderSecrets : liveTraderSecrets
-var cryptoTraderSecrets = cryptoTraderMode == 'paper' ? paperTraderSecrets : liveTraderSecrets
+// Paper and live Alpaca trading endpoints share one key pair, so the
+// credential mode does not change which Key Vault secrets the traders read.
+var rthTraderSecrets = traderSecrets
+var cryptoTraderSecrets = traderSecrets
 var quantBaseEnvironment = [
   {
     name: 'AZURE_CLIENT_ID'
@@ -295,21 +283,21 @@ var quantApiEnvironment = concat(quantBaseEnvironment, [
 var rthTraderEnvironment = concat(quantBaseEnvironment, [
   {
     name: 'HARNESS_ALPACA_API_KEY'
-    secretRef: rthTraderMode == 'paper' ? 'alpaca-paper-api-key' : 'alpaca-live-api-key'
+    secretRef: 'alpaca-api-key'
   }
   {
     name: 'HARNESS_ALPACA_API_SECRET'
-    secretRef: rthTraderMode == 'paper' ? 'alpaca-paper-api-secret' : 'alpaca-live-api-secret'
+    secretRef: 'alpaca-api-secret'
   }
 ])
 var cryptoTraderEnvironment = concat(quantBaseEnvironment, [
   {
     name: 'HARNESS_ALPACA_API_KEY'
-    secretRef: cryptoTraderMode == 'paper' ? 'alpaca-paper-api-key' : 'alpaca-live-api-key'
+    secretRef: 'alpaca-api-key'
   }
   {
     name: 'HARNESS_ALPACA_API_SECRET'
-    secretRef: cryptoTraderMode == 'paper' ? 'alpaca-paper-api-secret' : 'alpaca-live-api-secret'
+    secretRef: 'alpaca-api-secret'
   }
 ])
 
