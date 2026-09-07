@@ -474,6 +474,7 @@ def ensure_session(
         end_date=session_date,
     )
     started = time.monotonic()
+    last_error: str | None = None
     for _ in range(config.run.coverage_recheck_attempts):
         try:
             response = client.ensure(request)
@@ -505,12 +506,21 @@ def ensure_session(
                 + (f": {job.error_message}" if job.error_message else ""),
                 duration_ms=_elapsed_ms(started),
             )
+        try:
+            coverage = client.coverage(request)
+        except LakeClientError as error:
+            last_error = f"coverage query failed: {error}"
+            continue
+        return _outcome_from_entry(
+            _extract_entry(coverage, session_date), _elapsed_ms(started)
+        )
     return SessionOutcome(
         status="error",
         rows=None,
         byte_size=None,
         object_path=None,
-        error="coverage report was not produced within the recheck budget",
+        error=last_error
+        or "coverage report was not produced within the recheck budget",
         duration_ms=_elapsed_ms(started),
     )
 

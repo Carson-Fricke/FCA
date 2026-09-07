@@ -291,6 +291,71 @@ def test_ensure_and_poll_require_authentication() -> None:
     assert poll_response.status_code == 401
 
 
+def test_terminal_job_with_unsatisfied_coverage_is_superseded_and_relaunched() -> None:
+    catalog = InMemoryCatalogRepository(
+        [
+            CoverageRecord(
+                asset_class=AssetClass.EQUITY,
+                data_type=DataType.TRADE,
+                symbol="AAPL",
+                session_date=date(2024, 1, 18),
+                status=CoverageStatus.ERROR,
+            ),
+        ]
+    )
+    jobs = InMemoryJobRepository()
+    launched: list[EnsureJob] = []
+    spec = EnsureRequest.model_validate(
+        _request(start_date="2024-01-18", end_date="2024-01-18")
+    )
+    jobs.upsert(
+        JobRecord(
+            job_id=ensure_job_id(spec),
+            state=JobState.SUCCEEDED,
+            created_at=AS_OF,
+            updated_at=AS_OF,
+            error_message="stale attempt",
+        )
+    )
+    client = _client(catalog, jobs, launcher=launched.append)
+
+    response = _post(client, _request(start_date="2024-01-18", end_date="2024-01-18"))
+
+    assert response.status_code == 202
+    assert response.json()["job_id"] == ensure_job_id(spec)
+    assert response.json()["state"] == "queued"
+    assert len(launched) == 1
+    assert [gap.state for gap in launched[0].gaps] == ["error"]
+    polled = _get(client, ensure_job_id(spec))
+    assert polled.json()["state"] == "queued"
+    assert polled.json()["error_message"] is None
+
+
+def test_in_flight_job_record_short_circuits_without_relaunching() -> None:
+    catalog = InMemoryCatalogRepository()
+    jobs = InMemoryJobRepository()
+    launched: list[EnsureJob] = []
+    spec = EnsureRequest.model_validate(_request())
+    jobs.upsert(
+        JobRecord(
+            job_id=ensure_job_id(spec),
+            state=JobState.RUNNING,
+            created_at=AS_OF,
+            updated_at=AS_OF,
+        )
+    )
+    client = _client(catalog, jobs, launcher=launched.append)
+
+    first = _post(client, _request())
+    second = _post(client, _request())
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json() == second.json()
+    assert first.json()["state"] == "running"
+    assert launched == []
+
+
 def test_launcher_failure_is_persisted_as_failed_job() -> None:
     def launcher(job: EnsureJob) -> None:
         raise RuntimeError(f"launcher failed for {job.job_id}")

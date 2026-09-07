@@ -59,6 +59,8 @@ class EnsureJob:
 
 EnsureJobLauncher = Callable[[EnsureJob], None | Awaitable[None]]
 
+_IN_FLIGHT_JOB_STATES = frozenset({JobState.QUEUED, JobState.RUNNING})
+
 
 class EnsureRequestLike(Protocol):
     @property
@@ -125,7 +127,13 @@ async def ensure_coverage(
     as_of: datetime,
     wait_deadline_seconds: float,
 ) -> CoverageReport | JobRecord:
-    """Return satisfied coverage or launch one stable asynchronous job."""
+    """Return satisfied coverage or launch one stable asynchronous job.
+
+    A persisted job record short-circuits repeated calls while it is still
+    in flight. A terminal record whose coverage remains unsatisfied is
+    superseded and the work is relaunched, so re-ensuring the same spec
+    repairs sessions that ended in error or partial states.
+    """
     report = requested_coverage(
         catalog,
         spec,
@@ -138,14 +146,14 @@ async def ensure_coverage(
 
     job_id = ensure_job_id(spec)
     existing = jobs.get(job_id)
-    if existing is not None:
+    if existing is not None and existing.state in _IN_FLIGHT_JOB_STATES:
         return existing
 
     record = jobs.upsert(
         JobRecord(
             job_id=job_id,
             state=JobState.QUEUED,
-            created_at=as_of,
+            created_at=existing.created_at if existing is not None else as_of,
             updated_at=as_of,
         )
     )

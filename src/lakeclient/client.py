@@ -148,6 +148,21 @@ class LakeClient:
         except (KeyError, TypeError, ValueError) as error:
             raise LakeProtocolError("invalid ensure response") from error
 
+    def coverage(self, request: DatasetRequest) -> CoverageResponse:
+        """Fetch the coverage report for one bounded dataset request."""
+        response = self._request(
+            "GET",
+            "v1/catalog/coverage",
+            params={key: str(value) for key, value in request.to_payload().items()},
+        )
+        try:
+            parsed = parse_ensure_response(_response_object(response), location=None)
+        except (KeyError, TypeError, ValueError) as error:
+            raise LakeProtocolError("invalid coverage response") from error
+        if not isinstance(parsed, CoverageResponse):
+            raise LakeProtocolError("coverage endpoint returned a job response")
+        return parsed
+
     def job(self, job_id: str) -> JobStatus:
         """Fetch the current state of one ensure job."""
         normalized = _job_id(job_id)
@@ -201,8 +216,9 @@ class LakeClient:
         url: str,
         *,
         json_body: object | None = None,
+        params: dict[str, str] | None = None,
     ) -> httpx.Response:
-        response = self._http.request(method, url, json=json_body)
+        response = self._http.request(method, url, json=json_body, params=params)
         if response.is_error:
             raise _api_error(response)
         return response
