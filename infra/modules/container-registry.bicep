@@ -10,11 +10,6 @@ param registryName string
 @maxLength(36)
 param runtimePrincipalId string
 
-@description('Object/principal ID of the quant-harness runtime user-assigned managed identity, which pulls the shared image.')
-@minLength(36)
-@maxLength(36)
-param quantRuntimePrincipalId string
-
 @description('Optional deployer principal that imports a private source image and verifies its mirrored digest.')
 param imageImportPrincipalId string = ''
 
@@ -50,16 +45,6 @@ resource runtimeAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(registry.id, runtimePrincipalId, acrPullRole.id)
   properties: {
     principalId: runtimePrincipalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: acrPullRole.id
-  }
-}
-
-resource quantAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: registry
-  name: guid(registry.id, quantRuntimePrincipalId, acrPullRole.id)
-  properties: {
-    principalId: quantRuntimePrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: acrPullRole.id
   }
