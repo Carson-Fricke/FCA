@@ -723,6 +723,7 @@ resource rthTraderApp 'Microsoft.App/containerApps@2025-07-01' = {
                 timezone: rthScheduleTimezone
                 start: rthScheduleStart
                 end: rthScheduleEnd
+                desiredReplicas: string(rthTraderReplicas)
                 value: string(rthTraderReplicas)
               }
             }

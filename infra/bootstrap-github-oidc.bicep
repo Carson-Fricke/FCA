@@ -31,6 +31,7 @@ param githubRepositoryId string
 
 var namePrefix = '${toLower(resourceNamePrefix)}-${toLower(environmentName)}'
 var runtimeIdentityName = '${namePrefix}-runtime'
+var quantRuntimeIdentityName = '${namePrefix}-quant-runtime'
 var githubDeployerIdentityName = '${namePrefix}-github-deployer'
 var containerRegistryName = 'fca${take(uniqueString(resourceGroup().id, namePrefix, 'registry'), 18)}'
 var tags = {
@@ -44,6 +45,7 @@ module identities './modules/identities.bicep' = {
   name: 'github-oidc-bootstrap-identities'
   params: {
     runtimeIdentityName: runtimeIdentityName
+    quantRuntimeIdentityName: quantRuntimeIdentityName
     githubDeployerIdentityName: githubDeployerIdentityName
     location: location
     tags: tags
@@ -60,6 +62,7 @@ module containerRegistry './modules/container-registry.bicep' = {
   params: {
     registryName: containerRegistryName
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
+    quantRuntimePrincipalId: identities.outputs.quantRuntimeIdentity.principalId
     imageImportPrincipalId: identities.outputs.githubDeployerIdentity.principalId
     location: location
     tags: tags
