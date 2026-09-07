@@ -1,0 +1,32 @@
+{
+  "taskId": "T213",
+  "numTotalTests": 46,
+  "numPassedTests": 46,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-ensure-and-coverage-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/lake/http/routes/test_ensure.py tests/lake/coverage tests/lakeclient",
+      "result": "46 passed including two new route tests: re-ensuring a spec whose job record is terminal while coverage has non-terminal sessions supersedes the record, relaunches with the error gap, and clears the stale error_message; an in-flight QUEUED or RUNNING record still short-circuits without relaunching"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/lake/coverage/application.py src/lakeclient/client.py scripts/soak/run_soak.py tests/lake/http/routes/test_ensure.py && uv run --extra dev ruff format --check ... && uv run --extra dev ty check ...",
+      "result": "ruff check, ruff format --check, and ty clean on all four touched paths"
+    },
+    {
+      "name": "incident-repair-context",
+      "status": "passed",
+      "command": "POST /v1/catalog/ensure (range 2022-08-02..2023-08-02) and GET /v1/catalog/coverage",
+      "result": "The 233 SPY trade sessions errored during the 2026-09-06 key-rotation revision rollout (AlpacaHTTPError HTTP 401 recorded in coverage error_message) were repaired ahead of this change via a different-spec range ensure; post-repair coverage shows all 252 sessions in the band complete with row_count 1000 and no residual errors"
+    }
+  ],
+  "limitations": [
+    "The ensure supersede behavior reaches the live soak path only after the API Container App deploy of commit 7f71329; the driver recheck change applies on the next soak launch",
+    "The option ensure route (_ensure_option) retains its own short-circuit and is not repaired by this change"
+  ]
+}
