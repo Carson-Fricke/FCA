@@ -168,6 +168,7 @@ module containerRegistry './modules/container-registry.bicep' = {
   params: {
     registryName: containerRegistryName
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
+    quantRuntimePrincipalId: identities.outputs.quantRuntimeIdentity.principalId
     location: location
     tags: tags
   }
