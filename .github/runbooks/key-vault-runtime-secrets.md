@@ -75,6 +75,10 @@ function Set-GeneratedVaultSecret([string] $name) {
 }
 
 Set-GeneratedVaultSecret api-bearer-token
+
+# The quant API holds its own bearer token, independent of the lake API
+# token. Generate it separately so rotating one does not rotate the other.
+Set-GeneratedVaultSecret harness-api-bearer-token
 ```
 
 Never paste values into this runbook, a GitHub variable, Bicep parameter,
@@ -107,6 +111,10 @@ After all three names exist, deploy the Bicep composition. Confirm that:
 - API secrets reference all three versionless Key Vault URLs.
 - Ingest secrets reference only the two Alpaca values.
 - Both workloads identify `fca-ml-dev-runtime` for Key Vault retrieval.
+- The RTH and crypto traders also read the same two Alpaca values in both
+  paper and live credential modes: Alpaca issues one key pair across
+  endpoints, so no `alpaca-paper-*` or `alpaca-live-*` secret names exist or
+  are referenced (see the OIDC bootstrap runbook).
 - Environment variables use `secretRef`; no resolved value appears in ARM,
   Container Apps configuration output, GitHub logs, or task evidence.
 

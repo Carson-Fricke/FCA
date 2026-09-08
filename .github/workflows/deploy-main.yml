@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/deploy-main.yml
       - .github/workflows/publish-image.yml
+      - .github/workflows/quant-smoke.yml
       - Dockerfile
       - pyproject.toml
       - uv.lock
@@ -449,3 +450,20 @@ jobs:
             restore_scale_to_zero
             trap - EXIT
           fi
+
+  quant-smoke:
+    name: Quant runtime smoke test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs:
+      - publish-image
+      - deploy
+    uses: ./.github/workflows/quant-smoke.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      # Quant runtime workloads (quant API, RTH trader, optional crypto
+      # trader, backtest job) deploy the same shared digest-pinned image as
+      # the lake; this pins their smoke verification to the exact published
+      # digest. See .github/runbooks/h5-quant-smoke.md.
+      image-digest: ${{ needs.publish-image.outputs.image-digest }}

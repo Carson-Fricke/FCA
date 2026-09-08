@@ -32,7 +32,7 @@ another environment.
 | Key Vault | `fca-ml-dev-kv-obj3kww` |
 | Budget start | `2026-09-01` |
 | Key Vault public network | `true` |
-| External API ingress | `false` |
+| External API ingress | `true` (restored 2026-09-07 for local soak tooling; see Dev Deployment Enablement And Rebootstrap) |
 | Ingest schedule and timeout | `0 1 * * *`, `3600` seconds |
 
 The repository OIDC API reports `use_default=true`,
@@ -399,7 +399,7 @@ Set these variables on the selected Environment, not at repository scope:
 | `RESOURCE_NAME_PREFIX` | `fca-ml` | `<prod-resource-prefix>` |
 | `BUDGET_START_DATE` | `2026-09-01` | First day of approved budget period |
 | `ALLOW_PUBLIC_NETWORK_ACCESS` | `true` | Reviewed Key Vault network choice |
-| `ENABLE_EXTERNAL_API_INGRESS` | `false` | Reviewed API ingress choice |
+| `ENABLE_EXTERNAL_API_INGRESS` | `true` | Reviewed API ingress choice (dev restored 2026-09-07 for soak tooling) |
 | `INGEST_CRON_EXPRESSION` | `0 1 * * *` | Reviewed five-field UTC cron |
 | `INGEST_REPLICA_TIMEOUT_SECONDS` | `3600` | `60` through `86400` |
 
@@ -480,7 +480,8 @@ For existing dev, proceed directly to secret seeding or rotation. For a new
 environment, use this staging sequence:
 
 1. Select the Environment in `DEPLOYMENT_ENVIRONMENT` and verify all eleven
-   Environment variables plus the budget-contact secret.
+   base Environment variables, the quant-runtime variables listed under
+   "Dev Deployment Enablement And Rebootstrap", and the budget-contact secret.
 2. Merge a reviewed, path-matching change to `master`. Alternatively, rerun an
    explicitly approved prior `deploy-main.yml` run only when deploying that
    exact commit is intended. There is no supported manual-dispatch input.
@@ -837,8 +838,9 @@ Acceptance requires all of the following:
 
 - GitHub reports the immutable default prefix and Azure matches the exact
   environment subject, issuer, and audience.
-- The Environment has all eleven non-secret values, the branch policy, the
-  budget-contact secret name, and any plan-supported reviewer protection.
+- The Environment has all eleven base non-secret values, the quant-runtime
+  variables, the branch policy, the budget-contact secret name, and any
+  plan-supported reviewer protection.
 - The package remains private and no PAT, Azure client secret, provider value,
   or bearer value exists in GitHub.
 - The runtime identity has `Key Vault Secrets User` only at its vault and the
@@ -876,6 +878,53 @@ and timeout before each promotion. Preserve an already accepted budget start
 date unless intentionally rebasing the budget period. Do not create a no-op
 commit solely to deploy, and do not enable `assignGithubDeployerRoles` in a
 recurring run.
+
+## Dev Deployment Enablement And Rebootstrap
+
+The 2026-09-07 deploy that landed the quant-harness runtime wave required a
+one-time enablement pass. Record it here because the recurring pipeline can
+hit identical failures after future waves change the authorization surface.
+
+Required `dev` Environment variables for `deploy-main.yml` input validation:
+`ENABLE_CRYPTO_TRADER`, `RTH_TRADER_CREDENTIAL_MODE`,
+`CRYPTO_TRADER_CREDENTIAL_MODE`, `RTH_SCHEDULE_TIMEZONE`, `RTH_SCHEDULE_START`,
+`RTH_SCHEDULE_END`, `RTH_TRADER_REPLICAS`, and
+`BACKTEST_REPLICA_TIMEOUT_SECONDS`. The schedule values are Container Apps cron
+expressions (`30 9 * * 1-5` and `0 16 * * 1-5` in `America/New_York`), not
+clock times, and must satisfy the Bicep `minLength` of 9. Current dev values:
+crypto trader disabled, paper credential mode, one RTH replica, 3600-second
+backtest timeout.
+
+When a wave adds role assignments for a new runtime principal, the deployer's
+conditioned RBAC Administrator grants do not cover it and the deployment fails
+with `roleAssignments/write` authorization errors at the storage account and
+Key Vault scopes. The `rebootstrapWhen` rule in `access.bicep` names this
+condition. The authorized maintainer rebootstrap on 2026-09-07 created exactly
+the two scoped conditional Role Based Access Control Administrator assignments
+that `access.bicep` defines with `assignGithubDeployerRoles=true` (storage
+account and Key Vault scopes, principals limited to the runtime and
+quant-runtime identities, roles limited to the data roles that module grants).
+Reproduce it by deploying `main.bicep` once from an Owner identity with
+`assignGithubDeployerRoles=true`, then never again; recurring runs keep the
+flag `false`. Registry `AcrPull` for the quant-runtime identity is not
+templated anywhere: the deployer holds no role-assignment rights at the
+registry scope, so the authorized rebootstrap created that assignment
+manually at the registry scope. Recreate it the same manual way only if the
+registry or the quant-runtime identity is rebuilt.
+
+The KEDA cron custom scaler requires `desiredReplicas` metadata and rejects
+unknown metadata keys, so `container-apps.bicep` sets `desiredReplicas` and no
+`value`. Traders read the single `alpaca-api-key`/`alpaca-api-secret` pair in
+both paper and live credential modes because Alpaca issues one key pair across
+endpoints; the mode exists for future endpoint selection only.
+
+Current dev API posture after this pass: `ENABLE_EXTERNAL_API_INGRESS=true`
+and no `LAKE_API_AUDIENCE` variable, so the lake API is publicly reachable and
+authenticates with the static `api-bearer-token`. This restores local soak
+tooling access. Re-enabling Entra audience mode (T180) requires the soak
+driver to accept a credential plus audience and the calling principal to hold
+the `Lake.Access` application role; do not set `LAKE_API_AUDIENCE` before both
+exist.
 
 ## Recovery And Rollback
 

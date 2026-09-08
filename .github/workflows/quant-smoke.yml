@@ -1,0 +1,543 @@
+name: Quant runtime smoke test
+
+on:
+  workflow_call:
+    inputs:
+      image-digest:
+        description: >-
+          Optional sha256 digest (sha256:<64 hex>) published by publish-image.
+          When set, every quant runtime workload must reference exactly this
+          digest; when empty, the smoke verifies that the quant workloads share
+          one digest-pinned private ACR reference.
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      image-digest:
+        description: >-
+          Optional expected sha256 digest (sha256:<64 hex>); empty verifies the
+          shared digest-pinned image reference only.
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: fca-quant-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  quant-smoke:
+    name: Verify deployed quant runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The smoke is non-destructive: it is read-only except for the bounded
+    # synthetic backtest execution and the temporary one-replica quant API
+    # scale used by the private ingress health probe, which is restored
+    # through an exit trap. Trader revision health is observed without
+    # scaling the traders.
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_DIGEST: ${{ inputs.image-digest }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      RESOURCE_NAME_PREFIX: ${{ vars.RESOURCE_NAME_PREFIX }}
+      DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+      ENABLE_EXTERNAL_API_INGRESS: ${{ vars.ENABLE_EXTERNAL_API_INGRESS }}
+      ENABLE_CRYPTO_TRADER: ${{ vars.ENABLE_CRYPTO_TRADER }}
+      # The bounded synthetic backtest configuration ships inside the shared
+      # image (Dockerfile copies config/); it runs the deterministic built-in
+      # fixture without any data directory, network access, or credentials.
+      BACKTEST_SMOKE_CONFIG: config/harness/backtest.yaml
+      BACKTEST_SMOKE_DEADLINE_SECONDS: '600'
+      GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate smoke inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            AZURE_CLIENT_ID
+            AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID
+            AZURE_RESOURCE_GROUP
+            RESOURCE_NAME_PREFIX
+            DEPLOYMENT_ENVIRONMENT
+            ENABLE_EXTERNAL_API_INGRESS
+            ENABLE_CRYPTO_TRADER
+            GITHUB_REPOSITORY_NAME
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required smoke input $name is empty"
+              exit 1
+            fi
+          done
+
+          for boolean in ENABLE_EXTERNAL_API_INGRESS ENABLE_CRYPTO_TRADER; do
+            case "${!boolean,,}" in
+              true|false) ;;
+              *)
+                echo "::error::$boolean must be exactly true or false"
+                exit 1
+                ;;
+            esac
+          done
+
+          if [[ -n "$IMAGE_DIGEST" && ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The image-digest input must be empty or a sha256:<64 hex> digest"
+            exit 1
+          fi
+
+          if ! [[ "$BACKTEST_SMOKE_DEADLINE_SECONDS" =~ ^[0-9]+$ ]] || \
+             [[ "$BACKTEST_SMOKE_DEADLINE_SECONDS" -lt 120 || "$BACKTEST_SMOKE_DEADLINE_SECONDS" -gt 3600 ]]; then
+            echo "::error::BACKTEST_SMOKE_DEADLINE_SECONDS must be an integer between 120 and 3600"
+            exit 1
+          fi
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify quant workload image digests
+        id: runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+          normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+          quant_api_app_name="${normalized_prefix}-${normalized_environment}-quant-api"
+          rth_trader_app_name="${normalized_prefix}-${normalized_environment}-rth-trader"
+          crypto_trader_app_name="${normalized_prefix}-${normalized_environment}-crypto-trader"
+          backtest_job_name="${normalized_prefix}-${normalized_environment}-backtest"
+          acr_login_server="$(az acr list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].loginServer | [0]" \
+            --output tsv)"
+          if [[ -z "$acr_login_server" ]]; then
+            echo "::error::The private runtime ACR is missing; rerun the authorized OIDC bootstrap"
+            exit 1
+          fi
+
+          quant_api_image="$(az containerapp show \
+            --name "$quant_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='api'].image | [0]" \
+            --output tsv)"
+          rth_trader_image="$(az containerapp show \
+            --name "$rth_trader_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='trader'].image | [0]" \
+            --output tsv)"
+          backtest_image="$(az containerapp job show \
+            --name "$backtest_job_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='backtest'].image | [0]" \
+            --output tsv)"
+
+          acr_pattern='^[a-z0-9][a-z0-9-]*\.azurecr\.io/[^@[:space:]]+@sha256:[0-9a-f]{64}$'
+          assert_pinned_reference() {
+            local label="$1" image="$2"
+            if [[ ! "$image" =~ $acr_pattern ]]; then
+              echo "::error::$label does not use a digest-pinned private ACR reference ($image)"
+              exit 1
+            fi
+          }
+          assert_pinned_reference "The quant API" "$quant_api_image"
+          assert_pinned_reference "The RTH trader" "$rth_trader_image"
+          assert_pinned_reference "The backtest job" "$backtest_image"
+
+          if [[ -n "$IMAGE_DIGEST" ]]; then
+            expected_runtime_image="${acr_login_server}/${GITHUB_REPOSITORY_NAME,,}@${IMAGE_DIGEST}"
+            if [[ "$quant_api_image" != "$expected_runtime_image" ]]; then
+              echo "::error::The quant API does not use the published immutable image reference"
+              exit 1
+            fi
+            if [[ "$rth_trader_image" != "$expected_runtime_image" ]]; then
+              echo "::error::The RTH trader does not use the published immutable image reference"
+              exit 1
+            fi
+            if [[ "$backtest_image" != "$expected_runtime_image" ]]; then
+              echo "::error::The backtest job does not use the published immutable image reference"
+              exit 1
+            fi
+            reported_image="$expected_runtime_image"
+            digest_mode="pinned to the published commit digest"
+          else
+            if [[ "$quant_api_image" != "$rth_trader_image" || "$quant_api_image" != "$backtest_image" ]]; then
+              echo "::error::The quant runtime workloads do not share one immutable image digest"
+              exit 1
+            fi
+            reported_image="$quant_api_image"
+            digest_mode="shared digest-pinned reference (no expected digest supplied)"
+          fi
+
+          if [[ "${ENABLE_CRYPTO_TRADER,,}" == "true" ]]; then
+            crypto_trader_image="$(az containerapp show \
+              --name "$crypto_trader_app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "properties.template.containers[?name=='trader'].image | [0]" \
+              --output tsv)"
+            assert_pinned_reference "The crypto trader" "$crypto_trader_image"
+            if [[ -n "$IMAGE_DIGEST" ]]; then
+              if [[ "$crypto_trader_image" != "$expected_runtime_image" ]]; then
+                echo "::error::The crypto trader does not use the published immutable image reference"
+                exit 1
+              fi
+            else
+              if [[ "$crypto_trader_image" != "$quant_api_image" ]]; then
+                echo "::error::The crypto trader does not share the quant runtime image digest"
+                exit 1
+              fi
+            fi
+          fi
+
+          quant_api_fqdn="$(az containerapp show \
+            --name "$quant_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)"
+          if [[ -z "$quant_api_fqdn" || "$quant_api_fqdn" == "None" ]]; then
+            echo "::error::The deployed quant API did not expose an ingress FQDN for the health smoke"
+            exit 1
+          fi
+
+          printf 'quant-api-fqdn=%s\n' "$quant_api_fqdn" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Quant runtime smoke"
+            echo "- Environment: \\`$DEPLOYMENT_ENVIRONMENT\\`"
+            echo "- Digest expectation: $digest_mode"
+            echo "- Shared image: \\`$reported_image\\`"
+            echo "- Quant API app: \\`$quant_api_app_name\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify ingress and storage posture
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+          normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+          quant_api_app_name="${normalized_prefix}-${normalized_environment}-quant-api"
+          expected_external="${ENABLE_EXTERNAL_API_INGRESS,,}"
+
+          ingress_json="$(az containerapp show \
+            --name "$quant_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress \
+            --output json)"
+          ingress_external="$(jq --raw-output '.external' <<<"$ingress_json" | tr '[:upper:]' '[:lower:]')"
+          ingress_allow_insecure="$(jq --raw-output '.allowInsecure' <<<"$ingress_json" | tr '[:upper:]' '[:lower:]')"
+
+          if [[ "$ingress_external" != "$expected_external" ]]; then
+            echo "::error::The quant API ingress external flag ($ingress_external) does not match ENABLE_EXTERNAL_API_INGRESS ($expected_external)"
+            exit 1
+          fi
+          if [[ "$ingress_allow_insecure" != "false" ]]; then
+            echo "::error::The quant API ingress must not allow insecure traffic"
+            exit 1
+          fi
+
+          storage_account="$(az storage account list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].name | [0]" \
+            --output tsv)"
+          if [[ -z "$storage_account" ]]; then
+            echo "::error::The runtime storage account is missing; rerun the authorized OIDC bootstrap"
+            exit 1
+          fi
+
+          arm_base="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage"
+
+          if ! az rest --method GET \
+            --url "${arm_base}/storageAccounts/${storage_account}/tableServices/default/tables/killswitch?api-version=2023-05-01" \
+            --query name \
+            --output tsv \
+            --only-show-errors >/dev/null; then
+            echo "::error::The killswitch control table is missing from the runtime storage account"
+            exit 1
+          fi
+
+          for container_name in harness-results harness-state; do
+            if ! az rest --method GET \
+              --url "${arm_base}/storageAccounts/${storage_account}/blobServices/default/containers/${container_name}?api-version=2023-05-01" \
+              --query name \
+              --output tsv \
+              --only-show-errors >/dev/null; then
+              echo "::error::The ${container_name} blob container is missing from the runtime storage account"
+              exit 1
+            fi
+          done
+
+          {
+            echo "### Ingress and storage posture"
+            echo "- Quant API ingress external: \\`$ingress_external\\` (expected \\`$expected_external\\`)"
+            echo "- Quant API ingress allowInsecure: \\`$ingress_allow_insecure\\`"
+            echo "- killswitch table: present on \\`$storage_account\\` (management plane)"
+            echo "- harness-results and harness-state containers: present on \\`$storage_account\\` (management plane)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run probe-safe quant API health smoke
+        shell: bash
+        env:
+          QUANT_API_FQDN: ${{ steps.runtime.outputs.quant-api-fqdn }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${ENABLE_EXTERNAL_API_INGRESS,,}" == "true" ]]; then
+            quant_api_url="https://${QUANT_API_FQDN}/health"
+            response="$(curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --retry 12 \
+              --retry-all-errors \
+              --retry-delay 5 \
+              --connect-timeout 10 \
+              --max-time 30 \
+              "$quant_api_url")"
+            if ! printf '%s' "$response" | jq --exit-status --arg expected ok '.status == $expected' >/dev/null; then
+              echo "::error::The quant API probe-safe health endpoint did not return status ok"
+              exit 1
+            fi
+
+            # The protected route must reject anonymous calls; this proves the
+            # authentication boundary without moving the bearer token into the
+            # runner. The healthy revision already proves the versionless Key
+            # Vault reference for harness-api-bearer-token resolves.
+            protected_status="$(curl \
+              --silent \
+              --show-error \
+              --location \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --connect-timeout 10 \
+              --max-time 30 \
+              "https://${QUANT_API_FQDN}/v1/auth/check")"
+            if [[ "$protected_status" != "401" ]]; then
+              echo "::error::The quant API protected route returned $protected_status instead of rejecting anonymous access"
+              exit 1
+            fi
+
+            {
+              echo "### Quant API health"
+              echo "- Mode: public ingress"
+              echo "- \\`/health\\` returned status ok and \\`/v1/auth/check\\` rejected anonymous access with 401"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+            normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+            quant_api_app_name="${normalized_prefix}-${normalized_environment}-quant-api"
+
+            restore_scale_to_zero() {
+              az containerapp update \
+                --name "$quant_api_app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --min-replicas 0 \
+                --only-show-errors \
+                --output none
+            }
+            trap restore_scale_to_zero EXIT
+
+            az containerapp update \
+              --name "$quant_api_app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --min-replicas 1 \
+              --only-show-errors \
+              --output none
+
+            probes="$(az containerapp show \
+              --name "$quant_api_app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "properties.template.containers[?name=='api'] | [0].probes" \
+              --output json)"
+            if ! jq --exit-status \
+              'length == 3 and all(.[]; .httpGet.path == "/health" and .httpGet.port == 8000)' \
+              <<<"$probes" >/dev/null; then
+              echo "::error::The private quant API revision is not configured to probe /health"
+              exit 1
+            fi
+
+            health_state="Unknown"
+            provisioning_state="Unknown"
+            for _ in {1..24}; do
+              revision="$(az containerapp revision list \
+                --name "$quant_api_app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --output json \
+                | jq --compact-output \
+                  '[.[] | select(.properties.active == true)] | sort_by(.properties.createdTime) | last // {}')"
+              health_state="$(jq --raw-output '.properties.healthState // "Unknown"' <<<"$revision")"
+              provisioning_state="$(jq --raw-output '.properties.provisioningState // "Unknown"' <<<"$revision")"
+              if [[ "$health_state" == "Healthy" && "$provisioning_state" == "Provisioned" ]]; then
+                break
+              fi
+              if [[ "$health_state" == "Unhealthy" || "$provisioning_state" == "Failed" ]]; then
+                echo "::error::The private quant API revision failed its /health probes ($health_state, $provisioning_state)"
+                exit 1
+              fi
+              sleep 5
+            done
+            if [[ "$health_state" != "Healthy" || "$provisioning_state" != "Provisioned" ]]; then
+              echo "::error::The private quant API revision did not pass /health probes before the smoke deadline ($health_state, $provisioning_state)"
+              exit 1
+            fi
+
+            restore_scale_to_zero
+            trap - EXIT
+
+            {
+              echo "### Quant API health"
+              echo "- Mode: private ingress (temporary one-replica probe)"
+              echo "- The active revision passed all three \\`/health\\` probes and was restored to zero minimum replicas"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Start bounded synthetic backtest smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+          normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+          backtest_job_name="${normalized_prefix}-${normalized_environment}-backtest"
+
+          execution_name="$(az containerapp job start \
+            --name "$backtest_job_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --container-name backtest \
+            --args "backtest-job" "--config" "$BACKTEST_SMOKE_CONFIG" \
+            --only-show-errors \
+            --query name \
+            --output tsv)"
+          if [[ -z "$execution_name" ]]; then
+            echo "::error::The bounded synthetic backtest execution did not start"
+            exit 1
+          fi
+
+          execution_status="Running"
+          while [[ "$execution_status" != "Succeeded" && "$execution_status" != "Failed" ]]; do
+            if (( SECONDS >= BACKTEST_SMOKE_DEADLINE_SECONDS )); then
+              echo "::error::The bounded synthetic backtest execution $execution_name did not finish before the ${BACKTEST_SMOKE_DEADLINE_SECONDS}-second smoke deadline"
+              exit 1
+            fi
+            sleep 10
+            execution_status="$(az containerapp job execution list \
+              --name "$backtest_job_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?name=='$execution_name'].properties.status | [0]" \
+              --output tsv)"
+            if [[ -z "$execution_status" ]]; then
+              execution_status="Running"
+            fi
+          done
+
+          if [[ "$execution_status" != "Succeeded" ]]; then
+            echo "::error::The bounded synthetic backtest execution $execution_name finished as $execution_status"
+            exit 1
+          fi
+
+          {
+            echo "### Backtest job smoke"
+            echo "- Execution \\`$execution_name\\` succeeded with the bounded synthetic configuration \\`$BACKTEST_SMOKE_CONFIG\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report trader revision health
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+          normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+          rth_trader_app_name="${normalized_prefix}-${normalized_environment}-rth-trader"
+          crypto_trader_app_name="${normalized_prefix}-${normalized_environment}-crypto-trader"
+
+          read_latest_active_revision() {
+            az containerapp revision list \
+              --name "$1" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --output json \
+              | jq --compact-output \
+                '[.[] | select(.properties.active == true)] | sort_by(.properties.createdTime) | last // {}'
+          }
+
+          classify_trader_status() {
+            local provisioning="$1" health="$2" min_replicas="$3"
+            if [[ "$provisioning" != "Provisioned" ]]; then
+              printf 'degraded'
+            elif [[ "$min_replicas" == "0" ]]; then
+              printf 'dormant'
+            elif [[ "$health" == "Healthy" ]]; then
+              printf 'healthy'
+            else
+              printf 'degraded'
+            fi
+          }
+
+          rth_revision="$(read_latest_active_revision "$rth_trader_app_name")"
+          rth_provisioning="$(jq --raw-output '.properties.provisioningState // "Unknown"' <<<"$rth_revision")"
+          rth_health="$(jq --raw-output '.properties.healthState // "Unknown"' <<<"$rth_revision")"
+          rth_min_replicas="$(az containerapp show \
+            --name "$rth_trader_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.scale.minReplicas" \
+            --output tsv)"
+          rth_status="$(classify_trader_status "$rth_provisioning" "$rth_health" "$rth_min_replicas")"
+
+          if [[ "${ENABLE_CRYPTO_TRADER,,}" == "true" ]]; then
+            crypto_revision="$(read_latest_active_revision "$crypto_trader_app_name")"
+            crypto_provisioning="$(jq --raw-output '.properties.provisioningState // "Unknown"' <<<"$crypto_revision")"
+            crypto_health="$(jq --raw-output '.properties.healthState // "Unknown"' <<<"$crypto_revision")"
+            crypto_min_replicas="$(az containerapp show \
+              --name "$crypto_trader_app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "properties.template.scale.minReplicas" \
+              --output tsv)"
+            crypto_status="$(classify_trader_status "$crypto_provisioning" "$crypto_health" "$crypto_min_replicas")"
+            crypto_detail="provisioning \\`$crypto_provisioning\\`, health \\`$crypto_health\\`, min replicas \\`$crypto_min_replicas\\`"
+          else
+            crypto_status="disabled"
+            crypto_detail="no crypto compute is deployed in this environment"
+          fi
+
+          if [[ "$rth_status" == "degraded" ]]; then
+            echo "::warning::The RTH trader revision is not healthy ($rth_provisioning, $rth_health). This is expected until the Key Vault trader secrets are seeded and the harness trader runtime is implemented; see .github/runbooks/h5-quant-smoke.md."
+          fi
+          if [[ "$crypto_status" == "degraded" ]]; then
+            echo "::warning::The crypto trader revision is not healthy ($crypto_provisioning, $crypto_health). This is expected until the Key Vault trader secrets are seeded and the harness trader runtime is implemented; see .github/runbooks/h5-quant-smoke.md."
+          fi
+
+          {
+            echo "### Trader revision health"
+            echo ""
+            echo "| Trader | Status | Detail |"
+            echo "| --- | --- | --- |"
+            echo "| RTH trader (\\`$rth_trader_app_name\\`) | \\`$rth_status\\` | provisioning \\`$rth_provisioning\\`, health \\`$rth_health\\`, min replicas \\`$rth_min_replicas\\` |"
+            echo "| Crypto trader (\\`$crypto_trader_app_name\\`) | \\`$crypto_status\\` | $crypto_detail |"
+            echo ""
+            if [[ "$rth_status" == "degraded" || "$crypto_status" == "degraded" ]]; then
+              echo "Degraded trader status does not fail this smoke. It is expected until the environment vault holds the referenced Alpaca credential pair and the harness trader runtime is implemented. Seed values per \\`.github/runbooks/key-vault-runtime-secrets.md\\` and \\`.github/runbooks/h5-quant-smoke.md\\`; never echo secret values."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
