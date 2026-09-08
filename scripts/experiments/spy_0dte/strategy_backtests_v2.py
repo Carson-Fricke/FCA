@@ -45,7 +45,7 @@ from strategy_backtests import (
 
 from lake.contracts.partitions import AssetClass, DataType
 
-_STOP_LOSS_PCT = 0.50
+_STOP_LOSS_PCT = 0.30
 _PROFIT_TAKE_PCT = 0.60
 _CONTRACT_MULTIPLIER = 100
 _COMMISSION_PER_CONTRACT = 0.65
@@ -364,7 +364,7 @@ def run_calendar_v2(
         if loss_pct >= stop_pct:
             exit_minute_final = minute
             exit_reason = "stop"
-            pnl_gross = (spread - debit_gross) * _CONTRACT_MULTIPLIER
+            pnl_gross = profit * _CONTRACT_MULTIPLIER
             break
     else:
         check = _spread_value(exit_minute)
