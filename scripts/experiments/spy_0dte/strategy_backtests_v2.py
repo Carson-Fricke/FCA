@@ -47,24 +47,23 @@ from lake.contracts.partitions import AssetClass, DataType
 
 _STOP_LOSS_PCT = 0.50
 _PROFIT_TAKE_PCT = 0.60
+_CONTRACT_MULTIPLIER = 100
 _COMMISSION_PER_CONTRACT = 0.65
-_HALF_SPREAD_MIN = 0.025
-_HALF_SPREAD_PCT = 0.03
 
 
 def half_spread(price: float) -> float:
-    """Estimated half-spread for one fill at this option price."""
+    """Informational: the estimated half-spread we are avoiding via mid fill."""
     return max(_HALF_SPREAD_MIN, _HALF_SPREAD_PCT * price)
 
 
 def fill_buy(price: float) -> float:
-    """Effective buy price: ask (trade price + half-spread)."""
-    return price + half_spread(price)
+    """Limit-at-mid fill: no spread cost, just the mid price."""
+    return price
 
 
 def fill_sell(price: float) -> float:
-    """Effective sell price: bid (trade price - half-spread)."""
-    return price - half_spread(price)
+    """Limit-at-mid fill: no spread cost, just the mid price."""
+    return price
 
 
 def fill_cost(n_contracts: int) -> float:
@@ -227,53 +226,50 @@ def run_condor_v2(
     stop_pct: float = _STOP_LOSS_PCT,
     profit_take_pct: float = _PROFIT_TAKE_PCT,
 ) -> dict | None:
-    """Short condor: sell both spreads, with stop and profit take, net of costs."""
-    entry = condor_credit_net(panel, strikes, entry_minute)
-    if entry is None:
+    """Short condor: sell both spreads, with stop and profit take."""
+    credit_gross = condor_credit_gross(panel, strikes, entry_minute)
+    if credit_gross is None or credit_gross <= 0:
         return None
-    credit_net, credit_gross = entry
-    if credit_net <= 0:
-        return None
+    commission = fill_cost(8)
+    credit_net = credit_gross - commission
 
     exit_minute_final = exit_minute
     exit_reason = "expiry"
-    exit_net = None
+    exit_gross = None
 
     for minute in range(entry_minute + 1, exit_minute + 1):
-        current = condor_credit_net(panel, strikes, minute)
+        current = condor_credit_gross(panel, strikes, minute)
         if current is None:
             continue
-        current_net, _ = current
-        # To close the condor, we buy back the credit we sold.
-        # The cost to close = current_net (what someone would pay us now).
-        pnl = current_net  # if positive, we keep some credit; if negative, we paid to close
-        loss_pct = -pnl / credit_net if credit_net > 0 else 0
-        gain_pct = pnl / credit_net if credit_net > 0 else 0
+        pnl_gross = credit_gross - current
+        loss_pct = -pnl_gross / credit_gross if credit_gross > 0 else 0
+        gain_pct = pnl_gross / credit_gross if credit_gross > 0 else 0
         if loss_pct >= stop_pct:
             exit_minute_final = minute
             exit_reason = "stop"
-            exit_net = current_net
+            exit_gross = current
             break
         if gain_pct >= profit_take_pct:
             exit_minute_final = minute
             exit_reason = "profit_take"
-            exit_net = current_net
+            exit_gross = current
             break
     else:
-        exit_data = condor_credit_net(panel, strikes, exit_minute)
-        if exit_data is None:
-            return None
-        exit_net = exit_data[0]
+        exit_gross = condor_credit_gross(panel, strikes, exit_minute)
 
-    pnl = exit_net
+    if exit_gross is None:
+        return None
+    pnl_gross = (credit_gross - exit_gross) * _CONTRACT_MULTIPLIER
+    commission = fill_cost(8)
+    pnl_net = pnl_gross - commission
     return {
-        "pnl": round(pnl, 4),
-        "credit_net": round(credit_net, 4),
-        "credit_gross": round(credit_gross, 4),
-        "exit_net": round(exit_net, 4),
+        "pnl": round(pnl_net, 4),
+        "pnl_gross": round(pnl_gross, 4),
+        "credit_gross": round(credit_gross * _CONTRACT_MULTIPLIER, 4),
+        "exit_value": round(exit_gross, 4),
         "exit_minute": exit_minute_final,
         "exit_reason": exit_reason,
-        "total_costs": round(fill_cost(8), 4),
+        "total_costs": round(commission, 4),
     }
 
 
@@ -284,45 +280,46 @@ def run_straddle_v2(
     exit_minute: int,
     stop_pct: float = _STOP_LOSS_PCT,
 ) -> dict | None:
-    """Short straddle with stop, net of commission and spread."""
+    """Short straddle with stop. Gross P&L (mid fills) and net (with commission)."""
     entry = straddle_prices(panel, strike, entry_minute)
     if entry is None:
         return None
-    # Sell call + sell put: receive bids
-    credit_net = fill_sell(entry[0]) + fill_sell(entry[1]) - fill_cost(2)
-    if credit_net <= 0:
+    credit_gross = entry[0] + entry[1]
+    if credit_gross <= 0:
         return None
+    commission = fill_cost(4)
 
     exit_minute_final = exit_minute
     exit_reason = "expiry"
-    exit_net = None
+    exit_gross = None
 
     for minute in range(entry_minute + 1, exit_minute + 1):
         current = straddle_prices(panel, strike, minute)
         if current is None:
             continue
-        # To close: buy back both legs at asks
-        close_cost = fill_buy(current[0]) + fill_buy(current[1]) + fill_cost(2)
-        pnl = credit_net - close_cost
-        loss_pct = -pnl / credit_net if credit_net > 0 else 0
+        current_gross = current[0] + current[1]
+        pnl_gross = credit_gross - current_gross
+        loss_pct = -pnl_gross / credit_gross if credit_gross > 0 else 0
         if loss_pct >= stop_pct:
             exit_minute_final = minute
             exit_reason = "stop"
-            exit_net = credit_net - close_cost
+            exit_gross = current_gross
             break
     else:
         exit_price = straddle_prices(panel, strike, exit_minute)
         if exit_price is None:
             return None
-        close_cost = fill_buy(exit_price[0]) + fill_buy(exit_price[1]) + fill_cost(2)
-        exit_net = credit_net - close_cost
+        exit_gross = exit_price[0] + exit_price[1]
 
+    pnl_gross = (credit_gross - exit_gross) * _CONTRACT_MULTIPLIER
+    pnl_net = pnl_gross - commission
     return {
-        "pnl": round(exit_net, 4),
-        "credit_net": round(credit_net, 4),
+        "pnl": round(pnl_net, 4),
+        "pnl_gross": round(pnl_gross, 4),
+        "credit_gross": round(credit_gross * _CONTRACT_MULTIPLIER, 4),
         "exit_minute": exit_minute_final,
         "exit_reason": exit_reason,
-        "total_costs": round(fill_cost(4), 4),
+        "total_costs": round(commission, 4),
     }
 
 
@@ -334,65 +331,57 @@ def run_calendar_v2(
     exit_minute: int,
     stop_pct: float = _STOP_LOSS_PCT,
 ) -> dict | None:
-    """Calendar: sell 0DTE straddle, buy 1DTE straddle, net of all costs."""
+    """Calendar: sell 0DTE straddle, buy 1DTE straddle (a debit spread)."""
     entry_0 = straddle_prices(panel0, strike, entry_minute)
     entry_1 = straddle_prices(panel1, strike, entry_minute)
     if entry_0 is None or entry_1 is None:
         return None
-    # Sell 0DTE call + put (receive bids), buy 1DTE call + put (pay asks)
-    net_entry = (
-        fill_sell(entry_0[0])
-        + fill_sell(entry_0[1])
-        - fill_buy(entry_1[0])
-        - fill_buy(entry_1[1])
-        - fill_cost(4)
-    )
-    if net_entry <= 0:
+    # Debit = what 1DTE costs minus what 0DTE sells for
+    debit_gross = (entry_1[0] + entry_1[1]) - (entry_0[0] + entry_0[1])
+    if debit_gross <= 0:
         return None
+    commission = fill_cost(8)
 
     exit_minute_final = exit_minute
     exit_reason = "expiry"
-    exit_0 = straddle_prices(panel0, strike, exit_minute)
-    exit_1 = straddle_prices(panel1, strike, exit_minute)
-    if exit_0 is None or exit_1 is None:
-        return None
-    # Close: buy back 0DTE (pay asks), sell 1DTE (receive bids)
-    net_exit = (
-        fill_buy(exit_0[0])
-        + fill_buy(exit_0[1])
-        - fill_sell(exit_1[0])
-        - fill_sell(exit_1[1])
-        + fill_cost(4)
-    )
-    pnl = net_entry + net_exit
+    pnl_gross = None
+
+    def _spread_value(m: int) -> tuple[float, float, float] | None:
+        e0 = straddle_prices(panel0, strike, m)
+        e1 = straddle_prices(panel1, strike, m)
+        if e0 is None or e1 is None:
+            return None
+        spread = (e1[0] + e1[1]) - (e0[0] + e0[1])
+        profit = spread - debit_gross
+        return (spread, profit, debit_gross)
 
     for minute in range(entry_minute + 1, exit_minute + 1):
-        e0 = straddle_prices(panel0, strike, minute)
-        e1 = straddle_prices(panel1, strike, minute)
-        if e0 is None or e1 is None:
+        check = _spread_value(minute)
+        if check is None:
             continue
-        close_cost = (
-            fill_buy(e0[0])
-            + fill_buy(e0[1])
-            - fill_sell(e1[0])
-            - fill_sell(e1[1])
-            + fill_cost(4)
-        )
-        current_pnl = net_entry + close_cost
-        loss_pct = -current_pnl / abs(net_entry) if net_entry != 0 else 0
+        _, profit, _ = check
+        loss_pct = -profit / debit_gross if debit_gross > 0 else 0
         if loss_pct >= stop_pct:
             exit_minute_final = minute
             exit_reason = "stop"
-            net_exit = close_cost
-            pnl = net_entry + net_exit
+            pnl_gross = (spread - debit_gross) * _CONTRACT_MULTIPLIER
             break
+    else:
+        check = _spread_value(exit_minute)
+        if check is None:
+            return None
+        pnl_gross = (check[1]) * _CONTRACT_MULTIPLIER
 
+    if pnl_gross is None:
+        return None
+    pnl_net = pnl_gross - commission
     return {
-        "pnl": round(pnl, 4),
-        "net_entry": round(net_entry, 4),
+        "pnl": round(pnl_net, 4),
+        "pnl_gross": round(pnl_gross, 4),
+        "debit_gross": round(debit_gross * _CONTRACT_MULTIPLIER, 4),
         "exit_minute": exit_minute_final,
         "exit_reason": exit_reason,
-        "total_costs": round(fill_cost(8), 4),
+        "total_costs": round(commission, 4),
     }
 
 
@@ -479,22 +468,19 @@ def main(argv: list[str] | None = None) -> int:
                 next_panel0 = next_session["panel0"]
                 exit_on = straddle_prices(next_panel0, prior_atm, 90)
                 if entry_on and exit_on:
-                    # Buy 1DTE straddle at close: pay asks + commission
-                    entry_net = (
-                        fill_buy(entry_on[0]) + fill_buy(entry_on[1]) + fill_cost(2)
-                    )
-                    # Sell 0DTE straddle at 11:00: receive bids + commission
-                    exit_net = (
-                        fill_sell(exit_on[0]) + fill_sell(exit_on[1]) - fill_cost(2)
-                    )
-                    pnl = exit_net - entry_net
+                    entry_gross = entry_on[0] + entry_on[1]
+                    exit_gross = exit_on[0] + exit_on[1]
+                    pnl_gross = (exit_gross - entry_gross) * _CONTRACT_MULTIPLIER
+                    commission = fill_cost(4)
+                    pnl_net = pnl_gross - commission
                     overnight_days.append(
                         {
                             "session": f"{key}->{next_session['session']}",
-                            "pnl": round(pnl, 4),
-                            "entry_net": round(entry_net, 4),
-                            "exit_net": round(exit_net, 4),
-                            "total_costs": round(fill_cost(4), 4),
+                            "pnl": round(pnl_net, 4),
+                            "pnl_gross": round(pnl_gross, 4),
+                            "entry": round(entry_gross, 4),
+                            "exit": round(exit_gross, 4),
+                            "total_costs": round(commission, 4),
                         }
                     )
 
@@ -511,8 +497,8 @@ def main(argv: list[str] | None = None) -> int:
             "stopLossPct": _STOP_LOSS_PCT,
             "profitTakePct": _PROFIT_TAKE_PCT,
             "commissionPerContract": _COMMISSION_PER_CONTRACT,
-            "halfSpreadMin": _HALF_SPREAD_MIN,
-            "halfSpreadPct": _HALF_SPREAD_PCT,
+            "fillModel": "limit at mid (trade-print median, no spread cost)",
+            "commissionPerContract": _COMMISSION_PER_CONTRACT,
             "condorOtmPct": 1.5,
             "condorWingPct": 3.0,
             "morningFilterPct": 1.0,
