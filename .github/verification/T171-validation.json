@@ -1,0 +1,32 @@
+{
+  "taskId": "T171",
+  "numTotalTests": 2230,
+  "numPassedTests": 2230,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-rca-handoff-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/rca/ tests/thesis/protected/",
+      "result": "72 tests (20 new): the handoff bundle assembles exactly the eight policy-approved payload sections content-addressed against the release manifest (AC1); the RCA response schema admits only candidate explanations, evidence, uncertainty, alternatives, and discriminating tests and structurally rejects strategy edits, parameter recommendations, and promotion decisions fail-closed (AC2); advice egress routes through the release filter plus verbatim-run and web-query linkage checks and provenance-references artifacts by digest (AC3); the revision handoff records protected-result diagnosis consumption, the strongest selection/reuse modifier, barred sealed-window reuse, and required new lineage/contract versions with allowed grades exploratory and historical_validation only (AC4)"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2230 passed, 13 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev ty check",
+      "result": "ruff check, ruff format --check, and repository-wide ty clean"
+    }
+  ],
+  "limitations": [
+    "RCA response rejection is schema-shape only; detecting change-imperative intent in natural-language values is a later semantic layer",
+    "The egress verbatim-run check uses a structural 24-character overlap threshold against released artifacts rather than semantic quotation detection"
+  ]
+}

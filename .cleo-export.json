@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-08T20:56:13.163Z",
+    "exportedAt": "2026-09-08T21:44:33.821Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 217
     },
-    "checksum": "8e672660a9b6f63f",
+    "checksum": "ee53de4956c52e61",
     "taskCount": 213,
     "exportMode": "full"
   },
@@ -1409,7 +1409,7 @@
     "T171": {
       "type": "task",
       "title": "TH4.4 Blinded RCA advice and revision handoff",
-      "status": "pending",
+      "status": "done",
       "parentId": "T148",
       "depends": [
         "T147",
@@ -1631,7 +1631,7 @@
     "T148": {
       "type": "epic",
       "title": "TH4 Protected testing and blinded RCA",
-      "status": "pending",
+      "status": "done",
       "parentId": "T143",
       "depends": [
         "T145",
@@ -17219,7 +17219,7 @@
     {
       "id": "T171",
       "title": "TH4.4 Blinded RCA advice and revision handoff",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T148",
@@ -17254,21 +17254,167 @@
         "T170"
       ],
       "createdAt": "2026-09-03T00:11:34.670Z",
-      "updatedAt": "2026-09-03T00:34:08.305Z",
+      "updatedAt": "2026-09-08T21:43:47.155Z",
+      "completedAt": "2026-09-08T21:43:42.860Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T21:34:58.548Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:11:34.670Z"
+        "initializedAt": "2026-09-03T00:11:34.670Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3a442c977aebe9ec4709cc2772d46cecbbd77d38",
+                "shortSha": "3a442c9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/rca/session.py",
+                    "sha256": "6ba7912a80c6ffef9a07c5889994199a3cee8dc8d66c13ebf21f7fa17aee82e3"
+                  },
+                  {
+                    "path": "src/thesis/rca/egress.py",
+                    "sha256": "778061d33618b30479733c97301afb8c4b195790df8e5872e2430d0524307d48"
+                  },
+                  {
+                    "path": "src/thesis/rca/handoff.py",
+                    "sha256": "7b6f6e0cc62610af462d930205f731fab2ca1a69fd13f16b91d851a7b290f75a"
+                  },
+                  {
+                    "path": "tests/thesis/rca/test_handoff.py",
+                    "sha256": "56feaca98ec0b79ebd5814dbf011cc2739209ad4ee963033a68f214595156e34"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T171-validation.json",
+                "sha256": "ef11e376c2468e8236d843cea78afde9b168f55185619b21fd647cef109bd877",
+                "passCount": 2230,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T21:34:59.167Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3a442c977aebe9ec4709cc2772d46cecbbd77d38",
+                "shortSha": "3a442c9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/rca/session.py",
+                    "sha256": "6ba7912a80c6ffef9a07c5889994199a3cee8dc8d66c13ebf21f7fa17aee82e3"
+                  },
+                  {
+                    "path": "src/thesis/rca/egress.py",
+                    "sha256": "778061d33618b30479733c97301afb8c4b195790df8e5872e2430d0524307d48"
+                  },
+                  {
+                    "path": "src/thesis/rca/handoff.py",
+                    "sha256": "7b6f6e0cc62610af462d930205f731fab2ca1a69fd13f16b91d851a7b290f75a"
+                  },
+                  {
+                    "path": "tests/thesis/rca/test_handoff.py",
+                    "sha256": "56feaca98ec0b79ebd5814dbf011cc2739209ad4ee963033a68f214595156e34"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T171-validation.json",
+                "sha256": "ef11e376c2468e8236d843cea78afde9b168f55185619b21fd647cef109bd877",
+                "passCount": 2230,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T21:34:59.167Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3a442c977aebe9ec4709cc2772d46cecbbd77d38",
+                "shortSha": "3a442c9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/rca/session.py",
+                    "sha256": "6ba7912a80c6ffef9a07c5889994199a3cee8dc8d66c13ebf21f7fa17aee82e3"
+                  },
+                  {
+                    "path": "src/thesis/rca/egress.py",
+                    "sha256": "778061d33618b30479733c97301afb8c4b195790df8e5872e2430d0524307d48"
+                  },
+                  {
+                    "path": "src/thesis/rca/handoff.py",
+                    "sha256": "7b6f6e0cc62610af462d930205f731fab2ca1a69fd13f16b91d851a7b290f75a"
+                  },
+                  {
+                    "path": "tests/thesis/rca/test_handoff.py",
+                    "sha256": "56feaca98ec0b79ebd5814dbf011cc2739209ad4ee963033a68f214595156e34"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T171-validation.json",
+                "sha256": "ef11e376c2468e8236d843cea78afde9b168f55185619b21fd647cef109bd877",
+                "passCount": 2230,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T21:34:59.167Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "research",
       "scope": "feature",
       "relates": []
@@ -19548,7 +19694,7 @@
     {
       "id": "T148",
       "title": "TH4 Protected testing and blinded RCA",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T143",
@@ -19577,8 +19723,9 @@
         "T147"
       ],
       "createdAt": "2026-09-03T00:02:07.865Z",
-      "updatedAt": "2026-09-03T00:39:16.340Z",
-      "pipelineStage": "implementation",
+      "updatedAt": "2026-09-08T21:43:42.860Z",
+      "completedAt": "2026-09-08T21:43:42.860Z",
+      "pipelineStage": "contribution",
       "kind": "research",
       "scope": "feature",
       "relates": []
