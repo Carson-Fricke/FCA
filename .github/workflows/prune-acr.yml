@@ -231,8 +231,8 @@ jobs:
           done
 
           az acr manifest list-metadata \
-            --name "$acr_name" \
-            --repository "$repository_name" \
+            --registry "$acr_name" \
+            --name "$repository_name" \
             --only-show-errors \
             --output json > "$tmp/manifests.json"
 
