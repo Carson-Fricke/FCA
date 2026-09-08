@@ -831,10 +831,15 @@ def test_reordering_inbox_releases_out_of_order_frames_in_kernel_order() -> None
         _ScriptedInbox([late_first, reordered]), lateness=timedelta(seconds=3)
     )
 
-    released = [inbox.pop(), inbox.pop(), inbox.pop()]
+    released = [
+        inbox.pop(),
+        inbox.pop(),
+        inbox.pop(),
+    ]
 
     assert None not in released[:2]
-    assert list(map(_stamp, released[:2])) == sorted(map(_stamp, released[:2]))
+    stamps = [event.timestamp for event in released[:2] if event is not None]
+    assert stamps == sorted(stamps)
     assert released[2] is None
     assert inbox.dropped_late == 0
 
@@ -873,7 +878,7 @@ def test_reordering_inbox_rejects_invalid_construction() -> None:
     with pytest.raises(ValueError, match="capacity"):
         sup.ReorderingInbox(_ScriptedInbox([]), capacity=0)
     with pytest.raises(TypeError, match="pop"):
-        sup.ReorderingInbox(object())
+        sup.ReorderingInbox(object())  # ty: ignore[invalid-argument-type]
 
 
 # --------------------------------------------------------------------------

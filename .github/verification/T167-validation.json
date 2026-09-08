@@ -1,0 +1,31 @@
+{
+  "taskId": "T167",
+  "numTotalTests": 2184,
+  "numPassedTests": 2184,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-trust-and-projection-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/knowledge/",
+      "result": "101 knowledge-layer tests: 21 new projection tests covering workspace trust overlay promote/demote round-trips with deterministic v1 JSON serialization, tier precedence (platform_policy > workspace_promoted > curated > untrusted, promotion never elevates or demotes platform policy), unknown-page rejection, AC1 default read access with an empty overlay, projection determinism (byte-identical rebuilds), JSON round-trip, citation fields (path, git revision, page version, source url, content hash, global and effective tiers), bounded excerpts, max_pages bounding, and the explicit NON_CANONICAL_GUARD asserting nexus/brain are not used and canonical is false (AC5); the 80 pre-existing corpus/search tests stay green"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2184 passed, 13 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/knowledge tests/thesis/knowledge && uv run --extra dev ruff format --check src/thesis/knowledge tests/thesis/knowledge && uv run --extra dev ty check",
+      "result": "ruff check, ruff format --check, and repository-wide ty clean"
+    }
+  ],
+  "limitations": [
+    "The projection manifest is a compact citation document; CLEO-side consumption (seeding a workspace project with the manifest) is a later implementation decision per the architecture, which this task deliberately does not bind"
+  ]
+}

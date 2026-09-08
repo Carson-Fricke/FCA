@@ -1,0 +1,37 @@
+{
+  "taskId": "T216",
+  "numTotalTests": 2184,
+  "numPassedTests": 2184,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "restart-cycle-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/runtime/test_restart_cycle.py",
+      "result": "2 tests reproducing the 2026-09-08 live incident deterministically: boot-buy-snapshot-restore-continue with BuyAndHold proving no re-entry and no sim-fill-3 regeneration, and continuation parity proving the restored segment's fills exactly equal the uninterrupted run's post-split fills with venue ids and sequences strictly past restored ones"
+    },
+    {
+      "name": "focused-runtime-and-strategy-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/runtime/ tests/harness/strategy/ tests/integration/strategies/",
+      "result": "262 runtime/strategy tests + 6 reference-strategy integration tests pass; state_store round-trip and recovery suites unaffected"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2184 passed, 13 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev ty check",
+      "result": "format and ty clean repository-wide; the single remaining ruff F841 is in the concurrently-owned T214 experiment script (other agent's finding)"
+    }
+  ],
+  "limitations": [
+    "Fix verified deterministically by the two-boot restart-cycle test; the live Azure re-drill (revision restart during an RTH window with the session continuing) closes T114"
+  ]
+}
