@@ -265,7 +265,13 @@ jobs:
             rows
               .filter((r) => r.tags.some((t) => !/^[0-9a-f]{40}$/.test(t)))
               .forEach((r) => keep.add(r.digest));
-            const deletions = rows.filter((r) => !keep.has(r.digest)).map((r) => r.digest);
+            const candidates = rows.filter((r) => !keep.has(r.digest));
+            // Oldest candidates go first so a large backlog drains over
+            // multiple bounded runs; nothing in the keep set is ever sliced.
+            candidates.sort((a, b) => a.created - b.created);
+            const cap = Number(process.env.MAX_DELETIONS);
+            const remaining = Math.max(0, candidates.length - cap);
+            const deletions = candidates.slice(0, cap).map((r) => r.digest);
             const keptCount = rows.filter((r) => keep.has(r.digest)).length;
             if (deployedDigest) {
               const rank = rows.findIndex((r) => r.digest === deployedDigest);
@@ -274,19 +280,19 @@ jobs:
               }
             }
             fs.writeFileSync(tmp + "/delete-digests.json", JSON.stringify(deletions));
-            fs.writeFileSync(tmp + "/stats.json", JSON.stringify({ total: rows.length, kept: keptCount, deleting: deletions.length }));
+            fs.writeFileSync(tmp + "/stats.json", JSON.stringify({ total: rows.length, kept: keptCount, deleting: deletions.length, remaining: remaining }));
           ' "$tmp"
 
           total="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).total)")"
           kept="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).kept)")"
           delete_count="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).deleting)")"
+          remaining="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).remaining)")"
           echo "Surveyed ${total} mirrored manifest(s) in ${repository_name}; keeping ${kept}; deleting ${delete_count}"
           if (( total >= SURVEY_WINDOW )); then
             echo "::warning::The survey hit the ${SURVEY_WINDOW}-manifest service page cap; older manifests beyond it remain for later runs"
           fi
-          if (( delete_count > MAX_DELETIONS )); then
-            echo "::error::The delete list exceeded the bounded ${MAX_DELETIONS}-manifest cap; aborting to stay bounded"
-            exit 1
+          if (( remaining > 0 )); then
+            echo "::notice::${remaining} unretained manifest(s) remain beyond this run's ${MAX_DELETIONS}-deletion cap; the next run deletes the oldest first"
           fi
 
           deleted=0
