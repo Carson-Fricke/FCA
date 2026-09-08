@@ -34,7 +34,7 @@ def test_no_arguments_shows_root_help() -> None:
     [
         ("api", "Serve quant-harness results and job operations"),
         ("backtest-job", "Run one deterministic backtest job"),
-        ("trader", "Run a paper, shadow, or capability-gated live trader"),
+        ("trader", "Run one supervised paper or shadow trading session"),
     ],
 )
 def test_process_group_help(command: str, description: str) -> None:
@@ -44,12 +44,10 @@ def test_process_group_help(command: str, description: str) -> None:
     assert description in result.stdout
 
 
-@pytest.mark.parametrize("command", ["trader"])
-def test_unimplemented_process_fails_explicitly(command: str) -> None:
-    result = runner.invoke(cli.app, [command])
+def test_trader_requires_a_configuration() -> None:
+    result = runner.invoke(trader.app)
 
-    assert result.exit_code == 2
-    assert "scaffolded but not implemented yet" in result.stderr
+    assert result.exit_code != 0
 
 
 def test_backtest_job_requires_a_configuration() -> None:

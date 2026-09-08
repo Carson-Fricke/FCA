@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
+from typing import Self
 from urllib.parse import quote
 
 from azure.core.credentials import TokenCredential
@@ -57,7 +58,7 @@ class AzureBlobStore:
         container_name: str,
         *,
         credential: TokenCredential,
-    ) -> AzureBlobStore:
+    ) -> Self:
         """Create a blob store with the supplied token credential."""
         service = BlobServiceClient(account_url=account_url, credential=credential)
         return cls(service.get_container_client(container_name))
