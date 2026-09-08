@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-08T05:23:21.538Z",
+    "exportedAt": "2026-09-08T15:26:58.031Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 215
+      "nextId": 216
     },
-    "checksum": "b2774f4d51088957",
-    "taskCount": 211,
+    "checksum": "053d90775747e51a",
+    "taskCount": 212,
     "exportMode": "full"
   },
   "selection": {
@@ -176,6 +176,7 @@
       "T187",
       "T189",
       "T191",
+      "T215",
       "T008",
       "T027",
       "T039",
@@ -1864,6 +1865,13 @@
       "title": "Production adapters for the backtest results store",
       "status": "done",
       "parentId": "T071",
+      "depends": []
+    },
+    "T215": {
+      "type": "task",
+      "title": "Alpaca option trades endpoint rejects the feed parameter",
+      "status": "done",
+      "parentId": "T010",
       "depends": []
     },
     "T008": {
@@ -21687,6 +21695,172 @@
       "relates": []
     },
     {
+      "id": "T215",
+      "title": "Alpaca option trades endpoint rejects the feed parameter",
+      "status": "done",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T010",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "The provider's option trades endpoint rejects a feed query parameter outright (unexpected query parameter(s): feed); only the quotes endpoint accepts one. Stop sending feed for option trades so OPRA trade pagination works, keeping feed pinned to opra by validation for quotes. Found during the 2026-09-08 wave triage of uncommitted work.",
+      "labels": [
+        "lake",
+        "ingest",
+        "options"
+      ],
+      "acceptance": [
+        "Option trades requests omit the feed query parameter while quotes requests pin it, verified by a focused unit test",
+        "Focused lake tests, ruff, and ty pass on the touched paths"
+      ],
+      "files": [
+        "src/lake/providers/alpaca/client.py",
+        "tests/lake/providers/alpaca/test_options.py"
+      ],
+      "createdAt": "2026-09-08T15:24:18.717Z",
+      "updatedAt": "2026-09-08T15:26:12.001Z",
+      "completedAt": "2026-09-08T15:26:07.942Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T15:25:40.934Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-08T15:24:18.717Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a73bac7c0fa631d4e6adfc9111a5b6bb9c72d1a7",
+                "shortSha": "a73bac7"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/providers/alpaca/client.py",
+                    "sha256": "df5910307a5bd70e4b2b81795ea8bbeaad633643d26a6079b95ed39c0275b333"
+                  },
+                  {
+                    "path": "tests/lake/providers/alpaca/test_options.py",
+                    "sha256": "f6f19f8ae506e1650b4bd01790efe6ddf89dcba1a9382aaf1290855ac391a221"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T215-validation.json",
+                "sha256": "3c9a71cec5e820883b517c92078e4bf7cfd7fbc119e407c7ca9e81319959b69a",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T15:25:41.623Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a73bac7c0fa631d4e6adfc9111a5b6bb9c72d1a7",
+                "shortSha": "a73bac7"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/providers/alpaca/client.py",
+                    "sha256": "df5910307a5bd70e4b2b81795ea8bbeaad633643d26a6079b95ed39c0275b333"
+                  },
+                  {
+                    "path": "tests/lake/providers/alpaca/test_options.py",
+                    "sha256": "f6f19f8ae506e1650b4bd01790efe6ddf89dcba1a9382aaf1290855ac391a221"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T215-validation.json",
+                "sha256": "3c9a71cec5e820883b517c92078e4bf7cfd7fbc119e407c7ca9e81319959b69a",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T15:25:41.623Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a73bac7c0fa631d4e6adfc9111a5b6bb9c72d1a7",
+                "shortSha": "a73bac7"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/providers/alpaca/client.py",
+                    "sha256": "df5910307a5bd70e4b2b81795ea8bbeaad633643d26a6079b95ed39c0275b333"
+                  },
+                  {
+                    "path": "tests/lake/providers/alpaca/test_options.py",
+                    "sha256": "f6f19f8ae506e1650b4bd01790efe6ddf89dcba1a9382aaf1290855ac391a221"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T215-validation.json",
+                "sha256": "3c9a71cec5e820883b517c92078e4bf7cfd7fbc119e407c7ca9e81319959b69a",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T15:25:41.623Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "kind": "bug",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "done",
@@ -24752,7 +24926,8 @@
         "Complete child T053: E7.2 OPRA trades and quotes client",
         "Complete child T054: E7.3 Options symbol-day worker integration",
         "Complete child T055: E7.4 Options ensure and query API coverage",
-        "Complete child T056: E7.5 Three-underlying two-year soak and expansion gate"
+        "Complete child T056: E7.5 Three-underlying two-year soak and expansion gate",
+        "Complete child T215: Alpaca option trades endpoint rejects the feed parameter"
       ],
       "depends": [
         "T005",
@@ -24761,7 +24936,7 @@
         "T009"
       ],
       "createdAt": "2026-09-01T03:15:45.072Z",
-      "updatedAt": "2026-09-01T03:33:28.015Z",
+      "updatedAt": "2026-09-08T15:24:18.717Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -28148,7 +28323,8 @@
         "T053",
         "T054",
         "T055",
-        "T056"
+        "T056",
+        "T215"
       ],
       "T011": [
         "T057",
