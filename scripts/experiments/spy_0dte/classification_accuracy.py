@@ -1,9 +1,12 @@
 """Classification accuracy study: how early can you identify the day's family?
 
-For each minute N (1..390), trains a nearest-centroid classifier on the
-normalized price path through minute N only, and measures accuracy against
-the k-Shape cluster labels from the full-day clustering. Also computes
-per-cluster per-minute IQR (25th/75th percentile) error bands.
+For each minute N (1..390), classifies each session using only its price
+path through minute N — nearest cluster centroid under shape-based distance
+(SBD, the same shift-invariant metric the k-Shape clustering used) — and
+measures accuracy against the full-day cluster labels. At N = 390 accuracy
+is ~100% by construction (k-Shape's convergence condition); the curve shows
+how early the family shape becomes recognizable. Also computes per-cluster
+per-minute percentile bands.
 
 Outputs a JSON fixture consumed by the thesis UI clustering study page:
 
@@ -20,12 +23,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import numpy as np
-from price_clusters import (
-    normalize_paths,
-)
+
+from price_clusters import normalize_paths, sbd
 
 
 def classification_accuracy_by_minute(
@@ -34,20 +37,13 @@ def classification_accuracy_by_minute(
     k: int,
     check_minutes: list[int],
 ) -> list[dict]:
-    """For each check minute, classify using only the path prefix and measure accuracy."""
+    """For each check minute, classify by SBD to truncated-path centroids."""
     n = len(paths)
     results: list[dict] = []
-    rng = np.random.default_rng(42)
-
-    # Re-derive centroids from the full paths (same as k-Shape output)
-    z_full = np.array(
-        [(p - np.mean(p)) / (np.std(p) if np.std(p) > 1e-10 else 1.0) for p in paths]
-    )
 
     for minute_n in check_minutes:
         if minute_n < 5 or minute_n > 390:
             continue
-        # Truncate paths to minute_n
         truncated = paths[:, :minute_n]
         z_truncated = np.array(
             [
@@ -56,24 +52,18 @@ def classification_accuracy_by_minute(
             ]
         )
 
-        # Compute per-cluster centroids on the truncated paths
+        # Per-cluster centroids on the truncated paths
         centroids = np.zeros((k, minute_n))
         for j in range(k):
             members = np.where(labels == j)[0]
             if len(members) == 0:
-                centroids[j] = np.zeros(minute_n)
                 continue
             centroids[j] = np.mean(z_truncated[members], axis=0)
 
-        # Nearest-centroid classification using normalized Euclidean distance
+        # Nearest-centroid classification under SBD (shift-invariant)
         predictions = np.zeros(n, dtype=int)
         for i in range(n):
-            distances = np.array(
-                [
-                    np.sqrt(np.mean((z_truncated[i] - centroids[j]) ** 2))
-                    for j in range(k)
-                ]
-            )
+            distances = [sbd(z_truncated[i], centroids[j]) for j in range(k)]
             predictions[i] = int(np.argmin(distances))
 
         accuracy = float(np.mean(predictions == labels))
@@ -88,8 +78,10 @@ def classification_accuracy_by_minute(
     return results
 
 
-def cluster_iqr_bands(paths: np.ndarray, labels: np.ndarray, k: int) -> list[dict]:
-    """Per-cluster per-minute 25th/75th percentile bands around the centroid."""
+def cluster_percentile_bands(
+    paths: np.ndarray, labels: np.ndarray, k: int
+) -> list[dict]:
+    """Per-cluster per-minute percentile bands around the centroid."""
     clusters: list[dict] = []
     for j in range(k):
         members = np.where(labels == j)[0]
@@ -116,10 +108,22 @@ def cluster_iqr_bands(paths: np.ndarray, labels: np.ndarray, k: int) -> list[dic
     return clusters
 
 
+def load_labels(keys: list[str], clusters_fixture: dict) -> tuple[np.ndarray, int]:
+    """Reconstruct per-session labels from the clustering fixture."""
+    key_to_index = {key: i for i, key in enumerate(keys)}
+    labels = np.full(len(keys), -1, dtype=int)
+    for cluster in clusters_fixture["clusters"]:
+        for session_key in cluster["sessions"]:
+            if session_key in key_to_index:
+                labels[key_to_index[session_key]] = cluster["cluster"]
+    return labels, int(clusters_fixture["meta"]["clusters"])
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--step-minutes", type=int, default=10)
     args = parser.parse_args(argv)
     args.data_root = args.data_root.resolve()
     args.out = args.out.resolve()
@@ -129,7 +133,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    # Load the raw bars from cache (already downloaded)
     cache_dir = args.data_root / "bar-cache"
     if not cache_dir.is_dir():
         print("bar cache not found — run price_clusters.py first", flush=True)
@@ -142,45 +145,35 @@ def main(argv: list[str] | None = None) -> int:
     paths, keys = normalize_paths(raw_bars, target_length=390)
     print(f"loaded {len(paths)} price paths", flush=True)
 
-    # Load cluster labels from the existing clustering fixture
     clusters_file = args.out.parent / "spy0dteClusters.js"
     if not clusters_file.is_file():
         print("cluster fixture not found — run price_clusters.py first", flush=True)
         return 1
     clusters_text = clusters_file.read_text(encoding="utf-8")
-    import re
-
     match = re.search(r"export const clusters = (\{.*\});", clusters_text, re.S)
     if not match:
         print("cannot parse cluster fixture", flush=True)
         return 1
     cluster_fixture = json.loads(match.group(1))
-    k = cluster_fixture["meta"]["clusters"]
+    k = int(cluster_fixture["meta"]["clusters"])
 
-    # Reconstruct labels from the cluster fixture's session lists
-    key_to_index = {key: i for i, key in enumerate(keys)}
-    labels = np.full(len(paths), -1, dtype=int)
-    for cluster in cluster_fixture["clusters"]:
-        for session_key in cluster["sessions"]:
-            if session_key in key_to_index:
-                labels[key_to_index[session_key]] = cluster["cluster"]
+    labels, k = load_labels(keys, cluster_fixture)
     labeled = np.where(labels >= 0)[0]
     paths_labeled = paths[labeled]
     labels_labeled = labels[labeled]
     print(f"labeled {len(labeled)}/{len(paths)} paths across {k} clusters", flush=True)
 
-    # Classification accuracy at every 10 minutes from 10 to 390
-    check_minutes = list(range(10, 391, 10))
+    check_minutes = list(range(args.step_minutes, 391, args.step_minutes))
     accuracy = classification_accuracy_by_minute(
         paths_labeled, labels_labeled, k, check_minutes
     )
     print(
-        f"classification accuracy computed at {len(accuracy)} check minutes", flush=True
+        f"classification accuracy computed at {len(accuracy)} check minutes",
+        flush=True,
     )
 
-    # IQR bands per cluster
-    iqr_bands = cluster_iqr_bands(paths_labeled, labels_labeled, k)
-    print(f"IQR bands computed for {len(iqr_bands)} clusters", flush=True)
+    iqr_bands = cluster_percentile_bands(paths_labeled, labels_labeled, k)
+    print(f"percentile bands computed for {len(iqr_bands)} clusters", flush=True)
 
     fixture = {
         "meta": {
@@ -188,31 +181,30 @@ def main(argv: list[str] | None = None) -> int:
             "clusters": k,
             "checkMinutes": check_minutes,
             "randomBaseline": round(1.0 / k, 4),
+            "metric": "shape-based distance (SBD, shift-invariant)",
         },
         "accuracyByMinute": accuracy,
         "iqrBands": iqr_bands,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(
-        "/* Generated by scripts/experiments/spy_0dte/classification_accuracy.py - do not edit. */\n"
+        "/* Generated by scripts/experiments/spy_0dte/classification_accuracy.py"
+        " - do not edit. */\n"
         "export const classification = " + json.dumps(fixture, indent=1) + ";\n",
         encoding="utf-8",
     )
     print(f"wrote {args.out}", flush=True)
 
-    # Print accuracy curve
     print(
-        f"\nClassification accuracy by minute (random baseline = {1.0 / k:.1%}):",
+        f"\nClassification accuracy by minute (SBD, random baseline = {1.0 / k:.1%}):",
         flush=True,
     )
     for entry in accuracy:
-        bar = "#" * int(
-            (entry["accuracy"] - entry["randomBaseline"])
-            / (1.0 - entry["randomBaseline"])
-            * 40
-        )
+        headroom = 1.0 - entry["randomBaseline"]
+        filled = entry["accuracy"] - entry["randomBaseline"]
+        bar = "#" * max(0, int(filled / headroom * 40)) if headroom > 0 else ""
         print(
-            f"  minute {entry['minute']:>3}: {entry['accuracy']:.1%} {bar}",
+            f"  minute {entry['minute']:>3}: {entry['accuracy']:>6.1%} {bar}",
             flush=True,
         )
     return 0

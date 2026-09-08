@@ -44,202 +44,203 @@ export const classification = {
    380,
    390
   ],
-  "randomBaseline": 0.125
+  "randomBaseline": 0.125,
+  "metric": "shape-based distance (SBD, shift-invariant)"
  },
  "accuracyByMinute": [
   {
    "minute": 10,
-   "accuracy": 0.1291,
+   "accuracy": 0.1376,
    "randomBaseline": 0.125
   },
   {
    "minute": 20,
-   "accuracy": 0.135,
+   "accuracy": 0.1533,
    "randomBaseline": 0.125
   },
   {
    "minute": 30,
-   "accuracy": 0.1579,
+   "accuracy": 0.1664,
    "randomBaseline": 0.125
   },
   {
    "minute": 40,
-   "accuracy": 0.1691,
+   "accuracy": 0.1913,
    "randomBaseline": 0.125
   },
   {
    "minute": 50,
-   "accuracy": 0.1796,
+   "accuracy": 0.1855,
    "randomBaseline": 0.125
   },
   {
    "minute": 60,
-   "accuracy": 0.1959,
+   "accuracy": 0.2045,
    "randomBaseline": 0.125
   },
   {
    "minute": 70,
-   "accuracy": 0.2117,
+   "accuracy": 0.2084,
    "randomBaseline": 0.125
   },
   {
    "minute": 80,
-   "accuracy": 0.2274,
+   "accuracy": 0.2307,
    "randomBaseline": 0.125
   },
   {
    "minute": 90,
-   "accuracy": 0.2385,
+   "accuracy": 0.228,
    "randomBaseline": 0.125
   },
   {
    "minute": 100,
-   "accuracy": 0.2523,
+   "accuracy": 0.2353,
    "randomBaseline": 0.125
   },
   {
    "minute": 110,
-   "accuracy": 0.2674,
+   "accuracy": 0.2326,
    "randomBaseline": 0.125
   },
   {
    "minute": 120,
-   "accuracy": 0.291,
+   "accuracy": 0.2379,
    "randomBaseline": 0.125
   },
   {
    "minute": 130,
-   "accuracy": 0.3001,
+   "accuracy": 0.2372,
    "randomBaseline": 0.125
   },
   {
    "minute": 140,
-   "accuracy": 0.3113,
+   "accuracy": 0.2457,
    "randomBaseline": 0.125
   },
   {
    "minute": 150,
-   "accuracy": 0.3211,
+   "accuracy": 0.2444,
    "randomBaseline": 0.125
   },
   {
    "minute": 160,
-   "accuracy": 0.3355,
+   "accuracy": 0.2529,
    "randomBaseline": 0.125
   },
   {
    "minute": 170,
-   "accuracy": 0.3512,
+   "accuracy": 0.2634,
    "randomBaseline": 0.125
   },
   {
    "minute": 180,
-   "accuracy": 0.3676,
+   "accuracy": 0.2746,
    "randomBaseline": 0.125
   },
   {
    "minute": 190,
-   "accuracy": 0.3801,
+   "accuracy": 0.287,
    "randomBaseline": 0.125
   },
   {
    "minute": 200,
-   "accuracy": 0.3912,
+   "accuracy": 0.306,
    "randomBaseline": 0.125
   },
   {
    "minute": 210,
-   "accuracy": 0.4056,
+   "accuracy": 0.3218,
    "randomBaseline": 0.125
   },
   {
    "minute": 220,
-   "accuracy": 0.4279,
+   "accuracy": 0.346,
    "randomBaseline": 0.125
   },
   {
    "minute": 230,
-   "accuracy": 0.4443,
+   "accuracy": 0.3637,
    "randomBaseline": 0.125
   },
   {
    "minute": 240,
-   "accuracy": 0.4574,
+   "accuracy": 0.3827,
    "randomBaseline": 0.125
   },
   {
    "minute": 250,
-   "accuracy": 0.4908,
+   "accuracy": 0.4135,
    "randomBaseline": 0.125
   },
   {
    "minute": 260,
-   "accuracy": 0.5118,
+   "accuracy": 0.4397,
    "randomBaseline": 0.125
   },
   {
    "minute": 270,
-   "accuracy": 0.5354,
+   "accuracy": 0.4659,
    "randomBaseline": 0.125
   },
   {
    "minute": 280,
-   "accuracy": 0.5524,
+   "accuracy": 0.4928,
    "randomBaseline": 0.125
   },
   {
    "minute": 290,
-   "accuracy": 0.5786,
+   "accuracy": 0.5216,
    "randomBaseline": 0.125
   },
   {
    "minute": 300,
-   "accuracy": 0.597,
+   "accuracy": 0.5374,
    "randomBaseline": 0.125
   },
   {
    "minute": 310,
-   "accuracy": 0.6114,
+   "accuracy": 0.5577,
    "randomBaseline": 0.125
   },
   {
    "minute": 320,
-   "accuracy": 0.6258,
+   "accuracy": 0.5858,
    "randomBaseline": 0.125
   },
   {
    "minute": 330,
-   "accuracy": 0.652,
+   "accuracy": 0.6062,
    "randomBaseline": 0.125
   },
   {
    "minute": 340,
-   "accuracy": 0.6796,
+   "accuracy": 0.6337,
    "randomBaseline": 0.125
   },
   {
    "minute": 350,
-   "accuracy": 0.7051,
+   "accuracy": 0.6592,
    "randomBaseline": 0.125
   },
   {
    "minute": 360,
-   "accuracy": 0.7228,
+   "accuracy": 0.6874,
    "randomBaseline": 0.125
   },
   {
    "minute": 370,
-   "accuracy": 0.7418,
+   "accuracy": 0.7169,
    "randomBaseline": 0.125
   },
   {
    "minute": 380,
-   "accuracy": 0.7602,
+   "accuracy": 0.7464,
    "randomBaseline": 0.125
   },
   {
    "minute": 390,
-   "accuracy": 0.7733,
+   "accuracy": 0.7556,
    "randomBaseline": 0.125
   }
  ],
