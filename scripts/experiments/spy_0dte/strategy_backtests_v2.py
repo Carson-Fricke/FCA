@@ -51,11 +51,6 @@ _CONTRACT_MULTIPLIER = 100
 _COMMISSION_PER_CONTRACT = 0.65
 
 
-def half_spread(price: float) -> float:
-    """Informational: the estimated half-spread we are avoiding via mid fill."""
-    return max(_HALF_SPREAD_MIN, _HALF_SPREAD_PCT * price)
-
-
 def fill_buy(price: float) -> float:
     """Limit-at-mid fill: no spread cost, just the mid price."""
     return price
@@ -179,35 +174,6 @@ def condor_credit_gross(
     return (values[0] + values[2]) - (values[1] + values[3])
 
 
-def condor_credit_net(
-    panel: dict[tuple[float, str], pd.Series], strikes: dict, minute: int
-) -> tuple[float, float] | None:
-    """Net credit including spread + commission. Returns (net_credit, gross_credit)."""
-    legs = [
-        ("putSell", "put"),
-        ("putBuy", "put"),
-        ("callSell", "call"),
-        ("callBuy", "call"),
-    ]
-    values = []
-    for role, option_type in legs:
-        value = minute_value(panel, strikes[role], option_type, minute)
-        if value is None:
-            return None
-        values.append(value)
-    # Selling: receive bid (price - half_spread)
-    # Buying: pay ask (price + half_spread)
-    net = (
-        fill_sell(values[0])
-        + fill_sell(values[2])
-        - fill_buy(values[1])
-        - fill_buy(values[3])
-        - fill_cost(4)
-    )
-    gross = (values[0] + values[2]) - (values[1] + values[3])
-    return (net, gross)
-
-
 def straddle_prices(
     panel: dict[tuple[float, str], pd.Series], strike: float, minute: int
 ) -> tuple[float, float] | None:
@@ -231,7 +197,6 @@ def run_condor_v2(
     if credit_gross is None or credit_gross <= 0:
         return None
     commission = fill_cost(8)
-    credit_net = credit_gross - commission
 
     exit_minute_final = exit_minute
     exit_reason = "expiry"
@@ -498,7 +463,6 @@ def main(argv: list[str] | None = None) -> int:
             "profitTakePct": _PROFIT_TAKE_PCT,
             "commissionPerContract": _COMMISSION_PER_CONTRACT,
             "fillModel": "limit at mid (trade-print median, no spread cost)",
-            "commissionPerContract": _COMMISSION_PER_CONTRACT,
             "condorOtmPct": 1.5,
             "condorWingPct": 3.0,
             "morningFilterPct": 1.0,

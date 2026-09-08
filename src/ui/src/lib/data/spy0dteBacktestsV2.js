@@ -2,7 +2,7 @@
 export const backtestsV2 = {
  "meta": {
   "sessions": 42,
-  "generated": "2026-09-08T18:04:59.511867+00:00",
+  "generated": "2026-09-08T18:46:40.903782+00:00",
   "stopLossPct": 0.3,
   "profitTakePct": 0.6,
   "commissionPerContract": 0.65,
