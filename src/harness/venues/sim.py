@@ -194,6 +194,38 @@ class SimulatedVenue:
         return self._latency
 
     @property
+    def id_ordinal(self) -> int:
+        """Return the last used venue id ordinal, or 0 before any identifier."""
+        return self._ordinal
+
+    @property
+    def event_sequence(self) -> int:
+        """Return the last used event sequence, or -1 before any event."""
+        return self._sequence
+
+    def resume_from(self, *, id_ordinal: int, event_sequence: int) -> None:
+        """Continue id and sequence generation past restored runtime state.
+
+        A restored runtime rebuilds the venue fresh, so the counters of the
+        captured runtime must be replayed before the venue generates its next
+        acknowledgement, fill, or report; otherwise the new kernel regenerates
+        identifiers the restored books already route.  Counters only move
+        forward: a floor at or below the current value is a no-op.
+        """
+        for name, value, floor in (
+            ("id_ordinal", id_ordinal, 0),
+            ("event_sequence", event_sequence, -1),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            if value < floor:
+                raise ValueError(f"{name} must not precede {floor}")
+        if id_ordinal > self._ordinal:
+            self._ordinal = id_ordinal
+        if event_sequence > self._sequence:
+            self._sequence = event_sequence
+
+    @property
     def latest_market(self) -> MarketEvent | None:
         """Return the latest immutable market snapshot observed by the venue."""
         return self._latest_market

@@ -149,6 +149,32 @@ class PaperSessionStatus(StrEnum):
     ABORTED = "aborted"
 
 
+@dataclass(frozen=True, slots=True)
+class VenueWatermarks:
+    """Venue id and event-sequence counters at one supervision point.
+
+    A restored runtime rebuilds its simulated venue fresh, so the counters of
+    the captured runtime must be replayed into the new kernel before it
+    generates outcomes; otherwise the venue regenerates fill identifiers and
+    event sequences the restored books already carry.  ``id_ordinal`` is the
+    last used venue identifier ordinal and ``event_sequence`` the last used
+    event sequence (``-1`` before any event).
+    """
+
+    id_ordinal: int
+    event_sequence: int
+
+    def __post_init__(self) -> None:
+        for name, value, floor in (
+            ("id_ordinal", self.id_ordinal, 0),
+            ("event_sequence", self.event_sequence, -1),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise PaperConfigurationError(f"{name} must be an integer")
+            if value < floor:
+                raise PaperConfigurationError(f"{name} must not precede {floor}")
+
+
 def _validate_session(session: ExchangeSession) -> None:
     if session.open_time.tzinfo is None or session.close_time.tzinfo is None:
         raise PaperConfigurationError("session bounds must be timezone-aware")
@@ -704,6 +730,63 @@ class PaperShell:
             )
         )
 
+    # -- restore -------------------------------------------------------------
+
+    def strategy_state_export(self) -> dict[str, Mapping[str, object]]:
+        """Return each binding's frozen ``StateStore`` values keyed by book id.
+
+        Strategies export their restorable decision state through
+        ``context.state``; instances whose store is empty do not participate
+        and are omitted, so the export stays stable across restarts.
+        """
+        exported: dict[str, Mapping[str, object]] = {}
+        for binding in self._bindings:
+            values: dict[str, object] = dict(binding.context.state.snapshot)
+            if values:
+                exported[binding.context.book_id] = values
+        return exported
+
+    def restore_strategy_state(
+        self, states: Mapping[str, Mapping[str, object]]
+    ) -> None:
+        """Replay captured strategy state into each bound strategy's store.
+
+        Called on a freshly restored shell, this rehydrates every strategy
+        that exported state at the capture point, so bindings restarted by the
+        restore continue their decisions instead of repeating them.
+        """
+        for binding in self._bindings:
+            values = states.get(binding.context.book_id)
+            if values is None:
+                continue
+            store = binding.context.state
+            store.clear()
+            for key, value in values.items():
+                store[key] = value
+
+    def venue_watermarks(self) -> VenueWatermarks:
+        """Return the venue id and event-sequence counters for supervision."""
+        return VenueWatermarks(
+            id_ordinal=self._venue.id_ordinal,
+            event_sequence=self._venue.event_sequence,
+        )
+
+    def restore_venue_watermarks(self, watermarks: VenueWatermarks) -> None:
+        """Continue venue ids and event sequences past restored runtime state.
+
+        The counters only move forward, and the shell's event watermark rises
+        with the venue sequence so supervisory reports cannot reuse sequences
+        the restored books already carry.
+        """
+        if not isinstance(watermarks, VenueWatermarks):
+            raise PaperConfigurationError("watermarks must be a VenueWatermarks")
+        self._venue.resume_from(
+            id_ordinal=watermarks.id_ordinal,
+            event_sequence=watermarks.event_sequence,
+        )
+        if watermarks.event_sequence > self._last_sequence:
+            self._last_sequence = watermarks.event_sequence
+
     # -- session driving ----------------------------------------------------
 
     def step(self, event: MarketEvent) -> None:
@@ -1120,5 +1203,6 @@ __all__ = [
     "PaperShell",
     "PaperShellError",
     "ReplayPaperFeed",
+    "VenueWatermarks",
     "run_paper_session",
 ]

@@ -6,15 +6,19 @@ as a frozen, canonical, hash-verifiable :class:`RuntimeSnapshot`, and restores
 it exactly into a fresh :class:`~harness.portfolio.PortfolioHub` or
 :class:`~harness.runtime.paper.PaperShell`.  A restarted runtime resumes from
 the restored state with accounting books, marks, order attribution, risk-gate
-inputs, strategy state, random sources, and the event watermark identical to
-the original runtime at the capture point.
+inputs, strategy state, random sources, the venue id and event-sequence
+counters, and the event watermark identical to the original runtime at the
+capture point.
 
 Snapshot identity is the domain-separated SHA-256 hash of the canonical
 serialization (the repository's ``harness.configuration.hashing`` convention),
 so identity carries no wall-clock input and equal states hash equally.  The
 format is a cross-language contract (epic T181): every record below carries an
 explicit, pinned JSON encoding that must round-trip across the future Zig FFI
-boundary unchanged.
+boundary unchanged.  The ``venue`` record is an optional format-v1 extension:
+payloads written before the extension omit the key, and their restores fall
+back to id and sequence floors derived from the captured books, so older
+snapshots stay readable and round-trip byte-identically.
 
 Persistence goes through the injected :class:`SnapshotObjectStore` port with
 whole-object replacement semantics, matching the lake storage ports.  A save
@@ -32,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import struct
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
@@ -61,6 +66,7 @@ from harness.runtime.paper import (
     PaperOptions,
     PaperSessionPolicy,
     PaperShell,
+    VenueWatermarks,
 )
 from lake.contracts import ExchangeSession
 
@@ -72,6 +78,7 @@ _ID_CHARACTERS: Final = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
 )
 _REJECT_POLICIES: Final = frozenset({"reject_order", "halt_strategy", "halt_runtime"})
+_VENUE_FILL_PATTERN: Final = re.compile(r".+-fill-([0-9]+)")
 
 
 class SnapshotTrigger(StrEnum):
@@ -674,6 +681,51 @@ class RiskState:
 
 
 @dataclass(frozen=True, slots=True)
+class VenueState:
+    """The simulated venue's id and event-sequence counters at the capture point.
+
+    Venue fill and report identifiers share one monotonic ordinal and every
+    venue outcome carries a monotonic event sequence.  Both are replayed into
+    the fresh venue of a restored runtime so the restarted kernel continues
+    past the identifiers and sequences the captured books already route;
+    otherwise a regenerated identifier aborts the restore fail-closed with a
+    duplicate-fill error.
+    """
+
+    id_ordinal: int
+    event_sequence: int
+
+    def __post_init__(self) -> None:
+        _nonnegative_integer(self.id_ordinal, "venue id ordinal")
+        if isinstance(self.event_sequence, bool) or not isinstance(
+            self.event_sequence, int
+        ):
+            raise StateSnapshotIntegrityError("venue event sequence must be an integer")
+        if self.event_sequence < -1:
+            raise StateSnapshotIntegrityError(
+                "venue event sequence must not precede -1"
+            )
+
+    def to_json(self) -> dict[str, object]:
+        """Return the canonical JSON-ready venue record."""
+        return {
+            "id_ordinal": self.id_ordinal,
+            "event_sequence": self.event_sequence,
+        }
+
+    @classmethod
+    def from_json(cls, data: object) -> VenueState:
+        """Rebuild one venue record from parsed canonical JSON."""
+        values = _mapping(data, "venue state")
+        return cls(
+            id_ordinal=_integer(values.get("id_ordinal"), "venue id ordinal"),
+            event_sequence=_integer(
+                values.get("event_sequence"), "venue event sequence"
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeSnapshot:
     """Frozen, canonical, hash-verifiable full runtime state.
 
@@ -698,6 +750,7 @@ class RuntimeSnapshot:
     strategy_state: tuple[StrategyState, ...]
     random_states: tuple[RandomState, ...]
     risk: RiskState
+    venue: VenueState | None = None
 
     def __post_init__(self) -> None:
         if self.format_version != FORMAT_VERSION:
@@ -782,12 +835,18 @@ class RuntimeSnapshot:
             )
         if not isinstance(self.risk, RiskState):
             raise StateSnapshotIntegrityError("risk must be a RiskState record")
+        if self.venue is not None and not isinstance(self.venue, VenueState):
+            raise StateSnapshotIntegrityError("venue must be a VenueState record")
 
     # -- canonical identity ---------------------------------------------------
 
     def to_json(self) -> dict[str, object]:
-        """Return the canonical JSON-ready snapshot content."""
-        return {
+        """Return the canonical JSON-ready snapshot content.
+
+        The optional ``venue`` record is omitted when absent so payloads
+        written before the format-v1 extension round-trip byte-identically.
+        """
+        content = {
             "format_version": self.format_version,
             "run_id": self.run_id,
             "trigger": self.trigger.value,
@@ -806,6 +865,9 @@ class RuntimeSnapshot:
             "random_states": [item.to_json() for item in self.random_states],
             "risk": self.risk.to_json(),
         }
+        if self.venue is not None:
+            content["venue"] = self.venue.to_json()
+        return content
 
     @property
     def snapshot_id(self) -> str:
@@ -837,6 +899,7 @@ class RuntimeSnapshot:
         counts = _mapping(values.get("order_counts"), "order counts")
         owners = _mapping(values.get("order_owners"), "order owners")
         options = _mapping(values.get("options"), "options")
+        venue = values.get("venue")
         return cls(
             format_version=_nonnegative_integer(
                 values.get("format_version"), "format_version"
@@ -878,6 +941,7 @@ class RuntimeSnapshot:
                 for item in _sequence(values.get("random_states"), "random states")
             ),
             risk=RiskState.from_json(values.get("risk")),
+            venue=None if venue is None else VenueState.from_json(venue),
         )
 
     # -- runtime reconstruction -----------------------------------------------
@@ -1050,8 +1114,11 @@ class RuntimeStateStore:
 
         Everything is read through the shell's public supervision surface: the
         portfolio hub and its virtual books, the latest marks, per-strategy
-        order counts and daily losses, the risk pipeline identity, and the
-        in-flight session result (dispatch watermark and booked fills).  The
+        order counts and daily losses, the risk pipeline identity, the
+        in-flight session result (dispatch watermark and booked fills), the
+        venue id and event-sequence counters, and the strategies' exported
+        ``StateStore`` state.  Order attribution and strategy state are
+        derived from the shell when the caller does not supply them.  The
         capture point is deterministic: no wall-clock value enters the
         snapshot.
         """
@@ -1112,14 +1179,25 @@ class RuntimeStateStore:
             rule_ids=tuple(_rule_id(rule) for rule in shell.pipeline.rules),
             daily_losses=losses,
         )
+        if order_owners is None:
+            owners: dict[str, str] = {}
+            for book_state in books:
+                for fill in book_state.fills:
+                    owners.setdefault(fill.order_id, book_state.book_id)
+        else:
+            owners = dict(order_owners)
+        state_values: Mapping[str, Mapping[str, object]] = (
+            shell.strategy_state_export() if strategy_state is None else strategy_state
+        )
         strategies = tuple(
             StrategyState(instance_id=instance_id, values=dict(values))
-            for instance_id, values in (strategy_state or {}).items()
+            for instance_id, values in state_values.items()
         )
         randoms = tuple(
             RandomState.from_random(instance_id, source)
             for instance_id, source in (random_sources or {}).items()
         )
+        watermarks = shell.venue_watermarks()
         return RuntimeSnapshot(
             format_version=FORMAT_VERSION,
             run_id=self._run_id,
@@ -1131,10 +1209,14 @@ class RuntimeStateStore:
             books=tuple(books),
             prices=prices,
             order_counts=counts,
-            order_owners=dict(order_owners or {}),
+            order_owners=owners,
             strategy_state=strategies,
             random_states=randoms,
             risk=risk,
+            venue=VenueState(
+                id_ordinal=watermarks.id_ordinal,
+                event_sequence=watermarks.event_sequence,
+            ),
         )
 
     # -- persistence -----------------------------------------------------------
@@ -1296,9 +1378,12 @@ class RuntimeStateStore:
 
         The shell is constructed through its public API with the captured
         runtime options, then its public mutators replay the captured books,
-        marks, order counts, and order attribution.  The shell's fresh kernel
-        and venue continue from the captured event watermark; strategy
-        bindings restart (see the module integration notes).
+        marks, order counts, order attribution, strategy state, and venue id
+        and event-sequence watermarks.  The shell's fresh kernel and venue
+        continue from the captured event watermark, and restarted strategy
+        bindings rehydrate their exported state, so the restored runtime
+        neither re-enters positions the captured books already hold nor
+        regenerates identifiers the captured fills already route.
         """
         _validate_snapshot_run(self, snapshot)
         options = snapshot.paper_options()
@@ -1355,6 +1440,26 @@ class RuntimeStateStore:
                 shell.count_order(instance_id)
         for order_id, instance_id in snapshot.order_owners.items():
             shell.own_order(order_id, instance_id)
+        shell.restore_strategy_state(
+            {
+                record.instance_id: dict(record.values)
+                for record in snapshot.strategy_state
+            }
+        )
+        id_ordinal = 0
+        event_sequence = -1
+        if snapshot.venue is not None:
+            id_ordinal = snapshot.venue.id_ordinal
+            event_sequence = snapshot.venue.event_sequence
+        for book_state in snapshot.books:
+            for fill in book_state.fills:
+                event_sequence = max(event_sequence, fill.sequence)
+                ordinal = _venue_fill_ordinal(fill.fill_id)
+                if ordinal is not None:
+                    id_ordinal = max(id_ordinal, ordinal)
+        shell.restore_venue_watermarks(
+            VenueWatermarks(id_ordinal=id_ordinal, event_sequence=event_sequence)
+        )
 
     def restore_randoms(self, snapshot: RuntimeSnapshot) -> dict[str, Random]:
         """Rebuild each captured random source with its exact state."""
@@ -1450,6 +1555,17 @@ def _rule_id(rule: object) -> str:
     return text(str(value), "rule_id")
 
 
+def _venue_fill_ordinal(fill_id: str) -> int | None:
+    """Return the ordinal encoded in one generated venue fill id, if any.
+
+    Restores of payloads written before the ``venue`` record was added carry
+    no captured counters, so the ordinal suffixes of the captured fills bound
+    the floor the restored venue continues from.
+    """
+    match = _VENUE_FILL_PATTERN.fullmatch(fill_id)
+    return None if match is None else int(match.group(1))
+
+
 def _bool(value: object, name: str) -> bool:
     if not isinstance(value, bool):
         raise TypeError(f"{name} must be a boolean")
@@ -1474,4 +1590,5 @@ __all__ = [
     "StateStoreError",
     "StoredSnapshot",
     "StrategyState",
+    "VenueState",
 ]
