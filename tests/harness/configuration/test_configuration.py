@@ -132,7 +132,7 @@ def test_hash_does_not_depend_on_configuration_file_location(tmp_path: Path) -> 
         ),
         (
             "trader",
-            "969c2951518cf3be04800e3391e3e2ee9096a6438ed5ef424bbf10962d16448b",
+            "7774d9a90413bb24a2ce1c599443811d483d986e3847637e3975c1e71a9d466b",
         ),
     ],
 )

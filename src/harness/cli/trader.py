@@ -164,7 +164,7 @@ def _kill_switch_poller() -> Any | None:
 def _websocket_transport() -> Any:
     """Build the concrete WebSocket transport for the live feed boundary."""
     try:
-        import websockets  # ty: ignore[unresolved-import]
+        import websockets
     except ImportError as error:  # pragma: no cover - deployment dependency
         raise SystemExit(
             "the 'websockets' package is required for live feed connections; "
