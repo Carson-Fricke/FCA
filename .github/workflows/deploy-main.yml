@@ -8,6 +8,7 @@ on:
       - .github/workflows/deploy-main.yml
       - .github/workflows/publish-image.yml
       - .github/workflows/quant-smoke.yml
+      - .github/workflows/prune-acr.yml
       - Dockerfile
       # The image build context allowlist shapes what the Docker build sees,
       # so a .dockerignore change must redeploy.
