@@ -63,7 +63,7 @@ def seed_bytes(seed: str | int | bytes) -> bytes:
 
 
 def test_loaded_library_reports_the_pinned_abi_version(native_core: NativeCore) -> None:
-    assert NATIVE_ABI_VERSION == 1
+    assert NATIVE_ABI_VERSION == 2
     assert native_core.abi_version == NATIVE_ABI_VERSION
 
 
@@ -103,4 +103,4 @@ def test_out_of_range_decimals_report_an_error_code(native_core: NativeCore) -> 
 
 def test_loader_errors_are_dedicated_runtime_errors() -> None:
     assert not isinstance(NativeCoreUnavailable, ImportError)
-    assert NATIVE_ABI_VERSION == 1
+    assert NATIVE_ABI_VERSION == 2

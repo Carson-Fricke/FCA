@@ -27,4 +27,13 @@
 			Fixture data, no backend.
 		</p>
 	</div>
+
+	<div class="card">
+		<h2><a href="/demo/spy0dte">SPY 0DTE intraday study</a></h2>
+		<p>
+			Implied volatility, option price, realized theta, and realized delta profiles per minute of
+			the trading session for 0DTE and 1DTE ladders, plus the intraday movement profile, with
+			findings and candidate strategies. Real data: 42 sessions, July&ndash;September 2026.
+		</p>
+	</div>
 </div>

@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-07T20:35:28.506Z",
+    "exportedAt": "2026-09-08T02:43:17.252Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 214
+      "nextId": 215
     },
-    "checksum": "3b3ef5c17ae00895",
-    "taskCount": 210,
+    "checksum": "a15316a0b83fc15e",
+    "taskCount": 211,
     "exportMode": "full"
   },
   "selection": {
@@ -157,6 +157,7 @@
       "T178",
       "T186",
       "T188",
+      "T214",
       "T007",
       "T026",
       "T038",
@@ -1667,6 +1668,13 @@
       "parentId": "T150",
       "depends": []
     },
+    "T214": {
+      "type": "task",
+      "title": "H8.5 SPY 0DTE intraday theta-delta experiment (native CRR kernels and 42-session study)",
+      "status": "pending",
+      "parentId": "T076",
+      "depends": []
+    },
     "T007": {
       "type": "epic",
       "title": "E4 Equities SIP ingest",
@@ -2271,7 +2279,7 @@
     "T210": {
       "type": "task",
       "title": "TH6.7 Base chart component and backtest report composition",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": []
     },
@@ -19004,6 +19012,60 @@
       "relates": []
     },
     {
+      "id": "T214",
+      "title": "H8.5 SPY 0DTE intraday theta-delta experiment (native CRR kernels and 42-session study)",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T076",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Realism spike under H8.4: Zig-first Cox-Ross-Rubinstein pricing kernels in the native core (batch prices with tree greeks plus implied-time and implied-underlying inversions, C ABI v2, harness.quant NumPy facade), a 42-session SPY 0DTE/1DTE OPRA trade-tick dataset ingested into lake-schema Parquet, a backward-strip decomposition of every one-minute option change into delta/theta/vol components at current IV with fixed SMA-30-IV and movement-scaled-IV scenario views, and a Thesis UI study page rendering the per-minute profiles with findings and candidate strategies.",
+      "labels": [
+        "h8.4",
+        "realism-spike",
+        "options",
+        "research"
+      ],
+      "acceptance": [
+        "Native quant kernels exported behind C ABI v2 with zig fmt, zig build test, and Python facade parity tests passing",
+        "42-session SPY equity and option trade tick dataset resumable-ingested under .local/spy-0dte with lake-schema Parquet and state manifest",
+        "Backward-strip decomposition panel over 42 sessions with exact component reconciliation and ratio-of-sums aggregates",
+        "Thesis UI study page renders current-model, fixed SMA-30 IV, and movement-driven IV chart sets with findings and strategy candidates",
+        "Repository verification gates recorded: uv lock --check, ruff check, ruff format --check, ty, pytest, zig fmt --check, zig build test"
+      ],
+      "files": [
+        "src/harness/native/quant.zig",
+        "src/harness/native/ffi.zig",
+        "src/harness/quant",
+        "src/harness/_native.py",
+        "scripts/experiments/spy_0dte",
+        "src/ui/src/routes/demo/spy0dte",
+        "src/ui/src/lib/data/spy0dteProfile.js"
+      ],
+      "createdAt": "2026-09-08T02:30:45.685Z",
+      "updatedAt": "2026-09-08T02:35:42.634Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-08T02:30:45.685Z"
+      },
+      "pipelineStage": "implementation",
+      "assignee": "local",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T007",
       "title": "E4 Equities SIP ingest",
       "status": "done",
@@ -24248,7 +24310,8 @@
         "Complete child T128: H8.1 Reproducible parameter sweep runner",
         "Complete child T129: H8.2 Performance and memory budgets",
         "Complete child T130: H8.3 Strategy authoring and architecture guide",
-        "Complete child T131: H8.4 Timeboxed post-v1 realism spikes"
+        "Complete child T131: H8.4 Timeboxed post-v1 realism spikes",
+        "Complete child T214: H8.5 SPY 0DTE intraday theta-delta experiment (native CRR kernels and 42-session study)"
       ],
       "depends": [
         "T070",
@@ -24258,7 +24321,7 @@
         "T077"
       ],
       "createdAt": "2026-09-01T17:55:42.409Z",
-      "updatedAt": "2026-09-01T18:36:29.238Z",
+      "updatedAt": "2026-09-08T02:30:45.685Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -26069,7 +26132,7 @@
     {
       "id": "T210",
       "title": "TH6.7 Base chart component and backtest report composition",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T150",
@@ -26093,7 +26156,8 @@
         "2026-09-05 23:18:12 UTC: 2026-09-05 23:20 UTC: Multi-series chart support and cursor legend landed. TimeSeriesChart now accepts a series prop: an array of { name, data, color?, render? } entries rendered on one shared time axis with union extent/value scaling and a palette; the legacy single data prop still works as an unnamed series. The title-row legend shows every series' value at the hovered time (falling back to the window edge when not hovering), which fixes the PnL charts not showing equity at the cursor; the right-axis pill, date pill, and per-series OHLC readout snap to the nearest point across all series. BacktestReport passes the PnL and executions charts as a named Equity series and adds a Max drawdown tile. Stats contract now: winRate, cagr, maxDrawdown as decimal fractions (drawdown as positive loss magnitude), sharpe and sortino as ratios, all supplied by the backend result via report.stats; the component only formats. Note: these files were committed by the concurrent wave in commit 87ebb09 (they were build-verified before landing); no separate T210 commit exists for this batch.",
         "2026-09-05 23:26:24 UTC: 2026-09-05 23:35 UTC: Commit c75d387 unified the bar readout into the title-row legend. Hovering a candle chart now shows that series' full OHLC for the bar under the cursor directly in the legend (colored by bar direction), replacing the duplicate close value plus separate OHLC line; when the cursor is not on the chart the legend shows the series' most recent visible close. Line series keep the name-plus-value readout at the cursor.",
         "2026-09-06 00:26:59 UTC: 2026-09-05 23:45 UTC: Commit 65e2671. The title-row legend now shows the most recent visible bar's full OHLC for bar series whenever the cursor is not over the chart (previously only the close); hovering still shows the hovered bar's OHLC colored by direction. The controls instructions hint now starts minimized to the compact ? chip and expands on click.",
-        "2026-09-06 00:31:14 UTC: 2026-09-05 23:55 UTC: Commit e7f9a2a. The idle (non-hover) OHLC legend segment is now colored by the most recent bar's direction (green/red) instead of the series blue. The plotted data is inset 12px from both frame edges (xFor/tFor use an inner width), so the last bar no longer sits on the rightmost frame line; the overview strip mapping is unchanged."
+        "2026-09-06 00:31:14 UTC: 2026-09-05 23:55 UTC: Commit e7f9a2a. The idle (non-hover) OHLC legend segment is now colored by the most recent bar's direction (green/red) instead of the series blue. The plotted data is inset 12px from both frame edges (xFor/tFor use an inner width), so the last bar no longer sits on the rightmost frame line; the overview strip mapping is unchanged.",
+        "2026-09-07 21:28:15 UTC: Chat-style collapsible report card shipped in commit 92d7f2c: headline stat strip plus PnL preview collapsed; tabbed body (PnL & orders with fills table, Securities candles, baseline Risk analysis with drawdown and PnL distribution histogram, model-provided panel groups, backend-computed Statistics). New StatsTable and HistogramChart components; TimeSeriesChart gains per-series area fill option, opaque canvas background, per-chart value zoom decoupled from the shared time camera, removed interior frame and HUD. Navy opaque surface theme in app.css. Verified via npm run build (exit 0) and headless-Edge render with pixel sampling (.github/verification/T210-validation.json)."
       ],
       "acceptance": [
         "A base single-dataset chart component exposes pan and zoom grip handles, a bindable camera position, and an explicit vertical scaling model (auto-fit by default with an explicit value-window override)",
@@ -26110,21 +26174,94 @@
         "src/ui/src/lib/data/backtestFixture.js"
       ],
       "createdAt": "2026-09-05T22:31:16.575Z",
-      "updatedAt": "2026-09-06T00:31:14.074Z",
+      "updatedAt": "2026-09-07T21:28:20.076Z",
+      "completedAt": "2026-09-07T21:28:14.581Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastUpdated": "2026-09-07T21:27:35.086Z",
         "failureLog": [],
-        "initializedAt": "2026-09-05T22:31:16.575Z"
+        "initializedAt": "2026-09-05T22:31:16.575Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "92d7f2c6b0274c4e883a3c0c0263a8f4cc1b75ad",
+                "shortSha": "92d7f2c"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/ui/src/lib/components/backtest-view/BacktestReport.svelte",
+                    "sha256": "4dc298864b3e97b98207c7ffd9825b37372e4d6b61452d035f30f04472d0646f"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/backtest-view/StatsTable.svelte",
+                    "sha256": "470423035422221f09e99efd3e6da000bbd4af2addc9c6186d89e740d9f4d25f"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/charts/HistogramChart.svelte",
+                    "sha256": "e0a2553362f5ff6c8175e2a8a36b84dadc424f14bfee1e3d589915fa188ea2df"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/charts/TimeSeriesChart.svelte",
+                    "sha256": "17a6886d84c27215c531ae5ca3c3eb653ef78181ab45a86e6a566ec5b710cad7"
+                  },
+                  {
+                    "path": "src/ui/src/app.css",
+                    "sha256": "9d9f4c6e21948de5424f74e2d235a3ec4a07a02f123705973c743a93223b4274"
+                  }
+                ]
+              },
+              {
+                "kind": "note",
+                "note": "Report card, tabs, risk tab, stats table, navy theme implemented"
+              }
+            ],
+            "capturedAt": "2026-09-07T21:22:16.210Z",
+            "capturedBy": "unknown"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T210-validation.json",
+                "sha256": "75a80457dcc9942a922461f084deb962f0aa2dd571bfbe1e06f6ce52fefa260d",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-07T21:27:16.616Z",
+            "capturedBy": "unknown"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 210 CLEO tasks through T213.\n"
+              }
+            ],
+            "capturedAt": "2026-09-07T21:27:35.336Z",
+            "capturedBy": "unknown"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "assignee": "local",
       "kind": "work",
       "scope": "feature",
@@ -27522,7 +27659,8 @@
         "T128",
         "T129",
         "T130",
-        "T131"
+        "T131",
+        "T214"
       ],
       "T077": [
         "T132",

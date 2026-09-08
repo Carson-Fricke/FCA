@@ -7,7 +7,8 @@
 		camera = $bindable(null),
 		markers = [],
 		height = 320,
-		minSpan = 5 * 24 * 60 * 60 * 1000
+		minSpan = 5 * 24 * 60 * 60 * 1000,
+		axis = 'date'
 	} = $props();
 
 	const PAD = { top: 10, right: 70, bottom: 30, left: 70 };
@@ -373,7 +374,7 @@
 		for (let i = 0; i <= 6; i++) {
 			const t = camera.t0 + (span * i) / 6;
 			const x = xFor(t, w);
-			ctx.fillText(shortDate(t), Math.min(x + 3, w - PAD.right - 40), axisY + 10);
+			ctx.fillText(axisLabel(t), Math.min(x + 3, w - PAD.right - 40), axisY + 10);
 		}
 		const trackY = axisY + 20;
 		const plotW = w - PAD.left - PAD.right;
@@ -401,6 +402,20 @@
 		return new Date(t).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: '2-digit' });
 	}
 
+	function axisLabel(t) {
+		if (axis === 'time') {
+			return new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+		}
+		return shortDate(t);
+	}
+
+	function hoverLabel(t) {
+		if (axis === 'time') {
+			return new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+		}
+		return shortDay(t);
+	}
+
 	function drawCrosshair(ctx, w, h, r) {
 		const { x, y, pi, point } = hover;
 		const plot = plots[pi];
@@ -415,7 +430,7 @@
 		ctx.fillRect(w - PAD.right + 3, y - 7, PAD.right - 6, 14);
 		ctx.fillStyle = '#f1f5f9';
 		ctx.fillText(fmtValue(plotValue(plot, point)), w - PAD.right + 7, y + 4);
-		const label = shortDay(hover.t);
+		const label = hoverLabel(hover.t);
 		const tw = ctx.measureText(label).width + 10;
 		const tx = Math.min(Math.max(x - tw / 2, PAD.left), w - PAD.right - tw);
 		ctx.fillStyle = '#0c1220';

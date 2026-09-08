@@ -22,7 +22,7 @@ from typing import Any, Final
 
 #: ABI version this loader is pinned to. Must match ``types.abi_version`` in
 #: ``src/harness/native/types.zig``. Bump both together.
-NATIVE_ABI_VERSION: Final = 1
+NATIVE_ABI_VERSION: Final = 2
 
 #: Pinned fixed-point decimal scale of the native core. Matches the
 #: repository's binary decimal convention ``pa.decimal128(38, 18)``.
@@ -185,6 +185,73 @@ class NativeCore:
         self._arrow_batch.restype = ctypes.c_int
         self._arrow_batch.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
+        double_p = ctypes.POINTER(ctypes.c_double)
+        ubyte_p = ctypes.POINTER(ctypes.c_ubyte)
+        uint32_p = ctypes.POINTER(ctypes.c_uint32)
+
+        self._quant_max_steps = _bind(library, "harness_quant_max_steps")
+        self._quant_max_steps.restype = ctypes.c_uint32
+        self._quant_max_steps.argtypes = []
+
+        self._quant_price_batch = _bind(library, "harness_quant_crr_price_batch")
+        self._quant_price_batch.restype = ctypes.c_int
+        self._quant_price_batch.argtypes = [
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+            ubyte_p,
+            uint32_p,
+            ctypes.c_size_t,
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+        ]
+
+        self._quant_implied_time = _bind(
+            library, "harness_quant_crr_implied_time_batch"
+        )
+        self._quant_implied_time.restype = ctypes.c_int
+        self._quant_implied_time.argtypes = [
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+            ubyte_p,
+            uint32_p,
+            double_p,
+            double_p,
+            double_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            double_p,
+        ]
+
+        self._quant_implied_underlying = _bind(
+            library, "harness_quant_crr_implied_underlying_batch"
+        )
+        self._quant_implied_underlying.restype = ctypes.c_int
+        self._quant_implied_underlying.argtypes = [
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+            double_p,
+            ubyte_p,
+            uint32_p,
+            double_p,
+            double_p,
+            double_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            double_p,
+        ]
+
     @property
     def abi_version(self) -> int:
         """Return the ABI version reported by the loaded library."""
@@ -289,6 +356,130 @@ class NativeCore:
         """
         code = self._arrow_batch(schema_ptr, array_ptr)
         _raise_for_code(code, "Arrow batch export")
+
+    def quant_max_steps(self) -> int:
+        """Return the largest binomial step count the quant kernels accept."""
+        return int(self._quant_max_steps())
+
+    def quant_crr_price_batch(
+        self,
+        s: Any,
+        k: Any,
+        t: Any,
+        r: Any,
+        q: Any,
+        sigma: Any,
+        flags: Any,
+        steps: Any,
+        count: int,
+        out_price: Any,
+        out_delta: Any,
+        out_gamma: Any,
+        out_theta: Any,
+        out_vega: Any,
+    ) -> None:
+        """Batch CRR prices with tree greeks through the native core.
+
+        Every argument is a ``ctypes`` pointer to ``count`` contiguous
+        elements (``float64`` inputs and outputs, ``uint8`` flags, ``uint32``
+        steps). Invalid elements arrive as NaN; only structural problems
+        raise.
+        """
+        code = self._quant_price_batch(
+            s,
+            k,
+            t,
+            r,
+            q,
+            sigma,
+            flags,
+            steps,
+            count,
+            out_price,
+            out_delta,
+            out_gamma,
+            out_theta,
+            out_vega,
+        )
+        _raise_for_code(code, "quant CRR price batch")
+
+    def quant_crr_implied_time_batch(
+        self,
+        s: Any,
+        k: Any,
+        r: Any,
+        q: Any,
+        sigma: Any,
+        flags: Any,
+        steps: Any,
+        target: Any,
+        t_lower: Any,
+        t_upper: Any,
+        count: int,
+        bisect_iterations: int,
+        out_t: Any,
+    ) -> None:
+        """Batch implied time to expiry through the native core.
+
+        Solves the CRR price equation for time to expiry within
+        ``[t_lower, t_upper]`` per element; elements whose bracket does not
+        sign-change arrive as NaN.
+        """
+        code = self._quant_implied_time(
+            s,
+            k,
+            r,
+            q,
+            sigma,
+            flags,
+            steps,
+            target,
+            t_lower,
+            t_upper,
+            count,
+            bisect_iterations,
+            out_t,
+        )
+        _raise_for_code(code, "quant CRR implied time batch")
+
+    def quant_crr_implied_underlying_batch(
+        self,
+        k: Any,
+        t: Any,
+        r: Any,
+        q: Any,
+        sigma: Any,
+        flags: Any,
+        steps: Any,
+        target: Any,
+        s_lower: Any,
+        s_upper: Any,
+        count: int,
+        bisect_iterations: int,
+        out_s: Any,
+    ) -> None:
+        """Batch implied underlying spot through the native core.
+
+        Solves the CRR price equation for the spot within
+        ``[s_lower, s_upper]`` per element; elements whose bracket does not
+        sign-change arrive as NaN.
+        """
+        code = self._quant_implied_underlying(
+            k,
+            t,
+            r,
+            q,
+            sigma,
+            flags,
+            steps,
+            target,
+            s_lower,
+            s_upper,
+            count,
+            bisect_iterations,
+            out_s,
+        )
+        _raise_for_code(code, "quant CRR implied underlying batch")
 
 
 def load_native_core(

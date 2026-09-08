@@ -8,7 +8,9 @@
 //! native fixed-point decimals through the Arrow C Data Interface, and the
 //! kernel modules port the deterministic synchronous event kernel:
 //! ``clock`` (SimClock), ``bus`` (event queue/bus), ``oms`` (execution-report
-//! state machine), and ``books`` (virtual book accounting).
+//! state machine), and ``books`` (virtual book accounting). ``quant`` adds
+//! float64 batch quant kernels (CRR option pricing with tree greeks and
+//! implied-value inversions) behind the same C ABI.
 
 const std = @import("std");
 
@@ -32,6 +34,7 @@ pub const bars = @import("bars.zig");
 pub const arrow_batch = @import("arrow_batch.zig");
 pub const replay = @import("replay.zig");
 pub const metrics = @import("metrics.zig");
+pub const quant = @import("quant.zig");
 
 /// Returns the sum of two i64 values, saturating at the type bounds.
 pub fn saturatingAdd(a: i64, b: i64) i64 {
@@ -66,6 +69,7 @@ test {
     _ = arrow_batch;
     _ = replay;
     _ = metrics;
+    _ = quant;
 }
 
 // Force analysis of the C ABI exports so the shared-library artifact always
@@ -78,4 +82,8 @@ comptime {
     _ = &ffi.harness_trade_row_serialize;
     _ = &ffi.harness_decimal_batch_values;
     _ = &ffi.harness_arrow_decimal_batch;
+    _ = &ffi.harness_quant_max_steps;
+    _ = &ffi.harness_quant_crr_price_batch;
+    _ = &ffi.harness_quant_crr_implied_time_batch;
+    _ = &ffi.harness_quant_crr_implied_underlying_batch;
 }

@@ -14,7 +14,10 @@ const std = @import("std");
 /// Version of the stable C ABI exported by the native core. The Python loader
 /// (``src/harness/_native.py``) pins the same value and refuses to load a
 /// library that disagrees.
-pub const abi_version: u32 = 1;
+///
+/// v2 adds the float64 batch quant kernels (``harness_quant_*`` in ``ffi``)
+/// alongside the v1 decimal engine exports.
+pub const abi_version: u32 = 2;
 
 /// Pinned fixed-point scale for native decimals. This matches the repository's
 /// binary decimal convention, ``pa.decimal128(38, 18)`` in
@@ -539,7 +542,7 @@ fn decodeUtf8(bytes: []const u8, start: usize) Error!u21 {
 const testing = std.testing;
 
 test "abi version is pinned" {
-    try testing.expectEqual(@as(u32, 1), abi_version);
+    try testing.expectEqual(@as(u32, 2), abi_version);
 }
 
 test "canonical symbols match the Python canonicalization" {

@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const arrow = @import("arrow.zig");
+const quant = @import("quant.zig");
 const types = @import("types.zig");
 
 /// Error codes returned by every export.
@@ -185,8 +186,315 @@ pub export fn harness_arrow_decimal_batch(
     return code.ok;
 }
 
+fn constF64Slice(ptr: ?[*]const f64, n: usize) ?[]const f64 {
+    if (ptr == null) return null;
+    return ptr.?[0..n];
+}
+
+fn mutF64Slice(ptr: ?[*]f64, n: usize) ?[]f64 {
+    if (ptr == null) return null;
+    return ptr.?[0..n];
+}
+
+/// Largest binomial step count the quant kernels accept.
+pub export fn harness_quant_max_steps() u32 {
+    return quant.max_steps;
+}
+
+/// Batch CRR option prices with tree greeks. Every input and output buffer
+/// holds ``n`` float64 values (``flags`` is one byte and ``steps`` one u32 per
+/// element). Invalid elements produce NaN instead of failing the batch.
+pub export fn harness_quant_crr_price_batch(
+    s_ptr: ?[*]const f64,
+    k_ptr: ?[*]const f64,
+    t_ptr: ?[*]const f64,
+    r_ptr: ?[*]const f64,
+    q_ptr: ?[*]const f64,
+    sigma_ptr: ?[*]const f64,
+    flags_ptr: ?[*]const u8,
+    steps_ptr: ?[*]const u32,
+    n: usize,
+    out_price_ptr: ?[*]f64,
+    out_delta_ptr: ?[*]f64,
+    out_gamma_ptr: ?[*]f64,
+    out_theta_ptr: ?[*]f64,
+    out_vega_ptr: ?[*]f64,
+) c_int {
+    if (n == 0) return code.ok;
+    const s = constF64Slice(s_ptr, n) orelse return code.invalid_argument;
+    const k = constF64Slice(k_ptr, n) orelse return code.invalid_argument;
+    const t = constF64Slice(t_ptr, n) orelse return code.invalid_argument;
+    const r = constF64Slice(r_ptr, n) orelse return code.invalid_argument;
+    const q = constF64Slice(q_ptr, n) orelse return code.invalid_argument;
+    const sigma = constF64Slice(sigma_ptr, n) orelse return code.invalid_argument;
+    if (flags_ptr == null or steps_ptr == null) return code.invalid_argument;
+    const flag_values = flags_ptr.?[0..n];
+    const steps = steps_ptr.?[0..n];
+    const out_price = mutF64Slice(out_price_ptr, n) orelse return code.invalid_argument;
+    const out_delta = mutF64Slice(out_delta_ptr, n) orelse return code.invalid_argument;
+    const out_gamma = mutF64Slice(out_gamma_ptr, n) orelse return code.invalid_argument;
+    const out_theta = mutF64Slice(out_theta_ptr, n) orelse return code.invalid_argument;
+    const out_vega = mutF64Slice(out_vega_ptr, n) orelse return code.invalid_argument;
+
+    var index: usize = 0;
+    while (index < n) : (index += 1) {
+        const flag = flag_values[index];
+        const greeks = quant.priceAndGreeks(
+            s[index],
+            k[index],
+            t[index],
+            r[index],
+            q[index],
+            sigma[index],
+            flag & quant.flags.call != 0,
+            flag & quant.flags.american != 0,
+            steps[index],
+        );
+        out_price[index] = greeks.price;
+        out_delta[index] = greeks.delta;
+        out_gamma[index] = greeks.gamma;
+        out_theta[index] = greeks.theta;
+        out_vega[index] = greeks.vega;
+    }
+    return code.ok;
+}
+
+/// Batch implied time to expiry: solve CRR(S, K, T) = target for T within
+/// ``[t_lower, t_upper]`` per element. Elements whose bracket does not
+/// sign-change produce NaN.
+pub export fn harness_quant_crr_implied_time_batch(
+    s_ptr: ?[*]const f64,
+    k_ptr: ?[*]const f64,
+    r_ptr: ?[*]const f64,
+    q_ptr: ?[*]const f64,
+    sigma_ptr: ?[*]const f64,
+    flags_ptr: ?[*]const u8,
+    steps_ptr: ?[*]const u32,
+    target_ptr: ?[*]const f64,
+    t_lower_ptr: ?[*]const f64,
+    t_upper_ptr: ?[*]const f64,
+    n: usize,
+    bisect_iterations: u32,
+    out_t_ptr: ?[*]f64,
+) c_int {
+    if (n == 0) return code.ok;
+    const s = constF64Slice(s_ptr, n) orelse return code.invalid_argument;
+    const k = constF64Slice(k_ptr, n) orelse return code.invalid_argument;
+    const r = constF64Slice(r_ptr, n) orelse return code.invalid_argument;
+    const q = constF64Slice(q_ptr, n) orelse return code.invalid_argument;
+    const sigma = constF64Slice(sigma_ptr, n) orelse return code.invalid_argument;
+    if (flags_ptr == null or steps_ptr == null) return code.invalid_argument;
+    const flag_values = flags_ptr.?[0..n];
+    const steps = steps_ptr.?[0..n];
+    const target = constF64Slice(target_ptr, n) orelse return code.invalid_argument;
+    const t_lower = constF64Slice(t_lower_ptr, n) orelse return code.invalid_argument;
+    const t_upper = constF64Slice(t_upper_ptr, n) orelse return code.invalid_argument;
+    const out_t = mutF64Slice(out_t_ptr, n) orelse return code.invalid_argument;
+
+    var index: usize = 0;
+    while (index < n) : (index += 1) {
+        const flag = flag_values[index];
+        out_t[index] = quant.impliedTime(
+            s[index],
+            k[index],
+            r[index],
+            q[index],
+            sigma[index],
+            flag & quant.flags.call != 0,
+            flag & quant.flags.american != 0,
+            steps[index],
+            target[index],
+            t_lower[index],
+            t_upper[index],
+            bisect_iterations,
+        );
+    }
+    return code.ok;
+}
+
+/// Batch implied underlying spot: solve CRR(S, K, T) = target for S within
+/// ``[s_lower, s_upper]`` per element. Elements whose bracket does not
+/// sign-change produce NaN.
+pub export fn harness_quant_crr_implied_underlying_batch(
+    k_ptr: ?[*]const f64,
+    t_ptr: ?[*]const f64,
+    r_ptr: ?[*]const f64,
+    q_ptr: ?[*]const f64,
+    sigma_ptr: ?[*]const f64,
+    flags_ptr: ?[*]const u8,
+    steps_ptr: ?[*]const u32,
+    target_ptr: ?[*]const f64,
+    s_lower_ptr: ?[*]const f64,
+    s_upper_ptr: ?[*]const f64,
+    n: usize,
+    bisect_iterations: u32,
+    out_s_ptr: ?[*]f64,
+) c_int {
+    if (n == 0) return code.ok;
+    const k = constF64Slice(k_ptr, n) orelse return code.invalid_argument;
+    const t = constF64Slice(t_ptr, n) orelse return code.invalid_argument;
+    const r = constF64Slice(r_ptr, n) orelse return code.invalid_argument;
+    const q = constF64Slice(q_ptr, n) orelse return code.invalid_argument;
+    const sigma = constF64Slice(sigma_ptr, n) orelse return code.invalid_argument;
+    if (flags_ptr == null or steps_ptr == null) return code.invalid_argument;
+    const flag_values = flags_ptr.?[0..n];
+    const steps = steps_ptr.?[0..n];
+    const target = constF64Slice(target_ptr, n) orelse return code.invalid_argument;
+    const s_lower = constF64Slice(s_lower_ptr, n) orelse return code.invalid_argument;
+    const s_upper = constF64Slice(s_upper_ptr, n) orelse return code.invalid_argument;
+    const out_s = mutF64Slice(out_s_ptr, n) orelse return code.invalid_argument;
+
+    var index: usize = 0;
+    while (index < n) : (index += 1) {
+        const flag = flag_values[index];
+        out_s[index] = quant.impliedUnderlying(
+            k[index],
+            t[index],
+            r[index],
+            q[index],
+            sigma[index],
+            flag & quant.flags.call != 0,
+            flag & quant.flags.american != 0,
+            steps[index],
+            target[index],
+            s_lower[index],
+            s_upper[index],
+            bisect_iterations,
+        );
+    }
+    return code.ok;
+}
+
 test "abi export matches the pinned version" {
     try std.testing.expectEqual(types.abi_version, harness_native_abi_version());
+}
+
+test "quant batch kernels price, invert, and reject bad buffers" {
+    var s = [_]f64{ 500.0, 500.0, 500.0, 505.0 };
+    var k = [_]f64{ 500.0, 500.0, 500.0, 500.0 };
+    var t = [_]f64{ 1.0 / 365.0, 1.0 / 365.0, 1.0 / 365.0, 0 };
+    var r = [_]f64{ 0.04, 0.04, 0.04, 0.04 };
+    var q = [_]f64{ 0.0, 0.0, 0.0, 0.0 };
+    var sigma = [_]f64{ 0.30, 0.30, 0.0, 0.30 };
+    var flag = [_]u8{ quant.flags.call | quant.flags.american, quant.flags.american, quant.flags.call, quant.flags.call };
+    var steps = [_]u32{ 128, 1, 128, 128 };
+    var out_price = [_]f64{ 0, 0, 0, 0 };
+    var out_delta = [_]f64{ 0, 0, 0, 0 };
+    var out_gamma = [_]f64{ 0, 0, 0, 0 };
+    var out_theta = [_]f64{ 0, 0, 0, 0 };
+    var out_vega = [_]f64{ 0, 0, 0, 0 };
+
+    try std.testing.expectEqual(
+        code.ok,
+        harness_quant_crr_price_batch(
+            &s,
+            &k,
+            &t,
+            &r,
+            &q,
+            &sigma,
+            &flag,
+            &steps,
+            s.len,
+            &out_price,
+            &out_delta,
+            &out_gamma,
+            &out_theta,
+            &out_vega,
+        ),
+    );
+    try std.testing.expect(out_price[0] > 0);
+    try std.testing.expect(out_delta[0] > 0 and out_delta[0] < 1);
+    try std.testing.expect(std.math.isNan(out_price[1]));
+    try std.testing.expect(std.math.isNan(out_price[2]));
+    try std.testing.expectEqual(@as(f64, 5.0), out_price[3]);
+    try std.testing.expectEqual(@as(f64, 1.0), out_delta[3]);
+
+    try std.testing.expectEqual(
+        code.invalid_argument,
+        harness_quant_crr_price_batch(
+            null,
+            &k,
+            &t,
+            &r,
+            &q,
+            &sigma,
+            &flag,
+            &steps,
+            s.len,
+            &out_price,
+            &out_delta,
+            &out_gamma,
+            &out_theta,
+            &out_vega,
+        ),
+    );
+
+    const target = [_]f64{ out_price[0], out_price[0], 1e6 };
+    const t_lower = [_]f64{ 1.0 / (365.0 * 24.0 * 60.0), 1.0 / (365.0 * 24.0), 1.0 / (365.0 * 24.0) };
+    const t_upper = [_]f64{ 1.0, 1.0, 1.0 };
+    var out_t = [_]f64{ 0, 0, 0 };
+    var time_s = [_]f64{ 500.0, 500.0, 500.0 };
+    var time_k = [_]f64{ 500.0, 500.0, 500.0 };
+    var time_r = [_]f64{ 0.04, 0.04, 0.04 };
+    var time_q = [_]f64{ 0.0, 0.0, 0.0 };
+    var time_sigma = [_]f64{ 0.30, 0.30, 0.30 };
+    var time_flag = [_]u8{ quant.flags.call | quant.flags.american, quant.flags.call | quant.flags.american, quant.flags.call };
+    var time_steps = [_]u32{ 128, 128, 128 };
+    try std.testing.expectEqual(
+        code.ok,
+        harness_quant_crr_implied_time_batch(
+            &time_s,
+            &time_k,
+            &time_r,
+            &time_q,
+            &time_sigma,
+            &time_flag,
+            &time_steps,
+            &target,
+            &t_lower,
+            &t_upper,
+            3,
+            64,
+            &out_t,
+        ),
+    );
+    try std.testing.expect(std.math.isFinite(out_t[0]));
+    try std.testing.expectApproxEqAbs(t[0], out_t[0], 1e-9);
+    try std.testing.expect(std.math.isNan(out_t[2]));
+
+    const spot_target = [_]f64{out_price[0]};
+    const s_lower = [_]f64{450.0};
+    const s_upper = [_]f64{550.0};
+    var out_s = [_]f64{0};
+    var spot_k = [_]f64{500.0};
+    var spot_t = [_]f64{t[0]};
+    var spot_r = [_]f64{0.04};
+    var spot_q = [_]f64{0.0};
+    var spot_sigma = [_]f64{0.30};
+    var spot_flag = [_]u8{quant.flags.call | quant.flags.american};
+    var spot_steps = [_]u32{128};
+    try std.testing.expectEqual(
+        code.ok,
+        harness_quant_crr_implied_underlying_batch(
+            &spot_k,
+            &spot_t,
+            &spot_r,
+            &spot_q,
+            &spot_sigma,
+            &spot_flag,
+            &spot_steps,
+            &spot_target,
+            &s_lower,
+            &s_upper,
+            1,
+            64,
+            &out_s,
+        ),
+    );
+    try std.testing.expect(std.math.isFinite(out_s[0]));
+    try std.testing.expectApproxEqAbs(@as(f64, 500.0), out_s[0], 1e-6);
+    try std.testing.expectEqual(@as(u32, 1024), harness_quant_max_steps());
 }
 
 test "exports report error codes instead of panicking" {

@@ -23,13 +23,15 @@ and the local `backtest-job` CLI are implemented; offline reports, the harness
 query API, shadow/live runtimes, and CI/deployment orchestration remain
 planned. The pinned Zig 0.16.0
 toolchain is a first-class build component: the `build.zig` module builds the
-native core under `src/harness/native` (C ABI v1 with the Arrow C Data
+native core under `src/harness/native` (C ABI v2 with the Arrow C Data
 Interface bridge, pinned scale-18 fixed point, and the ported event kernel,
 OMS state machine, virtual book accounting, K-way replay merge, bar
 derivation, resting-order matching venue, SimpleTouch, latency-size, and
-trade-through fill models, and the ported metrics modules), the shared image
-compiles it
-in a dedicated Zig build stage, and CI gates the native core with
+trade-through fill models, the ported metrics modules, and the float64 batch
+quant kernels — the Cox-Ross-Rubinstein option pricer with tree greeks plus
+bracketed implied time-to-expiry and implied-underlying inversions), the
+shared image compiles it in a dedicated Zig build stage, and CI gates the
+native core with
 `zig fmt --check` and `zig build test` alongside the Python gates. The
 cross-language parity oracle drives the native core through a Zig-core runner
 (`zig_backtest`) and asserts byte-identical determinism artifacts against the
@@ -136,6 +138,7 @@ tests/lake/
 | `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, trade-through, and MidTouch option fill decisions. |
 | `harness.http` | Backtest query API and job launcher: authenticated run listing, artifact fetch, and launch routes composing the results store and the harness api process. |
 | `harness.portfolio` | Strategy virtual books, shared-account aggregate accounting, and deterministic option expiry, exercise, and assignment settlement. |
+| `harness.quant` | NumPy facade over the native float64 quant kernels: batch Cox-Ross-Rubinstein option pricing with tree greeks and bracketed implied time-to-expiry and implied-underlying inversions. |
 | `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts; standard metrics and attribution with documented conventions; offline static HTML reports; and the backtest results store writing run artifacts under `backtests/{run_id}` with a filterable run catalog and prefix-complete cleanup, wired to the lake run-catalog and readable-blob ports for production Azure adapters. |
 | `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies; plus the PaperShell shared simulation runtime composing the same kernel, venue, fills, fees, risk, and portfolio accounting against replay or live inbox feeds, the runtime state store capturing hash-verifiable snapshots with restore-equivalent continuation, the boot/periodic reconciler with broker-vs-book diff artifacts and explicit policies, and the recovery boot policies (resume-reconcile, flatten-halt, halt-only) with chaos-proven fault handling. |
 | `harness.strategy` | Mode-independent strategy callbacks, constrained context with capability-scoped surfaces (read-only clock, opaque engine-clocked data history, one-way venue commands, provenance-restricted scheduling, and engine-delivered corporate-action hooks), deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
