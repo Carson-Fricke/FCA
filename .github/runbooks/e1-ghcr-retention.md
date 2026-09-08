@@ -106,10 +106,13 @@ cooperate:
 
 1. **Registry-level retention policy** (`infra/modules/container-registry.bicep`)
    declares `properties.policies.retention` with `days: retentionDays`
-   (default 7, range 7-90) and `status: retentionStatus` (default `enabled`),
-   so the policy exists from Bicep with no portal change. Its limits:
-   - It is a **Premium SKU** feature; the registry is deployed on Basic, so
-     the declaration is inert until the SKU is upgraded.
+   (default 7, range 7-90) and `status: retentionStatus` (default
+   `disabled`). Its limits:
+   - It is a **Premium SKU** feature; the registry is deployed on Basic, and
+     an enabled policy on Basic fails the deployment with `SkuNotSupported`
+     (observed live 2026-09-08), which is why the default is disabled.
+     Upgrade the SKU via the `skuName` parameter and set
+     `retentionStatus=enabled` together to activate it from Bicep.
    - The service purges only **untagged** manifests after the age threshold.
      The mirrored manifests keep their commit-SHA tag, so the policy never
      cleans the imported digests; it covers future untagged leftovers only.

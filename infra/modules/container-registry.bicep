@@ -28,15 +28,23 @@ param retentionDays int = 7
   'enabled'
   'disabled'
 ])
-@description('Status of the registry-level retention policy. Enabled by default so the policy applies from Bicep with no portal change; disable it only to hand deletion fully to the per-service prune workflow.')
-param retentionStatus string = 'enabled'
+@description('Status of the registry-level retention policy. The policy is Premium-SKU-only: the default is disabled because this registry deploys the Basic SKU, and an enabled policy on Basic fails the deployment with SkuNotSupported. Per-service digest pruning is owned by the prune-acr.yml workflow. Set enabled together with a Premium skuName to activate it from Bicep.')
+param retentionStatus string = 'disabled'
+
+@allowed([
+  'Basic'
+  'Standard'
+  'Premium'
+])
+@description('Registry SKU. Basic is the budget default; the registry-level retention policy requires Premium, which is why retentionStatus defaults to disabled.')
+param skuName string = 'Basic'
 
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: registryName
   location: location
   tags: tags
   sku: {
-    name: 'Basic'
+    name: skuName
   }
   properties: {
     adminUserEnabled: false
@@ -44,12 +52,13 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
     networkRuleBypassOptions: 'AzureServices'
     policies: {
       // The registry-level retention policy purges only untagged manifests
-      // after the configured age and is enforced only on the Premium SKU. The
-      // mirrored manifests keep their commit-SHA tag, so tag-carrying digests
-      // need the per-service prune workflow (.github/workflows/prune-acr.yml),
+      // and is enforced only on the Premium SKU. This registry deploys the
+      // Basic SKU, so retentionStatus defaults to disabled; enabling it on
+      // Basic fails deployment with SkuNotSupported. The mirrored manifests
+      // keep their commit-SHA tag either way, so tag-carrying digests are
+      // pruned by the per-service workflow (.github/workflows/prune-acr.yml),
       // which keeps the newest two digests plus every digest an active or
-      // rollback Container App revision still references. Upgrading the SKU
-      // activates this policy for untagged manifests with no further change.
+      // rollback Container App revision still references.
       retentionPolicy: {
         days: retentionDays
         status: retentionStatus
