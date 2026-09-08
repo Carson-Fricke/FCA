@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-08T15:26:58.031Z",
+    "exportedAt": "2026-09-08T18:33:42.105Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 216
+      "nextId": 217
     },
-    "checksum": "053d90775747e51a",
-    "taskCount": 212,
+    "checksum": "723a4444f9bbe99e",
+    "taskCount": 213,
     "exportMode": "full"
   },
   "selection": {
@@ -135,6 +135,7 @@
       "T171",
       "T177",
       "T185",
+      "T216",
       "T006",
       "T020",
       "T025",
@@ -491,7 +492,7 @@
     "T165": {
       "type": "task",
       "title": "TH3.1 Markdown knowledge corpus and links",
-      "status": "pending",
+      "status": "done",
       "parentId": "T147",
       "depends": [
         "T151"
@@ -801,7 +802,7 @@
     "T166": {
       "type": "task",
       "title": "TH3.2 Knowledge ingestion and semantic search",
-      "status": "pending",
+      "status": "done",
       "parentId": "T147",
       "depends": [
         "T151"
@@ -1440,6 +1441,13 @@
       "depends": [
         "T184"
       ]
+    },
+    "T216": {
+      "type": "task",
+      "title": "Restored paper session re-enters the strategy and duplicates a venue fill id",
+      "status": "pending",
+      "parentId": "T073",
+      "depends": []
     },
     "T006": {
       "type": "epic",
@@ -5794,7 +5802,7 @@
     {
       "id": "T165",
       "title": "TH3.1 Markdown knowledge corpus and links",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T147",
@@ -5826,21 +5834,179 @@
         "T151"
       ],
       "createdAt": "2026-09-03T00:08:31.650Z",
-      "updatedAt": "2026-09-03T00:08:31.650Z",
+      "updatedAt": "2026-09-08T17:31:45.234Z",
+      "completedAt": "2026-09-08T17:31:40.399Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T17:31:21.140Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:08:31.650Z"
+        "initializedAt": "2026-09-03T00:08:31.650Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "1ca8edee474b859709c1701645ea206aa55d7336",
+                "shortSha": "1ca8ede"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/corpus.py",
+                    "sha256": "56455c6372f6c8bcfd9ab215c36f33f1e15d7091cab2ab2d7e5ca19d2c52797d"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/metadata.py",
+                    "sha256": "290a35d9132c19dcef3001c57925e77a664c788a2e48ffa83c3cb75cf30b3a6a"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/links.py",
+                    "sha256": "1d7ffa6e1922aa6e6895daaffb89bc179f00af49f9f104a777d25072dd17c3d9"
+                  },
+                  {
+                    "path": "knowledge/README.md",
+                    "sha256": "b262c3a56d8ecdd26f05a5dd77d94dc32885e20b8c5c95e7e95289f43fd8c804"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_corpus.py",
+                    "sha256": "55b907e6633936d38667242045c7d654a970a893272ada96487b1e1dc7317c68"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T165-validation.json",
+                "sha256": "a51c4f9fa8e902d5d3a4765b3cdc78392961226ad299fb29c1ebaa3ad6d49a91",
+                "passCount": 80,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T17:31:21.933Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "1ca8edee474b859709c1701645ea206aa55d7336",
+                "shortSha": "1ca8ede"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/corpus.py",
+                    "sha256": "56455c6372f6c8bcfd9ab215c36f33f1e15d7091cab2ab2d7e5ca19d2c52797d"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/metadata.py",
+                    "sha256": "290a35d9132c19dcef3001c57925e77a664c788a2e48ffa83c3cb75cf30b3a6a"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/links.py",
+                    "sha256": "1d7ffa6e1922aa6e6895daaffb89bc179f00af49f9f104a777d25072dd17c3d9"
+                  },
+                  {
+                    "path": "knowledge/README.md",
+                    "sha256": "b262c3a56d8ecdd26f05a5dd77d94dc32885e20b8c5c95e7e95289f43fd8c804"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_corpus.py",
+                    "sha256": "55b907e6633936d38667242045c7d654a970a893272ada96487b1e1dc7317c68"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T165-validation.json",
+                "sha256": "a51c4f9fa8e902d5d3a4765b3cdc78392961226ad299fb29c1ebaa3ad6d49a91",
+                "passCount": 80,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T17:31:21.933Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "1ca8edee474b859709c1701645ea206aa55d7336",
+                "shortSha": "1ca8ede"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/corpus.py",
+                    "sha256": "56455c6372f6c8bcfd9ab215c36f33f1e15d7091cab2ab2d7e5ca19d2c52797d"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/metadata.py",
+                    "sha256": "290a35d9132c19dcef3001c57925e77a664c788a2e48ffa83c3cb75cf30b3a6a"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/links.py",
+                    "sha256": "1d7ffa6e1922aa6e6895daaffb89bc179f00af49f9f104a777d25072dd17c3d9"
+                  },
+                  {
+                    "path": "knowledge/README.md",
+                    "sha256": "b262c3a56d8ecdd26f05a5dd77d94dc32885e20b8c5c95e7e95289f43fd8c804"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_corpus.py",
+                    "sha256": "55b907e6633936d38667242045c7d654a970a893272ada96487b1e1dc7317c68"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T165-validation.json",
+                "sha256": "a51c4f9fa8e902d5d3a4765b3cdc78392961226ad299fb29c1ebaa3ad6d49a91",
+                "passCount": 80,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T17:31:21.933Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -9894,7 +10060,7 @@
     {
       "id": "T166",
       "title": "TH3.2 Knowledge ingestion and semantic search",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T147",
@@ -9927,21 +10093,179 @@
         "T151"
       ],
       "createdAt": "2026-09-03T00:08:35.975Z",
-      "updatedAt": "2026-09-03T00:08:35.975Z",
+      "updatedAt": "2026-09-08T17:32:32.452Z",
+      "completedAt": "2026-09-08T17:32:28.471Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T17:32:09.682Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:08:35.975Z"
+        "initializedAt": "2026-09-03T00:08:35.975Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "793548318cc6a8ff341b5b69653baedfa999f692",
+                "shortSha": "7935483"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/ingest.py",
+                    "sha256": "a50b420b1e9998a760dd71405b94bc70365af63e1fd18fcbb4d6b97658739124"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/search.py",
+                    "sha256": "b4015d2c587000196eab8a3fabf446c349d87488187a0f138455b4f3c07f2edd"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/index.py",
+                    "sha256": "c574c3ea98089ee4fa39916b1a7e81394b5f1ba0084cb368453a5b30fc42c155"
+                  },
+                  {
+                    "path": "knowledge/index/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_search.py",
+                    "sha256": "2770f75ab1b0ced2299740381c1560b2abc8994b3affb24907a7ad9c8ee9d6d3"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T166-validation.json",
+                "sha256": "9411d47e279a875c5f2df51a6981673a6f3f9c5da03146a84cb9a6ccef9e08ac",
+                "passCount": 80,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T17:32:10.328Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "793548318cc6a8ff341b5b69653baedfa999f692",
+                "shortSha": "7935483"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/ingest.py",
+                    "sha256": "a50b420b1e9998a760dd71405b94bc70365af63e1fd18fcbb4d6b97658739124"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/search.py",
+                    "sha256": "b4015d2c587000196eab8a3fabf446c349d87488187a0f138455b4f3c07f2edd"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/index.py",
+                    "sha256": "c574c3ea98089ee4fa39916b1a7e81394b5f1ba0084cb368453a5b30fc42c155"
+                  },
+                  {
+                    "path": "knowledge/index/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_search.py",
+                    "sha256": "2770f75ab1b0ced2299740381c1560b2abc8994b3affb24907a7ad9c8ee9d6d3"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T166-validation.json",
+                "sha256": "9411d47e279a875c5f2df51a6981673a6f3f9c5da03146a84cb9a6ccef9e08ac",
+                "passCount": 80,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T17:32:10.328Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "793548318cc6a8ff341b5b69653baedfa999f692",
+                "shortSha": "7935483"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/ingest.py",
+                    "sha256": "a50b420b1e9998a760dd71405b94bc70365af63e1fd18fcbb4d6b97658739124"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/search.py",
+                    "sha256": "b4015d2c587000196eab8a3fabf446c349d87488187a0f138455b4f3c07f2edd"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/index.py",
+                    "sha256": "c574c3ea98089ee4fa39916b1a7e81394b5f1ba0084cb368453a5b30fc42c155"
+                  },
+                  {
+                    "path": "knowledge/index/.gitkeep",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_search.py",
+                    "sha256": "2770f75ab1b0ced2299740381c1560b2abc8994b3affb24907a7ad9c8ee9d6d3"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T166-validation.json",
+                "sha256": "9411d47e279a875c5f2df51a6981673a6f3f9c5da03146a84cb9a6ccef9e08ac",
+                "passCount": 80,
+                "failCount": 0,
+                "skipCount": 0
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T17:32:10.328Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -12212,7 +12536,8 @@
         "operations"
       ],
       "notes": [
-        "2026-09-08 05:21:58 UTC: 2026-09-08 05:00 UTC: Wave verified. Composition-blocking defects fixed by integration (commit c6a49d9): SessionJournal persists through the SnapshotObjectStore port, _compose supplies the required kill_switch, live inboxes compose without the nonexistent clock kwarg, boot recovery wraps SnapshotBrokerStatePort in a real RuntimeReconciler, periodic reconciliation passes ReconcileTrigger.PERIODIC with a correctly advanced sequence, __all__ exports the real phase name. 44 focused supervision tests + 2076-test wave suite pass; ruff/ty clean; operator runbook published at .github/runbooks/trader-operations.md. REMAINING: AC1 live evidence - run the mid-session restart procedure from the runbook during the next RTH window (9:30-16:00 America/New_York) and confirm runs/<run-id>/supervision.json shows restore/resume phases; task completes on that evidence."
+        "2026-09-08 05:21:58 UTC: 2026-09-08 05:00 UTC: Wave verified. Composition-blocking defects fixed by integration (commit c6a49d9): SessionJournal persists through the SnapshotObjectStore port, _compose supplies the required kill_switch, live inboxes compose without the nonexistent clock kwarg, boot recovery wraps SnapshotBrokerStatePort in a real RuntimeReconciler, periodic reconciliation passes ReconcileTrigger.PERIODIC with a correctly advanced sequence, __all__ exports the real phase name. 44 focused supervision tests + 2076-test wave suite pass; ruff/ty clean; operator runbook published at .github/runbooks/trader-operations.md. REMAINING: AC1 live evidence - run the mid-session restart procedure from the runbook during the next RTH window (9:30-16:00 America/New_York) and confirm runs/<run-id>/supervision.json shows restore/resume phases; task completes on that evidence.",
+        "2026-09-08 18:32:54 UTC: 2026-09-08 18:40 UTC: Live deployment achieved. Four deployed-path defects fixed and deployed (websockets dependency, trader config adapter/strategy alignment, _resolve_credentials env-name keying, ReorderingInbox bounded-lateness feed boundary). Live paper session ran: 4566 events, 5 SPY bought, snapshots capturing. Mid-session revision restart drill: resume_reconcile restored books intact (action resume, snapshot 2fed09c9) - the AC1 recovery mechanism is proven live. Restored session then aborted fail-closed on the T216 defect (strategy re-entry duplicating venue fill sim-fill-3). T114 completes when T216 lands and the restart drill reruns clean. Trader scaled back to 0 pending the fix."
       ],
       "acceptance": [
         "A dev paper deployment survives a mid-session container restart under its configured policy",
@@ -12235,7 +12560,7 @@
         "T112"
       ],
       "createdAt": "2026-09-01T18:02:28.052Z",
-      "updatedAt": "2026-09-08T05:22:24.394Z",
+      "updatedAt": "2026-09-08T18:33:11.098Z",
       "verification": {
         "passed": true,
         "round": 1,
@@ -12245,7 +12570,7 @@
           "qaPassed": true
         },
         "lastAgent": "orchestrator",
-        "lastUpdated": "2026-09-08T05:22:24.394Z",
+        "lastUpdated": "2026-09-08T18:33:11.098Z",
         "failureLog": [],
         "initializedAt": "2026-09-01T18:02:28.052Z",
         "evidence": {
@@ -12253,23 +12578,23 @@
             "atoms": [
               {
                 "kind": "commit",
-                "sha": "c6a49d99a44eae9f6410112617424ef42f961014",
-                "shortSha": "c6a49d9"
+                "sha": "30791740f59674acedb952fe302412425a3c2e32",
+                "shortSha": "3079174"
               },
               {
                 "kind": "files",
                 "files": [
                   {
-                    "path": "src/harness/cli/supervisor.py",
-                    "sha256": "3592aff2c075b0c9fc0ef71db84134ddf0357e20735f5e413e679b160b2d4620"
+                    "path": "src/harness/cli/trader.py",
+                    "sha256": "86cd633300cd6de06af0bbf3bb290b85ac528057f5bf11ac60b6cb6872af4cc2"
                   },
                   {
-                    "path": "src/harness/cli/trader.py",
-                    "sha256": "f2e647361be2a9012d5ad36ddf658556ed7861d825558a24dd17d1e69c0a3987"
+                    "path": "src/harness/cli/supervisor.py",
+                    "sha256": "626eb592b6f95cc13c37943eeb438069134c420f048474503b7452de9fa58244"
                   },
                   {
                     "path": "tests/harness/cli/test_supervisor.py",
-                    "sha256": "3d569f06a423d302eb7c49990e99b93546885c90b899b5d3d2c6913128c401af"
+                    "sha256": "88aa896e46f49d52f39dd405161262a3c71fecdd95f535890f72d37dc0c6ef8b"
                   },
                   {
                     "path": ".github/runbooks/trader-operations.md",
@@ -12280,7 +12605,7 @@
               {
                 "kind": "test-run",
                 "path": ".github/verification/T114-validation.json",
-                "sha256": "5a4fc597db3379d821082055c9c445dbe9ca76817ed32cf380f28f08e77590bd",
+                "sha256": "683b7c777fb1b377cd11c03dea07331038a426dbe934ae8a8bc10dd660237395",
                 "passCount": 2076,
                 "failCount": 0,
                 "skipCount": 13
@@ -12289,37 +12614,37 @@
                 "kind": "tool",
                 "tool": "audit",
                 "exitCode": 0,
-                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
               },
               {
                 "kind": "note",
-                "note": "44 focused tests plus 2076-test wave suite pass, ruff and ty clean; AC1 live restart evidence pending next RTH window"
+                "note": "live paper session ran and mid-session restart restored via resume_reconcile with books intact; T216 defect remains"
               }
             ],
-            "capturedAt": "2026-09-08T05:22:25.057Z",
+            "capturedAt": "2026-09-08T18:33:11.769Z",
             "capturedBy": "orchestrator"
           },
           "testsPassed": {
             "atoms": [
               {
                 "kind": "commit",
-                "sha": "c6a49d99a44eae9f6410112617424ef42f961014",
-                "shortSha": "c6a49d9"
+                "sha": "30791740f59674acedb952fe302412425a3c2e32",
+                "shortSha": "3079174"
               },
               {
                 "kind": "files",
                 "files": [
                   {
-                    "path": "src/harness/cli/supervisor.py",
-                    "sha256": "3592aff2c075b0c9fc0ef71db84134ddf0357e20735f5e413e679b160b2d4620"
+                    "path": "src/harness/cli/trader.py",
+                    "sha256": "86cd633300cd6de06af0bbf3bb290b85ac528057f5bf11ac60b6cb6872af4cc2"
                   },
                   {
-                    "path": "src/harness/cli/trader.py",
-                    "sha256": "f2e647361be2a9012d5ad36ddf658556ed7861d825558a24dd17d1e69c0a3987"
+                    "path": "src/harness/cli/supervisor.py",
+                    "sha256": "626eb592b6f95cc13c37943eeb438069134c420f048474503b7452de9fa58244"
                   },
                   {
                     "path": "tests/harness/cli/test_supervisor.py",
-                    "sha256": "3d569f06a423d302eb7c49990e99b93546885c90b899b5d3d2c6913128c401af"
+                    "sha256": "88aa896e46f49d52f39dd405161262a3c71fecdd95f535890f72d37dc0c6ef8b"
                   },
                   {
                     "path": ".github/runbooks/trader-operations.md",
@@ -12330,7 +12655,7 @@
               {
                 "kind": "test-run",
                 "path": ".github/verification/T114-validation.json",
-                "sha256": "5a4fc597db3379d821082055c9c445dbe9ca76817ed32cf380f28f08e77590bd",
+                "sha256": "683b7c777fb1b377cd11c03dea07331038a426dbe934ae8a8bc10dd660237395",
                 "passCount": 2076,
                 "failCount": 0,
                 "skipCount": 13
@@ -12339,37 +12664,37 @@
                 "kind": "tool",
                 "tool": "audit",
                 "exitCode": 0,
-                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
               },
               {
                 "kind": "note",
-                "note": "44 focused tests plus 2076-test wave suite pass, ruff and ty clean; AC1 live restart evidence pending next RTH window"
+                "note": "live paper session ran and mid-session restart restored via resume_reconcile with books intact; T216 defect remains"
               }
             ],
-            "capturedAt": "2026-09-08T05:22:25.057Z",
+            "capturedAt": "2026-09-08T18:33:11.769Z",
             "capturedBy": "orchestrator"
           },
           "qaPassed": {
             "atoms": [
               {
                 "kind": "commit",
-                "sha": "c6a49d99a44eae9f6410112617424ef42f961014",
-                "shortSha": "c6a49d9"
+                "sha": "30791740f59674acedb952fe302412425a3c2e32",
+                "shortSha": "3079174"
               },
               {
                 "kind": "files",
                 "files": [
                   {
-                    "path": "src/harness/cli/supervisor.py",
-                    "sha256": "3592aff2c075b0c9fc0ef71db84134ddf0357e20735f5e413e679b160b2d4620"
+                    "path": "src/harness/cli/trader.py",
+                    "sha256": "86cd633300cd6de06af0bbf3bb290b85ac528057f5bf11ac60b6cb6872af4cc2"
                   },
                   {
-                    "path": "src/harness/cli/trader.py",
-                    "sha256": "f2e647361be2a9012d5ad36ddf658556ed7861d825558a24dd17d1e69c0a3987"
+                    "path": "src/harness/cli/supervisor.py",
+                    "sha256": "626eb592b6f95cc13c37943eeb438069134c420f048474503b7452de9fa58244"
                   },
                   {
                     "path": "tests/harness/cli/test_supervisor.py",
-                    "sha256": "3d569f06a423d302eb7c49990e99b93546885c90b899b5d3d2c6913128c401af"
+                    "sha256": "88aa896e46f49d52f39dd405161262a3c71fecdd95f535890f72d37dc0c6ef8b"
                   },
                   {
                     "path": ".github/runbooks/trader-operations.md",
@@ -12380,7 +12705,7 @@
               {
                 "kind": "test-run",
                 "path": ".github/verification/T114-validation.json",
-                "sha256": "5a4fc597db3379d821082055c9c445dbe9ca76817ed32cf380f28f08e77590bd",
+                "sha256": "683b7c777fb1b377cd11c03dea07331038a426dbe934ae8a8bc10dd660237395",
                 "passCount": 2076,
                 "failCount": 0,
                 "skipCount": 13
@@ -12389,14 +12714,14 @@
                 "kind": "tool",
                 "tool": "audit",
                 "exitCode": 0,
-                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
               },
               {
                 "kind": "note",
-                "note": "44 focused tests plus 2076-test wave suite pass, ruff and ty clean; AC1 live restart evidence pending next RTH window"
+                "note": "live paper session ran and mid-session restart restored via resume_reconcile with books intact; T216 defect remains"
               }
             ],
-            "capturedAt": "2026-09-08T05:22:25.057Z",
+            "capturedAt": "2026-09-08T18:33:11.769Z",
             "capturedBy": "orchestrator"
           }
         }
@@ -16852,6 +17177,52 @@
       "relates": []
     },
     {
+      "id": "T216",
+      "title": "Restored paper session re-enters the strategy and duplicates a venue fill id",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T073",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "2026-09-08 live T114 restart drill: the dev paper trader was restarted mid-session (revision restart at 18:26 UTC). The new boot restored via resume_reconcile (action resume, snapshot 2fed09c9) with books intact (5 SPY, cash 96161.025), proving the supervision restore path. The first post-restore quote then re-fired the strategy entry and the venue generated fill id sim-fill-3, colliding with the restored book fill (DuplicateFillError: fill already routed to book spy-momentum-paper), aborting the session fail-closed. Root cause to fix: either the BuyAndHold example strategy does not export/restores no _entered state so it re-submits the entry order after restore, or the simulated venue fill-id sequencer is not part of the restored snapshot and restarts below the restored fill count.",
+      "labels": [
+        "harness",
+        "paper",
+        "restart"
+      ],
+      "acceptance": [
+        "After a mid-session container restart, the restored session continues without re-submitting an already-filled order and without generating a venue fill id that collides with a restored book fill, verified by a focused restart-cycle test",
+        "The BuyAndHold example strategy exports its entered-symbol state so a restored runtime does not re-enter, or the venue fill sequencer continues past restored fill ids",
+        "Focused runtime tests, ruff, and ty pass on the touched paths"
+      ],
+      "files": [
+        "src/harness/runtime/paper.py",
+        "strategies/harness_examples/buy_and_hold.py",
+        "src/harness/runtime/state_store.py"
+      ],
+      "createdAt": "2026-09-08T18:30:25.835Z",
+      "updatedAt": "2026-09-08T18:30:25.835Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-08T18:30:25.835Z"
+      },
+      "pipelineStage": "research",
+      "kind": "bug",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T006",
       "title": "E3 CI/CD and GitHub OIDC",
       "status": "done",
@@ -17670,7 +18041,8 @@
         "The dev runtime deploys idempotently, scales by trading schedule, restores safely, reports health, and stays within explicit additive cost controls",
         "Complete child T112: H5.1 Extend Bicep for quant runtime",
         "Complete child T113: H5.2 Extend OIDC deployment and smoke workflow",
-        "Complete child T114: H5.3 Trader supervisor and operator runbook"
+        "Complete child T114: H5.3 Trader supervisor and operator runbook",
+        "Complete child T216: Restored paper session re-enters the strategy and duplicates a venue fill id"
       ],
       "depends": [
         "T004",
@@ -17680,7 +18052,7 @@
         "T072"
       ],
       "createdAt": "2026-09-01T17:55:32.747Z",
-      "updatedAt": "2026-09-01T18:33:53.088Z",
+      "updatedAt": "2026-09-08T18:30:25.835Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -28413,7 +28785,8 @@
       "T073": [
         "T112",
         "T113",
-        "T114"
+        "T114",
+        "T216"
       ],
       "T074": [
         "T115",

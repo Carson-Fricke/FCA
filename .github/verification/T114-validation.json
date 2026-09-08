@@ -28,10 +28,23 @@
       "name": "composition-integrity-fixes",
       "status": "passed",
       "command": "commit c6a49d9 review",
-      "result": "Integration fixed five composition-blocking defects found by focused review: SessionJournal now persists through the SnapshotObjectStore port (RuntimeStateStore exposes no raw store surface); _compose supplies the required kill_switch; the live inboxes compose without the nonexistent clock kwarg; boot recovery wraps SnapshotBrokerStatePort in a real RuntimeReconciler; periodic reconciliation passes ReconcileTrigger.PERIODIC with a correctly advanced sequence; __all__ exports the real phase class name"
+      "result": "Integration fixed six composition-blocking defects found by focused review and live-boot diagnosis: SessionJournal now persists through the SnapshotObjectStore port (RuntimeStateStore exposes no raw store surface); _compose supplies the required kill_switch; the live inboxes compose without the nonexistent clock kwarg; boot recovery wraps SnapshotBrokerStatePort in a real RuntimeReconciler; periodic reconciliation passes ReconcileTrigger.PERIODIC with a correctly advanced sequence; __all__ exports the real phase class name"
+    },
+    {
+      "name": "live-deployment-fixes",
+      "status": "passed",
+      "command": "commits 1126fbf, 70fcacc, c647dd5, 3079174",
+      "result": "Four live-boot defects found and fixed against the deployed dev trader: the websockets transport dependency was missing from the runtime image (SystemExit before any journal write); the deployed trader config referenced an unimplemented market-data adapter and a nonexistent strategy module (repointed to the alpaca_ws SIP feed and BuyAndHoldStrategy); _resolve_credentials keyed resolved values by config field name while checking and subscripting by environment-variable name, so every boot failed the credential gate deterministically; and the live SIP feed interleaves per-symbol timestamps, which the deterministic kernel rejects, fixed by the bounded ReorderingInbox lateness window at the supervision boundary"
+    },
+    {
+      "name": "live-paper-session-and-restart-drill",
+      "status": "passed",
+      "command": "az containerapp update fca-ml-dev-rth-trader min-replicas 1; az containerapp revision restart; supervision.json + restarts.json + snapshots from harness-state",
+      "result": "The deployed supervisor ran a live paper session: 4566 market events consumed, the strategy bought 5 SPY (cash 96161.03, equity 99999.37), periodic snapshots captured, heartbeats and watermark advancing. The mid-session revision restart exercised the full recovery path: the new boot restored via resume_reconcile (action resume, snapshot 2fed09c9) with books intact. The supervision crash-loop gate had earlier engaged exactly as designed during the websockets incident and the durable restart ledger bounded it"
     }
   ],
   "limitations": [
-    "AC1 (a dev paper deployment survives a mid-session container restart) awaits live evidence: the deployed supervisor has not yet run inside an RTH session window, so no supervision document exists in harness-state. Execute the restart procedure from .github/runbooks/trader-operations.md during the next KEDA window (9:30-16:00 America/New_York), then verify runs/<run-id>/supervision.json shows restore/resume phases and the restart ledger bounds consecutive faults"
+    "AC1 (a dev paper deployment survives a mid-session container restart) is proven mechanically: the restart drill restored via resume_reconcile with books intact. The restored session then aborted fail-closed on the T216 defect (restored strategy re-entry duplicating a venue fill id); T114 completes once T216 lands and the restart drill reruns with the session continuing",
+    "The option ensure route (_ensure_option) retains its own short-circuit and is not repaired by this change"
   ]
 }

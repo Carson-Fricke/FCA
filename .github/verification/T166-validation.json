@@ -1,0 +1,32 @@
+{
+  "taskId": "T166",
+  "numTotalTests": 80,
+  "numPassedTests": 80,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-ingest-and-search-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/knowledge/test_search.py tests/thesis/knowledge/test_corpus.py",
+      "result": "28 ingest/search tests + 52 corpus tests: ingestion always proposes untrusted pages (AC1) including pages whose own front matter claims platform_policy, sha256 content hashing, duplicate/version-bump/new dedup verdicts, verbatim body preservation, is_instruction_like injection detectors with ordinary-prose pass (AC5), byte-identical deterministic index serialization with round-trip load (AC4), lexical/metadata/hyperlink/semantic hybrid retrieval with a dependency-free seeded HashingEmbedder (AC2), effective-date windowing, and full citation provenance on every hit: path, Git revision, page version, source url/publisher/content_hash, effective dates, trust tier (AC3)"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2155 passed at wave edit freeze (13 skipped performance benchmarks, 1 xfailed audit marker)"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/knowledge tests/thesis/knowledge && uv run --extra dev ruff format --check src/thesis/knowledge tests/thesis/knowledge && uv run --extra dev ty check src/thesis/knowledge",
+      "result": "ruff check, ruff format --check, and ty clean on the knowledge package"
+    }
+  ],
+  "limitations": [
+    "The production embedding backend is replaceable via EmbeddingPort; the shipped HashingEmbedder is a deterministic lexical baseline, not a semantic model, per the architecture's replaceable-embeddings stance",
+    "Network fetching is an injected FetchPort boundary; no fetcher implementation ships in this task (proposals can be built from supplied documents) and fetched content never auto-trusts"
+  ]
+}

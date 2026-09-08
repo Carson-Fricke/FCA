@@ -1,0 +1,31 @@
+{
+  "taskId": "T165",
+  "numTotalTests": 80,
+  "numPassedTests": 80,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-corpus-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/knowledge/test_corpus.py tests/thesis/knowledge/test_search.py",
+      "result": "52 corpus tests + 28 search tests (T166 layer unbroken) covering the pinned front-matter contract, the dependency-free YAML-subset parser with precise MetadataError cases, deterministic front-matter rendering with round-trip equality, typed link/relationship validation with backlinks/superseded_by/contradictions accessors, corpus loading from a fixture tree with a supersession chain and a contradiction, duplicate-id detection, Git revision capture via a fake subprocess, and validate() problem listing"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2155 passed at wave edit freeze (13 skipped performance benchmarks, 1 xfailed audit marker); the two remaining ruff F841 findings live in the concurrently-owned T214 experiment scripts, not in this task's files"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/knowledge tests/thesis/knowledge && uv run --extra dev ruff format --check src/thesis/knowledge tests/thesis/knowledge && uv run --extra dev ty check src/thesis/knowledge",
+      "result": "ruff check, ruff format --check, and ty clean on the knowledge package after integration hardening (ty-safe test builders, no ignore-comment suppressions)"
+    }
+  ],
+  "limitations": [
+    "Curation and publication remain explicit Git operations performed by the operator; no Git-write automation exists yet by design (AC3)"
+  ]
+}
