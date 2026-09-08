@@ -2,6 +2,7 @@
 	import TimeSeriesChart from '$lib/components/charts/TimeSeriesChart.svelte';
 	import { profile } from '$lib/data/spy0dteProfile.js';
 	import { backtests } from '$lib/data/spy0dteBacktests.js';
+	import { backtestsV2 } from '$lib/data/spy0dteBacktestsV2.js';
 
 	const m = profile.meta;
 	const height = 230;
@@ -14,12 +15,16 @@
 		overnightStraddle: 'Overnight ATM Straddle'
 	};
 	const strategyOrder = ['openingCalendar', 'middayCondor', 'powerHourStraddle', 'overnightStraddle'];
-	let activeStrategy = $state('openingCalendar');
+	let activeStrategy = $state('powerHourStraddle');
+	let activeVersion = $state('v2'); // default to the cost-adjusted results
+
+	const activeBacktests = $derived(activeVersion === 'v2' ? backtestsV2 : backtests);
+	const activeMeta = $derived(activeVersion === 'v2' ? backtestsV2.meta : backtests.meta);
 
 	function equityPoints(summary) {
 		if (!summary || !summary.equity || !summary.days) return [];
 		return summary.days.map((day, i) => ({
-			t: (1788813000000 + i * 86400000),
+			t: 1788813000000 + i * 86400000,
 			v: summary.equity[i]
 		}));
 	}
@@ -27,7 +32,7 @@
 	function pnlPoints(summary) {
 		if (!summary || !summary.days) return [];
 		return summary.days.map((day, i) => ({
-			t: (1788813000000 + i * 86400000),
+			t: 1788813000000 + i * 86400000,
 			v: day.pnl
 		}));
 	}
@@ -236,6 +241,27 @@
 
 	<div class="card">
 		<h2>Strategy backtests</h2>
+		<div class="version-row">
+			<button
+				class="version-tab"
+				class:active={activeVersion === 'v1'}
+				onclick={() => (activeVersion = 'v1')}
+			>V1 — Gross (no costs)</button>
+			<button
+				class="version-tab"
+				class:active={activeVersion === 'v2'}
+				onclick={() => (activeVersion = 'v2')}
+			>V2 — With stops &amp; commission</button>
+		</div>
+		{#if activeVersion === 'v2'}
+			<p class="meta-line">
+				Limit-at-mid fills &middot; ${activeMeta.commissionPerContract}/contract/side &middot;
+				stop-loss at {activeMeta.stopLossPct * 100}% &middot; condor wings ±{activeMeta.condorOtmPct}%/±{activeMeta.condorWingPct}%
+				&middot; morning filter &lt;{activeMeta.morningFilterPct}%
+			</p>
+		{:else}
+			<p class="meta-line">Mid fills, no commission, no stop-loss, no spread modeling</p>
+		{/if}
 		<div class="tabs">
 			{#each strategyOrder as key}
 				<button
@@ -244,23 +270,28 @@
 					onclick={() => (activeStrategy = key)}
 				>
 					{strategyLabels[key]}
+					{#if activeBacktests.strategies[key] && activeBacktests.strategies[key].count > 0}
+						<span class="tab-pnl" class:negative={activeBacktests.strategies[key].totalPnl < 0}>
+							{activeBacktests.strategies[key].totalPnl >= 0 ? '+' : ''}${activeBacktests.strategies[key].totalPnl.toFixed(0)}
+						</span>
+					{/if}
 				</button>
 			{/each}
 		</div>
-		{#if backtests.strategies[activeStrategy] && backtests.strategies[activeStrategy].count > 0}
-			{@const s = backtests.strategies[activeStrategy]}
+		{#if activeBacktests.strategies[activeStrategy] && activeBacktests.strategies[activeStrategy].count > 0}
+			{@const s = activeBacktests.strategies[activeStrategy]}
 			<div class="stats">
 				<div class="stat"><span class="label">Trades</span><span class="value">{s.count}</span></div>
 				<div class="stat"><span class="label">Total P&L</span><span class="value" class:negative={s.totalPnl < 0}>${s.totalPnl.toFixed(2)}</span></div>
 				<div class="stat"><span class="label">Win rate</span><span class="value">{(s.winRate * 100).toFixed(0)}%</span></div>
-				<div class="stat"><span class="label">Mean</span><span class="value" class:negative={s.meanPnl < 0}>${s.meanPnl.toFixed(2)}</span></div>
+				<div class="stat"><span class="label">Mean/trade</span><span class="value" class:negative={s.meanPnl < 0}>${s.meanPnl.toFixed(2)}</span></div>
 				<div class="stat"><span class="label">Best</span><span class="value positive">+${s.best.toFixed(2)}</span></div>
 				<div class="stat"><span class="label">Worst</span><span class="value negative">${s.worst.toFixed(2)}</span></div>
 				<div class="stat"><span class="label">Max DD</span><span class="value negative">${s.maxDrawdown.toFixed(2)}</span></div>
 			</div>
 			<div class="bt-grid">
 				<TimeSeriesChart
-					title="Cumulative P&L"
+					title="Cumulative P&L (dollars, per contract)"
 					render="line"
 					height={200}
 					{minSpan}
@@ -268,7 +299,7 @@
 					series={[{ name: 'equity', data: equityPoints(s), render: 'line', fill: true }]}
 				/>
 				<TimeSeriesChart
-					title="Per-trade P&L"
+					title="Per-trade P&L (dollars, per contract)"
 					render="line"
 					height={200}
 					{minSpan}
@@ -277,13 +308,22 @@
 				/>
 			</div>
 		{:else}
-			<p class="caveat">No qualifying trades.</p>
+			<p class="caveat">No qualifying trades — entry credit after costs is not positive, or strikes lack trade data.</p>
 		{/if}
-		<p class="caveat">
-			Simulated from trade-print medians at exact strikes and minutes. No fill slippage, no
-			commission, no bid/ask spread. Entry and exit prices are the actual NBBO-proxy medians the
-			market printed in the relevant minute.
-		</p>
+		{#if activeVersion === 'v2'}
+			<p class="caveat">
+				Limit-at-mid fills (trade-print median, no bid/ask spread cost). Commission:
+				${activeMeta.commissionPerContract}/contract/side (2-leg round trip = $2.60,
+				4-leg = $5.20, 8-leg = $10.40). Stop-loss fires when unrealized loss reaches
+				{activeMeta.stopLossPct * 100}% of initial credit. Option prices are per-share;
+				P&L is multiplied by the 100-share contract multiplier before subtracting commission.
+			</p>
+		{:else}
+			<p class="caveat">
+				Gross P&L only — no commission, no spread, no stop-loss. Shows the theoretical edge
+				before costs.
+			</p>
+		{/if}
 	</div>
 
 	<div class="card findings">
@@ -422,6 +462,37 @@
 		color: #0c1220;
 		font-weight: 600;
 		border-color: var(--accent);
+	}
+	.tab-pnl {
+		margin-left: 6px;
+		font-weight: 600;
+	}
+	.tab-pnl.negative {
+		color: #f87171;
+	}
+	.version-row {
+		display: flex;
+		gap: 6px;
+		margin-bottom: 8px;
+	}
+	.version-tab {
+		padding: 4px 10px;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 4px;
+		background: transparent;
+		color: var(--muted);
+		font-size: 11px;
+		cursor: pointer;
+	}
+	.version-tab.active {
+		background: rgba(34, 211, 238, 0.15);
+		color: var(--accent);
+		border-color: var(--accent);
+	}
+	.meta-line {
+		font-size: 11px;
+		color: var(--muted);
+		margin-bottom: 10px;
 	}
 	.stats {
 		display: flex;
