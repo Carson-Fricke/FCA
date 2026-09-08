@@ -64,6 +64,9 @@ COPY --from=native /out/ /opt/native/
 COPY config/ /app/config/
 
 WORKDIR /app
+# The CLI artifact convention writes under .local/ (backtest artifacts,
+# local trader state); the runtime user needs a writable mount point there.
+RUN mkdir -p /app/.local && chown lake:lake /app/.local
 USER lake
 
 ENTRYPOINT ["lake"]
