@@ -170,7 +170,6 @@ def test_opra_trades_paginate_across_selected_symbols_and_preserve_contract_meta
         "symbols": f"{SPY_CALL.symbol},{QQQ_PUT.symbol}",
         "start": "2024-01-19T00:00:00Z",
         "end": "2024-01-20T00:00:00Z",
-        "feed": "opra",
         "limit": 2,
         "sort": "asc",
     }

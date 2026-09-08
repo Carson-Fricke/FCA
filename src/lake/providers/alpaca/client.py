@@ -565,10 +565,14 @@ class AlpacaClient:
                 "symbols": ",".join(contracts_by_symbol),
                 "start": _format_bound(start),
                 "end": _format_bound(end),
-                "feed": feed,
                 "limit": limit,
                 "sort": "asc",
             }
+            # The provider's option trades endpoint rejects a feed parameter
+            # outright ("unexpected query parameter(s): feed"); only quotes
+            # accept one. ``feed`` remains pinned to "opra" by validation.
+            if data_type == "quotes":
+                params["feed"] = feed
             if page_token is not None:
                 params["page_token"] = page_token
 
