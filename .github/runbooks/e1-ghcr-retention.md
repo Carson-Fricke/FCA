@@ -4,6 +4,9 @@ This runbook covers the scheduled prune of the private GHCR container image
 (`ghcr.io/carson-fricke/fca`) published by `publish-image.yml` and consumed by
 `deploy-main.yml`. It is an automatic cost-control loop with a manual
 dispatch path; it never deletes the image the deployment currently relies on.
+It also documents the retention of the private ACR mirror that
+`deploy-main.yml` imports each published digest into (per-service
+keep-latest-and-previous, T208).
 
 ## Retention Rule
 
@@ -91,3 +94,98 @@ by version id. Package-level settings (visibility, role access) live at
 - Do not lower the 7-day floor to shrink the bill: the floor, not the
   newest-10 window, is what guarantees rollback re-imports within the Azure
   rollback window. Image slimming is the separate cost lever.
+
+## ACR Mirror Retention (Per Service)
+
+`deploy-main.yml` imports every published digest into the private ACR
+(repository = lowercased GitHub repository name, e.g. `fca`, tagged with the
+commit SHA) and deploys Container Apps by ACR digest. Unlike GHCR, that ACR is
+where the runtime actually pulls, so ACR retention must stay ahead of cost
+without ever stranding a running or rollback-able revision. Two mechanisms
+cooperate:
+
+1. **Registry-level retention policy** (`infra/modules/container-registry.bicep`)
+   declares `properties.policies.retention` with `days: retentionDays`
+   (default 7, range 7-90) and `status: retentionStatus` (default `enabled`),
+   so the policy exists from Bicep with no portal change. Its limits:
+   - It is a **Premium SKU** feature; the registry is deployed on Basic, so
+     the declaration is inert until the SKU is upgraded.
+   - The service purges only **untagged** manifests after the age threshold.
+     The mirrored manifests keep their commit-SHA tag, so the policy never
+     cleans the imported digests; it covers future untagged leftovers only.
+2. **Per-service prune workflow** (`.github/workflows/prune-acr.yml`) is the
+   enforced path. It runs weekly (Sundays 04:00 UTC), on manual
+   `workflow_dispatch`, and is called by `deploy-main.yml` after a successful
+   deploy (`acr-retention` job) so the just-deployed digest is always treated
+   as retained regardless of survey ordering.
+
+### Retention Rule
+
+The workflow signs in with the deployer OIDC identity (no client secrets),
+discovers the registry by the same tag filter as the deploy
+(`tags.product=='market-lake' && tags.environment==<env>`), and surveys the
+service repository's manifests (`az acr manifest list-metadata`, one bounded
+server page, re-sorted newest-first before any decision). Kept, in precedence
+order (the union of all rules is retained):
+
+1. The **newest two** digests (latest + previous) are always kept.
+2. The **deployed digest** passed as the `image-digest` input is kept.
+3. Any digest **referenced by an active Container App revision or by a
+   revision that still receives traffic** (a rollback candidate) of the api,
+   quant-api, rth-trader, and optional crypto-trader apps is kept.
+4. The current **ingest and backtest job images** (jobs have no revisions;
+   their template image is the live reference) are kept.
+5. Any digest **carrying a non-40-hex (mutable) tag** is never deleted,
+   mirroring the GHCR moving-tag safety net.
+
+Everything else inside the surveyed page is deleted with
+`az acr repository delete --yes`, one bounded loop capped at 100 deletions,
+per-manifest failures reported as warnings and retried on the next run.
+The workflow only ever enumerates and deletes inside the one service
+repository, so **non-service images in the registry are never touched**.
+Deleting a digest removes its commit-SHA tag along with the manifest, exactly
+like GHCR.
+
+### Run Manually
+
+```powershell
+gh workflow run prune-acr.yml
+gh run watch --workflow prune-acr.yml
+```
+
+Optionally pin a digest to retain regardless of age:
+
+```powershell
+gh workflow run prune-acr.yml -f image-digest=sha256:<64-hex>
+```
+
+The log must report the surveyed manifest count and the deletion count,
+ending in a notice like
+`ACR prune complete: surveyed N mirrored manifest(s) in fca; deleted D/N; ...`.
+
+### Identity and Permissions
+
+The prune runs environment-gated with `contents: read` + `id-token: write`
+and no other write scope. Manifest listing is read-only data-plane access,
+which the deployer already exercises in `deploy-main.yml` when it verifies
+the mirrored digest. Deletion is a data-plane delete under the same identity;
+individual failures are warnings and retry on the next run. If every delete
+fails with an authorization error, the deployer identity needs the ACR
+delete data action (for example `AcrDelete` or
+`Container Registry Repository Contributor`) granted at the registry scope
+through the authorized bootstrap path; the runtime and quant identities keep
+pull-only access.
+
+### Adoption Notes (Quant Runtime and Thesis Backend)
+
+The workflow is service-parameterized: the `repository-name` input defaults to
+the lowercased GitHub repository (the FCA service repo) and can be overridden
+for any other ACR repository. When the quant runtime image publication
+(T112-T114) and the Thesis backend image deployment (T174, T178) land:
+
+- Import into the private ACR and call `prune-acr.yml` from the owning
+  deployment workflow with that service's repository name and digest, or rely
+  on the weekly scheduled run if the image deploys outside `deploy-main.yml`.
+- Keep the newest-two rule and the revision-reference check unchanged; only
+  the repository name and the list of workloads queried for revisions need to
+  reflect the adopting service.

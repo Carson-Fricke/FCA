@@ -19,6 +19,18 @@ param location string = resourceGroup().location
 @description('Tags applied to the private runtime registry.')
 param tags object = {}
 
+@description('Days the registry-level retention policy keeps an untagged manifest before automated cleanup. The Azure rollback window is 7 days, which is also the ACR minimum; the supported range is 7-90 days.')
+@minValue(7)
+@maxValue(90)
+param retentionDays int = 7
+
+@allowed([
+  'enabled'
+  'disabled'
+])
+@description('Status of the registry-level retention policy. Enabled by default so the policy applies from Bicep with no portal change; disable it only to hand deletion fully to the per-service prune workflow.')
+param retentionStatus string = 'enabled'
+
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: registryName
   location: location
@@ -30,6 +42,19 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
     adminUserEnabled: false
     dataEndpointEnabled: false
     networkRuleBypassOptions: 'AzureServices'
+    policies: {
+      // The registry-level retention policy purges only untagged manifests
+      // after the configured age and is enforced only on the Premium SKU. The
+      // mirrored manifests keep their commit-SHA tag, so tag-carrying digests
+      // need the per-service prune workflow (.github/workflows/prune-acr.yml),
+      // which keeps the newest two digests plus every digest an active or
+      // rollback Container App revision still references. Upgrading the SKU
+      // activates this policy for untagged manifests with no further change.
+      retentionPolicy: {
+        days: retentionDays
+        status: retentionStatus
+      }
+    }
     publicNetworkAccess: 'Enabled'
     zoneRedundancy: 'Disabled'
   }
@@ -66,6 +91,8 @@ output registry object = {
   loginServer: registry.properties.loginServer
   adminUserEnabled: registry.properties.adminUserEnabled
   anonymousPullEnabled: false
+  retentionDays: retentionDays
+  retentionStatus: retentionStatus
   runtimeAcrPullAssignmentId: runtimeAcrPull.id
   imageImportAcrPullAssignmentId: empty(imageImportPrincipalId) ? null : imageImportAcrPull.id
 }

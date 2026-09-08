@@ -470,3 +470,19 @@ jobs:
       # the lake; this pins their smoke verification to the exact published
       # digest. See .github/runbooks/h5-quant-smoke.md.
       image-digest: ${{ needs.publish-image.outputs.image-digest }}
+
+  acr-retention:
+    name: ACR image retention
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs:
+      - publish-image
+      - deploy
+    uses: ./.github/workflows/prune-acr.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      # The prune keeps the newest and previous mirrored digest per service and
+      # treats the just-deployed digest as retained regardless of survey
+      # ordering. See .github/runbooks/e1-ghcr-retention.md.
+      image-digest: ${{ needs.publish-image.outputs.image-digest }}
