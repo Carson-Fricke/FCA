@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-08T02:43:17.252Z",
+    "exportedAt": "2026-09-08T05:23:21.538Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 215
     },
-    "checksum": "a15316a0b83fc15e",
+    "checksum": "b2774f4d51088957",
     "taskCount": 211,
     "exportMode": "full"
   },
@@ -708,7 +708,7 @@
     "T113": {
       "type": "task",
       "title": "H5.2 Extend OIDC deployment and smoke workflow",
-      "status": "pending",
+      "status": "done",
       "parentId": "T073",
       "depends": [
         "T031",
@@ -1671,7 +1671,7 @@
     "T214": {
       "type": "task",
       "title": "H8.5 SPY 0DTE intraday theta-delta experiment (native CRR kernels and 42-session study)",
-      "status": "pending",
+      "status": "done",
       "parentId": "T076",
       "depends": []
     },
@@ -2300,7 +2300,7 @@
     "T212": {
       "type": "task",
       "title": "Prune GHCR image versions on a schedule",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": []
     },
@@ -8275,7 +8275,7 @@
     {
       "id": "T113",
       "title": "H5.2 Extend OIDC deployment and smoke workflow",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T073",
@@ -8301,8 +8301,14 @@
         "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
       ],
       "files": [
-        ".github/workflows/deploy-quant-harness.yml",
-        ".github/actions/quant-harness"
+        ".github/workflows/quant-smoke.yml",
+        ".github/workflows/deploy-main.yml",
+        ".github/runbooks/h5-quant-smoke.md",
+        ".github/runbooks/github-azure-oidc-bootstrap.md",
+        ".github/runbooks/key-vault-runtime-secrets.md",
+        "Dockerfile",
+        ".dockerignore",
+        "infra/modules/container-apps.bicep"
       ],
       "depends": [
         "T031",
@@ -8310,21 +8316,218 @@
         "T112"
       ],
       "createdAt": "2026-09-01T18:02:23.322Z",
-      "updatedAt": "2026-09-03T00:39:14.991Z",
+      "updatedAt": "2026-09-08T05:17:00.780Z",
+      "completedAt": "2026-09-08T05:16:56.755Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T05:16:29.745Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:02:23.322Z"
+        "initializedAt": "2026-09-01T18:02:23.322Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6ce2b2f986e5640c0020a84d98c9247656ff0710",
+                "shortSha": "6ce2b2f"
+              },
+              {
+                "kind": "commit",
+                "sha": "4e08750bd6564ba9786be1dfe8932902f6f4fccc",
+                "shortSha": "4e08750"
+              },
+              {
+                "kind": "commit",
+                "sha": "f00054636044df6c6082682433b8e3e9e0a9acdf",
+                "shortSha": "f000546"
+              },
+              {
+                "kind": "commit",
+                "sha": "44850751b79634e5575f66caaf7affbed82eae8a",
+                "shortSha": "4485075"
+              },
+              {
+                "kind": "commit",
+                "sha": "50083b245f4759af37226c4b8560b4cca15c47a0",
+                "shortSha": "50083b2"
+              },
+              {
+                "kind": "commit",
+                "sha": "e4fb026c2a28c51f7d68aaccdc327e57a34dcdcb",
+                "shortSha": "e4fb026"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/workflows/quant-smoke.yml",
+                    "sha256": "b42e28b3d425f4d48e3439cc114949f8be554edad48f3b9e8945fd6977428926"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T113-validation.json",
+                "sha256": "8cf08fbe4d817270bb0acad2e8109eb0d201cbdf61781f2a2531f3ac7fb31288",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "deploy-main run 34188517611 green, all quant-smoke steps succeeded over OIDC only"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:16:32.308Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6ce2b2f986e5640c0020a84d98c9247656ff0710",
+                "shortSha": "6ce2b2f"
+              },
+              {
+                "kind": "commit",
+                "sha": "4e08750bd6564ba9786be1dfe8932902f6f4fccc",
+                "shortSha": "4e08750"
+              },
+              {
+                "kind": "commit",
+                "sha": "f00054636044df6c6082682433b8e3e9e0a9acdf",
+                "shortSha": "f000546"
+              },
+              {
+                "kind": "commit",
+                "sha": "44850751b79634e5575f66caaf7affbed82eae8a",
+                "shortSha": "4485075"
+              },
+              {
+                "kind": "commit",
+                "sha": "50083b245f4759af37226c4b8560b4cca15c47a0",
+                "shortSha": "50083b2"
+              },
+              {
+                "kind": "commit",
+                "sha": "e4fb026c2a28c51f7d68aaccdc327e57a34dcdcb",
+                "shortSha": "e4fb026"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/workflows/quant-smoke.yml",
+                    "sha256": "b42e28b3d425f4d48e3439cc114949f8be554edad48f3b9e8945fd6977428926"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T113-validation.json",
+                "sha256": "8cf08fbe4d817270bb0acad2e8109eb0d201cbdf61781f2a2531f3ac7fb31288",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "deploy-main run 34188517611 green, all quant-smoke steps succeeded over OIDC only"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:16:32.308Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "6ce2b2f986e5640c0020a84d98c9247656ff0710",
+                "shortSha": "6ce2b2f"
+              },
+              {
+                "kind": "commit",
+                "sha": "4e08750bd6564ba9786be1dfe8932902f6f4fccc",
+                "shortSha": "4e08750"
+              },
+              {
+                "kind": "commit",
+                "sha": "f00054636044df6c6082682433b8e3e9e0a9acdf",
+                "shortSha": "f000546"
+              },
+              {
+                "kind": "commit",
+                "sha": "44850751b79634e5575f66caaf7affbed82eae8a",
+                "shortSha": "4485075"
+              },
+              {
+                "kind": "commit",
+                "sha": "50083b245f4759af37226c4b8560b4cca15c47a0",
+                "shortSha": "50083b2"
+              },
+              {
+                "kind": "commit",
+                "sha": "e4fb026c2a28c51f7d68aaccdc327e57a34dcdcb",
+                "shortSha": "e4fb026"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/workflows/quant-smoke.yml",
+                    "sha256": "b42e28b3d425f4d48e3439cc114949f8be554edad48f3b9e8945fd6977428926"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T113-validation.json",
+                "sha256": "8cf08fbe4d817270bb0acad2e8109eb0d201cbdf61781f2a2531f3ac7fb31288",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "deploy-main run 34188517611 green, all quant-smoke steps succeeded over OIDC only"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:16:32.308Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "assignee": "h5-oidc",
       "kind": "work",
       "scope": "unit",
@@ -12000,6 +12203,9 @@
         "harness.h037",
         "operations"
       ],
+      "notes": [
+        "2026-09-08 05:21:58 UTC: 2026-09-08 05:00 UTC: Wave verified. Composition-blocking defects fixed by integration (commit c6a49d9): SessionJournal persists through the SnapshotObjectStore port, _compose supplies the required kill_switch, live inboxes compose without the nonexistent clock kwarg, boot recovery wraps SnapshotBrokerStatePort in a real RuntimeReconciler, periodic reconciliation passes ReconcileTrigger.PERIODIC with a correctly advanced sequence, __all__ exports the real phase name. 44 focused supervision tests + 2076-test wave suite pass; ruff/ty clean; operator runbook published at .github/runbooks/trader-operations.md. REMAINING: AC1 live evidence - run the mid-session restart procedure from the runbook during the next RTH window (9:30-16:00 America/New_York) and confirm runs/<run-id>/supervision.json shows restore/resume phases; task completes on that evidence."
+      ],
       "acceptance": [
         "A dev paper deployment survives a mid-session container restart under its configured policy",
         "harness status reports phase, watermark age, and book summary",
@@ -12009,8 +12215,10 @@
         "Strategy-facing contract changes update repository architecture guidance, and engine-path changes preserve the determinism golden test"
       ],
       "files": [
-        "src/harness/runtime/trader.py",
-        ".github/runbooks/trader.md"
+        "src/harness/cli/trader.py",
+        "src/harness/cli/supervisor.py",
+        "tests/harness/cli/test_supervisor.py",
+        ".github/runbooks/trader-operations.md"
       ],
       "depends": [
         "T107",
@@ -12019,19 +12227,171 @@
         "T112"
       ],
       "createdAt": "2026-09-01T18:02:28.052Z",
-      "updatedAt": "2026-09-06T01:00:26.300Z",
+      "updatedAt": "2026-09-08T05:22:24.394Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T05:22:24.394Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T18:02:28.052Z"
+        "initializedAt": "2026-09-01T18:02:28.052Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c6a49d99a44eae9f6410112617424ef42f961014",
+                "shortSha": "c6a49d9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/cli/supervisor.py",
+                    "sha256": "3592aff2c075b0c9fc0ef71db84134ddf0357e20735f5e413e679b160b2d4620"
+                  },
+                  {
+                    "path": "src/harness/cli/trader.py",
+                    "sha256": "f2e647361be2a9012d5ad36ddf658556ed7861d825558a24dd17d1e69c0a3987"
+                  },
+                  {
+                    "path": "tests/harness/cli/test_supervisor.py",
+                    "sha256": "3d569f06a423d302eb7c49990e99b93546885c90b899b5d3d2c6913128c401af"
+                  },
+                  {
+                    "path": ".github/runbooks/trader-operations.md",
+                    "sha256": "f033dfb75e6bd6c9e110d655ecf0c29f621ecd6291895d01f8e6b412248330f7"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T114-validation.json",
+                "sha256": "5a4fc597db3379d821082055c9c445dbe9ca76817ed32cf380f28f08e77590bd",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "44 focused tests plus 2076-test wave suite pass, ruff and ty clean; AC1 live restart evidence pending next RTH window"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:22:25.057Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c6a49d99a44eae9f6410112617424ef42f961014",
+                "shortSha": "c6a49d9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/cli/supervisor.py",
+                    "sha256": "3592aff2c075b0c9fc0ef71db84134ddf0357e20735f5e413e679b160b2d4620"
+                  },
+                  {
+                    "path": "src/harness/cli/trader.py",
+                    "sha256": "f2e647361be2a9012d5ad36ddf658556ed7861d825558a24dd17d1e69c0a3987"
+                  },
+                  {
+                    "path": "tests/harness/cli/test_supervisor.py",
+                    "sha256": "3d569f06a423d302eb7c49990e99b93546885c90b899b5d3d2c6913128c401af"
+                  },
+                  {
+                    "path": ".github/runbooks/trader-operations.md",
+                    "sha256": "f033dfb75e6bd6c9e110d655ecf0c29f621ecd6291895d01f8e6b412248330f7"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T114-validation.json",
+                "sha256": "5a4fc597db3379d821082055c9c445dbe9ca76817ed32cf380f28f08e77590bd",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "44 focused tests plus 2076-test wave suite pass, ruff and ty clean; AC1 live restart evidence pending next RTH window"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:22:25.057Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c6a49d99a44eae9f6410112617424ef42f961014",
+                "shortSha": "c6a49d9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/cli/supervisor.py",
+                    "sha256": "3592aff2c075b0c9fc0ef71db84134ddf0357e20735f5e413e679b160b2d4620"
+                  },
+                  {
+                    "path": "src/harness/cli/trader.py",
+                    "sha256": "f2e647361be2a9012d5ad36ddf658556ed7861d825558a24dd17d1e69c0a3987"
+                  },
+                  {
+                    "path": "tests/harness/cli/test_supervisor.py",
+                    "sha256": "3d569f06a423d302eb7c49990e99b93546885c90b899b5d3d2c6913128c401af"
+                  },
+                  {
+                    "path": ".github/runbooks/trader-operations.md",
+                    "sha256": "f033dfb75e6bd6c9e110d655ecf0c29f621ecd6291895d01f8e6b412248330f7"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T114-validation.json",
+                "sha256": "5a4fc597db3379d821082055c9c445dbe9ca76817ed32cf380f28f08e77590bd",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "44 focused tests plus 2076-test wave suite pass, ruff and ty clean; AC1 live restart evidence pending next RTH window"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:22:25.057Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
       "pipelineStage": "implementation",
       "assignee": "h5-supervisor",
@@ -19014,7 +19374,7 @@
     {
       "id": "T214",
       "title": "H8.5 SPY 0DTE intraday theta-delta experiment (native CRR kernels and 42-session study)",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T076",
@@ -19027,6 +19387,9 @@
         "realism-spike",
         "options",
         "research"
+      ],
+      "notes": [
+        "2026-09-08 03:05:58 UTC: SPY 0DTE intraday theta-delta realism spike: native CRR kernels (C ABI v2) with harness.quant facade; 42-session OPRA trade-tick ingest; backward-strip decomposition with fixed SMA-30-IV and movement-scaled-IV scenario views; Thesis UI study page with findings and candidate strategies."
       ],
       "acceptance": [
         "Native quant kernels exported behind C ABI v2 with zig fmt, zig build test, and Python facade parity tests passing",
@@ -19045,21 +19408,137 @@
         "src/ui/src/lib/data/spy0dteProfile.js"
       ],
       "createdAt": "2026-09-08T02:30:45.685Z",
-      "updatedAt": "2026-09-08T02:35:42.634Z",
+      "updatedAt": "2026-09-08T03:06:02.184Z",
+      "completedAt": "2026-09-08T03:05:57.327Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "opencode",
+        "lastUpdated": "2026-09-08T02:59:56.343Z",
         "failureLog": [],
-        "initializedAt": "2026-09-08T02:30:45.685Z"
+        "initializedAt": "2026-09-08T02:30:45.685Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "92ae118383a4296db9b52d621f52ce42fbc64766",
+                "shortSha": "92ae118"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/native/quant.zig",
+                    "sha256": "d34aba45fb572ab477a469072c83776a5600dfec9f4f4b53bb568730ca377d7a"
+                  },
+                  {
+                    "path": "src/harness/native/ffi.zig",
+                    "sha256": "0c171919728264066e046eaaaf04cc814640e241efb286f274313779b1bb7005"
+                  },
+                  {
+                    "path": "src/harness/quant/pricing.py",
+                    "sha256": "7dc9f073b2158e22675071f883b2355da04525fa3838581bed5d8a239bb72ecd"
+                  },
+                  {
+                    "path": "src/harness/quant/__init__.py",
+                    "sha256": "dbabbfb343828551ca2320a785e4543f5b41f9ef87d4d2c141a2bb6b476d5ef6"
+                  },
+                  {
+                    "path": "src/harness/_native.py",
+                    "sha256": "5413b0a82d5cd9eb860ffacc13d61716ebba47a4af30ed214b796fbe999f87fe"
+                  },
+                  {
+                    "path": "scripts/experiments/spy_0dte/analyze.py",
+                    "sha256": "2e3297e77425ea3b86e0f9f78c807695757730cf601b0b0d14c285b4e2d8b399"
+                  },
+                  {
+                    "path": "scripts/experiments/spy_0dte/session_profile.py",
+                    "sha256": "115d67fe98a83c3e133bfcb5d94f16713c6d681085cffde5e79396d1e993562b"
+                  },
+                  {
+                    "path": "scripts/experiments/spy_0dte/ingest.py",
+                    "sha256": "3c062de49b70dafe639365764f922613ac3c53bdd9015882fe28c27720dd4310"
+                  },
+                  {
+                    "path": "scripts/experiments/spy_0dte/open_iv.py",
+                    "sha256": "12e77f91993fd352d0ac5dafd2be93b6775e1d009fbd16e6c6e4c529847b1df8"
+                  },
+                  {
+                    "path": "src/ui/src/routes/demo/spy0dte/+page.svelte",
+                    "sha256": "62ee9b1e255aa84dd234de09cd35b8054068f932fba38e137fc7195dbb2a793f"
+                  },
+                  {
+                    "path": "src/ui/src/lib/data/spy0dteProfile.js",
+                    "sha256": "af9b02dc5531b270445228a3688cb85b49396c144bc89eaa070d3cd2b5401bd0"
+                  }
+                ]
+              },
+              {
+                "kind": "note",
+                "note": "native CRR kernels, 42-session ingest, backward-strip analysis, and UI study page implemented"
+              }
+            ],
+            "capturedAt": "2026-09-08T02:52:02.501Z",
+            "capturedBy": "opencode"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T214-test-run.json",
+                "sha256": "fe3830282cb5b291fe812cc0a6362aefc560ccb15bbcec8b0bd954280c9cc8a4",
+                "passCount": 2028,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "commit",
+                "sha": "92ae118383a4296db9b52d621f52ce42fbc64766",
+                "shortSha": "92ae118"
+              },
+              {
+                "kind": "note",
+                "note": "pytest 2028 passed 0 failed, 4 trader-CLI deselections are parallel-session WIP; zig build test 110/110"
+              }
+            ],
+            "capturedAt": "2026-09-08T02:53:49.847Z",
+            "capturedBy": "opencode"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "commit",
+                "sha": "92ae118383a4296db9b52d621f52ce42fbc64766",
+                "shortSha": "92ae118"
+              },
+              {
+                "kind": "note",
+                "note": "ruff check and ruff format --check clean on all owned paths; ty clean on scoped paths; uv lock --check ok; zig fmt --check clean; audit validated via validate-cleo-export.mjs"
+              }
+            ],
+            "capturedAt": "2026-09-08T02:59:56.954Z",
+            "capturedBy": "opencode"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "assignee": "local",
       "kind": "work",
       "scope": "feature",
@@ -26487,7 +26966,7 @@
     {
       "id": "T212",
       "title": "Prune GHCR image versions on a schedule",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T150",
@@ -26510,21 +26989,143 @@
         ".github/workflows/prune-ghcr.yml"
       ],
       "createdAt": "2026-09-05T23:18:23.862Z",
-      "updatedAt": "2026-09-05T23:18:23.862Z",
+      "updatedAt": "2026-09-08T05:00:41.698Z",
+      "completedAt": "2026-09-08T05:00:36.792Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T05:00:08.315Z",
         "failureLog": [],
-        "initializedAt": "2026-09-05T23:18:23.862Z"
+        "initializedAt": "2026-09-05T23:18:23.862Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "cd5ec203804ad1c12d6fcdae55c3846a93fe6cbc",
+                "shortSha": "cd5ec20"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/workflows/prune-ghcr.yml",
+                    "sha256": "d8bcefc16add49ca9cd1cf083cff72b57169377be1c63a74a10b9014483c2da4"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T212-validation.json",
+                "sha256": "75f7c9e1e85ca59ba127335953b346bef16f438acc192da7ba45466691e78e8b",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "manual dispatch run 34186597988 succeeded and reported surveyed 57 versions, deleted 0, keep-newest 10 with the 7-day floor"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:00:08.944Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "cd5ec203804ad1c12d6fcdae55c3846a93fe6cbc",
+                "shortSha": "cd5ec20"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/workflows/prune-ghcr.yml",
+                    "sha256": "d8bcefc16add49ca9cd1cf083cff72b57169377be1c63a74a10b9014483c2da4"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T212-validation.json",
+                "sha256": "75f7c9e1e85ca59ba127335953b346bef16f438acc192da7ba45466691e78e8b",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "manual dispatch run 34186597988 succeeded and reported surveyed 57 versions, deleted 0, keep-newest 10 with the 7-day floor"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:00:08.944Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "cd5ec203804ad1c12d6fcdae55c3846a93fe6cbc",
+                "shortSha": "cd5ec20"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/workflows/prune-ghcr.yml",
+                    "sha256": "d8bcefc16add49ca9cd1cf083cff72b57169377be1c63a74a10b9014483c2da4"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T212-validation.json",
+                "sha256": "75f7c9e1e85ca59ba127335953b346bef16f438acc192da7ba45466691e78e8b",
+                "passCount": 2076,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 211 CLEO tasks through T214.\n"
+              },
+              {
+                "kind": "note",
+                "note": "manual dispatch run 34186597988 succeeded and reported surveyed 57 versions, deleted 0, keep-newest 10 with the 7-day floor"
+              }
+            ],
+            "capturedAt": "2026-09-08T05:00:08.944Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "assignee": "e1-ghcr-prune",
       "kind": "work",
       "scope": "feature",
