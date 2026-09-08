@@ -29,6 +29,14 @@
 	</div>
 
 	<div class="card">
+		<h2><a href="/demo/spy0dte-clusters">SPY intraday price-path clustering</a></h2>
+		<p>
+			k-Shape clustering of normalized intraday price paths across 6 years of SPY data,
+			revealing families of price action with per-minute positive/negative breakdowns.
+		</p>
+	</div>
+
+	<div class="card">
 		<h2><a href="/demo/spy0dte">SPY 0DTE intraday study</a></h2>
 		<p>
 			Implied volatility, option price, realized theta, and realized delta profiles per minute of
