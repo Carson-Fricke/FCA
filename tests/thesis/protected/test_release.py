@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 import pytest
 
@@ -38,6 +39,12 @@ ARTIFACT = (
     "C:\\Users\\alice\\run.log contact alice@example.com via "
     "https://internal.example.com feed #win"
 )
+
+
+def _map(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    return cast(dict[str, object], value)
 
 
 def _decision(
@@ -413,7 +420,7 @@ def test_release_binds_full_artifacts_to_the_named_session() -> None:
     release = ProtectedRcaRelease.create(_request())
     payload = release.release_to_session("rca-session-1")
     assert payload["releaseId"] == release.release_id
-    assert dict(payload["artifacts"])["metrics.txt"] == release.artifacts["metrics.txt"]
+    assert _map(payload["artifacts"])["metrics.txt"] == release.artifacts["metrics.txt"]
     with pytest.raises(ReleaseBlockedError):
         release.release_to_session("rca-session-2")
 
@@ -422,8 +429,8 @@ def test_released_payloads_exclude_the_identity_mapping() -> None:
     release = ProtectedRcaRelease.create(_request())
     payload = release.release_to_session("rca-session-1")
     document = {
-        "aliasEntries": payload["manifest"]["aliasEntries"],
-        "artifacts": dict(payload["artifacts"]),
+        "aliasEntries": _map(payload["manifest"])["aliasEntries"],
+        "artifacts": _map(payload["artifacts"]),
         "manifest": payload["manifest"],
         "releaseId": payload["releaseId"],
         "rcaSessionId": payload["rcaSessionId"],
@@ -440,14 +447,15 @@ def test_released_payloads_exclude_the_identity_mapping() -> None:
         "2024-01-05",
     ):
         assert real not in dumped
-    for entry in payload["manifest"]["aliasEntries"]:
-        assert set(entry) == {"alias", "ordinal", "surface"}
+    alias_entries = _map(payload["manifest"])["aliasEntries"]
+    for entry in cast(list[object], alias_entries):
+        assert set(_map(entry)) == {"alias", "ordinal", "surface"}
 
 
 def test_release_manifest_records_removals_and_digests() -> None:
     release = ProtectedRcaRelease.create(_request())
     document = release.manifest.canonical_document
-    counts = document["removedCounts"]
+    counts = _map(document["removedCounts"])
     assert counts["absolute-path"] == 1
     assert counts["contact"] == 1
     assert counts["endpoint"] == 1
@@ -455,7 +463,7 @@ def test_release_manifest_records_removals_and_digests() -> None:
     expected = hashlib.sha256(
         release.artifacts["metrics.txt"].encode("utf-8")
     ).hexdigest()
-    assert document["artifactSha256"]["metrics.txt"] == expected
+    assert _map(document["artifactSha256"])["metrics.txt"] == expected
     assert document["notes"]
 
 
