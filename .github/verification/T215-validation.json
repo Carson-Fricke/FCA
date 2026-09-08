@@ -1,0 +1,23 @@
+{
+  "taskId": "T215",
+  "numTotalTests": 4,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-option-trades-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/lake/providers/alpaca/test_options.py",
+      "result": "4 passed: the OPRA trades pagination test now asserts the request body omits the feed parameter (the provider rejects it outright for trades), while quotes keep the opra-pinned feed"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/lake/providers/alpaca/client.py tests/lake/providers/alpaca/test_options.py && uv run --extra dev ruff format --check ... && uv run --extra dev ty check src/lake/providers/alpaca/client.py",
+      "result": "ruff check, ruff format --check, and ty clean on the touched paths"
+    }
+  ],
+  "limitations": []
+}

@@ -5,8 +5,8 @@ task: T012
 related:
   - type: task
     id: T012
-created: 2026-09-01
-updated: 2026-09-01
+created: 2026-09-07
+updated: 2026-09-07
 ---
 # Research (T012)
 
