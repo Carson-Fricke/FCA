@@ -1,10 +1,36 @@
 <script>
 	import TimeSeriesChart from '$lib/components/charts/TimeSeriesChart.svelte';
 	import { profile } from '$lib/data/spy0dteProfile.js';
+	import { backtests } from '$lib/data/spy0dteBacktests.js';
 
 	const m = profile.meta;
 	const height = 230;
 	const minSpan = 5 * 60 * 1000;
+
+	const strategyLabels = {
+		openingCalendar: 'Opening Calendar',
+		middayCondor: 'Midday Iron Condor',
+		powerHourStraddle: 'Power-Hour Straddle',
+		overnightStraddle: 'Overnight ATM Straddle'
+	};
+	const strategyOrder = ['openingCalendar', 'middayCondor', 'powerHourStraddle', 'overnightStraddle'];
+	let activeStrategy = $state('openingCalendar');
+
+	function equityPoints(summary) {
+		if (!summary || !summary.equity || !summary.days) return [];
+		return summary.days.map((day, i) => ({
+			t: (1788813000000 + i * 86400000),
+			v: summary.equity[i]
+		}));
+	}
+
+	function pnlPoints(summary) {
+		if (!summary || !summary.days) return [];
+		return summary.days.map((day, i) => ({
+			t: (1788813000000 + i * 86400000),
+			v: day.pnl
+		}));
+	}
 
 	function callPut(group) {
 		return [
@@ -208,6 +234,58 @@
 		</div>
 	</div>
 
+	<div class="card">
+		<h2>Strategy backtests</h2>
+		<div class="tabs">
+			{#each strategyOrder as key}
+				<button
+					class="tab"
+					class:active={activeStrategy === key}
+					onclick={() => (activeStrategy = key)}
+				>
+					{strategyLabels[key]}
+				</button>
+			{/each}
+		</div>
+		{#if backtests.strategies[activeStrategy] && backtests.strategies[activeStrategy].count > 0}
+			{@const s = backtests.strategies[activeStrategy]}
+			<div class="stats">
+				<div class="stat"><span class="label">Trades</span><span class="value">{s.count}</span></div>
+				<div class="stat"><span class="label">Total P&L</span><span class="value" class:negative={s.totalPnl < 0}>${s.totalPnl.toFixed(2)}</span></div>
+				<div class="stat"><span class="label">Win rate</span><span class="value">{(s.winRate * 100).toFixed(0)}%</span></div>
+				<div class="stat"><span class="label">Mean</span><span class="value" class:negative={s.meanPnl < 0}>${s.meanPnl.toFixed(2)}</span></div>
+				<div class="stat"><span class="label">Best</span><span class="value positive">+${s.best.toFixed(2)}</span></div>
+				<div class="stat"><span class="label">Worst</span><span class="value negative">${s.worst.toFixed(2)}</span></div>
+				<div class="stat"><span class="label">Max DD</span><span class="value negative">${s.maxDrawdown.toFixed(2)}</span></div>
+			</div>
+			<div class="bt-grid">
+				<TimeSeriesChart
+					title="Cumulative P&L"
+					render="line"
+					height={200}
+					{minSpan}
+					axis="date"
+					series={[{ name: 'equity', data: equityPoints(s), render: 'line', fill: true }]}
+				/>
+				<TimeSeriesChart
+					title="Per-trade P&L"
+					render="line"
+					height={200}
+					{minSpan}
+					axis="date"
+					series={[{ name: 'P&L', data: pnlPoints(s), render: 'line' }]}
+				/>
+			</div>
+		{:else}
+			<p class="caveat">No qualifying trades.</p>
+		{/if}
+		<p class="caveat">
+			Simulated from trade-print medians at exact strikes and minutes. No fill slippage, no
+			commission, no bid/ask spread. Entry and exit prices are the actual NBBO-proxy medians the
+			market printed in the relevant minute.
+		</p>
+	</div>
+
 	<div class="card findings">
 		<h2>Method</h2>
 		<p>
@@ -323,5 +401,58 @@
 	.caveat {
 		font-size: 12px;
 		color: var(--muted);
+	}
+	.tabs {
+		display: flex;
+		gap: 6px;
+		margin-bottom: 14px;
+		flex-wrap: wrap;
+	}
+	.tab {
+		padding: 6px 14px;
+		border: 1px solid rgba(148, 163, 184, 0.25);
+		border-radius: 6px;
+		background: transparent;
+		color: var(--muted);
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.tab.active {
+		background: var(--accent);
+		color: #0c1220;
+		font-weight: 600;
+		border-color: var(--accent);
+	}
+	.stats {
+		display: flex;
+		gap: 18px;
+		margin-bottom: 14px;
+		flex-wrap: wrap;
+	}
+	.stat {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.stat .label {
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--muted);
+	}
+	.stat .value {
+		font-size: 16px;
+		font-weight: 600;
+	}
+	.stat .value.negative {
+		color: #f87171;
+	}
+	.stat .value.positive {
+		color: #34d399;
+	}
+	.bt-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 12px;
 	}
 </style>
