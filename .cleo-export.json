@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-08T20:20:50.353Z",
+    "exportedAt": "2026-09-08T20:56:13.163Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 217
     },
-    "checksum": "c68e5bd373654cec",
+    "checksum": "8e672660a9b6f63f",
     "taskCount": 213,
     "exportMode": "full"
   },
@@ -1128,7 +1128,7 @@
     "T170": {
       "type": "task",
       "title": "TH4.3 RCA alias release and information-flow controls",
-      "status": "pending",
+      "status": "done",
       "parentId": "T148",
       "depends": [
         "T147",
@@ -14067,7 +14067,7 @@
     {
       "id": "T170",
       "title": "TH4.3 RCA alias release and information-flow controls",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T148",
@@ -14103,21 +14103,167 @@
         "T169"
       ],
       "createdAt": "2026-09-03T00:11:29.753Z",
-      "updatedAt": "2026-09-03T00:34:03.452Z",
+      "updatedAt": "2026-09-08T20:49:13.823Z",
+      "completedAt": "2026-09-08T20:49:09.567Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T20:48:50.241Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:11:29.753Z"
+        "initializedAt": "2026-09-03T00:11:29.753Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ab337b64307e1653a3f12b6771408175f1fa82c7",
+                "shortSha": "ab337b6"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/protected/aliasing.py",
+                    "sha256": "d6cf88fc5ab218d8e437e370f6c6529104670d7c3dc46b4a3d5963c544c00301"
+                  },
+                  {
+                    "path": "src/thesis/protected/release.py",
+                    "sha256": "39df35942948685b077ebce8bbbe472ffb0ef4cd6262c6f6542a6d51cb65ce81"
+                  },
+                  {
+                    "path": "src/thesis/protected/flow_checks.py",
+                    "sha256": "49347c6e427bd46a0f39ffee68db9c291df86dc6cda8a772c1f9f3f1fd5f77a4"
+                  },
+                  {
+                    "path": "tests/thesis/protected/test_release.py",
+                    "sha256": "4aa4fd4cbef019ad3d2df13b994db6e4c70695702d591e7ec0148ade2449dbef"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T170-validation.json",
+                "sha256": "ce4cfab789694498d76b11c02dfb097ac9305a9822f26f49f523e92d01962c5f",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T20:48:50.958Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ab337b64307e1653a3f12b6771408175f1fa82c7",
+                "shortSha": "ab337b6"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/protected/aliasing.py",
+                    "sha256": "d6cf88fc5ab218d8e437e370f6c6529104670d7c3dc46b4a3d5963c544c00301"
+                  },
+                  {
+                    "path": "src/thesis/protected/release.py",
+                    "sha256": "39df35942948685b077ebce8bbbe472ffb0ef4cd6262c6f6542a6d51cb65ce81"
+                  },
+                  {
+                    "path": "src/thesis/protected/flow_checks.py",
+                    "sha256": "49347c6e427bd46a0f39ffee68db9c291df86dc6cda8a772c1f9f3f1fd5f77a4"
+                  },
+                  {
+                    "path": "tests/thesis/protected/test_release.py",
+                    "sha256": "4aa4fd4cbef019ad3d2df13b994db6e4c70695702d591e7ec0148ade2449dbef"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T170-validation.json",
+                "sha256": "ce4cfab789694498d76b11c02dfb097ac9305a9822f26f49f523e92d01962c5f",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T20:48:50.958Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ab337b64307e1653a3f12b6771408175f1fa82c7",
+                "shortSha": "ab337b6"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/protected/aliasing.py",
+                    "sha256": "d6cf88fc5ab218d8e437e370f6c6529104670d7c3dc46b4a3d5963c544c00301"
+                  },
+                  {
+                    "path": "src/thesis/protected/release.py",
+                    "sha256": "39df35942948685b077ebce8bbbe472ffb0ef4cd6262c6f6542a6d51cb65ce81"
+                  },
+                  {
+                    "path": "src/thesis/protected/flow_checks.py",
+                    "sha256": "49347c6e427bd46a0f39ffee68db9c291df86dc6cda8a772c1f9f3f1fd5f77a4"
+                  },
+                  {
+                    "path": "tests/thesis/protected/test_release.py",
+                    "sha256": "4aa4fd4cbef019ad3d2df13b994db6e4c70695702d591e7ec0148ade2449dbef"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T170-validation.json",
+                "sha256": "ce4cfab789694498d76b11c02dfb097ac9305a9822f26f49f523e92d01962c5f",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T20:48:50.958Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "research",
       "scope": "feature",
       "relates": []

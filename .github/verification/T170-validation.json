@@ -1,0 +1,32 @@
+{
+  "taskId": "T170",
+  "numTotalTests": 2184,
+  "numPassedTests": 2184,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-protected-release-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/protected/ tests/harness/cli/test_supervisor.py",
+      "result": "51 protected-layer tests (25 new): aliasing selected by evidence tier and release gates with no user-facing mode (AC1), identity mapping confined to the authority layer and excluded from all released payloads (AC2), fail-closed source screening that blocks identity-revealing content without rewriting (AC3), allowlist-driven side-channel transformation of paths/contacts/endpoints/tags/logs/errors/timing with manifest-recorded removals (AC4), single-session binding with fail-closed advice filtering (AC5), and ReleaseRiskAssessment recording cross-release disclosure, empirical reidentification, diagnostic utility, and residual risk (AC6); aliases stable within a release and unlinkable across releases; the 26 pre-existing authority/exposure tests stay green"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2184 passed, 13 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/protected tests/thesis/protected && uv run --extra dev ruff format --check src/thesis/protected tests/thesis/protected && uv run --extra dev ty check",
+      "result": "ruff check, ruff format --check, and repository-wide ty clean"
+    }
+  ],
+  "limitations": [
+    "No standalone versioned RCA evidence-policy document exists in the repository; the module encodes architecture prose as fca-thesis-aliasing-policy-v1 and a later policy document should supersede it",
+    "Empirical reidentification risk is recorded as a best-effort structured assessment per release; no automated reidentification testing harness exists yet"
+  ]
+}
