@@ -18,7 +18,8 @@ from __future__ import annotations
 import json
 import sys
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -801,6 +802,78 @@ def test_resolve_credentials_rejects_unset_environment_contract() -> None:
             single_reference,
             {"HARNESS_ALPACA_API_KEY": "key-value"},
         )
+
+
+# --------------------------------------------------------------------------
+# ReorderingInbox: the live feed ordering boundary
+# --------------------------------------------------------------------------
+
+
+class _ScriptedInbox:
+    """Inner inbox serving a fixed frame sequence, then idling."""
+
+    def __init__(self, events: Sequence[QuoteEvent]) -> None:
+        self._events = list(events)
+
+    def pop(self) -> QuoteEvent | None:
+        return self._events.pop(0) if self._events else None
+
+
+def _stamp(event: QuoteEvent) -> datetime:
+    return event.timestamp
+
+
+def test_reordering_inbox_releases_out_of_order_frames_in_kernel_order() -> None:
+    late_first = _quote()
+    early_next = _quote()
+    reordered = replace(early_next, timestamp=OPEN + timedelta(minutes=1, seconds=-2))
+    inbox = sup.ReorderingInbox(
+        _ScriptedInbox([late_first, reordered]), lateness=timedelta(seconds=3)
+    )
+
+    released = [inbox.pop(), inbox.pop(), inbox.pop()]
+
+    assert None not in released[:2]
+    assert list(map(_stamp, released[:2])) == sorted(map(_stamp, released[:2]))
+    assert released[2] is None
+    assert inbox.dropped_late == 0
+
+
+def test_reordering_inbox_drops_beyond_tolerance_late_events() -> None:
+    first = _quote()
+    far_late = _quote()
+    straggler = _quote()
+    on_time = _quote()
+    base = OPEN + timedelta(minutes=1)
+    first = replace(first, timestamp=base)
+    far_late = replace(far_late, timestamp=base + timedelta(minutes=10))
+    straggler = replace(straggler, timestamp=base - timedelta(seconds=30))
+    on_time = replace(on_time, timestamp=base + timedelta(minutes=10, seconds=1))
+    inbox = sup.ReorderingInbox(
+        _ScriptedInbox([first, far_late, straggler, on_time]),
+        lateness=timedelta(seconds=2),
+    )
+
+    released = []
+    while True:
+        event = inbox.pop()
+        if event is None:
+            break
+        released.append(event)
+
+    stamps = [event.timestamp for event in released]
+    assert stamps == sorted(stamps)
+    assert straggler not in released
+    assert inbox.dropped_late == 1
+
+
+def test_reordering_inbox_rejects_invalid_construction() -> None:
+    with pytest.raises(ValueError, match="lateness"):
+        sup.ReorderingInbox(_ScriptedInbox([]), lateness=timedelta(seconds=-1))
+    with pytest.raises(ValueError, match="capacity"):
+        sup.ReorderingInbox(_ScriptedInbox([]), capacity=0)
+    with pytest.raises(TypeError, match="pop"):
+        sup.ReorderingInbox(object())
 
 
 # --------------------------------------------------------------------------

@@ -35,6 +35,7 @@ the command-line composition root wires from the deployment environment.
 
 from __future__ import annotations
 
+import heapq
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -50,8 +51,10 @@ from azure.identity import DefaultAzureCredential
 
 from harness.configuration import TraderConfig
 from harness.core.clock import Clock
+from harness.core.events import EVENT_CLASS_PRIORITY
 from harness.core.types import Side
 from harness.core.types.common import exact_decimal, text
+from harness.core.types.events import QuoteEvent, TradeEvent
 from harness.risk import RiskPipeline
 from harness.risk.kill_switch import KillSwitch
 from harness.runtime import (
@@ -63,6 +66,7 @@ from harness.runtime import (
     HaltOnlyPolicy,
     KillSwitchHaltPort,
     PaperFeed,
+    PaperInbox,
     PaperOptions,
     PaperSessionPolicy,
     PaperSessionResult,
@@ -1202,6 +1206,104 @@ def sleep(seconds: float) -> None:
 
 
 # --------------------------------------------------------------------------
+# Live reorder boundary
+# --------------------------------------------------------------------------
+
+type MarketEvent = QuoteEvent | TradeEvent
+
+FEED_LATENESS: timedelta = timedelta(seconds=2)
+FEED_BUFFER_CAPACITY: int = 8192
+
+
+class ReorderingInbox:
+    """Kernel-facing reorder buffer over a live feed inbox.
+
+    Live consolidated feeds interleave per-symbol streams, so provider frame
+    order does not guarantee nondecreasing event timestamps across symbols,
+    while the deterministic kernel requires nondecreasing
+    ``(timestamp, sequence)`` delivery.  This buffer holds events inside a
+    bounded lateness window and releases them in
+    ``(timestamp, sequence, class)`` order once a later-arriving print can no
+    longer precede them: an event is releasable when its timestamp is at or
+    behind the high-water mark minus the lateness window, or immediately when
+    the inner inbox is momentarily idle.  Events that arrive after their
+    timestamp has already been passed are dropped beyond tolerance and
+    counted in :attr:`dropped_late` rather than violating kernel ordering.
+    """
+
+    __slots__ = (
+        "_buffer",
+        "_capacity",
+        "_dropped_late",
+        "_inner",
+        "_lateness",
+        "_watermark",
+    )
+
+    def __init__(
+        self,
+        inner: PaperInbox,
+        *,
+        lateness: timedelta = FEED_LATENESS,
+        capacity: int = FEED_BUFFER_CAPACITY,
+    ) -> None:
+        if lateness < timedelta(0):
+            raise ValueError("lateness must not be negative")
+        if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity < 1:
+            raise ValueError("capacity must be a positive integer")
+        if not hasattr(inner, "pop"):
+            raise TypeError("inner must provide pop()")
+        self._inner = inner
+        self._lateness = lateness
+        self._capacity = capacity
+        self._buffer: list[tuple[datetime, int, int, MarketEvent]] = []
+        self._watermark: datetime | None = None
+        self._dropped_late = 0
+
+    @property
+    def dropped_late(self) -> int:
+        """Return how many beyond-tolerance late events were dropped."""
+        return self._dropped_late
+
+    def pop(self) -> MarketEvent | None:
+        """Return the next in-order event, or ``None`` while idle."""
+        while True:
+            inner_idle = False
+            while len(self._buffer) < self._capacity:
+                event = self._inner.pop()
+                if event is None:
+                    inner_idle = True
+                    break
+                stamp = event.timestamp
+                boundary = (
+                    None
+                    if self._watermark is None
+                    else self._watermark - self._lateness
+                )
+                if boundary is not None and stamp < boundary:
+                    self._dropped_late += 1
+                    continue
+                if self._watermark is None or stamp > self._watermark:
+                    self._watermark = stamp
+                heapq.heappush(
+                    self._buffer,
+                    (
+                        stamp,
+                        event.sequence,
+                        EVENT_CLASS_PRIORITY[event.event_type],
+                        event,
+                    ),
+                )
+            if not self._buffer:
+                return None
+            boundary = (
+                None if self._watermark is None else self._watermark - self._lateness
+            )
+            if boundary is None or self._buffer[0][0] <= boundary or inner_idle:
+                return heapq.heappop(self._buffer)[3]
+
+
+# --------------------------------------------------------------------------
 # Kill-switch table adapter
 # --------------------------------------------------------------------------
 
@@ -1342,6 +1444,7 @@ __all__ = [
     "KillSwitchPoller",
     "MarketWaitExceeded",
     "OutcomeKind",
+    "ReorderingInbox",
     "RestartableFault",
     "SessionJournal",
     "SnapshotBrokerStatePort",

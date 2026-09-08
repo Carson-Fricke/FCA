@@ -34,6 +34,7 @@ import typer
 
 from harness.cli._runner import run
 from harness.cli.supervisor import (
+    ReorderingInbox,
     SessionJournal,
     SupervisorSettings,
     TableKillSwitchPoller,
@@ -246,7 +247,7 @@ def _feed_factory(
             "harness.data.alpaca_ws:AlpacaSipWebSocketFeed (feed: sip), "
             "harness.data.alpaca_ws:AlpacaCryptoWebSocketFeed (feed: crypto)"
         )
-    return InboxPaperFeed(inbox), feed
+    return InboxPaperFeed(ReorderingInbox(inbox)), feed
 
 
 def _run_feed_thread(
