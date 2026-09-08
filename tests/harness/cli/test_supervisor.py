@@ -791,9 +791,14 @@ def test_resolve_credentials_keys_by_environment_variable_name() -> None:
 
 
 def test_resolve_credentials_rejects_unset_environment_contract() -> None:
+    configuration = _trader_config()
+    market_data = configuration.market_data.model_copy(
+        update={"credentials": {"api_key": "${HARNESS_ALPACA_API_KEY}"}}
+    )
+    single_reference = configuration.model_copy(update={"market_data": market_data})
     with pytest.raises(SystemExit, match="unset environment variables"):
         trader._resolve_credentials(
-            _trader_config(),
+            single_reference,
             {"HARNESS_ALPACA_API_KEY": "key-value"},
         )
 
