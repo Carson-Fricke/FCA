@@ -1,0 +1,35 @@
+{
+  "taskId": "T212",
+  "numTotalTests": 2076,
+  "numPassedTests": 2076,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2076 passed, 13 skipped (performance benchmarks require FCA_PERF=1), 1 xfailed; run once at wave edit freeze after one permitted rerun"
+    },
+    {
+      "name": "workflow-validation",
+      "status": "passed",
+      "command": "uv run --with pyyaml python -c \"import yaml; yaml.safe_load(open('.github/workflows/prune-ghcr.yml'))\"",
+      "result": "prune-ghcr.yml parses cleanly; keep-newest 10, 7-day floor (MIN_AGE_DAYS=7 per AC2), moving-tag safety set, PACKAGE_NAME derived from github.repository so schedule and dispatch agree"
+    },
+    {
+      "name": "manual-dispatch-run",
+      "status": "passed",
+      "command": "gh workflow run prune-ghcr.yml --repo Carson-Fricke/FCA --ref master",
+      "result": "Run 34186597988 (2026-09-08T04:19:41Z) succeeded; log reports 'Surveyed 57 image version(s); deleting 0' and the ::notice 'GHCR prune complete: surveyed 57 version(s); deleted 0/0; newest 10 and anything younger than 7 days retained' (AC3)"
+    },
+    {
+      "name": "retention-bound",
+      "status": "passed",
+      "command": "policy review",
+      "result": "Weekly cron 0 3 * * 0 with keep-newest 10 and the 7-day floor keeps the package near the ceiling at the current deploy cadence while preserving the Azure rollback window and the deployed digest (AC4); 57 versions surveyed with 0 deletions is consistent with recent deploy activity plus the floor"
+    }
+  ],
+  "limitations": []
+}

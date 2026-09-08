@@ -1,0 +1,37 @@
+{
+  "taskId": "T114",
+  "numTotalTests": 2076,
+  "numPassedTests": 2076,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-supervision-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/cli/test_supervisor.py",
+      "result": "44 passed covering SupervisorSettings validation, SessionJournal status/ledger durability with injected clocks, every boot gate (kill-switch 41, gate poll fault 75, crash-loop budget 86, no-session clean 0, connect faults 75, unexpected fault 1), trading_session_for, the Azure Table kill-switch contract, _settings_from_environment, and the harness trader status command"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2076 passed, 13 skipped, 1 xfailed at wave edit freeze; determinism golden and parity tests included; two stale scaffold assertions in tests/harness/cli/test_commands.py updated because the trader process is now implemented"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/harness/cli/supervisor.py src/harness/cli/trader.py src/lake/storage/azure.py tests/harness/cli/test_supervisor.py && uv run --extra dev ruff format --check ... && uv run --extra dev ty check ...",
+      "result": "ruff check, ruff format --check, and ty clean on all touched paths after integration fixes; ty strict on the engine surface with no wall-clock, unseeded random, or network access inside the synchronous kernel (clock and sleep injected; TableKillSwitchPoller is an explicit adapter boundary)"
+    },
+    {
+      "name": "composition-integrity-fixes",
+      "status": "passed",
+      "command": "commit c6a49d9 review",
+      "result": "Integration fixed five composition-blocking defects found by focused review: SessionJournal now persists through the SnapshotObjectStore port (RuntimeStateStore exposes no raw store surface); _compose supplies the required kill_switch; the live inboxes compose without the nonexistent clock kwarg; boot recovery wraps SnapshotBrokerStatePort in a real RuntimeReconciler; periodic reconciliation passes ReconcileTrigger.PERIODIC with a correctly advanced sequence; __all__ exports the real phase class name"
+    }
+  ],
+  "limitations": [
+    "AC1 (a dev paper deployment survives a mid-session container restart) awaits live evidence: the deployed supervisor has not yet run inside an RTH session window, so no supervision document exists in harness-state. Execute the restart procedure from .github/runbooks/trader-operations.md during the next KEDA window (9:30-16:00 America/New_York), then verify runs/<run-id>/supervision.json shows restore/resume phases and the restart ledger bounds consecutive faults"
+  ]
+}

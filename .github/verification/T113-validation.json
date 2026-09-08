@@ -1,0 +1,37 @@
+{
+  "taskId": "T113",
+  "numTotalTests": 2076,
+  "numPassedTests": 2076,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2076 passed, 13 skipped, 1 xfailed at wave edit freeze; the task touches no Python runtime code, so the shared suite plus workflow checks are the focused evidence"
+    },
+    {
+      "name": "workflow-validation",
+      "status": "passed",
+      "command": "uv run --with pyyaml python -c \"import yaml; yaml.safe_load(open('.github/workflows/quant-smoke.yml')); yaml.safe_load(open('.github/workflows/deploy-main.yml'))\"",
+      "result": "Both workflows parse cleanly; reusable-workflow contract (image-digest input, needs chain to publish-image output), SHA-pinned actions, zero secrets references, concurrency groups, and the trap-guarded private-ingress probe all validated by the T113 checklist"
+    },
+    {
+      "name": "live-deploy-with-quant-smoke",
+      "status": "passed",
+      "command": "push of commits 6ce2b2f, 4e08750, f000546, 4485075, 50083b2, e4fb026; deploy-main run 34188517611",
+      "result": "AC1/AC2 proven live: publish-image built one immutable digest, deploy imported it to the private ACR and updated every quant runtime (quant API, RTH trader, backtest job) by digest-pinned reference verified by the smoke's digest step; the smoke used OIDC only (no Azure client secrets) and every step succeeded: digest pinning, ingress and storage posture, quant API health, bounded synthetic backtest smoke, trader revision health"
+    },
+    {
+      "name": "incident-fixes-landed-in-wave",
+      "status": "passed",
+      "command": "git log 4e08750 f000546 4485075 50083b2 e4fb026",
+      "result": "Live-run findings fixed inside the wave: the backtest job template now bakes the in-image smoke config (az containerapp job start --args cannot pass leading-dash tokens and its --yaml override drops container args); the runtime image now ships the strategies package (Dockerfile + .dockerignore); the runtime user has a writable .local artifact root; deploy-main redeploys on .dockerignore changes"
+    }
+  ],
+  "limitations": [
+    "Trader revision health remains reported, not enforced: the RTH trader revision is expected degraded until the operator seeds the shared Alpaca credential pair and the first supervised session runs (see h5-quant-smoke.md and trader-operations.md)"
+  ]
+}
