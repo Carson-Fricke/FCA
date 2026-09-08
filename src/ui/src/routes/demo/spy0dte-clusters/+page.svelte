@@ -1,6 +1,7 @@
 <script>
 	import TimeSeriesChart from '$lib/components/charts/TimeSeriesChart.svelte';
 	import { clusters } from '$lib/data/spy0dteClusters.js';
+	import { classification } from '$lib/data/spy0dteClassification.js';
 
 	const cm = clusters.meta;
 	const height = 260;
@@ -12,6 +13,11 @@
 	function centroidPoints(cluster) {
 		const base = 1788813000000;
 		return cluster.centroid.map((v, i) => ({ t: base + i * 60000, v }));
+	}
+
+	function bandPoints(cluster, field) {
+		const base = 1788813000000;
+		return cluster[field].map((v, i) => ({ t: base + i * 60000, v }));
 	}
 
 	function pctPosPoints(cluster) {
@@ -42,6 +48,26 @@
 			color: palette[i % palette.length]
 		}));
 	}
+
+	function accuracyPoints() {
+		const base = 1788813000000;
+		return classification.accuracyByMinute.map((a) => ({
+			t: base + a.minute * 60000,
+			v: a.accuracy * 100
+		}));
+	}
+
+	function baselinePoints() {
+		const base = 1788813000000;
+		return classification.accuracyByMinute.map((a) => ({
+			t: base + a.minute * 60000,
+			v: a.randomBaseline * 100
+		}));
+	}
+
+	const activeIQR = $derived(
+		classification.iqrBands.find((b) => b.cluster === activeCluster)
+	);
 </script>
 
 <svelte:head>
@@ -90,12 +116,18 @@
 				</h2>
 				<div class="grid">
 					<TimeSeriesChart
-						title="Centroid path (normalized % change from open)"
+						title="Centroid path with 25th–75th percentile band"
 						axis="time"
 						render="line"
 						{height}
 						{minSpan}
-						series={[{ name: 'centroid', data: centroidPoints(c), render: 'line', fill: true }]}
+						series={[
+							{ name: 'centroid', data: centroidPoints(c), render: 'line' },
+							{ name: '25th pct', data: activeIQR ? bandPoints(activeIQR, 'p25') : [], render: 'line' },
+							{ name: '75th pct', data: activeIQR ? bandPoints(activeIQR, 'p75') : [], render: 'line' },
+							{ name: '10th pct', data: activeIQR ? bandPoints(activeIQR, 'p10') : [], render: 'line' },
+							{ name: '90th pct', data: activeIQR ? bandPoints(activeIQR, 'p90') : [], render: 'line' }
+						]}
 					/>
 					<TimeSeriesChart
 						title="% of sessions with positive / negative price at each minute"
@@ -109,9 +141,38 @@
 						]}
 					/>
 				</div>
+				<p class="caveat">
+					The shaded band shows the 10th–90th percentile range of outcomes within this
+					family. The 25th–75th percentile (IQR) is the tighter inner band: 50% of sessions
+					in this cluster land inside it. Wide bands = high within-family variance.
+				</p>
 			</div>
 		{/if}
 	{/each}
+
+	<div class="card">
+		<h2>Classification accuracy: how early can you identify the day's family?</h2>
+		<TimeSeriesChart
+			title="Nearest-centroid classification accuracy using only the path through minute N"
+			axis="time"
+			render="line"
+			height={220}
+			{minSpan}
+			series={[
+				{ name: 'accuracy %', data: accuracyPoints(), render: 'line', fill: true },
+				{ name: 'random baseline', data: baselinePoints(), render: 'line' }
+			]}
+		/>
+		<p class="caveat">
+			For each minute N, the price path through minute N is classified against the cluster
+			centroids computed on the same truncated paths. Accuracy above the random baseline
+			({classification.meta.randomBaseline * 100}%) means the partial path carries information
+			about the final family. The signal is weak before minute 120 (~29% at 2 hours), useful
+			by minute 240 (~46% at 4 hours), and strong after minute 300 (~60% at 5 hours).
+			Practical takeaway: the first 90 minutes are not enough for confident regime
+			classification — the day's family doesn't separate until 3–5 hours in.
+		</p>
+	</div>
 
 	<div class="card">
 		<h2>All sessions: % positive vs negative at each minute</h2>
