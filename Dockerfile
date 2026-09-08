@@ -13,6 +13,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
 COPY src/ ./src/
+# The strategy packages live at the repository root, outside src/: the
+# packaged wheel must include them or deployed backtests cannot import
+# configured strategy implementations (e.g. strategies.harness_examples).
+COPY strategies/ ./strategies/
 RUN uv sync --locked --no-dev --no-editable
 RUN test -x /opt/venv/bin/lake \
     && test -x /opt/venv/bin/harness \
