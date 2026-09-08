@@ -7,13 +7,12 @@ base_currency: USD
 strategy_instances:
   -
     instance_id: spy-momentum-paper
-    implementation: strategies.reference.momentum:MomentumStrategy
+    implementation: strategies.harness_examples.buy_and_hold:BuyAndHoldStrategy
     bundle_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     capital_fraction: 1.0
     symbols: [SPY]
     parameters:
-      lookback_bars: 20
-      entry_threshold: 0.015
+      quantity: 5
 risk_pipeline:
   on_reject: halt_strategy
   rules:
@@ -33,7 +32,7 @@ fees:
       minimum: 0.01
       side: both
 market_data:
-  adapter: harness.venues.alpaca:AlpacaMarketData
+  adapter: harness.data.alpaca_ws:AlpacaSipWebSocketFeed
   credentials:
     api_key: "${HARNESS_ALPACA_API_KEY}"
     api_secret: "${HARNESS_ALPACA_API_SECRET}"
