@@ -1,0 +1,26 @@
+{
+  "taskId": "T208",
+  "numTotalTests": 2184,
+  "numPassedTests": 2184,
+  "numFailedTests": 0,
+  "numPendingTests": 13,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "bicep-and-workflow-validation",
+      "status": "passed",
+      "command": "az bicep build --file infra/modules/container-registry.bicep && uv run --with pyyaml python -c \"import yaml; yaml.safe_load(open('.github/workflows/prune-acr.yml')); yaml.safe_load(open('.github/workflows/deploy-main.yml'))\"",
+      "result": "Bicep compiles with the retention policy (properties.policies.retention, retentionDays default 7 matching the rollback window, range 7-90, retentionStatus default enabled); both workflows parse cleanly; no live Azure mutations performed (AC5)"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2184 passed, 13 skipped, 1 xfailed at wave edit freeze; no Python runtime changes in this task"
+    }
+  ],
+  "limitations": [
+    "ACR registry-level retention policies are Premium-SKU-only and cover untagged manifests; tag-carrying mirrored digests are pruned by the per-service prune-acr.yml workflow, which keeps the newest two digests plus every digest referenced by an active or traffic-bearing Container App revision, job template images, and mutable-tagged digests",
+    "The scheduled and post-deploy prune paths require a live run to record deletion evidence; the workflow is wired to deploy-main (acr-retention job) and workflow_dispatch"
+  ]
+}

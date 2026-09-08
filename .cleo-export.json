@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-08T18:33:42.105Z",
+    "exportedAt": "2026-09-08T20:20:50.353Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 217
     },
-    "checksum": "723a4444f9bbe99e",
+    "checksum": "c68e5bd373654cec",
     "taskCount": 213,
     "exportMode": "full"
   },
@@ -859,7 +859,7 @@
     "T004": {
       "type": "epic",
       "title": "E1 Azure infrastructure and budget controls",
-      "status": "pending",
+      "status": "done",
       "parentId": "T001",
       "depends": [
         "T003"
@@ -1116,7 +1116,7 @@
     "T167": {
       "type": "task",
       "title": "TH3.3 Workspace knowledge trust and CLEO projection",
-      "status": "pending",
+      "status": "done",
       "parentId": "T147",
       "depends": [
         "T151",
@@ -1365,7 +1365,7 @@
     "T147": {
       "type": "epic",
       "title": "TH3 Global Markdown knowledge library",
-      "status": "pending",
+      "status": "done",
       "parentId": "T143",
       "depends": [
         "T003",
@@ -1445,7 +1445,7 @@
     "T216": {
       "type": "task",
       "title": "Restored paper session re-enters the strategy and duplicates a venue fill id",
-      "status": "pending",
+      "status": "done",
       "parentId": "T073",
       "depends": []
     },
@@ -2032,7 +2032,7 @@
     "T208": {
       "type": "task",
       "title": "E1.7 ACR image retention: keep latest and previous per service",
-      "status": "pending",
+      "status": "done",
       "parentId": "T004",
       "depends": [
         "T018",
@@ -10636,7 +10636,7 @@
     {
       "id": "T004",
       "title": "E1 Azure infrastructure and budget controls",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -10667,7 +10667,8 @@
         "T003"
       ],
       "createdAt": "2026-09-01T03:15:24.964Z",
-      "updatedAt": "2026-09-05T00:34:41.072Z",
+      "updatedAt": "2026-09-08T19:46:44.573Z",
+      "completedAt": "2026-09-08T19:46:44.573Z",
       "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
@@ -12537,7 +12538,8 @@
       ],
       "notes": [
         "2026-09-08 05:21:58 UTC: 2026-09-08 05:00 UTC: Wave verified. Composition-blocking defects fixed by integration (commit c6a49d9): SessionJournal persists through the SnapshotObjectStore port, _compose supplies the required kill_switch, live inboxes compose without the nonexistent clock kwarg, boot recovery wraps SnapshotBrokerStatePort in a real RuntimeReconciler, periodic reconciliation passes ReconcileTrigger.PERIODIC with a correctly advanced sequence, __all__ exports the real phase name. 44 focused supervision tests + 2076-test wave suite pass; ruff/ty clean; operator runbook published at .github/runbooks/trader-operations.md. REMAINING: AC1 live evidence - run the mid-session restart procedure from the runbook during the next RTH window (9:30-16:00 America/New_York) and confirm runs/<run-id>/supervision.json shows restore/resume phases; task completes on that evidence.",
-        "2026-09-08 18:32:54 UTC: 2026-09-08 18:40 UTC: Live deployment achieved. Four deployed-path defects fixed and deployed (websockets dependency, trader config adapter/strategy alignment, _resolve_credentials env-name keying, ReorderingInbox bounded-lateness feed boundary). Live paper session ran: 4566 events, 5 SPY bought, snapshots capturing. Mid-session revision restart drill: resume_reconcile restored books intact (action resume, snapshot 2fed09c9) - the AC1 recovery mechanism is proven live. Restored session then aborted fail-closed on the T216 defect (strategy re-entry duplicating venue fill sim-fill-3). T114 completes when T216 lands and the restart drill reruns clean. Trader scaled back to 0 pending the fix."
+        "2026-09-08 18:32:54 UTC: 2026-09-08 18:40 UTC: Live deployment achieved. Four deployed-path defects fixed and deployed (websockets dependency, trader config adapter/strategy alignment, _resolve_credentials env-name keying, ReorderingInbox bounded-lateness feed boundary). Live paper session ran: 4566 events, 5 SPY bought, snapshots capturing. Mid-session revision restart drill: resume_reconcile restored books intact (action resume, snapshot 2fed09c9) - the AC1 recovery mechanism is proven live. Restored session then aborted fail-closed on the T216 defect (strategy re-entry duplicating venue fill sim-fill-3). T114 completes when T216 lands and the restart drill reruns clean. Trader scaled back to 0 pending the fix.",
+        "2026-09-08 20:20:33 UTC: 2026-09-08 20:20 UTC: T216 fix deployed (deploy 34272980242 all green incl. new ACR retention job). Restart drill rescheduled: today's RTH window closed (boot returned clean no_session at 16:18 ET); execute the drill in the next window - boot (min-replicas 1), confirm RUNNING with events, az containerapp revision restart, confirm supervision.json shows resume_reconcile AND the session continuing without duplicate fills (T216 regression), then min-replicas 0. Commands in .github/runbooks/trader-operations.md. Task completes on that evidence."
       ],
       "acceptance": [
         "A dev paper deployment survives a mid-session container restart under its configured policy",
@@ -12560,7 +12562,7 @@
         "T112"
       ],
       "createdAt": "2026-09-01T18:02:28.052Z",
-      "updatedAt": "2026-09-08T18:33:11.098Z",
+      "updatedAt": "2026-09-08T20:20:32.976Z",
       "verification": {
         "passed": true,
         "round": 1,
@@ -13875,7 +13877,7 @@
     {
       "id": "T167",
       "title": "TH3.3 Workspace knowledge trust and CLEO projection",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T147",
@@ -13909,21 +13911,155 @@
         "T166"
       ],
       "createdAt": "2026-09-03T00:08:40.519Z",
-      "updatedAt": "2026-09-03T00:34:10.351Z",
+      "updatedAt": "2026-09-08T19:39:43.863Z",
+      "completedAt": "2026-09-08T19:39:40.184Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T19:39:21.642Z",
         "failureLog": [],
-        "initializedAt": "2026-09-03T00:08:40.519Z"
+        "initializedAt": "2026-09-03T00:08:40.519Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3f3c7a936be95e4f10447c9a5f6b491ee6dfcf8b",
+                "shortSha": "3f3c7a9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/trust.py",
+                    "sha256": "0521f0f91cd5057dcac2f8c69aee5a6b737025d154a151df62a7e3d9ac38d3bb"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/cleo_projection.py",
+                    "sha256": "25c4c3d749362edba36dd9813bcee62259a98f563cf8ac759cf0fea77a8d2adc"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_projection.py",
+                    "sha256": "d43541dec78ef7136414684c4f350187d535aeb2cd731bd665f376e120870da0"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T167-validation.json",
+                "sha256": "8d0db1efa7180e42ffc653c24ba566b8e5590af7337c7744b18150e1db1684f2",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:39:22.237Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3f3c7a936be95e4f10447c9a5f6b491ee6dfcf8b",
+                "shortSha": "3f3c7a9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/trust.py",
+                    "sha256": "0521f0f91cd5057dcac2f8c69aee5a6b737025d154a151df62a7e3d9ac38d3bb"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/cleo_projection.py",
+                    "sha256": "25c4c3d749362edba36dd9813bcee62259a98f563cf8ac759cf0fea77a8d2adc"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_projection.py",
+                    "sha256": "d43541dec78ef7136414684c4f350187d535aeb2cd731bd665f376e120870da0"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T167-validation.json",
+                "sha256": "8d0db1efa7180e42ffc653c24ba566b8e5590af7337c7744b18150e1db1684f2",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:39:22.237Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "3f3c7a936be95e4f10447c9a5f6b491ee6dfcf8b",
+                "shortSha": "3f3c7a9"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/knowledge/trust.py",
+                    "sha256": "0521f0f91cd5057dcac2f8c69aee5a6b737025d154a151df62a7e3d9ac38d3bb"
+                  },
+                  {
+                    "path": "src/thesis/knowledge/cleo_projection.py",
+                    "sha256": "25c4c3d749362edba36dd9813bcee62259a98f563cf8ac759cf0fea77a8d2adc"
+                  },
+                  {
+                    "path": "tests/thesis/knowledge/test_projection.py",
+                    "sha256": "d43541dec78ef7136414684c4f350187d535aeb2cd731bd665f376e120870da0"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T167-validation.json",
+                "sha256": "8d0db1efa7180e42ffc653c24ba566b8e5590af7337c7744b18150e1db1684f2",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:39:22.237Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -16245,7 +16381,7 @@
     {
       "id": "T147",
       "title": "TH3 Global Markdown knowledge library",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "epic",
       "parentId": "T143",
@@ -16272,8 +16408,9 @@
         "T144"
       ],
       "createdAt": "2026-09-03T00:02:03.996Z",
-      "updatedAt": "2026-09-03T00:12:43.874Z",
-      "pipelineStage": "implementation",
+      "updatedAt": "2026-09-08T19:39:40.184Z",
+      "completedAt": "2026-09-08T19:39:40.184Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -17179,7 +17316,7 @@
     {
       "id": "T216",
       "title": "Restored paper session re-enters the strategy and duplicates a venue fill id",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T073",
@@ -17203,21 +17340,179 @@
         "src/harness/runtime/state_store.py"
       ],
       "createdAt": "2026-09-08T18:30:25.835Z",
-      "updatedAt": "2026-09-08T18:30:25.835Z",
+      "updatedAt": "2026-09-08T19:39:09.755Z",
+      "completedAt": "2026-09-08T19:39:05.907Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T19:38:35.837Z",
         "failureLog": [],
-        "initializedAt": "2026-09-08T18:30:25.835Z"
+        "initializedAt": "2026-09-08T18:30:25.835Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a34edbf598c5c443096ad1618a59688f80e81be1",
+                "shortSha": "a34edbf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/venues/sim.py",
+                    "sha256": "c07dc95cb221843f17728e0aff37d8348c366d22d28bca1f1f778c2836f60b1d"
+                  },
+                  {
+                    "path": "src/harness/runtime/paper.py",
+                    "sha256": "02d27d8379f47a08d12fecdb3808bc7b76c9251a14d14128154772cd6c00cade"
+                  },
+                  {
+                    "path": "src/harness/runtime/state_store.py",
+                    "sha256": "ab9294b06e5295297e0a02821142650909a1d7af59d4f3218655042cf0c935f5"
+                  },
+                  {
+                    "path": "strategies/harness_examples/buy_and_hold.py",
+                    "sha256": "91dc59559481580f7f0b93fde43671ee353e86a4cf686298022aab6e2aa6e5d3"
+                  },
+                  {
+                    "path": "tests/harness/runtime/test_restart_cycle.py",
+                    "sha256": "b6b16f4264c47274bb28551d5bf0b26b4c28e02987fdc3c1bf4da91dea206865"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T216-validation.json",
+                "sha256": "2e35c85e765a4cc0151f3dc68a2afc807f181de4121c9c70c941ccde533a2802",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:38:36.493Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a34edbf598c5c443096ad1618a59688f80e81be1",
+                "shortSha": "a34edbf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/venues/sim.py",
+                    "sha256": "c07dc95cb221843f17728e0aff37d8348c366d22d28bca1f1f778c2836f60b1d"
+                  },
+                  {
+                    "path": "src/harness/runtime/paper.py",
+                    "sha256": "02d27d8379f47a08d12fecdb3808bc7b76c9251a14d14128154772cd6c00cade"
+                  },
+                  {
+                    "path": "src/harness/runtime/state_store.py",
+                    "sha256": "ab9294b06e5295297e0a02821142650909a1d7af59d4f3218655042cf0c935f5"
+                  },
+                  {
+                    "path": "strategies/harness_examples/buy_and_hold.py",
+                    "sha256": "91dc59559481580f7f0b93fde43671ee353e86a4cf686298022aab6e2aa6e5d3"
+                  },
+                  {
+                    "path": "tests/harness/runtime/test_restart_cycle.py",
+                    "sha256": "b6b16f4264c47274bb28551d5bf0b26b4c28e02987fdc3c1bf4da91dea206865"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T216-validation.json",
+                "sha256": "2e35c85e765a4cc0151f3dc68a2afc807f181de4121c9c70c941ccde533a2802",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:38:36.493Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "a34edbf598c5c443096ad1618a59688f80e81be1",
+                "shortSha": "a34edbf"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/venues/sim.py",
+                    "sha256": "c07dc95cb221843f17728e0aff37d8348c366d22d28bca1f1f778c2836f60b1d"
+                  },
+                  {
+                    "path": "src/harness/runtime/paper.py",
+                    "sha256": "02d27d8379f47a08d12fecdb3808bc7b76c9251a14d14128154772cd6c00cade"
+                  },
+                  {
+                    "path": "src/harness/runtime/state_store.py",
+                    "sha256": "ab9294b06e5295297e0a02821142650909a1d7af59d4f3218655042cf0c935f5"
+                  },
+                  {
+                    "path": "strategies/harness_examples/buy_and_hold.py",
+                    "sha256": "91dc59559481580f7f0b93fde43671ee353e86a4cf686298022aab6e2aa6e5d3"
+                  },
+                  {
+                    "path": "tests/harness/runtime/test_restart_cycle.py",
+                    "sha256": "b6b16f4264c47274bb28551d5bf0b26b4c28e02987fdc3c1bf4da91dea206865"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T216-validation.json",
+                "sha256": "2e35c85e765a4cc0151f3dc68a2afc807f181de4121c9c70c941ccde533a2802",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:38:36.493Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "bug",
       "scope": "feature",
       "relates": []
@@ -23899,7 +24194,7 @@
     {
       "id": "T208",
       "title": "E1.7 ACR image retention: keep latest and previous per service",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T004",
@@ -23930,19 +24225,165 @@
         "T031"
       ],
       "createdAt": "2026-09-05T00:34:41.072Z",
-      "updatedAt": "2026-09-05T00:34:41.072Z",
+      "updatedAt": "2026-09-08T19:46:48.612Z",
+      "completedAt": "2026-09-08T19:46:44.573Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-08T19:46:16.267Z",
         "failureLog": [],
-        "initializedAt": "2026-09-05T00:34:41.072Z"
+        "initializedAt": "2026-09-05T00:34:41.072Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "f8cfeea9fab5ffe5bf8483ea8afa46b3b461a3d5",
+                "shortSha": "f8cfeea"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/container-registry.bicep",
+                    "sha256": "7703352834552b1786a493533752ad90fd1d28dcf52d563d867208123c5b438e"
+                  },
+                  {
+                    "path": ".github/workflows/prune-acr.yml",
+                    "sha256": "0224144d9bbceab5967e60ad77f50d9f4139b706703c88c0f21e72742273c449"
+                  },
+                  {
+                    "path": ".github/workflows/deploy-main.yml",
+                    "sha256": "6aa9a3b9f97061cca5963bfc58f954a22b2f606b2db10d9278ce8cbafb49eef8"
+                  },
+                  {
+                    "path": ".github/runbooks/e1-ghcr-retention.md",
+                    "sha256": "8bf1eeba87556ecb039ad183f977e8bf4a464b71900f5602b404753bdf310043"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T208-validation.json",
+                "sha256": "70a92a67f7a88afa571241563fe76f3f6e2d0898d16b2162ab835ea7a735c57e",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:46:17.017Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "f8cfeea9fab5ffe5bf8483ea8afa46b3b461a3d5",
+                "shortSha": "f8cfeea"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/container-registry.bicep",
+                    "sha256": "7703352834552b1786a493533752ad90fd1d28dcf52d563d867208123c5b438e"
+                  },
+                  {
+                    "path": ".github/workflows/prune-acr.yml",
+                    "sha256": "0224144d9bbceab5967e60ad77f50d9f4139b706703c88c0f21e72742273c449"
+                  },
+                  {
+                    "path": ".github/workflows/deploy-main.yml",
+                    "sha256": "6aa9a3b9f97061cca5963bfc58f954a22b2f606b2db10d9278ce8cbafb49eef8"
+                  },
+                  {
+                    "path": ".github/runbooks/e1-ghcr-retention.md",
+                    "sha256": "8bf1eeba87556ecb039ad183f977e8bf4a464b71900f5602b404753bdf310043"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T208-validation.json",
+                "sha256": "70a92a67f7a88afa571241563fe76f3f6e2d0898d16b2162ab835ea7a735c57e",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:46:17.017Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "f8cfeea9fab5ffe5bf8483ea8afa46b3b461a3d5",
+                "shortSha": "f8cfeea"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/container-registry.bicep",
+                    "sha256": "7703352834552b1786a493533752ad90fd1d28dcf52d563d867208123c5b438e"
+                  },
+                  {
+                    "path": ".github/workflows/prune-acr.yml",
+                    "sha256": "0224144d9bbceab5967e60ad77f50d9f4139b706703c88c0f21e72742273c449"
+                  },
+                  {
+                    "path": ".github/workflows/deploy-main.yml",
+                    "sha256": "6aa9a3b9f97061cca5963bfc58f954a22b2f606b2db10d9278ce8cbafb49eef8"
+                  },
+                  {
+                    "path": ".github/runbooks/e1-ghcr-retention.md",
+                    "sha256": "8bf1eeba87556ecb039ad183f977e8bf4a464b71900f5602b404753bdf310043"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T208-validation.json",
+                "sha256": "70a92a67f7a88afa571241563fe76f3f6e2d0898d16b2162ab835ea7a735c57e",
+                "passCount": 2184,
+                "failCount": 0,
+                "skipCount": 13
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
+              }
+            ],
+            "capturedAt": "2026-09-08T19:46:17.017Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
       "kind": "work",
