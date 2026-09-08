@@ -5,9 +5,26 @@ capability directory implements only the client boundary: immutable
 submissions, preallocated hidden-window references (never contents), signed
 sealed-status facts with Ed25519 verification, a deterministic injected
 transport client, and the client-side exposure ledger that maps authority
-facts onto the ``thesis.experiments`` evidence-grade vocabulary.
+facts onto the ``thesis.experiments`` evidence-grade vocabulary.  It also
+implements the authority-side RCA alias release layer: aliasing strategies
+selected by evidence tier and release gates, information-flow screening and
+sanitization, session binding, and the release risk record.
 """
 
+from thesis.protected.aliasing import (
+    ALIASING_POLICY_VERSION,
+    AliasingError,
+    AliasPlan,
+    AliasSelectionError,
+    AliasStrategyKind,
+    IdentityMapping,
+    IdentitySurface,
+    RcaEvidenceTier,
+    ReleaseBlockedError,
+    ReleaseGate,
+    StrategyGateDecision,
+    build_aliasing,
+)
 from thesis.protected.client import (
     ELIGIBILITY_PATH,
     EVALUATION_PATH,
@@ -57,14 +74,38 @@ from thesis.protected.facts import (
     SignedSealedStatusFact,
     fact_signing_bytes,
 )
+from thesis.protected.flow_checks import (
+    FlowCheckError,
+    FlowFinding,
+    FlowFindingKind,
+    IdentifierLeakError,
+    OutputSurface,
+    assert_no_raw_identifiers,
+    sanitize_output,
+    screen_source,
+)
+from thesis.protected.release import (
+    RELEASE_SCHEMA,
+    ProtectedRcaRelease,
+    RcaReleaseRequest,
+    ReleaseRequestError,
+    ReleaseRiskAssessment,
+    TransformationManifest,
+)
 from thesis.protected.windows import HiddenWindowRef, WindowAllocation
 
 __all__ = [
+    "ALIASING_POLICY_VERSION",
     "ELIGIBILITY_PATH",
     "EVALUATION_PATH",
     "FACT_EXPOSURE_KINDS",
     "FACT_SIGNING_DOMAIN",
+    "RELEASE_SCHEMA",
     "SEALED_STATUS_PATH",
+    "AliasPlan",
+    "AliasSelectionError",
+    "AliasStrategyKind",
+    "AliasingError",
     "AuthorityProtocolError",
     "AuthorityRequest",
     "AuthorityResponse",
@@ -81,28 +122,48 @@ __all__ = [
     "ExposureLedger",
     "FACT_SIGNING_DOMAIN",
     "FactConflictError",
+    "FlowCheckError",
+    "FlowFinding",
+    "FlowFindingKind",
     "HiddenWindowRef",
+    "IdentifierLeakError",
+    "IdentityMapping",
+    "IdentitySurface",
     "LineageAncestry",
     "ModelRegistryIdentity",
+    "OutputSurface",
+    "ProtectedRcaRelease",
     "ProtectedTestClient",
     "ProtectedTestError",
     "ProtectedTestSubmission",
     "ProtectedExposureRecord",
     "RegistryRole",
+    "ReleaseBlockedError",
+    "ReleaseGate",
+    "ReleaseRequestError",
+    "ReleaseRiskAssessment",
+    "RcaEvidenceTier",
+    "RcaReleaseRequest",
     "SEALED_STATUS_PATH",
     "SealedStatusFact",
     "SealedStatusKind",
     "SealedStatusMirror",
     "SignatureVerificationError",
     "SignedSealedStatusFact",
+    "StrategyGateDecision",
     "SubmissionError",
     "SystemClock",
+    "TransformationManifest",
     "WindowAllocation",
+    "assert_no_raw_identifiers",
+    "build_aliasing",
     "downgrade_for_fact",
     "exposure_kind_for_fact",
     "fact_signing_bytes",
     "influence_exposure_kind",
     "modifiers_for",
+    "sanitize_output",
+    "screen_source",
     "verify_exposure_chain",
     "window_influence_modifier",
 ]
