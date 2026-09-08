@@ -9,6 +9,9 @@ on:
       - .github/workflows/publish-image.yml
       - .github/workflows/quant-smoke.yml
       - Dockerfile
+      # The image build context allowlist shapes what the Docker build sees,
+      # so a .dockerignore change must redeploy.
+      - .dockerignore
       - pyproject.toml
       - uv.lock
       - config/**
