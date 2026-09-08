@@ -7,6 +7,8 @@
 !src/**
 !config/
 !config/**
+!strategies/
+!strategies/**
 **/__pycache__/
 **/*.py[cod]
 **/*.egg-info/
