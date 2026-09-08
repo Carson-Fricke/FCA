@@ -24,13 +24,20 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: ${{ github.event.repository.name }}
+          # owner/name -> package name (stripped + lowercased below). Event
+          # payload independent, so schedule and workflow_dispatch agree.
+          PACKAGE_NAME: ${{ github.repository }}
           KEEP_NEWEST: '10'
-          MIN_AGE_DAYS: '2'
+          # Spec floor (T212 AC2): the 7-day floor preserves the Azure rollback
+          # window. GHCR versions are NOT rebuildable: deleting one removes the
+          # manifest and its SHA tag, and deploy-main re-imports rollbacks from
+          # GHCR by digest (ghcr.io/<owner>/<repo>@<digest>).
+          MIN_AGE_DAYS: '7'
         run: |
           set -euo pipefail
 
-          # GHCR package names are lowercase.
+          # GHCR package names are lowercase and bare (no owner prefix).
+          PACKAGE_NAME="${PACKAGE_NAME##*/}"
           PACKAGE_NAME="${PACKAGE_NAME,,}"
 
           # Collect every version id + created_at (paginated). mktemp -d for a
@@ -67,18 +74,23 @@ jobs:
             const cutoff = Date.now() - minAgeMs;
             const keep = new Set();
             rows.slice(0, Number(process.env.KEEP_NEWEST)).forEach((r) => keep.add(r.id));
-            // Safety: never delete a version carrying a moving tag (future-proofing).
-            rows.filter((r) => r.tags.some((t) => t !== "latest" && !/^[0-9a-f]{40}$/.test(t)))
-              .slice(0, 5).forEach((r) => keep.add(r.id));
+            // Safety: never delete a version carrying a moving (non-SHA) tag.
+            // The publish workflow tags only 40-hex commit SHAs, so today this
+            // set is empty; if a mutable tag ever appears, every version
+            // carrying it is retained, not just some of them.
+            rows.filter((r) => r.tags.some((t) => !/^[0-9a-f]{40}$/.test(t)))
+              .forEach((r) => keep.add(r.id));
             const deleteIds = rows
               .filter((r) => !keep.has(r.id) && r.created < cutoff)
               .map((r) => r.id);
             console.log(JSON.stringify({ total: rows.length, deleting: deleteIds.length }));
             fs.writeFileSync(process.argv[1] + "/delete-ids.json", JSON.stringify(deleteIds));
+            fs.writeFileSync(process.argv[1] + "/stats.json", JSON.stringify({ total: rows.length, deleting: deleteIds.length }));
           ' "$tmp"
 
+          total="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).total)")"
           delete_count="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/delete-ids.json','utf8')).length)")"
-          echo "Deleting ${delete_count} old image version(s)"
+          echo "Surveyed ${total} image version(s); deleting ${delete_count}"
 
           deleted=0
           for id in $(node -e "JSON.parse(require('fs').readFileSync('$tmp/delete-ids.json','utf8')).forEach((id)=>console.log(id))"); do
@@ -91,5 +103,5 @@ jobs:
             fi
           done
 
-          echo "::notice::GHCR prune complete: ${deleted}/${delete_count} version(s) deleted; newest ${KEEP_NEWEST} and anything younger than ${MIN_AGE_DAYS} days retained"
+          echo "::notice::GHCR prune complete: surveyed ${total} version(s); deleted ${deleted}/${delete_count}; newest ${KEEP_NEWEST} and anything younger than ${MIN_AGE_DAYS} days retained"
           rm -rf "$tmp"
