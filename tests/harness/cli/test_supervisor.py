@@ -774,6 +774,30 @@ def test_settings_from_environment_rejects_invalid_values(
         trader._settings_from_environment(environ)
 
 
+def test_resolve_credentials_keys_by_environment_variable_name() -> None:
+    configuration = _trader_config()
+    resolved = trader._resolve_credentials(
+        configuration,
+        {
+            "HARNESS_ALPACA_API_KEY": "key-value",
+            "HARNESS_ALPACA_API_SECRET": "secret-value",
+        },
+    )
+
+    assert resolved == {
+        "HARNESS_ALPACA_API_KEY": "key-value",
+        "HARNESS_ALPACA_API_SECRET": "secret-value",
+    }
+
+
+def test_resolve_credentials_rejects_unset_environment_contract() -> None:
+    with pytest.raises(SystemExit, match="unset environment variables"):
+        trader._resolve_credentials(
+            _trader_config(),
+            {"HARNESS_ALPACA_API_KEY": "key-value"},
+        )
+
+
 # --------------------------------------------------------------------------
 # harness trader status: the supervision status command
 # --------------------------------------------------------------------------

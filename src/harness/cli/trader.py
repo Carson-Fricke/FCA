@@ -87,10 +87,18 @@ _SETTING_POSITIVE_INTEGERS = {
 def _resolve_credentials(
     config: TraderConfig, environ: dict[str, str] | None = None
 ) -> dict[str, str]:
-    """Resolve the configured market-data credential references."""
+    """Resolve the configured market-data credential references.
+
+    The returned mapping is keyed by the referenced environment-variable
+    name (``HARNESS_ALPACA_API_KEY``), not by the configuration field name,
+    so the feed composition reads credentials by their deployment contract.
+    """
+    from harness.configuration import environment_variable_name
+
     resolved: dict[str, str] = {}
-    for name, reference in config.market_data.credentials.items():
-        resolved[name] = resolve_environment_reference(
+    for reference in config.market_data.credentials.values():
+        variable = environment_variable_name(reference)
+        resolved[variable] = resolve_environment_reference(
             reference, environ
         ).get_secret_value()
     missing = _CREDENTIAL_ENV_KEYS - set(resolved)
