@@ -424,12 +424,13 @@ jobs:
           normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
           backtest_job_name="${normalized_prefix}-${normalized_environment}-backtest"
 
+          # The job template runs the bounded in-image configuration verbatim:
+          # `az containerapp job start --args` cannot pass leading-dash tokens
+          # and the --yaml override drops container args, so the template
+          # itself carries `backtest-job --config config/harness/backtest.yaml`.
           execution_name="$(az containerapp job start \
             --name "$backtest_job_name" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --container-name backtest \
-            --args "backtest-job" "--config" "$BACKTEST_SMOKE_CONFIG" \
-            --only-show-errors \
             --query name \
             --output tsv)"
           if [[ -z "$execution_name" ]]; then

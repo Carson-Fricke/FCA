@@ -821,10 +821,16 @@ resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
           command: [
             'harness'
           ]
-          // Per-run configuration is supplied by the job start operation's
-          // container argument override (backtest-job --config <path>).
+          // The bounded synthetic smoke configuration ships inside the shared
+          // image and the job runs it verbatim. Per-run argument overrides are
+          // not possible here: az containerapp job start --args cannot pass
+          // leading-dash tokens and its --yaml override drops container args,
+          // so future per-run backtests need a different transport (env-var
+          // configuration or a dedicated job).
           args: [
             'backtest-job'
+            '--config'
+            'config/harness/backtest.yaml'
           ]
           env: quantBaseEnvironment
           resources: {
