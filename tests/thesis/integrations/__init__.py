@@ -1,0 +1,1 @@
+"""Thesis integration adapter tests."""
