@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-08T21:44:33.821Z",
+    "exportedAt": "2026-09-09T01:33:20.310Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 217
     },
-    "checksum": "ee53de4956c52e61",
+    "checksum": "fa9593ed74e7949d",
     "taskCount": 213,
     "exportMode": "full"
   },
@@ -1013,7 +1013,7 @@
     "T114": {
       "type": "task",
       "title": "H5.3 Trader supervisor and operator runbook",
-      "status": "pending",
+      "status": "done",
       "parentId": "T073",
       "depends": [
         "T107",
@@ -1543,7 +1543,7 @@
     "T073": {
       "type": "epic",
       "title": "H5 M2 Azure trader deployment",
-      "status": "pending",
+      "status": "done",
       "parentId": "T068",
       "depends": [
         "T004",
@@ -12522,7 +12522,7 @@
     {
       "id": "T114",
       "title": "H5.3 Trader supervisor and operator runbook",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T073",
@@ -12562,7 +12562,8 @@
         "T112"
       ],
       "createdAt": "2026-09-01T18:02:28.052Z",
-      "updatedAt": "2026-09-08T20:20:32.976Z",
+      "updatedAt": "2026-09-09T01:30:43.128Z",
+      "completedAt": "2026-09-09T01:30:37.968Z",
       "verification": {
         "passed": true,
         "round": 1,
@@ -12572,7 +12573,7 @@
           "qaPassed": true
         },
         "lastAgent": "orchestrator",
-        "lastUpdated": "2026-09-08T18:33:11.098Z",
+        "lastUpdated": "2026-09-09T01:30:14.547Z",
         "failureLog": [],
         "initializedAt": "2026-09-01T18:02:28.052Z",
         "evidence": {
@@ -12580,23 +12581,23 @@
             "atoms": [
               {
                 "kind": "commit",
-                "sha": "30791740f59674acedb952fe302412425a3c2e32",
-                "shortSha": "3079174"
+                "sha": "b121f83f816836da674abc491f42c4308ae49c2f",
+                "shortSha": "b121f83"
               },
               {
                 "kind": "files",
                 "files": [
                   {
                     "path": "src/harness/cli/trader.py",
-                    "sha256": "86cd633300cd6de06af0bbf3bb290b85ac528057f5bf11ac60b6cb6872af4cc2"
+                    "sha256": "b443ecb362accec12f64cf1caecfb286fe092d5ba61eea6fbf0e28fd01c70659"
                   },
                   {
-                    "path": "src/harness/cli/supervisor.py",
-                    "sha256": "626eb592b6f95cc13c37943eeb438069134c420f048474503b7452de9fa58244"
+                    "path": "config/harness/trader-crypto.yaml",
+                    "sha256": "8b41ca1e05d2db3b619d8ba13cf86347effe2cfaa6f8ddae06da8fef1689dda3"
                   },
                   {
                     "path": "tests/harness/cli/test_supervisor.py",
-                    "sha256": "88aa896e46f49d52f39dd405161262a3c71fecdd95f535890f72d37dc0c6ef8b"
+                    "sha256": "76cc09d012915ab5a69478c6438d21436ee744560b1be8c2b7c7818bff746b03"
                   },
                   {
                     "path": ".github/runbooks/trader-operations.md",
@@ -12607,7 +12608,7 @@
               {
                 "kind": "test-run",
                 "path": ".github/verification/T114-validation.json",
-                "sha256": "683b7c777fb1b377cd11c03dea07331038a426dbe934ae8a8bc10dd660237395",
+                "sha256": "4ab3d7e5c6d155f3242a643891f3b76ad284e0af466eb5b8905464332764ed5e",
                 "passCount": 2076,
                 "failCount": 0,
                 "skipCount": 13
@@ -12616,37 +12617,37 @@
                 "kind": "tool",
                 "tool": "audit",
                 "exitCode": 0,
-                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
               },
               {
                 "kind": "note",
-                "note": "live paper session ran and mid-session restart restored via resume_reconcile with books intact; T216 defect remains"
+                "note": "local crypto drill - hard kill mid-session, resume_reconcile restored and continued; follow-up commits 27ad6e4 (crypto stream 404 endpoint), 4d8694d (ReorderingInbox burst livelock), b83b9c2 (resumed-boot housekeeping hook), dcd14d0 (restored fill history), 72b0873 (drill evidence)"
               }
             ],
-            "capturedAt": "2026-09-08T18:33:11.769Z",
+            "capturedAt": "2026-09-09T01:30:15.250Z",
             "capturedBy": "orchestrator"
           },
           "testsPassed": {
             "atoms": [
               {
                 "kind": "commit",
-                "sha": "30791740f59674acedb952fe302412425a3c2e32",
-                "shortSha": "3079174"
+                "sha": "b121f83f816836da674abc491f42c4308ae49c2f",
+                "shortSha": "b121f83"
               },
               {
                 "kind": "files",
                 "files": [
                   {
                     "path": "src/harness/cli/trader.py",
-                    "sha256": "86cd633300cd6de06af0bbf3bb290b85ac528057f5bf11ac60b6cb6872af4cc2"
+                    "sha256": "b443ecb362accec12f64cf1caecfb286fe092d5ba61eea6fbf0e28fd01c70659"
                   },
                   {
-                    "path": "src/harness/cli/supervisor.py",
-                    "sha256": "626eb592b6f95cc13c37943eeb438069134c420f048474503b7452de9fa58244"
+                    "path": "config/harness/trader-crypto.yaml",
+                    "sha256": "8b41ca1e05d2db3b619d8ba13cf86347effe2cfaa6f8ddae06da8fef1689dda3"
                   },
                   {
                     "path": "tests/harness/cli/test_supervisor.py",
-                    "sha256": "88aa896e46f49d52f39dd405161262a3c71fecdd95f535890f72d37dc0c6ef8b"
+                    "sha256": "76cc09d012915ab5a69478c6438d21436ee744560b1be8c2b7c7818bff746b03"
                   },
                   {
                     "path": ".github/runbooks/trader-operations.md",
@@ -12657,7 +12658,7 @@
               {
                 "kind": "test-run",
                 "path": ".github/verification/T114-validation.json",
-                "sha256": "683b7c777fb1b377cd11c03dea07331038a426dbe934ae8a8bc10dd660237395",
+                "sha256": "4ab3d7e5c6d155f3242a643891f3b76ad284e0af466eb5b8905464332764ed5e",
                 "passCount": 2076,
                 "failCount": 0,
                 "skipCount": 13
@@ -12666,37 +12667,37 @@
                 "kind": "tool",
                 "tool": "audit",
                 "exitCode": 0,
-                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
               },
               {
                 "kind": "note",
-                "note": "live paper session ran and mid-session restart restored via resume_reconcile with books intact; T216 defect remains"
+                "note": "local crypto drill - hard kill mid-session, resume_reconcile restored and continued; follow-up commits 27ad6e4 (crypto stream 404 endpoint), 4d8694d (ReorderingInbox burst livelock), b83b9c2 (resumed-boot housekeeping hook), dcd14d0 (restored fill history), 72b0873 (drill evidence)"
               }
             ],
-            "capturedAt": "2026-09-08T18:33:11.769Z",
+            "capturedAt": "2026-09-09T01:30:15.250Z",
             "capturedBy": "orchestrator"
           },
           "qaPassed": {
             "atoms": [
               {
                 "kind": "commit",
-                "sha": "30791740f59674acedb952fe302412425a3c2e32",
-                "shortSha": "3079174"
+                "sha": "b121f83f816836da674abc491f42c4308ae49c2f",
+                "shortSha": "b121f83"
               },
               {
                 "kind": "files",
                 "files": [
                   {
                     "path": "src/harness/cli/trader.py",
-                    "sha256": "86cd633300cd6de06af0bbf3bb290b85ac528057f5bf11ac60b6cb6872af4cc2"
+                    "sha256": "b443ecb362accec12f64cf1caecfb286fe092d5ba61eea6fbf0e28fd01c70659"
                   },
                   {
-                    "path": "src/harness/cli/supervisor.py",
-                    "sha256": "626eb592b6f95cc13c37943eeb438069134c420f048474503b7452de9fa58244"
+                    "path": "config/harness/trader-crypto.yaml",
+                    "sha256": "8b41ca1e05d2db3b619d8ba13cf86347effe2cfaa6f8ddae06da8fef1689dda3"
                   },
                   {
                     "path": "tests/harness/cli/test_supervisor.py",
-                    "sha256": "88aa896e46f49d52f39dd405161262a3c71fecdd95f535890f72d37dc0c6ef8b"
+                    "sha256": "76cc09d012915ab5a69478c6438d21436ee744560b1be8c2b7c7818bff746b03"
                   },
                   {
                     "path": ".github/runbooks/trader-operations.md",
@@ -12707,7 +12708,7 @@
               {
                 "kind": "test-run",
                 "path": ".github/verification/T114-validation.json",
-                "sha256": "683b7c777fb1b377cd11c03dea07331038a426dbe934ae8a8bc10dd660237395",
+                "sha256": "4ab3d7e5c6d155f3242a643891f3b76ad284e0af466eb5b8905464332764ed5e",
                 "passCount": 2076,
                 "failCount": 0,
                 "skipCount": 13
@@ -12716,19 +12717,24 @@
                 "kind": "tool",
                 "tool": "audit",
                 "exitCode": 0,
-                "stdoutTail": "Validated 212 CLEO tasks through T215.\n"
+                "stdoutTail": "Validated 213 CLEO tasks through T216.\n"
               },
               {
                 "kind": "note",
-                "note": "live paper session ran and mid-session restart restored via resume_reconcile with books intact; T216 defect remains"
+                "note": "local crypto drill - hard kill mid-session, resume_reconcile restored and continued; follow-up commits 27ad6e4 (crypto stream 404 endpoint), 4d8694d (ReorderingInbox burst livelock), b83b9c2 (resumed-boot housekeeping hook), dcd14d0 (restored fill history), 72b0873 (drill evidence)"
               }
             ],
-            "capturedAt": "2026-09-08T18:33:11.769Z",
+            "capturedAt": "2026-09-09T01:30:15.250Z",
             "capturedBy": "orchestrator"
           }
         }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "assignee": "h5-supervisor",
       "kind": "work",
       "scope": "unit",
@@ -18610,7 +18616,7 @@
     {
       "id": "T073",
       "title": "H5 M2 Azure trader deployment",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T068",
@@ -18639,8 +18645,9 @@
         "T072"
       ],
       "createdAt": "2026-09-01T17:55:32.747Z",
-      "updatedAt": "2026-09-08T18:30:25.835Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-09T01:30:37.968Z",
+      "completedAt": "2026-09-09T01:30:37.968Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
