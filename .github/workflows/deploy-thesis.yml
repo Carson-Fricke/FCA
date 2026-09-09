@@ -1,0 +1,703 @@
+name: Deploy thesis environment
+
+# Additive Thesis deployment: builds the Dockerfile.thesis image, pushes it to
+# the private ACR by digest, deploys infra/main.bicep with deployThesis=true,
+# and runs a probe-safe smoke. The market-lake composition (deploy-main.yml)
+# is owned by a separate workflow; this one reuses the currently deployed
+# digest-pinned lake image for the market-lake workloads instead of rebuilding
+# them.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/deploy-thesis.yml
+      - Dockerfile.thesis
+      - infra/main.bicep
+      - infra/modules/thesis.bicep
+      - infra/modules/thesis-workspaces.bicep
+      - infra/parameters/thesis.dev.bicepparam
+      - src/thesis/**
+      - config/thesis/**
+      - pyproject.toml
+      - uv.lock
+  workflow_dispatch:
+    inputs:
+      expect-thesis-serving:
+        description: >-
+          Whether the Thesis API process is expected to serve /health. True
+          makes degraded health fail the smoke; false reports it as an
+          expected warning while the thesis serve runtime is a scaffold.
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      expect-thesis-serving:
+        description: >-
+          Whether the Thesis API process is expected to serve /health. True
+          makes degraded health fail the smoke.
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: fca-thesis-deployment-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-thesis-image:
+    name: Build and push the Thesis image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The image is built from Dockerfile.thesis, which carries no secrets:
+    # its runtime configuration resolves the bearer token through a Key Vault
+    # secretRef at the platform, never through build arguments or image
+    # layers. The push authenticates with the OIDC deployer identity via
+    # az acr login; no registry credential is committed or echoed.
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image-reference: ${{ steps.image.outputs.image-reference }}
+      image-digest: ${{ steps.image.outputs.image-digest }}
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+      GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            AZURE_CLIENT_ID
+            AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID
+            AZURE_RESOURCE_GROUP
+            DEPLOYMENT_ENVIRONMENT
+            GITHUB_REPOSITORY_NAME
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required build input $name is empty"
+              exit 1
+            fi
+          done
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push the digest-pinned Thesis image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          acr_name="$(az acr list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].name | [0]" \
+            --output tsv)"
+          if [[ -z "$acr_name" ]]; then
+            echo "::error::The private runtime ACR is missing; rerun the authorized OIDC bootstrap"
+            exit 1
+          fi
+          acr_login_server="$(az acr show \
+            --name "$acr_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query loginServer \
+            --output tsv)"
+
+          repository="${GITHUB_REPOSITORY_NAME,,}-thesis"
+          tag="${acr_login_server}/${repository}:${GITHUB_SHA}"
+
+          az acr login --name "$acr_name" --only-show-errors >/dev/null
+          docker build --file Dockerfile.thesis --tag "$tag" .
+          docker push "$tag" >/dev/null
+
+          digest="$(az acr repository show \
+            --name "$acr_name" \
+            --image "${repository}:${GITHUB_SHA}" \
+            --query digest \
+            --output tsv)"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The pushed Thesis image did not return a valid immutable digest ($digest)"
+            exit 1
+          fi
+
+          image_reference="${acr_login_server}/${repository}@${digest}"
+          if [[ "$image_reference" != "$tag@$digest" ]]; then
+            echo "::error::The pushed Thesis image tag and digest do not compose into the expected reference"
+            exit 1
+          fi
+
+          printf 'image-reference=%s\n' "$image_reference" >> "$GITHUB_OUTPUT"
+          printf 'image-digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Thesis image"
+            echo "- Repository: \\`$repository\\`"
+            echo "- Digest-pinned reference: \\`$image_reference\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy thesis-enabled environment
+    needs: build-thesis-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Environment protection and branch policy are evaluated before this job.
+    # The deployment is additive: deployThesis=true enables the Thesis
+    # modules while the market-lake composition keeps its existing shape.
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      THESIS_IMAGE_REFERENCE: ${{ needs.build-thesis-image.outputs.image-reference }}
+      THESIS_IMAGE_DIGEST: ${{ needs.build-thesis-image.outputs.image-digest }}
+      THESIS_ENABLE_EXTERNAL_INGRESS: ${{ vars.THESIS_ENABLE_EXTERNAL_INGRESS }}
+      THESIS_API_AUDIENCE: ${{ vars.THESIS_API_AUDIENCE }}
+      THESIS_WORKSPACE_REGISTRY: ${{ vars.THESIS_WORKSPACE_REGISTRY || '[{"workspaceId":"equity-momentum","ownerId":"local-operator"}]' }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      RESOURCE_NAME_PREFIX: ${{ vars.RESOURCE_NAME_PREFIX }}
+      DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+      BUDGET_START_DATE: ${{ vars.BUDGET_START_DATE }}
+      ALLOW_PUBLIC_NETWORK_ACCESS: ${{ vars.ALLOW_PUBLIC_NETWORK_ACCESS }}
+      ENABLE_EXTERNAL_API_INGRESS: ${{ vars.ENABLE_EXTERNAL_API_INGRESS }}
+      LAKE_API_AUDIENCE: ${{ vars.LAKE_API_AUDIENCE }}
+      GITHUB_OWNER: ${{ github.event.repository.owner.login }}
+      GITHUB_OWNER_ID: ${{ github.event.repository.owner.id }}
+      GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+      GITHUB_REPOSITORY_ID: ${{ github.event.repository.id }}
+
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate deployment inputs
+        shell: bash
+        env:
+          BUDGET_ALERT_CONTACT_EMAIL: ${{ secrets.BUDGET_ALERT_CONTACT_EMAIL }}
+        run: |
+          set -euo pipefail
+
+          required=(
+            THESIS_IMAGE_REFERENCE
+            THESIS_IMAGE_DIGEST
+            AZURE_CLIENT_ID
+            AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID
+            AZURE_RESOURCE_GROUP
+            AZURE_LOCATION
+            RESOURCE_NAME_PREFIX
+            DEPLOYMENT_ENVIRONMENT
+            BUDGET_START_DATE
+            BUDGET_ALERT_CONTACT_EMAIL
+            ALLOW_PUBLIC_NETWORK_ACCESS
+            ENABLE_EXTERNAL_API_INGRESS
+            GITHUB_OWNER
+            GITHUB_OWNER_ID
+            GITHUB_REPOSITORY_NAME
+            GITHUB_REPOSITORY_ID
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required deployment input $name is empty"
+              exit 1
+            fi
+          done
+
+          if [[ ! "$THESIS_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The Thesis image job did not return a valid immutable digest"
+            exit 1
+          fi
+          if [[ "$THESIS_IMAGE_REFERENCE" != *"@$THESIS_IMAGE_DIGEST" ]]; then
+            echo "::error::The Thesis image reference and digest outputs disagree"
+            exit 1
+          fi
+
+          for boolean in ALLOW_PUBLIC_NETWORK_ACCESS ENABLE_EXTERNAL_API_INGRESS THESIS_ENABLE_EXTERNAL_INGRESS; do
+            value="${!boolean,,}"
+            if [[ -z "$value" ]]; then
+              value="false"
+            fi
+            case "$value" in
+              true|false) ;;
+              *)
+                echo "::error::$boolean must be exactly true or false"
+                exit 1
+                ;;
+            esac
+          done
+
+          if ! jq --exit-status 'type == "array" and all(.[]; (.workspaceId | type == "string") and (.ownerId | type == "string"))' <<<"$THESIS_WORKSPACE_REGISTRY" >/dev/null; then
+            echo "::error::THESIS_WORKSPACE_REGISTRY must be a JSON array of workspaceId/ownerId objects"
+            exit 1
+          fi
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve the deployed lake image reference
+        id: lake
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+          normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+          api_app_name="${normalized_prefix}-${normalized_environment}-api"
+
+          # The Thesis deployment is additive, so the market-lake workloads
+          # keep their currently deployed digest-pinned image; rebuilding the
+          # lake image here would couple the two products' release cadence.
+          lake_image_reference="$(az containerapp show \
+            --name "$api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='api'].image | [0]" \
+            --output tsv)"
+          if [[ ! "$lake_image_reference" =~ ^[a-z0-9][a-z0-9-]*\.azurecr\.io/[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The deployed market-lake API does not expose a digest-pinned private ACR reference; deploy the main environment first ($lake_image_reference)"
+            exit 1
+          fi
+
+          printf 'lake-image-reference=%s\n' "$lake_image_reference" >> "$GITHUB_OUTPUT"
+
+      - name: Validate and deploy the digest-pinned thesis composition
+        shell: bash
+        env:
+          DEPLOYMENT_NAME: fca-thesis-${{ github.run_id }}-${{ github.run_attempt }}
+          LAKE_IMAGE_REFERENCE: ${{ steps.lake.outputs.lake-image-reference }}
+          BUDGET_ALERT_CONTACT_EMAIL: ${{ secrets.BUDGET_ALERT_CONTACT_EMAIL }}
+        run: |
+          set -euo pipefail
+
+          az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+          thesis_enable_external_ingress="${THESIS_ENABLE_EXTERNAL_INGRESS,,}"
+          if [[ -z "$thesis_enable_external_ingress" ]]; then
+            thesis_enable_external_ingress="false"
+          fi
+
+          deployment_parameters=(
+            "location=$AZURE_LOCATION"
+            "resourceNamePrefix=$RESOURCE_NAME_PREFIX"
+            "environmentName=$DEPLOYMENT_ENVIRONMENT"
+            "sharedImageReference=$LAKE_IMAGE_REFERENCE"
+            "githubOwner=$GITHUB_OWNER"
+            "githubOwnerId=$GITHUB_OWNER_ID"
+            "githubRepository=$GITHUB_REPOSITORY_NAME"
+            "githubRepositoryId=$GITHUB_REPOSITORY_ID"
+            "githubEnvironment=$DEPLOYMENT_ENVIRONMENT"
+            "budgetStartDate=$BUDGET_START_DATE"
+            "budgetAlertContactEmail=$BUDGET_ALERT_CONTACT_EMAIL"
+            "assignGithubDeployerRoles=false"
+            "allowPublicNetworkAccess=$ALLOW_PUBLIC_NETWORK_ACCESS"
+            "enableExternalApiIngress=$ENABLE_EXTERNAL_API_INGRESS"
+            "lakeApiAudience=$LAKE_API_AUDIENCE"
+            "deployThesis=true"
+            "thesisImageReference=$THESIS_IMAGE_REFERENCE"
+            "thesisEnableExternalIngress=$thesis_enable_external_ingress"
+            "thesisApiAudience=$THESIS_API_AUDIENCE"
+            "thesisWorkspaceRegistry=$THESIS_WORKSPACE_REGISTRY"
+          )
+
+          az deployment group validate \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters "${deployment_parameters[@]}" \
+            --only-show-errors \
+            --output none
+
+          az deployment group create \
+            --name "$DEPLOYMENT_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters "${deployment_parameters[@]}" \
+            --only-show-errors \
+            --output none
+
+          summary="$(az deployment group show \
+            --name "$DEPLOYMENT_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.outputs.deploymentSummary.value.thesis \
+            --output json)"
+          thesis_api_name="$(jq --raw-output '.api.name // empty' <<<"$summary")"
+          thesis_api_fqdn="$(jq --raw-output '.api.fqdn // empty' <<<"$summary")"
+          if [[ -z "$thesis_api_name" || -z "$thesis_api_fqdn" ]]; then
+            echo "::error::The deployment summary did not report the Thesis API name and FQDN"
+            exit 1
+          fi
+
+          {
+            echo "### Thesis deployment"
+            echo "- Image digest: \\`$THESIS_IMAGE_DIGEST\\`"
+            echo "- Thesis API: \\`$thesis_api_name\\`"
+            echo "- Thesis API FQDN: \\`$thesis_api_fqdn\\`"
+            echo "- Workspace isolation: \\`$(jq --raw-output '.workspaces.model // "unknown"' <<<"$summary")\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  thesis-smoke:
+    name: Thesis runtime smoke test
+    needs:
+      - build-thesis-image
+      - deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The smoke is non-destructive: it is read-only except for the temporary
+    # one-replica Thesis API scale used by the private ingress health probe,
+    # which is restored through an exit trap (mirroring quant-smoke). While
+    # the thesis serve process is a scaffold, degraded health is reported as
+    # a warning; EXPECT_THESIS_SERVING=true turns it into a failure once the
+    # runtime is implemented.
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      THESIS_IMAGE_REFERENCE: ${{ needs.build-thesis-image.outputs.image-reference }}
+      THESIS_IMAGE_DIGEST: ${{ needs.build-thesis-image.outputs.image-digest }}
+      EXPECT_THESIS_SERVING: ${{ inputs.expect-thesis-serving || 'false' }}
+      THESIS_ENABLE_EXTERNAL_INGRESS: ${{ vars.THESIS_ENABLE_EXTERNAL_INGRESS }}
+      THESIS_WORKSPACE_REGISTRY: ${{ vars.THESIS_WORKSPACE_REGISTRY || '[{"workspaceId":"equity-momentum","ownerId":"local-operator"}]' }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      RESOURCE_NAME_PREFIX: ${{ vars.RESOURCE_NAME_PREFIX }}
+      DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate smoke inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            AZURE_CLIENT_ID
+            AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID
+            AZURE_RESOURCE_GROUP
+            RESOURCE_NAME_PREFIX
+            DEPLOYMENT_ENVIRONMENT
+            THESIS_IMAGE_REFERENCE
+            THESIS_IMAGE_DIGEST
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required smoke input $name is empty"
+              exit 1
+            fi
+          done
+
+          for boolean in EXPECT_THESIS_SERVING THESIS_ENABLE_EXTERNAL_INGRESS; do
+            value="${!boolean,,}"
+            if [[ -z "$value" ]]; then
+              value="false"
+            fi
+            case "$value" in
+              true|false) ;;
+              *)
+                echo "::error::$boolean must be exactly true or false"
+                exit 1
+                ;;
+            esac
+          done
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify thesis workload posture
+        id: posture
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+          normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+          thesis_api_app_name="${normalized_prefix}-${normalized_environment}-thesis-api"
+
+          thesis_api_image="$(az containerapp show \
+            --name "$thesis_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='thesis-api'].image | [0]" \
+            --output tsv)"
+          if [[ "$thesis_api_image" != "$THESIS_IMAGE_REFERENCE" ]]; then
+            echo "::error::The Thesis API does not use the built immutable image reference ($thesis_api_image)"
+            exit 1
+          fi
+
+          ingress_json="$(az containerapp show \
+            --name "$thesis_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress \
+            --output json)"
+          ingress_external="$(jq --raw-output '.external' <<<"$ingress_json" | tr '[:upper:]' '[:lower:]')"
+          ingress_allow_insecure="$(jq --raw-output '.allowInsecure' <<<"$ingress_json" | tr '[:upper:]' '[:lower:]')"
+          expected_external="${THESIS_ENABLE_EXTERNAL_INGRESS,,}"
+          if [[ -z "$expected_external" ]]; then
+            expected_external="false"
+          fi
+          if [[ "$ingress_external" != "$expected_external" ]]; then
+            echo "::error::The Thesis API ingress external flag ($ingress_external) does not match THESIS_ENABLE_EXTERNAL_INGRESS ($expected_external)"
+            exit 1
+          fi
+          if [[ "$ingress_allow_insecure" != "false" ]]; then
+            echo "::error::The Thesis API ingress must not allow insecure traffic"
+            exit 1
+          fi
+
+          probes="$(az containerapp show \
+            --name "$thesis_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "properties.template.containers[?name=='thesis-api'] | [0].probes" \
+            --output json)"
+          if ! jq --exit-status \
+            'length == 3 and all(.[]; .httpGet.path == "/health" and .httpGet.port == 8000)' \
+            <<<"$probes" >/dev/null; then
+            echo "::error::The Thesis API revision is not configured to probe /health on port 8000"
+            exit 1
+          fi
+
+          # Secrets must all be Key Vault references: a value-bearing secret
+          # would mean a provider or model secret was committed to the
+          # deployment, which this contract forbids.
+          secrets_json="$(az containerapp show \
+            --name "$thesis_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.secrets \
+            --output json)"
+          if ! jq --exit-status \
+            'length == 1 and .[0].name == "thesis-api-bearer-token" and (.[0] | has("value") | not)' \
+            <<<"$secrets_json" >/dev/null; then
+            echo "::error::The Thesis API must expose exactly the thesis-api-bearer-token Key Vault secretRef and no plain values"
+            exit 1
+          fi
+
+          storage_account="$(az storage account list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?tags.product=='thesis' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].name | [0]" \
+            --output tsv)"
+          if [[ -z "$storage_account" ]]; then
+            echo "::error::The Thesis workspace storage account is missing"
+            exit 1
+          fi
+
+          arm_base="https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage"
+          if ! az rest --method GET \
+            --url "${arm_base}/storageAccounts/${storage_account}/tableServices/default/tables/workspaces?api-version=2023-05-01" \
+            --query name \
+            --output tsv \
+            --only-show-errors >/dev/null; then
+            echo "::error::The workspaces registry table is missing from the Thesis storage account"
+            exit 1
+          fi
+
+          while read -r container_name; do
+            if ! az rest --method GET \
+              --url "${arm_base}/storageAccounts/${storage_account}/blobServices/default/containers/${container_name}?api-version=2023-05-01" \
+              --query name \
+              --output tsv \
+              --only-show-errors >/dev/null; then
+              echo "::error::The ${container_name} blob container is missing from the Thesis storage account"
+              exit 1
+            fi
+          done < <(jq --raw-output '.[] | "thesis-ws-\(.workspaceId | ascii_downcase | gsub("_"; "-"))"' <<<"$THESIS_WORKSPACE_REGISTRY")
+
+          thesis_api_fqdn="$(jq --raw-output '.fqdn // empty' <<<"$(az containerapp show \
+            --name "$thesis_api_app_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress \
+            --output json)")"
+          if [[ -z "$thesis_api_fqdn" || "$thesis_api_fqdn" == "None" ]]; then
+            echo "::error::The deployed Thesis API did not expose an ingress FQDN for the health smoke"
+            exit 1
+          fi
+
+          printf 'thesis-api-fqdn=%s\n' "$thesis_api_fqdn" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Thesis workload posture"
+            echo "- Image: \\`$thesis_api_image\\`"
+            echo "- Ingress external: \\`$ingress_external\\`, allowInsecure: \\`$ingress_allow_insecure\\`"
+            echo "- Probes: three \\`/health\\` probes on port 8000"
+            echo "- Secrets: single thesis-api-bearer-token Key Vault secretRef, no plain values"
+            echo "- Workspace registry table and per-workspace containers present on \\`$storage_account\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run probe-safe thesis API health smoke
+        shell: bash
+        env:
+          THESIS_API_FQDN: ${{ steps.posture.outputs.thesis-api-fqdn }}
+        run: |
+          set -euo pipefail
+
+          strict_serving="${EXPECT_THESIS_SERVING,,}"
+          if [[ -z "$strict_serving" ]]; then
+            strict_serving="false"
+          fi
+          scaffold_note="The thesis serve process is a scaffold, so degraded health is expected until the Thesis API runtime is implemented."
+
+          if [[ "${THESIS_ENABLE_EXTERNAL_INGRESS,,}" == "true" ]]; then
+            health_status="$(curl \
+              --silent \
+              --show-error \
+              --location \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --connect-timeout 10 \
+              --max-time 30 \
+              --retry 12 \
+              --retry-all-errors \
+              --retry-delay 5 \
+              "https://${THESIS_API_FQDN}/health" || echo '000')"
+            if [[ "$health_status" != "200" ]]; then
+              if [[ "$strict_serving" == "true" ]]; then
+                echo "::error::The Thesis API /health probe returned $health_status instead of 200"
+                exit 1
+              fi
+              echo "::warning::The Thesis API /health probe returned $health_status. $scaffold_note"
+            fi
+
+            protected_status="000"
+            if [[ "$health_status" == "200" ]]; then
+              # The protected route must reject anonymous calls; this proves
+              # the authentication boundary without moving the bearer token
+              # into the runner. The healthy revision already proves the
+              # versionless Key Vault reference for thesis-api-bearer-token
+              # resolves.
+              protected_status="$(curl \
+                --silent \
+                --show-error \
+                --location \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                --connect-timeout 10 \
+                --max-time 30 \
+                "https://${THESIS_API_FQDN}/v1/auth/check")"
+              if [[ "$protected_status" != "401" ]]; then
+                if [[ "$strict_serving" == "true" ]]; then
+                  echo "::error::The Thesis API protected route returned $protected_status instead of rejecting anonymous access"
+                  exit 1
+                fi
+                echo "::warning::The Thesis API protected route returned $protected_status. $scaffold_note"
+              fi
+            fi
+
+            {
+              echo "### Thesis API health"
+              echo "- Mode: public ingress"
+              echo "- \\`/health\\` returned \\`$health_status\\` and \\`/v1/auth/check\\` returned \\`$protected_status\\`"
+              if [[ "$strict_serving" != "true" ]]; then
+                echo "- $scaffold_note"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
+            normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
+            thesis_api_app_name="${normalized_prefix}-${normalized_environment}-thesis-api"
+
+            restore_scale_to_zero() {
+              az containerapp update \
+                --name "$thesis_api_app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --min-replicas 0 \
+                --only-show-errors \
+                --output none
+            }
+            trap restore_scale_to_zero EXIT
+
+            az containerapp update \
+              --name "$thesis_api_app_name" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --min-replicas 1 \
+              --only-show-errors \
+              --output none
+
+            health_state="Unknown"
+            provisioning_state="Unknown"
+            for _ in {1..24}; do
+              revision="$(az containerapp revision list \
+                --name "$thesis_api_app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --output json \
+                | jq --compact-output \
+                  '[.[] | select(.properties.active == true)] | sort_by(.properties.createdTime) | last // {}')"
+              health_state="$(jq --raw-output '.properties.healthState // "Unknown"' <<<"$revision")"
+              provisioning_state="$(jq --raw-output '.properties.provisioningState // "Unknown"' <<<"$revision")"
+              if [[ "$health_state" == "Healthy" && "$provisioning_state" == "Provisioned" ]]; then
+                break
+              fi
+              if [[ "$provisioning_state" == "Failed" ]]; then
+                break
+              fi
+              sleep 5
+            done
+
+            if [[ "$health_state" == "Healthy" && "$provisioning_state" == "Provisioned" ]]; then
+              # Mirroring quant-smoke, the private path proves health through
+              # the platform probes; a public runner cannot reach the
+              # internal FQDN to exercise the 401 boundary directly.
+              probe_outcome="The active revision passed all three \\`/health\\` probes"
+            else
+              if [[ "$strict_serving" == "true" ]]; then
+                echo "::error::The private Thesis API revision did not pass its /health probes ($health_state, $provisioning_state)"
+                exit 1
+              fi
+              echo "::warning::The private Thesis API revision reported $health_state, $provisioning_state. $scaffold_note"
+              probe_outcome="Revision reported \\`$health_state\\`, \\`$provisioning_state\\`"
+            fi
+
+            restore_scale_to_zero
+            trap - EXIT
+
+            {
+              echo "### Thesis API health"
+              echo "- Mode: private ingress (temporary one-replica probe, restored to zero)"
+              echo "- $probe_outcome"
+              if [[ "$strict_serving" != "true" ]]; then
+                echo "- $scaffold_note"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

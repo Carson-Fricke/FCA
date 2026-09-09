@@ -107,6 +107,46 @@ param rthTraderReplicas int = 1
 @maxValue(86400)
 param backtestReplicaTimeoutSeconds int = 3600
 
+// Thesis (T174) wiring is additive: deployThesis defaults to false so the
+// market-lake composition is unchanged. The Thesis identity is composed here
+// rather than in identities.bicep because that module is shared and the
+// Thesis runtime requires an identity distinct from both the lake runtime
+// identity and the quant-harness identity; Thesis must never share the
+// provider, broker, or gatekeeper credential scope of those workloads
+// (fca-thesis.md security invariants). The thesis modules receive the
+// identity through parameters and create no identity themselves.
+@description('Whether to deploy the Thesis backend Container App and its workspace persistence. False leaves the market-lake composition unchanged.')
+param deployThesis bool = false
+
+@description('Immutable digest-pinned private ACR image reference for the Thesis backend image built from Dockerfile.thesis. Required when deployThesis is true.')
+@minLength(1)
+param thesisImageReference string = 'not-deployed.azurecr.io/thesis@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+
+@description('Whether the Thesis API accepts public ingress, independent of the market-lake API authentication boundary.')
+param thesisEnableExternalIngress bool = false
+
+@description('Entra application client ID the Thesis API accepts as token audience. Empty keeps the Thesis API on static bearer authentication only.')
+param thesisApiAudience string = ''
+
+@description('Initial Thesis workspace registry. Each entry requires workspaceId and ownerId; one blob container is provisioned per entry.')
+param thesisWorkspaceRegistry array = []
+
+@description('CPU cores per Thesis API replica.')
+param thesisContainerCpu string = '0.25'
+
+@description('Memory per Thesis API replica.')
+param thesisContainerMemory string = '0.5Gi'
+
+@description('Minimum replicas for the Thesis API; zero scales the app to zero.')
+@minValue(0)
+@maxValue(4)
+param thesisMinReplicas int = 0
+
+@description('Maximum replicas for the Thesis API; bounds the additive monthly cost envelope.')
+@minValue(1)
+@maxValue(4)
+param thesisMaxReplicas int = 2
+
 var normalizedPrefix = toLower(resourceNamePrefix)
 var normalizedEnvironment = toLower(environmentName)
 var namePrefix = '${normalizedPrefix}-${normalizedEnvironment}'
@@ -126,6 +166,11 @@ var quantApiAppName = '${namePrefix}-quant-api'
 var rthTraderAppName = '${namePrefix}-rth-trader'
 var cryptoTraderAppName = '${namePrefix}-crypto-trader'
 var backtestJobName = '${namePrefix}-backtest'
+var thesisIdentityName = '${namePrefix}-thesis'
+var thesisApiAppName = '${namePrefix}-thesis-api'
+// A dedicated persistence account for Thesis workspaces: 'thesis' plus the
+// same deterministic suffix keeps the name distinct from the lake account.
+var thesisWorkspacesStorageAccountName = 'thesis${take(deterministicSuffix, 18)}'
 var budgetName = '${namePrefix}-budget'
 // The PerGB2018 Log Analytics SKU requires at least 30 days.
 var logRetentionDays = 30
@@ -134,6 +179,12 @@ var tags = {
   product: 'market-lake'
   environment: environmentName
   managedBy: 'bicep'
+}
+
+resource thesisIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (deployThesis) {
+  name: thesisIdentityName
+  location: location
+  tags: tags
 }
 
 module storage './modules/storage.bicep' = {
@@ -258,6 +309,61 @@ module costControls './modules/cost-controls.bicep' = {
   }
 }
 
+
+module traderMonitoring './modules/monitoring.bicep' = {
+  name: 'market-lake-trader-monitoring'
+  params: {
+    namePrefix: namePrefix
+    logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
+    traderAlertContactEmail: budgetAlertContactEmail
+    tags: tags
+  }
+}
+module thesisWorkspaces './modules/thesis-workspaces.bicep' = if (deployThesis) {
+  name: 'thesis-workspaces'
+  params: {
+    storageAccountName: thesisWorkspacesStorageAccountName
+    location: location
+    tags: tags
+    // Ternary guards mirror the conditional module so the possibly-skipped
+    // identity is never dereferenced when Thesis is disabled; the filler
+    // values are never evaluated in an enabled deployment.
+    thesisPrincipalId: deployThesis ? thesisIdentity.properties.principalId : '00000000-0000-0000-0000-000000000000'
+    workspaceRegistry: thesisWorkspaceRegistry
+  }
+}
+
+module thesisApi './modules/thesis.bicep' = if (deployThesis) {
+  name: 'thesis-api'
+  // Param expressions referencing containerApps, keyVault, and
+  // thesisWorkspaces outputs create the deployment ordering implicitly; an
+  // explicit dependsOn would be flagged as unnecessary. The identity and
+  // workspace accesses use the same ternary guard as their conditional
+  // sources so a Thesis-disabled deployment never dereferences them.
+  params: {
+    thesisApiAppName: thesisApiAppName
+    containerAppsEnvironmentResourceId: containerApps.outputs.containerAppsEnvironment.resourceId
+    logAnalyticsWorkspaceResourceId: containerApps.outputs.logAnalyticsWorkspace.resourceId
+    thesisImageReference: thesisImageReference
+    registryLoginServer: containerRegistry.outputs.registry.loginServer
+    keyVaultUri: keyVault.outputs.keyVaultUri
+    thesisIdentityResourceId: deployThesis ? thesisIdentity.id : '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/not-deployed'
+    thesisIdentityClientId: deployThesis ? thesisIdentity.properties.clientId : '00000000-0000-0000-0000-000000000000'
+    thesisIdentityPrincipalId: deployThesis ? thesisIdentity.properties.principalId : '00000000-0000-0000-0000-000000000000'
+    thesisWorkspaceStorageAccountName: deployThesis ? thesisWorkspaces.outputs.storageAccountName : 'thesisnotdeployed'
+    thesisWorkspaceContainerPrefix: deployThesis ? thesisWorkspaces.outputs.containerPrefix : 'thesis-ws-'
+    thesisWorkspaceRegistryTableName: deployThesis ? thesisWorkspaces.outputs.registryTableName : 'workspaces'
+    location: location
+    tags: tags
+    enableExternalIngress: thesisEnableExternalIngress
+    thesisApiEntraAudience: thesisApiAudience
+    thesisContainerCpu: thesisContainerCpu
+    thesisContainerMemory: thesisContainerMemory
+    thesisMinReplicas: thesisMinReplicas
+    thesisMaxReplicas: thesisMaxReplicas
+  }
+}
+
 @description('Non-secret summary of the composed market-lake and quant-harness resources, identity wiring, and additive cost controls.')
 output deploymentSummary object = {
   environment: environmentName
@@ -296,5 +402,16 @@ output deploymentSummary object = {
     backtestReplicaTimeoutSeconds: backtestReplicaTimeoutSeconds
     logRetentionDays: logRetentionDays
     monthlyBudgetAlertsUsd: costControls.outputs.monthlyBudgetAlerts.amountsUsd
+  }
+  thesis: {
+    enabled: deployThesis
+    api: deployThesis ? thesisApi.outputs.thesisApi : null
+    identity: deployThesis ? thesisApi.outputs.thesisIdentity : null
+    workspaces: deployThesis ? thesisWorkspaces.outputs.isolation : null
+    costEnvelope: deployThesis ? thesisApi.outputs.costEnvelope : null
+    image: {
+      reference: thesisImageReference
+      pinnedByDigest: contains(thesisImageReference, '@sha256:')
+    }
   }
 }
