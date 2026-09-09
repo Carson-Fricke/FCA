@@ -1,0 +1,31 @@
+{
+  "taskId": "T172",
+  "numTotalTests": 2368,
+  "numPassedTests": 2368,
+  "numFailedTests": 0,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-consent-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/activation/",
+      "result": "44 parametrized items pass: natural-language ambiguity is structurally impossible (no text parameter exists; NL strings rejected in every slot), confirmation must restate the proposal's exact bundle hash/environment/action, paper/shadow/live default disabled, revocation and expiry enforced through the GrantLedger, one-shot scope consumed on first validated request, and the gatekeeper client fails closed before contacting the endpoint on revoked/expired/mismatched/capability/test-failure inputs"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2368 passed, 14 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/activation tests/thesis/activation && uv run --extra dev ty check src/thesis/activation",
+      "result": "ruff and ty clean on the activation package"
+    }
+  ],
+  "limitations": [
+    "The gatekeeper itself is a separate deterministic service (Thesis-side surface only); endpoint fakes model its contract until the gatekeeper service task lands"
+  ]
+}

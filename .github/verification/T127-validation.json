@@ -1,0 +1,33 @@
+{
+  "taskId": "T127",
+  "numTotalTests": 2368,
+  "numPassedTests": 2368,
+  "numFailedTests": 0,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "monitoring-contract-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/operations/test_monitoring_contract.py",
+      "result": "16 tests: action group with parameterized email, alerts scoped to the trader app name pattern, no plaintext emails or secrets, severity fields present, Log Analytics query alerts reference the faulted/halt supervision vocabulary"
+    },
+    {
+      "name": "bicep-builds",
+      "status": "passed",
+      "command": "az bicep build --file infra/modules/monitoring.bicep; az bicep build --file infra/main.bicep",
+      "result": "Both compile cleanly including the traderMonitoring module wiring into main.bicep (namePrefix, logAnalyticsWorkspaceName, budgetAlertContactEmail, tags)"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2368 passed, 14 skipped, 1 xfailed at wave edit freeze; no engine changes (AC5/AC6 untouched by design)"
+    }
+  ],
+  "limitations": [
+    "AC1/AC2/AC3 are drill-executed procedures: the runbook defines them fully, but the actual drills (alert test-fires, kill-switch drill, rollback rehearsal) require the live dev environment and are operator-executed",
+    "Halts and daily-loss alerts are armed but manual until the trader's emit boundary publishes supervision events to Log Analytics; console tracebacks and restarts are automatable today",
+    "monitoring.bicep main.bicep wiring landed in the same infra/main.bicep change as T174's thesis wiring (commit 9892cc1)"
+  ]
+}

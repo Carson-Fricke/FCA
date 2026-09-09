@@ -1,0 +1,32 @@
+{
+  "taskId": "T174",
+  "numTotalTests": 2368,
+  "numPassedTests": 2368,
+  "numFailedTests": 0,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "deployment-contract-tests",
+      "status": "passed",
+      "command": "uv run --extra dev --with pyyaml python -m pytest -p no:cacheprovider tests/thesis/operations/test_deployment_contract.py",
+      "result": "20 tests: digest-pinned image reference enforced, thesis-api-bearer-token secretRef with no plaintext value, three /health probes, scale-to-zero defaults, identity parameterization, Log Analytics diagnostics, container-per-workspace isolation model, additive deployThesis-gated main.bicep wiring, bicepparam sentinel, deploy-thesis.yml YAML validity with pinned action SHAs and no committed secrets"
+    },
+    {
+      "name": "bicep-builds",
+      "status": "passed",
+      "command": "az bicep build --file infra/modules/thesis.bicep; az bicep build --file infra/modules/thesis-workspaces.bicep; az bicep build --file infra/main.bicep",
+      "result": "All three compile cleanly (exit 0); compiled ARM is gitignored"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2368 passed, 14 skipped, 1 xfailed at wave edit freeze"
+    }
+  ],
+  "limitations": [
+    "deployThesis defaults to false in main.bicep, so the market-lake deployment is unchanged until the Thesis deploy workflow is enabled",
+    "The workflow smoke treats degraded health as a warning while `thesis serve` remains a scaffold"
+  ]
+}
