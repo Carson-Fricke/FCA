@@ -128,6 +128,9 @@ param thesisEnableExternalIngress bool = false
 @description('Entra application client ID the Thesis API accepts as token audience. Empty keeps the Thesis API on static bearer authentication only.')
 param thesisApiAudience string = ''
 
+@description('Operator-owned hostname served by the Thesis API. Empty keeps the Container Apps default FQDN; a non-empty value adds a hostname binding and a managed certificate gated on registrar-side DNS validation (domain-hosting.md).')
+param thesisCustomDomain string = ''
+
 @description('Initial Thesis workspace registry. Each entry requires workspaceId and ownerId; one blob container is provisioned per entry.')
 param thesisWorkspaceRegistry array = []
 
@@ -357,6 +360,7 @@ module thesisApi './modules/thesis.bicep' = if (deployThesis) {
     tags: tags
     enableExternalIngress: thesisEnableExternalIngress
     thesisApiEntraAudience: thesisApiAudience
+    customDomainName: thesisCustomDomain
     thesisContainerCpu: thesisContainerCpu
     thesisContainerMemory: thesisContainerMemory
     thesisMinReplicas: thesisMinReplicas

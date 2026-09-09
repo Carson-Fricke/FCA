@@ -18,6 +18,13 @@ targetScope = 'resourceGroup'
 // the quant-harness identity, keeping provider, broker, and model secrets
 // out of Thesis scope (fca-thesis.md security invariants).
 //
+// Public hosting on an operator-owned hostname is opt-in: an empty
+// customDomainName parameter preserves the default-FQDN deployment exactly,
+// while a non-empty value adds a hostname binding and a free managed
+// certificate gated on registrar-side DNS validation. The registrar steps
+// stay with the operator (domain-hosting.md runbook); this module never
+// holds a registrar credential or a certificate file.
+//
 // Additive monthly cost envelope (per the cost-controls.bicep style,
 // Consumption plan list pricing): scale-to-zero by default means $0 idle
 // compute. Each replica at 0.25 vCPU + 0.5 GiB for 730 hours costs roughly
@@ -87,6 +94,9 @@ param enableExternalIngress bool = false
 
 @description('Entra application client ID the Thesis API accepts as token audience. Empty keeps the API on static bearer authentication only.')
 param thesisApiEntraAudience string = ''
+
+@description('Optional public custom hostname for the Thesis site, for example thesis.<operator-domain>. Empty keeps the deployment exactly on the Container Apps default FQDN with no hostname binding and no managed certificate. A non-empty value requires external ingress and operator-created registrar DNS records (see .github/runbooks/domain-hosting.md).')
+param customDomainName string = ''
 
 @description('CPU cores per Thesis API replica. Container Apps consumption allows 0.25 to 2.0 in 0.25 increments.')
 @allowed([
@@ -181,6 +191,11 @@ var thesisApiEnvironment = concat(thesisBaseEnvironment, thesisEntraEnvironment,
 // The vault is referenced, not created: the composition owns the Key Vault.
 var keyVaultName = split(replace(keyVaultUri, 'https://', ''), '.')[0]
 
+// Managed certificate names accept lowercase alphanumeric characters and
+// hyphens. The derived name replaces dots with hyphens and stays under the
+// 63-character resource-name limit.
+var thesisCustomCertificateName = take(replace(toLower(customDomainName), '.', '-'), 63)
+
 resource thesisKeyVault 'Microsoft.KeyVault/vaults@2026-02-01' existing = {
   name: keyVaultName
 }
@@ -197,6 +212,28 @@ resource thesisSecretAccess 'Microsoft.Authorization/roleAssignments@2022-04-01'
     principalId: thesisIdentityPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: keyVaultSecretsUserRole.id
+  }
+}
+
+// The managed environment is composed in the same resource group by
+// container-apps.bicep; this module receives its resource ID and resolves
+// the name for the managed-certificate parent scope.
+resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2025-07-01' existing = {
+  name: last(split(containerAppsEnvironmentResourceId, '/'))
+}
+
+// The free managed certificate is requested only for a non-empty custom
+// domain. CNAME domain control validation leaves the certificate pending
+// until the operator's registrar records resolve; see
+// .github/runbooks/domain-hosting.md for the exact DNS records and az
+// commands. No certificate file is uploaded and no secret is stored.
+resource thesisManagedCertificate 'Microsoft.App/managedEnvironments/managedCertificates@2025-07-01' = if (!empty(customDomainName)) {
+  parent: containerAppsEnvironment
+  name: thesisCustomCertificateName
+  location: location
+  properties: {
+    subjectName: customDomainName
+    domainControlValidation: 'CNAME'
   }
 }
 
@@ -232,6 +269,17 @@ resource thesisApiApp 'Microsoft.App/containerApps@2025-07-01' = {
         allowInsecure: false
         targetPort: thesisContainerPort
         transport: 'http'
+        // An empty customDomainName keeps the ingress exactly as deployed
+        // before this parameter existed. A custom hostname binds only to
+        // external ingress and references the managed certificate above;
+        // the certificateId reference orders the certificate before the app.
+        customDomains: empty(customDomainName) ? [] : [
+          {
+            name: customDomainName
+            bindingType: 'SniEnabled'
+            certificateId: thesisManagedCertificate.id
+          }
+        ]
         traffic: [
           {
             latestRevision: true
@@ -334,6 +382,7 @@ output thesisApi object = {
   imageReference: thesisImageReference
   pinnedByDigest: contains(thesisImageReference, '@sha256:')
   ingressExternal: enableExternalIngress
+  customDomain: customDomainName
 }
 
 @description('Identity wiring consumed by the Thesis API, echoed for non-secret composition summaries.')

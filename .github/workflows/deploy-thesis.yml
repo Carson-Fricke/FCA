@@ -177,6 +177,8 @@ jobs:
       THESIS_IMAGE_DIGEST: ${{ needs.build-thesis-image.outputs.image-digest }}
       THESIS_ENABLE_EXTERNAL_INGRESS: ${{ vars.THESIS_ENABLE_EXTERNAL_INGRESS }}
       THESIS_API_AUDIENCE: ${{ vars.THESIS_API_AUDIENCE }}
+      THESIS_CUSTOM_DOMAIN: ${{ vars.THESIS_CUSTOM_DOMAIN }}
+      THESIS_CUSTOM_DOMAIN_AUTHORIZED: ${{ vars.THESIS_CUSTOM_DOMAIN_AUTHORIZED }}
       THESIS_WORKSPACE_REGISTRY: ${{ vars.THESIS_WORKSPACE_REGISTRY || '[{"workspaceId":"equity-momentum","ownerId":"local-operator"}]' }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -241,6 +243,34 @@ jobs:
           if [[ "$THESIS_IMAGE_REFERENCE" != *"@$THESIS_IMAGE_DIGEST" ]]; then
             echo "::error::The Thesis image reference and digest outputs disagree"
             exit 1
+          fi
+
+          # Public hosting on an operator-owned hostname is an explicit
+          # authorization decision (github-azure-oidc-bootstrap.md ingress
+          # budget; domain-hosting.md registrar runbook): the deployment only
+          # binds the custom hostname when both variables are set and the
+          # authorization acknowledgment is exactly "true".
+          custom_domain_authorized="${THESIS_CUSTOM_DOMAIN_AUTHORIZED,,}"
+          if [[ -n "$THESIS_CUSTOM_DOMAIN" && "$custom_domain_authorized" != "true" ]]; then
+            echo "::error::THESIS_CUSTOM_DOMAIN is set but THESIS_CUSTOM_DOMAIN_AUTHORIZED is not exactly true; the operator must acknowledge the public-ingress authorization before the custom domain is bound"
+            exit 1
+          fi
+          if [[ -n "$custom_domain_authorized" && "$custom_domain_authorized" != "true" ]]; then
+            echo "::error::THESIS_CUSTOM_DOMAIN_AUTHORIZED must be empty or exactly true"
+            exit 1
+          fi
+          if [[ -n "$THESIS_CUSTOM_DOMAIN" ]]; then
+            if ! [[ "$THESIS_CUSTOM_DOMAIN" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; then
+              echo "::error::THESIS_CUSTOM_DOMAIN must be a lowercase FQDN without scheme or path ($THESIS_CUSTOM_DOMAIN)"
+              exit 1
+            fi
+            # Container Apps binds a custom domain only to external ingress;
+            # the pairing must reflect the reviewed ingress-budget decision.
+            if [[ "${THESIS_ENABLE_EXTERNAL_INGRESS,,}" != "true" ]]; then
+              echo "::error::A custom domain requires external ingress; set THESIS_ENABLE_EXTERNAL_INGRESS=true after the ingress budget review in .github/runbooks/github-azure-oidc-bootstrap.md"
+              exit 1
+            fi
+            echo "Thesis custom domain authorization acknowledged for $THESIS_CUSTOM_DOMAIN (operator-owned registrar records; see .github/runbooks/domain-hosting.md)"
           fi
 
           for boolean in ALLOW_PUBLIC_NETWORK_ACCESS ENABLE_EXTERNAL_API_INGRESS THESIS_ENABLE_EXTERNAL_INGRESS; do
@@ -330,6 +360,7 @@ jobs:
             "thesisImageReference=$THESIS_IMAGE_REFERENCE"
             "thesisEnableExternalIngress=$thesis_enable_external_ingress"
             "thesisApiAudience=$THESIS_API_AUDIENCE"
+            "thesisCustomDomain=${THESIS_CUSTOM_DOMAIN}"
             "thesisWorkspaceRegistry=$THESIS_WORKSPACE_REGISTRY"
           )
 
@@ -391,6 +422,8 @@ jobs:
       THESIS_IMAGE_DIGEST: ${{ needs.build-thesis-image.outputs.image-digest }}
       EXPECT_THESIS_SERVING: ${{ inputs.expect-thesis-serving || 'false' }}
       THESIS_ENABLE_EXTERNAL_INGRESS: ${{ vars.THESIS_ENABLE_EXTERNAL_INGRESS }}
+      THESIS_CUSTOM_DOMAIN: ${{ vars.THESIS_CUSTOM_DOMAIN }}
+      THESIS_CHECK_CUSTOM_DOMAIN: ${{ vars.THESIS_CHECK_CUSTOM_DOMAIN }}
       THESIS_WORKSPACE_REGISTRY: ${{ vars.THESIS_WORKSPACE_REGISTRY || '[{"workspaceId":"equity-momentum","ownerId":"local-operator"}]' }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -701,3 +734,78 @@ jobs:
               fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Check the custom hostname (optional)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          strict_serving="${EXPECT_THESIS_SERVING,,}"
+          if [[ -z "$strict_serving" ]]; then
+            strict_serving="false"
+          fi
+          check_enabled="${THESIS_CHECK_CUSTOM_DOMAIN,,}"
+
+          if [[ "$check_enabled" != "true" ]]; then
+            if [[ -n "$THESIS_CUSTOM_DOMAIN" ]]; then
+              echo "::notice::THESIS_CUSTOM_DOMAIN is bound but THESIS_CHECK_CUSTOM_DOMAIN is unset; skipping the custom-hostname smoke"
+            else
+              echo "THESIS_CUSTOM_DOMAIN is unset; skipping the custom-hostname smoke"
+            fi
+            exit 0
+          fi
+
+          if [[ -z "$THESIS_CUSTOM_DOMAIN" ]]; then
+            echo "::error::THESIS_CHECK_CUSTOM_DOMAIN is true but THESIS_CUSTOM_DOMAIN is empty"
+            exit 1
+          fi
+
+          # curl validates the TLS chain: a managed certificate that is still
+          # issuing, or a stale registrar record, surfaces here as 000.
+          health_status="$(curl \
+            --silent \
+            --show-error \
+            --location \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --retry 12 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            "https://${THESIS_CUSTOM_DOMAIN}/health" || echo '000')"
+          if [[ "$health_status" != "200" ]]; then
+            if [[ "$strict_serving" == "true" ]]; then
+              echo "::error::The custom hostname /health probe on $THESIS_CUSTOM_DOMAIN returned $health_status instead of 200"
+              exit 1
+            fi
+            echo "::warning::The custom hostname /health probe on $THESIS_CUSTOM_DOMAIN returned $health_status (managed-certificate issuance can lag the first binding)"
+          fi
+
+          protected_status="000"
+          if [[ "$health_status" == "200" ]]; then
+            # The public authentication boundary must hold on the custom
+            # hostname too: anonymous protected-route calls are rejected.
+            protected_status="$(curl \
+              --silent \
+              --show-error \
+              --location \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --connect-timeout 10 \
+              --max-time 30 \
+              "https://${THESIS_CUSTOM_DOMAIN}/v1/auth/check")"
+            if [[ "$protected_status" != "401" ]]; then
+              if [[ "$strict_serving" == "true" ]]; then
+                echo "::error::The custom hostname protected route on $THESIS_CUSTOM_DOMAIN returned $protected_status instead of rejecting anonymous access"
+                exit 1
+              fi
+              echo "::warning::The custom hostname protected route on $THESIS_CUSTOM_DOMAIN returned $protected_status"
+            fi
+          fi
+
+          {
+            echo "### Thesis custom hostname"
+            echo "- Hostname: \\`$THESIS_CUSTOM_DOMAIN\\`"
+            echo "- \\`/health\\` returned \\`$health_status\\` and \\`/v1/auth/check\\` returned \\`$protected_status\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
