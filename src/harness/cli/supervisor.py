@@ -1229,6 +1229,10 @@ class ReorderingInbox:
     the inner inbox is momentarily idle.  Events that arrive after their
     timestamp has already been passed are dropped beyond tolerance and
     counted in :attr:`dropped_late` rather than violating kernel ordering.
+    When a burst fills the buffer with stamps tighter than the lateness
+    window, the oldest buffered event is shed — also counted in
+    :attr:`dropped_late` — so the boundary always makes progress and the
+    kernel never stalls on the live feed.
     """
 
     __slots__ = (
@@ -1301,6 +1305,15 @@ class ReorderingInbox:
             )
             if boundary is None or self._buffer[0][0] <= boundary or inner_idle:
                 return heapq.heappop(self._buffer)[3]
+            if len(self._buffer) >= self._capacity:
+                # A burst can fill the buffer with stamps tighter than the
+                # lateness window, wedging the release condition forever.
+                # Shed the oldest buffered event (counted as beyond
+                # tolerance) so the boundary always makes progress and the
+                # kernel never stalls on the live feed.
+                heapq.heappop(self._buffer)
+                self._dropped_late += 1
+                continue
 
 
 # --------------------------------------------------------------------------

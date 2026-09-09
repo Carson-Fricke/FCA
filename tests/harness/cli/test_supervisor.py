@@ -932,6 +932,26 @@ def test_reordering_inbox_rejects_invalid_construction() -> None:
         sup.ReorderingInbox(object())  # ty: ignore[invalid-argument-type]
 
 
+def test_reordering_inbox_sheds_heads_instead_of_stalling_on_tight_bursts() -> None:
+    stamp = OPEN + timedelta(minutes=1)
+    flooded = [replace(_quote(), timestamp=stamp) for _ in range(6)]
+    inbox = sup.ReorderingInbox(
+        _ScriptedInbox(flooded), lateness=timedelta(seconds=2), capacity=3
+    )
+
+    released = []
+    while True:
+        event = inbox.pop()
+        if event is None:
+            break
+        released.append(event)
+
+    stamps = [event.timestamp for event in released]
+    assert stamps == sorted(stamps)
+    assert len(released) == 2
+    assert inbox.dropped_late == 4
+
+
 # --------------------------------------------------------------------------
 # harness trader status: the supervision status command
 # --------------------------------------------------------------------------
