@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-09T17:50:44.868Z",
+    "exportedAt": "2026-09-09T19:49:42.050Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 222
+      "nextId": 223
     },
-    "checksum": "b22d1197351ae604",
-    "taskCount": 218,
+    "checksum": "0e16e942ecf28643",
+    "taskCount": 219,
     "exportMode": "full"
   },
   "selection": {
@@ -194,6 +194,7 @@
       "T150",
       "T205",
       "T208",
+      "T222",
       "T009",
       "T075",
       "T085",
@@ -1228,7 +1229,7 @@
     "T050": {
       "type": "task",
       "title": "E6.4 Cost projection and equity rollout decision",
-      "status": "pending",
+      "status": "done",
       "parentId": "T009",
       "depends": [
         "T049"
@@ -1890,7 +1891,7 @@
     "T218": {
       "type": "task",
       "title": "H8.6 Harness MCP server for backtests and experiments",
-      "status": "pending",
+      "status": "done",
       "parentId": "T076",
       "depends": []
     },
@@ -2057,6 +2058,13 @@
         "T018",
         "T031"
       ]
+    },
+    "T222": {
+      "type": "task",
+      "title": "H8.7 Wavelet signal kernels and intraday/daily regime studies",
+      "status": "done",
+      "parentId": "T076",
+      "depends": []
     },
     "T009": {
       "type": "epic",
@@ -2365,7 +2373,7 @@
     "T220": {
       "type": "task",
       "title": "TH6.6 Thesis workspace UI implementation (Svelte)",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": []
     },
@@ -15657,7 +15665,7 @@
     {
       "id": "T050",
       "title": "E6.4 Cost projection and equity rollout decision",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T009",
@@ -15676,21 +15684,155 @@
         "T049"
       ],
       "createdAt": "2026-09-01T03:22:57.624Z",
-      "updatedAt": "2026-09-01T03:28:42.885Z",
+      "updatedAt": "2026-09-09T19:39:22.926Z",
+      "completedAt": "2026-09-09T19:39:18.776Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-09T19:38:31.446Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:22:57.624Z"
+        "initializedAt": "2026-09-01T03:22:57.624Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "5a5fe0dd5157c8eba3acd7b030c8de2b68ec8f88",
+                "shortSha": "5a5fe0d"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "docs/e6.4-cost-projection.md",
+                    "sha256": "2e5c687959927514e2dc84add341921b09491f609e9c8a9644382f1929115caf"
+                  },
+                  {
+                    "path": "scripts/cost/e6_4_projection.py",
+                    "sha256": "aab2623312144cc06b4aa7d9c9e587070a56606f3062d8fb07356662a51d076e"
+                  },
+                  {
+                    "path": "tests/scripts/test_e6_4_projection.py",
+                    "sha256": "cadafbdc33167c3d224ced9024d54a3034813dc11cac0fa03dd1795df7be386b"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T050-validation.json",
+                "sha256": "75549a810cfb1dcc3379a9fbbb18d3d142ac57563afe6440be2fac6f5a9f6308",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:38:31.934Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "5a5fe0dd5157c8eba3acd7b030c8de2b68ec8f88",
+                "shortSha": "5a5fe0d"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "docs/e6.4-cost-projection.md",
+                    "sha256": "2e5c687959927514e2dc84add341921b09491f609e9c8a9644382f1929115caf"
+                  },
+                  {
+                    "path": "scripts/cost/e6_4_projection.py",
+                    "sha256": "aab2623312144cc06b4aa7d9c9e587070a56606f3062d8fb07356662a51d076e"
+                  },
+                  {
+                    "path": "tests/scripts/test_e6_4_projection.py",
+                    "sha256": "cadafbdc33167c3d224ced9024d54a3034813dc11cac0fa03dd1795df7be386b"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T050-validation.json",
+                "sha256": "75549a810cfb1dcc3379a9fbbb18d3d142ac57563afe6440be2fac6f5a9f6308",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:38:31.934Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "5a5fe0dd5157c8eba3acd7b030c8de2b68ec8f88",
+                "shortSha": "5a5fe0d"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "docs/e6.4-cost-projection.md",
+                    "sha256": "2e5c687959927514e2dc84add341921b09491f609e9c8a9644382f1929115caf"
+                  },
+                  {
+                    "path": "scripts/cost/e6_4_projection.py",
+                    "sha256": "aab2623312144cc06b4aa7d9c9e587070a56606f3062d8fb07356662a51d076e"
+                  },
+                  {
+                    "path": "tests/scripts/test_e6_4_projection.py",
+                    "sha256": "cadafbdc33167c3d224ced9024d54a3034813dc11cac0fa03dd1795df7be386b"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T050-validation.json",
+                "sha256": "75549a810cfb1dcc3379a9fbbb18d3d142ac57563afe6440be2fac6f5a9f6308",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:38:31.934Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "research",
       "scope": "unit",
       "relates": []
@@ -23562,7 +23704,7 @@
     {
       "id": "T218",
       "title": "H8.6 Harness MCP server for backtests and experiments",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T076",
@@ -23586,21 +23728,179 @@
         "src/harness/mcp/"
       ],
       "createdAt": "2026-09-09T17:26:02.057Z",
-      "updatedAt": "2026-09-09T17:26:02.057Z",
+      "updatedAt": "2026-09-09T19:25:00.918Z",
+      "completedAt": "2026-09-09T19:24:57.522Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-09T19:24:14.746Z",
         "failureLog": [],
-        "initializedAt": "2026-09-09T17:26:02.057Z"
+        "initializedAt": "2026-09-09T17:26:02.057Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ccc3a7ce8d161aa9c971276e61848f00df85d5ab",
+                "shortSha": "ccc3a7c"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/mcp/server.py",
+                    "sha256": "a04c2c05082c1dc395e22d556634c2a68691338bf5222ae81d74286d0d685cb3"
+                  },
+                  {
+                    "path": "src/harness/mcp/tools.py",
+                    "sha256": "5a0155d21193ce0f212cd7d66173a03b209751f447678507e6edc6f62f9226a5"
+                  },
+                  {
+                    "path": "src/harness/mcp/transport.py",
+                    "sha256": "5e01306616f39745b78192a0eb6037a1b6339059b31ed7595bd2f9fc05da5ff1"
+                  },
+                  {
+                    "path": "src/harness/mcp/auth.py",
+                    "sha256": "c44567ff2e633f5e4da1165ddaa2f67ed39c185b9338462068face7f5f3115fe"
+                  },
+                  {
+                    "path": "tests/harness/mcp/test_server.py",
+                    "sha256": "00bf0c29a79b753adbcd35e90437d0c5c64d50c7919334c8dc991fd804bf8066"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T218-validation.json",
+                "sha256": "79d457546563e86fa476f3d26b762b1abcef98922e25821321f23b985d362c36",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:24:15.326Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ccc3a7ce8d161aa9c971276e61848f00df85d5ab",
+                "shortSha": "ccc3a7c"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/mcp/server.py",
+                    "sha256": "a04c2c05082c1dc395e22d556634c2a68691338bf5222ae81d74286d0d685cb3"
+                  },
+                  {
+                    "path": "src/harness/mcp/tools.py",
+                    "sha256": "5a0155d21193ce0f212cd7d66173a03b209751f447678507e6edc6f62f9226a5"
+                  },
+                  {
+                    "path": "src/harness/mcp/transport.py",
+                    "sha256": "5e01306616f39745b78192a0eb6037a1b6339059b31ed7595bd2f9fc05da5ff1"
+                  },
+                  {
+                    "path": "src/harness/mcp/auth.py",
+                    "sha256": "c44567ff2e633f5e4da1165ddaa2f67ed39c185b9338462068face7f5f3115fe"
+                  },
+                  {
+                    "path": "tests/harness/mcp/test_server.py",
+                    "sha256": "00bf0c29a79b753adbcd35e90437d0c5c64d50c7919334c8dc991fd804bf8066"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T218-validation.json",
+                "sha256": "79d457546563e86fa476f3d26b762b1abcef98922e25821321f23b985d362c36",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:24:15.326Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ccc3a7ce8d161aa9c971276e61848f00df85d5ab",
+                "shortSha": "ccc3a7c"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/mcp/server.py",
+                    "sha256": "a04c2c05082c1dc395e22d556634c2a68691338bf5222ae81d74286d0d685cb3"
+                  },
+                  {
+                    "path": "src/harness/mcp/tools.py",
+                    "sha256": "5a0155d21193ce0f212cd7d66173a03b209751f447678507e6edc6f62f9226a5"
+                  },
+                  {
+                    "path": "src/harness/mcp/transport.py",
+                    "sha256": "5e01306616f39745b78192a0eb6037a1b6339059b31ed7595bd2f9fc05da5ff1"
+                  },
+                  {
+                    "path": "src/harness/mcp/auth.py",
+                    "sha256": "c44567ff2e633f5e4da1165ddaa2f67ed39c185b9338462068face7f5f3115fe"
+                  },
+                  {
+                    "path": "tests/harness/mcp/test_server.py",
+                    "sha256": "00bf0c29a79b753adbcd35e90437d0c5c64d50c7919334c8dc991fd804bf8066"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T218-validation.json",
+                "sha256": "79d457546563e86fa476f3d26b762b1abcef98922e25821321f23b985d362c36",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:24:15.326Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -25519,6 +25819,114 @@
       "relates": []
     },
     {
+      "id": "T222",
+      "title": "H8.7 Wavelet signal kernels and intraday/daily regime studies",
+      "status": "done",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T076",
+      "size": "medium",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "",
+      "createdAt": "2026-09-09T17:53:13.259Z",
+      "updatedAt": "2026-09-09T18:09:01.019Z",
+      "completedAt": "2026-09-09T18:08:56.102Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastUpdated": "2026-09-09T18:06:25.217Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-09T17:53:13.259Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "46afa737bac753b53555b165e653bdf1ed481e52",
+                "shortSha": "46afa73"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/signal/wavelets.py",
+                    "sha256": "6dc040a9df401190068987bccd496fac649d3b562b6eb30b233db4c2b75d657f"
+                  },
+                  {
+                    "path": "src/harness/signal/analytic.py",
+                    "sha256": "ea57e136010e241863f2348bf34c0e8c31e39bd4ff4471251063991a1ab3d41c"
+                  },
+                  {
+                    "path": "src/harness/signal/scalogram.py",
+                    "sha256": "065aa142b42c9da8c1b670f97298bfd64db6e1caeacd721e217ac3be6b5ed843"
+                  },
+                  {
+                    "path": "src/harness/signal/__init__.py",
+                    "sha256": "bd0b1f3f2b6a5ae8f6220a2a5a54b2a417e88522d3a7d102fca90320adb97b49"
+                  },
+                  {
+                    "path": "scripts/experiments/spy_0dte/wavelet_intraday.py",
+                    "sha256": "b357bb0fddc46392c8bc564c36dda0257badc11debd96bf769cac439e073f475"
+                  },
+                  {
+                    "path": "scripts/experiments/spy_0dte/wavelet_daily.py",
+                    "sha256": "ef1083c20e1e5a8c7a3362859b6d108e2076cddf07eec9581054f718aa74b342"
+                  },
+                  {
+                    "path": "scripts/experiments/spy_0dte/cross_timeframe.py",
+                    "sha256": "6eac13d96c0d61df05f064499cb0e623893349649a3caf803dafaa7d899e971b"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-09T18:01:43.752Z",
+            "capturedBy": "unknown"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T222-validation.json",
+                "sha256": "bd41785c2f080d6340fcbb7ac9ac15bd16c117dfb8086820c33eff7da8e83d7d",
+                "passCount": 2368,
+                "failCount": 0,
+                "skipCount": 14
+              }
+            ],
+            "capturedAt": "2026-09-09T18:05:57.906Z",
+            "capturedBy": "unknown"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T18:06:25.417Z",
+            "capturedBy": "unknown"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T009",
       "title": "E6 Dev deployment and equities soak gate",
       "status": "pending",
@@ -26908,7 +27316,8 @@
         "Complete child T130: H8.3 Strategy authoring and architecture guide",
         "Complete child T131: H8.4 Timeboxed post-v1 realism spikes",
         "Complete child T214: H8.5 SPY 0DTE intraday theta-delta experiment (native CRR kernels and 42-session study)",
-        "Complete child T218: H8.6 Harness MCP server for backtests and experiments"
+        "Complete child T218: H8.6 Harness MCP server for backtests and experiments",
+        "Complete child T222: H8.7 Wavelet signal kernels and intraday/daily regime studies"
       ],
       "depends": [
         "T070",
@@ -26918,7 +27327,7 @@
         "T077"
       ],
       "createdAt": "2026-09-01T17:55:42.409Z",
-      "updatedAt": "2026-09-09T17:26:02.057Z",
+      "updatedAt": "2026-09-09T17:53:13.259Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -29508,7 +29917,7 @@
     {
       "id": "T220",
       "title": "TH6.6 Thesis workspace UI implementation (Svelte)",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T150",
@@ -29532,21 +29941,179 @@
         "src/ui/"
       ],
       "createdAt": "2026-09-09T17:40:59.278Z",
-      "updatedAt": "2026-09-09T17:40:59.278Z",
+      "updatedAt": "2026-09-09T19:11:23.159Z",
+      "completedAt": "2026-09-09T19:11:19.521Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-09T19:10:41.646Z",
         "failureLog": [],
-        "initializedAt": "2026-09-09T17:40:59.278Z"
+        "initializedAt": "2026-09-09T17:40:59.278Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "d2c5e9678a4007e4eba8291284a654b706abd7dd",
+                "shortSha": "d2c5e96"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/ui/src/lib/api.ts",
+                    "sha256": "9afb15cc39b9b394078f34097fd9c92e9a83c5804a88ade40e714d8a9dd78e61"
+                  },
+                  {
+                    "path": "src/ui/src/lib/sse.ts",
+                    "sha256": "4dd1717f83b5698ed8b785b7eca0d7ac9b4ed21ddb140ef97fabee3db2b272dd"
+                  },
+                  {
+                    "path": "src/ui/src/routes/w/[workspace]/backtests/[id]/+page.svelte",
+                    "sha256": "172e8a2a1497fc558ea5f8639d08e7a939b0f2ba729deb2cfc1ca9f34d2384d7"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/chat/ConsentCard.svelte",
+                    "sha256": "346e3ae85ebba1712bfb837a69e46f97082b4aeceacdd94ee4c6d3b122d87014"
+                  },
+                  {
+                    "path": "src/ui/src/tests/sse-client.test.ts",
+                    "sha256": "03427964203a9f6a8e6632a843c1aeac53fb9fe8e3fd3616ef2b31664893e2c3"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T220-validation.json",
+                "sha256": "ebf5326b5b583827256320697243f5cfc1b9dd55ca3f6014063f96d206266319",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:10:42.294Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "d2c5e9678a4007e4eba8291284a654b706abd7dd",
+                "shortSha": "d2c5e96"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/ui/src/lib/api.ts",
+                    "sha256": "9afb15cc39b9b394078f34097fd9c92e9a83c5804a88ade40e714d8a9dd78e61"
+                  },
+                  {
+                    "path": "src/ui/src/lib/sse.ts",
+                    "sha256": "4dd1717f83b5698ed8b785b7eca0d7ac9b4ed21ddb140ef97fabee3db2b272dd"
+                  },
+                  {
+                    "path": "src/ui/src/routes/w/[workspace]/backtests/[id]/+page.svelte",
+                    "sha256": "172e8a2a1497fc558ea5f8639d08e7a939b0f2ba729deb2cfc1ca9f34d2384d7"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/chat/ConsentCard.svelte",
+                    "sha256": "346e3ae85ebba1712bfb837a69e46f97082b4aeceacdd94ee4c6d3b122d87014"
+                  },
+                  {
+                    "path": "src/ui/src/tests/sse-client.test.ts",
+                    "sha256": "03427964203a9f6a8e6632a843c1aeac53fb9fe8e3fd3616ef2b31664893e2c3"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T220-validation.json",
+                "sha256": "ebf5326b5b583827256320697243f5cfc1b9dd55ca3f6014063f96d206266319",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:10:42.294Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "d2c5e9678a4007e4eba8291284a654b706abd7dd",
+                "shortSha": "d2c5e96"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/ui/src/lib/api.ts",
+                    "sha256": "9afb15cc39b9b394078f34097fd9c92e9a83c5804a88ade40e714d8a9dd78e61"
+                  },
+                  {
+                    "path": "src/ui/src/lib/sse.ts",
+                    "sha256": "4dd1717f83b5698ed8b785b7eca0d7ac9b4ed21ddb140ef97fabee3db2b272dd"
+                  },
+                  {
+                    "path": "src/ui/src/routes/w/[workspace]/backtests/[id]/+page.svelte",
+                    "sha256": "172e8a2a1497fc558ea5f8639d08e7a939b0f2ba729deb2cfc1ca9f34d2384d7"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/chat/ConsentCard.svelte",
+                    "sha256": "346e3ae85ebba1712bfb837a69e46f97082b4aeceacdd94ee4c6d3b122d87014"
+                  },
+                  {
+                    "path": "src/ui/src/tests/sse-client.test.ts",
+                    "sha256": "03427964203a9f6a8e6632a843c1aeac53fb9fe8e3fd3616ef2b31664893e2c3"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T220-validation.json",
+                "sha256": "ebf5326b5b583827256320697243f5cfc1b9dd55ca3f6014063f96d206266319",
+                "passCount": 2408,
+                "failCount": 0,
+                "skipCount": 14
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 218 CLEO tasks through T221.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T19:10:42.294Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -30523,7 +31090,8 @@
         "T130",
         "T131",
         "T214",
-        "T218"
+        "T218",
+        "T222"
       ],
       "T077": [
         "T132",
