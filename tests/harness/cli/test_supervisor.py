@@ -827,6 +827,31 @@ def test_session_for_equity_feed_delegates_to_the_xnys_calendar() -> None:
     assert trader._session_for(configuration, saturday) is None
 
 
+def test_resumed_boot_re_arms_the_housekeeping_pace() -> None:
+    store, journal, clock = _journal()
+    supervisor = _supervisor(store, journal, clock, session=_session())
+    options = PaperOptions(
+        run_id=RUN_ID,
+        initial_cash=CASH,
+        session_policy=PaperSessionPolicy.STOP_AT_CLOSE,
+        session=_session(),
+    )
+    shell = PaperShell(_trader_config(), options=options, wall_clock=clock)
+    state_store = RuntimeStateStore(store, run_id=RUN_ID)
+    snapshot = state_store.capture(
+        shell,
+        options=options,
+        strategy_ids=["solo"],
+        trigger=sup.SnapshotTrigger.PERIODIC,
+    )
+    state_store.save(snapshot)
+
+    resumed, resumed_options = supervisor._build_shell(snapshot)
+
+    assert resumed._options.idle_pace == supervisor._housekeeping
+    assert resumed_options.idle_pace == supervisor._housekeeping
+
+
 def test_feed_factory_passes_the_configured_crypto_websocket_url() -> None:
     configuration = _trader_config()
     instance = _instance().model_copy(update={"symbols": ("BTC/USD",)})

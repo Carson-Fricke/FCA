@@ -38,8 +38,8 @@ import hashlib
 import json
 import re
 import struct
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -1373,6 +1373,7 @@ class RuntimeStateStore:
         configuration: TraderConfig,
         *,
         wall_clock: Clock | None = None,
+        idle_pace: Callable[[], None] | None = None,
     ) -> PaperShell:
         """Rebuild a paper shell whose supervision state matches the snapshot.
 
@@ -1384,9 +1385,14 @@ class RuntimeStateStore:
         bindings rehydrate their exported state, so the restored runtime
         neither re-enters positions the captured books already hold nor
         regenerates identifiers the captured fills already route.
+
+        ``idle_pace`` re-arms the non-deterministic pacing callback that the
+        snapshot deliberately does not capture; a resumed boot without it
+        would run unsupervised (no heartbeats, periodic snapshots, kill-switch
+        polls, or market-wait enforcement).
         """
         _validate_snapshot_run(self, snapshot)
-        options = snapshot.paper_options()
+        options = replace(snapshot.paper_options(), idle_pace=idle_pace)
         shell = (
             PaperShell(configuration, options=options)
             if wall_clock is None

@@ -38,7 +38,7 @@ from __future__ import annotations
 import heapq
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import IntEnum, StrEnum
@@ -864,9 +864,16 @@ class TraderSupervisor:
     ) -> tuple[PaperShell | ShadowShell, PaperOptions]:
         pipeline = self._kill_switch_pipeline()
         if snapshot is not None:
-            options = snapshot.paper_options()
+            # The snapshot cannot carry the non-deterministic pacing callback;
+            # re-arm it so the resumed boot keeps supervising (heartbeats,
+            # periodic snapshots, kill-switch polls, market-wait enforcement).
+            pace = self._housekeeping
+            options = replace(snapshot.paper_options(), idle_pace=pace)
             shell: PaperShell | ShadowShell = self._state_store.restore_shell(
-                snapshot, self._configuration, wall_clock=self._clock
+                snapshot,
+                self._configuration,
+                wall_clock=self._clock,
+                idle_pace=pace,
             )
             return shell, options
         options = self._session_options()
