@@ -1,0 +1,31 @@
+{
+  "taskId": "T219",
+  "numTotalTests": 2462,
+  "numPassedTests": 2462,
+  "numFailedTests": 0,
+  "numPendingTests": 15,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-screening-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/screening/",
+      "result": "22 tests: strict no-lookahead (a post-as_of bar with an enormous dollar volume is invisible and cannot change ranking), deterministic rank with symbol-ascending tiebreak and byte-identical repeat runs, provenance on every result (universe revision, data window, definition hash), preset evaluation and conjunction (dollar-volume floor, price floor, listing age, candidate-set percentile rank), declaration-time parameter validation, the programmatic boundary (exactly one screen(ctx) function, allowlisted imports only, no aliases, no dunder access, restricted builtins with a blocked __import__, open() and __import__('os') failing closed at runtime), fail-closed script errors, and artifact round-trip with content-hash verification and tamper rejection"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2462 passed, 15 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/screening tests/thesis/screening && uv run --extra dev ruff format --check src/thesis/screening tests/thesis/screening && uv run --extra dev ty check src/thesis/screening",
+      "result": "ruff, format, and ty clean"
+    }
+  ],
+  "limitations": [
+    "The screener engine consumes injected ScreenerContext ports; the Thesis API route wiring that feeds it from the lake and universe services is the integration owner's next step (recommended: POST /v1/workspaces/{ws}/screeners/run and GET /v1/workspaces/{ws}/screeners)"
+  ]
+}
