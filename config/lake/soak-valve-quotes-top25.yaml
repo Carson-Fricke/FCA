@@ -1,0 +1,157 @@
+# E6.5 quotes valve config (T051): top-25 universe symbols, one-year quote history.
+# Universe: config/lake/universe-equities-200.yaml (200 liquid US listings,
+# rank = list position). Decision and gates: docs/e6.4-cost-projection.md
+# (QUOTE_HISTORY_VALVE); rollout record: docs/e6.5-universe-universe.md.
+# Non-secret defaults only: credentials come from the environment
+# (LAKE_API__BEARER_TOKEN) and the dev deployment, never from this file.
+# This file must stay inside the strict YAML subset parsed by
+# lake.configuration.loader.load_yaml_mapping (no anchors, no tabs, no
+# secret-bearing keys).
+#
+# Cost prices are published Azure list prices for westus2 retrieved from the
+# Azure Retail Prices API (prices.azure.com, api-version 2023-01-01-preview)
+# on 2026-09-05, identical to config/lake/soak-aapl-spy.yaml. Verify prices
+# again before any long soak.
+schema_version: 1
+soak:
+  id: e65-valve-quotes-top25
+  universe: config/lake/universe-equities-200.yaml
+  symbols:
+    - SPY
+    - QQQ
+    - AAPL
+    - TSLA
+    - NVDA
+    - AMD
+    - AMZN
+    - MSFT
+    - META
+    - GOOGL
+    - PLTR
+    - IWM
+    - NFLX
+    - F
+    - T
+    - BAC
+    - PFE
+    - INTC
+    - WFC
+    - C
+    - VZ
+    - DIS
+    - V
+    - JPM
+    - XOM
+  data_types:
+    - quote
+  window:
+    # Quotes valve arm: T050 QUOTE_HISTORY_VALVE one-year history window,
+    # pinned at the 2026-09-09 snapshot date (365 days back). Symbols are
+    # the top 25 by liquidity rank in the universe file.
+    default_start: "2025-09-09"
+    end: latest_closed_session
+  chunking:
+    # One XNYS session per ensure request; the dev API catalog limit is 366
+    # days and per-session requests keep every call well inside it.
+    sessions_per_request: 1
+    order: newest_first
+  run:
+    state_file: .local/soak/state-e65-quotes.json
+    results_file: .local/soak/results-e65-quotes.jsonl
+    summary_file: .local/soak/summary-e65-quotes.json
+    job_wait_deadline_seconds: 300
+    poll_interval_seconds: 2.0
+    coverage_recheck_attempts: 3
+    inter_request_pause_seconds: 0.25
+  pages:
+    # Alpaca v2 historical endpoints return up to 10,000 items per page.
+    # Ensure responses do not expose provider page counts, so pages are
+    # estimated from recorded row counts as ceil(rows / items_per_page).
+    assumed_items_per_page: 10000
+  estimate:
+    # Dry-run-only planning bytes per closed quote session (zstd Parquet).
+    # Uniform SPY-side proxy per T050 assumption 3 (docs/e6.4-cost-projection.md);
+    # replace with recorded soak bytes for real projections.
+    assumed_bytes_per_session:
+      SPY:
+        quote: 80000000
+      QQQ:
+        quote: 80000000
+      AAPL:
+        quote: 80000000
+      TSLA:
+        quote: 80000000
+      NVDA:
+        quote: 80000000
+      AMD:
+        quote: 80000000
+      AMZN:
+        quote: 80000000
+      MSFT:
+        quote: 80000000
+      META:
+        quote: 80000000
+      GOOGL:
+        quote: 80000000
+      PLTR:
+        quote: 80000000
+      IWM:
+        quote: 80000000
+      NFLX:
+        quote: 80000000
+      F:
+        quote: 80000000
+      T:
+        quote: 80000000
+      BAC:
+        quote: 80000000
+      PFE:
+        quote: 80000000
+      INTC:
+        quote: 80000000
+      WFC:
+        quote: 80000000
+      C:
+        quote: 80000000
+      VZ:
+        quote: 80000000
+      DIS:
+        quote: 80000000
+      V:
+        quote: 80000000
+      JPM:
+        quote: 80000000
+      XOM:
+        quote: 80000000
+    # Dev API container resources (az containerapp show, 2026-09-05).
+    api_vcores: 0.25
+    api_memory_gib: 0.5
+    # Rough operator estimate for Log Analytics ingestion per 1000 HTTP
+    # requests served by the API; refine from the workspace after the soak.
+    log_analytics_gb_per_1000_requests: 0.25
+    # Retention horizon used to prorate Blob and Table stored-data cost.
+    storage_retention_days: 90
+
+  cost:
+    currency: USD
+    region: westus2
+    blob_hns_lrs:
+      stored_usd_per_gb_month: 0.018
+      write_usd_per_10k: 0.065
+      read_usd_per_10k: 0.005
+      other_usd_per_10k: 0.005
+    tables_lrs:
+      stored_usd_per_gb_month: 0.045
+      transaction_usd_per_10k: 0.00036
+    queue_v2_lrs:
+      stored_usd_per_gb_month: 0.045
+      class1_usd_per_10k: 0.004
+    container_apps_consumption:
+      vcpu_usd_per_second: 0.000034
+      memory_usd_per_gib_second: 0.000004
+      requests_usd_per_million: 0.4
+      environment_usd_per_hour: 0.1
+    log_analytics:
+      ingestion_usd_per_gb: 2.3
+      retention_usd_per_gb_month: 0.1
+      included_free_gb_per_month: 5.0

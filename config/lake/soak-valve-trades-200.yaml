@@ -1,0 +1,682 @@
+# E6.5 trades valve config (T051): all 200 universe symbols, trade history.
+# Universe: config/lake/universe-equities-200.yaml (200 liquid US listings,
+# rank = list position). Decision and gates: docs/e6.4-cost-projection.md
+# (QUOTE_HISTORY_VALVE); rollout record: docs/e6.5-universe-universe.md.
+# Non-secret defaults only: credentials come from the environment
+# (LAKE_API__BEARER_TOKEN) and the dev deployment, never from this file.
+# This file must stay inside the strict YAML subset parsed by
+# lake.configuration.loader.load_yaml_mapping (no anchors, no tabs, no
+# secret-bearing keys).
+#
+# Cost prices are published Azure list prices for westus2 retrieved from the
+# Azure Retail Prices API (prices.azure.com, api-version 2023-01-01-preview)
+# on 2026-09-05, identical to config/lake/soak-aapl-spy.yaml. Verify prices
+# again before any long soak.
+schema_version: 1
+soak:
+  id: e65-valve-trades-200
+  universe: config/lake/universe-equities-200.yaml
+  symbols:
+    - SPY
+    - QQQ
+    - AAPL
+    - TSLA
+    - NVDA
+    - AMD
+    - AMZN
+    - MSFT
+    - META
+    - GOOGL
+    - PLTR
+    - IWM
+    - NFLX
+    - F
+    - T
+    - BAC
+    - PFE
+    - INTC
+    - WFC
+    - C
+    - VZ
+    - DIS
+    - V
+    - JPM
+    - XOM
+    - CVX
+    - BA
+    - COIN
+    - HOOD
+    - GLD
+    - TQQQ
+    - SQQQ
+    - SOXL
+    - EEM
+    - EFA
+    - VTI
+    - VOO
+    - TLT
+    - SLV
+    - XLF
+    - XLE
+    - XLK
+    - XLV
+    - BRK.B
+    - WMT
+    - GS
+    - SCHW
+    - MS
+    - CRM
+    - ORCL
+    - ADBE
+    - COST
+    - PEP
+    - KO
+    - MCD
+    - NKE
+    - HD
+    - JNJ
+    - UNH
+    - LLY
+    - MRK
+    - ABBV
+    - PGR
+    - TMO
+    - QCOM
+    - TXN
+    - MU
+    - AMAT
+    - LRCX
+    - KLAC
+    - ADI
+    - NOW
+    - INTU
+    - ISRG
+    - SBUX
+    - TGT
+    - LOW
+    - TJX
+    - DHR
+    - BMY
+    - AXP
+    - BKNG
+    - GM
+    - DAL
+    - XBI
+    - GDX
+    - XLI
+    - XLY
+    - HYG
+    - LQD
+    - DIA
+    - USO
+    - GILD
+    - AMGN
+    - ELV
+    - MDLZ
+    - PM
+    - MO
+    - RTX
+    - LMT
+    - NOC
+    - GD
+    - DE
+    - USB
+    - PNC
+    - BLK
+    - BX
+    - SPGI
+    - ICE
+    - CME
+    - AON
+    - MET
+    - PRU
+    - AFL
+    - ALL
+    - CB
+    - TRV
+    - HIG
+    - XLP
+    - XLU
+    - KHC
+    - XLC
+    - XLB
+    - XLRE
+    - AGG
+    - UNG
+    - ARKK
+    - MMM
+    - HPE
+    - HPQ
+    - DELL
+    - WDC
+    - STX
+    - NTAP
+    - ON
+    - MRVL
+    - NXPI
+    - SWKS
+    - TER
+    - MCHP
+    - ZBRA
+    - CSCO
+    - IBM
+    - ACN
+    - ADP
+    - PAYX
+    - CTSH
+    - WDAY
+    - CRWD
+    - PANW
+    - SNPS
+    - CDNS
+    - ADSK
+    - GWW
+    - FAST
+    - URI
+    - RCL
+    - NCLH
+    - CCL
+    - LUV
+    - UAL
+    - MAR
+    - HLT
+    - WYNN
+    - LVS
+    - MGM
+    - CMG
+    - YUM
+    - DRI
+    - DPZ
+    - TAP
+    - STZ
+    - KDP
+    - MNST
+    - KVUE
+    - CL
+    - KMB
+    - GIS
+    - SYY
+    - KR
+    - HSY
+    - CVS
+    - CI
+    - CNC
+    - HUM
+    - MCK
+    - LH
+    - ZTS
+    - OXY
+    - COP
+    - SLB
+    - HAL
+    - BKR
+    - DVN
+    - FANG
+    - PLD
+    - PSX
+    - VLO
+    - MPC
+    - EOG
+  data_types:
+    - trade
+  window:
+    # Trades valve arm: full available SIP history per symbol (Alpaca v2
+    # equity coverage is documented from 2016-01-01). Sessions earlier than
+    # real provider availability surface as empty terminal coverage.
+    default_start: "2016-01-01"
+    end: latest_closed_session
+  chunking:
+    # One XNYS session per ensure request; the dev API catalog limit is 366
+    # days and per-session requests keep every call well inside it.
+    sessions_per_request: 1
+    order: newest_first
+  run:
+    state_file: .local/soak/state-e65-trades.json
+    results_file: .local/soak/results-e65-trades.jsonl
+    summary_file: .local/soak/summary-e65-trades.json
+    job_wait_deadline_seconds: 300
+    poll_interval_seconds: 2.0
+    coverage_recheck_attempts: 3
+    inter_request_pause_seconds: 0.25
+  pages:
+    # Alpaca v2 historical endpoints return up to 10,000 items per page.
+    # Ensure responses do not expose provider page counts, so pages are
+    # estimated from recorded row counts as ceil(rows / items_per_page).
+    assumed_items_per_page: 10000
+  estimate:
+    # Dry-run-only planning bytes per closed trade session (zstd Parquet).
+    # Uniform SPY-side proxy per T050 assumption 3 (docs/e6.4-cost-projection.md);
+    # replace with recorded soak bytes for real projections.
+    assumed_bytes_per_session:
+      SPY:
+        trade: 6000000
+      QQQ:
+        trade: 6000000
+      AAPL:
+        trade: 6000000
+      TSLA:
+        trade: 6000000
+      NVDA:
+        trade: 6000000
+      AMD:
+        trade: 6000000
+      AMZN:
+        trade: 6000000
+      MSFT:
+        trade: 6000000
+      META:
+        trade: 6000000
+      GOOGL:
+        trade: 6000000
+      PLTR:
+        trade: 6000000
+      IWM:
+        trade: 6000000
+      NFLX:
+        trade: 6000000
+      F:
+        trade: 6000000
+      T:
+        trade: 6000000
+      BAC:
+        trade: 6000000
+      PFE:
+        trade: 6000000
+      INTC:
+        trade: 6000000
+      WFC:
+        trade: 6000000
+      C:
+        trade: 6000000
+      VZ:
+        trade: 6000000
+      DIS:
+        trade: 6000000
+      V:
+        trade: 6000000
+      JPM:
+        trade: 6000000
+      XOM:
+        trade: 6000000
+      CVX:
+        trade: 6000000
+      BA:
+        trade: 6000000
+      COIN:
+        trade: 6000000
+      HOOD:
+        trade: 6000000
+      GLD:
+        trade: 6000000
+      TQQQ:
+        trade: 6000000
+      SQQQ:
+        trade: 6000000
+      SOXL:
+        trade: 6000000
+      EEM:
+        trade: 6000000
+      EFA:
+        trade: 6000000
+      VTI:
+        trade: 6000000
+      VOO:
+        trade: 6000000
+      TLT:
+        trade: 6000000
+      SLV:
+        trade: 6000000
+      XLF:
+        trade: 6000000
+      XLE:
+        trade: 6000000
+      XLK:
+        trade: 6000000
+      XLV:
+        trade: 6000000
+      BRK.B:
+        trade: 6000000
+      WMT:
+        trade: 6000000
+      GS:
+        trade: 6000000
+      SCHW:
+        trade: 6000000
+      MS:
+        trade: 6000000
+      CRM:
+        trade: 6000000
+      ORCL:
+        trade: 6000000
+      ADBE:
+        trade: 6000000
+      COST:
+        trade: 6000000
+      PEP:
+        trade: 6000000
+      KO:
+        trade: 6000000
+      MCD:
+        trade: 6000000
+      NKE:
+        trade: 6000000
+      HD:
+        trade: 6000000
+      JNJ:
+        trade: 6000000
+      UNH:
+        trade: 6000000
+      LLY:
+        trade: 6000000
+      MRK:
+        trade: 6000000
+      ABBV:
+        trade: 6000000
+      PGR:
+        trade: 6000000
+      TMO:
+        trade: 6000000
+      QCOM:
+        trade: 6000000
+      TXN:
+        trade: 6000000
+      MU:
+        trade: 6000000
+      AMAT:
+        trade: 6000000
+      LRCX:
+        trade: 6000000
+      KLAC:
+        trade: 6000000
+      ADI:
+        trade: 6000000
+      NOW:
+        trade: 6000000
+      INTU:
+        trade: 6000000
+      ISRG:
+        trade: 6000000
+      SBUX:
+        trade: 6000000
+      TGT:
+        trade: 6000000
+      LOW:
+        trade: 6000000
+      TJX:
+        trade: 6000000
+      DHR:
+        trade: 6000000
+      BMY:
+        trade: 6000000
+      AXP:
+        trade: 6000000
+      BKNG:
+        trade: 6000000
+      GM:
+        trade: 6000000
+      DAL:
+        trade: 6000000
+      XBI:
+        trade: 6000000
+      GDX:
+        trade: 6000000
+      XLI:
+        trade: 6000000
+      XLY:
+        trade: 6000000
+      HYG:
+        trade: 6000000
+      LQD:
+        trade: 6000000
+      DIA:
+        trade: 6000000
+      USO:
+        trade: 6000000
+      GILD:
+        trade: 6000000
+      AMGN:
+        trade: 6000000
+      ELV:
+        trade: 6000000
+      MDLZ:
+        trade: 6000000
+      PM:
+        trade: 6000000
+      MO:
+        trade: 6000000
+      RTX:
+        trade: 6000000
+      LMT:
+        trade: 6000000
+      NOC:
+        trade: 6000000
+      GD:
+        trade: 6000000
+      DE:
+        trade: 6000000
+      USB:
+        trade: 6000000
+      PNC:
+        trade: 6000000
+      BLK:
+        trade: 6000000
+      BX:
+        trade: 6000000
+      SPGI:
+        trade: 6000000
+      ICE:
+        trade: 6000000
+      CME:
+        trade: 6000000
+      AON:
+        trade: 6000000
+      MET:
+        trade: 6000000
+      PRU:
+        trade: 6000000
+      AFL:
+        trade: 6000000
+      ALL:
+        trade: 6000000
+      CB:
+        trade: 6000000
+      TRV:
+        trade: 6000000
+      HIG:
+        trade: 6000000
+      XLP:
+        trade: 6000000
+      XLU:
+        trade: 6000000
+      KHC:
+        trade: 6000000
+      XLC:
+        trade: 6000000
+      XLB:
+        trade: 6000000
+      XLRE:
+        trade: 6000000
+      AGG:
+        trade: 6000000
+      UNG:
+        trade: 6000000
+      ARKK:
+        trade: 6000000
+      MMM:
+        trade: 6000000
+      HPE:
+        trade: 6000000
+      HPQ:
+        trade: 6000000
+      DELL:
+        trade: 6000000
+      WDC:
+        trade: 6000000
+      STX:
+        trade: 6000000
+      NTAP:
+        trade: 6000000
+      ON:
+        trade: 6000000
+      MRVL:
+        trade: 6000000
+      NXPI:
+        trade: 6000000
+      SWKS:
+        trade: 6000000
+      TER:
+        trade: 6000000
+      MCHP:
+        trade: 6000000
+      ZBRA:
+        trade: 6000000
+      CSCO:
+        trade: 6000000
+      IBM:
+        trade: 6000000
+      ACN:
+        trade: 6000000
+      ADP:
+        trade: 6000000
+      PAYX:
+        trade: 6000000
+      CTSH:
+        trade: 6000000
+      WDAY:
+        trade: 6000000
+      CRWD:
+        trade: 6000000
+      PANW:
+        trade: 6000000
+      SNPS:
+        trade: 6000000
+      CDNS:
+        trade: 6000000
+      ADSK:
+        trade: 6000000
+      GWW:
+        trade: 6000000
+      FAST:
+        trade: 6000000
+      URI:
+        trade: 6000000
+      RCL:
+        trade: 6000000
+      NCLH:
+        trade: 6000000
+      CCL:
+        trade: 6000000
+      LUV:
+        trade: 6000000
+      UAL:
+        trade: 6000000
+      MAR:
+        trade: 6000000
+      HLT:
+        trade: 6000000
+      WYNN:
+        trade: 6000000
+      LVS:
+        trade: 6000000
+      MGM:
+        trade: 6000000
+      CMG:
+        trade: 6000000
+      YUM:
+        trade: 6000000
+      DRI:
+        trade: 6000000
+      DPZ:
+        trade: 6000000
+      TAP:
+        trade: 6000000
+      STZ:
+        trade: 6000000
+      KDP:
+        trade: 6000000
+      MNST:
+        trade: 6000000
+      KVUE:
+        trade: 6000000
+      CL:
+        trade: 6000000
+      KMB:
+        trade: 6000000
+      GIS:
+        trade: 6000000
+      SYY:
+        trade: 6000000
+      KR:
+        trade: 6000000
+      HSY:
+        trade: 6000000
+      CVS:
+        trade: 6000000
+      CI:
+        trade: 6000000
+      CNC:
+        trade: 6000000
+      HUM:
+        trade: 6000000
+      MCK:
+        trade: 6000000
+      LH:
+        trade: 6000000
+      ZTS:
+        trade: 6000000
+      OXY:
+        trade: 6000000
+      COP:
+        trade: 6000000
+      SLB:
+        trade: 6000000
+      HAL:
+        trade: 6000000
+      BKR:
+        trade: 6000000
+      DVN:
+        trade: 6000000
+      FANG:
+        trade: 6000000
+      PLD:
+        trade: 6000000
+      PSX:
+        trade: 6000000
+      VLO:
+        trade: 6000000
+      MPC:
+        trade: 6000000
+      EOG:
+        trade: 6000000
+    # Dev API container resources (az containerapp show, 2026-09-05).
+    api_vcores: 0.25
+    api_memory_gib: 0.5
+    # Rough operator estimate for Log Analytics ingestion per 1000 HTTP
+    # requests served by the API; refine from the workspace after the soak.
+    log_analytics_gb_per_1000_requests: 0.25
+    # Retention horizon used to prorate Blob and Table stored-data cost.
+    storage_retention_days: 90
+
+  cost:
+    currency: USD
+    region: westus2
+    blob_hns_lrs:
+      stored_usd_per_gb_month: 0.018
+      write_usd_per_10k: 0.065
+      read_usd_per_10k: 0.005
+      other_usd_per_10k: 0.005
+    tables_lrs:
+      stored_usd_per_gb_month: 0.045
+      transaction_usd_per_10k: 0.00036
+    queue_v2_lrs:
+      stored_usd_per_gb_month: 0.045
+      class1_usd_per_10k: 0.004
+    container_apps_consumption:
+      vcpu_usd_per_second: 0.000034
+      memory_usd_per_gib_second: 0.000004
+      requests_usd_per_million: 0.4
+      environment_usd_per_hour: 0.1
+    log_analytics:
+      ingestion_usd_per_gb: 2.3
+      retention_usd_per_gb_month: 0.1
+      included_free_gb_per_month: 5.0

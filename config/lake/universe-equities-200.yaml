@@ -1,0 +1,243 @@
+# E6.5 controlled-backfill equity universe (T051): the 200 most liquid US
+# listings, ranked most liquid first. Every symbol is a currently listed US
+# equity or ETF. The list position IS the liquidity rank used by the T050
+# QUOTE_HISTORY_VALVE: quotes are restricted to ranks 1..25.
+#
+# Derivation and explicit assumption set (full record:
+# docs/e6.5-universe-universe.md):
+# - Constituent grounding: all 167 single-name symbols were validated on
+#   2026-09-09 against the S&P 500 constituents table snapshot retrieved from
+#   Wikipedia (List of S&P 500 companies, 504 tickers) on 2026-09-09. The 33
+#   ETFs are not index constituents and are validated by name only.
+# - Liquidity ordering: operator-curated approximation of trailing median
+#   daily notional traded value as of 2026-09-09, grouped into explicit
+#   bands. Order inside a band is approximate and not asserted; selection of
+#   the 200 names and the top-25 head block is the operative decision.
+# - One listing per issuer: the more liquid share class only (GOOGL kept,
+#   GOOG dropped; FOXA kept, FOX/NWS/NWSA dropped; BRK.B for Berkshire).
+# - The quote valve is insensitive to intra-band ordering: per-session quote
+#   cost is uniform across symbols, so the T050 top-25 cost envelope holds
+#   for any 25-symbol head set of equivalent liquidity.
+#
+# This file must stay inside the strict YAML subset parsed by
+# lake.configuration.loader.load_yaml_mapping (no anchors, no tabs, no
+# secret-bearing keys).
+schema_version: 1
+
+universe:
+  id: e65-equities-200
+  asset_class: equity
+  count: 200
+  ranking:
+    measure: trailing median daily notional traded value, operator-curated bands
+    snapshot_date: "2026-09-09"
+    order: newest liquidity rank first, rank equals list position
+    band_note: order inside a band is approximate and not asserted
+    single_name_source: S&P 500 constituents snapshot retrieved 2026-09-09
+    share_class_rule: one listing per issuer, more liquid class only
+    valve_ref: docs/e6.4-cost-projection.md QUOTE_HISTORY_VALVE top-25 quotes
+  # Band A: extreme liquidity (>= 5B USD/day typical notional)
+  # Band B: very high (2-5B); Band C: high (1-2.5B); Band D: (0.8-1.5B)
+  # Band E: (0.5-0.9B); Band F: (0.4-0.6B); Band G: (0.25-0.45B)
+  # Band H: (0.2-0.35B); Band I: (0.15-0.3B)
+  symbols:
+    - SPY
+    - QQQ
+    - AAPL
+    - TSLA
+    - NVDA
+    - AMD
+    - AMZN
+    - MSFT
+    - META
+    - GOOGL
+    - PLTR
+    - IWM
+    - NFLX
+    - F
+    - T
+    - BAC
+    - PFE
+    - INTC
+    - WFC
+    - C
+    - VZ
+    - DIS
+    - V
+    - JPM
+    - XOM
+    - CVX
+    - BA
+    - COIN
+    - HOOD
+    - GLD
+    - TQQQ
+    - SQQQ
+    - SOXL
+    - EEM
+    - EFA
+    - VTI
+    - VOO
+    - TLT
+    - SLV
+    - XLF
+    - XLE
+    - XLK
+    - XLV
+    - BRK.B
+    - WMT
+    - GS
+    - SCHW
+    - MS
+    - CRM
+    - ORCL
+    - ADBE
+    - COST
+    - PEP
+    - KO
+    - MCD
+    - NKE
+    - HD
+    - JNJ
+    - UNH
+    - LLY
+    - MRK
+    - ABBV
+    - PGR
+    - TMO
+    - QCOM
+    - TXN
+    - MU
+    - AMAT
+    - LRCX
+    - KLAC
+    - ADI
+    - NOW
+    - INTU
+    - ISRG
+    - SBUX
+    - TGT
+    - LOW
+    - TJX
+    - DHR
+    - BMY
+    - AXP
+    - BKNG
+    - GM
+    - DAL
+    - XBI
+    - GDX
+    - XLI
+    - XLY
+    - HYG
+    - LQD
+    - DIA
+    - USO
+    - GILD
+    - AMGN
+    - ELV
+    - MDLZ
+    - PM
+    - MO
+    - RTX
+    - LMT
+    - NOC
+    - GD
+    - DE
+    - USB
+    - PNC
+    - BLK
+    - BX
+    - SPGI
+    - ICE
+    - CME
+    - AON
+    - MET
+    - PRU
+    - AFL
+    - ALL
+    - CB
+    - TRV
+    - HIG
+    - XLP
+    - XLU
+    - KHC
+    - XLC
+    - XLB
+    - XLRE
+    - AGG
+    - UNG
+    - ARKK
+    - MMM
+    - HPE
+    - HPQ
+    - DELL
+    - WDC
+    - STX
+    - NTAP
+    - ON
+    - MRVL
+    - NXPI
+    - SWKS
+    - TER
+    - MCHP
+    - ZBRA
+    - CSCO
+    - IBM
+    - ACN
+    - ADP
+    - PAYX
+    - CTSH
+    - WDAY
+    - CRWD
+    - PANW
+    - SNPS
+    - CDNS
+    - ADSK
+    - GWW
+    - FAST
+    - URI
+    - RCL
+    - NCLH
+    - CCL
+    - LUV
+    - UAL
+    - MAR
+    - HLT
+    - WYNN
+    - LVS
+    - MGM
+    - CMG
+    - YUM
+    - DRI
+    - DPZ
+    - TAP
+    - STZ
+    - KDP
+    - MNST
+    - KVUE
+    - CL
+    - KMB
+    - GIS
+    - SYY
+    - KR
+    - HSY
+    - CVS
+    - CI
+    - CNC
+    - HUM
+    - MCK
+    - LH
+    - ZTS
+    - OXY
+    - COP
+    - SLB
+    - HAL
+    - BKR
+    - DVN
+    - FANG
+    - PLD
+    - PSX
+    - VLO
+    - MPC
+    - EOG
