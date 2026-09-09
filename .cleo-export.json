@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-09T19:49:42.050Z",
+    "exportedAt": "2026-09-09T23:11:21.268Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 223
+      "nextId": 224
     },
-    "checksum": "0e16e942ecf28643",
-    "taskCount": 219,
+    "checksum": "6bf9a5238677d823",
+    "taskCount": 220,
     "exportMode": "full"
   },
   "selection": {
@@ -230,6 +230,7 @@
       "T195",
       "T221",
       "T196",
+      "T223",
       "T197",
       "T198",
       "T199",
@@ -1519,7 +1520,7 @@
     "T051": {
       "type": "task",
       "title": "E6.5 Expand equity universe and controlled backfill",
-      "status": "pending",
+      "status": "done",
       "parentId": "T009",
       "depends": [
         "T038",
@@ -1898,7 +1899,7 @@
     "T219": {
       "type": "task",
       "title": "H9.6 Workspace screener backend with programmatic custom screeners",
-      "status": "pending",
+      "status": "done",
       "parentId": "T077",
       "depends": []
     },
@@ -2069,7 +2070,7 @@
     "T009": {
       "type": "epic",
       "title": "E6 Dev deployment and equities soak gate",
-      "status": "pending",
+      "status": "done",
       "parentId": "T001",
       "depends": [
         "T004",
@@ -2357,7 +2358,7 @@
     "T217": {
       "type": "task",
       "title": "TH6.5 Workspace-resident Thesis agent runtime and CLI-equivalent scoping",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": []
     },
@@ -2389,7 +2390,7 @@
     "T221": {
       "type": "task",
       "title": "TH6.7 Public domain hosting and TLS for the Thesis UI",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": [
         "T174",
@@ -2404,6 +2405,13 @@
       "depends": [
         "T192"
       ]
+    },
+    "T223": {
+      "type": "task",
+      "title": "Workspace picker 404 recovery, workspace creation UX, and data-mode surfacing",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
     },
     "T197": {
       "type": "task",
@@ -19227,7 +19235,7 @@
     {
       "id": "T051",
       "title": "E6.5 Expand equity universe and controlled backfill",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T009",
@@ -19248,21 +19256,179 @@
         "T050"
       ],
       "createdAt": "2026-09-01T03:23:01.036Z",
-      "updatedAt": "2026-09-01T03:28:50.981Z",
+      "updatedAt": "2026-09-09T22:29:33.860Z",
+      "completedAt": "2026-09-09T22:29:29.132Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-09T22:28:55.162Z",
         "failureLog": [],
-        "initializedAt": "2026-09-01T03:23:01.036Z"
+        "initializedAt": "2026-09-01T03:23:01.036Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "7782ddeeb66c0742a725ba9356505df9d8a5bd31",
+                "shortSha": "7782dde"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "config/lake/universe-equities-200.yaml",
+                    "sha256": "e4ddc2f6095ca7c4fd49e81ac00aa94aa7e1f423d8b398b5837cf8f54e01af31"
+                  },
+                  {
+                    "path": "config/lake/soak-valve-trades-200.yaml",
+                    "sha256": "d2428a2d71d0f6fac7d0c906b0fd42f5fb4c5518b03e80972b97c9a147af8783"
+                  },
+                  {
+                    "path": "config/lake/soak-valve-quotes-top25.yaml",
+                    "sha256": "922e46d502c5e06dc9fbe8ccea8ac7f0304f16e9445e64f71fae69f463e9e90a"
+                  },
+                  {
+                    "path": "tests/scripts/test_universe_expansion.py",
+                    "sha256": "e2ef5529fd36c6c5c28fb00f58708269945ad09c97188666b4bc28759152c417"
+                  },
+                  {
+                    "path": "docs/e6.5-universe-universe.md",
+                    "sha256": "d0da644415b8240c7289664e304b3bc4014add797ba27174bdf19d0fa6140715"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T051-validation.json",
+                "sha256": "4d54be1a6b1a739c2a872e3535f46c3425b8d30b230e2365dfc33b6902f90002",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T22:28:55.722Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "7782ddeeb66c0742a725ba9356505df9d8a5bd31",
+                "shortSha": "7782dde"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "config/lake/universe-equities-200.yaml",
+                    "sha256": "e4ddc2f6095ca7c4fd49e81ac00aa94aa7e1f423d8b398b5837cf8f54e01af31"
+                  },
+                  {
+                    "path": "config/lake/soak-valve-trades-200.yaml",
+                    "sha256": "d2428a2d71d0f6fac7d0c906b0fd42f5fb4c5518b03e80972b97c9a147af8783"
+                  },
+                  {
+                    "path": "config/lake/soak-valve-quotes-top25.yaml",
+                    "sha256": "922e46d502c5e06dc9fbe8ccea8ac7f0304f16e9445e64f71fae69f463e9e90a"
+                  },
+                  {
+                    "path": "tests/scripts/test_universe_expansion.py",
+                    "sha256": "e2ef5529fd36c6c5c28fb00f58708269945ad09c97188666b4bc28759152c417"
+                  },
+                  {
+                    "path": "docs/e6.5-universe-universe.md",
+                    "sha256": "d0da644415b8240c7289664e304b3bc4014add797ba27174bdf19d0fa6140715"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T051-validation.json",
+                "sha256": "4d54be1a6b1a739c2a872e3535f46c3425b8d30b230e2365dfc33b6902f90002",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T22:28:55.722Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "7782ddeeb66c0742a725ba9356505df9d8a5bd31",
+                "shortSha": "7782dde"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "config/lake/universe-equities-200.yaml",
+                    "sha256": "e4ddc2f6095ca7c4fd49e81ac00aa94aa7e1f423d8b398b5837cf8f54e01af31"
+                  },
+                  {
+                    "path": "config/lake/soak-valve-trades-200.yaml",
+                    "sha256": "d2428a2d71d0f6fac7d0c906b0fd42f5fb4c5518b03e80972b97c9a147af8783"
+                  },
+                  {
+                    "path": "config/lake/soak-valve-quotes-top25.yaml",
+                    "sha256": "922e46d502c5e06dc9fbe8ccea8ac7f0304f16e9445e64f71fae69f463e9e90a"
+                  },
+                  {
+                    "path": "tests/scripts/test_universe_expansion.py",
+                    "sha256": "e2ef5529fd36c6c5c28fb00f58708269945ad09c97188666b4bc28759152c417"
+                  },
+                  {
+                    "path": "docs/e6.5-universe-universe.md",
+                    "sha256": "d0da644415b8240c7289664e304b3bc4014add797ba27174bdf19d0fa6140715"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T051-validation.json",
+                "sha256": "4d54be1a6b1a739c2a872e3535f46c3425b8d30b230e2365dfc33b6902f90002",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T22:28:55.722Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "unit",
       "relates": []
@@ -23908,7 +24074,7 @@
     {
       "id": "T219",
       "title": "H9.6 Workspace screener backend with programmatic custom screeners",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T077",
@@ -23932,21 +24098,179 @@
         "src/thesis/screening/"
       ],
       "createdAt": "2026-09-09T17:39:40.098Z",
-      "updatedAt": "2026-09-09T17:39:40.098Z",
+      "updatedAt": "2026-09-09T23:10:03.930Z",
+      "completedAt": "2026-09-09T23:10:00.026Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-09T23:08:43.672Z",
         "failureLog": [],
-        "initializedAt": "2026-09-09T17:39:40.098Z"
+        "initializedAt": "2026-09-09T17:39:40.098Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "8d08b126a06b21a64ad2d0023902020f988e3e0b",
+                "shortSha": "8d08b12"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/screening/engine.py",
+                    "sha256": "70ea74f79f2ba8a7a39dd6ae76d363ce9b6900e81e4a704718f351ddb557e099"
+                  },
+                  {
+                    "path": "src/thesis/screening/presets.py",
+                    "sha256": "9ca72e07d362af5d2c9978c8f257efe8cb3617a0722ee732f4838e6187d3bd49"
+                  },
+                  {
+                    "path": "src/thesis/screening/programs.py",
+                    "sha256": "ee76e65407c4cf2cd1b4ebde9f105b03441417b1004c3f818c9e2caebf049095"
+                  },
+                  {
+                    "path": "src/thesis/screening/artifacts.py",
+                    "sha256": "d6cd54fe24a1279a79c072cccd75533ba5e76e3bfc7ca86008a1f40644fe6805"
+                  },
+                  {
+                    "path": "tests/thesis/screening/test_engine.py",
+                    "sha256": "e40b0e1b18d66ee799564e0f015fc4f28d7aeb1c241e00aa54f10d7afd020342"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T219-validation.json",
+                "sha256": "01c2d38e43f2aebe96e60235f122e4c56585c7b5c473007d911ec017e4a2fdc3",
+                "passCount": 2462,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T23:08:44.455Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "8d08b126a06b21a64ad2d0023902020f988e3e0b",
+                "shortSha": "8d08b12"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/screening/engine.py",
+                    "sha256": "70ea74f79f2ba8a7a39dd6ae76d363ce9b6900e81e4a704718f351ddb557e099"
+                  },
+                  {
+                    "path": "src/thesis/screening/presets.py",
+                    "sha256": "9ca72e07d362af5d2c9978c8f257efe8cb3617a0722ee732f4838e6187d3bd49"
+                  },
+                  {
+                    "path": "src/thesis/screening/programs.py",
+                    "sha256": "ee76e65407c4cf2cd1b4ebde9f105b03441417b1004c3f818c9e2caebf049095"
+                  },
+                  {
+                    "path": "src/thesis/screening/artifacts.py",
+                    "sha256": "d6cd54fe24a1279a79c072cccd75533ba5e76e3bfc7ca86008a1f40644fe6805"
+                  },
+                  {
+                    "path": "tests/thesis/screening/test_engine.py",
+                    "sha256": "e40b0e1b18d66ee799564e0f015fc4f28d7aeb1c241e00aa54f10d7afd020342"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T219-validation.json",
+                "sha256": "01c2d38e43f2aebe96e60235f122e4c56585c7b5c473007d911ec017e4a2fdc3",
+                "passCount": 2462,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T23:08:44.455Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "8d08b126a06b21a64ad2d0023902020f988e3e0b",
+                "shortSha": "8d08b12"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/screening/engine.py",
+                    "sha256": "70ea74f79f2ba8a7a39dd6ae76d363ce9b6900e81e4a704718f351ddb557e099"
+                  },
+                  {
+                    "path": "src/thesis/screening/presets.py",
+                    "sha256": "9ca72e07d362af5d2c9978c8f257efe8cb3617a0722ee732f4838e6187d3bd49"
+                  },
+                  {
+                    "path": "src/thesis/screening/programs.py",
+                    "sha256": "ee76e65407c4cf2cd1b4ebde9f105b03441417b1004c3f818c9e2caebf049095"
+                  },
+                  {
+                    "path": "src/thesis/screening/artifacts.py",
+                    "sha256": "d6cd54fe24a1279a79c072cccd75533ba5e76e3bfc7ca86008a1f40644fe6805"
+                  },
+                  {
+                    "path": "tests/thesis/screening/test_engine.py",
+                    "sha256": "e40b0e1b18d66ee799564e0f015fc4f28d7aeb1c241e00aa54f10d7afd020342"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T219-validation.json",
+                "sha256": "01c2d38e43f2aebe96e60235f122e4c56585c7b5c473007d911ec017e4a2fdc3",
+                "passCount": 2462,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T23:08:44.455Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -25555,7 +25879,8 @@
         "Complete child T212: Prune GHCR image versions on a schedule",
         "Complete child T217: TH6.5 Workspace-resident Thesis agent runtime and CLI-equivalent scoping",
         "Complete child T220: TH6.6 Thesis workspace UI implementation (Svelte)",
-        "Complete child T221: TH6.7 Public domain hosting and TLS for the Thesis UI"
+        "Complete child T221: TH6.7 Public domain hosting and TLS for the Thesis UI",
+        "Complete child T223: Workspace picker 404 recovery, workspace creation UX, and data-mode surfacing"
       ],
       "depends": [
         "T069",
@@ -25569,7 +25894,7 @@
         "T149"
       ],
       "createdAt": "2026-09-03T00:02:16.159Z",
-      "updatedAt": "2026-09-09T17:41:39.720Z",
+      "updatedAt": "2026-09-09T22:39:34.467Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -25929,7 +26254,7 @@
     {
       "id": "T009",
       "title": "E6 Dev deployment and equities soak gate",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T001",
@@ -25959,8 +26284,9 @@
         "T008"
       ],
       "createdAt": "2026-09-01T03:15:41.837Z",
-      "updatedAt": "2026-09-01T03:33:20.061Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-09T22:29:29.132Z",
+      "completedAt": "2026-09-09T22:29:29.132Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -29764,7 +30090,7 @@
     {
       "id": "T217",
       "title": "TH6.5 Workspace-resident Thesis agent runtime and CLI-equivalent scoping",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T150",
@@ -29788,21 +30114,155 @@
         "src/thesis/chat/"
       ],
       "createdAt": "2026-09-09T17:22:57.110Z",
-      "updatedAt": "2026-09-09T17:22:57.110Z",
+      "updatedAt": "2026-09-09T22:16:02.203Z",
+      "completedAt": "2026-09-09T22:15:58.834Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-09T21:59:13.769Z",
         "failureLog": [],
-        "initializedAt": "2026-09-09T17:22:57.110Z"
+        "initializedAt": "2026-09-09T17:22:57.110Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "7217dd30bcfa7a1dec74d6ea6ad70011c676b4e1",
+                "shortSha": "7217dd3"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/agent/residency.py",
+                    "sha256": "10a4ad16e981776f18d03131e653a8d2737d80b34f68b650590fc7c6abc8b2de"
+                  },
+                  {
+                    "path": "src/thesis/agent/operations.py",
+                    "sha256": "80871f7ec5946b20c2f7e25652f9e81b5841e1721d65bb4cf8b07a486d507de5"
+                  },
+                  {
+                    "path": "tests/thesis/agent/test_residency.py",
+                    "sha256": "f48e2198e9493261aacc75c246b38ea98ca30c2246d406be87b0a3b8b3ef3d75"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T217-validation.json",
+                "sha256": "8befd0c7cc3d6cdb4afe0cf054388da36d4180cad2a8a48f61bf710e09093bff",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T21:59:14.360Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "7217dd30bcfa7a1dec74d6ea6ad70011c676b4e1",
+                "shortSha": "7217dd3"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/agent/residency.py",
+                    "sha256": "10a4ad16e981776f18d03131e653a8d2737d80b34f68b650590fc7c6abc8b2de"
+                  },
+                  {
+                    "path": "src/thesis/agent/operations.py",
+                    "sha256": "80871f7ec5946b20c2f7e25652f9e81b5841e1721d65bb4cf8b07a486d507de5"
+                  },
+                  {
+                    "path": "tests/thesis/agent/test_residency.py",
+                    "sha256": "f48e2198e9493261aacc75c246b38ea98ca30c2246d406be87b0a3b8b3ef3d75"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T217-validation.json",
+                "sha256": "8befd0c7cc3d6cdb4afe0cf054388da36d4180cad2a8a48f61bf710e09093bff",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T21:59:14.360Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "7217dd30bcfa7a1dec74d6ea6ad70011c676b4e1",
+                "shortSha": "7217dd3"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/agent/residency.py",
+                    "sha256": "10a4ad16e981776f18d03131e653a8d2737d80b34f68b650590fc7c6abc8b2de"
+                  },
+                  {
+                    "path": "src/thesis/agent/operations.py",
+                    "sha256": "80871f7ec5946b20c2f7e25652f9e81b5841e1721d65bb4cf8b07a486d507de5"
+                  },
+                  {
+                    "path": "tests/thesis/agent/test_residency.py",
+                    "sha256": "f48e2198e9493261aacc75c246b38ea98ca30c2246d406be87b0a3b8b3ef3d75"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T217-validation.json",
+                "sha256": "8befd0c7cc3d6cdb4afe0cf054388da36d4180cad2a8a48f61bf710e09093bff",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T21:59:14.360Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -30224,7 +30684,7 @@
     {
       "id": "T221",
       "title": "TH6.7 Public domain hosting and TLS for the Thesis UI",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T150",
@@ -30251,21 +30711,155 @@
         "T220"
       ],
       "createdAt": "2026-09-09T17:41:39.720Z",
-      "updatedAt": "2026-09-09T17:49:27.161Z",
+      "updatedAt": "2026-09-09T22:16:54.743Z",
+      "completedAt": "2026-09-09T22:16:51.334Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-09T22:14:58.631Z",
         "failureLog": [],
-        "initializedAt": "2026-09-09T17:41:39.720Z"
+        "initializedAt": "2026-09-09T17:41:39.720Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c56c6f52c3a20d8f4d6ec678ee4d1ee850de123a",
+                "shortSha": "c56c6f5"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/thesis.bicep",
+                    "sha256": "42921517d594c7383fdfb6430ce80b20fa843ba670281a15edf98239434bfef2"
+                  },
+                  {
+                    "path": ".github/runbooks/domain-hosting.md",
+                    "sha256": "fa7939362998c6b4e69dd5e1068bf9fe6845b4ddf76ce38c42915b2df19bfb18"
+                  },
+                  {
+                    "path": "tests/thesis/operations/test_domain_contract.py",
+                    "sha256": "1484e66ae91a012b81e998199ce5ea251482ce4963685704cb372836e8aa3721"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T221-validation.json",
+                "sha256": "863ab1fba36a1bad9f3c5a01ccc95d4b47d75f747fe69ce790e16c0afe492817",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T22:14:59.159Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c56c6f52c3a20d8f4d6ec678ee4d1ee850de123a",
+                "shortSha": "c56c6f5"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/thesis.bicep",
+                    "sha256": "42921517d594c7383fdfb6430ce80b20fa843ba670281a15edf98239434bfef2"
+                  },
+                  {
+                    "path": ".github/runbooks/domain-hosting.md",
+                    "sha256": "fa7939362998c6b4e69dd5e1068bf9fe6845b4ddf76ce38c42915b2df19bfb18"
+                  },
+                  {
+                    "path": "tests/thesis/operations/test_domain_contract.py",
+                    "sha256": "1484e66ae91a012b81e998199ce5ea251482ce4963685704cb372836e8aa3721"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T221-validation.json",
+                "sha256": "863ab1fba36a1bad9f3c5a01ccc95d4b47d75f747fe69ce790e16c0afe492817",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T22:14:59.159Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "c56c6f52c3a20d8f4d6ec678ee4d1ee850de123a",
+                "shortSha": "c56c6f5"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "infra/modules/thesis.bicep",
+                    "sha256": "42921517d594c7383fdfb6430ce80b20fa843ba670281a15edf98239434bfef2"
+                  },
+                  {
+                    "path": ".github/runbooks/domain-hosting.md",
+                    "sha256": "fa7939362998c6b4e69dd5e1068bf9fe6845b4ddf76ce38c42915b2df19bfb18"
+                  },
+                  {
+                    "path": "tests/thesis/operations/test_domain_contract.py",
+                    "sha256": "1484e66ae91a012b81e998199ce5ea251482ce4963685704cb372836e8aa3721"
+                  }
+                ]
+              },
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T221-validation.json",
+                "sha256": "863ab1fba36a1bad9f3c5a01ccc95d4b47d75f747fe69ce790e16c0afe492817",
+                "passCount": 2440,
+                "failCount": 0,
+                "skipCount": 15
+              },
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 219 CLEO tasks through T222.\n"
+              }
+            ],
+            "capturedAt": "2026-09-09T22:14:59.159Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -30372,6 +30966,62 @@
       },
       "pipelineStage": "contribution",
       "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T223",
+      "title": "Workspace picker 404 recovery, workspace creation UX, and data-mode surfacing",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 16,
+      "positionVersion": 0,
+      "description": "Fix the workspace selection flow after the workspace-section wave. The root route blind-redirects to the remembered workspace id from localStorage, so a stale id lands on the 404 error page; the workspaces picker's guarded auto-redirect then yanks users back to that 404 on every in-app back navigation (flicker then snap-back). Workspace creation UX is a toast-only stub reachable only from inside an existing workspace, with no API function behind it. Fixture versus live-API mode is chosen only by build-time env with no user-visible indication or escape hatch, and the live thesis API does not yet implement workspace list or snapshot routes, so real mode 404s with no recovery path. Changes: the root route always routes to the picker, the picker auto-redirects only on initial page entry and shows a stale-workspace notice when the remembered id is gone, workspace creation gets a real API function (fixture store plus POST /v1/workspaces) with the dialog reachable from the picker and navigation into the created workspace, snapshots for newly created workspaces synthesize an empty overview in fixture mode, and the current data mode is surfaced in the picker and shell with a runtime fixture-mode override persisted across reloads.",
+      "labels": [
+        "thesis",
+        "ui",
+        "workspace",
+        "ux"
+      ],
+      "notes": [
+        "2026-09-09 22:39:34 UTC: 2026-09-07 21:00 UTC: Created from orchestrator symptom reports after the workspace-section wave: selecting a workspace 404s, no workspace-creation UX, back-to-workspaces flickers then jumps back to 404, and no fixture/real mode UX. The live thesis API currently exposes only chat and streaming routers under /v1/workspaces/{id}; workspace list/snapshot/create routes are a backend follow-up (T155-era scope) and the UI degrades to an explicit unavailable state with a fixture escape hatch until they land.",
+        "2026-09-09 22:53:30 UTC: 2026-09-09 22:55 UTC: First fix landed in commit 58b1650, verified by a clean production build. Root route now always routes to the picker so a stale remembered id can never reach the error page; the picker auto-resumes only on initial page entry (afterNavigate enter) so in-app back navigation stays put, and a stale remembered id surfaces as an amber notice with Open-anyway and Dismiss actions (Dismiss also clears the persisted id). Workspace creation is real: api.createWorkspace() POSTs /v1/workspaces in live mode and appends to the fixture store in fixture mode, the dialog is reachable from the picker and the workspace sidebar, and creation navigates into the new workspace - fixture-mode snapshots for locally created workspaces synthesize an empty operational overview. Data mode is surfaced by a new DataModeBadge (fixture data vs thesis api) shown on the picker, the workspace shell, and the error page, with runtime switching persisted in localStorage thesis.fixtures; the picker and error page offer Continue with fixture data when the live API is unreachable, which matters because the thesis API does not yet implement workspace list/snapshot/create routes (only chat and streaming exist under /v1/workspaces/{id}).",
+        "2026-09-09 22:56:47 UTC: 2026-09-09 23:10 UTC: Root cause of the persistent 404 found in commit 44bebeb: /w/[workspace] has only a +layout and no +page, so the bare workspace path (/w/beta-quant) is a SvelteKit route-not-found while every child section exists. The picker and the auto-resume navigated to the bare path (the sidebar switcher worked because it targets /w/[id]/overview). Fixes: the picker enter() and auto-resume now navigate to /w/[id]/overview directly, and a new w/[workspace]/+page.svelte redirects the bare path to the overview so stale links and any remaining /w/[id] navigation resolve. The back-to-workspaces snap-back was this same route 404 reached through the picker auto-resume; with selection now targeting overview and the auto-resume restricted to initial page entry, in-app back navigation stays on the picker."
+      ],
+      "acceptance": [
+        "A stale remembered workspace id never lands the user on the 404 error page: the root route sends users to the picker and the picker only auto-redirects when the remembered id exists in the loaded workspace list",
+        "Browser back navigation from a workspace to the picker no longer redirects forward again (no flicker and snap-back); the picker shows the remembered workspace notice with an explicit continue affordance instead",
+        "The workspaces picker offers workspace creation and the dialog navigates into the newly created workspace; fixture-mode creation stores the workspace locally and synthesizes an empty snapshot",
+        "The picker and the workspace shell display the active data mode (fixtures or thesis-api) and provide a way to switch to fixture mode at runtime when the API is unreachable",
+        "npm run build succeeds from src/ui with the changed flows"
+      ],
+      "files": [
+        "src/ui/src/routes/",
+        "src/ui/src/lib/api.ts",
+        "src/ui/src/lib/workspace.svelte.ts",
+        "src/ui/src/lib/components/shell/"
+      ],
+      "createdAt": "2026-09-09T22:39:34.467Z",
+      "updatedAt": "2026-09-09T22:56:46.986Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-09T22:39:34.467Z"
+      },
+      "pipelineStage": "implementation",
+      "assignee": "local",
+      "kind": "bug",
       "scope": "feature",
       "relates": []
     },
@@ -31162,7 +31812,8 @@
         "T212",
         "T217",
         "T220",
-        "T221"
+        "T221",
+        "T223"
       ],
       "T181": [
         "T182",
