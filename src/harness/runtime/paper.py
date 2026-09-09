@@ -22,7 +22,7 @@ market-session boot and shutdown behavior is governed by
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -786,6 +786,25 @@ class PaperShell:
         )
         if watermarks.event_sequence > self._last_sequence:
             self._last_sequence = watermarks.event_sequence
+
+    def restore_fills(self, fills: Sequence[Fill]) -> None:
+        """Replay captured session fills into the kernel's fill history.
+
+        A restored shell continues the same session, so later supervision
+        captures require the booked fill history to back every fill the
+        restored books reference.  Fills must arrive once each, in capture
+        order; duplicates are rejected rather than silently rebooked.
+        """
+        seen: set[str] = set()
+        for fill in fills:
+            if not isinstance(fill, Fill):
+                raise PaperConfigurationError("fills must be Fill events")
+            if fill.fill_id in seen:
+                raise PaperConfigurationError(
+                    f"fill {fill.fill_id!r} is restored more than once"
+                )
+            seen.add(fill.fill_id)
+        self._fills.extend(fills)
 
     # -- session driving ----------------------------------------------------
 

@@ -1441,6 +1441,14 @@ class RuntimeStateStore:
                 marks[symbol] = marker.price
         for symbol in sorted(marks):
             hub.mark(symbol, marks[symbol])
+        session_fills: dict[str, Fill] = {}
+        for book_state in snapshot.books:
+            for fill in book_state.fills:
+                session_fills[fill.fill_id] = fill
+        if session_fills:
+            shell.restore_fills(
+                sorted(session_fills.values(), key=lambda fill: fill.sequence)
+            )
         for instance_id, count in snapshot.order_counts.items():
             for _ in range(count):
                 shell.count_order(instance_id)

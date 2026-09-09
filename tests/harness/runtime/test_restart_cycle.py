@@ -202,7 +202,11 @@ def test_restored_shell_does_not_reenter_or_duplicate_restored_fill_ids() -> Non
     assert second.hub.snapshot == first.hub.snapshot
     assert second.hub.book(INSTANCE_ID).fill_ids == ("sim-fill-3",)
     assert second.order_count(INSTANCE_ID) == 1
-    assert second.result().fills == ()
+    assert second.result().fills == first.result().fills
+
+    # The supervision regression: a capture taken after the restore must
+    # succeed — the books' fills are backed by the restored session history.
+    _capture(second, store, options, sequence=events[1].sequence)
 
 
 def test_restored_venue_ids_and_sequences_continue_past_restored_books() -> None:
@@ -232,23 +236,22 @@ def test_restored_venue_ids_and_sequences_continue_past_restored_books() -> None
         second.step(event)
     result = second.result()
 
-    assert result.fills == tuple(
-        fill for fill in expected.fills if fill.fill_id not in restored_ids
-    )
+    assert result.fills == expected.fills
     restored_ordinals = [
         int(fill_id.rsplit("-", 1)[1])
         for fill_id in restored_ids
         if fill_id.startswith("sim-fill-")
     ]
     assert restored_ordinals
-    assert result.fills
+    new_fills = result.fills[len(restored_fills) :]
+    assert new_fills
     assert all(
         int(fill.fill_id.rsplit("-", 1)[1]) > max(restored_ordinals)
-        for fill in result.fills
+        for fill in new_fills
     )
     assert all(
         fill.sequence > max(restored_fill.sequence for restored_fill in restored_fills)
-        for fill in result.fills
+        for fill in new_fills
     )
     assert second.order_count(INSTANCE_ID) == reference.order_count(INSTANCE_ID)
     assert second.hub.snapshot == reference.hub.snapshot
