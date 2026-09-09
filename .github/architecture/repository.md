@@ -21,7 +21,10 @@ venue commands, provenance-restricted scheduling), live-feed gap healing, the
 SecurityMaster listings view, the PaperShell shared paper simulation runtime,
 and the local `backtest-job` CLI are implemented; offline reports, the harness
 query API, shadow/live runtimes, and CI/deployment orchestration remain
-planned. The pinned Zig 0.16.0
+planned. The `harness.signal` pure-NumPy wavelet and analytic-signal kernels
+(MODWT with circular/reflection boundaries, additive MRA, wavelet variance,
+Hilbert envelope/phase features, and an exploratory Morlet CWT scalogram) are
+implemented for the intraday-pattern research scripts. The pinned Zig 0.16.0
 toolchain is a first-class build component: the `build.zig` module builds the
 native core under `src/harness/native` (C ABI v2 with the Arrow C Data
 Interface bridge, pinned scale-18 fixed point, and the ported event kernel,
@@ -143,6 +146,7 @@ tests/lake/
 | `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies; plus the PaperShell shared simulation runtime composing the same kernel, venue, fills, fees, risk, and portfolio accounting against replay or live inbox feeds, the runtime state store capturing hash-verifiable snapshots with restore-equivalent continuation, the boot/periodic reconciler with broker-vs-book diff artifacts and explicit policies, and the recovery boot policies (resume-reconcile, flatten-halt, halt-only) with chaos-proven fault handling. |
 | `harness.strategy` | Mode-independent strategy callbacks, constrained context with capability-scoped surfaces (read-only clock, opaque engine-clocked data history, one-way venue commands, provenance-restricted scheduling, and engine-delivered corporate-action hooks), deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
 | `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, complete decision auditing, options collateral rules (naked-short rejection and collateral limits with audited decisions), and the explicit audited global kill switch. |
+| `harness.signal` | Pure-NumPy time-series signal kernels for market-microstructure research: maximal-overlap discrete wavelet transform (MODWT) with circular/reflection boundaries, additive multiresolution analysis, exact inversion, and unbiased wavelet-variance estimation; Hilbert analytic-signal envelope and phase features for band-limited details; and an exploratory Morlet continuous-wavelet-transform scalogram. |
 | `harness.testing` | Deterministic synthetic feeds, determinism artifact canonicalization, reproducibility manifest comparison, cross-language parity scenarios, and paper-to-backtest parity scenarios and reports. |
 | `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, simulated top-of-book matching venue, the options multi-leg matching engine with atomic all-leg fillability, and the Alpaca live broker venues for single-leg equities (async command receipts, execution-report conversion), fractional continuous crypto with maker-taker fee reconciliation, and options multi-leg (net debit/credit spreads, leg-report mapping) behind the consolidated capability matrix. |
 

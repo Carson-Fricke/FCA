@@ -1,0 +1,53 @@
+{
+  "taskId": "T222",
+  "numTotalTests": 2368,
+  "numPassedTests": 2368,
+  "numFailedTests": 0,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "signal-kernel-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/signal",
+      "result": "38 tests: QMF relations for LA8/DB4 (sum=sqrt2, orthonormality, even-lag autocorrelation, cross-orthogonality at even shifts), circular MODWT exact inversion + Parseval energy conservation, reflection MRA exact reconstruction at every sample, shift invariance, octave-band sine localization including exact band-edge split, WMTSA variance counts (M_j = N - L_j + 1), white-noise 2^-j octave-band variance partition, analytic-signal envelope/phase-velocity exactness on sines and AM signals, phase-increment coherence tone-vs-noise separation, Morlet CWT bit-exact against direct linear convolution, scale-vs-period localization, cone-of-influence masking"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2368 passed, 14 skipped, 1 xfailed at wave edit freeze (includes the 38 new harness.signal tests)"
+    },
+    {
+      "name": "static-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/harness/signal tests/harness/signal scripts/experiments/spy_0dte/wavelet_intraday.py scripts/experiments/spy_0dte/wavelet_daily.py scripts/experiments/spy_0dte/cross_timeframe.py; uv run --extra dev ruff format --check <same>; uv run --extra dev ty check <same>",
+      "result": "ruff lint clean, format clean, ty clean on all wave files"
+    },
+    {
+      "name": "intraday-study-run",
+      "status": "passed",
+      "command": "uv run --extra dev python scripts/experiments/spy_0dte/wavelet_intraday.py --surrogate-reps 12 --stability-iterations 30",
+      "result": "1515/1527 sessions clustered: shape-space DBCV 0.000 with 0 clusters for real data AND all three surrogate families (iid, phase, gbm); positive control day-vol-only clustering DBCV 0.160 with 6 clusters; outputs features.parquet, clusters.csv, scalogram.parquet, summary.json under .local/spy-clusters/wavelet"
+    },
+    {
+      "name": "daily-study-run",
+      "status": "passed",
+      "command": "uv run --extra dev python scripts/experiments/spy_0dte/wavelet_daily.py",
+      "result": "1527 daily bars; D1-D6+S6 variance partition (geometric octave decay, near-white daily returns); vol-cycle D4 phase velocity 0.299 rad/day (~21-day period) at 0.99 coherence; outputs daily-variance.csv, vol-variance.csv, daily-mra.parquet, rolling-variance.csv, summary.json under .local/spy-clusters/wavelet-daily"
+    },
+    {
+      "name": "cross-timeframe-run",
+      "status": "passed",
+      "command": "uv run --extra dev python scripts/experiments/spy_0dte/cross_timeframe.py",
+      "result": "1514 sessions joined; regime lift tables and regime-conditional shape profiles written to cross_timeframe.json; 0DTE lake overlay (42 sessions) at zero_dte_overlay.parquet"
+    }
+  ],
+  "limitations": [
+    "Shape-space cluster null: real DBCV equals all surrogate families, so the pooled test cannot detect time-of-day phase organization; the conditional within-vol-quintile test (next steps) is required before concluding on the phase hypothesis",
+    "Phase-randomized surrogates preserve the wavelet-variance fingerprint by construction, so only time-localized features are testable against that null",
+    "Open-block D3/D4 block energies are structurally dead under the causal reflection boundary (L_j-1 trim zone); open-window claims require the Morlet CWT route",
+    "Surrogate reps at 12 per family give coarse null distributions; 50 reps recommended before treating the null verdict as definitive",
+    "Two pre-existing ruff F841 violations in classification_accuracy.py and strategy_backtests.py and four pre-existing ty diagnostics in tests/harness/cli/test_supervisor.py and tests/thesis/integrations/test_activation.py are integration findings from other sessions' uncommitted work, not this wave"
+  ]
+}
