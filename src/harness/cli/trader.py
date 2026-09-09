@@ -218,6 +218,9 @@ def _feed_factory(
     """
     adapter = config.market_data.adapter
     settings = dict(config.market_data.settings)
+    websocket_url = settings.get("websocket_url")
+    if websocket_url is not None and not isinstance(websocket_url, str):
+        raise SystemExit("market_data.settings.websocket_url must be a string")
     if settings.get("feed") == "crypto":
         if adapter != "harness.data.alpaca_ws:AlpacaCryptoWebSocketFeed":
             raise SystemExit(
@@ -231,6 +234,7 @@ def _feed_factory(
             transport=_websocket_transport(),
             inbox=inbox,
             clock=lambda: clock.now(),
+            websocket_url=websocket_url,
         )
     elif adapter == "harness.data.alpaca_ws:AlpacaSipWebSocketFeed":
         inbox = AlpacaSipInbox()
@@ -241,6 +245,7 @@ def _feed_factory(
             transport=_websocket_transport(),
             inbox=inbox,
             clock=lambda: clock.now(),
+            websocket_url=websocket_url,
         )
     else:
         raise SystemExit(

@@ -40,6 +40,9 @@ market_data:
     api_secret: "${HARNESS_ALPACA_API_SECRET}"
   settings:
     feed: crypto
+    # Alpaca serves the crypto stream per locale; the bare v1beta3/crypto
+    # endpoint rejects the upgrade with HTTP 404.
+    websocket_url: "wss://stream.data.alpaca.markets/v1beta3/crypto/us"
 broker:
   adapter: harness.venues.alpaca:AlpacaBroker
   credentials:

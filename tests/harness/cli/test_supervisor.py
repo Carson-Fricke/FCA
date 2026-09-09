@@ -827,6 +827,34 @@ def test_session_for_equity_feed_delegates_to_the_xnys_calendar() -> None:
     assert trader._session_for(configuration, saturday) is None
 
 
+def test_feed_factory_passes_the_configured_crypto_websocket_url() -> None:
+    configuration = _trader_config()
+    instance = _instance().model_copy(update={"symbols": ("BTC/USD",)})
+    market_data = configuration.market_data.model_copy(
+        update={
+            "adapter": "harness.data.alpaca_ws:AlpacaCryptoWebSocketFeed",
+            "settings": {
+                "feed": "crypto",
+                "websocket_url": "wss://stream.example.test/v1beta3/crypto/us",
+            },
+        }
+    )
+    crypto_config = configuration.model_copy(
+        update={"strategy_instances": (instance,), "market_data": market_data}
+    )
+
+    _paper_feed, pump = trader._feed_factory(
+        crypto_config,
+        {
+            "HARNESS_ALPACA_API_KEY": "key-value",
+            "HARNESS_ALPACA_API_SECRET": "secret-value",
+        },
+        SimClock(datetime(2026, 9, 9, 12, 0, tzinfo=UTC)),
+    )
+
+    assert pump._websocket_url == "wss://stream.example.test/v1beta3/crypto/us"
+
+
 # --------------------------------------------------------------------------
 # ReorderingInbox: the live feed ordering boundary
 # --------------------------------------------------------------------------
