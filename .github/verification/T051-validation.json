@@ -1,0 +1,38 @@
+{
+  "taskId": "T051",
+  "numTotalTests": 2440,
+  "numPassedTests": 2440,
+  "numFailedTests": 0,
+  "numPendingTests": 15,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "universe-and-valve-config-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/scripts/test_universe_expansion.py tests/lake/coverage",
+      "result": "31 tests (13 new): universe config validation (200 unique liquid listings, format), valve mapping (200 trades + top-25 quotes), and the coverage suite regression green"
+    },
+    {
+      "name": "live-backfill-execution",
+      "status": "passed",
+      "command": "scripts/soak/run_soak.py with config/lake/soak-valve-trades-200.yaml (4 bounded 50-symbol batches) and soak-valve-quotes-top25.yaml (1 invocation); pilot first on AAPL/MSFT/SPY",
+      "result": "Pilot: 6/6 sessions complete. Full launch: 7 invocations, 444/444 sessions complete, 0 failed, 450,000 rows, 6.41 MB, $0.0248 incremental; lake reconciliation exact (800 Parquet objects / 10.55 MB); posture restored to internal after runs; launch log in docs/e6.5-universe-universe.md"
+    },
+    {
+      "name": "cost-cross-check",
+      "status": "passed",
+      "command": "scripts/cost/e6_4_projection.py --scenario valve",
+      "result": "T050 model reproduces exactly ($7.6910/mo, both gates PASS); deployed 1,000-record ingest cap projects the real corpus at ~14.3 GB = ~$0.14/mo, ~55x under the envelope"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2440 passed, 15 skipped, 1 xfailed at wave edit freeze"
+    }
+  ],
+  "limitations": [
+    "KEY FINDING F1 for the integration owner: the deployed ensure path publishes BOTH data types per session (src/lake/ingestion/equities/transaction.py:91 never consults data_type), so the trades arm side-effect-published quotes for all 200 symbols - immaterial at bounded depth (~$0.06/mo) but a valve leakage that must be fixed before any unbounded ingest path",
+    "Universe derivation: 167 S&P 500 single names validated against the 2026-09-09 constituents snapshot + 33 ETFs, curated most-liquid-first; HES corrected to PLD (delisting via Chevron acquisition)"
+  ]
+}

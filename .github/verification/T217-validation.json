@@ -1,0 +1,31 @@
+{
+  "taskId": "T217",
+  "numTotalTests": 2440,
+  "numPassedTests": 2440,
+  "numFailedTests": 0,
+  "numPendingTests": 15,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-residency-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/agent tests/thesis/chat",
+      "result": "21 tests (10 new): residency binds one workspace with frozen identity and structurally workspace-scoped boundaries (path containment rejects traversal, no boundary method accepts a workspace parameter), AgentSession durable JSON v1 records over the injected ResidencyStore with load-or-create and restart-resume restoring transcript cursor and identity, every WorkspaceOperations call emits an immutable OperationAuditRecord with inputs digest, unavailable backends fail closed (T173 StatusSurface pattern), and the chat seam keeps incoming chats validated against the frozen binding (cross-workspace raises)"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2440 passed, 15 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/agent tests/thesis/agent && uv run --extra dev ty check src/thesis/agent",
+      "result": "ruff and ty clean; existing agent and chat tests stayed green"
+    }
+  ],
+  "limitations": [
+    "edit_strategy_code, request_backtest, and deploy_paper return typed unavailable outcomes until their backing services land; open_investigation composes the existing chat service"
+  ]
+}
