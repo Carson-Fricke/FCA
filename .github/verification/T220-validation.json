@@ -1,0 +1,32 @@
+{
+  "taskId": "T220",
+  "numTotalTests": 2408,
+  "numPassedTests": 2408,
+  "numFailedTests": 0,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "ui-build-and-tests",
+      "status": "passed",
+      "command": "cd src/ui && npm run build && npm run test -- run && npx svelte-check",
+      "result": "adapter-static build succeeds (SPA fallback verified on / and /w/alpha-lab/chats); 18 vitest tests pass (workspace switcher re-scoping, SSE resume/dedup, consent card free-text rejection, backtest split declared/not-declared, capability unavailable surfaces, screener save); svelte-check 0 errors 0 warnings"
+    },
+    {
+      "name": "spec-implementation-inventory",
+      "status": "passed",
+      "command": "route/component review against .github/architecture/thesis-ui-design.md",
+      "result": "All eight spec pages implemented under /w/[workspace]/ (overview, chats, strategies+detail with lineage, backtests+detail with IS/OOS split and not-declared state, deployments with orders/risk, dashboards with artifact-backed widgets, screener with saved studies, workspace-state with CLEO projection/lineage/evidence/consent-audit) plus the app shell (switcher, command palette, copilot panel), chat SSE client with Last-Event-ID resume and ephemeral dedup, structured consent card, and a fixture/real dual-mode typed API layer (21 fixture documents, two workspaces for re-scoping)"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2408 passed, 14 skipped, 1 xfailed at wave edit freeze"
+    }
+  ],
+  "limitations": [
+    "Composer uploads render untrusted-evidence chips without a backend upload route (none exists yet)",
+    "Real mode requires PUBLIC_THESIS_API_BASE; fixture mode is the default until the Thesis API serves every route"
+  ]
+}

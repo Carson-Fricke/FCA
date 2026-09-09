@@ -1,0 +1,38 @@
+{
+  "taskId": "T050",
+  "numTotalTests": 2408,
+  "numPassedTests": 2408,
+  "numFailedTests": 0,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "projection-model-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/scripts/test_e6_4_projection.py",
+      "result": "18 tests: linear extrapolation math, both gate branches including single-gate failures, valve ranking order with solved-fit verification, deterministic table/JSON output"
+    },
+    {
+      "name": "measured-baseline-and-decision",
+      "status": "passed",
+      "command": "az consumption budget list; az storage blob list; az monitor metrics list UsedCapacity; scripts/cost/e6_4_projection.py --scenario base|bounded200|valve|scaled|watchlist",
+      "result": "Measured MTD spend $1.18 (run rate $3.94/30d), lake container 19.9 MB, StorageV2 with Cool-after-14-days. Broad-backfill projection (200 symbols, full depth): $430.26/month and 42,994 GiB - both gates FAIL, so the rule fires QUOTE_HISTORY_VALVE: trades for all 200 symbols plus quotes for the top-25 by liquidity at 1-year history at $7.69/month (both gates pass with margin); the solved-fit maximum is top-39 within the 1-TiB gate. Decision recorded in docs/e6.4-cost-projection.md with the operator sign-off block; T051 receives the valve handoff"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2408 passed, 14 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check scripts/cost tests/scripts && uv run --extra dev ty check scripts/cost/e6_4_projection.py",
+      "result": "ruff and ty clean"
+    }
+  ],
+  "limitations": [
+    "Cost Management query API returned persistent 429s, so the baseline anchors on budget currentSpend plus cited list-price arithmetic (Azure Retail Prices API, retrieved 2026-09-09)",
+    "Full-depth byte projections are order-of-magnitude planning numbers from the measured per-session bytes; the valve recommendation (top-25) starts well inside the solved-fit bound"
+  ]
+}

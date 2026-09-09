@@ -1,0 +1,37 @@
+{
+  "taskId": "T218",
+  "numTotalTests": 2408,
+  "numPassedTests": 2408,
+  "numFailedTests": 0,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-mcp-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/mcp tests/harness/cli/test_commands.py",
+      "result": "38 tests (22 new): initialize handshake, exact default tool set (trader absent unless the capability flag is set; shadow/live have no field at all and never appear), remote-API contract mirror with bearer header and payload shape, exact local argv for backtest/sweep/trader, get_* payload mapping, malformed JSON-RPC and unknown-method error objects, stdio framing with graceful EOF shutdown, no-credential serialization; 16 CLI regression tests green"
+    },
+    {
+      "name": "protocol-and-auth",
+      "status": "passed",
+      "command": "review of src/harness/mcp/{transport,auth,tools,server}.py",
+      "result": "Newline-delimited JSON-RPC 2.0 over stdio (MCP stdio convention), diagnostics to stderr only, error codes -32700/-32600/-32601/-32602/-32603, isError results for domain failures; bearer from HARNESS_API_BEARER_TOKEN via injected source, serialized settings carry only the env-var name and a bearer_configured boolean"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2408 passed, 14 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/harness/mcp tests/harness/mcp src/harness/cli/__init__.py && uv run --extra dev ty check src/harness/mcp",
+      "result": "ruff and ty clean"
+    }
+  ],
+  "limitations": [
+    "No new dependencies: the MCP stdio framing is implemented by hand (JSON-RPC 2.0), so protocol-version negotiation is fixed at 2024-11-05 with tools/listChanged false"
+  ]
+}
