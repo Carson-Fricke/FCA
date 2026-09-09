@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-09T17:09:41.950Z",
+    "exportedAt": "2026-09-09T17:50:44.868Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 217
+      "nextId": 222
     },
-    "checksum": "94db86587c641258",
-    "taskCount": 213,
+    "checksum": "b22d1197351ae604",
+    "taskCount": 218,
     "exportMode": "full"
   },
   "selection": {
@@ -178,6 +178,8 @@
       "T189",
       "T191",
       "T215",
+      "T218",
+      "T219",
       "T008",
       "T027",
       "T039",
@@ -221,8 +223,11 @@
       "T192",
       "T212",
       "T193",
+      "T217",
       "T194",
+      "T220",
       "T195",
+      "T221",
       "T196",
       "T197",
       "T198",
@@ -1882,6 +1887,20 @@
       "parentId": "T010",
       "depends": []
     },
+    "T218": {
+      "type": "task",
+      "title": "H8.6 Harness MCP server for backtests and experiments",
+      "status": "pending",
+      "parentId": "T076",
+      "depends": []
+    },
+    "T219": {
+      "type": "task",
+      "title": "H9.6 Workspace screener backend with programmatic custom screeners",
+      "status": "pending",
+      "parentId": "T077",
+      "depends": []
+    },
     "T008": {
       "type": "epic",
       "title": "E5 HTTP ensure and query API",
@@ -2327,6 +2346,13 @@
       "parentId": "T070",
       "depends": []
     },
+    "T217": {
+      "type": "task",
+      "title": "TH6.5 Workspace-resident Thesis agent runtime and CLI-equivalent scoping",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
+    },
     "T194": {
       "type": "task",
       "title": "Opaque StrategyHistory facade",
@@ -2336,6 +2362,13 @@
         "T192"
       ]
     },
+    "T220": {
+      "type": "task",
+      "title": "TH6.6 Thesis workspace UI implementation (Svelte)",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
+    },
     "T195": {
       "type": "task",
       "title": "Engine wiring for the data capability",
@@ -2343,6 +2376,16 @@
       "parentId": "T070",
       "depends": [
         "T194"
+      ]
+    },
+    "T221": {
+      "type": "task",
+      "title": "TH6.7 Public domain hosting and TLS for the Thesis UI",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": [
+        "T174",
+        "T220"
       ]
     },
     "T196": {
@@ -23517,6 +23560,98 @@
       "relates": []
     },
     {
+      "id": "T218",
+      "title": "H8.6 Harness MCP server for backtests and experiments",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T076",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Expose the quant-harness as an MCP (Model Context Protocol) server so the Thesis agent (T217) and other MCP clients can run backtests, sweeps, and experiments as first-class tools. Reuse the harness API contracts (POST /v1/backtests/jobs, runs, artifacts) as the tool implementations and the capability gating semantics from the T173 adapters; the server is a harness product surface (src/harness/mcp) wired as a harness CLI subcommand or sidecar, authenticated like the quant API.",
+      "labels": [
+        "harness",
+        "mcp",
+        "agent-tools"
+      ],
+      "acceptance": [
+        "An MCP server exposes harness capabilities (run backtest, run parameter sweep, fetch status/manifests/artifacts, launch supervised trader) as tools with schemas mirroring the harness API contracts",
+        "The MCP server authenticates with the same bearer-token posture as the quant API and holds no broker credentials",
+        "The Thesis agent can discover and call the harness MCP tools to run backtests and experiments without bespoke HTTP plumbing in the agent",
+        "Unimplemented capabilities are absent from the tool list rather than stubbed",
+        "Focused MCP tool-schema, authentication, and invocation tests pass over an in-process transport"
+      ],
+      "files": [
+        "src/harness/mcp/"
+      ],
+      "createdAt": "2026-09-09T17:26:02.057Z",
+      "updatedAt": "2026-09-09T17:26:02.057Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-09T17:26:02.057Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T219",
+      "title": "H9.6 Workspace screener backend with programmatic custom screeners",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T077",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Backend for the T176 Screener page: execute symbol screeners (volume/liquidity presets plus user-authored programmatic scripts) over the point-in-time universe and lake market data, persist screener definitions and saved studies as workspace Git artifacts, and serve results through the Thesis API with data-window and universe-revision provenance. Composes with H9.4's UniverseView semantics (survivorship-clean, point-in-time) and the workspace artifact contracts; the UI consumes via the T173 status-surface pattern.",
+      "labels": [
+        "thesis",
+        "screening",
+        "workspaces"
+      ],
+      "acceptance": [
+        "A screener engine executes preset filters (volume, liquidity) and user-authored programmatic screeners over point-in-time universe and market data with no lookahead",
+        "Screener definitions and saved studies are workspace Git artifacts with stable identity and provenance",
+        "Screener results are served through the Thesis API for the T176 Screener page, citing the data window and universe revision used",
+        "Custom screener scripts run in a constrained boundary: no network, no wall-clock decisions inside evaluation, and failures fail closed with the script error surfaced",
+        "Focused screening engine, provenance, and boundary tests pass"
+      ],
+      "files": [
+        "src/thesis/screening/"
+      ],
+      "createdAt": "2026-09-09T17:39:40.098Z",
+      "updatedAt": "2026-09-09T17:39:40.098Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-09T17:39:40.098Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "done",
@@ -24008,7 +24143,8 @@
         "Complete child T133: H9.2 Alpaca delisted-history coverage sweep",
         "Complete child T134: H9.3 Delisting and rename events with settlement",
         "Complete child T135: H9.4 Point-in-time UniverseView and dynamic subscriptions",
-        "Complete child T136: H9.5 Conditional supplemental listings dataset"
+        "Complete child T136: H9.5 Conditional supplemental listings dataset",
+        "Complete child T219: H9.6 Workspace screener backend with programmatic custom screeners"
       ],
       "depends": [
         "T005",
@@ -24017,7 +24153,7 @@
         "T070"
       ],
       "createdAt": "2026-09-01T17:55:45.717Z",
-      "updatedAt": "2026-09-01T18:41:36.618Z",
+      "updatedAt": "2026-09-09T17:39:40.098Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -25116,7 +25252,10 @@
         "Complete child T207: TH6.6 Backtest PnL and price chart component",
         "Complete child T209: Relocate Thesis UI into the src/ui product namespace",
         "Complete child T211: Chat-owned messaging with percolated steering and SSE streaming for the Thesis backend",
-        "Complete child T212: Prune GHCR image versions on a schedule"
+        "Complete child T212: Prune GHCR image versions on a schedule",
+        "Complete child T217: TH6.5 Workspace-resident Thesis agent runtime and CLI-equivalent scoping",
+        "Complete child T220: TH6.6 Thesis workspace UI implementation (Svelte)",
+        "Complete child T221: TH6.7 Public domain hosting and TLS for the Thesis UI"
       ],
       "depends": [
         "T069",
@@ -25130,7 +25269,7 @@
         "T149"
       ],
       "createdAt": "2026-09-03T00:02:16.159Z",
-      "updatedAt": "2026-09-05T23:18:23.862Z",
+      "updatedAt": "2026-09-09T17:41:39.720Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -26768,7 +26907,8 @@
         "Complete child T129: H8.2 Performance and memory budgets",
         "Complete child T130: H8.3 Strategy authoring and architecture guide",
         "Complete child T131: H8.4 Timeboxed post-v1 realism spikes",
-        "Complete child T214: H8.5 SPY 0DTE intraday theta-delta experiment (native CRR kernels and 42-session study)"
+        "Complete child T214: H8.5 SPY 0DTE intraday theta-delta experiment (native CRR kernels and 42-session study)",
+        "Complete child T218: H8.6 Harness MCP server for backtests and experiments"
       ],
       "depends": [
         "T070",
@@ -26778,7 +26918,7 @@
         "T077"
       ],
       "createdAt": "2026-09-01T17:55:42.409Z",
-      "updatedAt": "2026-09-08T02:30:45.685Z",
+      "updatedAt": "2026-09-09T17:26:02.057Z",
       "pipelineStage": "research",
       "kind": "work",
       "scope": "feature",
@@ -29213,6 +29353,52 @@
       "relates": []
     },
     {
+      "id": "T217",
+      "title": "TH6.5 Workspace-resident Thesis agent runtime and CLI-equivalent scoping",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 13,
+      "positionVersion": 0,
+      "description": "Formalize the Thesis agent as a workspace-resident entity rather than a per-request assistant: the agent binds to one workspace (context root, working state, file operations, CLEO projection), persists across sessions, and presents the CLI-equivalent operational surface the UI contract assumes (TH6.3/T176 chats view). The agent runtime modules exist (src/thesis/agent: context, router, skills, subagents) and chat-owned messaging landed in T211; this task closes the gap between per-request chat handling and a durable workspace-scoped agent.",
+      "labels": [
+        "thesis",
+        "agent",
+        "workspaces"
+      ],
+      "acceptance": [
+        "The Thesis agent is a workspace-resident entity: it binds to one workspace, persists its identity/session across chat sessions, and its context root, state, and file operations are scoped to that workspace like a CLI session",
+        "The agent exposes the same operational surface as the harness CLI within workspace scope: modify strategy code, run backtests, deploy paper activations, and run hypothesis-discovery investigations, with every act recorded in workspace audit state",
+        "Chat transcripts and agent acts survive reconnects and process restarts with the same cursor/resume semantics as the execution event stream",
+        "Focused workspace-scoping, persistence, and restart-resume tests pass"
+      ],
+      "files": [
+        "src/thesis/agent/",
+        "src/thesis/chat/"
+      ],
+      "createdAt": "2026-09-09T17:22:57.110Z",
+      "updatedAt": "2026-09-09T17:22:57.110Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-09T17:22:57.110Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T194",
       "title": "Opaque StrategyHistory facade",
       "status": "done",
@@ -29320,6 +29506,52 @@
       "relates": []
     },
     {
+      "id": "T220",
+      "title": "TH6.6 Thesis workspace UI implementation (Svelte)",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 14,
+      "positionVersion": 0,
+      "description": "Implement the Thesis workspace UI per the accepted T176 specification (.github/architecture/thesis-ui-design.md): SvelteKit (Svelte 5 runes, TypeScript, Tailwind v4, adapter-static SPA) seeded from the existing src/ui laboratory, adopting the workspace-app mockup's information architecture and the backtest mockup's visual design. Consumes the Thesis API contracts (T211 chat/SSE, T172 consent, T173 status surfaces, T174 deployment) without introducing a second source of truth.",
+      "labels": [
+        "thesis",
+        "ui",
+        "svelte"
+      ],
+      "acceptance": [
+        "The SvelteKit workspace app implements the T176 specification: workspace selection and creation, the sidebar page set (Overview, AI chats, Strategies, Backtests, Deployments, Dashboards, Screener, Workspace state), and the workspace-scoped copilot",
+        "Chat consumes the SSE event stream with Last-Event-ID resume and ephemeral-frame dedup, renders workflow timelines, steering acknowledgements, CLEO plan visibility, evidence links, and the structured activation-consent confirmation",
+        "Backtest detail renders the declared train/test split with per-segment metrics and an explicit not-declared state",
+        "Deployments and Dashboards consume the T173 status surfaces and workspace artifact widget definitions",
+        "npm run build succeeds and focused Playwright-free component/route tests pass"
+      ],
+      "files": [
+        "src/ui/"
+      ],
+      "createdAt": "2026-09-09T17:40:59.278Z",
+      "updatedAt": "2026-09-09T17:40:59.278Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-09T17:40:59.278Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T195",
       "title": "Engine wiring for the data capability",
       "status": "done",
@@ -29418,6 +29650,55 @@
         "sessionId": "ses_20260904182631_35e281"
       },
       "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T221",
+      "title": "TH6.7 Public domain hosting and TLS for the Thesis UI",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 15,
+      "positionVersion": 0,
+      "description": "Host the FCA Thesis deployment on the user's GoDaddy domain once the T176-specified UI is implemented and working locally (TH6.6): DNS zone delegation or CNAME validation from GoDaddy, Azure Container Apps custom-domain and managed-certificate wiring parameterized in the thesis Bicep modules, TLS posture, and the public-ingress authorization decision recorded per the repository's ingress budget rules. Blocked by TH6.6 (UI complete and working locally).",
+      "labels": [
+        "thesis",
+        "deployment",
+        "domain"
+      ],
+      "acceptance": [
+        "The user's GoDaddy domain serves the Thesis UI and API over HTTPS with managed certificates on the Azure Container Apps deployment|DNS delegation and validation steps are documented and executed against the registrar without committing registrar credentials|Public ingress posture is explicit: the external-ingress budget/authorization decision is recorded and the authenticated routes remain bearer/Entra protected|Custom-domain and TLS wiring is parameterized in Bicep (no portal changes) and covered by the deployment contract tests|Post-deploy smoke validates the custom hostname end to end"
+      ],
+      "files": [
+        "infra/modules/thesis.bicep",
+        "infra/main.bicep",
+        ".github/workflows/deploy-thesis.yml",
+        ".github/runbooks/"
+      ],
+      "depends": [
+        "T174",
+        "T220"
+      ],
+      "createdAt": "2026-09-09T17:41:39.720Z",
+      "updatedAt": "2026-09-09T17:49:27.161Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-09T17:41:39.720Z"
+      },
+      "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -30241,14 +30522,16 @@
         "T129",
         "T130",
         "T131",
-        "T214"
+        "T214",
+        "T218"
       ],
       "T077": [
         "T132",
         "T133",
         "T134",
         "T135",
-        "T136"
+        "T136",
+        "T219"
       ],
       "T143": [
         "T144",
@@ -30308,7 +30591,10 @@
         "T209",
         "T210",
         "T211",
-        "T212"
+        "T212",
+        "T217",
+        "T220",
+        "T221"
       ],
       "T181": [
         "T182",
@@ -31162,6 +31448,10 @@
       ],
       "T195": [
         "T194"
+      ],
+      "T221": [
+        "T174",
+        "T220"
       ],
       "T196": [
         "T192"
