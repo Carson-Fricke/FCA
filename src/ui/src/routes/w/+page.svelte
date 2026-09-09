@@ -28,7 +28,7 @@
 				workspaces = items;
 				loading = false;
 				if (ui.lastWorkspace && items.some((w) => w.id === ui.lastWorkspace)) {
-					goto(`/w/${ui.lastWorkspace}`, { replaceState: true });
+					goto(`/w/${ui.lastWorkspace}/overview`, { replaceState: true });
 				} else if (ui.lastWorkspace && staleNotice === null) {
 					staleNotice = ui.lastWorkspace;
 				}
@@ -46,7 +46,7 @@
 	function enter(id: string): void {
 		setLastWorkspace(id);
 		staleNotice = null;
-		goto(`/w/${id}`);
+		goto(`/w/${id}/overview`);
 	}
 
 	function dismissStale(): void {
