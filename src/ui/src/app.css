@@ -1,13 +1,76 @@
+@import 'tailwindcss';
+
+@theme {
+	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+	--color-surface-950: #070b14;
+	--color-surface-900: #0c1220;
+	--color-surface-850: #111827;
+	--color-surface-800: #1a2332;
+	--color-surface-700: #243044;
+	--color-surface-600: #334155;
+
+	--color-accent: #22d3ee;
+	--color-accent-dim: #0891b2;
+	--color-profit: #34d399;
+	--color-loss: #f87171;
+	--color-warn: #fbbf24;
+}
+
+@layer base {
+	html {
+		color-scheme: dark;
+	}
+
+	body {
+		margin: 0;
+		min-height: 100vh;
+		font-family: var(--font-sans);
+		background: var(--color-surface-950);
+		color: #e2e8f0;
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+	}
+
+	* {
+		scrollbar-width: thin;
+		scrollbar-color: var(--color-surface-600) transparent;
+	}
+}
+
+@layer utilities {
+	.grid-bg {
+		background-image:
+			linear-gradient(rgb(34 211 238 / 0.03) 1px, transparent 1px),
+			linear-gradient(90deg, rgb(34 211 238 / 0.03) 1px, transparent 1px);
+		background-size: 48px 48px;
+	}
+
+	.glow-cyan {
+		box-shadow: 0 0 24px -6px rgb(34 211 238 / 0.35);
+	}
+
+	.font-tabular {
+		font-variant-numeric: tabular-nums;
+	}
+}
+
+/*
+ * Legacy bridge: the pre-existing chart/report components and demo pages
+ * read these custom properties. They are mapped onto the adopted m2 theme
+ * tokens so the whole app shares one palette without rewriting the
+ * canvas-drawing components.
+ */
 :root {
-	color-scheme: dark;
-	--bg: #0a0f1a;
-	--panel: #151d30;
-	--panel-raised: #1d2740;
+	--bg: #070b14;
+	--panel: #111827;
+	--panel-raised: #1a2332;
 	--panel-sunken: #0c1220;
 	--surface-well: #0c1220;
-	--border: rgba(148, 163, 184, 0.14);
-	--border-strong: rgba(148, 163, 184, 0.28);
-	--shadow-card: 0 6px 20px rgba(2, 6, 16, 0.5);
+	--border: rgb(255 255 255 / 0.05);
+	--border-strong: rgb(255 255 255 / 0.12);
+	--shadow-card: 0 6px 20px rgb(2 6 16 / 0.5);
 	--text: #e2e8f0;
 	--muted: #94a3b8;
 	--faint: #64748b;
@@ -17,52 +80,15 @@
 	--red: #f87171;
 	--amber: #fbbf24;
 	--purple: #a78bfa;
-	--font-mono: 'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, monospace;
+	--font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
 	--radius: 12px;
 }
 
-* {
-	box-sizing: border-box;
-}
-
-html {
-	scrollbar-width: thin;
-	scrollbar-color: #334155 transparent;
-}
-
-body {
-	margin: 0;
-	min-height: 100vh;
-	background: var(--bg);
-	color: var(--text);
-	font-family: Inter, 'Segoe UI', system-ui, -apple-system, sans-serif;
-	font-size: 14px;
-	-webkit-font-smoothing: antialiased;
-}
-
-a {
-	color: var(--accent);
-	text-decoration: none;
-}
-
-a:hover {
-	text-decoration: underline;
-}
-
+/* Keep the demo laboratory pages legible under the new tokens. */
 .page {
 	max-width: 1280px;
 	margin: 0 auto;
 	padding: 24px 16px 48px;
-}
-
-h1 {
-	font-size: 20px;
-	margin: 0 0 4px;
-}
-
-.sub {
-	color: var(--muted);
-	margin: 0 0 20px;
 }
 
 .card {
@@ -77,4 +103,19 @@ h1 {
 .card h2 {
 	font-size: 15px;
 	margin: 0 0 8px;
+}
+
+h1 {
+	font-size: 20px;
+	margin: 0 0 4px;
+}
+
+.sub {
+	color: var(--muted);
+	margin: 0 0 20px;
+}
+
+a {
+	color: var(--accent);
+	text-decoration: none;
 }

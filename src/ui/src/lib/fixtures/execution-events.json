@@ -1,0 +1,98 @@
+{
+	"exec-1": {
+		"items": [
+			{
+				"eventId": "evt-101",
+				"executionId": "exec-1",
+				"workspaceId": "alpha-lab",
+				"eventType": "workflow.launched",
+				"correlationId": "corr-1",
+				"actorId": "user-alex",
+				"actorScope": "user",
+				"intentEpoch": 0,
+				"lateResult": false,
+				"occurredAt": "2026-09-08T17:14:01Z",
+				"cursor": 1,
+				"payload": { "workflowId": "wf-strategy-tune", "version": "1.4.0" }
+			},
+			{
+				"eventId": "evt-102",
+				"executionId": "exec-1",
+				"workspaceId": "alpha-lab",
+				"eventType": "message.accepted",
+				"correlationId": "corr-1",
+				"actorId": "user-alex",
+				"actorScope": "user",
+				"intentEpoch": 0,
+				"lateResult": false,
+				"occurredAt": "2026-09-08T17:14:01Z",
+				"cursor": 2,
+				"payload": { "messageId": "msg-1" }
+			},
+			{
+				"eventId": "evt-103",
+				"executionId": "exec-1",
+				"workspaceId": "alpha-lab",
+				"eventType": "tool.submitted",
+				"correlationId": "corr-2",
+				"actorId": "thesis-agent",
+				"actorScope": "tool",
+				"intentEpoch": 0,
+				"lateResult": false,
+				"occurredAt": "2026-09-08T17:15:30Z",
+				"cursor": 3,
+				"payload": { "tool": "backtest.submit", "bundle": "momentum-breakout-v3.2" }
+			},
+			{
+				"eventId": "evt-104",
+				"executionId": "exec-1",
+				"workspaceId": "alpha-lab",
+				"eventType": "workflow.steered",
+				"correlationId": "corr-3",
+				"actorId": "user-alex",
+				"actorScope": "user",
+				"intentEpoch": 1,
+				"lateResult": false,
+				"occurredAt": "2026-09-08T17:40:02Z",
+				"cursor": 4,
+				"payload": {
+					"messageId": "msg-3",
+					"intentEpoch": 1,
+					"steeringIntent": "Restrict to 2024-2025, equities only"
+				}
+			},
+			{
+				"eventId": "evt-105",
+				"executionId": "exec-1",
+				"workspaceId": "alpha-lab",
+				"eventType": "tool.result",
+				"correlationId": "corr-2",
+				"actorId": "harness",
+				"actorScope": "tool",
+				"intentEpoch": 1,
+				"lateResult": true,
+				"occurredAt": "2026-09-08T17:52:10Z",
+				"cursor": 5,
+				"payload": { "tool": "backtest.submit", "backtestId": "bt-204", "superseded": false }
+			}
+		]
+	},
+	"exec-b1": {
+		"items": [
+			{
+				"eventId": "evt-201",
+				"executionId": "exec-b1",
+				"workspaceId": "beta-quant",
+				"eventType": "workflow.completed",
+				"correlationId": "corr-b1",
+				"actorId": "thesis-agent",
+				"actorScope": "workflow",
+				"intentEpoch": 0,
+				"lateResult": false,
+				"occurredAt": "2026-09-07T08:41:00Z",
+				"cursor": 1,
+				"payload": { "strategyId": "str-b1", "artifact": "strategies/term-carry/draft.py" }
+			}
+		]
+	}
+}

@@ -1,4 +1,5 @@
-<script>
+﻿<script>
+	// @ts-nocheck — legacy JS component retained and restyled, not rewritten
 	let {
 		title = '',
 		data = [],
@@ -13,14 +14,56 @@
 
 	const PAD = { top: 10, right: 70, bottom: 30, left: 70 };
 	const XPAD = 12;
-	const FRAME = '#243044';
-	const GRID = 'rgba(148, 163, 184, 0.1)';
-	const AXIS = '#64748b';
-	const UP = '#34d399';
-	const DOWN = '#f87171';
-	const ACCENT = '#22d3ee';
-	const HANDLE = 'rgba(34, 211, 238, 0.35)';
+	// Fallbacks matching the adopted m2 theme tokens; the live values are
+	// read from the Tailwind v4 @theme custom properties at draw time.
+	let FRAME = '#243044';
+	let GRID = 'rgba(148, 163, 184, 0.1)';
+	let AXIS = '#64748b';
+	let UP = '#34d399';
+	let DOWN = '#f87171';
+	let ACCENT = '#22d3ee';
+	let HANDLE = 'rgba(34, 211, 238, 0.35)';
 	const PALETTE = ['#22d3ee', '#f472b6', '#fbbf24', '#34d399', '#a78bfa'];
+	const CANVAS_FONT = '11px "JetBrains Mono", ui-monospace, monospace';
+	const CANVAS_BG = '#0c1220';
+
+	function theme(el, name, fallback) {
+		try {
+			const value = getComputedStyle(el).getPropertyValue(name).trim();
+			return value || fallback;
+		} catch {
+			return fallback;
+		}
+	}
+
+	/** Theme tokens resolved per draw so canvas art follows the @theme palette. */
+	function canvasTheme() {
+		const el = holder;
+		return {
+			bg: theme(el, '--surface-900', '#0c1220'),
+			grid: theme(el, '--border', GRID),
+			frame: theme(el, '--surface-700', FRAME),
+			axis: theme(el, '--muted', AXIS),
+			up: theme(el, '--color-profit', UP),
+			down: theme(el, '--color-loss', DOWN),
+			accent: theme(el, '--color-accent', ACCENT),
+			handle: theme(el, '--accent', HANDLE)
+		};
+	}
+
+	let BG = CANVAS_BG;
+
+	function applyCanvasTheme() {
+		const t = canvasTheme();
+		BG = t.bg;
+		FRAME = t.frame;
+		GRID = t.grid;
+		AXIS = t.axis;
+		UP = t.up;
+		DOWN = t.down;
+		ACCENT = t.accent;
+		HANDLE = t.handle;
+	}
 
 	let holder;
 	let canvas;
@@ -222,9 +265,10 @@
 		canvas.height = Math.round(h * dpr);
 		const ctx = canvas.getContext('2d');
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-		ctx.fillStyle = '#0c1220';
+		applyCanvasTheme();
+		ctx.fillStyle = BG;
 		ctx.fillRect(0, 0, w, h);
-		ctx.font = '11px system-ui, sans-serif';
+		ctx.font = CANVAS_FONT;
 		const r = effectiveRange(h);
 		if (!r) return;
 		drawFrame(ctx, w, h, r);
@@ -426,14 +470,14 @@
 		ctx.moveTo(PAD.left, y);
 		ctx.lineTo(w - PAD.right, y);
 		ctx.stroke();
-		ctx.fillStyle = '#0c1220';
+		ctx.fillStyle = canvasTheme().bg;
 		ctx.fillRect(w - PAD.right + 3, y - 7, PAD.right - 6, 14);
 		ctx.fillStyle = '#f1f5f9';
 		ctx.fillText(fmtValue(plotValue(plot, point)), w - PAD.right + 7, y + 4);
 		const label = hoverLabel(hover.t);
 		const tw = ctx.measureText(label).width + 10;
 		const tx = Math.min(Math.max(x - tw / 2, PAD.left), w - PAD.right - tw);
-		ctx.fillStyle = '#0c1220';
+		ctx.fillStyle = canvasTheme().bg;
 		ctx.fillRect(tx, h - PAD.bottom + 1, tw, 13);
 		ctx.fillStyle = '#f1f5f9';
 		ctx.fillText(label, tx + 5, h - PAD.bottom + 11);

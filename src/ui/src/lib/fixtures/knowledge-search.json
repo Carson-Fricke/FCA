@@ -1,0 +1,25 @@
+{
+	"items": [
+		{
+			"title": "Breakout entry-threshold study",
+			"path": "knowledge/studies/breakout-thresholds.md",
+			"revision": "a1b2c3d",
+			"trust_tier": "workspace",
+			"excerpt": "Across 2015-2024 equities, entry thresholds between 0.8σ and 1.0σ dominate on net Sharpe after costs; sub-0.8σ degrades to noise trading."
+		},
+		{
+			"title": "Overnight drift decay — literature notes",
+			"path": "knowledge/reviews/overnight-drift.md",
+			"revision": "e4f5a6b",
+			"trust_tier": "workspace",
+			"excerpt": "Post gap-up drift decay is strongest within two sessions; falsification tests should condition on gap size and prior-day volume."
+		},
+		{
+			"title": "Term-structure carry primer (external)",
+			"path": "external/carry-primer.pdf",
+			"revision": "n/a",
+			"trust_tier": "external",
+			"excerpt": "Roll yield dominates P&L for calendar-spread carry strategies when the term structure is in backwardation."
+		}
+	]
+}

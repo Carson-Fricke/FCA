@@ -1,0 +1,33 @@
+{
+	"alpha-lab": {
+		"state": "available",
+		"value": {
+			"cash": "128940.55",
+			"equity": "363187.02",
+			"books": [
+				{
+					"name": "live-main",
+					"cash": "32140.12",
+					"equity": "182110.44",
+					"positions": [
+						{ "symbol": "QQQ", "quantity": "240", "average_price": "410.88" },
+						{ "symbol": "SPY", "quantity": "-100", "average_price": "615.30" }
+					]
+				},
+				{
+					"name": "paper-alpha",
+					"cash": "96800.43",
+					"equity": "181076.58",
+					"positions": [
+						{ "symbol": "SPY", "quantity": "80", "average_price": "611.20" }
+					]
+				}
+			]
+		}
+	},
+	"beta-quant": {
+		"state": "unavailable",
+		"value": null,
+		"reason": "unavailable"
+	}
+}

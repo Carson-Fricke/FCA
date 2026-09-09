@@ -1,4 +1,5 @@
-<script>
+﻿<script>
+	// @ts-nocheck — legacy JS component retained and restyled, not rewritten
 	let { nodes = [], selected = null, onselect = null, height = 560 } = $props();
 
 	const W = 196;
@@ -164,8 +165,8 @@
 	function clip(ctx, text, max) {
 		if (ctx.measureText(text).width <= max) return text;
 		let t = text;
-		while (t.length > 3 && ctx.measureText(t + '…').width > max) t = t.slice(0, -1);
-		return t + '…';
+		while (t.length > 3 && ctx.measureText(t + 'â€¦').width > max) t = t.slice(0, -1);
+		return t + 'â€¦';
 	}
 
 	function roundRect(ctx, x, y, w, h, r) {

@@ -1,4 +1,5 @@
-<script>
+﻿<script>
+	// @ts-nocheck — legacy JS component retained and restyled, not rewritten
 	let { stats = {} } = $props();
 
 	const KNOWN = {
@@ -34,7 +35,7 @@
 	const GROUP_ORDER = ['Returns', 'Trades', 'Execution', 'Other'];
 
 	function fmtValue(value, format) {
-		if (value == null || !Number.isFinite(value)) return '—';
+		if (value == null || !Number.isFinite(value)) return 'â€”';
 		switch (format) {
 			case 'pct':
 				return `${(value * 100).toFixed(1)}%`;

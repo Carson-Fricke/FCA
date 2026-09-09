@@ -1,0 +1,52 @@
+{
+	"alpha-lab": {
+		"items": [
+			{
+				"id": "dep-1",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-2",
+				"strategy_name": "Mean Reversion EQ",
+				"mode": "live",
+				"state": "running",
+				"health": "healthy",
+				"allocated_capital": 50000,
+				"unrealized_pnl": 412,
+				"realized_pnl": 6210,
+				"since": "2026-09-08T15:20:00Z",
+				"request_ref": "req-live-221"
+			},
+			{
+				"id": "dep-2",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-1",
+				"strategy_name": "Momentum Breakout v3.2",
+				"mode": "paper",
+				"state": "running",
+				"health": "healthy",
+				"allocated_capital": 100000,
+				"unrealized_pnl": 187,
+				"realized_pnl": 940,
+				"since": "2026-09-08T18:30:00Z",
+				"request_ref": "req-paper-318"
+			}
+		]
+	},
+	"beta-quant": {
+		"items": [
+			{
+				"id": "dep-b1",
+				"workspace_id": "beta-quant",
+				"strategy_id": "str-b1",
+				"strategy_name": "Term Structure Carry",
+				"mode": "paper",
+				"state": "paused",
+				"health": "stale",
+				"allocated_capital": 250000,
+				"unrealized_pnl": 0,
+				"realized_pnl": 0,
+				"since": "2026-09-06T09:00:00Z",
+				"request_ref": "req-paper-402"
+			}
+		]
+	}
+}

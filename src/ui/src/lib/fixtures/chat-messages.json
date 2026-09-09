@@ -1,0 +1,126 @@
+{
+	"chat-1": {
+		"items": [
+			{
+				"message_id": "msg-1",
+				"chat_id": "chat-1",
+				"workspace_id": "alpha-lab",
+				"actor_id": "user-alex",
+				"role": "user",
+				"body": "Re-tune Momentum Breakout v3 with a tighter entry threshold and re-run the last 3 years.",
+				"state": "accepted",
+				"attachment_ids": [],
+				"created_at": "2026-09-08T17:14:00Z",
+				"updated_at": null,
+				"execution_id": "exec-1",
+				"intent_epoch": 0
+			},
+			{
+				"message_id": "msg-2",
+				"chat_id": "chat-1",
+				"workspace_id": "alpha-lab",
+				"actor_id": "thesis-agent",
+				"role": "assistant",
+				"body": "Plan: adapt v3.2 with entry threshold 0.9σ, validate on the declared split, then submit a paper backtest. Evidence so far: v3.1 baseline +12.1% (bt-101).",
+				"state": "accepted",
+				"attachment_ids": [],
+				"created_at": "2026-09-08T17:14:12Z",
+				"updated_at": null,
+				"execution_id": "exec-1",
+				"intent_epoch": 0
+			},
+			{
+				"message_id": "msg-3",
+				"chat_id": "chat-1",
+				"workspace_id": "alpha-lab",
+				"actor_id": "user-alex",
+				"role": "user",
+				"body": "Focus on 2024-2025 only; skip the crypto names.",
+				"state": "accepted",
+				"attachment_ids": [],
+				"created_at": "2026-09-08T17:40:00Z",
+				"updated_at": null,
+				"execution_id": "exec-1",
+				"intent_epoch": 1
+			},
+			{
+				"message_id": "msg-4",
+				"chat_id": "chat-1",
+				"workspace_id": "alpha-lab",
+				"actor_id": "thesis-agent",
+				"role": "assistant",
+				"body": "Steering acknowledged at intent epoch 1 — the next safe boundary replans to 2024-2025, equities only. Backtest bt-204 already submitted stays attached as supplementary evidence.",
+				"state": "accepted",
+				"attachment_ids": [],
+				"created_at": "2026-09-08T17:40:09Z",
+				"updated_at": null,
+				"execution_id": "exec-1",
+				"intent_epoch": 1
+			}
+		]
+	},
+	"chat-2": {
+		"items": [
+			{
+				"message_id": "msg-i1",
+				"chat_id": "chat-2",
+				"workspace_id": "alpha-lab",
+				"actor_id": "user-alex",
+				"role": "user",
+				"body": "Test the hypothesis that overnight drift decays after large gap-ups. Design a falsification test.",
+				"state": "accepted",
+				"attachment_ids": ["att-9"],
+				"created_at": "2026-09-05T10:02:00Z",
+				"updated_at": null,
+				"execution_id": null,
+				"intent_epoch": 0
+			},
+			{
+				"message_id": "msg-i2",
+				"chat_id": "chat-2",
+				"workspace_id": "alpha-lab",
+				"actor_id": "thesis-agent",
+				"role": "assistant",
+				"body": "Falsification design: for gap-up days >2σ, measure close-to-open drift across the next 5 sessions; null = drift indistinguishable from baseline. Uploaded evidence att-9 (gap-day table, untrusted) is quoted with provenance.",
+				"state": "accepted",
+				"attachment_ids": [],
+				"created_at": "2026-09-05T10:03:30Z",
+				"updated_at": null,
+				"execution_id": null,
+				"intent_epoch": 0
+			}
+		]
+	},
+	"chat-b1": {
+		"items": [
+			{
+				"message_id": "msg-b1",
+				"chat_id": "chat-b1",
+				"workspace_id": "beta-quant",
+				"actor_id": "user-alex",
+				"role": "user",
+				"body": "Draft a term-structure carry strategy for liquid futures.",
+				"state": "accepted",
+				"attachment_ids": [],
+				"created_at": "2026-09-07T08:22:00Z",
+				"updated_at": null,
+				"execution_id": "exec-b1",
+				"intent_epoch": 0
+			},
+			{
+				"message_id": "msg-b2",
+				"chat_id": "chat-b1",
+				"workspace_id": "beta-quant",
+				"actor_id": "thesis-agent",
+				"role": "assistant",
+				"body": "Sweep roll calendars, rank carry z-scores, and size by inverse ATR. First pass saved as str-b1 draft.",
+				"state": "accepted",
+				"attachment_ids": [],
+				"created_at": "2026-09-07T08:22:15Z",
+				"updated_at": null,
+				"execution_id": "exec-b1",
+				"intent_epoch": 0
+			}
+		]
+	}
+}

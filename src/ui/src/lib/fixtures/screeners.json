@@ -1,0 +1,40 @@
+{
+	"alpha-lab": {
+		"items": [
+			{
+				"id": "scr-1",
+				"workspace_id": "alpha-lab",
+				"name": "Liquid large caps",
+				"filters": [
+					{ "kind": "volume", "op": ">", "value": 5000000 },
+					{ "kind": "liquidity", "op": ">", "value": 250000000 }
+				],
+				"created_at": "2026-08-02T09:10:00Z",
+				"artifact_path": "screeners/liquid-large-caps.json"
+			},
+			{
+				"id": "scr-2",
+				"workspace_id": "alpha-lab",
+				"name": "High-volume movers",
+				"filters": [
+					{ "kind": "volume", "op": ">", "value": 20000000 },
+					{ "kind": "price", "op": ">", "value": 20 }
+				],
+				"created_at": "2026-08-22T15:45:00Z",
+				"artifact_path": "screeners/high-volume-movers.json"
+			}
+		]
+	},
+	"beta-quant": {
+		"items": [
+			{
+				"id": "scr-b1",
+				"workspace_id": "beta-quant",
+				"name": "Liquid futures universe",
+				"filters": [{ "kind": "liquidity", "op": ">", "value": 1000000000 }],
+				"created_at": "2026-09-05T16:30:00Z",
+				"artifact_path": "screeners/liquid-futures.json"
+			}
+		]
+	}
+}

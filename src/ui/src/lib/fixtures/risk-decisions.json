@@ -1,0 +1,21 @@
+{
+	"req-live-221": {
+		"items": [
+			{ "rule": "max-daily-loss", "decision": "allow", "reason": null },
+			{ "rule": "position-limit", "decision": "allow", "reason": null },
+			{ "rule": "fat-finger-band", "decision": "clamp", "reason": "order price 1.8% above band mid; clamped to band" },
+			{ "rule": "stale-quote", "decision": "reject", "reason": "quote older than 1200ms at submit" }
+		]
+	},
+	"req-paper-318": {
+		"items": [
+			{ "rule": "max-daily-loss", "decision": "allow", "reason": null },
+			{ "rule": "position-limit", "decision": "allow", "reason": null }
+		]
+	},
+	"req-paper-402": {
+		"items": [
+			{ "rule": "deployment-window", "decision": "reject", "reason": "outside paper session window" }
+		]
+	}
+}

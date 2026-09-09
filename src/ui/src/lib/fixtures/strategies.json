@@ -1,0 +1,80 @@
+{
+	"alpha-lab": {
+		"items": [
+			{
+				"id": "str-1",
+				"workspace_id": "alpha-lab",
+				"name": "Momentum Breakout",
+				"symbol": "SPY",
+				"status": "paper",
+				"description": "Donchian breakout with vol filter",
+				"pnl": 18420,
+				"return_pct": 18.4,
+				"win_rate": 0.57,
+				"capital": 100000,
+				"code": "def signal(ctx):\n    breakout = ctx.high.rolling(20).max()\n    vol_ok = ctx.atr14 / ctx.close < 0.03\n    return ctx.close > breakout.shift(1) & vol_ok\n\ndef size(ctx):\n    return ctx.equity * 0.95 / ctx.atr14\n\ndef risk(ctx):\n    return ctx.max_daily_loss(0.02)",
+				"versions": [
+					{ "version": "1.0.0", "created_at": "2026-05-02T10:00:00Z", "parent_version": null, "note": "Initial breakout skeleton" },
+					{ "version": "3.1.0", "created_at": "2026-07-15T09:30:00Z", "parent_version": "1.0.0", "note": "Baseline +12.1% (bt-101)" },
+					{ "version": "3.2.0", "created_at": "2026-09-08T17:16:00Z", "parent_version": "3.1.0", "note": "Entry threshold 0.9σ, equity-only universe" }
+				],
+				"created_at": "2026-05-02T10:00:00Z"
+			},
+			{
+				"id": "str-2",
+				"workspace_id": "alpha-lab",
+				"name": "Mean Reversion EQ",
+				"symbol": "QQQ",
+				"status": "live",
+				"description": "Z-score reversion on liquid equity pairs",
+				"pnl": 6210,
+				"return_pct": 6.2,
+				"win_rate": 0.61,
+				"capital": 50000,
+				"code": "def signal(ctx):\n    z = (ctx.close - ctx.close.rolling(60).mean()) / ctx.close.rolling(60).std()\n    return z < -2.0\n\ndef size(ctx):\n    return ctx.equity * 0.5\n\ndef risk(ctx):\n    return ctx.max_daily_loss(0.015)",
+				"versions": [
+					{ "version": "2.0.0", "created_at": "2026-03-11T12:00:00Z", "parent_version": null, "note": "Pairs reversion rewrite" }
+				],
+				"created_at": "2026-03-11T12:00:00Z"
+			},
+			{
+				"id": "str-3",
+				"workspace_id": "alpha-lab",
+				"name": "Vol Carry",
+				"symbol": "VIX",
+				"status": "paused",
+				"description": "Short vol carry with dynamic hedge",
+				"pnl": -2310,
+				"return_pct": -2.3,
+				"win_rate": 0.44,
+				"capital": 25000,
+				"code": "def signal(ctx):\n    return ctx.vix_futures.term_slope() > 0.08\n\ndef risk(ctx):\n    return ctx.max_daily_loss(0.01)",
+				"versions": [
+					{ "version": "1.0.0", "created_at": "2026-06-20T08:00:00Z", "parent_version": null, "note": "Initial carry study" }
+				],
+				"created_at": "2026-06-20T08:00:00Z"
+			}
+		]
+	},
+	"beta-quant": {
+		"items": [
+			{
+				"id": "str-b1",
+				"workspace_id": "beta-quant",
+				"name": "Term Structure Carry",
+				"symbol": "ES",
+				"status": "draft",
+				"description": "Futures roll carry, inverse-ATR sizing",
+				"pnl": 0,
+				"return_pct": 0,
+				"win_rate": 0,
+				"capital": 0,
+				"code": "def signal(ctx):\n    return ctx.futures.carry_zscore(rank=10)\n\ndef size(ctx):\n    return ctx.inverse_atr_weight()\n\ndef risk(ctx):\n    return ctx.max_daily_loss(0.02)",
+				"versions": [
+					{ "version": "0.1.0", "created_at": "2026-09-07T08:41:00Z", "parent_version": null, "note": "Agent first-pass draft" }
+				],
+				"created_at": "2026-09-07T08:41:00Z"
+			}
+		]
+	}
+}

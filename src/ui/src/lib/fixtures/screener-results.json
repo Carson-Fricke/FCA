@@ -1,0 +1,9 @@
+{
+	"items": [
+		{ "symbol": "SPY", "last": 612.4, "volume": 41230000, "avg_dollar_volume_20d": 24800000000, "change_pct": 0.42, "matched_strategy_id": "str-1" },
+		{ "symbol": "QQQ", "last": 418.2, "volume": 28940000, "avg_dollar_volume_20d": 12100000000, "change_pct": -0.18, "matched_strategy_id": "str-2" },
+		{ "symbol": "IWM", "last": 233.9, "volume": 18100000, "avg_dollar_volume_20d": 4200000000, "change_pct": 0.65, "matched_strategy_id": null },
+		{ "symbol": "TLT", "last": 88.7, "volume": 12500000, "avg_dollar_volume_20d": 1100000000, "change_pct": -0.32, "matched_strategy_id": null },
+		{ "symbol": "GLD", "last": 244.1, "volume": 7400000, "avg_dollar_volume_20d": 1800000000, "change_pct": 0.9, "matched_strategy_id": null }
+	]
+}

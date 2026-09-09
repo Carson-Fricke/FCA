@@ -1,4 +1,5 @@
-<script>
+﻿<script>
+	// @ts-nocheck — legacy JS component retained and restyled, not rewritten
 	import TimeSeriesChart from '$lib/components/charts/TimeSeriesChart.svelte';
 	import HistogramChart from '$lib/components/charts/HistogramChart.svelte';
 	import StatsTable from '$lib/components/backtest-view/StatsTable.svelte';

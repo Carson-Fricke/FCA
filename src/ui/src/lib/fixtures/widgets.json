@@ -1,0 +1,111 @@
+{
+	"alpha-lab": {
+		"items": [
+			{
+				"id": "wgt-1",
+				"workspace_id": "alpha-lab",
+				"title": "Alpha Lab equity",
+				"type": "equity",
+				"pinned": true,
+				"created_at": "2026-08-01T09:00:00Z",
+				"data": {
+					"points": [
+						{ "t": 1767225600000, "v": 100000 },
+						{ "t": 1769904000000, "v": 102400 },
+						{ "t": 1772323200000, "v": 101100 },
+						{ "t": 1775001600000, "v": 105900 },
+						{ "t": 1777593600000, "v": 108200 },
+						{ "t": 1780272000000, "v": 111900 },
+						{ "t": 1782864000000, "v": 115600 },
+						{ "t": 1785542400000, "v": 118400 }
+					]
+				}
+			},
+			{
+				"id": "wgt-2",
+				"workspace_id": "alpha-lab",
+				"title": "Daily P&L",
+				"type": "pnl",
+				"pinned": true,
+				"created_at": "2026-08-03T10:00:00Z",
+				"data": {
+					"points": [
+						{ "t": 1785542400000, "v": 412 },
+						{ "t": 1785628800000, "v": -180 },
+						{ "t": 1785715200000, "v": 905 },
+						{ "t": 1785801600000, "v": -412 },
+						{ "t": 1786060800000, "v": 260 }
+					]
+				}
+			},
+			{
+				"id": "wgt-3",
+				"workspace_id": "alpha-lab",
+				"title": "Strategy allocation",
+				"type": "allocation",
+				"pinned": false,
+				"created_at": "2026-08-10T12:00:00Z",
+				"data": {
+					"items": [
+						{ "label": "Momentum Breakout", "share": 0.5 },
+						{ "label": "Mean Reversion EQ", "share": 0.35 },
+						{ "label": "Vol Carry", "share": 0.15 }
+					]
+				}
+			},
+			{
+				"id": "wgt-4",
+				"workspace_id": "alpha-lab",
+				"title": "Win rate by strategy",
+				"type": "winrate",
+				"pinned": false,
+				"created_at": "2026-08-12T08:30:00Z",
+				"data": {
+					"items": [
+						{ "label": "Momentum Breakout", "share": 0.58 },
+						{ "label": "Mean Reversion EQ", "share": 0.61 },
+						{ "label": "Vol Carry", "share": 0.44 }
+					]
+				}
+			},
+			{
+				"id": "wgt-5",
+				"workspace_id": "alpha-lab",
+				"title": "Orders per day",
+				"type": "orders",
+				"pinned": false,
+				"created_at": "2026-08-20T14:00:00Z",
+				"data": {
+					"items": [
+						{ "label": "Mon", "share": 14 },
+						{ "label": "Tue", "share": 9 },
+						{ "label": "Wed", "share": 17 },
+						{ "label": "Thu", "share": 6 },
+						{ "label": "Fri", "share": 11 }
+					]
+				}
+			}
+		]
+	},
+	"beta-quant": {
+		"items": [
+			{
+				"id": "wgt-b1",
+				"workspace_id": "beta-quant",
+				"title": "Term carry equity",
+				"type": "equity",
+				"pinned": false,
+				"created_at": "2026-09-01T09:00:00Z",
+				"data": {
+					"points": [
+						{ "t": 1767225600000, "v": 200000 },
+						{ "t": 1772323200000, "v": 203800 },
+						{ "t": 1777593600000, "v": 205100 },
+						{ "t": 1782864000000, "v": 207900 },
+						{ "t": 1785542400000, "v": 209400 }
+					]
+				}
+			}
+		]
+	}
+}

@@ -1,0 +1,70 @@
+{
+	"alpha-lab": {
+		"items": [
+			{
+				"id": "ord-9001",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-2",
+				"symbol": "QQQ",
+				"side": "buy",
+				"quantity": "120",
+				"price": "412.66",
+				"status": "filled",
+				"mode": "live",
+				"created_at": "2026-09-08T15:42:11Z"
+			},
+			{
+				"id": "ord-9002",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-2",
+				"symbol": "QQQ",
+				"side": "sell",
+				"quantity": "120",
+				"price": "418.14",
+				"status": "filled",
+				"mode": "live",
+				"created_at": "2026-09-08T16:55:03Z"
+			},
+			{
+				"id": "ord-9003",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-1",
+				"symbol": "SPY",
+				"side": "buy",
+				"quantity": "80",
+				"price": "611.20",
+				"status": "open",
+				"mode": "paper",
+				"created_at": "2026-09-08T19:02:40Z"
+			},
+			{
+				"id": "ord-9004",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-1",
+				"symbol": "SPY",
+				"side": "sell",
+				"quantity": "80",
+				"price": "608.90",
+				"status": "cancelled",
+				"mode": "paper",
+				"created_at": "2026-09-08T19:10:02Z"
+			}
+		]
+	},
+	"beta-quant": {
+		"items": [
+			{
+				"id": "ord-8100",
+				"workspace_id": "beta-quant",
+				"strategy_id": "str-b1",
+				"symbol": "ESZ6",
+				"side": "buy",
+				"quantity": "4",
+				"price": "6218.25",
+				"status": "cancelled",
+				"mode": "paper",
+				"created_at": "2026-09-06T09:05:00Z"
+			}
+		]
+	}
+}

@@ -1,0 +1,15 @@
+{
+	"proposal": {
+		"schema": "fca-thesis-consent-proposal-v1",
+		"action": "paper",
+		"bundleHash": "9f2c1d4b7e8a30c5f6d1b2a4e8c7d0f3a5b6c9d2e1f4a7b8c3d6e9f0a1b2c3d4",
+		"capitalBound": "100000",
+		"environment": "dev",
+		"expiration": "2026-10-08T00:00:00Z",
+		"instruments": ["SPY", "QQQ"],
+		"proposedAt": "2026-09-08T18:20:00Z",
+		"riskBound": "500",
+		"riskBoundKind": "max-daily-loss",
+		"scope": { "intervalEnd": null, "kind": "one_shot" }
+	}
+}

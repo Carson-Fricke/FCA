@@ -1,0 +1,90 @@
+{
+	"alpha-lab": {
+		"items": [
+			{
+				"id": "bt-101",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-1",
+				"name": "Momentum Breakout v3.1 baseline",
+				"period_start": "2022-01-03",
+				"period_end": "2025-08-29",
+				"capital": 100000,
+				"total_return": 0.121,
+				"sharpe": 1.05,
+				"max_drawdown": -0.081,
+				"win_rate": 0.54,
+				"trades": 96,
+				"split_declared": false,
+				"created_at": "2026-07-15T09:45:00Z"
+			},
+			{
+				"id": "bt-204",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-1",
+				"name": "Momentum Breakout v3.2 — declared split",
+				"period_start": "2024-01-02",
+				"period_end": "2025-08-29",
+				"capital": 100000,
+				"total_return": 0.184,
+				"sharpe": 1.31,
+				"max_drawdown": -0.064,
+				"win_rate": 0.58,
+				"trades": 48,
+				"split_declared": true,
+				"created_at": "2026-09-08T18:04:00Z"
+			},
+			{
+				"id": "bt-155",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-2",
+				"name": "Mean Reversion EQ — 2026 H1",
+				"period_start": "2026-01-02",
+				"period_end": "2026-06-30",
+				"capital": 50000,
+				"total_return": 0.061,
+				"sharpe": 1.22,
+				"max_drawdown": -0.031,
+				"win_rate": 0.61,
+				"trades": 74,
+				"split_declared": false,
+				"created_at": "2026-07-02T11:20:00Z"
+			},
+			{
+				"id": "bt-160",
+				"workspace_id": "alpha-lab",
+				"strategy_id": "str-3",
+				"name": "Vol Carry — shutdown review",
+				"period_start": "2026-04-01",
+				"period_end": "2026-08-31",
+				"capital": 25000,
+				"total_return": -0.023,
+				"sharpe": -0.4,
+				"max_drawdown": -0.042,
+				"win_rate": 0.44,
+				"trades": 58,
+				"split_declared": false,
+				"created_at": "2026-09-01T10:00:00Z"
+			}
+		]
+	},
+	"beta-quant": {
+		"items": [
+			{
+				"id": "bt-b1",
+				"workspace_id": "beta-quant",
+				"strategy_id": "str-b1",
+				"name": "Term carry first pass",
+				"period_start": "2023-01-02",
+				"period_end": "2025-06-30",
+				"capital": 200000,
+				"total_return": 0.047,
+				"sharpe": 0.81,
+				"max_drawdown": -0.032,
+				"win_rate": 0.52,
+				"trades": 70,
+				"split_declared": true,
+				"created_at": "2026-09-07T08:45:00Z"
+			}
+		]
+	}
+}

@@ -1,11 +1,33 @@
-<script>
+﻿<script>
+	// @ts-nocheck — legacy JS component retained and restyled, not rewritten
 	let { values = [], height = 200, bins = 9, label = 'Trade PnL distribution' } = $props();
 
-	const FRAME = 'rgba(148, 163, 184, 0.14)';
-	const AXIS = '#64748b';
-	const GREEN = '#34d399';
-	const RED = '#f87171';
-	const TEXT = '#94a3b8';
+	// Fallbacks matching the adopted m2 theme tokens; live values are read
+	// from the Tailwind v4 @theme custom properties at draw time.
+	let FRAME = 'rgba(148, 163, 184, 0.14)';
+	let AXIS = '#64748b';
+	let GREEN = '#34d399';
+	let RED = '#f87171';
+	let TEXT = '#94a3b8';
+	const CANVAS_FONT = '11px "JetBrains Mono", ui-monospace, monospace';
+
+	function theme(el, name, fallback) {
+		try {
+			const value = getComputedStyle(el).getPropertyValue(name).trim();
+			return value || fallback;
+		} catch {
+			return fallback;
+		}
+	}
+
+	function applyCanvasTheme() {
+		const el = canvas;
+		AXIS = theme(el, '--muted', AXIS);
+		GREEN = theme(el, '--color-profit', GREEN);
+		RED = theme(el, '--color-loss', RED);
+		TEXT = theme(el, '--text', TEXT);
+		FRAME = theme(el, '--border', FRAME);
+	}
 
 	let canvas;
 	let size = $state(null);
@@ -59,9 +81,10 @@
 		canvas.height = Math.round(h * dpr);
 		const ctx = canvas.getContext('2d');
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-		ctx.fillStyle = '#0c1220';
+		applyCanvasTheme();
+		ctx.fillStyle = getComputedStyle(canvas).getPropertyValue('--surface-900').trim() || '#0c1220';
 		ctx.fillRect(0, 0, w, h);
-		ctx.font = '11px system-ui, sans-serif';
+		ctx.font = CANVAS_FONT;
 		const pad = { top: 8, right: 8, bottom: 24, left: 8 };
 		const plotW = w - pad.left - pad.right;
 		const plotH = h - pad.top - pad.bottom;
