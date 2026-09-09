@@ -1,0 +1,26 @@
+{
+  "taskId": "T176",
+  "numTotalTests": 2368,
+  "numPassedTests": 2368,
+  "numFailedTests": 0,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "specification-coverage-review",
+      "status": "passed",
+      "command": "manual review of .github/architecture/thesis-ui-design.md against AC1-AC4 and the eight product requirements",
+      "result": "AC1: workspace creation/selection (switcher + create dialog), multiple chats and investigations (typed threads with hypothesis/falsification trails), uploads (untrusted evidence with provenance), workflow timelines (durable event stream with cursor state), steering (message-based with percolation ack), CLEO plan visibility (read-only plan/task projection), evidence (digest/revision-cited badges), strategy lineage (ancestry + exposure history), knowledge search (trust-tiered corpus with citations), activation consent (structured T172 confirmation inline) — all specified. AC2: SSE cursor/Last-Event-ID resume, ephemeral-frame dedup, content-addressed artifacts, bearer/Entra authorization, no second source of truth. AC3: implementation (Svelte per product decision, overriding the roadmap's React wording — documented in the decision record) deferred to the later UI task. AC4: all durable state remains in workspace repository/CLEO state served by the API; client state is view-only. The eight product requirements map to pages: workspace selection, workspace-as-home, workspace-scoped chat, backtest results with in-sample/out-of-sample split rendering (not-declared state when absent), deployment monitoring (P&L/orders/risk), workspace-authored widgets, screener with saved studies, train/test split"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2368 passed, 14 skipped, 1 xfailed — spec-only change, suite unaffected"
+    }
+  ],
+  "limitations": [
+    "The two reference mockups are React (Next.js and Vite); their information architecture and visual design are adopted but their stack is not, per the product decision for Svelte",
+    "Widget sandboxing for custom programmatic widgets is specified as a constraint (workspace-artifact definitions, sandboxed rendering) with the concrete sandbox mechanism deferred to implementation"
+  ]
+}
