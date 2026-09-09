@@ -56,6 +56,7 @@ from harness.data.alpaca_ws import (
 from harness.risk.kill_switch import KillSwitch
 from harness.runtime.paper import InboxPaperFeed
 from harness.runtime.state_store import RuntimeStateStore, SnapshotObjectStore
+from lake.contracts import ExchangeSession
 from lake.storage.azure import AzureReadableBlobStore
 from lake.storage.parquet import LocalFilesystemStore
 
@@ -285,6 +286,21 @@ def _run_feed_thread(
     return thread, _shutdown
 
 
+def _session_for(configuration: TraderConfig, clock: Clock) -> ExchangeSession | None:
+    """Resolve the supervised session for the configured market data.
+
+    XNYS equity feeds trade the exchange calendar, so sessions come from
+    :func:`trading_session_for`.  Crypto trades continuously across every
+    UTC day: a crypto feed supervises one UTC-day session containing the
+    clock instant, so boots outside equity hours still run a real session.
+    """
+    if configuration.market_data.settings.get("feed") == "crypto":
+        now = clock.now()
+        open_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return ExchangeSession(now.date(), open_time, open_time + timedelta(days=1))
+    return trading_session_for(clock)
+
+
 def _compose(
     config_path: str,
 ) -> tuple[TraderSupervisor, Callable[[], None], datetime]:
@@ -317,7 +333,7 @@ def _compose(
     supervisor = TraderSupervisor(
         configuration=configuration,
         settings=settings,
-        session=trading_session_for(clock),
+        session=_session_for(configuration, clock),
         run_id=run_id,
         state_store=store,
         journal=journal,

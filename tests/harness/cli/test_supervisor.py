@@ -784,7 +784,6 @@ def test_resolve_credentials_keys_by_environment_variable_name() -> None:
             "HARNESS_ALPACA_API_SECRET": "secret-value",
         },
     )
-
     assert resolved == {
         "HARNESS_ALPACA_API_KEY": "key-value",
         "HARNESS_ALPACA_API_SECRET": "secret-value",
@@ -802,6 +801,30 @@ def test_resolve_credentials_rejects_unset_environment_contract() -> None:
             single_reference,
             {"HARNESS_ALPACA_API_KEY": "key-value"},
         )
+
+
+def test_session_for_crypto_supervises_the_continuous_utc_day() -> None:
+    configuration = _trader_config()
+    market_data = configuration.market_data.model_copy(
+        update={"settings": {"feed": "crypto"}}
+    )
+    crypto_config = configuration.model_copy(update={"market_data": market_data})
+    # 21:30 UTC is after the XNYS close: the equity path would be no_session.
+    clock = SimClock(datetime(2026, 9, 8, 21, 30, tzinfo=UTC))
+
+    session = trader._session_for(crypto_config, clock)
+
+    assert session is not None
+    assert session.open_time == datetime(2026, 9, 8, 0, 0, tzinfo=UTC)
+    assert session.close_time == datetime(2026, 9, 9, 0, 0, tzinfo=UTC)
+    assert session.open_time <= clock.now() < session.close_time
+
+
+def test_session_for_equity_feed_delegates_to_the_xnys_calendar() -> None:
+    configuration = _trader_config()
+    saturday = SimClock(datetime(2026, 9, 5, 15, 0, tzinfo=UTC))
+
+    assert trader._session_for(configuration, saturday) is None
 
 
 # --------------------------------------------------------------------------

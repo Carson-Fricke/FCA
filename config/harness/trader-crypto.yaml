@@ -1,0 +1,60 @@
+# Crypto paper trader example. Crypto trades continuously across every UTC
+# day, so the supervised session spans the clock's UTC date (see
+# trader._session_for). Credential fields contain references, never values.
+schema_version: 1
+shell: trader
+mode: paper
+seed: 1729
+base_currency: USD
+strategy_instances:
+  -
+    instance_id: btc-hold-paper
+    implementation: strategies.harness_examples.buy_and_hold:BuyAndHoldStrategy
+    bundle_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    capital_fraction: 1.0
+    symbols: [BTC/USD]
+    parameters:
+      quantity: 0.01
+risk_pipeline:
+  on_reject: halt_strategy
+  rules:
+    -
+      rule_id: max-order-notional
+      implementation: harness.risk.limits:MaxOrderNotional
+      parameters:
+        limit: 10000.00
+fees:
+  currency: USD
+  rounding: half_even
+  rules:
+    -
+      fee_id: crypto-commission
+      basis: per_unit
+      rate: 0.005
+      minimum: 0.01
+      side: both
+market_data:
+  adapter: harness.data.alpaca_ws:AlpacaCryptoWebSocketFeed
+  credentials:
+    api_key: "${HARNESS_ALPACA_API_KEY}"
+    api_secret: "${HARNESS_ALPACA_API_SECRET}"
+  settings:
+    feed: crypto
+broker:
+  adapter: harness.venues.alpaca:AlpacaBroker
+  credentials:
+    api_key: "${HARNESS_ALPACA_API_KEY}"
+    api_secret: "${HARNESS_ALPACA_API_SECRET}"
+  settings:
+    account: paper
+deployment:
+  name: trader-crypto-local
+  target: local
+  environment: local
+  image: null
+  replicas: 1
+  restart_policy: always
+  network_access: runtime_only
+  resources:
+    cpu_cores: 1.0
+    memory_mib: 1024
