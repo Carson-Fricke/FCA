@@ -184,7 +184,9 @@
 		}
 	}
 
-	/** Match workspace evidence deep-links mentioned in a message body. */
+	/** Workspace evidence deep-links mentioned in a message body. Unused in
+	 * the transcript since evidence scoping moved to sandboxed subagent
+	 * views; kept for the workspace-state projection. */
 	function evidenceFor(messageId: string): EvidenceItem[] {
 		const message = messages.find((m) => m.message_id === messageId);
 		if (!message) return [];
@@ -265,7 +267,6 @@
 					{messages}
 					{percolations}
 					{proposal}
-					evidenceFor={evidenceFor}
 					onConfirmConsent={confirmProposal}
 					onRejectConsent={() => {
 						proposal = null;
@@ -289,7 +290,6 @@
 
 		<ChatComposer
 			onSubmit={send}
-			strategies={strategies.map((s) => ({ id: s.id, name: s.name }))}
 			{activeExecutionId}
 			{busy}
 		/>

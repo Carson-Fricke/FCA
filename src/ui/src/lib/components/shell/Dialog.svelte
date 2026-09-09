@@ -17,7 +17,7 @@
 	<button type="button" class="absolute inset-0 cursor-default" aria-label="Close dialog" onclick={onClose}>
 	</button>
 	<div
-		class="relative z-10 w-full max-w-lg rounded-2xl border border-white/10 bg-surface-850 shadow-2xl glow-cyan"
+		class="relative z-10 w-full max-w-lg rounded-2xl border border-white/10 bg-surface-850 shadow-2xl"
 		role="dialog"
 		aria-label={title}
 	>

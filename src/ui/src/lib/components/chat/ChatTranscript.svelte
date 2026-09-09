@@ -1,23 +1,20 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
 	import ConsentCard from './ConsentCard.svelte';
-	import EvidenceBadge from './EvidenceBadge.svelte';
 	import type {
 		ChatMessage,
 		ConsentConfirmation,
 		ConsentProposal,
-		EvidenceItem,
 		SteeringPercolationTarget
 	} from '$lib/types';
 
 	/**
 	 * Transcript pane: role-styled messages, inline steering
-	 * acknowledgements, uploaded-evidence trust tiers, evidence badges, and
-	 * the structured activation-consent card when a proposal is open.
+	 * acknowledgements, and the structured activation-consent card when a
+	 * proposal is open. Evidence scoping belongs to sandboxed subagent
+	 * views, not to user-visible chat messages.
 	 */
 	let {
 		messages,
-		evidenceFor = () => [],
 		percolations = {},
 		proposal = null,
 		onConfirmConsent,
@@ -25,7 +22,6 @@
 		consentBusy = false
 	}: {
 		messages: ChatMessage[];
-		evidenceFor?: (messageId: string) => EvidenceItem[];
 		percolations?: Record<string, SteeringPercolationTarget[]>;
 		proposal?: ConsentProposal | null;
 		onConfirmConsent?: (confirmation: ConsentConfirmation) => void;
@@ -34,17 +30,17 @@
 	} = $props();
 
 	const ROLE_STYLE: Record<string, string> = {
-		user: 'border-accent/40 bg-accent/5',
-		assistant: 'border-white/10 bg-surface-850/60',
-		tool: 'border-surface-600/60 bg-surface-900/60',
-		system: 'border-surface-600/60 bg-surface-900/60'
+		user: 'border-white/10 bg-surface-850/60',
+		assistant: 'border-white/5 bg-surface-850/40',
+		tool: 'border-transparent bg-surface-900/40',
+		system: 'border-transparent bg-surface-900/40'
 	};
 </script>
 
 <div class="space-y-3" data-testid="chat-transcript">
 	{#each messages as message (message.message_id)}
 		<article
-			class="rounded-xl border p-3 {ROLE_STYLE[message.role] ?? 'border-white/10 bg-surface-850/60'}"
+			class="rounded-xl border p-3 {ROLE_STYLE[message.role] ?? 'border-white/5 bg-surface-850/40'}"
 			data-testid="chat-message"
 			data-role={message.role}
 			data-message-id={message.message_id}
@@ -52,9 +48,9 @@
 			<header class="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider">
 				<span
 					class="font-semibold {message.role === 'user'
-						? 'text-accent'
+						? 'text-slate-200'
 						: message.role === 'assistant'
-							? 'text-slate-300'
+							? 'text-slate-400'
 							: 'text-slate-500'}"
 				>
 					{message.role}
@@ -76,19 +72,11 @@
 						>
 							↑ {attachmentId} · untrusted evidence
 						</span>
-					{/each}
-				</div>
-			{/if}
+{/each}
+			</div>
+		{/if}
 
-			{#if evidenceFor(message.message_id).length}
-				<div class="mt-2 flex flex-wrap gap-1.5">
-					{#each evidenceFor(message.message_id) as item (item.id)}
-						<EvidenceBadge evidence={item} />
-					{/each}
-				</div>
-			{/if}
-
-			{#if percolations[message.message_id]}
+		{#if percolations[message.message_id]}
 				<div
 					class="mt-2 rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5 font-mono text-[10px] text-warn"
 					data-testid="steering-ack"

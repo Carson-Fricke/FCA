@@ -71,7 +71,7 @@
 	<div class="w-full max-w-3xl">
 		<div class="mb-8 flex items-center gap-3">
 			<span
-				class="flex h-11 w-11 items-center justify-center rounded-xl border border-accent/40 bg-accent/10 font-mono text-lg font-bold text-accent glow-cyan"
+				class="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-surface-800 font-mono text-lg font-bold text-slate-300"
 				aria-hidden="true"
 			>
 				Θ

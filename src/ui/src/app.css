@@ -11,8 +11,8 @@
 	--color-surface-700: #243044;
 	--color-surface-600: #334155;
 
-	--color-accent: #22d3ee;
-	--color-accent-dim: #0891b2;
+	--color-accent: #6c9bd2;
+	--color-accent-dim: #4a7098;
 	--color-profit: #34d399;
 	--color-loss: #f87171;
 	--color-warn: #fbbf24;
@@ -42,13 +42,9 @@
 @layer utilities {
 	.grid-bg {
 		background-image:
-			linear-gradient(rgb(34 211 238 / 0.03) 1px, transparent 1px),
-			linear-gradient(90deg, rgb(34 211 238 / 0.03) 1px, transparent 1px);
+			linear-gradient(rgb(108 155 210 / 0.02) 1px, transparent 1px),
+			linear-gradient(90deg, rgb(108 155 210 / 0.02) 1px, transparent 1px);
 		background-size: 48px 48px;
-	}
-
-	.glow-cyan {
-		box-shadow: 0 0 24px -6px rgb(34 211 238 / 0.35);
 	}
 
 	.font-tabular {

@@ -97,8 +97,6 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 	{#if copilotVisible}
 		<CopilotPanel
 			{workspaceId}
-			workspaceName={data.snapshot.overview.workspace.name}
-			strategies={strategies.map((s) => ({ id: s.id, name: s.name }))}
 			onExpand={switchToChats}
 		/>
 	{/if}

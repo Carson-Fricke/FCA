@@ -2,56 +2,24 @@
 	import { goto } from '$app/navigation';
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
 	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
-	import EvidenceBadge from '$lib/components/chat/EvidenceBadge.svelte';
-	import { listChats, listMessages, postMessage, getWorkspaceState } from '$lib/api';
-	import type {
-		ChatMessage,
-		ChatThread,
-		EvidenceItem,
-		SteeringPercolationTarget
-	} from '$lib/types';
+	import { listChats, listMessages, postMessage } from '$lib/api';
+	import type { ChatMessage, ChatThread, SteeringPercolationTarget } from '$lib/types';
 
 	/**
 	 * Collapsible right-hand assistant on every page except the full-page
-	 * chats view. Workspace scope indicator: "In context: <workspace>".
+	 * chats view. Evidence scoping and knowledge search are agent-side
+	 * capabilities (sandboxed subagents and MCP tools) and never surface
+	 * here.
 	 */
-	let {
-		workspaceId,
-		workspaceName,
-		strategies,
-		onExpand
-	}: {
-		workspaceId: string;
-		workspaceName: string;
-		strategies: { id: string; name: string }[];
-		onExpand: () => void;
-	} = $props();
+	let { workspaceId, onExpand }: { workspaceId: string; onExpand: () => void } = $props();
 
 	let chats = $state<ChatThread[]>([]);
 	let chatId = $state<string | null>(null);
 	let messages = $state<ChatMessage[]>([]);
 	let busy = $state(false);
 	let percolations = $state<Record<string, SteeringPercolationTarget[]>>({});
-	let evidence = $state<EvidenceItem[]>([]);
 
 	const activeThread = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
-
-	$effect(() => {
-		let cancelled = false;
-		listChats(workspaceId).then((items) => {
-			if (cancelled) return;
-			chats = items;
-			chatId = items[0]?.chat_id ?? null;
-		});
-		getWorkspaceState(workspaceId)
-			.then((state) => {
-				if (!cancelled) evidence = state.evidence;
-			})
-			.catch(() => undefined);
-		return () => {
-			cancelled = true;
-		};
-	});
 
 	$effect(() => {
 		let cancelled = false;
@@ -117,10 +85,6 @@
 		</button>
 	</div>
 
-	<div class="border-b border-white/5 px-4 py-2 font-mono text-[10px] text-slate-500">
-		In context: <span class="text-accent">{workspaceName}</span>
-	</div>
-
 	{#if activeThread}
 		<div class="border-b border-white/5 px-4 py-2">
 			<select
@@ -137,29 +101,10 @@
 	{/if}
 
 	<div class="min-h-0 flex-1 overflow-y-auto p-3">
-		<ChatTranscript {messages} {percolations} evidenceFor={() => evidence.slice(0, 2)} />
+		<ChatTranscript {messages} {percolations} />
 	</div>
 
-	<div class="max-h-56 overflow-y-auto border-t border-white/5 p-3">
-		<h4 class="mb-1.5 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
-			Evidence in scope
-		</h4>
-		<div class="flex flex-wrap gap-1.5">
-			{#each evidence.slice(0, 4) as item (item.id)}
-				<EvidenceBadge evidence={item} />
-			{:else}
-				<span class="text-[11px] text-slate-600">No workspace evidence yet.</span>
-			{/each}
-		</div>
-	</div>
-
-	<ChatComposer
-		onSubmit={send}
-		{strategies}
-		activeExecutionId={null}
-		{busy}
-		compact
-	/>
+	<ChatComposer onSubmit={send} activeExecutionId={null} {busy} />
 
 	<button
 		type="button"

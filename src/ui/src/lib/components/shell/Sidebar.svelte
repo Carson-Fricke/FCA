@@ -46,7 +46,7 @@
 >
 	<div class="flex items-center gap-2 px-4 pt-4 pb-3">
 		<span
-			class="flex h-8 w-8 items-center justify-center rounded-lg border border-accent/40 bg-accent/10 font-mono text-sm font-bold text-accent glow-cyan"
+			class="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-surface-800 font-mono text-sm font-bold text-slate-300"
 			aria-hidden="true"
 		>
 			Θ
@@ -76,7 +76,7 @@
 		</button>
 	</div>
 
-	<div class="mt-4 px-3 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
+	<div class="mt-4 px-3 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
 		Workspace
 	</div>
 	<nav class="mt-1 flex-1 overflow-y-auto px-3" aria-label="Primary">
@@ -85,19 +85,19 @@
 				<li>
 					<a
 						href="/w/{workspaceId}/{item.id}"
-						class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition
+						class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] transition
 							{page === item.id
-							? 'border border-accent/30 bg-accent/10 font-medium text-accent'
-							: 'border border-transparent text-slate-400 hover:bg-surface-800/60 hover:text-slate-200'}"
+							? 'bg-surface-800/70 font-medium text-slate-100'
+							: 'text-slate-400 hover:bg-surface-800/60 hover:text-slate-300'}"
 						aria-current={page === item.id ? 'page' : undefined}
 						data-testid="nav-{item.id}"
 					>
-						<span class="w-4 text-center text-xs" aria-hidden="true">{item.icon}</span>
+						<span class="w-4 text-center text-slate-500" aria-hidden="true">{item.icon}</span>
 						<span class="flex-1">{item.label}</span>
 						{#if item.count && snapshot.counts[item.count] > 0}
 							<span
-								class="rounded-full bg-surface-800 px-1.5 font-mono text-[10px] {page === item.id
-									? 'text-accent'
+								class="rounded-full bg-surface-800 px-1.5 font-mono text-[11px] {page === item.id
+									? 'text-slate-300'
 									: 'text-slate-500'}"
 							>
 								{snapshot.counts[item.count]}
