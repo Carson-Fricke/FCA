@@ -7,7 +7,8 @@
 	import Sidebar from '$lib/components/shell/Sidebar.svelte';
 	import TopBar from '$lib/components/shell/TopBar.svelte';
 import ToastStack from '$lib/components/common/ToastStack.svelte';
-import { listStrategies, listWidgets } from '$lib/api';
+import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
+import { createWorkspace, listStrategies, listWidgets } from '$lib/api';
 import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 	import type { Strategy, WidgetDefinition } from '$lib/types';
 	import type { LayoutData } from './$types';
@@ -115,13 +116,19 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 {#if createOpen}
 	<CreateWorkspaceDialog
 		onClose={() => (createOpen = false)}
-		onCreate={(input) => {
+		onCreate={async (input) => {
 			createOpen = false;
-			// Workspace creation is a backend action; the picker reflects it on
-			// the next snapshot fetch. Surface feedback immediately.
-			notify(`Workspace “${input.name}” requested`);
+			try {
+				const workspace = await createWorkspace(input);
+				notify(`Workspace “${workspace.name}” created`);
+				await goto(`/w/${workspace.id}/overview`);
+			} catch (error) {
+				notify(`Workspace creation failed: ${error instanceof Error ? error.message : error}`, true);
+			}
 		}}
 	/>
 {/if}
+
+<DataModeBadge />
 
 <ToastStack />

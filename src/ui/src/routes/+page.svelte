@@ -1,11 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { ui } from '$lib/workspace.svelte';
 
-	// Landing route: honor the remembered workspace, otherwise the picker.
-	if (ui.lastWorkspace) {
-		goto(`/w/${ui.lastWorkspace}`, { replaceState: true });
-	} else {
-		goto('/w', { replaceState: true });
-	}
+	// Landing route: the picker resolves the remembered workspace with an
+	// existence check, so a stale id can never land on the error page here.
+	goto('/w', { replaceState: true });
 </script>

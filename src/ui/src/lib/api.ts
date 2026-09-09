@@ -16,6 +16,7 @@
  *    the SSE client in `sse.ts` with Last-Event-ID resume;
  *  - status surfaces map to available/unavailable, never fabricated.
  */
+import { browser } from '$app/environment';
 import { fixtures } from './fixtures';
 import type {
 	BacktestDetail,
@@ -47,11 +48,36 @@ const forceFixtures = (import.meta.env.PUBLIC_THESIS_UI_FIXTURES as string | und
 const bearerToken: string | null =
 	(import.meta.env.PUBLIC_THESIS_API_BEARER_TOKEN as string | undefined) ?? null;
 
+/** True when a real Thesis API base URL is configured at build time. */
+export const canUseRealApi: boolean = base.trim() !== '';
+
+/**
+ * Runtime fixture override persisted across reloads (localStorage
+ * `thesis.fixtures`). It only takes effect client-side: 'true' forces
+ * fixture mode even when a base URL is configured, 'false' restores the
+ * default choice, and an absent value keeps the build-time default.
+ */
+function storedFixtureOverride(): string | null {
+	return browser ? localStorage.getItem('thesis.fixtures') : null;
+}
+
 /** True when the UI renders from fixtures instead of the Thesis API. */
-export const fixtureMode: boolean = forceFixtures || base.trim() === '';
+export const fixtureMode: boolean =
+	storedFixtureOverride() === 'true'
+		? true
+		: storedFixtureOverride() === 'false'
+			? canUseRealApi
+			: forceFixtures || !canUseRealApi;
 
 /** The API base URL in real mode ('' in fixture mode). */
 export const apiBaseUrl: string = fixtureMode ? '' : base.replace(/\/+$/, '');
+
+/** Persist the runtime data-mode choice and reload so every caller sees it. */
+export function setFixtureMode(enabled: boolean): void {
+	if (!browser) return;
+	localStorage.setItem('thesis.fixtures', enabled ? 'true' : 'false');
+	location.reload();
+}
 
 export const uiEnvironment: string =
 	(import.meta.env.PUBLIC_THESIS_UI_ENV as string | undefined) ?? 'dev';
@@ -100,16 +126,72 @@ export function listWorkspaces(): Promise<WorkspaceSummary[]> {
 	return apiFetch<{ items: WorkspaceSummary[] }>('/v1/workspaces').then((r) => r.items);
 }
 
+function slugifyWorkspaceId(name: string): string {
+	const slug = name
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+	return slug || `workspace-${Date.now()}`;
+}
+
+function initialsFor(name: string): string {
+	return name
+		.split(/\s+/)
+		.slice(0, 2)
+		.map((word) => word[0]?.toUpperCase() ?? '')
+		.join('');
+}
+
+export function createWorkspace(input: {
+	name: string;
+	description: string;
+}): Promise<WorkspaceSummary> {
+	if (fixtureMode) {
+		return wait(15).then(() => {
+			const created: WorkspaceSummary = {
+				id: slugifyWorkspaceId(input.name),
+				name: input.name,
+				description: input.description,
+				initials: initialsFor(input.name),
+				created_at: new Date().toISOString()
+			};
+			fixtures.workspaces.items.push(plain(created));
+			return created;
+		});
+	}
+	return apiFetch<WorkspaceSummary>('/v1/workspaces', {
+		method: 'POST',
+		body: JSON.stringify(input)
+	});
+}
+
 export function getSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
 	if (fixtureMode) {
 		return wait(5).then(() => {
 			const doc = fixtures.workspaceSnapshot[workspaceId];
-			if (!doc) throw new Error(`unknown workspace ${workspaceId}`);
-			return {
-				workspaces: plain(fixtures.workspaces.items),
-				overview: plain(doc.overview),
-				counts: { ...doc.counts }
-			};
+			if (doc) {
+				return {
+					workspaces: plain(fixtures.workspaces.items),
+					overview: plain(doc.overview),
+					counts: { ...doc.counts }
+				};
+			}
+			// Locally created workspaces have no fixture document: synthesize
+			// an empty overview so creation flows reach a working shell.
+			const ws = fixtures.workspaces.items.find((w) => w.id === workspaceId);
+			if (ws) {
+				return {
+					workspaces: plain(fixtures.workspaces.items),
+					overview: {
+						workspace: plain(ws),
+						health: 'operational',
+						activity: [],
+						openChats: []
+					},
+					counts: { strategies: 0, chats: 0, backtests: 0, deployments: 0, dashboards: 0, screeners: 0 }
+				};
+			}
+			throw new Error(`unknown workspace ${workspaceId}`);
 		});
 	}
 	return apiFetch<WorkspaceSnapshot>(
