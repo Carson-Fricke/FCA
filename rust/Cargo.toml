@@ -11,4 +11,10 @@ members = [
     "crates/harness-py",
     "crates/harness-num",
     "crates/harness-api",
+    "crates/harness-data",
+    "crates/harness-backtest",
+    "crates/harness-live",
+    "crates/harness-mcp",
+    "crates/harness-host",
+    "crates/harness-config",
 ]
