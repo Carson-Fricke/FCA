@@ -2,13 +2,14 @@
   "schemaVersion": "1.0.0",
   "detectedAt": "2026-09-04T17:59:37.056Z",
   "projectTypes": [
-    "python"
+    "python",
+    "rust"
   ],
   "primaryType": "python",
-  "monorepo": false,
+  "monorepo": true,
   "testing": {
     "framework": "pytest",
-    "command": "pytest",
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleo-verify-tool.ps1 test",
     "testFilePatterns": [
       "**/test_*.py",
       "**/*_test.py"
@@ -16,6 +17,15 @@
     "directories": {
       "integration": "tests/integration"
     }
+  },
+  "build": {
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleo-verify-tool.ps1 build"
+  },
+  "lint": {
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleo-verify-tool.ps1 lint"
+  },
+  "typecheck": {
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleo-verify-tool.ps1 typecheck"
   },
   "directories": {
     "source": "src",
