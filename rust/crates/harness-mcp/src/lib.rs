@@ -126,8 +126,7 @@ mod tests {
     }
 
     fn remote_context(transport: Arc<dyn RemoteTransport>) -> HarnessToolsContext {
-        let mut context =
-            HarnessToolsContext::new(Boundary::Remote, Arc::new(StaticTokenSource));
+        let mut context = HarnessToolsContext::new(Boundary::Remote, Arc::new(StaticTokenSource));
         context.api_base_url = Some("https://api.example.test".to_string());
         context.remote_transport = Some(transport);
         context.configuration_loader = Arc::new(StaticLoader);
@@ -169,14 +168,20 @@ mod tests {
         );
         assert_eq!(response["result"]["protocolVersion"], PROTOCOL_VERSION);
         assert_eq!(response["result"]["serverInfo"]["name"], "harness-mcp");
-        assert_eq!(response["result"]["capabilities"]["tools"]["listChanged"], false);
+        assert_eq!(
+            response["result"]["capabilities"]["tools"]["listChanged"],
+            false
+        );
     }
 
     #[test]
     fn ping_and_tools_list_work() {
         let server = local_server(Arc::new(EchoRunner));
         assert_eq!(
-            call(&server, json!({"jsonrpc": "2.0", "id": 1, "method": "ping"})),
+            call(
+                &server,
+                json!({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+            ),
             json!({"jsonrpc": "2.0", "id": 1, "result": {}})
         );
         let response = call(
@@ -222,7 +227,10 @@ mod tests {
     #[test]
     fn incorrect_jsonrpc_version_is_invalid_request() {
         let server = local_server(Arc::new(EchoRunner));
-        let response = call(&server, json!({"jsonrpc": "1.0", "id": 5, "method": "ping"}));
+        let response = call(
+            &server,
+            json!({"jsonrpc": "1.0", "id": 5, "method": "ping"}),
+        );
         assert_eq!(response["error"]["code"], INVALID_REQUEST);
         assert_eq!(response["id"], 5);
     }
@@ -322,7 +330,10 @@ mod tests {
                 "params": {"name": TOOL_RUN_SWEEP, "arguments": {"spec_path": "spec.json"}}
             }),
         );
-        assert_eq!(response["result"]["structuredContent"]["sweep_id"], "sweep-1");
+        assert_eq!(
+            response["result"]["structuredContent"]["sweep_id"],
+            "sweep-1"
+        );
     }
 
     #[test]
@@ -355,7 +366,10 @@ mod tests {
             }),
         );
         assert_eq!(launch["result"]["structuredContent"]["job_id"], "run-1");
-        assert_eq!(launch["result"]["structuredContent"]["location"], "/v1/backtests/jobs/run-1");
+        assert_eq!(
+            launch["result"]["structuredContent"]["location"],
+            "/v1/backtests/jobs/run-1"
+        );
     }
 
     #[test]
@@ -376,7 +390,11 @@ mod tests {
         )
         .expect("serve");
         assert_eq!(answered, 2);
-        let lines: Vec<&str> = std::str::from_utf8(&output).expect("utf8").trim().split('\n').collect();
+        let lines: Vec<&str> = std::str::from_utf8(&output)
+            .expect("utf8")
+            .trim()
+            .split('\n')
+            .collect();
         assert_eq!(lines.len(), 2);
         let ping: Value = decode_message(lines[0]).expect("json");
         assert_eq!(ping["result"], json!({}));
@@ -410,6 +428,8 @@ mod tests {
 
     #[test]
     fn bearer_headers_are_used_for_remote_calls() {
-        assert!(bearer_headers(Some("t")).expect("headers").contains_key("Authorization"));
+        assert!(bearer_headers(Some("t"))
+            .expect("headers")
+            .contains_key("Authorization"));
     }
 }

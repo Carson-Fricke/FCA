@@ -22,7 +22,10 @@ impl StrategyBinding {
     /// # Errors
     ///
     /// Returns a `ValueError`-equivalent when no context event bus is present.
-    pub fn new(strategy: LoadedStrategy, context_json: impl Into<String>) -> Result<Self, ContractError> {
+    pub fn new(
+        strategy: LoadedStrategy,
+        context_json: impl Into<String>,
+    ) -> Result<Self, ContractError> {
         let context_json = context_json.into();
         if context_json.trim().is_empty() {
             return Err(ContractError::value_error(
@@ -100,11 +103,7 @@ impl StrategyBinding {
     /// # Errors
     ///
     /// Returns the strategy's own error when the callback raises.
-    pub fn receive(
-        &self,
-        event_kind: &str,
-        payload_json: &str,
-    ) -> Result<bool, ContractError> {
+    pub fn receive(&self, event_kind: &str, payload_json: &str) -> Result<bool, ContractError> {
         if !self.started {
             return Ok(false);
         }

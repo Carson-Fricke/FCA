@@ -106,10 +106,7 @@ impl StrategyHost {
             install_search_paths(py, &search_paths)?;
             let module = py.import(spec.module.as_str())?;
             let class = module.getattr(spec.class.as_str()).map_err(|error| {
-                pyo3::exceptions::PyAttributeError::new_err(format!(
-                    "{}: {error}",
-                    spec.class
-                ))
+                pyo3::exceptions::PyAttributeError::new_err(format!("{}: {error}", spec.class))
             })?;
             let kwargs = PyDict::new(py);
             for (name, value) in &spec.parameters {
@@ -120,9 +117,7 @@ impl StrategyHost {
                 Err(first_error) => {
                     let fallback = PyDict::new(py);
                     fallback.set_item("parameters", &kwargs)?;
-                    class
-                        .call((), Some(&fallback))
-                        .map_err(|_| first_error)?
+                    class.call((), Some(&fallback)).map_err(|_| first_error)?
                 }
             };
             for callback in REQUIRED_CALLBACKS {
@@ -183,7 +178,11 @@ impl LoadedStrategy {
     ///
     /// Returns [`HostError`] when the payload is invalid, the callback raises,
     /// or its result cannot be encoded.
-    pub fn call_json(&self, callback: &str, payload_json: Option<&str>) -> Result<String, HostError> {
+    pub fn call_json(
+        &self,
+        callback: &str,
+        payload_json: Option<&str>,
+    ) -> Result<String, HostError> {
         let result: PyResult<String> = Python::attach(|py| {
             let bound = self.object.bind(py);
             let value = match payload_json {

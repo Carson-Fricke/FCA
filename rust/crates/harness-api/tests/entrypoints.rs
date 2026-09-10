@@ -20,7 +20,10 @@ fn run_help(name: &str, path: &str) {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(!stdout.trim().is_empty(), "{name} --help produced no output");
+    assert!(
+        !stdout.trim().is_empty(),
+        "{name} --help produced no output"
+    );
 }
 
 #[test]

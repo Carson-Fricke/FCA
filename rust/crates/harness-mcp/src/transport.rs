@@ -81,7 +81,10 @@ pub fn serve_stdio<R: BufRead, W: Write, E: Write>(
             answered += 1;
         }
     }
-    writeln!(diagnostics, "harness mcp: shutdown after {answered} responses")?;
+    writeln!(
+        diagnostics,
+        "harness mcp: shutdown after {answered} responses"
+    )?;
     diagnostics.flush()?;
     Ok(answered)
 }

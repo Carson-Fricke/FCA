@@ -178,11 +178,11 @@ fail clearly until composed.
 
 ## Quant-Harness Rust Workspace
 
-`rust/` is a Cargo workspace staging the Rust port of the quant-harness engine.
-The Python engine under `src/harness` and the pinned Zig native core under
-`src/harness/native` remain authoritative until the migration flips; the Rust
-crates are additive and are not yet wired into the Python runtime or the shared
-image.
+`rust/` is a Cargo workspace porting the quant-harness engine and its
+interfaces. The Python engine under `src/harness` and the pinned Zig native
+core under `src/harness/native` remain authoritative for the unported engine
+surfaces; the Rust interface processes are flipped behind
+`HARNESS_USE_RUST_ENTRYPOINTS` (see `rust-interface-migration.md`).
 
 ```text
 rust/
@@ -190,17 +190,43 @@ rust/
 |-- rust-toolchain.toml        Pinned stable toolchain
 `-- crates/
     |-- harness-native/        C ABI native core (`cdylib` + `rlib`)
-    |-- harness-py/            Python bindings (pre-declared, empty)
-    `-- harness-num/           Numeric kernels (pre-declared, empty)
+    |-- harness-py/            Python extension bindings (`_rust` cdylib)
+    |-- harness-num/           Numeric kernels
+    |-- harness-api/           CLI facade, axum HTTP boundary, api/mcp binaries
+    |-- harness-mcp/           JSON-RPC 2.0 / MCP server and tool catalog
+    |-- harness-host/          PyO3 strategy, indicator, and screener host
+    `-- harness-config/        YAML-subset loader, models, canonical hashing
 ```
 
-`harness-native` builds a loadable shared library (`harness_native.dll` on
-Windows, `libharness_native.so` on Linux) and currently exports only the
-placeholder `harness_native_version` symbol; the ported event-kernel, OMS,
-replay, and quant surfaces follow in later tasks. `harness-py` and
-`harness-num` are declared as workspace members up front so the members list is
-stable and later work can fill them in with disjoint file ownership. The
-workspace is gated by `cargo fmt --all --check` and `cargo build --workspace`.
+- `harness-api` owns the `harness`, `api`, and `backtest-job` process
+  binaries; its axum routes, bearer authentication, and provenance fields
+  mirror `harness.http`.
+- `harness-mcp` owns the pure JSON-RPC dispatch, the capability-filtered tool
+  catalog, bearer credential resolution, and newline-delimited stdio framing.
+- `harness-host` embeds the interpreter and loads unmodified user strategies,
+  indicators, and screeners, with one interpreter acquisition per batch.
+- `harness-config` reproduces the Python loader, strict models, exact-decimal
+  normalization, datetime formatting, and domain-separated hashes; its parity
+  suite asserts the exact hashes of every committed config file.
+- `harness-native`, `harness-py`, and `harness-num` remain the staged native
+  and binding surfaces.
+
+The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
+--all-targets -- -D warnings`, and `cargo test --workspace`.
+
+## Decommission Status
+
+Removing the pinned Zig core and the Python engine paths is intentionally
+gated. The Rust engine does not yet execute backtests or trading sessions, so:
+
+- Docker and CI keep the Zig and Python stages until the Rust engine is wired.
+- `pyproject.toml` keeps its engine dependencies; the strategy-host surface is
+  the stable subset that can be pruned once the engine flips.
+- The Python suites for ported areas (`tests/harness/http`, `tests/harness/mcp`,
+  and configuration) remain as parity oracles alongside the Rust parity suites.
+
+Deletion proceeds only when `backtest-job` and `trader` run the Rust engine and
+repository-wide verification is green on the Rust stack.
 
 ## Thesis Packages
 

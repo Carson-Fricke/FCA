@@ -45,7 +45,10 @@ pub fn configured_bearer_token(bearer_token: Option<String>) -> Result<Option<St
         Some(token) => Some(token),
         None => std::env::var(BEARER_TOKEN_VARIABLE).ok(),
     };
-    if token.as_deref().is_some_and(|value| value.trim().is_empty()) {
+    if token
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
         return Err(AuthError::EmptyToken);
     }
     Ok(token)
@@ -74,9 +77,10 @@ fn unauthorized() -> Response {
         )),
     )
         .into_response();
-    response
-        .headers_mut()
-        .insert(header::WWW_AUTHENTICATE, header::HeaderValue::from_static("Bearer"));
+    response.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        header::HeaderValue::from_static("Bearer"),
+    );
     response
 }
 
@@ -100,7 +104,11 @@ pub fn authenticate_bearer(header_value: Option<&str>, expected_token: Option<&s
 }
 
 /// Axum middleware requiring a valid bearer credential on protected routes.
-pub async fn require_bearer(State(state): State<AppState>, request: Request<Body>, next: Next) -> Response {
+pub async fn require_bearer(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
     let header_value = request
         .headers()
         .get(header::AUTHORIZATION)

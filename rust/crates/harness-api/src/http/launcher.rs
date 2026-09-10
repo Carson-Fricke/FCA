@@ -51,8 +51,10 @@ pub struct UnportedBacktestRunner;
 
 impl BacktestRunner for UnportedBacktestRunner {
     fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
-        Err("the Rust backtest engine is not yet ported; the Python harness remains authoritative"
-            .to_string())
+        Err(
+            "the Rust backtest engine is not yet ported; the Python harness remains authoritative"
+                .to_string(),
+        )
     }
 }
 
@@ -114,17 +116,17 @@ pub fn launch_record(
 }
 
 /// Persist one failed launch while preserving the original creation time.
-pub fn mark_failed(
-    jobs: &dyn JobRepository,
-    job_id: &str,
-    clock: &dyn Clock,
-    error: &LaunchError,
-) {
+pub fn mark_failed(jobs: &dyn JobRepository, job_id: &str, clock: &dyn Clock, error: &LaunchError) {
     let existing = jobs.get(job_id);
     let created_at = existing
         .as_ref()
         .map_or_else(|| clock.now(), |record| record.created_at);
-    let mut record = JobRecord::new(job_id, super::store::JobState::Failed, created_at, clock.now());
+    let mut record = JobRecord::new(
+        job_id,
+        super::store::JobState::Failed,
+        created_at,
+        clock.now(),
+    );
     record.error_message = Some(error.to_string());
     jobs.upsert(record);
 }
@@ -210,7 +212,13 @@ mod tests {
 
     #[test]
     fn launch_record_joins_sorted_strategy_ids() {
-        let record = launch_record(&config(), &RunOutcome { completed: true, artifact_json: vec![] });
+        let record = launch_record(
+            &config(),
+            &RunOutcome {
+                completed: true,
+                artifact_json: vec![],
+            },
+        );
         assert_eq!(record.strategy_id, "a,b");
         assert_eq!(record.status, RunStatus::Complete);
         assert_eq!(record.configuration_digest.as_deref(), Some("digest"));
@@ -233,6 +241,9 @@ mod tests {
             })
             .expect("launch");
         assert!(store.get("run-1").is_some());
-        assert_eq!(jobs.get("run-1").map(|job| job.state), Some(super::super::store::JobState::Succeeded));
+        assert_eq!(
+            jobs.get("run-1").map(|job| job.state),
+            Some(super::super::store::JobState::Succeeded)
+        );
     }
 }

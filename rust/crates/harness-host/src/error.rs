@@ -21,7 +21,9 @@ impl fmt::Display for HostError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Python(message) => write!(formatter, "python error: {message}"),
-            Self::MissingAttribute(message) => write!(formatter, "missing python attribute: {message}"),
+            Self::MissingAttribute(message) => {
+                write!(formatter, "missing python attribute: {message}")
+            }
             Self::Io(message) => write!(formatter, "io error: {message}"),
             Self::Json(message) => write!(formatter, "json error: {message}"),
             Self::Invalid(message) => write!(formatter, "invalid host input: {message}"),

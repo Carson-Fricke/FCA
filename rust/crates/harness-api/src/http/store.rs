@@ -118,7 +118,11 @@ pub struct RunCatalogRecord {
 impl RunCatalogRecord {
     /// Construct a run row with empty derived fields.
     #[must_use]
-    pub fn new(run_id: impl Into<String>, status: RunStatus, strategy_id: impl Into<String>) -> Self {
+    pub fn new(
+        run_id: impl Into<String>,
+        status: RunStatus,
+        strategy_id: impl Into<String>,
+    ) -> Self {
         Self {
             run_id: run_id.into(),
             status,
@@ -233,7 +237,12 @@ pub trait JobRepository: Send + Sync {
 }
 
 fn path_segment(value: &str) -> Result<&str, StoreError> {
-    if value.is_empty() || value.contains('/') || value.contains('\\') || value == "." || value == ".." {
+    if value.is_empty()
+        || value.contains('/')
+        || value.contains('\\')
+        || value == "."
+        || value == ".."
+    {
         return Err(StoreError::InvalidName(value.to_string()));
     }
     Ok(value)
@@ -243,7 +252,9 @@ fn object_path(value: &str) -> Result<&str, StoreError> {
     if value.is_empty()
         || value.contains('\\')
         || value.starts_with('/')
-        || value.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        || value
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
     {
         return Err(StoreError::InvalidName(value.to_string()));
     }
@@ -406,7 +417,10 @@ impl RunStore for InMemoryRunStore {
             .range(prefix.clone()..)
             .take_while(|(path, _)| path.starts_with(&prefix))
             .map(|(path, payload)| {
-                (path.strip_prefix(&prefix).unwrap_or(path).to_string(), payload.clone())
+                (
+                    path.strip_prefix(&prefix).unwrap_or(path).to_string(),
+                    payload.clone(),
+                )
             })
             .collect();
         Some(StoredRun { record, artifacts })
@@ -418,7 +432,11 @@ impl RunStore for InMemoryRunStore {
         }
         let prefix = format!("{RUN_PREFIX}/{run_id}/");
         let mut inner = self.inner.lock().expect("results store poisoned");
-        let removed_blobs = inner.blobs.keys().filter(|path| path.starts_with(&prefix)).count();
+        let removed_blobs = inner
+            .blobs
+            .keys()
+            .filter(|path| path.starts_with(&prefix))
+            .count();
         inner.blobs.retain(|path, _| !path.starts_with(&prefix));
         let removed_row = inner.catalog.remove(run_id).is_some();
         removed_blobs > 0 || removed_row
@@ -465,13 +483,19 @@ mod tests {
     #[test]
     fn run_digest_is_stable_and_domain_separated() {
         let mut digests = BTreeMap::new();
-        digests.insert("actions.parquet".to_string(), artifact_digest(b"actions-bytes"));
+        digests.insert(
+            "actions.parquet".to_string(),
+            artifact_digest(b"actions-bytes"),
+        );
         digests.insert("fills.parquet".to_string(), artifact_digest(b"fills-bytes"));
         let digest = run_digest("run-1", &digests);
         assert_eq!(digest.len(), 64);
         assert_eq!(digest, run_digest("run-1", &digests));
         let mut other = BTreeMap::new();
-        other.insert("actions.parquet".to_string(), artifact_digest(b"actions-bytes"));
+        other.insert(
+            "actions.parquet".to_string(),
+            artifact_digest(b"actions-bytes"),
+        );
         other.insert("fills.parquet".to_string(), artifact_digest(b"other"));
         assert_ne!(digest, run_digest("run-1", &other));
     }
@@ -483,7 +507,10 @@ mod tests {
         artifacts.insert("b.bin".to_string(), vec![1, 2, 3]);
         artifacts.insert("a.bin".to_string(), vec![4, 5]);
         let record = store
-            .put(RunCatalogRecord::new("r", RunStatus::Complete, "s"), artifacts)
+            .put(
+                RunCatalogRecord::new("r", RunStatus::Complete, "s"),
+                artifacts,
+            )
             .expect("put");
         assert_eq!(record.artifact_count, 2);
         assert_eq!(record.total_bytes, 5);
@@ -496,7 +523,10 @@ mod tests {
         let mut artifacts = BTreeMap::new();
         artifacts.insert("a.bin".to_string(), vec![1]);
         store
-            .put(RunCatalogRecord::new("r", RunStatus::Complete, "s"), artifacts)
+            .put(
+                RunCatalogRecord::new("r", RunStatus::Complete, "s"),
+                artifacts,
+            )
             .expect("put");
         assert!(store.delete("r"));
         assert!(store.get("r").is_none());
@@ -510,7 +540,10 @@ mod tests {
         let mut artifacts = BTreeMap::new();
         artifacts.insert("a.bin".to_string(), vec![1]);
         let error = store
-            .put(RunCatalogRecord::new("../x", RunStatus::Complete, "s"), artifacts)
+            .put(
+                RunCatalogRecord::new("../x", RunStatus::Complete, "s"),
+                artifacts,
+            )
             .expect_err("must reject");
         assert!(matches!(error, StoreError::InvalidName(_)));
     }

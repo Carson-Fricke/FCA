@@ -20,10 +20,7 @@ pub fn launch_router() -> Router<AppState> {
         .route("/v1/backtests/jobs/{job_id}", get(job_status))
 }
 
-async fn launch_job(
-    State(state): State<AppState>,
-    body: Bytes,
-) -> Result<Response, ApiError> {
+async fn launch_job(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
     let configuration = state.configuration_parser.parse(&body).map_err(|error| {
         ApiError::validation_error("the submitted document is not a valid backtest configuration")
             .with_details(json!(error.to_string()))

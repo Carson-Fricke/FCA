@@ -16,8 +16,8 @@ use clap::Parser;
 use harness_mcp::auth::{EnvironmentBearerTokenSource, BEARER_TOKEN_VARIABLE};
 use harness_mcp::server::McpServer;
 use harness_mcp::tools::{
-    Boundary, ConfigurationLoader, HarnessToolsContext, ProcessOutcome, ProcessRunner, RemoteResponse,
-    RemoteTransport,
+    Boundary, ConfigurationLoader, HarnessToolsContext, ProcessOutcome, ProcessRunner,
+    RemoteResponse, RemoteTransport,
 };
 use harness_mcp::transport::serve_stdio;
 use serde_json::{Map, Value};
@@ -97,11 +97,7 @@ fn decode_response(response: ureq::Response) -> Result<RemoteResponse, String> {
 pub struct HttpRemoteTransport;
 
 impl RemoteTransport for HttpRemoteTransport {
-    fn get(
-        &self,
-        url: &str,
-        headers: &BTreeMap<String, String>,
-    ) -> Result<RemoteResponse, String> {
+    fn get(&self, url: &str, headers: &BTreeMap<String, String>) -> Result<RemoteResponse, String> {
         let mut request = ureq::get(url);
         for (name, value) in headers {
             request = request.set(name, value);
@@ -134,7 +130,9 @@ impl RemoteTransport for HttpRemoteTransport {
 /// Resolve the remote API base URL from the flag or environment.
 #[must_use]
 pub fn resolve_base_url(api_base_url: Option<&str>) -> Option<String> {
-    let explicit = api_base_url.map(str::trim).filter(|value| !value.is_empty());
+    let explicit = api_base_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     match explicit {
         Some(value) => Some(value.to_string()),
         None => std::env::var(API_BASE_URL_VARIABLE)
@@ -162,7 +160,9 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
         .map(|_| Arc::new(HttpRemoteTransport) as Arc<dyn RemoteTransport>);
     context.runner = Some(Arc::new(SubprocessRunner));
     context.configuration_loader = default_loader();
-    let context = context.validate().map_err(|error| McpServeError(error.to_string()))?;
+    let context = context
+        .validate()
+        .map_err(|error| McpServeError(error.to_string()))?;
     harness_mcp::create_server(context).map_err(|error| McpServeError(error.to_string()))
 }
 

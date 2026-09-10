@@ -166,9 +166,7 @@ fn validate_arguments(schema: &Value, arguments: &Map<String, Value>) -> Result<
                 format!("argument '{name}' must be a string"),
             ));
         }
-        if property.get("type").and_then(Value::as_str) == Some("object")
-            && !value.is_object()
-        {
+        if property.get("type").and_then(Value::as_str) == Some("object") && !value.is_object() {
             return Err(JsonRpcError::new(
                 INVALID_PARAMS,
                 format!("argument '{name}' must be an object"),
@@ -232,7 +230,10 @@ impl McpServer {
                 None,
             ));
         }
-        let Some(method) = object.get("method").and_then(Value::as_str).filter(|m| !m.is_empty())
+        let Some(method) = object
+            .get("method")
+            .and_then(Value::as_str)
+            .filter(|m| !m.is_empty())
         else {
             return Some(error_response(
                 &response_id(object.get("id")),
@@ -265,7 +266,9 @@ impl McpServer {
                 if notification {
                     None
                 } else {
-                    Some(json!({"jsonrpc": JSONRPC_VERSION, "id": raw_id.cloned().unwrap_or(Value::Null), "result": result}))
+                    Some(
+                        json!({"jsonrpc": JSONRPC_VERSION, "id": raw_id.cloned().unwrap_or(Value::Null), "result": result}),
+                    )
                 }
             }
             Err(error) => {

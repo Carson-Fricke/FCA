@@ -106,11 +106,7 @@ pub fn load_configuration(path: &std::path::Path) -> Result<HarnessConfig, Confi
                 }
             )))
         }
-        None => {
-            return Err(ConfigError(
-                "configuration has no 'shell' key".to_string(),
-            ))
-        }
+        None => return Err(ConfigError("configuration has no 'shell' key".to_string())),
     };
     match shell.as_str() {
         "api" => build_api(&mapping).map(HarnessConfig::Api),

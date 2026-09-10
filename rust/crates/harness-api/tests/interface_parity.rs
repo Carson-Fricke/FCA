@@ -14,10 +14,10 @@ use axum::http::{header, Request, StatusCode};
 use axum::Router;
 use harness_api::http::clock::{Clock, SystemClock};
 use harness_api::http::configuration::{StrictJsonConfigurationParser, ValidatedConfiguration};
+use harness_api::http::create_app;
 use harness_api::http::launcher::{BacktestRunner, InProcessLauncher, RunOutcome};
 use harness_api::http::state::AppConfig;
 use harness_api::http::store::{InMemoryJobRepository, InMemoryRunStore};
-use harness_api::http::create_app;
 use harness_mcp::auth::{BearerTokenSource, MissingBearerCredentialError};
 use harness_mcp::create_server;
 use harness_mcp::server::McpServer;
@@ -55,10 +55,7 @@ impl BearerTokenSource for StaticCredentials {
 
     fn bearer_headers(&self) -> Result<BTreeMap<String, String>, MissingBearerCredentialError> {
         let mut headers = BTreeMap::new();
-        headers.insert(
-            "Authorization".to_string(),
-            format!("Bearer {BEARER}"),
-        );
+        headers.insert("Authorization".to_string(), format!("Bearer {BEARER}"));
         Ok(headers)
     }
 }
@@ -91,11 +88,7 @@ struct ApiTransport {
 }
 
 impl RemoteTransport for ApiTransport {
-    fn get(
-        &self,
-        url: &str,
-        headers: &BTreeMap<String, String>,
-    ) -> Result<RemoteResponse, String> {
+    fn get(&self, url: &str, headers: &BTreeMap<String, String>) -> Result<RemoteResponse, String> {
         self.dispatch("GET", url, headers, None)
     }
 
@@ -132,11 +125,16 @@ impl ApiTransport {
                     builder = builder.header(name, value);
                 }
                 let body = match payload {
-                    Some(value) => Body::from(serde_json::to_vec(&value).map_err(|e| e.to_string())?),
+                    Some(value) => {
+                        Body::from(serde_json::to_vec(&value).map_err(|e| e.to_string())?)
+                    }
                     None => Body::empty(),
                 };
                 let request = builder.body(body).map_err(|error| error.to_string())?;
-                let response = router.oneshot(request).await.map_err(|error| error.to_string())?;
+                let response = router
+                    .oneshot(request)
+                    .await
+                    .map_err(|error| error.to_string())?;
                 let status_code = response.status().as_u16();
                 let mut response_headers = BTreeMap::new();
                 for (name, value) in response.headers() {
@@ -215,18 +213,31 @@ async fn http_launch_is_queryable_through_mcp() {
                 .uri("/v1/backtests/jobs")
                 .header(header::AUTHORIZATION, format!("Bearer {BEARER}"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_vec(&backtest_document()).expect("json")))
+                .body(Body::from(
+                    serde_json::to_vec(&backtest_document()).expect("json"),
+                ))
                 .expect("request"),
         )
         .await
         .expect("launch");
     assert_eq!(launch.status(), StatusCode::ACCEPTED);
 
-    let run = tool_call(&server, 1, "get_run", json!({"run_id": "momentum-spy-2024-01"}));
+    let run = tool_call(
+        &server,
+        1,
+        "get_run",
+        json!({"run_id": "momentum-spy-2024-01"}),
+    );
     assert_eq!(run["result"]["isError"], false);
-    assert_eq!(run["result"]["structuredContent"]["run_id"], "momentum-spy-2024-01");
+    assert_eq!(
+        run["result"]["structuredContent"]["run_id"],
+        "momentum-spy-2024-01"
+    );
     assert_eq!(run["result"]["structuredContent"]["status"], "complete");
-    assert_eq!(run["result"]["structuredContent"]["strategy_id"], "spy-momentum");
+    assert_eq!(
+        run["result"]["structuredContent"]["strategy_id"],
+        "spy-momentum"
+    );
 
     let status = tool_call(
         &server,
@@ -253,13 +264,21 @@ async fn mcp_run_backtest_remote_launches_and_http_reads_it_back() {
     let router = http_app();
     let server = mcp_server(router.clone());
 
-    let launcher = tool_call(&server, 1, "run_backtest", json!({"config_path": "bt.json"}));
+    let launcher = tool_call(
+        &server,
+        1,
+        "run_backtest",
+        json!({"config_path": "bt.json"}),
+    );
     assert_eq!(launcher["result"]["isError"], false, "{launcher}");
     let payload = &launcher["result"]["structuredContent"];
     assert_eq!(payload["boundary"], "remote");
     assert_eq!(payload["job_id"], "momentum-spy-2024-01");
     assert_eq!(payload["state"], "succeeded");
-    assert_eq!(payload["location"], "/v1/backtests/jobs/momentum-spy-2024-01");
+    assert_eq!(
+        payload["location"],
+        "/v1/backtests/jobs/momentum-spy-2024-01"
+    );
 
     let response = router
         .clone()
@@ -274,7 +293,12 @@ async fn mcp_run_backtest_remote_launches_and_http_reads_it_back() {
         .await
         .expect("get run");
     assert_eq!(response.status(), StatusCode::OK);
-    let bytes = response.into_body().collect().await.expect("body").to_bytes();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
     let row: Value = serde_json::from_slice(&bytes).expect("json");
     assert_eq!(row["run_id"], "momentum-spy-2024-01");
     assert_eq!(row["status"], "complete");

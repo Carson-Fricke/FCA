@@ -133,9 +133,8 @@ pub fn resolve_environment_reference(reference: &str) -> Result<String, ApiConfi
         .strip_prefix("${")
         .and_then(|value| value.strip_suffix('}'))
     {
-        return std::env::var(inner).map_err(|_| {
-            ApiConfigError(format!("environment variable '{inner}' is not set"))
-        });
+        return std::env::var(inner)
+            .map_err(|_| ApiConfigError(format!("environment variable '{inner}' is not set")));
     }
     Ok(trimmed.to_string())
 }
@@ -200,7 +199,10 @@ pub async fn serve_api(args: &crate::ApiArgs) -> Result<(), ApiConfigError> {
 /// Blocking entry point for the standalone `api` binary and `harness api`.
 #[must_use]
 pub fn serve_api_blocking(args: &crate::ApiArgs) -> ExitCode {
-    let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("api server could not start: {error}");
@@ -274,8 +276,8 @@ mod tests {
 
     #[test]
     fn environment_reference_resolution_names_the_variable() {
-        let error = resolve_environment_reference("${FCA_DEFINITELY_UNSET_VARIABLE}")
-            .expect_err("error");
+        let error =
+            resolve_environment_reference("${FCA_DEFINITELY_UNSET_VARIABLE}").expect_err("error");
         assert!(error.0.contains("FCA_DEFINITELY_UNSET_VARIABLE"));
         assert!(resolve_environment_reference("literal").expect("literal") == "literal");
     }

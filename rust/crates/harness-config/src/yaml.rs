@@ -166,7 +166,9 @@ fn split_mapping_entry(text: &str) -> Result<(String, String), ConfigError> {
             }
         }
     }
-    Err(ConfigError(format!("expected a YAML mapping entry: {text:?}")))
+    Err(ConfigError(format!(
+        "expected a YAML mapping entry: {text:?}"
+    )))
 }
 
 fn split_flow_values(text: &str) -> Result<Vec<String>, ConfigError> {
@@ -187,7 +189,13 @@ fn split_flow_values(text: &str) -> Result<Vec<String>, ConfigError> {
                 '[' => depth += 1,
                 ']' => depth -= 1,
                 ',' if depth == 0 => {
-                    values.push(chars[start..index].iter().collect::<String>().trim().to_string());
+                    values.push(
+                        chars[start..index]
+                            .iter()
+                            .collect::<String>()
+                            .trim()
+                            .to_string(),
+                    );
                     start = index + 1;
                 }
                 _ => {}
@@ -253,7 +261,11 @@ fn scalar(value: &str) -> Result<YamlValue, ConfigError> {
     if is_decimal(value) {
         return Ok(YamlValue::Decimal(value.to_string()));
     }
-    if value.starts_with('&') || value.starts_with('*') || value.starts_with('!') || value.starts_with('{') {
+    if value.starts_with('&')
+        || value.starts_with('*')
+        || value.starts_with('!')
+        || value.starts_with('{')
+    {
         return Err(ConfigError(format!("unsupported YAML value: {value:?}")));
     }
     Ok(YamlValue::Str(value.to_string()))
@@ -361,7 +373,9 @@ fn parse_block(
 /// # Errors
 ///
 /// Returns [`ConfigError`] for unreadable, empty, or malformed documents.
-pub fn load_yaml_mapping(path: &std::path::Path) -> Result<BTreeMap<String, YamlValue>, ConfigError> {
+pub fn load_yaml_mapping(
+    path: &std::path::Path,
+) -> Result<BTreeMap<String, YamlValue>, ConfigError> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| ConfigError(format!("configuration could not be loaded: {error}")))?;
     let lines = clean_lines(&text)?;
@@ -408,7 +422,9 @@ pub fn parse_yaml_mapping(text: &str) -> Result<BTreeMap<String, YamlValue>, Con
     }
     match parsed {
         YamlValue::Map(mapping) => Ok(mapping),
-        _ => Err(ConfigError("configuration root must be a mapping".to_string())),
+        _ => Err(ConfigError(
+            "configuration root must be a mapping".to_string(),
+        )),
     }
 }
 
@@ -445,7 +461,10 @@ mod tests {
     #[test]
     fn exact_decimals_keep_their_source_text() {
         let mapping = parse_yaml_mapping("rate: 0.005\ncount: 20\n").expect("parse");
-        assert_eq!(mapping.get("rate"), Some(&YamlValue::Decimal("0.005".to_string())));
+        assert_eq!(
+            mapping.get("rate"),
+            Some(&YamlValue::Decimal("0.005".to_string()))
+        );
         assert_eq!(mapping.get("count"), Some(&YamlValue::Int(20)));
     }
 }

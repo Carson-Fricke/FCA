@@ -202,11 +202,7 @@ pub trait RemoteTransport: Send + Sync {
     /// # Errors
     ///
     /// Returns a reason string when the request cannot be completed.
-    fn get(
-        &self,
-        url: &str,
-        headers: &BTreeMap<String, String>,
-    ) -> Result<RemoteResponse, String>;
+    fn get(&self, url: &str, headers: &BTreeMap<String, String>) -> Result<RemoteResponse, String>;
     /// Perform one authenticated POST with a JSON body.
     ///
     /// # Errors
@@ -476,12 +472,19 @@ impl HarnessTools {
     /// # Errors
     ///
     /// Returns [`ToolExecutionError`] when the boundary fails.
-    pub fn run_backtest(&self, arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
+    pub fn run_backtest(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
         let config_path = text_argument(arguments, "config_path")?;
         if self.context.mode == Boundary::Remote {
             return self.launch_remote_backtest(&config_path);
         }
-        let mut tail = vec!["backtest-job".to_string(), "--config".to_string(), config_path];
+        let mut tail = vec![
+            "backtest-job".to_string(),
+            "--config".to_string(),
+            config_path,
+        ];
         tail.extend(workspace_arguments(arguments)?);
         self.invoke_process(&tail, "backtest-job")
     }
@@ -491,7 +494,10 @@ impl HarnessTools {
     /// # Errors
     ///
     /// Returns [`ToolExecutionError`] when the process boundary fails.
-    pub fn launch_trader(&self, arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
+    pub fn launch_trader(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
         let config_path = text_argument(arguments, "config_path")?;
         self.invoke_process(
             &["trader".to_string(), "--config".to_string(), config_path],
@@ -535,7 +541,10 @@ impl HarnessTools {
     /// # Errors
     ///
     /// Returns [`ToolExecutionError`] when the remote call fails.
-    pub fn list_artifacts(&self, arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
+    pub fn list_artifacts(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
         let run_id = identifier_argument(arguments, "run_id")?;
         let url = self.remote_url(&format!(
             "{RUN_ROUTE}/{}/artifacts",
@@ -563,11 +572,7 @@ impl HarnessTools {
         })
     }
 
-    fn invoke_process(
-        &self,
-        tail: &[String],
-        process: &str,
-    ) -> Result<Value, ToolExecutionError> {
+    fn invoke_process(&self, tail: &[String], process: &str) -> Result<Value, ToolExecutionError> {
         let Some(runner) = &self.context.runner else {
             return Err(ToolExecutionError::new(format!(
                 "the local harness process '{process}' could not be invoked: \
@@ -600,11 +605,15 @@ impl HarnessTools {
     }
 
     fn launch_remote_backtest(&self, config_path: &str) -> Result<Value, ToolExecutionError> {
-        let payload = self.context.configuration_loader.load_json(config_path).map_err(|error| {
-            ToolExecutionError::new(format!(
-                "could not load the backtest configuration '{config_path}': {error}"
-            ))
-        })?;
+        let payload = self
+            .context
+            .configuration_loader
+            .load_json(config_path)
+            .map_err(|error| {
+                ToolExecutionError::new(format!(
+                    "could not load the backtest configuration '{config_path}': {error}"
+                ))
+            })?;
         let url = self.remote_url(LAUNCH_ROUTE)?;
         let response = self.dispatch_remote_post(&url, &payload)?;
         let status_code = response.status_code;
@@ -670,7 +679,11 @@ impl HarnessTools {
 
     fn dispatch_remote_get(&self, url: &str) -> Result<RemoteResponse, ToolExecutionError> {
         let headers = self.remote_headers()?;
-        let transport = self.context.remote_transport.as_ref().ok_or_else(remote_unconfigured)?;
+        let transport = self
+            .context
+            .remote_transport
+            .as_ref()
+            .ok_or_else(remote_unconfigured)?;
         transport
             .get(url, &headers)
             .map_err(|_| ToolExecutionError::new("the remote harness API could not be reached"))
@@ -682,7 +695,11 @@ impl HarnessTools {
         payload: &Value,
     ) -> Result<RemoteResponse, ToolExecutionError> {
         let headers = self.remote_headers()?;
-        let transport = self.context.remote_transport.as_ref().ok_or_else(remote_unconfigured)?;
+        let transport = self
+            .context
+            .remote_transport
+            .as_ref()
+            .ok_or_else(remote_unconfigured)?;
         transport
             .post(url, &headers, payload)
             .map_err(|_| ToolExecutionError::new("the remote harness API could not be reached"))
@@ -707,9 +724,7 @@ impl HarnessTools {
 }
 
 fn remote_unconfigured() -> ToolExecutionError {
-    ToolExecutionError::new(
-        "the remote harness API boundary is not configured for this MCP server",
-    )
+    ToolExecutionError::new("the remote harness API boundary is not configured for this MCP server")
 }
 
 fn credential_rejected(status_code: u16) -> ToolExecutionError {
@@ -718,10 +733,7 @@ fn credential_rejected(status_code: u16) -> ToolExecutionError {
     ))
 }
 
-fn text_argument(
-    arguments: &Map<String, Value>,
-    key: &str,
-) -> Result<String, ToolExecutionError> {
+fn text_argument(arguments: &Map<String, Value>, key: &str) -> Result<String, ToolExecutionError> {
     arguments
         .get(key)
         .and_then(Value::as_str)
@@ -744,15 +756,15 @@ fn identifier_argument(
     Ok(value)
 }
 
-fn workspace_arguments(
-    arguments: &Map<String, Value>,
-) -> Result<Vec<String>, ToolExecutionError> {
+fn workspace_arguments(arguments: &Map<String, Value>) -> Result<Vec<String>, ToolExecutionError> {
     match arguments.get("workspace") {
         None | Some(Value::Null) => Ok(Vec::new()),
         Some(Value::String(workspace)) if !workspace.trim().is_empty() => {
             Ok(vec!["--output-dir".to_string(), workspace.clone()])
         }
-        Some(_) => Err(ToolExecutionError::new("workspace must be a non-empty string")),
+        Some(_) => Err(ToolExecutionError::new(
+            "workspace must be a non-empty string",
+        )),
     }
 }
 
@@ -908,10 +920,8 @@ mod tests {
     }
 
     fn local_context() -> HarnessToolsContext {
-        let mut context = HarnessToolsContext::new(
-            Boundary::Local,
-            Arc::new(EnvironmentBearerTokenSource),
-        );
+        let mut context =
+            HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
         context.runner = Some(Arc::new(EchoRunner));
         context.validate().expect("valid context")
     }
@@ -921,7 +931,13 @@ mod tests {
         let catalog = build_catalog(local_context()).expect("catalog");
         assert_eq!(
             catalog.names(),
-            vec!["run_backtest", "get_backtest_status", "get_run", "list_artifacts", "run_sweep"]
+            vec![
+                "run_backtest",
+                "get_backtest_status",
+                "get_run",
+                "list_artifacts",
+                "run_sweep"
+            ]
         );
         let mut opted_in = local_context();
         opted_in.capabilities.trader = true;
@@ -939,7 +955,10 @@ mod tests {
         let payload = tool.call(&arguments).expect("call");
         assert_eq!(payload["boundary"], "local");
         assert_eq!(payload["exit_code"], 0);
-        assert_eq!(payload["stdout"], "harness backtest-job --config backtest.yaml --output-dir out");
+        assert_eq!(
+            payload["stdout"],
+            "harness backtest-job --config backtest.yaml --output-dir out"
+        );
     }
 
     #[test]
@@ -953,10 +972,8 @@ mod tests {
 
     #[test]
     fn remote_boundary_requires_https_and_transport() {
-        let mut context = HarnessToolsContext::new(
-            Boundary::Remote,
-            Arc::new(EnvironmentBearerTokenSource),
-        );
+        let mut context =
+            HarnessToolsContext::new(Boundary::Remote, Arc::new(EnvironmentBearerTokenSource));
         context.api_base_url = Some("http://example.test".to_string());
         assert!(context.validate().is_err());
     }

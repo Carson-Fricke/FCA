@@ -95,15 +95,13 @@ class Demo:
         let module = unique_module("strategy");
         fs::write(dir.join(format!("{module}.py")), STRATEGY_SOURCE).expect("write module");
         let host = StrategyHost::with_search_paths(vec![dir.clone()]);
-        let spec = StrategySpec::new(module, "Demo")
-            .with_parameter("threshold", serde_json::json!(0.5));
+        let spec =
+            StrategySpec::new(module, "Demo").with_parameter("threshold", serde_json::json!(0.5));
         let strategy = host.load(&spec).expect("load strategy");
         assert_eq!(strategy.class(), "Demo");
         assert!(strategy.has_callback("on_quote").expect("has"));
 
-        strategy
-            .call("on_start", Some("{}"))
-            .expect("on_start");
+        strategy.call("on_start", Some("{}")).expect("on_start");
         let events = vec![
             StrategyEvent::new("on_quote", r#"{"price":1.0}"#),
             StrategyEvent::new("on_trade", r#"{"price":99.0}"#),
@@ -129,8 +127,8 @@ class Demo:
         )
         .expect("write module");
         let host = StrategyHost::with_search_paths(vec![dir.clone()]);
-        let spec = StrategySpec::new(module, "Echo")
-            .with_parameter("threshold", serde_json::json!(7));
+        let spec =
+            StrategySpec::new(module, "Echo").with_parameter("threshold", serde_json::json!(7));
         let strategy = host.load(&spec).expect("load");
         let summary = strategy.call_json("summary", None).expect("summary");
         assert!(summary.contains("\"threshold\": 7"), "{summary}");
@@ -148,7 +146,10 @@ class Demo:
         .expect("write module");
         let host = IndicatorHost::with_search_paths(vec![dir.clone()]);
         let scale = host.load(&module, "scale").expect("load scale");
-        assert_eq!(scale.call_f64(&[1.0, 2.0, 3.0]).expect("call"), vec![2.0, 4.0, 6.0]);
+        assert_eq!(
+            scale.call_f64(&[1.0, 2.0, 3.0]).expect("call"),
+            vec![2.0, 4.0, 6.0]
+        );
         let batched = scale
             .call_f64_batch(&[vec![1.0], vec![2.0, 3.0]])
             .expect("batch");
@@ -170,9 +171,7 @@ class Demo:
         .expect("write screener");
         let host = ScreenerHost::with_search_paths(vec![dir.clone()]);
         let screener = host.load_program(&path).expect("load program");
-        let output = screener
-            .run(r#"{"symbols":["A","B","C"]}"#)
-            .expect("run");
+        let output = screener.run(r#"{"symbols":["A","B","C"]}"#).expect("run");
         assert!(output.contains("\"count\": 3"), "{output}");
         assert!(output.contains("\"first\": \"A\""), "{output}");
         let _ = fs::remove_dir_all(dir);
@@ -199,9 +198,7 @@ class Demo:
         )
         .expect("write module");
         let host = StrategyHost::with_search_paths(vec![dir.clone()]);
-        let strategy = host
-            .load(&StrategySpec::new(module, "Demo"))
-            .expect("load");
+        let strategy = host.load(&StrategySpec::new(module, "Demo")).expect("load");
         let mut binding = StrategyBinding::new(strategy, "{}").expect("bind");
         assert!(!binding.started());
         binding.start().expect("start");

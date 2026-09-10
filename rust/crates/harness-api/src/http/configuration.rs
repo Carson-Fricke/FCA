@@ -95,11 +95,14 @@ fn parse_rfc3339_date(value: &Value, field: &str) -> Result<Option<NaiveDate>, C
     match value {
         Value::Null => Ok(None),
         Value::String(text) => {
-            let parsed = DateTime::parse_from_rfc3339(text)
-                .map_err(|error| ConfigurationError(format!("{field} is not an RFC 3339 timestamp: {error}")))?;
+            let parsed = DateTime::parse_from_rfc3339(text).map_err(|error| {
+                ConfigurationError(format!("{field} is not an RFC 3339 timestamp: {error}"))
+            })?;
             Ok(Some(parsed.with_timezone(&Utc).date_naive()))
         }
-        _ => Err(ConfigurationError(format!("{field} must be an RFC 3339 string"))),
+        _ => Err(ConfigurationError(format!(
+            "{field} must be an RFC 3339 string"
+        ))),
     }
 }
 
@@ -107,9 +110,9 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
     fn parse(&self, body: &[u8]) -> Result<ValidatedConfiguration, ConfigurationError> {
         let document: Value = serde_json::from_slice(body)
             .map_err(|error| ConfigurationError(format!("malformed JSON: {error}")))?;
-        let object = document
-            .as_object()
-            .ok_or_else(|| ConfigurationError("the submitted document is not a JSON object".to_string()))?;
+        let object = document.as_object().ok_or_else(|| {
+            ConfigurationError("the submitted document is not a JSON object".to_string())
+        })?;
 
         let shell = object
             .get("shell")
@@ -123,7 +126,9 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
 
         for key in object.keys() {
             if !BACKTEST_KEYS.contains(&key.as_str()) {
-                return Err(ConfigurationError(format!("unexpected configuration field '{key}'")));
+                return Err(ConfigurationError(format!(
+                    "unexpected configuration field '{key}'"
+                )));
             }
         }
 
@@ -136,13 +141,13 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
 
         let mut strategy_ids = Vec::new();
         if let Some(instances) = object.get("strategy_instances") {
-            let instances = instances
-                .as_array()
-                .ok_or_else(|| ConfigurationError("strategy_instances must be an array".to_string()))?;
+            let instances = instances.as_array().ok_or_else(|| {
+                ConfigurationError("strategy_instances must be an array".to_string())
+            })?;
             for instance in instances {
-                let instance = instance
-                    .as_object()
-                    .ok_or_else(|| ConfigurationError("each strategy instance must be an object".to_string()))?;
+                let instance = instance.as_object().ok_or_else(|| {
+                    ConfigurationError("each strategy instance must be an object".to_string())
+                })?;
                 let instance_id = instance
                     .get("instance_id")
                     .and_then(Value::as_str)
@@ -199,7 +204,10 @@ mod tests {
         .expect("parse");
         assert_eq!(configuration.run_id, "run-1");
         assert_eq!(configuration.strategy_ids, vec!["a", "z"]);
-        assert_eq!(configuration.data_start, NaiveDate::from_ymd_opt(2024, 1, 2));
+        assert_eq!(
+            configuration.data_start,
+            NaiveDate::from_ymd_opt(2024, 1, 2)
+        );
         assert_eq!(configuration.data_end, NaiveDate::from_ymd_opt(2024, 1, 19));
         assert_eq!(configuration.configuration_digest.len(), 64);
     }

@@ -33,7 +33,9 @@ impl ScreenerHost {
     /// Construct a host that prepends `paths` to `sys.path`.
     #[must_use]
     pub fn with_search_paths(paths: Vec<PathBuf>) -> Self {
-        Self { search_paths: paths }
+        Self {
+            search_paths: paths,
+        }
     }
 
     /// Execute one screener source file and resolve its `screen` callable.
@@ -52,13 +54,11 @@ impl ScreenerHost {
             install_search_paths(py, &search_paths)?;
             let globals = PyDict::new(py);
             py.run(code.as_c_str(), Some(&globals), None)?;
-            let screen = globals
-                .get_item(SCREEN_ENTRYPOINT)?
-                .ok_or_else(|| {
-                    pyo3::exceptions::PyAttributeError::new_err(format!(
-                        "screener program must define {SCREEN_ENTRYPOINT}"
-                    ))
-                })?;
+            let screen = globals.get_item(SCREEN_ENTRYPOINT)?.ok_or_else(|| {
+                pyo3::exceptions::PyAttributeError::new_err(format!(
+                    "screener program must define {SCREEN_ENTRYPOINT}"
+                ))
+            })?;
             if !screen.is_callable() {
                 return Err(pyo3::exceptions::PyTypeError::new_err(format!(
                     "{SCREEN_ENTRYPOINT} must be callable"

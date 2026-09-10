@@ -99,7 +99,11 @@ fn validation_rejects_malformed_documents() {
         .join("harness")
         .join("configuration")
         .join("fixtures");
-    for fixture in ["invalid-api.yaml", "invalid-backtest.yaml", "invalid-secret.yaml"] {
+    for fixture in [
+        "invalid-api.yaml",
+        "invalid-backtest.yaml",
+        "invalid-secret.yaml",
+    ] {
         let path = dir.join(fixture);
         if path.exists() {
             assert!(

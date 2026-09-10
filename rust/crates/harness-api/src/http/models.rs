@@ -141,7 +141,11 @@ impl ApiError {
     /// A 422 for a request-validation failure.
     #[must_use]
     pub fn validation_error(message: &str) -> Self {
-        Self::new(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", message)
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            message,
+        )
     }
 }
 

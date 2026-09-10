@@ -20,7 +20,10 @@ const ARTIFACT_NAME_MAX: usize = 512;
 pub fn runs_router() -> Router<AppState> {
     Router::new()
         .route("/v1/backtests/runs", get(list_runs))
-        .route("/v1/backtests/runs/{run_id}", get(get_run).delete(delete_run))
+        .route(
+            "/v1/backtests/runs/{run_id}",
+            get(get_run).delete(delete_run),
+        )
         .route("/v1/backtests/runs/{run_id}/artifacts", get(list_artifacts))
         .route(
             "/v1/backtests/runs/{run_id}/artifacts/{*artifact_name}",

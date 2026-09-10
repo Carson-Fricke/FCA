@@ -13,12 +13,14 @@ use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
 use harness_api::http::clock::{Clock, SystemClock};
 use harness_api::http::configuration::{StrictJsonConfigurationParser, ValidatedConfiguration};
-use harness_api::http::launcher::{BacktestLauncher, BacktestRunner, InProcessLauncher, LaunchError, RunOutcome};
+use harness_api::http::create_app;
+use harness_api::http::launcher::{
+    BacktestLauncher, BacktestRunner, InProcessLauncher, LaunchError, RunOutcome,
+};
 use harness_api::http::state::AppConfig;
 use harness_api::http::store::{
     InMemoryJobRepository, InMemoryRunStore, RunCatalogRecord, RunStatus, RunStore, SasIssuer,
 };
-use harness_api::http::create_app;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -52,7 +54,10 @@ struct RecordingLauncher {
 
 impl BacktestLauncher for RecordingLauncher {
     fn launch(&self, job: &harness_api::http::launcher::LaunchJob) -> Result<(), LaunchError> {
-        self.jobs.lock().expect("jobs poisoned").push(job.job_id.clone());
+        self.jobs
+            .lock()
+            .expect("jobs poisoned")
+            .push(job.job_id.clone());
         Ok(())
     }
 }
@@ -64,7 +69,10 @@ struct RecordingSasIssuer {
 
 impl SasIssuer for RecordingSasIssuer {
     fn issue(&self, object_path: &str) -> String {
-        self.paths.lock().expect("paths poisoned").push(object_path.to_string());
+        self.paths
+            .lock()
+            .expect("paths poisoned")
+            .push(object_path.to_string());
         format!("https://storage.example/{object_path}?sig=abc")
     }
 }
@@ -74,7 +82,11 @@ struct TestApp {
     store: Arc<InMemoryRunStore>,
 }
 
-fn build(token: Option<&str>, sas: Option<Arc<dyn SasIssuer>>, runner: Arc<dyn BacktestRunner>) -> TestApp {
+fn build(
+    token: Option<&str>,
+    sas: Option<Arc<dyn SasIssuer>>,
+    runner: Arc<dyn BacktestRunner>,
+) -> TestApp {
     let store = Arc::new(InMemoryRunStore::new());
     let jobs = Arc::new(InMemoryJobRepository::new());
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
@@ -103,12 +115,22 @@ fn app_with(token: Option<&str>, runner: Arc<dyn BacktestRunner>) -> TestApp {
     build(token, None, runner)
 }
 
-fn seed(store: &dyn RunStore, run_id: &str, status: RunStatus, strategy_id: &str, artifacts: &[(&str, &[u8])]) {
+fn seed(
+    store: &dyn RunStore,
+    run_id: &str,
+    status: RunStatus,
+    strategy_id: &str,
+    artifacts: &[(&str, &[u8])],
+) {
     let mut record = RunCatalogRecord::new(run_id, status, strategy_id);
     record.data_start = chrono::NaiveDate::from_ymd_opt(2024, 1, 2);
     record.data_end = chrono::NaiveDate::from_ymd_opt(2024, 1, 3);
-    record.metrics.insert("sharpe".to_string(), "1.2345".to_string());
-    record.metrics.insert("max_drawdown".to_string(), "-0.0825".to_string());
+    record
+        .metrics
+        .insert("sharpe".to_string(), "1.2345".to_string());
+    record
+        .metrics
+        .insert("max_drawdown".to_string(), "-0.0825".to_string());
     let mut map = BTreeMap::new();
     for (name, payload) in artifacts {
         map.insert((*name).to_string(), payload.to_vec());
@@ -135,7 +157,11 @@ fn json_body(bytes: &[u8]) -> Value {
 }
 
 fn get(path: &str) -> Request<Body> {
-    Request::builder().method("GET").uri(path).body(Body::empty()).expect("request")
+    Request::builder()
+        .method("GET")
+        .uri(path)
+        .body(Body::empty())
+        .expect("request")
 }
 
 fn get_auth(path: &str, token: &str) -> Request<Body> {
@@ -214,7 +240,12 @@ async fn routes_reject_missing_or_invalid_credentials() {
     for request in cases {
         let (status, headers, body) = send(&test.router, request).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(headers.get(header::WWW_AUTHENTICATE).and_then(|v| v.to_str().ok()), Some("Bearer"));
+        assert_eq!(
+            headers
+                .get(header::WWW_AUTHENTICATE)
+                .and_then(|v| v.to_str().ok()),
+            Some("Bearer")
+        );
         assert_eq!(
             json_body(&body),
             json!({"error": {"code": "unauthorized", "message": "a valid bearer token is required"}})
@@ -225,8 +256,23 @@ async fn routes_reject_missing_or_invalid_credentials() {
 #[tokio::test]
 async fn list_runs_returns_catalog_rows_sorted_by_run_id() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    seed(test.store.as_ref(), "run-1", RunStatus::Complete, "momentum", &[("fills.parquet", b"fills-bytes"), ("actions.parquet", b"actions-bytes")]);
-    seed(test.store.as_ref(), "run-2", RunStatus::Failed, "mean-reversion", &[("backtest.json", b"{}")]);
+    seed(
+        test.store.as_ref(),
+        "run-1",
+        RunStatus::Complete,
+        "momentum",
+        &[
+            ("fills.parquet", b"fills-bytes"),
+            ("actions.parquet", b"actions-bytes"),
+        ],
+    );
+    seed(
+        test.store.as_ref(),
+        "run-2",
+        RunStatus::Failed,
+        "mean-reversion",
+        &[("backtest.json", b"{}")],
+    );
 
     let (status, _, body) = send(&test.router, get_auth("/v1/backtests/runs", BEARER)).await;
     assert_eq!(status, StatusCode::OK);
@@ -238,30 +284,64 @@ async fn list_runs_returns_catalog_rows_sorted_by_run_id() {
     assert_eq!(runs[0]["strategy_id"], "momentum");
     assert_eq!(runs[0]["data_start"], "2024-01-02");
     assert_eq!(runs[0]["artifact_count"], 2);
-    assert_eq!(runs[0]["total_bytes"], (b"fills-bytes".len() + b"actions-bytes".len()) as u64);
+    assert_eq!(
+        runs[0]["total_bytes"],
+        (b"fills-bytes".len() + b"actions-bytes".len()) as u64
+    );
     assert_eq!(runs[0]["metrics"]["sharpe"], "1.2345");
 }
 
 #[tokio::test]
 async fn list_runs_filters_by_status_and_strategy() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    seed(test.store.as_ref(), "run-1", RunStatus::Complete, "momentum", &[("a", b"a")]);
-    seed(test.store.as_ref(), "run-2", RunStatus::Failed, "mean-reversion", &[("a", b"a")]);
+    seed(
+        test.store.as_ref(),
+        "run-1",
+        RunStatus::Complete,
+        "momentum",
+        &[("a", b"a")],
+    );
+    seed(
+        test.store.as_ref(),
+        "run-2",
+        RunStatus::Failed,
+        "mean-reversion",
+        &[("a", b"a")],
+    );
 
-    let (_, _, failed) = send(&test.router, get_auth("/v1/backtests/runs?status=failed", BEARER)).await;
+    let (_, _, failed) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs?status=failed", BEARER),
+    )
+    .await;
     assert_eq!(json_body(&failed)["runs"][0]["run_id"], "run-2");
 
-    let (_, _, momentum) = send(&test.router, get_auth("/v1/backtests/runs?strategy_id=momentum", BEARER)).await;
+    let (_, _, momentum) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs?strategy_id=momentum", BEARER),
+    )
+    .await;
     assert_eq!(json_body(&momentum)["runs"][0]["run_id"], "run-1");
 
-    let (_, _, both) = send(&test.router, get_auth("/v1/backtests/runs?status=failed&strategy_id=momentum", BEARER)).await;
+    let (_, _, both) = send(
+        &test.router,
+        get_auth(
+            "/v1/backtests/runs?status=failed&strategy_id=momentum",
+            BEARER,
+        ),
+    )
+    .await;
     assert_eq!(json_body(&both)["runs"], json!([]));
 }
 
 #[tokio::test]
 async fn list_runs_rejects_an_unknown_status_value() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    let (status, _, body) = send(&test.router, get_auth("/v1/backtests/runs?status=archived", BEARER)).await;
+    let (status, _, body) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs?status=archived", BEARER),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(json_body(&body)["error"]["code"], "validation_error");
 }
@@ -269,13 +349,21 @@ async fn list_runs_rejects_an_unknown_status_value() {
 #[tokio::test]
 async fn get_run_returns_the_catalog_row_or_404() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    seed(test.store.as_ref(), "run-1", RunStatus::Complete, "momentum", &[("a", b"a")]);
+    seed(
+        test.store.as_ref(),
+        "run-1",
+        RunStatus::Complete,
+        "momentum",
+        &[("a", b"a")],
+    );
 
-    let (found_status, _, found) = send(&test.router, get_auth("/v1/backtests/runs/run-1", BEARER)).await;
+    let (found_status, _, found) =
+        send(&test.router, get_auth("/v1/backtests/runs/run-1", BEARER)).await;
     assert_eq!(found_status, StatusCode::OK);
     assert_eq!(json_body(&found)["run_id"], "run-1");
 
-    let (missing_status, _, missing) = send(&test.router, get_auth("/v1/backtests/runs/unknown", BEARER)).await;
+    let (missing_status, _, missing) =
+        send(&test.router, get_auth("/v1/backtests/runs/unknown", BEARER)).await;
     assert_eq!(missing_status, StatusCode::NOT_FOUND);
     assert_eq!(
         json_body(&missing),
@@ -286,25 +374,58 @@ async fn get_run_returns_the_catalog_row_or_404() {
 #[tokio::test]
 async fn list_artifacts_reports_names_sizes_and_object_paths() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    seed(test.store.as_ref(), "run-1", RunStatus::Complete, "momentum", &[("fills.parquet", b"fills-bytes"), ("actions.parquet", b"actions-bytes")]);
+    seed(
+        test.store.as_ref(),
+        "run-1",
+        RunStatus::Complete,
+        "momentum",
+        &[
+            ("fills.parquet", b"fills-bytes"),
+            ("actions.parquet", b"actions-bytes"),
+        ],
+    );
 
-    let (status, _, body) = send(&test.router, get_auth("/v1/backtests/runs/run-1/artifacts", BEARER)).await;
+    let (status, _, body) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs/run-1/artifacts", BEARER),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let artifacts = &json_body(&body)["artifacts"];
     assert_eq!(artifacts[0]["name"], "actions.parquet");
     assert_eq!(artifacts[1]["name"], "fills.parquet");
     assert_eq!(artifacts[0]["size"], b"actions-bytes".len() as u64);
-    assert_eq!(artifacts[0]["object_path"], "backtests/run-1/actions.parquet");
+    assert_eq!(
+        artifacts[0]["object_path"],
+        "backtests/run-1/actions.parquet"
+    );
     assert_eq!(artifacts[0]["sas_url"], Value::Null);
 }
 
 #[tokio::test]
 async fn list_artifacts_issues_scoped_sas_urls_when_configured() {
     let issuer = Arc::new(RecordingSasIssuer::default());
-    let test = build(Some(BEARER), Some(issuer.clone()), Arc::new(StubRunner { fail: false }));
-    seed(test.store.as_ref(), "run-1", RunStatus::Complete, "momentum", &[("fills.parquet", b"fills-bytes"), ("actions.parquet", b"actions-bytes")]);
+    let test = build(
+        Some(BEARER),
+        Some(issuer.clone()),
+        Arc::new(StubRunner { fail: false }),
+    );
+    seed(
+        test.store.as_ref(),
+        "run-1",
+        RunStatus::Complete,
+        "momentum",
+        &[
+            ("fills.parquet", b"fills-bytes"),
+            ("actions.parquet", b"actions-bytes"),
+        ],
+    );
 
-    let (status, _, body) = send(&test.router, get_auth("/v1/backtests/runs/run-1/artifacts", BEARER)).await;
+    let (status, _, body) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs/run-1/artifacts", BEARER),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let artifacts = &json_body(&body)["artifacts"];
     assert_eq!(
@@ -323,44 +444,104 @@ async fn list_artifacts_issues_scoped_sas_urls_when_configured() {
 #[tokio::test]
 async fn download_artifact_returns_exact_payload_bytes() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    seed(test.store.as_ref(), "run-1", RunStatus::Complete, "momentum", &[("fills.parquet", b"fills-bytes")]);
+    seed(
+        test.store.as_ref(),
+        "run-1",
+        RunStatus::Complete,
+        "momentum",
+        &[("fills.parquet", b"fills-bytes")],
+    );
 
-    let (status, headers, body) = send(&test.router, get_auth("/v1/backtests/runs/run-1/artifacts/fills.parquet", BEARER)).await;
+    let (status, headers, body) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs/run-1/artifacts/fills.parquet", BEARER),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, b"fills-bytes");
-    assert_eq!(headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()), Some("application/octet-stream"));
+    assert_eq!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/octet-stream")
+    );
 }
 
 #[tokio::test]
 async fn download_artifact_rejects_unknown_runs_and_artifacts() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    seed(test.store.as_ref(), "run-1", RunStatus::Complete, "momentum", &[("fills.parquet", b"fills-bytes")]);
+    seed(
+        test.store.as_ref(),
+        "run-1",
+        RunStatus::Complete,
+        "momentum",
+        &[("fills.parquet", b"fills-bytes")],
+    );
 
-    let (missing_run_status, _, missing_run) = send(&test.router, get_auth("/v1/backtests/runs/unknown/artifacts/fills.parquet", BEARER)).await;
+    let (missing_run_status, _, missing_run) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs/unknown/artifacts/fills.parquet", BEARER),
+    )
+    .await;
     assert_eq!(missing_run_status, StatusCode::NOT_FOUND);
     assert_eq!(json_body(&missing_run)["error"]["code"], "run_not_found");
 
-    let (missing_artifact_status, _, missing_artifact) = send(&test.router, get_auth("/v1/backtests/runs/run-1/artifacts/missing.parquet", BEARER)).await;
+    let (missing_artifact_status, _, missing_artifact) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs/run-1/artifacts/missing.parquet", BEARER),
+    )
+    .await;
     assert_eq!(missing_artifact_status, StatusCode::NOT_FOUND);
-    assert_eq!(json_body(&missing_artifact)["error"]["code"], "artifact_not_found");
+    assert_eq!(
+        json_body(&missing_artifact)["error"]["code"],
+        "artifact_not_found"
+    );
 }
 
 #[tokio::test]
 async fn delete_run_removes_the_row_and_artifacts_together() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    seed(test.store.as_ref(), "run-1", RunStatus::Complete, "momentum", &[("fills.parquet", b"fills-bytes")]);
-    seed(test.store.as_ref(), "run-2", RunStatus::Failed, "mean-reversion", &[("backtest.json", b"{}")]);
+    seed(
+        test.store.as_ref(),
+        "run-1",
+        RunStatus::Complete,
+        "momentum",
+        &[("fills.parquet", b"fills-bytes")],
+    );
+    seed(
+        test.store.as_ref(),
+        "run-2",
+        RunStatus::Failed,
+        "mean-reversion",
+        &[("backtest.json", b"{}")],
+    );
 
-    let (removed_status, _, removed) = send(&test.router, delete_auth("/v1/backtests/runs/run-1", BEARER)).await;
+    let (removed_status, _, removed) = send(
+        &test.router,
+        delete_auth("/v1/backtests/runs/run-1", BEARER),
+    )
+    .await;
     assert_eq!(removed_status, StatusCode::NO_CONTENT);
     assert!(removed.is_empty());
 
-    let (gone_status, _, _) = send(&test.router, get_auth("/v1/backtests/runs/run-1", BEARER)).await;
+    let (gone_status, _, _) =
+        send(&test.router, get_auth("/v1/backtests/runs/run-1", BEARER)).await;
     assert_eq!(gone_status, StatusCode::NOT_FOUND);
 
-    let (repeat_status, _, _) = send(&test.router, delete_auth("/v1/backtests/runs/run-1", BEARER)).await;
+    let (repeat_status, _, _) = send(
+        &test.router,
+        delete_auth("/v1/backtests/runs/run-1", BEARER),
+    )
+    .await;
     assert_eq!(repeat_status, StatusCode::NOT_FOUND);
-    assert_eq!(test.store.list(None, None).iter().map(|r| r.run_id.as_str()).collect::<Vec<_>>(), vec!["run-2"]);
+    assert_eq!(
+        test.store
+            .list(None, None)
+            .iter()
+            .map(|r| r.run_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["run-2"]
+    );
 }
 
 #[tokio::test]
@@ -375,17 +556,40 @@ async fn dev_launch_completes_and_becomes_queryable_end_to_end() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
     let document = backtest_document("momentum-spy-2024-01");
 
-    let (launch_status, headers, launch_body) = send(&test.router, post_json("/v1/backtests/jobs", Some(BEARER), document)).await;
-    assert_eq!(launch_status, StatusCode::ACCEPTED, "{}", String::from_utf8_lossy(&launch_body));
-    assert_eq!(json_body(&launch_body), json!({"job_id": "momentum-spy-2024-01", "state": "succeeded"}));
-    assert_eq!(headers.get(header::LOCATION).and_then(|v| v.to_str().ok()), Some("/v1/backtests/jobs/momentum-spy-2024-01"));
+    let (launch_status, headers, launch_body) = send(
+        &test.router,
+        post_json("/v1/backtests/jobs", Some(BEARER), document),
+    )
+    .await;
+    assert_eq!(
+        launch_status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&launch_body)
+    );
+    assert_eq!(
+        json_body(&launch_body),
+        json!({"job_id": "momentum-spy-2024-01", "state": "succeeded"})
+    );
+    assert_eq!(
+        headers.get(header::LOCATION).and_then(|v| v.to_str().ok()),
+        Some("/v1/backtests/jobs/momentum-spy-2024-01")
+    );
 
-    let (job_status, _, job_body) = send(&test.router, get_auth("/v1/backtests/jobs/momentum-spy-2024-01", BEARER)).await;
+    let (job_status, _, job_body) = send(
+        &test.router,
+        get_auth("/v1/backtests/jobs/momentum-spy-2024-01", BEARER),
+    )
+    .await;
     assert_eq!(job_status, StatusCode::OK);
     assert_eq!(json_body(&job_body)["state"], "succeeded");
     assert_eq!(json_body(&job_body)["error_message"], Value::Null);
 
-    let (run_status, _, run_body) = send(&test.router, get_auth("/v1/backtests/runs/momentum-spy-2024-01", BEARER)).await;
+    let (run_status, _, run_body) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs/momentum-spy-2024-01", BEARER),
+    )
+    .await;
     assert_eq!(run_status, StatusCode::OK);
     let row = json_body(&run_body);
     assert_eq!(row["status"], "complete");
@@ -393,7 +597,14 @@ async fn dev_launch_completes_and_becomes_queryable_end_to_end() {
     assert!(row["configuration_digest"].is_string());
     assert_eq!(row["artifact_count"], 1);
 
-    let (_, _, artifact_body) = send(&test.router, get_auth("/v1/backtests/runs/momentum-spy-2024-01/artifacts/backtest.json", BEARER)).await;
+    let (_, _, artifact_body) = send(
+        &test.router,
+        get_auth(
+            "/v1/backtests/runs/momentum-spy-2024-01/artifacts/backtest.json",
+            BEARER,
+        ),
+    )
+    .await;
     assert_eq!(json_body(&artifact_body)["status"], "completed");
 }
 
@@ -402,15 +613,33 @@ async fn failed_launch_is_recorded_on_the_job_and_leaves_no_run() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: true }));
     let document = backtest_document("momentum-spy-2024-01");
 
-    let (launch_status, _, launch_body) = send(&test.router, post_json("/v1/backtests/jobs", Some(BEARER), document)).await;
+    let (launch_status, _, launch_body) = send(
+        &test.router,
+        post_json("/v1/backtests/jobs", Some(BEARER), document),
+    )
+    .await;
     assert_eq!(launch_status, StatusCode::ACCEPTED);
-    assert_eq!(json_body(&launch_body), json!({"job_id": "momentum-spy-2024-01", "state": "failed"}));
+    assert_eq!(
+        json_body(&launch_body),
+        json!({"job_id": "momentum-spy-2024-01", "state": "failed"})
+    );
 
-    let (_, _, job_body) = send(&test.router, get_auth("/v1/backtests/jobs/momentum-spy-2024-01", BEARER)).await;
+    let (_, _, job_body) = send(
+        &test.router,
+        get_auth("/v1/backtests/jobs/momentum-spy-2024-01", BEARER),
+    )
+    .await;
     assert_eq!(json_body(&job_body)["state"], "failed");
-    assert!(json_body(&job_body)["error_message"].as_str().expect("message").contains("StrategyLoadError"));
+    assert!(json_body(&job_body)["error_message"]
+        .as_str()
+        .expect("message")
+        .contains("StrategyLoadError"));
 
-    let (run_status, _, _) = send(&test.router, get_auth("/v1/backtests/runs/momentum-spy-2024-01", BEARER)).await;
+    let (run_status, _, _) = send(
+        &test.router,
+        get_auth("/v1/backtests/runs/momentum-spy-2024-01", BEARER),
+    )
+    .await;
     assert_eq!(run_status, StatusCode::NOT_FOUND);
     assert!(test.store.get("momentum-spy-2024-01").is_none());
 }
@@ -420,11 +649,19 @@ async fn launch_rejects_unknown_fields_and_non_object_documents() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
     let mut document = backtest_document("r");
     document["unexpected"] = json!(true);
-    let (extra_status, _, extra) = send(&test.router, post_json("/v1/backtests/jobs", Some(BEARER), document)).await;
+    let (extra_status, _, extra) = send(
+        &test.router,
+        post_json("/v1/backtests/jobs", Some(BEARER), document),
+    )
+    .await;
     assert_eq!(extra_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(json_body(&extra)["error"]["code"], "validation_error");
 
-    let (malformed_status, _, malformed) = send(&test.router, post_raw("/v1/backtests/jobs", BEARER, b"[1, 2]")).await;
+    let (malformed_status, _, malformed) = send(
+        &test.router,
+        post_raw("/v1/backtests/jobs", BEARER, b"[1, 2]"),
+    )
+    .await;
     assert_eq!(malformed_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(json_body(&malformed)["error"]["code"], "validation_error");
 }
@@ -432,7 +669,15 @@ async fn launch_rejects_unknown_fields_and_non_object_documents() {
 #[tokio::test]
 async fn launch_rejects_a_wrong_shell_document() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    let (status, _, body) = send(&test.router, post_json("/v1/backtests/jobs", Some(BEARER), json!({"schema_version": 1, "shell": "trader"}))).await;
+    let (status, _, body) = send(
+        &test.router,
+        post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            json!({"schema_version": 1, "shell": "trader"}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(json_body(&body)["error"]["code"], "validation_error");
 }
@@ -454,15 +699,27 @@ async fn injected_launcher_keeps_asynchronous_job_semantics() {
     };
     let router = create_app(config).expect("app");
 
-    let (status, _, body) = send(&router, post_json("/v1/backtests/jobs", Some(BEARER), backtest_document("momentum-spy-2024-01"))).await;
+    let (status, _, body) = send(
+        &router,
+        post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            backtest_document("momentum-spy-2024-01"),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::ACCEPTED);
-    assert_eq!(json_body(&body), json!({"job_id": "momentum-spy-2024-01", "state": "queued"}));
+    assert_eq!(
+        json_body(&body),
+        json!({"job_id": "momentum-spy-2024-01", "state": "queued"})
+    );
 }
 
 #[tokio::test]
 async fn job_status_returns_404_for_an_unknown_job() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    let (status, _, body) = send(&test.router, get_auth("/v1/backtests/jobs/unknown", BEARER)).await;
+    let (status, _, body) =
+        send(&test.router, get_auth("/v1/backtests/jobs/unknown", BEARER)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(
         json_body(&body),
@@ -487,7 +744,10 @@ fn in_memory_store_helpers_are_deterministic() {
     let mut artifacts = BTreeMap::new();
     artifacts.insert("a".to_string(), vec![1, 2]);
     let record = store
-        .put(RunCatalogRecord::new("r", RunStatus::Complete, "s"), artifacts)
+        .put(
+            RunCatalogRecord::new("r", RunStatus::Complete, "s"),
+            artifacts,
+        )
         .expect("put");
     assert_eq!(record.total_bytes, 2);
     assert_eq!(store.list(None, Some("s")).len(), 1);

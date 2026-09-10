@@ -28,7 +28,9 @@ impl IndicatorHost {
     /// Construct a host that prepends `paths` to `sys.path`.
     #[must_use]
     pub fn with_search_paths(paths: Vec<PathBuf>) -> Self {
-        Self { search_paths: paths }
+        Self {
+            search_paths: paths,
+        }
     }
 
     /// Import one module-level indicator callable.

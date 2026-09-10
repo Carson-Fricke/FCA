@@ -41,9 +41,7 @@ pub trait BearerTokenSource: Send + Sync {
 
 /// Return the stripped bearer token from an environment mapping.
 #[must_use]
-pub fn bearer_token_from_environ(
-    environ: Option<&BTreeMap<String, String>>,
-) -> Option<String> {
+pub fn bearer_token_from_environ(environ: Option<&BTreeMap<String, String>>) -> Option<String> {
     let token = match environ {
         Some(environ) => environ.get(BEARER_TOKEN_VARIABLE).cloned(),
         None => std::env::var(BEARER_TOKEN_VARIABLE).ok(),
@@ -96,14 +94,20 @@ mod tests {
         assert!(bearer_headers(None).is_err());
         assert!(bearer_headers(Some("  ")).is_err());
         let headers = bearer_headers(Some(" secret ")).expect("headers");
-        assert_eq!(headers.get("Authorization").map(String::as_str), Some("Bearer secret"));
+        assert_eq!(
+            headers.get("Authorization").map(String::as_str),
+            Some("Bearer secret")
+        );
     }
 
     #[test]
     fn environ_reads_the_documented_variable() {
         let mut environ = BTreeMap::new();
         environ.insert(BEARER_TOKEN_VARIABLE.to_string(), " abc ".to_string());
-        assert_eq!(bearer_token_from_environ(Some(&environ)).as_deref(), Some("abc"));
+        assert_eq!(
+            bearer_token_from_environ(Some(&environ)).as_deref(),
+            Some("abc")
+        );
         let empty: BTreeMap<String, String> = BTreeMap::new();
         assert_eq!(bearer_token_from_environ(Some(&empty)), None);
     }

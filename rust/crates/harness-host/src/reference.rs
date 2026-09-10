@@ -84,10 +84,8 @@ mod tests {
 
     #[test]
     fn records_callbacks_in_dispatch_order() {
-        let mut strategy = ReferenceStrategy::new(BTreeMap::from([(
-            "label".to_string(),
-            json!("alpha"),
-        )]));
+        let mut strategy =
+            ReferenceStrategy::new(BTreeMap::from([("label".to_string(), json!("alpha"))]));
         assert_eq!(strategy.parameters().get("label"), Some(&json!("alpha")));
         strategy.dispatch_lifecycle("on_start");
         strategy.dispatch("on_quote", r#"{"symbol":"SPY"}"#);

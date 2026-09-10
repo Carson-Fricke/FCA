@@ -37,8 +37,7 @@ pub mod mcp_cli;
 ///
 /// Mirrors `typer.Typer(help="Run a quant-harness process from the shared FCA
 /// runtime image.")` in `harness.cli.application`.
-pub const HARNESS_ABOUT: &str =
-    "Run a quant-harness process from the shared FCA runtime image.";
+pub const HARNESS_ABOUT: &str = "Run a quant-harness process from the shared FCA runtime image.";
 
 /// Process facade mirroring `harness.cli.application:app`.
 ///
@@ -465,7 +464,8 @@ impl std::error::Error for ConfigurationError {}
 /// Returns [`ConfigurationError::Io`] when the file cannot be read, or
 /// [`ConfigurationError::MissingShell`] when no top-level `shell` key exists.
 pub fn configuration_shell(path: &Path) -> Result<String, ConfigurationError> {
-    let text = fs::read_to_string(path).map_err(|error| ConfigurationError::Io(error.to_string()))?;
+    let text =
+        fs::read_to_string(path).map_err(|error| ConfigurationError::Io(error.to_string()))?;
     parse_configuration_shell(&text).ok_or(ConfigurationError::MissingShell)
 }
 
@@ -505,10 +505,7 @@ mod tests {
     }
 
     impl BacktestJobRunner for RecordingRunner {
-        fn run(
-            &self,
-            args: &BacktestJobArgs,
-        ) -> Result<BacktestRunSummary, BacktestJobError> {
+        fn run(&self, args: &BacktestJobArgs) -> Result<BacktestRunSummary, BacktestJobError> {
             self.seen.borrow_mut().push(args.clone());
             match &self.summary {
                 Some(summary) => Ok(summary.clone()),
@@ -730,7 +727,10 @@ mod tests {
             CommandResult::ServeMcp(args) => {
                 assert_eq!(args.mode, "remote");
                 assert!(args.enable_trader);
-                assert_eq!(args.api_base_url.as_deref(), Some("https://api.example.test"));
+                assert_eq!(
+                    args.api_base_url.as_deref(),
+                    Some("https://api.example.test")
+                );
             }
             other => panic!("expected mcp serve, got {other:?}"),
         }
@@ -746,7 +746,10 @@ mod tests {
             parse_configuration_shell("mode: x\n\"shell\": \"api\"\n").as_deref(),
             Some("api")
         );
-        assert_eq!(parse_configuration_shell("market_data:\n  shell: nested\n"), None);
+        assert_eq!(
+            parse_configuration_shell("market_data:\n  shell: nested\n"),
+            None
+        );
         assert_eq!(parse_configuration_shell("no shell here\n"), None);
     }
 }

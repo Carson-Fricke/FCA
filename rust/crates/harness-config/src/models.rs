@@ -103,9 +103,7 @@ fn scalar_text(value: YamlValue, field: &str) -> Result<String, ConfigError> {
 fn identifier(text: &str, field: &str) -> Result<String, ConfigError> {
     let trimmed = text.trim();
     if trimmed.is_empty() || trimmed.len() > 128 {
-        return Err(ConfigError(format!(
-            "{field} must be 1 to 128 characters"
-        )));
+        return Err(ConfigError(format!("{field} must be 1 to 128 characters")));
     }
     let mut chars = trimmed.chars();
     let first = chars.next().unwrap_or(' ');
@@ -121,18 +119,22 @@ fn identifier(text: &str, field: &str) -> Result<String, ConfigError> {
 fn non_empty_text(text: &str, field: &str) -> Result<String, ConfigError> {
     let trimmed = text.trim();
     if trimmed.is_empty() || trimmed.len() > 512 {
-        return Err(ConfigError(format!(
-            "{field} must be 1 to 512 characters"
-        )));
+        return Err(ConfigError(format!("{field} must be 1 to 512 characters")));
     }
     Ok(trimmed.to_string())
 }
 
 fn sha256(text: &str, field: &str) -> Result<String, ConfigError> {
-    if text.len() == 64 && text.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+    if text.len() == 64
+        && text
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    {
         return Ok(text.to_string());
     }
-    Err(ConfigError(format!("{field} must be a 64-character hex digest")))
+    Err(ConfigError(format!(
+        "{field} must be a 64-character hex digest"
+    )))
 }
 
 fn env_reference(text: &str, field: &str) -> Result<String, ConfigError> {
@@ -140,18 +142,14 @@ fn env_reference(text: &str, field: &str) -> Result<String, ConfigError> {
         .strip_prefix("${")
         .and_then(|value| value.strip_suffix('}'));
     let Some(inner) = inner else {
-        return Err(ConfigError(format!(
-            "{field} must use ${{ENV_VAR}} syntax"
-        )));
+        return Err(ConfigError(format!("{field} must use ${{ENV_VAR}} syntax")));
     };
     let mut chars = inner.chars();
     let first = chars.next().unwrap_or(' ');
     if !(first.is_ascii_uppercase() || first == '_')
         || !chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
     {
-        return Err(ConfigError(format!(
-            "{field} must use ${{ENV_VAR}} syntax"
-        )));
+        return Err(ConfigError(format!("{field} must use ${{ENV_VAR}} syntax")));
     }
     Ok(text.to_string())
 }
@@ -160,7 +158,9 @@ fn currency(text: &str, field: &str) -> Result<String, ConfigError> {
     if text.len() == 3 && text.chars().all(|c| c.is_ascii_uppercase()) {
         return Ok(text.to_string());
     }
-    Err(ConfigError(format!("{field} must be a three-letter currency")))
+    Err(ConfigError(format!(
+        "{field} must be a three-letter currency"
+    )))
 }
 
 fn bar_interval(text: &str, field: &str) -> Result<String, ConfigError> {
@@ -207,7 +207,8 @@ fn image_digest(text: &str, field: &str) -> Result<String, ConfigError> {
 }
 
 fn parse_decimal(text: &str, field: &str) -> Result<Decimal, ConfigError> {
-    Decimal::from_str(text.trim()).map_err(|_| ConfigError(format!("{field} must be an exact decimal")))
+    Decimal::from_str(text.trim())
+        .map_err(|_| ConfigError(format!("{field} must be an exact decimal")))
 }
 
 fn decimal_value(decimal: Decimal) -> Value {
@@ -215,8 +216,11 @@ fn decimal_value(decimal: Decimal) -> Value {
 }
 
 fn datetime_value(text: &str, field: &str) -> Result<Value, ConfigError> {
-    let parsed = DateTime::parse_from_rfc3339(text)
-        .map_err(|_| ConfigError(format!("{field} must be an ISO 8601 datetime with a UTC offset")))?;
+    let parsed = DateTime::parse_from_rfc3339(text).map_err(|_| {
+        ConfigError(format!(
+            "{field} must be an ISO 8601 datetime with a UTC offset"
+        ))
+    })?;
     let formatted = parsed
         .with_timezone(&Utc)
         .format("%Y-%m-%dT%H:%M:%S%.6fZ")
@@ -294,10 +298,18 @@ fn build_parameters(value: Option<YamlValue>, field: &str) -> Result<Value, Conf
 
 fn build_strategy_instance(value: YamlValue) -> Result<Value, ConfigError> {
     let mut map = as_map(value, "strategy_instances[]")?;
-    let instance_id = identifier(&as_str(take(&mut map, "instance_id")?, "instance_id")?, "instance_id")?;
-    let implementation =
-        non_empty_text(&as_str(take(&mut map, "implementation")?, "implementation")?, "implementation")?;
-    let bundle_hash = sha256(&as_str(take(&mut map, "bundle_hash")?, "bundle_hash")?, "bundle_hash")?;
+    let instance_id = identifier(
+        &as_str(take(&mut map, "instance_id")?, "instance_id")?,
+        "instance_id",
+    )?;
+    let implementation = non_empty_text(
+        &as_str(take(&mut map, "implementation")?, "implementation")?,
+        "implementation",
+    )?;
+    let bundle_hash = sha256(
+        &as_str(take(&mut map, "bundle_hash")?, "bundle_hash")?,
+        "bundle_hash",
+    )?;
     let capital_fraction_text =
         scalar_text(take(&mut map, "capital_fraction")?, "capital_fraction")?;
     let capital_fraction = parse_decimal(&capital_fraction_text, "capital_fraction")?;
@@ -331,9 +343,15 @@ fn build_strategy_instances(value: YamlValue) -> Result<(Value, Decimal), Config
     let mut capital = Decimal::ZERO;
     for item in items {
         let built = build_strategy_instance(item)?;
-        let id = built["instance_id"].as_str().unwrap_or_default().to_string();
+        let id = built["instance_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         ids.push(id);
-        if let Some(fraction) = built["capital_fraction"].get("$decimal").and_then(Value::as_str) {
+        if let Some(fraction) = built["capital_fraction"]
+            .get("$decimal")
+            .and_then(Value::as_str)
+        {
             capital += parse_decimal(fraction, "capital_fraction")?;
         }
         output.push(built);
@@ -357,8 +375,10 @@ fn build_strategy_instances(value: YamlValue) -> Result<(Value, Decimal), Config
 fn build_risk_rule(value: YamlValue) -> Result<Value, ConfigError> {
     let mut map = as_map(value, "risk_pipeline.rules[]")?;
     let rule_id = identifier(&as_str(take(&mut map, "rule_id")?, "rule_id")?, "rule_id")?;
-    let implementation =
-        non_empty_text(&as_str(take(&mut map, "implementation")?, "implementation")?, "implementation")?;
+    let implementation = non_empty_text(
+        &as_str(take(&mut map, "implementation")?, "implementation")?,
+        "implementation",
+    )?;
     let parameters = build_parameters(take_opt(&mut map, "parameters"), "parameters")?;
     ensure_empty(&map, "risk rule")?;
     Ok(json!({
@@ -377,7 +397,9 @@ fn build_risk_pipeline(value: YamlValue) -> Result<Value, ConfigError> {
     )?;
     let rules_value = as_seq(take(&mut map, "rules")?, "rules")?;
     if rules_value.is_empty() {
-        return Err(ConfigError("risk_pipeline.rules must not be empty".to_string()));
+        return Err(ConfigError(
+            "risk_pipeline.rules must not be empty".to_string(),
+        ));
     }
     let mut rules = Vec::with_capacity(rules_value.len());
     let mut ids: Vec<String> = Vec::new();
@@ -406,10 +428,7 @@ fn build_fee_rule(value: YamlValue) -> Result<Value, ConfigError> {
         &["flat", "per_unit", "notional_bps"],
         "basis",
     )?;
-    let rate = parse_decimal(
-        &scalar_text(take(&mut map, "rate")?, "rate")?,
-        "rate",
-    )?;
+    let rate = parse_decimal(&scalar_text(take(&mut map, "rate")?, "rate")?, "rate")?;
     if rate < Decimal::ZERO {
         return Err(ConfigError("rate must not be negative".to_string()));
     }
@@ -507,7 +526,9 @@ fn build_deployment(value: YamlValue) -> Result<Value, ConfigError> {
     };
     let replicas = as_int(take(&mut map, "replicas")?, "replicas")?;
     if !(0..=100).contains(&replicas) {
-        return Err(ConfigError("replicas must be between 0 and 100".to_string()));
+        return Err(ConfigError(
+            "replicas must be between 0 and 100".to_string(),
+        ));
     }
     let restart_policy = enum_value(
         &as_str(take(&mut map, "restart_policy")?, "restart_policy")?,
@@ -540,8 +561,10 @@ fn build_deployment(value: YamlValue) -> Result<Value, ConfigError> {
 
 fn build_data_snapshot(value: YamlValue) -> Result<Value, ConfigError> {
     let mut map = as_map(value, "data")?;
-    let snapshot_id =
-        non_empty_text(&as_str(take(&mut map, "snapshot_id")?, "snapshot_id")?, "snapshot_id")?;
+    let snapshot_id = non_empty_text(
+        &as_str(take(&mut map, "snapshot_id")?, "snapshot_id")?,
+        "snapshot_id",
+    )?;
     let fingerprint = sha256(
         &as_str(take(&mut map, "fingerprint")?, "fingerprint")?,
         "fingerprint",
@@ -629,8 +652,10 @@ pub fn build_api(mapping: &Mapping) -> Result<Value, ConfigError> {
     };
     let auth = {
         let mut auth = as_map(take(&mut map, "auth")?, "auth")?;
-        let bearer =
-            env_reference(&as_str(take(&mut auth, "bearer_token")?, "bearer_token")?, "bearer_token")?;
+        let bearer = env_reference(
+            &as_str(take(&mut auth, "bearer_token")?, "bearer_token")?,
+            "bearer_token",
+        )?;
         ensure_empty(&auth, "auth")?;
         json!({"bearer_token": bearer})
     };
@@ -787,13 +812,20 @@ mod tests {
     fn backtest_decimal_normalization_matches_python() {
         let value = build(&minimal_backtest(), "backtest").expect("build");
         assert_eq!(value["initial_cash"], json!({"$decimal": "100"}));
-        assert_eq!(value["strategy_instances"][0]["capital_fraction"], json!({"$decimal": "1"}));
-        assert_eq!(value["start"], json!({"$datetime": "2024-01-02T14:30:00.000000Z"}));
+        assert_eq!(
+            value["strategy_instances"][0]["capital_fraction"],
+            json!({"$decimal": "1"})
+        );
+        assert_eq!(
+            value["start"],
+            json!({"$datetime": "2024-01-02T14:30:00.000000Z"})
+        );
     }
 
     #[test]
     fn backtest_rejects_network_enabled_deployment() {
-        let text = minimal_backtest().replace("network_access: disabled", "network_access: runtime_only");
+        let text =
+            minimal_backtest().replace("network_access: disabled", "network_access: runtime_only");
         assert!(build(&text, "backtest").is_err());
     }
 

@@ -197,11 +197,10 @@ impl PythonStrategyLinter {
         let lint_path = self.lint_path.to_string_lossy().to_string();
         let result: PyResult<LintReport> = Python::attach(|py| {
             let importlib = py.import("importlib.util")?;
-            let spec = importlib
-                .call_method1(
-                    "spec_from_file_location",
-                    ("_harness_strategy_lint", lint_path.as_str()),
-                )?;
+            let spec = importlib.call_method1(
+                "spec_from_file_location",
+                ("_harness_strategy_lint", lint_path.as_str()),
+            )?;
             let module = importlib.call_method1("module_from_spec", (&spec,))?;
             py.import("sys")?
                 .getattr("modules")?
@@ -246,8 +245,8 @@ impl PythonStrategyLinter {
     ///
     /// Returns [`StrategyLintError`] when the file cannot be read or linted.
     pub fn lint_file(&self, path: &Path) -> Result<LintReport, StrategyLintError> {
-        let source = std::fs::read_to_string(path)
-            .map_err(|error| StrategyLintError(error.to_string()))?;
+        let source =
+            std::fs::read_to_string(path).map_err(|error| StrategyLintError(error.to_string()))?;
         self.lint_source(&source, Some(&path.to_string_lossy()))
     }
 
@@ -315,7 +314,10 @@ mod tests {
     fn async_syntax_is_reported() {
         let linter = PythonStrategyLinter::new(default_lint_path());
         let report = linter
-            .lint_source("async def on_quote(event):\n    return event\n", Some("<test>"))
+            .lint_source(
+                "async def on_quote(event):\n    return event\n",
+                Some("<test>"),
+            )
             .expect("lint");
         assert!(report.codes().contains(&"SB700"), "{}", report.render());
         assert_eq!(report.violations[0].category, ViolationCategory::Asyncio);
