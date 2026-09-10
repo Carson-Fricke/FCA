@@ -23,6 +23,7 @@ pub mod capi;
 pub mod clock;
 pub mod decimal;
 pub mod fills;
+pub mod kernel;
 pub mod latency_size;
 pub mod market;
 pub mod market_bus;
