@@ -333,6 +333,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-mcp"
+version = "0.1.0"
+dependencies = [
+ "percent-encoding",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "harness-native"
 version = "0.1.0"
 
