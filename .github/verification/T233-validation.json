@@ -1,0 +1,32 @@
+{
+  "taskId": "T233",
+  "numTotalTests": 2759,
+  "numPassedTests": 2759,
+  "numFailedTests": 0,
+  "numPendingTests": 15,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "local-stack-script-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/scripts/test_local_stack.py",
+      "result": "22 tests: stage result aggregation, remediation message mapping per stage, token redaction on every rendered line (sentinel value absent from output), CLI defaults and flag handling; network stages injected - no real HTTP in tests. Live dead-port smoke recorded 0/3 stages with per-stage remediation and exit 1"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2759 tests passing at freeze (repo-wide count including the concurrent screening workstream's additions)"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check scripts/local && uv run --extra dev ty check scripts/local/run_local_stack.py",
+      "result": "ruff, format, and ty clean"
+    }
+  ],
+  "limitations": [
+    "The verification script checks the chain over the network surfaces; it does not manage processes - the runbook's three-terminal startup is operator-executed",
+    "thesis serve remains a scaffolded boundary per the T178 packaging contract; the runbook's Terminal 2 composition wires the real workspace-data services until the serve entrypoint takes over"
+  ]
+}
