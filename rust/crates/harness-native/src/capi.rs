@@ -470,6 +470,144 @@ pub unsafe extern "C" fn harness_quant_crr_price_batch(
     code::OK
 }
 
+/// # Safety
+///
+/// Every pointer must reference a valid buffer of `n` elements of its type;
+/// output pointers must be writable.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn harness_quant_crr_implied_time_batch(
+    s_ptr: *const f64,
+    k_ptr: *const f64,
+    r_ptr: *const f64,
+    q_ptr: *const f64,
+    sigma_ptr: *const f64,
+    flags_ptr: *const u8,
+    steps_ptr: *const u32,
+    target_ptr: *const f64,
+    t_lower_ptr: *const f64,
+    t_upper_ptr: *const f64,
+    n: usize,
+    bisect_iterations: u32,
+    out_t_ptr: *mut f64,
+) -> c_int {
+    if n == 0 {
+        return code::OK;
+    }
+    let (Some(s), Some(k), Some(r), Some(q), Some(sigma)) = (
+        unsafe { const_f64_slice(s_ptr, n) },
+        unsafe { const_f64_slice(k_ptr, n) },
+        unsafe { const_f64_slice(r_ptr, n) },
+        unsafe { const_f64_slice(q_ptr, n) },
+        unsafe { const_f64_slice(sigma_ptr, n) },
+    ) else {
+        return code::INVALID_ARGUMENT;
+    };
+    if flags_ptr.is_null() || steps_ptr.is_null() {
+        return code::INVALID_ARGUMENT;
+    }
+    let Some(target) = (unsafe { const_f64_slice(target_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(t_lower) = (unsafe { const_f64_slice(t_lower_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(t_upper) = (unsafe { const_f64_slice(t_upper_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(out_t) = (unsafe { mut_f64_slice(out_t_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let flags = unsafe { slice::from_raw_parts(flags_ptr, n) };
+    let steps = unsafe { slice::from_raw_parts(steps_ptr, n) };
+    for index in 0..n {
+        out_t[index] = crate::quant::implied_time(
+            s[index],
+            k[index],
+            r[index],
+            q[index],
+            sigma[index],
+            flags[index] & crate::quant::FLAG_CALL != 0,
+            flags[index] & crate::quant::FLAG_AMERICAN != 0,
+            steps[index],
+            target[index],
+            t_lower[index],
+            t_upper[index],
+            bisect_iterations,
+        );
+    }
+    code::OK
+}
+
+/// # Safety
+///
+/// Every pointer must reference a valid buffer of `n` elements of its type;
+/// output pointers must be writable.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn harness_quant_crr_implied_underlying_batch(
+    k_ptr: *const f64,
+    t_ptr: *const f64,
+    r_ptr: *const f64,
+    q_ptr: *const f64,
+    sigma_ptr: *const f64,
+    flags_ptr: *const u8,
+    steps_ptr: *const u32,
+    target_ptr: *const f64,
+    s_lower_ptr: *const f64,
+    s_upper_ptr: *const f64,
+    n: usize,
+    bisect_iterations: u32,
+    out_s_ptr: *mut f64,
+) -> c_int {
+    if n == 0 {
+        return code::OK;
+    }
+    let (Some(k), Some(t), Some(r), Some(q), Some(sigma)) = (
+        unsafe { const_f64_slice(k_ptr, n) },
+        unsafe { const_f64_slice(t_ptr, n) },
+        unsafe { const_f64_slice(r_ptr, n) },
+        unsafe { const_f64_slice(q_ptr, n) },
+        unsafe { const_f64_slice(sigma_ptr, n) },
+    ) else {
+        return code::INVALID_ARGUMENT;
+    };
+    if flags_ptr.is_null() || steps_ptr.is_null() {
+        return code::INVALID_ARGUMENT;
+    }
+    let Some(target) = (unsafe { const_f64_slice(target_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(s_lower) = (unsafe { const_f64_slice(s_lower_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(s_upper) = (unsafe { const_f64_slice(s_upper_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(out_s) = (unsafe { mut_f64_slice(out_s_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let flags = unsafe { slice::from_raw_parts(flags_ptr, n) };
+    let steps = unsafe { slice::from_raw_parts(steps_ptr, n) };
+    for index in 0..n {
+        out_s[index] = crate::quant::implied_underlying(
+            k[index],
+            t[index],
+            r[index],
+            q[index],
+            sigma[index],
+            flags[index] & crate::quant::FLAG_CALL != 0,
+            flags[index] & crate::quant::FLAG_AMERICAN != 0,
+            steps[index],
+            target[index],
+            s_lower[index],
+            s_upper[index],
+            bisect_iterations,
+        );
+    }
+    code::OK
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
