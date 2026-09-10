@@ -30,6 +30,8 @@ use std::process::ExitCode;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
+pub mod http;
+
 /// Root help/`about` text for the `harness` facade.
 ///
 /// Mirrors `typer.Typer(help="Run a quant-harness process from the shared FCA
