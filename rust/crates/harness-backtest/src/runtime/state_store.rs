@@ -1,0 +1,1448 @@
+//! Durable runtime-state snapshots for the paper runtime.
+//!
+//! Port of the deterministic core of `harness.runtime.state_store`: the
+//! canonical [`RuntimeSnapshot`] contract, its domain-separated SHA-256
+//! identity, the verify-then-commit [`RuntimeStateStore`], and the
+//! [`SnapshotSchedule`] cadence. The captured records carry the pinned,
+//! cross-language JSON encoding (epic T181): decimal scalars are tagged as
+//! `{"$decimal": text}` and floats as big-endian IEEE-754 bit patterns, so a
+//! snapshot round-trips byte-identically across the FFI boundary.
+//!
+//! The store's `capture`/`restore_shell` methods in Python read a `PaperShell`;
+//! the shell port belongs to this same task but its kernel is large, so capture
+//! is expressed through the public record constructors and the shell seam in
+//! [`super::paper`].
+
+use std::collections::BTreeMap;
+
+use crate::canonical_json::JsonValue;
+use crate::sha256::{digest_hex, Sha256};
+
+/// Snapshot format version.
+pub const FORMAT_VERSION: u64 = 1;
+
+/// Domain prefix for the snapshot identity hash.
+const SNAPSHOT_DOMAIN: &[u8] = b"fca:harness-runtime-state-snapshot:v1\0";
+
+/// Deterministic capture points for one runtime snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SnapshotTrigger {
+    /// A periodic capture.
+    Periodic,
+    /// A session-end capture.
+    SessionEnd,
+    /// A stop capture.
+    Stop,
+}
+
+impl SnapshotTrigger {
+    /// The stable lowercase value.
+    #[must_use]
+    pub const fn value(self) -> &'static str {
+        match self {
+            Self::Periodic => "periodic",
+            Self::SessionEnd => "session_end",
+            Self::Stop => "stop",
+        }
+    }
+
+    /// Parse a trigger from its lowercase value.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "periodic" => Some(Self::Periodic),
+            "session_end" => Some(Self::SessionEnd),
+            "stop" => Some(Self::Stop),
+            _ => None,
+        }
+    }
+}
+
+/// State-store failure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StateStoreError {
+    /// No valid snapshot is stored.
+    Missing(String),
+    /// A stored snapshot or pointer has an unsupported version.
+    Version(String),
+    /// Snapshot bytes fail their canonical hash checks.
+    Integrity(String),
+    /// A payload cannot be persisted verifiably.
+    Write(String),
+    /// A snapshot cannot be restored.
+    Restore(String),
+}
+
+impl std::fmt::Display for StateStoreError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing(message)
+            | Self::Version(message)
+            | Self::Integrity(message)
+            | Self::Write(message)
+            | Self::Restore(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for StateStoreError {}
+
+/// Whole-object storage boundary for snapshot payloads and pointers.
+pub trait SnapshotObjectStore {
+    /// Atomically replace the object at a repository-relative path.
+    fn replace(&mut self, relative_path: &str, payload: &[u8]);
+
+    /// Return the full payload of one object, or `None` when absent.
+    fn read(&self, relative_path: &str) -> Option<Vec<u8>>;
+}
+
+/// An in-memory [`SnapshotObjectStore`] for deterministic tests.
+#[derive(Clone, Debug, Default)]
+pub struct InMemorySnapshotStore {
+    objects: BTreeMap<String, Vec<u8>>,
+}
+
+impl InMemorySnapshotStore {
+    /// Create an empty store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Number of stored objects.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    /// Whether the store holds no objects.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+}
+
+impl SnapshotObjectStore for InMemorySnapshotStore {
+    fn replace(&mut self, relative_path: &str, payload: &[u8]) {
+        self.objects
+            .insert(relative_path.to_string(), payload.to_vec());
+    }
+
+    fn read(&self, relative_path: &str) -> Option<Vec<u8>> {
+        self.objects.get(relative_path).cloned()
+    }
+}
+
+/// Normalize a string-exact decimal the way `_decimal_text` does.
+///
+/// Zero renders as `0`; otherwise trailing fractional zeros are removed and
+/// the sign and integer part are preserved.
+#[must_use]
+pub fn decimal_text(value: &str) -> String {
+    let value = value.trim();
+    let (sign, unsigned) = match value.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", value.strip_prefix('+').unwrap_or(value)),
+    };
+    let (integer, fraction) = match unsigned.split_once('.') {
+        Some((integer, fraction)) => (integer, fraction),
+        None => (unsigned, ""),
+    };
+    let integer = integer.trim_start_matches('0');
+    let integer = if integer.is_empty() { "0" } else { integer };
+    let fraction = fraction.trim_end_matches('0');
+    let all_zero = integer == "0" && fraction.is_empty();
+    if all_zero {
+        return "0".to_string();
+    }
+    if fraction.is_empty() {
+        format!("{sign}{integer}")
+    } else {
+        format!("{sign}{integer}.{fraction}")
+    }
+}
+
+/// Build the tagged `{"$decimal": text}` value the canonical encoder expects.
+#[must_use]
+pub fn decimal_tag(value: &str) -> JsonValue {
+    JsonValue::object([("$decimal", JsonValue::String(decimal_text(value)))])
+}
+
+fn as_object(value: &JsonValue) -> Result<&BTreeMap<String, JsonValue>, StateStoreError> {
+    match value {
+        JsonValue::Object(entries) => Ok(entries),
+        _ => Err(StateStoreError::Integrity(
+            "expected a JSON object".to_string(),
+        )),
+    }
+}
+
+fn as_array(value: &JsonValue) -> Result<&[JsonValue], StateStoreError> {
+    match value {
+        JsonValue::Array(items) => Ok(items),
+        _ => Err(StateStoreError::Integrity(
+            "expected a JSON array".to_string(),
+        )),
+    }
+}
+
+fn as_str(value: &JsonValue, name: &str) -> Result<String, StateStoreError> {
+    match value {
+        JsonValue::String(text) => Ok(text.clone()),
+        _ => Err(StateStoreError::Integrity(format!("{name} must be a string"))),
+    }
+}
+
+fn required<'a>(
+    entries: &'a BTreeMap<String, JsonValue>,
+    key: &str,
+) -> Result<&'a JsonValue, StateStoreError> {
+    entries
+        .get(key)
+        .ok_or_else(|| StateStoreError::Integrity(format!("missing {key}")))
+}
+
+fn as_u64(value: &JsonValue, name: &str) -> Result<u64, StateStoreError> {
+    match value {
+        JsonValue::UInt(number) => Ok(*number),
+        JsonValue::Int(number) if *number >= 0 => Ok(*number as u64),
+        _ => Err(StateStoreError::Integrity(format!(
+            "{name} must be a non-negative integer"
+        ))),
+    }
+}
+
+fn as_i64(value: &JsonValue, name: &str) -> Result<i64, StateStoreError> {
+    match value {
+        JsonValue::Int(number) => Ok(*number),
+        JsonValue::UInt(number) => i64::try_from(*number)
+            .map_err(|_| StateStoreError::Integrity(format!("{name} is out of range"))),
+        _ => Err(StateStoreError::Integrity(format!(
+            "{name} must be an integer"
+        ))),
+    }
+}
+
+fn as_tagged_decimal(value: &JsonValue, name: &str) -> Result<String, StateStoreError> {
+    match value {
+        JsonValue::Object(entries) => match entries.get("$decimal") {
+            Some(JsonValue::String(text)) => Ok(text.clone()),
+            _ => Err(StateStoreError::Integrity(format!(
+                "{name} must be a tagged decimal"
+            ))),
+        },
+        JsonValue::String(text) => Ok(text.clone()),
+        _ => Err(StateStoreError::Integrity(format!(
+            "{name} must be a decimal"
+        ))),
+    }
+}
+
+fn object(entries: impl IntoIterator<Item = (&'static str, JsonValue)>) -> JsonValue {
+    JsonValue::object(entries)
+}
+
+fn string_array(values: &[String]) -> JsonValue {
+    JsonValue::Array(
+        values
+            .iter()
+            .map(|value| JsonValue::String(value.clone()))
+            .collect(),
+    )
+}
+
+/// Exact serialized state of one fill.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FillState {
+    /// Originating event identifier.
+    pub event_id: String,
+    /// Fill time as an RFC3339 microsecond string.
+    pub timestamp: String,
+    /// Fill sequence.
+    pub sequence: u64,
+    /// Fill identifier.
+    pub fill_id: String,
+    /// Order identifier.
+    pub order_id: String,
+    /// Instrument symbol.
+    pub symbol: String,
+    /// Fill side.
+    pub side: String,
+    /// String-exact quantity.
+    pub quantity: String,
+    /// String-exact price.
+    pub price: String,
+    /// String-exact fee.
+    pub fee: String,
+    /// Liquidity flag, if any.
+    pub liquidity: Option<String>,
+}
+
+impl FillState {
+    fn to_json(&self) -> JsonValue {
+        object([
+            ("event_id", JsonValue::String(self.event_id.clone())),
+            ("timestamp", JsonValue::String(self.timestamp.clone())),
+            ("sequence", JsonValue::UInt(self.sequence)),
+            ("fill_id", JsonValue::String(self.fill_id.clone())),
+            ("order_id", JsonValue::String(self.order_id.clone())),
+            ("symbol", JsonValue::String(self.symbol.clone())),
+            ("side", JsonValue::String(self.side.clone())),
+            ("quantity", JsonValue::String(self.quantity.clone())),
+            ("price", JsonValue::String(self.price.clone())),
+            ("fee", JsonValue::String(self.fee.clone())),
+            (
+                "liquidity",
+                match &self.liquidity {
+                    Some(value) => JsonValue::String(value.clone()),
+                    None => JsonValue::Null,
+                },
+            ),
+        ])
+    }
+
+    fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
+        let entries = as_object(value)?;
+        Ok(Self {
+            event_id: as_str(required(entries, "event_id")?, "event_id")?,
+            timestamp: as_str(required(entries, "timestamp")?, "timestamp")?,
+            sequence: as_u64(required(entries, "sequence")?, "sequence")?,
+            fill_id: as_str(required(entries, "fill_id")?, "fill_id")?,
+            order_id: as_str(required(entries, "order_id")?, "order_id")?,
+            symbol: as_str(required(entries, "symbol")?, "symbol")?,
+            side: as_str(required(entries, "side")?, "side")?,
+            quantity: as_str(required(entries, "quantity")?, "quantity")?,
+            price: as_str(required(entries, "price")?, "price")?,
+            fee: as_str(required(entries, "fee")?, "fee")?,
+            liquidity: match required(entries, "liquidity")? {
+                JsonValue::Null => None,
+                other => Some(as_str(other, "liquidity")?),
+            },
+        })
+    }
+}
+
+/// One virtual book's exact restorable accounting state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BookState {
+    /// Book identifier.
+    pub book_id: String,
+    /// String-exact initial cash.
+    pub initial_cash: String,
+    /// String-exact current cash.
+    pub cash: String,
+    /// Booked fill identifiers in application order.
+    pub fill_ids: Vec<String>,
+    /// Booked fills in application order.
+    pub fills: Vec<FillState>,
+    /// Captured position markers, sorted by symbol.
+    pub markers: Vec<(String, String)>,
+}
+
+impl BookState {
+    fn to_json(&self) -> JsonValue {
+        object([
+            ("book_id", JsonValue::String(self.book_id.clone())),
+            ("initial_cash", decimal_tag(&self.initial_cash)),
+            ("cash", decimal_tag(&self.cash)),
+            ("fill_ids", string_array(&self.fill_ids)),
+            (
+                "fills",
+                JsonValue::Array(self.fills.iter().map(FillState::to_json).collect()),
+            ),
+            (
+                "markers",
+                JsonValue::Array(
+                    self.markers
+                        .iter()
+                        .map(|(symbol, price)| {
+                            object([
+                                ("symbol", JsonValue::String(symbol.clone())),
+                                ("price", decimal_tag(price)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+        ])
+    }
+
+    fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
+        let entries = as_object(value)?;
+        let fill_ids = as_array(required(entries, "fill_ids")?)?
+            .iter()
+            .map(|item| as_str(item, "fill id"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let fills = as_array(required(entries, "fills")?)?
+            .iter()
+            .map(FillState::from_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        if fill_ids.len() != fills.len() {
+            return Err(StateStoreError::Integrity(
+                "book fill identifiers and fills must have equal length".to_string(),
+            ));
+        }
+        for (fill_id, fill) in fill_ids.iter().zip(fills.iter()) {
+            if fill_id != &fill.fill_id {
+                return Err(StateStoreError::Integrity(
+                    "book fill identifiers must match the captured fills in order".to_string(),
+                ));
+            }
+        }
+        let markers = as_array(required(entries, "markers")?)?
+            .iter()
+            .map(|item| {
+                let entries = as_object(item)?;
+                Ok((
+                    as_str(required(entries, "symbol")?, "symbol")?,
+                    as_tagged_decimal(required(entries, "price")?, "price")?,
+                ))
+            })
+            .collect::<Result<Vec<_>, StateStoreError>>()?;
+        Ok(Self {
+            book_id: as_str(required(entries, "book_id")?, "book_id")?,
+            initial_cash: as_tagged_decimal(
+                required(entries, "initial_cash")?,
+                "initial_cash",
+            )?,
+            cash: as_tagged_decimal(required(entries, "cash")?, "cash")?,
+            fill_ids,
+            fills,
+            markers,
+        })
+    }
+}
+
+/// Exact serialized state of one seeded random source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RandomState {
+    /// Instance identifier.
+    pub instance_id: String,
+    /// State version.
+    pub version: u64,
+    /// Internal MT state words, least significant first.
+    pub internal: Vec<u64>,
+    /// Gaussian cache as a big-endian IEEE-754 hex bit pattern, if present.
+    pub gauss_next_bits: Option<String>,
+}
+
+impl RandomState {
+    fn to_json(&self) -> JsonValue {
+        let gauss = match &self.gauss_next_bits {
+            Some(bits) => object([("$float_bits", JsonValue::String(bits.clone()))]),
+            None => JsonValue::Null,
+        };
+        object([
+            ("instance_id", JsonValue::String(self.instance_id.clone())),
+            ("version", JsonValue::UInt(self.version)),
+            (
+                "internal",
+                JsonValue::Array(
+                    self.internal
+                        .iter()
+                        .map(|word| JsonValue::UInt(*word))
+                        .collect(),
+                ),
+            ),
+            ("gauss_next", gauss),
+        ])
+    }
+
+    fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
+        let entries = as_object(value)?;
+        let internal = as_array(required(entries, "internal")?)?
+            .iter()
+            .map(|item| as_u64(item, "random internal state"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let gauss_next_bits = match required(entries, "gauss_next")? {
+            JsonValue::Null => None,
+            JsonValue::Object(gauss) => match gauss.get("$float_bits") {
+                Some(JsonValue::String(bits)) => Some(bits.clone()),
+                _ => {
+                    return Err(StateStoreError::Integrity(
+                        "random gauss state must decode to a float".to_string(),
+                    ))
+                }
+            },
+            _ => {
+                return Err(StateStoreError::Integrity(
+                    "random gauss state must decode to a float".to_string(),
+                ))
+            }
+        };
+        Ok(Self {
+            instance_id: as_str(required(entries, "instance_id")?, "instance_id")?,
+            version: as_u64(required(entries, "version")?, "random version")?,
+            internal,
+            gauss_next_bits,
+        })
+    }
+}
+
+/// One strategy's frozen state values at the capture point.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StrategyState {
+    /// Instance identifier.
+    pub instance_id: String,
+    /// Tagged canonical values.
+    pub values: BTreeMap<String, JsonValue>,
+}
+
+impl StrategyState {
+    fn to_json(&self) -> JsonValue {
+        object([
+            ("instance_id", JsonValue::String(self.instance_id.clone())),
+            ("values", JsonValue::Object(self.values.clone())),
+        ])
+    }
+
+    fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
+        let entries = as_object(value)?;
+        let values = as_object(required(entries, "values")?)?;
+        Ok(Self {
+            instance_id: as_str(required(entries, "instance_id")?, "instance_id")?,
+            values: values.clone(),
+        })
+    }
+}
+
+/// Risk-gate identity and per-strategy gate inputs at the capture point.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RiskState {
+    /// Rejection policy.
+    pub on_reject: String,
+    /// Configured rule order.
+    pub rule_ids: Vec<String>,
+    /// Per-strategy daily loss, tagged as decimals.
+    pub daily_losses: BTreeMap<String, String>,
+}
+
+impl RiskState {
+    fn to_json(&self) -> JsonValue {
+        object([
+            ("on_reject", JsonValue::String(self.on_reject.clone())),
+            ("rule_ids", string_array(&self.rule_ids)),
+            (
+                "daily_losses",
+                JsonValue::Object(
+                    self.daily_losses
+                        .iter()
+                        .map(|(key, value)| (key.clone(), decimal_tag(value)))
+                        .collect(),
+                ),
+            ),
+        ])
+    }
+
+    fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
+        let entries = as_object(value)?;
+        let rule_ids = as_array(required(entries, "rule_ids")?)?
+            .iter()
+            .map(|item| as_str(item, "rule_id"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let daily_losses = as_object(required(entries, "daily_losses")?)?
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), as_tagged_decimal(value, "daily loss")?)))
+            .collect::<Result<BTreeMap<_, _>, StateStoreError>>()?;
+        Ok(Self {
+            on_reject: as_str(required(entries, "on_reject")?, "on_reject")?,
+            rule_ids,
+            daily_losses,
+        })
+    }
+}
+
+/// The simulated venue's id and event-sequence counters at the capture point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VenueState {
+    /// Venue identifier ordinal.
+    pub id_ordinal: u64,
+    /// Arena event sequence; `-1` precedes the first event.
+    pub event_sequence: i64,
+}
+
+impl VenueState {
+    fn to_json(self) -> JsonValue {
+        object([
+            ("id_ordinal", JsonValue::UInt(self.id_ordinal)),
+            ("event_sequence", JsonValue::Int(self.event_sequence)),
+        ])
+    }
+
+    fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
+        let entries = as_object(value)?;
+        Ok(Self {
+            id_ordinal: as_u64(required(entries, "id_ordinal")?, "venue id ordinal")?,
+            event_sequence: as_i64(
+                required(entries, "event_sequence")?,
+                "venue event sequence",
+            )?,
+        })
+    }
+}
+
+/// Frozen, canonical, hash-verifiable full runtime state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeSnapshot {
+    /// Snapshot format version.
+    pub format_version: u64,
+    /// Run identifier.
+    pub run_id: String,
+    /// Capture trigger.
+    pub trigger: SnapshotTrigger,
+    /// Caller capture sequence.
+    pub sequence: u64,
+    /// Events dispatched at capture.
+    pub dispatched_count: u64,
+    /// Market events consumed at capture.
+    pub market_event_count: u64,
+    /// Tagged runtime options.
+    pub options: BTreeMap<String, JsonValue>,
+    /// Captured books.
+    pub books: Vec<BookState>,
+    /// Captured marks, tagged as decimals.
+    pub prices: BTreeMap<String, String>,
+    /// Per-strategy order counts.
+    pub order_counts: BTreeMap<String, u64>,
+    /// Order-to-book attribution.
+    pub order_owners: BTreeMap<String, String>,
+    /// Strategy state, sorted by instance id in the canonical form.
+    pub strategy_state: Vec<StrategyState>,
+    /// Random states, sorted by instance id in the canonical form.
+    pub random_states: Vec<RandomState>,
+    /// Risk-gate identity and inputs.
+    pub risk: RiskState,
+    /// Optional venue counters.
+    pub venue: Option<VenueState>,
+}
+
+impl RuntimeSnapshot {
+    /// Return the canonical JSON-ready snapshot content.
+    #[must_use]
+    pub fn to_json(&self) -> JsonValue {
+        let mut content = object([
+            ("format_version", JsonValue::UInt(self.format_version)),
+            ("run_id", JsonValue::String(self.run_id.clone())),
+            ("trigger", JsonValue::string(self.trigger.value())),
+            ("sequence", JsonValue::UInt(self.sequence)),
+            ("dispatched_count", JsonValue::UInt(self.dispatched_count)),
+            (
+                "market_event_count",
+                JsonValue::UInt(self.market_event_count),
+            ),
+            ("options", JsonValue::Object(self.options.clone())),
+            (
+                "books",
+                JsonValue::Array(self.books.iter().map(BookState::to_json).collect()),
+            ),
+            (
+                "prices",
+                JsonValue::Object(
+                    self.prices
+                        .iter()
+                        .map(|(key, value)| (key.clone(), decimal_tag(value)))
+                        .collect(),
+                ),
+            ),
+            (
+                "order_counts",
+                JsonValue::Object(
+                    self.order_counts
+                        .iter()
+                        .map(|(key, value)| (key.clone(), JsonValue::UInt(*value)))
+                        .collect(),
+                ),
+            ),
+            (
+                "order_owners",
+                JsonValue::Object(
+                    self.order_owners
+                        .iter()
+                        .map(|(key, value)| (key.clone(), JsonValue::String(value.clone())))
+                        .collect(),
+                ),
+            ),
+            (
+                "strategy_state",
+                JsonValue::Array(
+                    self.strategy_state
+                        .iter()
+                        .map(StrategyState::to_json)
+                        .collect(),
+                ),
+            ),
+            (
+                "random_states",
+                JsonValue::Array(
+                    self.random_states
+                        .iter()
+                        .map(RandomState::to_json)
+                        .collect(),
+                ),
+            ),
+            ("risk", self.risk.to_json()),
+        ]);
+        let JsonValue::Object(ref mut entries) = content else {
+            unreachable!("snapshot content is an object")
+        };
+        if let Some(venue) = self.venue {
+            entries.insert("venue".to_string(), venue.to_json());
+        }
+        content
+    }
+
+    /// Rebuild one snapshot from parsed canonical JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError::Integrity`] when the document is malformed.
+    pub fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
+        let entries = as_object(value)?;
+        let trigger = as_str(required(entries, "trigger")?, "trigger")?;
+        let trigger = SnapshotTrigger::parse(&trigger).ok_or_else(|| {
+            StateStoreError::Integrity(format!("unknown snapshot trigger {trigger:?}"))
+        })?;
+        let prices = as_object(required(entries, "prices")?)?
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), as_tagged_decimal(value, "price")?)))
+            .collect::<Result<BTreeMap<_, _>, StateStoreError>>()?;
+        let order_counts = as_object(required(entries, "order_counts")?)?
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), as_u64(value, "order count")?)))
+            .collect::<Result<BTreeMap<_, _>, StateStoreError>>()?;
+        let order_owners = as_object(required(entries, "order_owners")?)?
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), as_str(value, "order owner")?)))
+            .collect::<Result<BTreeMap<_, _>, StateStoreError>>()?;
+        let venue = match entries.get("venue") {
+            None | Some(JsonValue::Null) => None,
+            Some(value) => Some(VenueState::from_json(value)?),
+        };
+        let mut snapshot = Self {
+            format_version: as_u64(
+                required(entries, "format_version")?,
+                "format_version",
+            )?,
+            run_id: as_str(required(entries, "run_id")?, "run_id")?,
+            trigger,
+            sequence: as_u64(required(entries, "sequence")?, "sequence")?,
+            dispatched_count: as_u64(
+                required(entries, "dispatched_count")?,
+                "dispatched_count",
+            )?,
+            market_event_count: as_u64(
+                required(entries, "market_event_count")?,
+                "market_event_count",
+            )?,
+            options: as_object(required(entries, "options")?)?.clone(),
+            books: as_array(required(entries, "books")?)?
+                .iter()
+                .map(BookState::from_json)
+                .collect::<Result<Vec<_>, _>>()?,
+            prices,
+            order_counts,
+            order_owners,
+            strategy_state: as_array(required(entries, "strategy_state")?)?
+                .iter()
+                .map(StrategyState::from_json)
+                .collect::<Result<Vec<_>, _>>()?,
+            random_states: as_array(required(entries, "random_states")?)?
+                .iter()
+                .map(RandomState::from_json)
+                .collect::<Result<Vec<_>, _>>()?,
+            risk: RiskState::from_json(required(entries, "risk")?)?,
+            venue,
+        };
+        snapshot.normalize();
+        Ok(snapshot)
+    }
+
+    fn normalize(&mut self) {
+        self.strategy_state
+            .sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
+        self.random_states
+            .sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
+        for book in &mut self.books {
+            book.markers.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+    }
+
+    /// Return the canonical UTF-8 bytes the snapshot identity hashes.
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = SNAPSHOT_DOMAIN.to_vec();
+        bytes.extend_from_slice(self.to_json().to_canonical_string_utf8().as_bytes());
+        bytes
+    }
+
+    /// Return the domain-separated SHA-256 identity of this snapshot.
+    #[must_use]
+    pub fn snapshot_id(&self) -> String {
+        digest_hex(&self.canonical_bytes())
+    }
+
+    /// Return the canonical stored envelope for this snapshot.
+    #[must_use]
+    pub fn payload_bytes(&self) -> Vec<u8> {
+        object([
+            ("snapshot_id", JsonValue::String(self.snapshot_id())),
+            ("snapshot", self.to_json()),
+        ])
+        .to_canonical_string_utf8()
+        .into_bytes()
+    }
+}
+
+/// Version-checked pointer to one persisted snapshot payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredSnapshot {
+    /// Snapshot format version.
+    pub format_version: u64,
+    /// Run identifier.
+    pub run_id: String,
+    /// Snapshot identity.
+    pub snapshot_id: String,
+    /// SHA-256 of the payload bytes.
+    pub payload_sha256: String,
+    /// Payload byte length.
+    pub byte_length: u64,
+}
+
+impl StoredSnapshot {
+    /// Return the canonical JSON-ready pointer record.
+    #[must_use]
+    pub fn to_json(&self) -> JsonValue {
+        object([
+            ("format_version", JsonValue::UInt(self.format_version)),
+            ("run_id", JsonValue::String(self.run_id.clone())),
+            ("snapshot_id", JsonValue::String(self.snapshot_id.clone())),
+            (
+                "payload_sha256",
+                JsonValue::String(self.payload_sha256.clone()),
+            ),
+            ("byte_length", JsonValue::UInt(self.byte_length)),
+        ])
+    }
+
+    /// Rebuild a pointer from parsed canonical JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError`] when the pointer is malformed or versioned
+    /// outside this build.
+    pub fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
+        let entries = as_object(value)?;
+        let format_version = as_u64(
+            required(entries, "format_version")?,
+            "format_version",
+        )?;
+        if format_version != FORMAT_VERSION {
+            return Err(StateStoreError::Version(format!(
+                "snapshot format version {format_version} is not supported; this build reads \
+                 version {FORMAT_VERSION}"
+            )));
+        }
+        let pointer = Self {
+            format_version,
+            run_id: as_str(required(entries, "run_id")?, "run_id")?,
+            snapshot_id: as_str(required(entries, "snapshot_id")?, "snapshot_id")?,
+            payload_sha256: as_str(
+                required(entries, "payload_sha256")?,
+                "payload_sha256",
+            )?,
+            byte_length: as_u64(required(entries, "byte_length")?, "byte_length")?,
+        };
+        if pointer.byte_length == 0 {
+            return Err(StateStoreError::Integrity(
+                "byte_length must be positive".to_string(),
+            ));
+        }
+        Ok(pointer)
+    }
+}
+
+/// Deterministic periodic capture cadence over admitted market events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SnapshotSchedule {
+    /// Events between periodic captures.
+    pub every_events: u64,
+}
+
+impl SnapshotSchedule {
+    /// Create a schedule.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError`] when `every_events` is zero.
+    pub fn new(every_events: u64) -> Result<Self, StateStoreError> {
+        if every_events == 0 {
+            return Err(StateStoreError::Integrity(
+                "every_events must be positive".to_string(),
+            ));
+        }
+        Ok(Self { every_events })
+    }
+
+    /// Whether a periodic snapshot is due after this many events.
+    #[must_use]
+    pub fn due(&self, market_event_count: u64) -> bool {
+        market_event_count > 0 && market_event_count.is_multiple_of(self.every_events)
+    }
+}
+
+fn payload_key(run_id: &str, snapshot_id: &str) -> String {
+    format!("runs/{run_id}/snapshots/{snapshot_id}.json")
+}
+
+fn pointer_key(run_id: &str) -> String {
+    format!("runs/{run_id}/latest.json")
+}
+
+/// Persist, verify, and restore canonical runtime state snapshots.
+pub struct RuntimeStateStore {
+    run_id: String,
+    stores: Vec<Box<dyn SnapshotObjectStore>>,
+}
+
+impl RuntimeStateStore {
+    /// Create a store bound to one run identifier.
+    #[must_use]
+    pub fn new(run_id: impl Into<String>) -> Self {
+        Self {
+            run_id: run_id.into(),
+            stores: Vec::new(),
+        }
+    }
+
+    /// Register a primary or mirror store, in priority order.
+    pub fn add_store(&mut self, store: Box<dyn SnapshotObjectStore>) {
+        self.stores.push(store);
+    }
+
+    /// The deployment run identifier.
+    #[must_use]
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    /// Persist one snapshot atomically and return its pointer record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError::Write`] when a store fails to persist the
+    /// payload or pointer verbatim.
+    pub fn save(&mut self, snapshot: &RuntimeSnapshot) -> Result<StoredSnapshot, StateStoreError> {
+        if snapshot.run_id != self.run_id {
+            return Err(StateStoreError::Integrity(format!(
+                "snapshot run {:?} does not match store run {:?}",
+                snapshot.run_id, self.run_id
+            )));
+        }
+        let payload = snapshot.payload_bytes();
+        let pointer = StoredSnapshot {
+            format_version: FORMAT_VERSION,
+            run_id: snapshot.run_id.clone(),
+            snapshot_id: snapshot.snapshot_id(),
+            payload_sha256: digest_hex(&payload),
+            byte_length: payload.len() as u64,
+        };
+        let payload_key = payload_key(&snapshot.run_id, &snapshot.snapshot_id());
+        let pointer_bytes = pointer.to_json().to_canonical_string_utf8().into_bytes();
+        let pointer_key = pointer_key(&snapshot.run_id);
+        for store in &mut self.stores {
+            store.replace(&payload_key, &payload);
+            if store.read(&payload_key).as_deref() != Some(payload.as_slice()) {
+                return Err(StateStoreError::Write(format!(
+                    "snapshot payload at {payload_key:?} did not persist verbatim"
+                )));
+            }
+        }
+        for store in &mut self.stores {
+            store.replace(&pointer_key, &pointer_bytes);
+            if store.read(&pointer_key).as_deref() != Some(pointer_bytes.as_slice()) {
+                return Err(StateStoreError::Write(format!(
+                    "snapshot pointer at {pointer_key:?} did not persist verbatim"
+                )));
+            }
+        }
+        Ok(pointer)
+    }
+
+    /// Return the latest valid snapshot, falling back to mirrors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError`] when no store holds a valid snapshot.
+    pub fn load(&self) -> Result<RuntimeSnapshot, StateStoreError> {
+        let mut failures: Vec<StateStoreError> = Vec::new();
+        for store in &self.stores {
+            match self.load_from(store.as_ref()) {
+                Ok(snapshot) => return Ok(snapshot),
+                Err(error) => failures.push(error),
+            }
+        }
+        if failures.is_empty() {
+            return Err(StateStoreError::Missing(format!(
+                "no snapshot is stored for run {:?}",
+                self.run_id
+            )));
+        }
+        for priority in [0usize, 1, 2] {
+            for failure in &failures {
+                let rank = match failure {
+                    StateStoreError::Integrity(_) => 0,
+                    StateStoreError::Version(_) => 1,
+                    StateStoreError::Missing(_) => 2,
+                    _ => 3,
+                };
+                if rank == priority {
+                    return Err(failure.clone());
+                }
+            }
+        }
+        Err(failures.remove(0))
+    }
+
+    /// Return the pointer record of the latest stored snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError`] when no store holds a valid pointer.
+    pub fn latest(&self) -> Result<StoredSnapshot, StateStoreError> {
+        let key = pointer_key(&self.run_id);
+        let mut errors: Vec<StateStoreError> = Vec::new();
+        for store in &self.stores {
+            let Some(raw) = store.read(&key) else {
+                errors.push(StateStoreError::Missing(format!(
+                    "object {key:?} is not available in the snapshot store"
+                )));
+                continue;
+            };
+            let text = String::from_utf8(raw).map_err(|error| {
+                StateStoreError::Integrity(format!("object {key:?} is not valid UTF-8: {error}"))
+            })?;
+            let value = parse_json(&text, &key)?;
+            return StoredSnapshot::from_json(&value);
+        }
+        if errors.is_empty() {
+            return Err(StateStoreError::Missing(format!(
+                "no snapshot pointer is stored for run {:?}",
+                self.run_id
+            )));
+        }
+        Err(errors.remove(0))
+    }
+
+    fn load_from(&self, store: &dyn SnapshotObjectStore) -> Result<RuntimeSnapshot, StateStoreError> {
+        let pointer_key = pointer_key(&self.run_id);
+        let raw = store.read(&pointer_key).ok_or_else(|| {
+            StateStoreError::Missing(format!(
+                "object {pointer_key:?} is not available in the snapshot store"
+            ))
+        })?;
+        let text = String::from_utf8(raw).map_err(|error| {
+            StateStoreError::Integrity(format!("object {pointer_key:?} is not valid UTF-8: {error}"))
+        })?;
+        let pointer = StoredSnapshot::from_json(&parse_json(&text, &pointer_key)?)?;
+        if pointer.run_id != self.run_id {
+            return Err(StateStoreError::Integrity(format!(
+                "snapshot pointer at {pointer_key:?} references run {:?}",
+                pointer.run_id
+            )));
+        }
+        let payload_key = payload_key(&self.run_id, &pointer.snapshot_id);
+        let payload = store.read(&payload_key).ok_or_else(|| {
+            StateStoreError::Missing(format!(
+                "object {payload_key:?} is not available in the snapshot store"
+            ))
+        })?;
+        if payload.len() as u64 != pointer.byte_length {
+            return Err(StateStoreError::Integrity(format!(
+                "snapshot payload at {payload_key:?} has an unexpected length"
+            )));
+        }
+        if digest_hex(&payload) != pointer.payload_sha256 {
+            return Err(StateStoreError::Integrity(format!(
+                "snapshot payload at {payload_key:?} fails its SHA-256 digest"
+            )));
+        }
+        let envelope_text = String::from_utf8(payload).map_err(|error| {
+            StateStoreError::Integrity(format!(
+                "snapshot payload at {payload_key:?} is not valid UTF-8: {error}"
+            ))
+        })?;
+        let envelope = parse_json(&envelope_text, &payload_key)?;
+        let entries = as_object(&envelope)?;
+        let declared = as_str(required(entries, "snapshot_id")?, "snapshot_id")?;
+        let snapshot = RuntimeSnapshot::from_json(required(entries, "snapshot")?)?;
+        if snapshot.snapshot_id() != declared {
+            return Err(StateStoreError::Integrity(format!(
+                "snapshot content hashes to {:?} but the envelope declares {declared:?}",
+                snapshot.snapshot_id()
+            )));
+        }
+        if snapshot.run_id != self.run_id {
+            return Err(StateStoreError::Integrity(format!(
+                "snapshot run {:?} does not match store run {:?}",
+                snapshot.run_id, self.run_id
+            )));
+        }
+        Ok(snapshot)
+    }
+}
+
+/// Parse a tiny canonical JSON document into [`JsonValue`].
+///
+/// The state store only ever reads back JSON that its own canonical encoder
+/// wrote, so this minimal parser covers objects, arrays, strings, integers,
+/// booleans, and null.
+///
+/// # Errors
+///
+/// Returns [`StateStoreError::Integrity`] on malformed input.
+pub fn parse_json(text: &str, name: &str) -> Result<JsonValue, StateStoreError> {
+    let mut parser = JsonParser {
+        bytes: text.as_bytes(),
+        position: 0,
+    };
+    let value = parser.value().map_err(|message| {
+        StateStoreError::Integrity(format!("object {name:?} is not valid JSON: {message}"))
+    })?;
+    parser.skip_whitespace();
+    if parser.position != parser.bytes.len() {
+        return Err(StateStoreError::Integrity(format!(
+            "object {name:?} has trailing JSON content"
+        )));
+    }
+    Ok(value)
+}
+
+struct JsonParser<'a> {
+    bytes: &'a [u8],
+    position: usize,
+}
+
+impl JsonParser<'_> {
+    fn value(&mut self) -> Result<JsonValue, String> {
+        self.skip_whitespace();
+        match self.peek() {
+            Some(b'{') => self.object(),
+            Some(b'[') => self.array(),
+            Some(b'"') => Ok(JsonValue::String(self.string()?)),
+            Some(b't') => self.literal("true", JsonValue::Bool(true)),
+            Some(b'f') => self.literal("false", JsonValue::Bool(false)),
+            Some(b'n') => self.literal("null", JsonValue::Null),
+            Some(b'-') | Some(b'0'..=b'9') => self.number(),
+            other => Err(format!("unexpected byte {other:?}")),
+        }
+    }
+
+    fn object(&mut self) -> Result<JsonValue, String> {
+        self.expect(b'{')?;
+        let mut entries = BTreeMap::new();
+        self.skip_whitespace();
+        if self.peek() == Some(b'}') {
+            self.position += 1;
+            return Ok(JsonValue::Object(entries));
+        }
+        loop {
+            self.skip_whitespace();
+            let key = self.string()?;
+            self.skip_whitespace();
+            self.expect(b':')?;
+            let value = self.value()?;
+            entries.insert(key, value);
+            self.skip_whitespace();
+            match self.peek() {
+                Some(b',') => self.position += 1,
+                Some(b'}') => {
+                    self.position += 1;
+                    return Ok(JsonValue::Object(entries));
+                }
+                other => return Err(format!("expected ',' or '}}', got {other:?}")),
+            }
+        }
+    }
+
+    fn array(&mut self) -> Result<JsonValue, String> {
+        self.expect(b'[')?;
+        let mut items = Vec::new();
+        self.skip_whitespace();
+        if self.peek() == Some(b']') {
+            self.position += 1;
+            return Ok(JsonValue::Array(items));
+        }
+        loop {
+            items.push(self.value()?);
+            self.skip_whitespace();
+            match self.peek() {
+                Some(b',') => self.position += 1,
+                Some(b']') => {
+                    self.position += 1;
+                    return Ok(JsonValue::Array(items));
+                }
+                other => return Err(format!("expected ',' or ']', got {other:?}")),
+            }
+        }
+    }
+
+    fn string(&mut self) -> Result<String, String> {
+        self.expect(b'"')?;
+        let mut out = String::new();
+        loop {
+            let byte = self.next().ok_or("unterminated string")?;
+            match byte {
+                b'"' => return Ok(out),
+                b'\\' => {
+                    let escape = self.next().ok_or("unterminated escape")?;
+                    match escape {
+                        b'"' => out.push('"'),
+                        b'\\' => out.push('\\'),
+                        b'/' => out.push('/'),
+                        b'b' => out.push('\u{08}'),
+                        b'f' => out.push('\u{0c}'),
+                        b'n' => out.push('\n'),
+                        b'r' => out.push('\r'),
+                        b't' => out.push('\t'),
+                        b'u' => {
+                            let code = self.hex4()?;
+                            let character = char::from_u32(code)
+                                .ok_or_else(|| "invalid unicode escape".to_string())?;
+                            out.push(character);
+                        }
+                        other => return Err(format!("invalid escape {other:?}")),
+                    }
+                }
+                other if other < 0x80 => out.push(char::from(other)),
+                _ => {
+                    self.position -= 1;
+                    let rest = std::str::from_utf8(&self.bytes[self.position..])
+                        .map_err(|error| error.to_string())?;
+                    let character = rest.chars().next().ok_or("truncated UTF-8")?;
+                    out.push(character);
+                    self.position += character.len_utf8();
+                }
+            }
+        }
+    }
+
+    fn hex4(&mut self) -> Result<u32, String> {
+        let mut code = 0u32;
+        for _ in 0..4 {
+            let byte = self.next().ok_or("truncated unicode escape")?;
+            let digit = char::from(byte)
+                .to_digit(16)
+                .ok_or_else(|| "invalid unicode escape".to_string())?;
+            code = code * 16 + digit;
+        }
+        Ok(code)
+    }
+
+    fn number(&mut self) -> Result<JsonValue, String> {
+        let start = self.position;
+        if self.peek() == Some(b'-') {
+            self.position += 1;
+        }
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.position += 1;
+        }
+        let text = std::str::from_utf8(&self.bytes[start..self.position])
+            .map_err(|error| error.to_string())?;
+        if let Ok(value) = text.parse::<u64>() {
+            return Ok(JsonValue::UInt(value));
+        }
+        text.parse::<i64>()
+            .map(JsonValue::Int)
+            .map_err(|error| error.to_string())
+    }
+
+    fn literal(&mut self, expected: &str, value: JsonValue) -> Result<JsonValue, String> {
+        if self.bytes[self.position..].starts_with(expected.as_bytes()) {
+            self.position += expected.len();
+            Ok(value)
+        } else {
+            Err(format!("expected {expected:?}"))
+        }
+    }
+
+    fn expect(&mut self, byte: u8) -> Result<(), String> {
+        if self.next() == Some(byte) {
+            Ok(())
+        } else {
+            Err(format!("expected {:?}", char::from(byte)))
+        }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+            self.position += 1;
+        }
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.position).copied()
+    }
+
+    fn next(&mut self) -> Option<u8> {
+        let byte = self.peek()?;
+        self.position += 1;
+        Some(byte)
+    }
+}
+
+/// Hash helper used by tests to inspect payload digests.
+#[must_use]
+pub fn payload_sha256(payload: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(payload);
+    hasher.finalize_hex()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_snapshot() -> RuntimeSnapshot {
+        RuntimeSnapshot {
+            format_version: FORMAT_VERSION,
+            run_id: "paper-run".to_string(),
+            trigger: SnapshotTrigger::Periodic,
+            sequence: 3,
+            dispatched_count: 10,
+            market_event_count: 24,
+            options: BTreeMap::from([
+                ("run_id".to_string(), JsonValue::string("paper-run")),
+                ("initial_cash".to_string(), decimal_tag("1000000")),
+            ]),
+            books: vec![BookState {
+                book_id: "alpha".to_string(),
+                initial_cash: "1000000".to_string(),
+                cash: "999000.00".to_string(),
+                fill_ids: vec!["fill-1".to_string()],
+                fills: vec![FillState {
+                    event_id: "e1".to_string(),
+                    timestamp: "2024-01-02T14:30:00.000000Z".to_string(),
+                    sequence: 5,
+                    fill_id: "fill-1".to_string(),
+                    order_id: "order-1".to_string(),
+                    symbol: "SPY".to_string(),
+                    side: "buy".to_string(),
+                    quantity: "2".to_string(),
+                    price: "100.00".to_string(),
+                    fee: "0.01".to_string(),
+                    liquidity: Some("taker".to_string()),
+                }],
+                markers: vec![("SPY".to_string(), "100.00".to_string())],
+            }],
+            prices: BTreeMap::from([("SPY".to_string(), "100.00".to_string())]),
+            order_counts: BTreeMap::from([("momentum".to_string(), 1)]),
+            order_owners: BTreeMap::from([("order-1".to_string(), "alpha".to_string())]),
+            strategy_state: vec![StrategyState {
+                instance_id: "momentum".to_string(),
+                values: BTreeMap::from([(
+                    "warm".to_string(),
+                    JsonValue::Bool(true),
+                )]),
+            }],
+            random_states: vec![RandomState {
+                instance_id: "momentum".to_string(),
+                version: 3,
+                internal: vec![1, 2, 3],
+                gauss_next_bits: None,
+            }],
+            risk: RiskState {
+                on_reject: "reject_order".to_string(),
+                rule_ids: vec!["max_position".to_string()],
+                daily_losses: BTreeMap::from([("momentum".to_string(), "0".to_string())]),
+            },
+            venue: Some(VenueState {
+                id_ordinal: 4,
+                event_sequence: 9,
+            }),
+        }
+    }
+
+    #[test]
+    fn decimal_normalization_matches_python() {
+        assert_eq!(decimal_text("0"), "0");
+        assert_eq!(decimal_text("0.00"), "0");
+        assert_eq!(decimal_text("1000000"), "1000000");
+        assert_eq!(decimal_text("100.00"), "100");
+        assert_eq!(decimal_text("0.0100"), "0.01");
+        assert_eq!(decimal_text("-5.500"), "-5.5");
+    }
+
+    #[test]
+    fn snapshot_round_trips_byte_identically() {
+        let snapshot = sample_snapshot();
+        let payload = snapshot.payload_bytes();
+        let reparsed = parse_json(
+            std::str::from_utf8(&payload).expect("utf8"),
+            "payload",
+        )
+        .expect("parse");
+        let entries = as_object(&reparsed).expect("object");
+        let restored = RuntimeSnapshot::from_json(
+            entries.get("snapshot").expect("snapshot key"),
+        )
+        .expect("restore");
+        assert_eq!(restored.payload_bytes(), payload);
+        assert_eq!(restored.snapshot_id(), snapshot.snapshot_id());
+        assert_eq!(restored.to_json(), snapshot.to_json());
+    }
+
+    #[test]
+    fn store_save_load_round_trips() {
+        let snapshot = sample_snapshot();
+        let mut store = RuntimeStateStore::new("paper-run");
+        store.add_store(Box::new(InMemorySnapshotStore::new()));
+        let pointer = store.save(&snapshot).expect("save");
+        assert_eq!(pointer.snapshot_id, snapshot.snapshot_id());
+        assert_eq!(pointer.byte_length, snapshot.payload_bytes().len() as u64);
+        let loaded = store.load().expect("load");
+        assert_eq!(loaded.payload_bytes(), snapshot.payload_bytes());
+        assert_eq!(loaded.snapshot_id(), snapshot.snapshot_id());
+        let latest = store.latest().expect("latest");
+        assert_eq!(latest, pointer);
+    }
+
+    #[test]
+    fn load_falls_back_to_the_mirror() {
+        let snapshot = sample_snapshot();
+        let mut primary = RuntimeStateStore::new("paper-run");
+        primary.add_store(Box::new(InMemorySnapshotStore::new()));
+        primary.save(&snapshot).expect("save");
+
+        let mut store = RuntimeStateStore::new("paper-run");
+        store.add_store(Box::new(InMemorySnapshotStore::new()));
+        store.add_store(primary.stores.remove(0));
+        assert_eq!(
+            store.load().expect("mirror").snapshot_id(),
+            snapshot.snapshot_id()
+        );
+    }
+
+    #[test]
+    fn schedule_cadence() {
+        let schedule = SnapshotSchedule::new(5).expect("schedule");
+        assert!(!schedule.due(0));
+        assert!(schedule.due(5));
+        assert!(!schedule.due(6));
+        assert!(schedule.due(10));
+        assert!(SnapshotSchedule::new(0).is_err());
+    }
+
+    #[test]
+    fn detects_payload_tampering() {
+        let snapshot = sample_snapshot();
+        let mut store = RuntimeStateStore::new("paper-run");
+        store.add_store(Box::new(InMemorySnapshotStore::new()));
+        store.save(&snapshot).expect("save");
+        let key = payload_key("paper-run", &snapshot.snapshot_id());
+        store.stores[0].replace(&key, b"tampered");
+        assert!(matches!(
+            store.load(),
+            Err(StateStoreError::Integrity(_))
+        ));
+    }
+}
