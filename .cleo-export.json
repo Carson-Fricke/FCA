@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-10T02:02:42.540Z",
+    "exportedAt": "2026-09-10T02:20:32.229Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 234
     },
-    "checksum": "17c9ac492f45028f",
+    "checksum": "e851669401dc672b",
     "taskCount": 230,
     "exportMode": "full"
   },
@@ -2532,7 +2532,10 @@
       "title": "TH6.10 Local end-to-end stack runbook: harness api + thesis serve + UI real mode",
       "status": "pending",
       "parentId": "T150",
-      "depends": []
+      "depends": [
+        "T231",
+        "T232"
+      ]
     },
     "T200": {
       "type": "task",
@@ -31958,8 +31961,12 @@
         ".github/runbooks/thesis-local-stack.md",
         "scripts/local/"
       ],
+      "depends": [
+        "T231",
+        "T232"
+      ],
       "createdAt": "2026-09-10T02:02:13.506Z",
-      "updatedAt": "2026-09-10T02:02:13.506Z",
+      "updatedAt": "2026-09-10T02:12:25.220Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -33352,6 +33359,10 @@
         "T195",
         "T196",
         "T197"
+      ],
+      "T233": [
+        "T231",
+        "T232"
       ],
       "T200": [
         "T193",
