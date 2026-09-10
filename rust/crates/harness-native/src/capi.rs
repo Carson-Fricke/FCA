@@ -302,6 +302,110 @@ pub unsafe extern "C" fn harness_trade_row_serialize(
     }
 }
 
+/// Largest binomial step count the quant kernels accept.
+#[no_mangle]
+pub extern "C" fn harness_quant_max_steps() -> u32 {
+    crate::quant::MAX_STEPS
+}
+
+unsafe fn const_f64_slice<'a>(ptr: *const f64, n: usize) -> Option<&'a [f64]> {
+    if ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { slice::from_raw_parts(ptr, n) })
+}
+
+unsafe fn mut_f64_slice<'a>(ptr: *mut f64, n: usize) -> Option<&'a mut [f64]> {
+    if ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { slice::from_raw_parts_mut(ptr, n) })
+}
+
+/// # Safety
+///
+/// Every pointer must reference a valid buffer of `n` elements of its type;
+/// output pointers must be writable.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn harness_quant_crr_price_batch(
+    s_ptr: *const f64,
+    k_ptr: *const f64,
+    t_ptr: *const f64,
+    r_ptr: *const f64,
+    q_ptr: *const f64,
+    sigma_ptr: *const f64,
+    flags_ptr: *const u8,
+    steps_ptr: *const u32,
+    n: usize,
+    out_price_ptr: *mut f64,
+    out_delta_ptr: *mut f64,
+    out_gamma_ptr: *mut f64,
+    out_theta_ptr: *mut f64,
+    out_vega_ptr: *mut f64,
+) -> c_int {
+    if n == 0 {
+        return code::OK;
+    }
+    let Some(s) = (unsafe { const_f64_slice(s_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(k) = (unsafe { const_f64_slice(k_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(t) = (unsafe { const_f64_slice(t_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(r) = (unsafe { const_f64_slice(r_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(q) = (unsafe { const_f64_slice(q_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(sigma) = (unsafe { const_f64_slice(sigma_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    if flags_ptr.is_null() || steps_ptr.is_null() {
+        return code::INVALID_ARGUMENT;
+    }
+    let flags = unsafe { slice::from_raw_parts(flags_ptr, n) };
+    let steps = unsafe { slice::from_raw_parts(steps_ptr, n) };
+    let Some(out_price) = (unsafe { mut_f64_slice(out_price_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(out_delta) = (unsafe { mut_f64_slice(out_delta_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(out_gamma) = (unsafe { mut_f64_slice(out_gamma_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(out_theta) = (unsafe { mut_f64_slice(out_theta_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    let Some(out_vega) = (unsafe { mut_f64_slice(out_vega_ptr, n) }) else {
+        return code::INVALID_ARGUMENT;
+    };
+    for index in 0..n {
+        let greeks = crate::quant::price_and_greeks(
+            s[index],
+            k[index],
+            t[index],
+            r[index],
+            q[index],
+            sigma[index],
+            flags[index] & crate::quant::FLAG_CALL != 0,
+            flags[index] & crate::quant::FLAG_AMERICAN != 0,
+            steps[index],
+        );
+        out_price[index] = greeks.price;
+        out_delta[index] = greeks.delta;
+        out_gamma[index] = greeks.gamma;
+        out_theta[index] = greeks.theta;
+        out_vega[index] = greeks.vega;
+    }
+    code::OK
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
