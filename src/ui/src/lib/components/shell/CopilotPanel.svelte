@@ -184,7 +184,13 @@
 	{/if}
 
 	<div class="min-h-0 flex-1 overflow-y-auto p-3">
-		<ChatTranscript {messages} {percolations} />
+		<ChatTranscript
+			{messages}
+			{percolations}
+			proposal={null}
+			onConfirmConsent={undefined}
+			onRejectConsent={undefined}
+		/>
 	</div>
 
 	<ChatComposer onSubmit={send} activeExecutionId={null} {busy} />
