@@ -1,0 +1,37 @@
+{
+  "taskId": "T226",
+  "numTotalTests": 4,
+  "numPassedTests": 4,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "nasdaq-trader-symbol-directory-verification",
+      "status": "passed",
+      "command": "GET https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt",
+      "result": "Live file verified: 13194 securities with the Nasdaq Traded|Symbol|Security Name|Listing Exchange|Market Category|ETF|Round Lot Size|Test Issue|Financial Status schema, authoritative ETF flag, all US exchanges via Listing Exchange codes, and a File Creation Time row usable as the point-in-time knowledge date"
+    },
+    {
+      "name": "sec-edgar-xbrl-companyfacts-verification",
+      "status": "passed",
+      "command": "GET https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json (AAPL)",
+      "result": "Live fact verified: dei:EntityCommonStockSharesOutstanding facts carry end, val, accn, fy, fp, form, filed (knowledge date), and frame, confirming filed-date point-in-time semantics with original-versus-restated lineage; 10 req/s fair-access policy and nightly companyfacts.zip bulk path documented"
+    },
+    {
+      "name": "sec-ticker-to-cik-map-verification",
+      "status": "passed",
+      "command": "GET https://www.sec.gov/files/company_tickers.json",
+      "result": "Live map verified: approximately 13k ticker-to-CIK entries suitable for joining the Nasdaq directory to SEC submissions SIC industry codes"
+    },
+    {
+      "name": "rejected-sources-analysis",
+      "status": "passed",
+      "command": "web research on yfinance, FMP, Finnhub, Twelve Data, Alpha Vantage, and Schwab",
+      "result": "Yahoo Finance rejected for production (ToS-prohibited pattern, silently restated history); freemium tiers rejected for gating statement history without filed-date semantics; Schwab recorded as a quote/current-snapshot supplement only; composition stored as decision D006 with orchestrator approval"
+    }
+  ],
+  "limitations": [
+    "No free GICS-style sector or industry source exists; SEC SIC is the v1 industry code and ETF sector labels remain coarse until a paid provider is added"
+  ]
+}
