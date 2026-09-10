@@ -2,14 +2,14 @@
 	// @ts-nocheck — legacy JS component retained and restyled, not rewritten
 	let { values = [], height = 200, bins = 9, label = 'Trade PnL distribution' } = $props();
 
-	// Fallbacks matching the adopted m2 theme tokens; live values are read
+	// Fallbacks matching the light sage theme; live values are read
 	// from the Tailwind v4 @theme custom properties at draw time.
-	let FRAME = 'rgba(148, 163, 184, 0.14)';
-	let AXIS = '#64748b';
-	let GREEN = '#34d399';
-	let RED = '#f87171';
-	let TEXT = '#94a3b8';
-	const CANVAS_FONT = '11px "JetBrains Mono", ui-monospace, monospace';
+	let FRAME = '#e5eae6';
+	let AXIS = '#6b7a67';
+	let GREEN = '#2a8761';
+	let RED = '#c76868';
+	let TEXT = '#6b7a67';
+	const CANVAS_FONT = '11px "SFMono-Regular", "SF Mono", Consolas, ui-monospace, monospace';
 
 	function theme(el, name, fallback) {
 		try {
@@ -82,7 +82,7 @@
 		const ctx = canvas.getContext('2d');
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		applyCanvasTheme();
-		ctx.fillStyle = getComputedStyle(canvas).getPropertyValue('--surface-900').trim() || '#0c1220';
+		ctx.fillStyle = getComputedStyle(canvas).getPropertyValue('--surface-900').trim() || '#ffffff';
 		ctx.fillRect(0, 0, w, h);
 		ctx.font = CANVAS_FONT;
 		const pad = { top: 8, right: 8, bottom: 24, left: 8 };
@@ -176,9 +176,11 @@
 <style>
 	.wrap {
 		margin: 0;
-		background: var(--surface-well);
+		background: var(--panel);
+		border: 1px solid var(--border);
 		border-radius: 10px;
 		overflow: hidden;
+		box-shadow: var(--shadow-card);
 	}
 	figcaption {
 		position: relative;
@@ -191,6 +193,8 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: var(--muted);
+		border-bottom: 1px solid var(--border);
+		background: var(--surface-well);
 	}
 	.tick {
 		width: 14px;

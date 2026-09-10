@@ -1,4 +1,4 @@
-﻿<script>
+<script>
 	// @ts-nocheck — legacy JS component retained and restyled, not rewritten
 	let {
 		title = '',
@@ -14,18 +14,18 @@
 
 	const PAD = { top: 10, right: 70, bottom: 30, left: 70 };
 	const XPAD = 12;
-	// Fallbacks matching the adopted m2 theme tokens; the live values are
+	// Fallbacks matching the light sage theme; the live values are
 	// read from the Tailwind v4 @theme custom properties at draw time.
-	let FRAME = '#243044';
-	let GRID = 'rgba(148, 163, 184, 0.1)';
-	let AXIS = '#64748b';
-	let UP = '#34d399';
-	let DOWN = '#f87171';
-	let ACCENT = '#22d3ee';
-	let HANDLE = 'rgba(34, 211, 238, 0.35)';
-	const PALETTE = ['#22d3ee', '#f472b6', '#fbbf24', '#34d399', '#a78bfa'];
-	const CANVAS_FONT = '11px "JetBrains Mono", ui-monospace, monospace';
-	const CANVAS_BG = '#0c1220';
+	let FRAME = '#e5eae6';
+	let GRID = 'rgba(139, 148, 158, 0.14)';
+	let AXIS = '#6b7a67';
+	let UP = '#2a8761';
+	let DOWN = '#c76868';
+	let ACCENT = '#2a8761';
+	let HANDLE = 'rgba(42, 135, 97, 0.3)';
+	const PALETTE = ['#2a8761', '#8a74af', '#d6ad58', '#6d8db3', '#c76868'];
+	const CANVAS_FONT = '11px "SFMono-Regular", "SF Mono", Consolas, ui-monospace, monospace';
+	const CANVAS_BG = '#ffffff';
 
 	function theme(el, name, fallback) {
 		try {
@@ -40,9 +40,9 @@
 	function canvasTheme() {
 		const el = holder;
 		return {
-			bg: theme(el, '--surface-900', '#0c1220'),
+			bg: theme(el, '--surface-900', '#ffffff'),
 			grid: theme(el, '--border', GRID),
-			frame: theme(el, '--surface-700', FRAME),
+			frame: theme(el, '--border', FRAME),
 			axis: theme(el, '--muted', AXIS),
 			up: theme(el, '--color-profit', UP),
 			down: theme(el, '--color-loss', DOWN),
@@ -660,9 +660,11 @@
 <style>
 	.wrap {
 		margin: 0;
-		background: var(--surface-well);
+		background: var(--panel);
+		border: 1px solid var(--border);
 		border-radius: 10px;
 		overflow: hidden;
+		box-shadow: var(--shadow-card);
 	}
 	figcaption {
 		display: flex;
@@ -674,6 +676,8 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: var(--muted);
+		border-bottom: 1px solid var(--border);
+		background: var(--surface-well);
 	}
 	.tick {
 		width: 14px;
