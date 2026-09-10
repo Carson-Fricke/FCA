@@ -1,0 +1,10 @@
+# Source distribution payload for the Rust PyO3 bridge. The pure-Python
+# packages are discovered by setuptools; the Rust workspace and the setup.py
+# that builds its cdylib must travel with the sdist so a wheel can be rebuilt
+# from it.
+include setup.py
+include rust/Cargo.toml
+include rust/Cargo.lock
+include rust/rust-toolchain.toml
+recursive-include rust/crates *.rs
+recursive-include rust/crates Cargo.toml
