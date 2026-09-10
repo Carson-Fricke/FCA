@@ -50,7 +50,7 @@ function Get-ChangedPaths {
 $changed = Get-ChangedPaths
 $rustTouched = @($changed | Where-Object { $_ -like 'rust/*' }).Count -gt 0
 $pyTouched = @($changed | Where-Object {
-        $_ -like 'src/*' -or $_ -like 'tests/*' -or $_ -like 'strategies/*' -or $_ -like 'scripts/*'
+        $_ -like 'src/*' -or $_ -like 'tests/*' -or $_ -like 'strategies/*' -or $_ -like '*.py' -or $_ -like 'pyproject.toml'
     }).Count -gt 0
 
 $haveRust = Test-Path -LiteralPath (Join-Path $root 'rust\Cargo.toml')
