@@ -22,12 +22,15 @@ pub mod books;
 pub mod capi;
 pub mod clock;
 pub mod decimal;
+pub mod fills;
 pub mod latency_size;
 pub mod market;
 pub mod market_bus;
+pub mod matching;
 pub mod oms;
 mod sha256;
 pub mod simple_touch;
+pub mod trade_through;
 pub mod types;
 mod wide;
 
