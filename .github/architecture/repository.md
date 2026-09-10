@@ -176,6 +176,32 @@ under `.local/backtests/`.
 The `api` and `trader` command entrypoints remain thin process boundaries and
 fail clearly until composed.
 
+## Quant-Harness Rust Workspace
+
+`rust/` is a Cargo workspace staging the Rust port of the quant-harness engine.
+The Python engine under `src/harness` and the pinned Zig native core under
+`src/harness/native` remain authoritative until the migration flips; the Rust
+crates are additive and are not yet wired into the Python runtime or the shared
+image.
+
+```text
+rust/
+|-- Cargo.toml                 Workspace manifest (resolver 2)
+|-- rust-toolchain.toml        Pinned stable toolchain
+`-- crates/
+    |-- harness-native/        C ABI native core (`cdylib` + `rlib`)
+    |-- harness-py/            Python bindings (pre-declared, empty)
+    `-- harness-num/           Numeric kernels (pre-declared, empty)
+```
+
+`harness-native` builds a loadable shared library (`harness_native.dll` on
+Windows, `libharness_native.so` on Linux) and currently exports only the
+placeholder `harness_native_version` symbol; the ported event-kernel, OMS,
+replay, and quant surfaces follow in later tasks. `harness-py` and
+`harness-num` are declared as workspace members up front so the members list is
+stable and later work can fill them in with disjoint file ownership. The
+workspace is gated by `cargo fmt --all --check` and `cargo build --workspace`.
+
 ## Thesis Packages
 
 Thesis remains a peer product. `thesis.workspaces` owns isolated workspace
