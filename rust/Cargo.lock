@@ -389,6 +389,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-host"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+ "serde_json",
+]
+
+[[package]]
 name = "harness-mcp"
 version = "0.1.0"
 dependencies = [
