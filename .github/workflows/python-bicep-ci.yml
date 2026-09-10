@@ -9,9 +9,13 @@ on:
       - "tests/**"
       - "pyproject.toml"
       - "uv.lock"
+      - "setup.py"
       - "build.zig"
       - "build.zig.zon"
       - "src/harness/native/**"
+      - "rust/**"
+      - "Dockerfile"
+      - ".dockerignore"
       - "infra/**"
   push:
     branches:
@@ -24,9 +28,13 @@ on:
       - "tests/**"
       - "pyproject.toml"
       - "uv.lock"
+      - "setup.py"
       - "build.zig"
       - "build.zig.zon"
       - "src/harness/native/**"
+      - "rust/**"
+      - "Dockerfile"
+      - ".dockerignore"
       - "infra/**"
 
 permissions:
@@ -76,6 +84,33 @@ jobs:
       - name: Build package
         run: uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .
 
+  rust:
+    name: Rust format, lint, and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup show
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace --locked
+
   zig:
     name: Zig format and native core tests
     runs-on: ubuntu-latest
@@ -96,6 +131,49 @@ jobs:
 
       - name: Build and test native core
         run: zig build test
+
+  parity:
+    name: Cross-language parity oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Set up Zig 0.16.0
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+
+      - name: Build Zig native core
+        run: zig build
+
+      - name: Sync locked development environment
+        run: uv sync --locked --extra dev
+
+      - name: Rust-core determinism oracle
+        run: >-
+          uv run --extra dev pytest -p no:cacheprovider
+          tests/determinism/test_rust_oracle.py
+
+      - name: Zig-core determinism oracle
+        run: >-
+          uv run --extra dev pytest -p no:cacheprovider
+          tests/determinism/test_parity_oracle.py
 
   bicep:
     name: Bicep validation
