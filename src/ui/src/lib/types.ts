@@ -380,28 +380,65 @@ export interface WidgetDefinition {
 	data: Record<string, unknown>;
 }
 
-export interface ScreenerFilter {
-	kind: 'volume' | 'liquidity' | 'price';
-	op: '>' | '<' | '>=' | '<=';
-	value: number;
+// ---------- Screener (thesis.screening HTTP surface, /v1/workspaces/{ws}/screening) ----------
+
+/**
+ * One declarative filter: a preset kind plus validated parameters. The kind
+ * vocabulary and per-kind parameter validation mirror
+ * `src/thesis/screening/presets.py` (every violation is a backend
+ * FilterError at declaration time).
+ */
+export interface ScreenerFilterSpec {
+	kind: string;
+	params?: Record<string, string | number | boolean>;
 }
 
-export interface ScreenerDefinition {
-	id: string;
-	workspace_id: string;
-	name: string;
-	filters: ScreenerFilter[];
-	created_at: string;
+/** A saved screener definition document as served by the screening router. */
+export interface ScreenerSavedDefinition {
+	screener_id: string;
+	definition: {
+		schema_version: number;
+		name: string;
+		universe_revision: string;
+		lookback_days: number;
+		filters: ScreenerFilterSpec[];
+	};
+	definition_hash: string;
 	artifact_path: string;
 }
 
-export interface ScreenerResultRow {
+/** One surviving symbol with its evaluated fact sheet (string metrics). */
+export interface ScreenerHitRow {
+	rank: number;
 	symbol: string;
-	last: number;
-	volume: number;
-	avg_dollar_volume_20d: number;
-	change_pct: number;
-	matched_strategy_id: string | null;
+	metrics: Record<string, string>;
+}
+
+/** One deterministic run result with full provenance. */
+export interface ScreenerRunResult {
+	schema_version: number;
+	result_id: string;
+	screener_id: string;
+	definition_name: string;
+	universe_revision: string;
+	as_of: string;
+	data_window_start: string;
+	data_window_end: string;
+	definition_hash: string;
+	hits: ScreenerHitRow[];
+}
+
+/** Payload to save one screener definition. */
+export interface ScreenerSaveInput {
+	name: string;
+	universe_revision?: string;
+	lookback_days?: number;
+	filters: ScreenerFilterSpec[];
+}
+
+/** Payload to run one screener at an explicit point-in-time as-of date. */
+export interface ScreenerRunInput extends ScreenerSaveInput {
+	as_of: string;
 }
 
 // ---------- CLEO projection + workspace state ----------

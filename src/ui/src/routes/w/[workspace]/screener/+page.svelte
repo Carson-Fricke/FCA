@@ -1,24 +1,28 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import ScreenerPanel from '$lib/components/screener/ScreenerPanel.svelte';
-	import { listScreeners, listStrategies } from '$lib/api';
-	import type { ScreenerDefinition, Strategy } from '$lib/types';
+	import { listScreeners } from '$lib/api';
+	import type { ScreenerSavedDefinition } from '$lib/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const workspaceId = $derived(data.workspaceId);
 
-	let saved = $state<ScreenerDefinition[]>([]);
-	let strategies = $state<Strategy[]>([]);
+	let saved = $state<ScreenerSavedDefinition[] | null>(null);
+	let loadError = $state<string | null>(null);
 
 	$effect(() => {
 		let cancelled = false;
-		listScreeners(workspaceId).then((items) => {
-			if (!cancelled) saved = items;
-		});
-		listStrategies(workspaceId).then((items) => {
-			if (!cancelled) strategies = items;
-		});
+		saved = null;
+		loadError = null;
+		listScreeners(workspaceId)
+			.then((items) => {
+				if (!cancelled) saved = items;
+			})
+			.catch((error) => {
+				if (!cancelled) loadError = error instanceof Error ? error.message : String(error);
+			});
 		return () => {
 			cancelled = true;
 		};
@@ -31,13 +35,15 @@
 	<header>
 		<h1 class="text-xl font-semibold text-slate-800">Screener</h1>
 		<p class="text-sm text-slate-500">
-			Volume/liquidity presets; saved screeners persist as workspace artifacts.
+			Declarative point-in-time screens with definition-hash provenance; saved studies persist as
+			workspace artifacts.
 		</p>
 	</header>
 
-	<ScreenerPanel
-		{workspaceId}
-		initialSaved={saved}
-		strategies={strategies.map((s) => ({ id: s.id, name: s.name, symbol: s.symbol }))}
-	/>
+	{#if loadError}
+		<EmptyState title="Saved studies unavailable" hint={loadError} />
+	{/if}
+	{#key workspaceId}
+		<ScreenerPanel {workspaceId} initialSaved={saved ?? []} />
+	{/key}
 </div>

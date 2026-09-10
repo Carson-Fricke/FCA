@@ -35,8 +35,6 @@ import type {
 	OrderRecord,
 	PortfolioSummary,
 	RiskDecisionRecord,
-	ScreenerDefinition,
-	ScreenerResultRow,
 	StatusSurface,
 	Strategy,
 	TradeRecord,
@@ -47,6 +45,37 @@ import type {
 	WorkspaceStateData,
 	WorkspaceSummary
 } from '../types';
+
+/**
+ * Screener fixture rows are the input vocabulary of api.ts's fixture
+ * translator: flat definition rows plus flat result rows. listScreeners
+ * translates them into the real ScreenerSavedDefinition contract and the
+ * fixture run path maps them into ScreenerRunResult hits, so fixture mode
+ * exercises the real shapes end to end. Filter kinds use the engine-native
+ * preset names whose single numeric `min` parameter survives translation
+ * (avg_dollar_volume_min / min_price / avg_volume_percentile_min).
+ */
+export interface ScreenerFixtureFilterRow {
+	kind: string;
+	op: string;
+	value: number;
+}
+
+export interface ScreenerFixtureDefinitionRow {
+	id: string;
+	workspace_id: string;
+	name: string;
+	filters: ScreenerFixtureFilterRow[];
+	created_at: string;
+	artifact_path: string;
+}
+
+export interface ScreenerFixtureResultRow {
+	symbol: string;
+	last: number;
+	volume: number;
+	avg_dollar_volume_20d: number;
+}
 
 export interface Fixtures {
 	workspaces: { items: WorkspaceSummary[] };
@@ -64,8 +93,8 @@ export interface Fixtures {
 	portfolio: Record<string, StatusSurface<PortfolioSummary>>;
 	riskDecisions: Record<string, { items: RiskDecisionRecord[] }>;
 	widgets: Record<string, { items: WidgetDefinition[] }>;
-	screeners: Record<string, { items: ScreenerDefinition[] }>;
-	screenerResults: { items: ScreenerResultRow[] };
+	screeners: Record<string, { items: ScreenerFixtureDefinitionRow[] }>;
+	screenerResults: { items: ScreenerFixtureResultRow[] };
 	workspaceState: Record<string, WorkspaceStateData>;
 	knowledgeSearch: { items: KnowledgeHit[] };
 	consentProposal: { proposal: ConsentProposal };
