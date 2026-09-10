@@ -39,7 +39,7 @@ function Get-ChangedPaths {
     try { git diff --name-only HEAD 2>$null | ForEach-Object { if ($_) { [void]$set.Add($_) } } }
     catch { }
     try {
-        git status --porcelain 2>$null | ForEach-Object {
+        git status --porcelain -uno 2>$null | ForEach-Object {
             if ($_ -and $_.Length -gt 3) { [void]$set.Add(($_.Substring(3)).Trim()) }
         }
     }
