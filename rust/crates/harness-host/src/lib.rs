@@ -15,14 +15,28 @@
 //! acquisition per call (or per batch), so hot loops do not pay a per-event
 //! GIL acquisition.
 
+pub mod binding;
+pub mod contracts;
 pub mod error;
 pub mod indicator;
+pub mod lint;
 pub mod python;
+pub mod reference;
 pub mod screener;
 pub mod strategy;
 
+pub use binding::StrategyBinding;
+pub use contracts::{
+    callback_name_for_event, is_known_callback, require_callbacks, validate_callback_order,
+    ContractError, ContractErrorKind, CALLBACK_ORDER,
+};
 pub use error::HostError;
 pub use indicator::{IndicatorHost, LoadedCallable};
+pub use lint::{
+    default_lint_path, LintReport, PythonStrategyLinter, SandboxViolation, StrategyLintError,
+    ViolationCategory,
+};
+pub use reference::ReferenceStrategy;
 pub use screener::{LoadedScreener, ScreenerHost, SCREEN_ENTRYPOINT};
 pub use strategy::{LoadedStrategy, StrategyEvent, StrategyHost, StrategySpec};
 
@@ -172,6 +186,36 @@ class Demo:
         let host = ScreenerHost::new();
         let error = host.load_program(&path).err().expect("error");
         assert!(matches!(error, HostError::Python(_)), "{error}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn binding_lifecycle_matches_python_contract() {
+        let dir = temp_dir("binding");
+        let module = unique_module("binding");
+        fs::write(
+            dir.join(format!("{module}.py")),
+            "class Demo:\n    def __init__(self, parameters=None):\n        self.calls = []\n    def on_start(self, context):\n        self.calls.append(\"on_start\")\n    def on_quote(self, event):\n        self.calls.append(\"on_quote\")\n    def on_stop(self, context):\n        self.calls.append(\"on_stop\")\n    def summary(self):\n        return self.calls\n",
+        )
+        .expect("write module");
+        let host = StrategyHost::with_search_paths(vec![dir.clone()]);
+        let strategy = host
+            .load(&StrategySpec::new(module, "Demo"))
+            .expect("load");
+        let mut binding = StrategyBinding::new(strategy, "{}").expect("bind");
+        assert!(!binding.started());
+        binding.start().expect("start");
+        assert!(binding.started());
+        assert!(binding.receive("quote", r#"{"price":1}"#).expect("receive"));
+        let second_start = binding.start().expect_err("double start");
+        assert_eq!(second_start.kind, ContractErrorKind::Runtime);
+        binding.stop().expect("stop");
+        assert!(!binding.receive("quote", "{}").expect("after stop"));
+        let summary = binding
+            .strategy()
+            .call_json("summary", None)
+            .expect("summary");
+        assert_eq!(summary, r#"["on_start", "on_quote", "on_stop"]"#);
         let _ = fs::remove_dir_all(dir);
     }
 }
