@@ -212,7 +212,16 @@ def serve(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the standalone harness MCP command."""
+    """Run the standalone harness MCP command.
+
+    When the Rust entrypoint flip is enabled and a Rust ``mcp`` binary is
+    available, this dispatches to it; otherwise it runs the Python command.
+    """
+    from harness.cli.rust_entrypoints import exec_rust_entrypoint
+
+    rust_result = exec_rust_entrypoint("mcp", [] if argv is None else list(argv))
+    if rust_result is not None:
+        return rust_result
     try:
         app(args=None if argv is None else list(argv), prog_name="harness-mcp")
     except SystemExit as error:
