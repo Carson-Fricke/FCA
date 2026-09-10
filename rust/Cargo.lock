@@ -106,6 +106,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-data"
+version = "0.1.0"
+dependencies = [
+ "harness-num",
+]
+
+[[package]]
 name = "harness-native"
 version = "0.1.0"
 dependencies = [
