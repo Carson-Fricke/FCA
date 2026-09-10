@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -95,7 +97,7 @@ def test_facts_reject_invalid_fields(make_facts) -> None:
             "common_stock",
             "NASDAQ",
             "x",
-            "2024-05-31",  # type: ignore[arg-type]
+            cast(date, "2024-05-31"),
             {},
         )
 
@@ -143,7 +145,11 @@ def test_filter_context_rejects_misaligned_series(make_facts, make_bars) -> None
 def test_filter_context_rejects_unordered_dates(make_facts, make_bars) -> None:
     bars = make_bars()
     with pytest.raises(ValueError):
-        FilterContext(make_facts(), (bars[1], bars[0]), ())
+        FilterContext(
+            make_facts(),
+            (bars[1], bars[0]),
+            cast(Mapping[str, tuple[float | None, ...]], ()),
+        )
 
 
 def test_evaluation_round_trips_indicator_series_to_the_sandbox(make_context) -> None:

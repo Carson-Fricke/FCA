@@ -90,7 +90,7 @@ def _service_error(error: Exception) -> HTTPException:
 
 
 def _payload(request: ScreenerDefinitionRequest | RunScreenerRequest) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "name": request.name,
         "universe_revision": request.universe_revision,
         "lookback_days": request.lookback_days,
@@ -98,6 +98,11 @@ def _payload(request: ScreenerDefinitionRequest | RunScreenerRequest) -> dict[st
             {"kind": spec.kind, "params": dict(spec.params)} for spec in request.filters
         ],
     }
+    # The service derives a default universe revision from the run's as-of
+    # instant; saved definitions keep the caller-declared revision only.
+    if isinstance(request, RunScreenerRequest):
+        payload["as_of"] = request.as_of.isoformat()
+    return payload
 
 
 def create_screener_router() -> APIRouter:

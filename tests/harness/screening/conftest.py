@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import TypedDict, Unpack
 
 import pytest
 
@@ -94,11 +95,21 @@ def build_bars(
     )
 
 
+class _FactOverrides(TypedDict, total=False):
+    """Keyword overrides forwarded to :func:`build_facts` (minus ``symbol``)."""
+
+    security_type: str
+    exchange: str
+    sic_industry: str
+    as_of: date
+    fundamentals: Mapping[str, str | int | float | bool | None]
+
+
 def build_context(
     symbol: str = "AAPL",
     closes: Sequence[str] = AAPL_CLOSES,
     indicators: Mapping[str, tuple[float | None, ...]] | None = None,
-    **fact_overrides: object,
+    **fact_overrides: Unpack[_FactOverrides],
 ) -> FilterContext:
     """Build one screening context with a host-computed sma_5 series."""
     bars = build_bars(tuple(closes))
@@ -111,7 +122,7 @@ def build_context(
                 (IndicatorSeriesRequest("sma", {"period": 5}, alias="sma_5"),),
             )
         )
-    facts = build_facts(symbol, **fact_overrides)  # type: ignore[arg-type]
+    facts = build_facts(symbol, **fact_overrides)
     return FilterContext(facts, bars, series)
 
 

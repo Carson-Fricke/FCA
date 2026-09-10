@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Final, Protocol
+from decimal import Decimal
+from typing import Any, Final, Protocol, cast
 
 SCHEMA_VERSION: Final = 1
 DEFINITION_DOMAIN: Final = b"fca:thesis-screening-definition:v1\0"
@@ -55,7 +56,24 @@ class MarketBar:
 
 
 class ScreenerContext(Protocol):
-    """Injected data ports the engine screens over."""
+    """Injected data ports the engine screens over.
+
+    ``universe`` and ``market_data`` are the two required ports.  Three
+    optional ports extend the surface for the declarative filter vocabulary
+    and are discovered with ``getattr`` so minimal T219-style contexts keep
+    working; a definition that declares a filter needing a port the context
+    does not expose fails closed with :class:`ScreenerPortError` instead of
+    silently producing an empty screen:
+
+    - ``classification(symbol, as_of) -> Mapping[str, str] | None`` — the
+      point-in-time classification fact sheet (``security_type``,
+      ``exchange``, ``sic_code``, ``sic_industry``, ...);
+    - ``fundamentals(symbol, as_of) -> Mapping[str, str] | None`` — the
+      filed-date point-in-time fundamentals fact sheet;
+    - ``indicator_value(name, params, symbol, *, window_start, window_end)``
+      — one precomputed technical indicator value, or ``None`` when the
+      indicator never warmed up inside the fetched window.
+    """
 
     def universe(self, as_of: date) -> Sequence[UniverseEntry]:
         """Return the point-in-time universe snapshot for ``as_of``."""
@@ -119,7 +137,12 @@ class ScreenerDefinition:
 
 @dataclass(frozen=True, slots=True)
 class ScreenerHit:
-    """One surviving symbol with its evaluated metrics."""
+    """One surviving symbol with its evaluated fact sheet.
+
+    ``metrics`` merges the base market metrics, the classification and
+    fundamentals fact sheets (when the context exposes those ports), and any
+    precomputed indicator values, all as strings for canonical serialization.
+    """
 
     symbol: str
     rank: int
@@ -190,14 +213,79 @@ def _symbol_metrics(
     }
 
 
+def _numeric_ranks(
+    metrics_by_symbol: Mapping[str, Mapping[str, str]],
+) -> dict[str, dict[str, float]]:
+    """Compute per-metric percentile ranks across the full candidate set.
+
+    The rank of one value is the fraction of candidates whose value for the
+    same metric is less than or equal to it, computed only over the symbols
+    that carry the metric at all.  Ties share one rank and the computation is
+    order-free, so results are deterministic for identical inputs.
+    """
+    numeric_by_symbol: dict[str, dict[str, float]] = {}
+    values_by_metric: dict[str, list[float]] = {}
+    for symbol, metrics in metrics_by_symbol.items():
+        numeric: dict[str, float] = {}
+        for key, raw in metrics.items():
+            try:
+                numeric[key] = float(raw)
+            except (TypeError, ValueError):
+                continue
+        numeric_by_symbol[symbol] = numeric
+        for key, value in numeric.items():
+            values_by_metric.setdefault(key, []).append(value)
+    sorted_by_metric = {key: sorted(values) for key, values in values_by_metric.items()}
+    return {
+        symbol: {
+            key: _percentile_rank(value, sorted_by_metric[key])
+            for key, value in numeric.items()
+        }
+        for symbol, numeric in numeric_by_symbol.items()
+    }
+
+
+def _percentile_rank(value: float, ordered: list[float]) -> float:
+    """Return the fraction of ``ordered`` values less than or equal to ``value``."""
+    if not ordered:
+        return 0.0
+    rank = sum(1 for other in ordered if other <= value)
+    return rank / len(ordered)
+
+
+def _fact_mapping(port: object, *args: object) -> Mapping[str, str] | None:
+    """Call one optional fact port and normalize its result, or ``None``."""
+    if port is None:
+        return None
+    caller = cast("Callable[..., object]", port)
+    try:
+        result = caller(*args)
+    except ScreenerError:
+        raise
+    except Exception as error:  # noqa: BLE001 - port failures fail closed
+        raise ScreenerPortError(f"fact-sheet port failed: {error}") from error
+    if result is None:
+        return None
+    if not isinstance(result, Mapping):
+        raise ScreenerPortError("fact-sheet ports must return mappings")
+    return {str(key): str(value) for key, value in result.items()}
+
+
 def run_screener(
     definition: ScreenerDefinition,
     context: ScreenerContext,
     *,
     as_of: date,
 ) -> ScreenerResult:
-    """Evaluate ``definition`` over the as-of universe snapshot."""
-    from thesis.screening.presets import resolve_filter
+    """Evaluate ``definition`` over the as-of universe snapshot.
+
+    Filters are resolved once at declaration time; the fact sheet per symbol
+    merges base market metrics, the optional classification and fundamentals
+    fact sheets, and precomputed indicator values.  Every numeric fact is
+    percentile-ranked across the full candidate set, so relative filters see
+    the same rank for the same inputs regardless of evaluation order.
+    """
+    from thesis.screening.presets import indicator_metric_key, resolve_filter
 
     if not isinstance(definition, ScreenerDefinition):
         raise ScreenerError("definition must be a ScreenerDefinition")
@@ -210,6 +298,43 @@ def run_screener(
     except Exception as error:  # noqa: BLE001 - port failures fail closed
         raise ScreenerPortError(f"universe port failed: {error}") from error
 
+    evaluators = tuple(
+        resolve_filter(spec.get("kind"), spec.get("params") or {})
+        for spec in definition.filters
+    )
+    indicator_requests: list[tuple[str, Mapping[str, object]]] = []
+    for evaluator in evaluators:
+        for request in evaluator.indicators:
+            pair = (request.name, dict(request.params))
+            if pair not in indicator_requests:
+                indicator_requests.append(pair)
+    classification_port = getattr(context, "classification", None)
+    fundamentals_port = getattr(context, "fundamentals", None)
+    indicator_port = getattr(context, "indicator_value", None)
+    if indicator_requests and indicator_port is None:
+        raise ScreenerPortError(
+            "definition declares indicator filters but the context does not "
+            "expose the indicator_value port"
+        )
+    needed_families = {
+        family for evaluator in evaluators for family in evaluator.fact_sources
+    }
+    available_families = {
+        family: port is not None
+        for family, port in (
+            ("classification", classification_port),
+            ("fundamentals", fundamentals_port),
+        )
+    }
+    missing = sorted(
+        family for family in needed_families if not available_families.get(family, True)
+    )
+    if missing:
+        raise ScreenerPortError(
+            "definition declares fact filters but the context does not expose "
+            f"the {', '.join(sorted(missing))} port"
+        )
+
     metrics_by_symbol: dict[str, dict[str, str]] = {}
     for entry in entries:
         try:
@@ -220,27 +345,48 @@ def run_screener(
             raise ScreenerPortError(
                 f"market-data port failed for {entry.symbol}: {error}"
             ) from error
-        metrics_by_symbol[entry.symbol] = _symbol_metrics(entry, bars, as_of)
+        metrics = _symbol_metrics(entry, bars, as_of)
+        if classification_port is not None:
+            facts = _fact_mapping(classification_port, entry.symbol, as_of)
+            if facts:
+                metrics.update(facts)
+        if fundamentals_port is not None:
+            facts = _fact_mapping(fundamentals_port, entry.symbol, as_of)
+            if facts:
+                metrics.update(facts)
+        if indicator_requests:
+            indicator_caller = cast("Callable[..., object]", indicator_port)
+            for name, params in indicator_requests:
+                try:
+                    value = indicator_caller(
+                        name,
+                        params,
+                        entry.symbol,
+                        window_start=window_start_date,
+                        window_end=as_of,
+                    )
+                except ScreenerPortError:
+                    raise
+                except Exception as error:  # noqa: BLE001 - fail closed
+                    raise ScreenerPortError(
+                        f"indicator port failed for {entry.symbol}: {error}"
+                    ) from error
+                if value is None:
+                    continue
+                text = format(value, "f") if isinstance(value, Decimal) else str(value)
+                metrics[indicator_metric_key(name, params)] = text
+        metrics_by_symbol[entry.symbol] = metrics
 
-    # Average-volume percentile rank across the whole candidate set.
-    volumes = sorted(
-        float(metrics["avg_volume"]) for metrics in metrics_by_symbol.values()
-    )
-
-    def _percentile(value: str) -> float:
-        rank = sum(1 for other in volumes if other <= float(value))
-        return rank / len(volumes) if volumes else 0.0
+    ranks = _numeric_ranks(metrics_by_symbol)
 
     survivors: list[tuple[str, dict[str, str]]] = []
     for symbol, metrics in metrics_by_symbol.items():
-        percentile = _percentile(str(metrics["avg_volume"]))
-        passed = True
-        for spec in definition.filters:
-            evaluator = resolve_filter(spec.get("kind"), spec.get("params", {}))
-            if not evaluator.evaluate(metrics, percentile=percentile):
-                passed = False
-                break
-        if passed:
+        symbol_ranks = ranks.get(symbol, {})
+        percentile = symbol_ranks.get("avg_volume", 0.0)
+        if all(
+            evaluator.evaluate(metrics, percentile=percentile, ranks=symbol_ranks)
+            for evaluator in evaluators
+        ):
             survivors.append((symbol, metrics))
 
     survivors.sort(key=lambda item: (-float(item[1]["avg_dollar_volume"]), item[0]))

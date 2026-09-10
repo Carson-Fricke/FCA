@@ -12,6 +12,7 @@ import pytest
 
 from harness.screening import (
     FilterContext,
+    FilterEvaluationError,
     evaluate_universe,
     evaluate_universe_inprocess,
 )
@@ -133,9 +134,9 @@ def screen(ctx):
 def test_violations_fail_closed_identically_in_both_models(make_context) -> None:
     script = "import os\n\ndef screen(ctx):\n    return True\n"
     universe = _universe(make_context)
-    with pytest.raises(Exception) as sandbox_error:
+    with pytest.raises(FilterEvaluationError) as sandbox_error:
         evaluate_universe(script, universe)
-    with pytest.raises(Exception) as reference_error:
+    with pytest.raises(FilterEvaluationError) as reference_error:
         evaluate_universe_inprocess(script, universe)
     sandbox_record = sandbox_error.value.error
     reference_record = reference_error.value.error

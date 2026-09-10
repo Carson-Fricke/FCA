@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from datetime import date
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 
@@ -167,13 +168,13 @@ def test_invalid_timeout_fails_closed(timeout: float, make_context) -> None:
 
 def test_non_string_script_fails_closed(make_context) -> None:
     with pytest.raises(FilterEvaluationError) as raised:
-        evaluate_filter(b"def screen(ctx):\n    return True", make_context())  # type: ignore[arg-type]
+        evaluate_filter(cast(str, b"def screen(ctx):\n    return True"), make_context())
     assert raised.value.error.kind is FilterErrorKind.INPUT_INVALID
 
 
 def test_non_filter_context_fails_closed() -> None:
     with pytest.raises(FilterEvaluationError) as raised:
-        evaluate_universe(SIMPLE_TRUE, (object(),))
+        evaluate_universe(SIMPLE_TRUE, cast("tuple[FilterContext, ...]", (object(),)))
     assert raised.value.error.kind is FilterErrorKind.INPUT_INVALID
 
 
@@ -239,7 +240,7 @@ def test_worker_response_hash_mismatch_fails_closed(monkeypatch, make_context) -
 
     real_load = json_module.loads
 
-    def tampered(data: object, **kwargs: object) -> object:
+    def tampered(data: str | bytes | bytearray, **kwargs: Any) -> Any:
         document = real_load(data, **kwargs)
         if (
             isinstance(document, dict)

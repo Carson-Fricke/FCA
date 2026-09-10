@@ -32,8 +32,6 @@ import type {
 	PortfolioSummary,
 	PostMessageResult,
 	RiskDecisionRecord,
-	ScreenerDefinition,
-	ScreenerResultRow,
 	StatusSurface,
 	Strategy,
 	WidgetDefinition,
@@ -42,6 +40,66 @@ import type {
 	WorkspaceStateData,
 	WorkspaceSummary
 } from './types';
+
+// ---------------------------------------------------------------------------
+// Screener contract (thesis.screening HTTP surface, `/v1/workspaces/{ws}/screening`).
+// The UX agent owns moving these into `types.ts` and rebuilding the panel;
+// they are declared here so the client functions carry the real shapes today.
+// ---------------------------------------------------------------------------
+
+/** One declarative filter: a preset kind plus validated parameters. */
+export interface ScreenerFilterSpec {
+	kind: string;
+	params?: Record<string, string | number | boolean>;
+}
+
+/** A saved screener definition document as served by the screening router. */
+export interface ScreenerSavedDefinition {
+	screener_id: string;
+	definition: {
+		schema_version: number;
+		name: string;
+		universe_revision: string;
+		lookback_days: number;
+		filters: ScreenerFilterSpec[];
+	};
+	definition_hash: string;
+	artifact_path: string;
+}
+
+/** One surviving symbol with its evaluated fact sheet (string metrics). */
+export interface ScreenerHitRow {
+	rank: number;
+	symbol: string;
+	metrics: Record<string, string>;
+}
+
+/** One deterministic run result with full provenance. */
+export interface ScreenerRunResult {
+	schema_version: number;
+	result_id: string;
+	screener_id: string;
+	definition_name: string;
+	universe_revision: string;
+	as_of: string;
+	data_window_start: string;
+	data_window_end: string;
+	definition_hash: string;
+	hits: ScreenerHitRow[];
+}
+
+/** Payload to save one screener definition. */
+export interface ScreenerSaveInput {
+	name: string;
+	universe_revision?: string;
+	lookback_days?: number;
+	filters: ScreenerFilterSpec[];
+}
+
+/** Payload to run one screener at an explicit point-in-time as-of date. */
+export interface ScreenerRunInput extends ScreenerSaveInput {
+	as_of: string;
+}
 
 const base: string = (import.meta.env.PUBLIC_THESIS_API_BASE as string | undefined) ?? '';
 const forceFixtures = (import.meta.env.PUBLIC_THESIS_UI_FIXTURES as string | undefined) === 'true';
@@ -118,12 +176,12 @@ function itemsOf<T>(doc: Record<string, { items: T[] }>): Record<string, T[]> {
 
 const store: {
 	widgets: Record<string, WidgetDefinition[]>;
-	screeners: Record<string, ScreenerDefinition[]>;
+	screeners: Record<string, ScreenerSavedDefinition[]>;
 	messages: Record<string, ChatMessage[]>;
 	nextId: number;
 } = {
 	widgets: itemsOf(fixtures.widgets),
-	screeners: itemsOf(fixtures.screeners),
+	screeners: {},
 	messages: itemsOf(fixtures.chatMessages),
 	nextId: 1
 };
@@ -449,50 +507,149 @@ export function removeWidget(workspaceId: string, widgetId: string): Promise<voi
 	);
 }
 
-export function listScreeners(workspaceId: string): Promise<ScreenerDefinition[]> {
+/**
+ * Legacy fixture rows use a flat `{kind, op, value}` vocabulary; translate
+ * them into the engine-native `{kind, params}` presets so fixture mode
+ * exercises the real contract. The UX agent owns regenerating fixtures.
+ */
+function nativeFilter(kind: string, op: string | undefined, value: number): ScreenerFilterSpec {
+	const preset =
+		kind === 'price'
+			? 'min_price'
+			: kind === 'volume' || kind === 'liquidity'
+				? 'avg_dollar_volume_min'
+				: kind;
+	if (op === '<' || op === '<=') {
+		return { kind: preset, params: { max: value } };
+	}
+	return { kind: preset, params: { min: value } };
+}
+
+function toNativeFilters(legacy: unknown): ScreenerFilterSpec[] {
+	if (!Array.isArray(legacy)) return [];
+	return legacy
+		.filter((row) => typeof row === 'object' && row !== null)
+		.map((row) => {
+			const record = row as { kind?: unknown; op?: unknown; value?: unknown };
+			if (typeof record.value === 'number') {
+				return nativeFilter(String(record.kind), record.op as string | undefined, record.value);
+			}
+			return { kind: String(record.kind ?? ''), params: {} };
+		});
+}
+
+function legacyToSaved(row: Record<string, unknown>): ScreenerSavedDefinition {
+	const id = String(row.id ?? 'scr');
+	return {
+		screener_id: id,
+		definition: {
+			schema_version: 1,
+			name: String(row.name ?? id),
+			universe_revision: 'universe:fixture',
+			lookback_days: 20,
+			filters: toNativeFilters(row.filters)
+		},
+		definition_hash: `fixture-${id}`,
+		artifact_path: String(row.artifact_path ?? `screeners/${id}.json`)
+	};
+}
+
+export function listScreeners(workspaceId: string): Promise<ScreenerSavedDefinition[]> {
 	if (fixtureMode) {
 		return wait(5).then(() => {
-			const doc = store.screeners[workspaceId];
-			return doc ? plain(doc) : [];
+			const legacy = plain(fixtures.screeners[workspaceId]?.items ?? []);
+			const created = plain(store.screeners[workspaceId] ?? []);
+			return [
+				...legacy.map((row) => legacyToSaved(row as unknown as Record<string, unknown>)),
+				...created
+			];
 		});
 	}
-	return apiFetch<{ items: ScreenerDefinition[] }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screeners`
+	return apiFetch<{ items: ScreenerSavedDefinition[] }>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screening`
 	).then((r) => r.items);
 }
 
 export function saveScreener(
 	workspaceId: string,
-	definition: { name: string; filters: ScreenerDefinition['filters'] }
-): Promise<ScreenerDefinition> {
+	input: ScreenerSaveInput
+): Promise<ScreenerSavedDefinition> {
 	if (fixtureMode) {
 		return wait(15).then(() => {
-			const created: ScreenerDefinition = {
-				id: `scr-local-${store.nextId++}`,
-				workspace_id: workspaceId,
-				name: definition.name,
-				filters: plain(definition.filters),
-				created_at: new Date().toISOString(),
-				artifact_path: `screeners/${definition.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`
+			const created: ScreenerSavedDefinition = {
+				screener_id: `scr-local-${store.nextId++}`,
+				definition: {
+					schema_version: 1,
+					name: input.name,
+					universe_revision: input.universe_revision ?? 'universe:fixture',
+					lookback_days: input.lookback_days ?? 20,
+					filters: input.filters
+				},
+				definition_hash: `fixture-${Date.now()}`,
+				artifact_path: `screeners/definitions/${input.name
+					.toLowerCase()
+					.replace(/[^a-z0-9]+/g, '-')}.json`
 			};
 			store.screeners[workspaceId] = [...(store.screeners[workspaceId] ?? []), created];
 			return created;
 		});
 	}
-	return apiFetch<ScreenerDefinition>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screeners`,
-		{ method: 'POST', body: JSON.stringify(definition) }
+	return apiFetch<ScreenerSavedDefinition>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screening`,
+		{ method: 'POST', body: JSON.stringify(input) }
 	);
 }
 
-export function runScreener(): Promise<ScreenerResultRow[]> {
+export function runScreener(
+	workspaceId: string,
+	input: ScreenerRunInput
+): Promise<ScreenerRunResult> {
 	if (fixtureMode) {
-		return wait(15).then(() => plain(fixtures.screenerResults.items));
+		return wait(15).then(() => {
+			const rows = plain(fixtures.screenerResults.items);
+			return {
+				schema_version: 1,
+				result_id: 'fixture-run',
+				screener_id: 'fixture',
+				definition_name: input.name,
+				universe_revision: input.universe_revision ?? 'universe:fixture',
+				as_of: input.as_of,
+				data_window_start: input.as_of,
+				data_window_end: input.as_of,
+				definition_hash: 'fixture-definition-hash',
+				hits: rows.map((row, index) => ({
+					rank: index + 1,
+					symbol: row.symbol,
+					metrics: {
+						last_close: String(row.last),
+						avg_volume: String(row.volume),
+						avg_dollar_volume: String(row.avg_dollar_volume_20d)
+					}
+				}))
+			};
+		});
 	}
-	return apiFetch<{ items: ScreenerResultRow[] }>(
-		'/v1/screener/run',
-		{ method: 'POST', body: JSON.stringify({ universe: 'us-equity' }) }
-	).then((r) => r.items);
+	return apiFetch<ScreenerRunResult>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screening/run`,
+		{ method: 'POST', body: JSON.stringify(input) }
+	);
+}
+
+/** Fetch one stored run result (with provenance) by its content id. */
+export function getScreenerResult(
+	workspaceId: string,
+	resultId: string
+): Promise<ScreenerRunResult> {
+	if (fixtureMode) {
+		return runScreener(workspaceId, {
+			name: 'fixture-screen',
+			as_of: new Date().toISOString().slice(0, 10),
+			filters: []
+		});
+	}
+	return apiFetch<ScreenerRunResult>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screening/results/${encodeURIComponent(resultId)}`
+	);
 }
 
 export function getWorkspaceState(workspaceId: string): Promise<WorkspaceStateData> {
