@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-09T23:11:21.268Z",
+    "exportedAt": "2026-09-10T02:02:42.540Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 224
+      "nextId": 234
     },
-    "checksum": "6bf9a5238677d823",
-    "taskCount": 220,
+    "checksum": "17c9ac492f45028f",
+    "taskCount": 230,
     "exportMode": "full"
   },
   "selection": {
@@ -47,6 +47,7 @@
       "T172",
       "T174",
       "T182",
+      "T225",
       "T003",
       "T014",
       "T017",
@@ -78,6 +79,7 @@
       "T173",
       "T175",
       "T183",
+      "T226",
       "T004",
       "T015",
       "T018",
@@ -108,6 +110,7 @@
       "T170",
       "T176",
       "T184",
+      "T227",
       "T005",
       "T019",
       "T024",
@@ -136,6 +139,7 @@
       "T177",
       "T185",
       "T216",
+      "T228",
       "T006",
       "T020",
       "T025",
@@ -159,6 +163,7 @@
       "T186",
       "T188",
       "T214",
+      "T229",
       "T007",
       "T026",
       "T038",
@@ -180,6 +185,7 @@
       "T215",
       "T218",
       "T219",
+      "T230",
       "T008",
       "T027",
       "T039",
@@ -221,6 +227,7 @@
       "T190",
       "T210",
       "T211",
+      "T224",
       "T192",
       "T212",
       "T193",
@@ -232,8 +239,11 @@
       "T196",
       "T223",
       "T197",
+      "T231",
       "T198",
+      "T232",
       "T199",
+      "T233",
       "T200",
       "T204"
     ],
@@ -551,6 +561,13 @@
       "parentId": "T181",
       "depends": []
     },
+    "T225": {
+      "type": "task",
+      "title": "Tick-native incremental indicator library with cross-mode parity",
+      "status": "pending",
+      "parentId": "T224",
+      "depends": []
+    },
     "T003": {
       "type": "epic",
       "title": "E0 Repository and Python foundation",
@@ -863,6 +880,13 @@
         "T182"
       ]
     },
+    "T226": {
+      "type": "task",
+      "title": "Free fundamentals and security-classification source evaluation",
+      "status": "done",
+      "parentId": "T224",
+      "depends": []
+    },
     "T004": {
       "type": "epic",
       "title": "E1 Azure infrastructure and budget controls",
@@ -1167,6 +1191,15 @@
         "T183"
       ]
     },
+    "T227": {
+      "type": "task",
+      "title": "Fundamentals and security-classification ingest",
+      "status": "pending",
+      "parentId": "T224",
+      "depends": [
+        "T226"
+      ]
+    },
     "T005": {
       "type": "epic",
       "title": "E2 Lake core library",
@@ -1456,6 +1489,17 @@
       "parentId": "T073",
       "depends": []
     },
+    "T228": {
+      "type": "task",
+      "title": "Screening data ports, declarative filter expansion, and API serving",
+      "status": "pending",
+      "parentId": "T224",
+      "depends": [
+        "T225",
+        "T226",
+        "T227"
+      ]
+    },
     "T006": {
       "type": "epic",
       "title": "E3 CI/CD and GitHub OIDC",
@@ -1691,6 +1735,15 @@
       "parentId": "T076",
       "depends": []
     },
+    "T229": {
+      "type": "task",
+      "title": "Process-isolated custom screener evaluation in the harness",
+      "status": "pending",
+      "parentId": "T224",
+      "depends": [
+        "T225"
+      ]
+    },
     "T007": {
       "type": "epic",
       "title": "E4 Equities SIP ingest",
@@ -1902,6 +1955,16 @@
       "status": "done",
       "parentId": "T077",
       "depends": []
+    },
+    "T230": {
+      "type": "task",
+      "title": "Production screener UX",
+      "status": "pending",
+      "parentId": "T224",
+      "depends": [
+        "T228",
+        "T229"
+      ]
     },
     "T008": {
       "type": "epic",
@@ -2334,6 +2397,13 @@
       "parentId": "T150",
       "depends": []
     },
+    "T224": {
+      "type": "epic",
+      "title": "Market intelligence and production screening",
+      "status": "pending",
+      "parentId": "T068",
+      "depends": []
+    },
     "T192": {
       "type": "task",
       "title": "Capability-scoped read-only strategy clock",
@@ -2422,6 +2492,13 @@
         "T196"
       ]
     },
+    "T231": {
+      "type": "task",
+      "title": "TH6.8 Thesis API workspace data routes over local persistence and harness adapters",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
+    },
     "T198": {
       "type": "task",
       "title": "Import-boundary and type separation for the strategy surface",
@@ -2430,6 +2507,13 @@
       "depends": [
         "T192"
       ]
+    },
+    "T232": {
+      "type": "task",
+      "title": "TH6.9 Model providers: OpenRouter adapter and Azure AI Foundry invocation client",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
     },
     "T199": {
       "type": "task",
@@ -2442,6 +2526,13 @@
         "T196",
         "T197"
       ]
+    },
+    "T233": {
+      "type": "task",
+      "title": "TH6.10 Local end-to-end stack runbook: harness api + thesis serve + UI real mode",
+      "status": "pending",
+      "parentId": "T150",
+      "depends": []
     },
     "T200": {
       "type": "task",
@@ -6744,6 +6835,54 @@
       "relates": []
     },
     {
+      "id": "T225",
+      "title": "Tick-native incremental indicator library with cross-mode parity",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T224",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Introduce a first-class indicator library in the harness built as incremental state machines over kernel tick events (trades and quotes), not bar-aligned window functions. Each indicator consumes deterministic kernel events in event-time, maintains O(1) per-tick state, and emits values at deterministic boundaries derived the same way bars are derived in the native kernel. The registry exposes named indicators (sma, ema, rsi, atr, realized volatility, dollar volume, vwap, obv, and similar) with typed parameter schemas usable from declarative screener filters, strategies, and the MCP surface. Outputs must be byte-identical across a LakeReplayFeed backtest, a PaperShell live-ordered feed, and shadow mode, validated by a parity oracle in the existing determinism testing pattern. No wall-clock access anywhere.",
+      "labels": [
+        "harness",
+        "indicators",
+        "determinism"
+      ],
+      "notes": [
+        "2026-09-10 00:22:12 UTC: 2026-09-10 00:30 UTC: Source evaluation complete (live-endpoint verification, not just docs). Recommendation - classification: Nasdaq Trader nasdaqtraded.txt (daily official file, 13194 securities, authoritative ETF flag, all US exchanges via Listing Exchange, File Creation Time row as knowledge date; archive daily for point-in-time) joined with SEC company_tickers.json/company_tickers_exchange.json and submissions/*.json for symbol-to-CIK-to-SIC mapping. Fundamentals: SEC EDGAR XBRL company facts as primary - free, no key, 10 req/s fair-access policy, nightly bulk companyfacts.zip backfill then companyconcept increments, every fact carries filed (knowledge date), accn (provenance), form, frame; original-vs-restated lineage falls out of as-of joins on filed. Verified live on AAPL dei:EntityCommonStockSharesOutstanding. Known gaps: no GICS sector/industry (SIC only, via SEC submissions), ETFs have no SIC and do not file - ETF sector coverage needs yfinance-class labeling (dev-only) or a paid provider (FMP Starter ~22/mo) later. Rejected for production: Yahoo Finance (ToS-prohibited pattern, silent restatements, breakage history), FMP free tier (250/day, statements limited to ~87 symbols), Twelve Data (8 fundamental pulls/day), Alpha Vantage (25/day). Schwab (if connected): licensed quotes/history plus current fundamental snapshot via the fundamental projection, 120 req/min, but 30-minute access tokens with a 7-day refresh-token hard expiry requiring weekly re-consent; treat as a quote supplement and consistency checker, not a lake source. Pending orchestrator sign-off on this composition."
+      ],
+      "acceptance": [
+        "Indicators are incremental state machines consuming kernel tick events in event time with O(1) amortized updates and no wall-clock dependence",
+        "The registry exposes at least sma, ema, rsi, atr, realized volatility, dollar volume, vwap, and obv with typed parameters and golden-value tests per indicator",
+        "A cross-mode parity oracle proves byte-identical indicator outputs across replayed backtest, paper-ordered live feed, and shadow event sequences",
+        "Indicators integrate with the deterministic replay and HistoricalView point-in-time guards without lookahead",
+        "Focused harness tests, ruff, and ty pass on the touched paths"
+      ],
+      "files": [
+        "src/harness/indicators/",
+        "src/harness/testing/",
+        "tests/harness/indicators/"
+      ],
+      "createdAt": "2026-09-10T00:04:22.866Z",
+      "updatedAt": "2026-09-10T00:31:05.674Z",
+      "verification": {
+        "passed": false,
+        "round": 0,
+        "gates": {},
+        "evidence": {},
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": []
+      },
+      "pipelineStage": "implementation",
+      "assignee": "local",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T003",
       "title": "E0 Repository and Python foundation",
       "status": "done",
@@ -8031,10 +8170,11 @@
         "Complete child T075: H7 M4 Live broker integration",
         "Complete child T076: H8 M5 Hardening, sweeps, and authoring",
         "Complete child T077: H9 M3b Point-in-time equity universes",
-        "Complete child T181: H10 M6 Zig core engine migration"
+        "Complete child T181: H10 M6 Zig core engine migration",
+        "Complete child T224: Market intelligence and production screening"
       ],
       "createdAt": "2026-09-01T17:53:59.152Z",
-      "updatedAt": "2026-09-04T16:45:28.087Z",
+      "updatedAt": "2026-09-10T00:00:33.493Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -11121,6 +11261,104 @@
       "pipelineStage": "contribution",
       "assignee": "zig-ffi",
       "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T226",
+      "title": "Free fundamentals and security-classification source evaluation",
+      "status": "done",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T224",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Research spike to select the free data sources for security classification (stock versus ETF, sector, industry) and point-in-time fundamentals. Evaluate SEC EDGAR XBRL company facts (official, free, filing-date point-in-time), Nasdaq Trader symbol directory files (official listing and ETF classification), Schwab Trader API (user-account fundamentals and profiles), Yahoo Finance scrapers (unofficial, fragile, terms-of-service gray), and freemium providers (Financial Modeling Prep, Finnhub, Twelve Data free tiers). Produce a decision record comparing coverage over the target universe, point-in-time semantics, refresh cadence, rate limits and terms of service, ingestion cost, and schema fit, and select the primary and supplemental sources for the ingest task.",
+      "labels": [
+        "research",
+        "fundamentals",
+        "reference-data"
+      ],
+      "acceptance": [
+        "A decision record exists comparing at least SEC EDGAR XBRL company facts, the Nasdaq Trader symbol directory, the Schwab API, Yahoo Finance scraping, and one freemium provider on coverage, point-in-time semantics, terms of service, rate limits, and cost",
+        "The record selects the primary classification source and the primary fundamentals source with a documented schema mapping to the lake storage conventions and a refresh cadence",
+        "The recommendation names the point-in-time key (filing date or effective date) and how restatements are handled"
+      ],
+      "files": [
+        ".cleo/rcasd/",
+        "docs/"
+      ],
+      "createdAt": "2026-09-10T00:04:27.199Z",
+      "updatedAt": "2026-09-10T00:41:34.872Z",
+      "completedAt": "2026-09-10T00:41:30.125Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T00:35:41.024Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-10T00:04:27.199Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "decision",
+                "decisionId": "D006"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/verification/T226-validation.json",
+                    "sha256": "ad46f796786621425839e71476258b6848ba25258096f5b4ff9a616cdbe44057"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-10T00:34:37.065Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T226-validation.json",
+                "sha256": "ad46f796786621425839e71476258b6848ba25258096f5b4ff9a616cdbe44057",
+                "passCount": 4,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-10T00:35:22.505Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 220 CLEO tasks through T223.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T00:35:41.221Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "kind": "research",
       "scope": "feature",
       "relates": []
     },
@@ -15062,6 +15300,56 @@
       "relates": []
     },
     {
+      "id": "T227",
+      "title": "Fundamentals and security-classification ingest",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T224",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Implement the lake-side ingest for the sources selected by the research task: a security-classification dataset (symbol to security type stock or ETF, sector, industry, exchange) and a point-in-time fundamentals dataset (market cap, shares outstanding, pe, revenue, earnings, and similar fields) keyed by filing or effective date so screening at any as-of instant only sees facts known then. Azure storage schemas follow the lake partition conventions, the lakeclient query surface exposes both datasets, and the ingest is idempotent with coverage tracking like the market-data ingest.",
+      "labels": [
+        "lake",
+        "fundamentals",
+        "reference-data"
+      ],
+      "acceptance": [
+        "Security classification and fundamentals datasets exist in the lake with documented partition paths and PyArrow schemas",
+        "Every fundamentals row carries its knowledge date (filing or publication) and as-of queries never return facts dated after the query instant",
+        "The ingest is idempotent with coverage reporting per symbol and period, and lakeclient can query both datasets",
+        "Focused lake tests, ruff, and ty pass on the touched paths"
+      ],
+      "files": [
+        "src/lake/",
+        "config/lake/",
+        "tests/lake/"
+      ],
+      "depends": [
+        "T226"
+      ],
+      "createdAt": "2026-09-10T00:04:31.280Z",
+      "updatedAt": "2026-09-10T00:32:10.197Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T00:04:31.280Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T005",
       "title": "E2 Lake core library",
       "status": "done",
@@ -18563,6 +18851,62 @@
       "relates": []
     },
     {
+      "id": "T228",
+      "title": "Screening data ports, declarative filter expansion, and API serving",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T224",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Bind the T219 screener engine to real data: implement the ScreenerContext protocol over UniverseView, SecurityMasterView, the lake market-data query path, and the new classification and fundamentals datasets; expand the metric and filter vocabulary with security type, sector, industry, fundamentals fields, and indicator-based technical conditions (rsi, sma cross, atr, dollar volume percentile and similar) computed through the tick-native indicator library over the OHLCV window; serve screening runs and saved studies through the Thesis API with the workspace artifact store; and align the UI api client to the real contract (send the active filter set, receive the backend result schema).",
+      "labels": [
+        "screening",
+        "thesis",
+        "lake",
+        "api"
+      ],
+      "acceptance": [
+        "A concrete ScreenerContext serves universe, classification, fundamentals, and OHLCV windows with point-in-time correctness at the requested as-of instant",
+        "Declarative filters cover security type, sector, industry, at least four fundamentals fields, and at least four indicator-based technical conditions",
+        "The Thesis API exposes screener run, definition save and load, and result retrieval routes with bearer auth and provenance in every response",
+        "The UI screener page sends the configured filters to the real endpoint and renders the real result schema",
+        "Focused tests, ruff, and ty pass on the touched paths"
+      ],
+      "files": [
+        "src/thesis/screening/",
+        "src/thesis/http/",
+        "src/harness/indicators/",
+        "src/ui/src/lib/api.ts",
+        "tests/thesis/screening/"
+      ],
+      "depends": [
+        "T225",
+        "T226",
+        "T227"
+      ],
+      "createdAt": "2026-09-10T00:04:35.478Z",
+      "updatedAt": "2026-09-10T00:32:32.427Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T00:04:35.478Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T006",
       "title": "E3 CI/CD and GitHub OIDC",
       "status": "done",
@@ -21425,6 +21769,56 @@
       "relates": []
     },
     {
+      "id": "T229",
+      "title": "Process-isolated custom screener evaluation in the harness",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T224",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Move custom Python screener filter execution from the in-process restricted-exec of T219 into subprocess-isolated sandbox workers owned by the harness. Each evaluation runs in a fresh worker process with CPU and memory limits, a wall-clock timeout, no network, a locked import surface, and structured result marshalling. The script context exposes the security fact sheet, the full OHLCV window, and precomputed named indicators from the registry so scripts never hand-roll math; scripts are linted before acceptance and their results are persisted as provenance-carrying artifacts.",
+      "labels": [
+        "harness",
+        "sandbox",
+        "screening"
+      ],
+      "acceptance": [
+        "Custom filters execute in a fresh subprocess with cpu, memory, and wall-clock limits and no network access, and violations fail closed with a clear error record",
+        "The script context exposes facts, the OHLCV window, and named precomputed indicators, and a malicious-script test suite proves escaping attempts are rejected",
+        "Deterministic scripts produce identical results inside and outside the sandbox (parity test)",
+        "Focused tests, ruff, and ty pass on the touched paths"
+      ],
+      "files": [
+        "src/harness/screening/",
+        "src/thesis/screening/programs.py",
+        "tests/harness/screening/"
+      ],
+      "depends": [
+        "T225"
+      ],
+      "createdAt": "2026-09-10T00:04:39.871Z",
+      "updatedAt": "2026-09-10T00:32:40.153Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T00:04:39.871Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T007",
       "title": "E4 Equities SIP ingest",
       "status": "done",
@@ -24276,6 +24670,58 @@
       "relates": []
     },
     {
+      "id": "T230",
+      "title": "Production screener UX",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T224",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Rebuild the screener page on the real contract: a filter builder with rows for ticker type, sector and industry, fundamentals, volume and liquidity, and indicator conditions with parameter editors; an embedded Python editor for custom script filters with client-side syntax feedback and server lint errors surfaced inline; saved-study management (save, list, re-run, hash-verified provenance display); and a results table aligned to the backend result schema with ranks and metrics. Fixture mode keeps the page renderable before the API is reachable.",
+      "labels": [
+        "thesis",
+        "ui",
+        "screening"
+      ],
+      "acceptance": [
+        "The filter builder covers ticker type, sector, industry, fundamentals, volume and liquidity, and indicator conditions and sends the full active filter set with every run",
+        "Custom Python scripts are authored in an embedded editor with syntax feedback and server lint errors rendered inline",
+        "Saved studies list, re-run, and display their provenance hash; results render rank and metric columns from the real schema",
+        "npm run build succeeds from src/ui and the page degrades gracefully when the API is unavailable"
+      ],
+      "files": [
+        "src/ui/src/lib/components/screener/",
+        "src/ui/src/routes/w/[workspace]/screener/",
+        "src/ui/src/lib/types.ts",
+        "src/ui/src/lib/fixtures/"
+      ],
+      "depends": [
+        "T228",
+        "T229"
+      ],
+      "createdAt": "2026-09-10T00:04:44.081Z",
+      "updatedAt": "2026-09-10T00:32:47.524Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T00:04:44.081Z"
+      },
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "done",
@@ -25880,7 +26326,10 @@
         "Complete child T217: TH6.5 Workspace-resident Thesis agent runtime and CLI-equivalent scoping",
         "Complete child T220: TH6.6 Thesis workspace UI implementation (Svelte)",
         "Complete child T221: TH6.7 Public domain hosting and TLS for the Thesis UI",
-        "Complete child T223: Workspace picker 404 recovery, workspace creation UX, and data-mode surfacing"
+        "Complete child T223: Workspace picker 404 recovery, workspace creation UX, and data-mode surfacing",
+        "Complete child T231: TH6.8 Thesis API workspace data routes over local persistence and harness adapters",
+        "Complete child T232: TH6.9 Model providers: OpenRouter adapter and Azure AI Foundry invocation client",
+        "Complete child T233: TH6.10 Local end-to-end stack runbook: harness api + thesis serve + UI real mode"
       ],
       "depends": [
         "T069",
@@ -25894,7 +26343,7 @@
         "T149"
       ],
       "createdAt": "2026-09-03T00:02:16.159Z",
-      "updatedAt": "2026-09-09T22:39:34.467Z",
+      "updatedAt": "2026-09-10T02:02:13.506Z",
       "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
@@ -29710,6 +30159,55 @@
       "relates": []
     },
     {
+      "id": "T224",
+      "title": "Market intelligence and production screening",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T068",
+      "size": "large",
+      "position": 11,
+      "positionVersion": 0,
+      "description": "Upgrade the screener from the T219 engine-plus-stub state to a production screener on par with finviz-class tools. Introduce a first-class tick-native indicator library in the harness whose incremental state machines consume kernel events so outputs are identical across backtest replay, paper, and live; add security classification (stock/ETF, sector, industry) and point-in-time fundamentals from free reference-data sources; implement concrete ScreenerContext data ports over UniverseView, SecurityMasterView, the lake query API, and the new facts; expand declarative filters (type, industry, fundamentals, volume, liquidity, indicator-based technicals); move custom Python screener evaluation into process-isolated sandboxed workers in the harness; serve screening through the Thesis API; and rebuild the screener UX on the real contract with a filter builder and an embedded Python editor.",
+      "labels": [
+        "screening",
+        "indicators",
+        "fundamentals",
+        "harness",
+        "thesis"
+      ],
+      "notes": [
+        "2026-09-10 00:00:33 UTC: 2026-09-09 23:30 UTC: Created from the orchestrator directive that the screener must reach production quality on par with finviz-class screeners, with orchestrator decisions: indicators must work 100 percent on tick data and behave identically in live, paper, and backtest; custom scripts execute server-side in the harness inside a process-isolated sandbox; fundamentals and classification data come from free sources to be explored (SEC EDGAR, Nasdaq symbol files, Schwab, and similar candidates)."
+      ],
+      "acceptance": [
+        "Complete child tasks deliver the tick-native indicator library, the fundamentals and classification reference-data ingest, screening data ports and serving, sandboxed custom-script evaluation, and the production screener UX",
+        "Indicator outputs are byte-identical across backtest replay, paper, and live event orderings, validated by a cross-mode parity oracle",
+        "Screener filters cover ticker type, sector, industry, fundamentals, volume, liquidity, and indicator-based technical conditions with point-in-time correctness",
+        "Custom Python screener filters execute server-side in the harness inside a subprocess-isolated sandbox with resource limits",
+        "The screener UX sends real filter definitions to a real screening API and renders real results",
+        "Complete child T225: Tick-native incremental indicator library with cross-mode parity",
+        "Complete child T226: Free fundamentals and security-classification source evaluation",
+        "Complete child T227: Fundamentals and security-classification ingest",
+        "Complete child T228: Screening data ports, declarative filter expansion, and API serving",
+        "Complete child T229: Process-isolated custom screener evaluation in the harness",
+        "Complete child T230: Production screener UX"
+      ],
+      "files": [
+        "src/harness/indicators/",
+        "src/thesis/screening/",
+        "src/thesis/http/",
+        "src/lake/",
+        "src/ui/src/lib/components/screener/",
+        "src/ui/src/routes/w/[workspace]/screener/"
+      ],
+      "createdAt": "2026-09-10T00:00:33.493Z",
+      "updatedAt": "2026-09-10T00:04:44.081Z",
+      "pipelineStage": "research",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T192",
       "title": "Capability-scoped read-only strategy clock",
       "status": "done",
@@ -30989,7 +31487,8 @@
       "notes": [
         "2026-09-09 22:39:34 UTC: 2026-09-07 21:00 UTC: Created from orchestrator symptom reports after the workspace-section wave: selecting a workspace 404s, no workspace-creation UX, back-to-workspaces flickers then jumps back to 404, and no fixture/real mode UX. The live thesis API currently exposes only chat and streaming routers under /v1/workspaces/{id}; workspace list/snapshot/create routes are a backend follow-up (T155-era scope) and the UI degrades to an explicit unavailable state with a fixture escape hatch until they land.",
         "2026-09-09 22:53:30 UTC: 2026-09-09 22:55 UTC: First fix landed in commit 58b1650, verified by a clean production build. Root route now always routes to the picker so a stale remembered id can never reach the error page; the picker auto-resumes only on initial page entry (afterNavigate enter) so in-app back navigation stays put, and a stale remembered id surfaces as an amber notice with Open-anyway and Dismiss actions (Dismiss also clears the persisted id). Workspace creation is real: api.createWorkspace() POSTs /v1/workspaces in live mode and appends to the fixture store in fixture mode, the dialog is reachable from the picker and the workspace sidebar, and creation navigates into the new workspace - fixture-mode snapshots for locally created workspaces synthesize an empty operational overview. Data mode is surfaced by a new DataModeBadge (fixture data vs thesis api) shown on the picker, the workspace shell, and the error page, with runtime switching persisted in localStorage thesis.fixtures; the picker and error page offer Continue with fixture data when the live API is unreachable, which matters because the thesis API does not yet implement workspace list/snapshot/create routes (only chat and streaming exist under /v1/workspaces/{id}).",
-        "2026-09-09 22:56:47 UTC: 2026-09-09 23:10 UTC: Root cause of the persistent 404 found in commit 44bebeb: /w/[workspace] has only a +layout and no +page, so the bare workspace path (/w/beta-quant) is a SvelteKit route-not-found while every child section exists. The picker and the auto-resume navigated to the bare path (the sidebar switcher worked because it targets /w/[id]/overview). Fixes: the picker enter() and auto-resume now navigate to /w/[id]/overview directly, and a new w/[workspace]/+page.svelte redirects the bare path to the overview so stale links and any remaining /w/[id] navigation resolve. The back-to-workspaces snap-back was this same route 404 reached through the picker auto-resume; with selection now targeting overview and the auto-resume restricted to initial page entry, in-app back navigation stays on the picker."
+        "2026-09-09 22:56:47 UTC: 2026-09-09 23:10 UTC: Root cause of the persistent 404 found in commit 44bebeb: /w/[workspace] has only a +layout and no +page, so the bare workspace path (/w/beta-quant) is a SvelteKit route-not-found while every child section exists. The picker and the auto-resume navigated to the bare path (the sidebar switcher worked because it targets /w/[id]/overview). Fixes: the picker enter() and auto-resume now navigate to /w/[id]/overview directly, and a new w/[workspace]/+page.svelte redirects the bare path to the overview so stale links and any remaining /w/[id] navigation resolve. The back-to-workspaces snap-back was this same route 404 reached through the picker auto-resume; with selection now targeting overview and the auto-resume restricted to initial page entry, in-app back navigation stays on the picker.",
+        "2026-09-09 23:19:25 UTC: 2026-09-09 23:45 UTC: Density and capability-surface cleanup landed in commit c5d7fe5 (316 lines removed), addressing the first-viewing feedback. (1) Evidence scoping removed from every copilot/message surface - it belongs to sandboxed subagent views only; EvidenceBadge remains only in the workspace-state EvidenceIndex projection. (2) Palette professionalized: accent moved from #22d3ee cyan to muted steel blue #6c9bd2, glow-cyan utility deleted (brand marks and dialogs now use neutral surfaces), grid lines dimmed. (3) The In-context bar removed from the copilot. (4) CLEO plan panel de-densified: stage chip row dropped (current stage shows in the header), per-step gate annotations dropped, task timeline capped to the last five entries. (5) Backtests view recorded as v1; future multi-tab work (risk tab with max drawdown, indicators used by the strategy) is follow-up. (6) Transcript borders softened to near-invisible (border-white/5, transparent for tool/system); role labels de-accented. (7) Sidebar nav enlarged to text-[15px], active item switched from accent text to neutral surface highlight, labels dimmed to slate-400, section headers and count chips bumped up in size and dimmed in color. (8) Strategy-context attachment removed from the composer. (9) Knowledge search removed from the composer entirely per the MCP directive: knowledge search is an agent tool the workspace agent invokes; the user never surfaces it. Evidence upload also removed from the composer; uploads enter through the workspace state projection. The chats full page and copilot call sites updated consistently; production build clean."
       ],
       "acceptance": [
         "A stale remembered workspace id never lands the user on the 404 error page: the root route sends users to the picker and the picker only auto-redirects when the remembered id exists in the loaded workspace list",
@@ -31005,7 +31504,7 @@
         "src/ui/src/lib/components/shell/"
       ],
       "createdAt": "2026-09-09T22:39:34.467Z",
-      "updatedAt": "2026-09-09T22:56:46.986Z",
+      "updatedAt": "2026-09-09T23:19:24.855Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -31129,6 +31628,52 @@
       "relates": []
     },
     {
+      "id": "T231",
+      "title": "TH6.8 Thesis API workspace data routes over local persistence and harness adapters",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 17,
+      "positionVersion": 0,
+      "description": "Wire the remaining UI-covered workspace data routes into the Thesis API so the UI runs fully in real mode against a local stack: workspaces, backtests, deployments (status/orders/portfolio/risk), dashboards, screeners, and workspace-state, each backed by local workspace persistence (TH0 contracts) and the T173 harness activation adapters. Chat, streaming, and auth routes already exist (T211). This is the unblocker for running the Svelte UI against a local thesis serve + harness api stack with no fixture data.",
+      "labels": [
+        "thesis",
+        "api",
+        "local"
+      ],
+      "acceptance": [
+        "The Thesis API serves the workspace data routes the T176 UI consumes: workspaces list/create, backtests (history and declared-split detail), deployments (status, orders, portfolio summary, risk decisions), dashboards (workspace-artifact widget definitions), screeners, and workspace-state (CLEO projection, evidence, consent/audit trail)",
+        "Backtest and deployment routes are backed by the T173 harness adapters (LocalHarnessProcess or RemoteHarnessApi) rather than reimplemented harness logic",
+        "Local mode persists workspace entities through the workspace Git-backed contracts with no Azure requirement",
+        "The UI real-mode client consumes the routes with its existing typed contracts and the fixture fixtures remain as documented fallbacks",
+        "Focused API route tests with injected services pass"
+      ],
+      "files": [
+        "src/thesis/http/"
+      ],
+      "createdAt": "2026-09-10T02:00:36.554Z",
+      "updatedAt": "2026-09-10T02:00:36.554Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T02:00:36.554Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T198",
       "title": "Import-boundary and type separation for the strategy surface",
       "status": "done",
@@ -31224,6 +31769,53 @@
       },
       "pipelineStage": "contribution",
       "assignee": "determinism-datapath",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T232",
+      "title": "TH6.9 Model providers: OpenRouter adapter and Azure AI Foundry invocation client",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 18,
+      "positionVersion": 0,
+      "description": "Implement the two model-provider adapters behind the existing thesis provider protocol so the agent runs on OpenRouter (key-based, fastest local path) or Azure AI Foundry (Entra + project deployment, per the architecture's provider section): an OpenRouter adapter (OpenAI-compatible, OPENROUTER_API_KEY from an injected env surface) and the Foundry deployment invocation client completing foundry.py's contracts, both fail-closed and credential-free in serialized surfaces, wired to the model router role bindings with invocation provenance recorded.",
+      "labels": [
+        "thesis",
+        "providers",
+        "foundry",
+        "openrouter"
+      ],
+      "acceptance": [
+        "An OpenRouter provider implements the existing provider protocol: OpenAI-compatible base URL (https://openrouter.ai/api/v1), API key resolved from an injected environment surface (OPENROUTER_API_KEY, never stored or serialized), model string passthrough, and preflight that records provider status without credentials",
+        "An Azure AI Foundry invocation client completes the existing foundry.py contracts: deployment-bound chat-completion calls through a Foundry project endpoint using the Entra credential protocol, with the documented preflight (tenant, project, deployment, CLI sign-in) recorded before first call",
+        "The model router binds roles to the configured provider and every invocation records provider, exact model/version, role, and pre-result assignment per the architecture",
+        "Both adapters fail closed with typed errors on unreachable providers and expose no credentials in any serialized surface",
+        "Focused adapter tests with injected transports pass"
+      ],
+      "files": [
+        "src/thesis/providers/"
+      ],
+      "createdAt": "2026-09-10T02:01:44.135Z",
+      "updatedAt": "2026-09-10T02:01:44.135Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T02:01:44.135Z"
+      },
+      "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -31335,6 +31927,53 @@
       },
       "pipelineStage": "contribution",
       "assignee": "adversarial-suite",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T233",
+      "title": "TH6.10 Local end-to-end stack runbook: harness api + thesis serve + UI real mode",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T150",
+      "size": "medium",
+      "position": 19,
+      "positionVersion": 0,
+      "description": "Document and verify the local development stack so the whole Thesis experience runs on one machine with no Azure: harness api (backtest launch/jobs), thesis serve (chat + workspace routes from TH6.8 with local persistence), and the Svelte UI dev server in real mode, with a single verification script that walks the chain (health, workspace, chat message, backtest launch) and a runbook capturing commands, env vars, and provider selection (OpenRouter key or Foundry preflight per TH6.9).",
+      "labels": [
+        "thesis",
+        "local",
+        "runbook"
+      ],
+      "acceptance": [
+        "A runbook documents and a single script verifies the complete local stack with no Azure: harness api serving the quant API, thesis serve serving the Thesis API with local workspace persistence, and the Svelte UI in real mode against both",
+        "The runbook records the exact commands, required environment variables (bearer tokens, OPENROUTER_API_KEY or Foundry preflight), port layout, and the startup preflight sequence",
+        "The verification script exercises the chain end to end: health checks, a chat message through the Thesis API, and a backtest launch through the harness adapter",
+        "Failures at each stage surface precise remediation steps",
+        "Focused script tests pass and the runbook commands are copy-executable"
+      ],
+      "files": [
+        ".github/runbooks/thesis-local-stack.md",
+        "scripts/local/"
+      ],
+      "createdAt": "2026-09-10T02:02:13.506Z",
+      "updatedAt": "2026-09-10T02:02:13.506Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T02:02:13.506Z"
+      },
+      "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -31654,7 +32293,8 @@
         "T077",
         "T075",
         "T076",
-        "T181"
+        "T181",
+        "T224"
       ],
       "T069": [
         "T078",
@@ -31813,7 +32453,10 @@
         "T217",
         "T220",
         "T221",
-        "T223"
+        "T223",
+        "T231",
+        "T232",
+        "T233"
       ],
       "T181": [
         "T182",
@@ -31822,6 +32465,14 @@
         "T185",
         "T186",
         "T187"
+      ],
+      "T224": [
+        "T225",
+        "T226",
+        "T227",
+        "T228",
+        "T229",
+        "T230"
       ]
     },
     "dependencies": {
@@ -32192,6 +32843,9 @@
       "T184": [
         "T183"
       ],
+      "T227": [
+        "T226"
+      ],
       "T005": [
         "T003"
       ],
@@ -32311,6 +32965,11 @@
       "T185": [
         "T184"
       ],
+      "T228": [
+        "T225",
+        "T226",
+        "T227"
+      ],
       "T006": [
         "T003",
         "T004"
@@ -32406,6 +33065,9 @@
       "T186": [
         "T184"
       ],
+      "T229": [
+        "T225"
+      ],
       "T007": [
         "T004",
         "T005"
@@ -32485,6 +33147,10 @@
       "T187": [
         "T185",
         "T186"
+      ],
+      "T230": [
+        "T228",
+        "T229"
       ],
       "T008": [
         "T003",
