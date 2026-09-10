@@ -17,7 +17,7 @@
 
 	const PAGES = [
 		{ id: 'overview', label: 'Overview' },
-		{ id: 'chats', label: 'AI chats' },
+		{ id: 'chats', label: 'Conversations' },
 		{ id: 'strategies', label: 'Strategies' },
 		{ id: 'backtests', label: 'Backtests' },
 		{ id: 'deployments', label: 'Deployments' },
@@ -50,7 +50,7 @@
 			<span class="text-slate-500" aria-hidden="true">⌕</span>
 			<input
 				type="text"
-				class="w-full bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-600"
+				class="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-500"
 				placeholder="Search strategies, pages, dashboards…"
 				bind:value={query}
 			/>
@@ -59,64 +59,64 @@
 
 		<div class="mt-2 max-h-80 overflow-y-auto">
 			{#if pages.length}
-				<div class="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">Go to</div>
+				<div class="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Go to</div>
 				{#each pages as page (page.id)}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
+						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-surface-800"
 						onclick={() => go(`/w/${workspaceId}/${page.id}`)}
 					>
-						<span aria-hidden="true">◎</span>{page.label}<span class="ml-auto text-slate-600" aria-hidden="true">→</span>
+						<span aria-hidden="true">◎</span>{page.label}<span class="ml-auto text-slate-500" aria-hidden="true">→</span>
 					</button>
 				{/each}
 			{/if}
 			{#if matchedStrategies.length}
-				<div class="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">Strategies</div>
+				<div class="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Strategies</div>
 				{#each matchedStrategies as strategy (strategy.id)}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
+						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-surface-800"
 						onclick={() => go(`/w/${workspaceId}/strategies/${strategy.id}`)}
 					>
 						<span class="font-mono text-xs text-accent">{strategy.symbol}</span>
 						{strategy.name}
-						<span class="ml-auto text-slate-600" aria-hidden="true">↗</span>
+						<span class="ml-auto text-slate-500" aria-hidden="true">↗</span>
 					</button>
 				{/each}
 			{/if}
 			{#if matchedWidgets.length}
-				<div class="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">Dashboards</div>
+				<div class="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Dashboards</div>
 				{#each matchedWidgets as widget (widget.id)}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
+						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-surface-800"
 						onclick={() => go(`/w/${workspaceId}/dashboards`)}
 					>
 						<span aria-hidden="true">▤</span>{widget.title}
-						<span class="ml-auto text-slate-600" aria-hidden="true">→</span>
+						<span class="ml-auto text-slate-500" aria-hidden="true">→</span>
 					</button>
 				{/each}
 			{/if}
 			{#if nothing}
 				<div class="px-3 py-4 text-center">
-					<p class="text-sm text-slate-300">No matches for “{query}”</p>
-					<p class="text-xs text-slate-600">Try a strategy name or a quick action below.</p>
+					<p class="text-sm text-slate-700">No matches for “{query}”</p>
+					<p class="text-xs text-slate-500">Try a strategy name or a quick action below.</p>
 				</div>
 			{/if}
 
-			<div class="px-2 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
+			<div class="px-2 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
 				Quick actions
 			</div>
 			<button
 				type="button"
-				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
+				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-surface-800"
 				onclick={() => go(`/w/${workspaceId}/chats`)}
 			>
 				<span aria-hidden="true">＋</span>New chat
 			</button>
 			<button
 				type="button"
-				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
+				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-surface-800"
 				onclick={() => go(`/w/${workspaceId}/screener`)}
 			>
 				<span aria-hidden="true">＋</span>New screener
@@ -124,7 +124,7 @@
 		</div>
 
 		<div
-			class="mt-1 flex items-center justify-between border-t border-surface-700 px-3 py-2 text-[10px] text-slate-600"
+			class="mt-1 flex items-center justify-between border-t border-surface-700 px-3 py-2 text-[10px] text-slate-500"
 		>
 			<span>⌘K to open anytime</span>
 			<span>Searching in workspace <strong class="text-slate-500">{workspaceId}</strong></span>

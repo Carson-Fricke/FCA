@@ -32,7 +32,7 @@
 
 	const pageLabels: Record<string, string> = {
 		overview: 'Overview',
-		chats: 'AI chats',
+		chats: 'Conversations',
 		strategies: 'Strategies',
 		backtests: 'Backtests',
 		deployments: 'Deployments',
@@ -46,12 +46,12 @@
 
 <header class="flex h-14 shrink-0 items-center gap-3 border-b border-surface-700 bg-surface-900 px-4">
 	<nav class="flex min-w-0 items-center gap-1.5 text-sm text-slate-500" aria-label="Breadcrumb">
-		<a href="/w" class="hover:text-slate-300">Workspace</a>
+		<a href="/w" class="hover:text-slate-700">Workspace</a>
 		<span aria-hidden="true">›</span>
-		<a href="/w/{workspaceId}/overview" class="truncate hover:text-slate-300">{workspaceName}</a>
+		<a href="/w/{workspaceId}/overview" class="truncate hover:text-slate-700">{workspaceName}</a>
 		{#if page !== 'overview'}
 			<span aria-hidden="true">›</span>
-			<span class="truncate text-slate-300">{pageLabels[page] ?? page}</span>
+			<span class="truncate text-slate-700">{pageLabels[page] ?? page}</span>
 		{/if}
 	</nav>
 
@@ -68,7 +68,7 @@
 		{/if}
 		<a
 			href="https://github.com/"
-			class="hidden items-center gap-1 text-xs text-slate-500 hover:text-slate-300 sm:flex"
+			class="hidden items-center gap-1 text-xs text-slate-500 hover:text-slate-700 sm:flex"
 		>
 			Docs <span aria-hidden="true">↗</span>
 		</a>
@@ -77,7 +77,7 @@
 		<div class="relative" bind:this={holder}>
 			<button
 				type="button"
-				class="relative rounded-lg border border-surface-700 px-2 py-1.5 text-slate-400 transition hover:border-surface-600 hover:text-slate-200 {notificationsOpen
+				class="relative rounded-lg border border-surface-700 px-2 py-1.5 text-slate-500 transition hover:border-surface-600 hover:text-slate-800 {notificationsOpen
 					? 'border-accent/40 text-accent'
 					: ''}"
 				aria-label="Notifications"
@@ -98,7 +98,7 @@
 					data-testid="notifications-popover"
 				>
 					<div class="mb-1 flex items-center justify-between px-1">
-						<h3 class="text-xs font-semibold text-slate-300">Workspace updates</h3>
+						<h3 class="text-xs font-semibold text-slate-700">Workspace updates</h3>
 						<button
 							type="button"
 							class="text-[11px] text-accent hover:underline"
@@ -109,9 +109,9 @@
 					</div>
 					{#each activity.slice(0, 5) as item (item.id)}
 						<div class="rounded-lg px-2 py-1.5 hover:bg-surface-800/60">
-							<p class="text-xs font-medium text-slate-200">{item.title}</p>
+							<p class="text-xs font-medium text-slate-800">{item.title}</p>
 							<p class="text-[11px] text-slate-500">{item.description}</p>
-							<p class="font-mono text-[10px] text-slate-600">{relativeTime(item.created_at)}</p>
+							<p class="font-mono text-[10px] text-slate-500">{relativeTime(item.created_at)}</p>
 						</div>
 					{:else}
 						<p class="px-2 py-3 text-center text-xs text-slate-500">
@@ -128,7 +128,7 @@
 				class="rounded-lg border px-2 py-1.5 text-xs transition
 					{copilotVisible
 					? 'border-accent/40 bg-accent/10 text-accent'
-					: 'border-surface-700 text-slate-400 hover:border-surface-600 hover:text-slate-200'}"
+					: 'border-surface-700 text-slate-500 hover:border-surface-600 hover:text-slate-800'}"
 				onclick={onToggleCopilot}
 				data-testid="copilot-toggle"
 				title="Toggle workspace copilot"

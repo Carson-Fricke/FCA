@@ -203,13 +203,13 @@
 	});
 </script>
 
-<svelte:head><title>AI chats — Thesis</title></svelte:head>
+<svelte:head><title>Conversations — Thesis</title></svelte:head>
 
 <div class="flex h-full min-h-0 gap-4">
 	<section class="flex w-72 shrink-0 flex-col rounded-xl border border-surface-700 bg-surface-900">
 		<div class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
-			<h2 class="text-sm font-semibold text-slate-200">Conversations</h2>
-			<span class="rounded-full bg-surface-800 px-1.5 font-mono text-[10px] text-slate-400">
+			<h2 class="text-sm font-semibold text-slate-800">Conversations</h2>
+			<span class="rounded-full bg-surface-800 px-1.5 font-mono text-[10px] text-slate-500">
 				{chats.length}
 			</span>
 		</div>
@@ -226,7 +226,7 @@
 						data-testid="conversation-item"
 						data-chat={chat.chat_id}
 					>
-						<p class="truncate text-sm {chat.chat_id === chatId ? 'text-accent' : 'text-slate-300'}">
+						<p class="truncate text-sm {chat.chat_id === chatId ? 'text-accent' : 'text-slate-700'}">
 							{chat.title}
 						</p>
 						<p class="text-[11px] text-slate-500">
@@ -235,12 +235,12 @@
 					</button>
 				</li>
 			{:else}
-				<li class="px-3 py-6 text-center text-xs text-slate-600">
+				<li class="px-3 py-6 text-center text-xs text-slate-500">
 					Your next good idea starts with a conversation.
 				</li>
 			{/each}
 		</ul>
-		<div class="border-t border-surface-700 px-4 py-2 font-mono text-[10px] text-slate-600">
+		<div class="border-t border-surface-700 px-4 py-2 font-mono text-[10px] text-slate-500">
 			Scoped to workspace {workspaceId}
 		</div>
 	</section>
@@ -248,7 +248,7 @@
 	<section class="flex min-w-0 flex-1 flex-col rounded-xl border border-surface-700 bg-surface-900">
 		{#if activeChat}
 			<header class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
-				<h1 class="truncate text-sm font-semibold text-slate-100">{activeChat.title}</h1>
+				<h1 class="truncate text-sm font-semibold text-slate-800">{activeChat.title}</h1>
 				{#if activeChat.kind === 'investigation'}
 					<span class="rounded-full border border-accent/40 px-2 py-0.5 font-mono text-[10px] text-accent">
 						investigation

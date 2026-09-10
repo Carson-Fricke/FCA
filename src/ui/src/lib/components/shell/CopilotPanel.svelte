@@ -7,16 +7,22 @@
 
 	/**
 	 * Collapsible right-hand assistant on every page except the full-page
-	 * chats view. Evidence scoping and knowledge search are agent-side
-	 * capabilities (sandboxed subagents and MCP tools) and never surface
-	 * here.
+	 * conversations view. The header carries three icon-only controls with
+	 * tooltips: new conversation, conversation history overlay, and expand
+	 * to the full-page view. Evidence scoping and knowledge search are
+	 * agent-side capabilities and never surface here.
 	 */
-	let { workspaceId, onExpand }: { workspaceId: string; onExpand: () => void } = $props();
+	let {
+		workspaceId,
+		workspaceName = '',
+		onExpand
+	}: { workspaceId: string; workspaceName?: string; onExpand: () => void } = $props();
 
 	let chats = $state<ChatThread[]>([]);
 	let chatId = $state<string | null>(null);
 	let messages = $state<ChatMessage[]>([]);
 	let busy = $state(false);
+	let historyOpen = $state(false);
 	let percolations = $state<Record<string, SteeringPercolationTarget[]>>({});
 
 	const activeThread = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
@@ -48,23 +54,39 @@
 		};
 	});
 
-	async function send(input: { body: string; attachmentIds: string[]; steeringIntent: string | null }): Promise<void> {
-		if (!chatId) return;
-		busy = true;
-		try {
-			const result = await postMessage(workspaceId, chatId, input);
-			messages = [...messages, result.message];
-			if (result.percolated.length) {
-				percolations = {
-					...percolations,
-					[result.message.message_id]: result.percolated
-				};
+	function newConversation(): void {
+		chatId = null;
+		messages = [];
+		historyOpen = false;
+	}
+
+	async function send(input: {
+		body: string;
+		attachmentIds: string[];
+		steeringIntent: string | null;
+	}): Promise<void> {
+		if (chatId) {
+			busy = true;
+			try {
+				const result = await postMessage(workspaceId, chatId, input);
+				messages = [...messages, result.message];
+				if (result.percolated.length) {
+					percolations = {
+						...percolations,
+						[result.message.message_id]: result.percolated
+					};
+				}
+			} catch {
+				// surfaced by toast in the full chat view; copilot stays quiet
+			} finally {
+				busy = false;
 			}
-		} catch {
-			// surfaced by toast in the full chat view; copilot stays quiet
-		} finally {
-			busy = false;
+			return;
 		}
+		// No conversation selected: route to the full conversations view where
+		// a new thread can be started (the copilot attaches to an existing
+		// conversation by design).
+		await goto(`/w/${workspaceId}/conversations`);
 	}
 </script>
 
@@ -74,29 +96,90 @@
 >
 	<div class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
 		<span class="text-accent" aria-hidden="true">✦</span>
-		<h2 class="text-sm font-semibold text-slate-200">Copilot</h2>
-		<button
-			type="button"
-			class="ml-auto rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-accent"
-			onclick={onExpand}
-			title="Expand to full chat"
-		>
-			⤢ full chat
-		</button>
+		<h2 class="text-sm font-semibold text-slate-800">Copilot</h2>
+		{#if activeThread}
+			<span class="ml-1 min-w-0 truncate text-[11px] text-slate-500">
+				{activeThread.title}
+			</span>
+		{/if}
+		<div class="ml-auto flex items-center gap-1">
+			<button
+				type="button"
+				class="rounded-md border border-transparent p-1.5 text-slate-600 transition hover:border-surface-600 hover:text-accent"
+				onclick={newConversation}
+				title="New conversation"
+				aria-label="New conversation"
+				data-testid="copilot-new-conversation"
+			>
+				<span aria-hidden="true">＋</span>
+			</button>
+			<button
+				type="button"
+				class="rounded-md border border-transparent p-1.5 text-slate-600 transition hover:border-surface-600 hover:text-accent {historyOpen
+					? 'border-surface-600 text-accent'
+					: ''}"
+				onclick={() => (historyOpen = !historyOpen)}
+				title="Conversation history"
+				aria-label="Conversation history"
+				data-testid="copilot-history"
+			>
+				<span aria-hidden="true">☰</span>
+			</button>
+			<button
+				type="button"
+				class="rounded-md border border-transparent p-1.5 text-slate-600 transition hover:border-surface-600 hover:text-accent"
+				onclick={onExpand}
+				title="Expand to full chat"
+				aria-label="Expand to full chat"
+				data-testid="copilot-expand"
+			>
+				<span aria-hidden="true">⤢</span>
+			</button>
+		</div>
 	</div>
 
-	{#if activeThread}
-		<div class="border-b border-surface-700 px-4 py-2">
-			<select
-				class="w-full rounded border border-surface-600/60 bg-surface-950 px-2 py-1 text-xs text-slate-300 outline-none"
-				value={chatId}
-				onchange={(e) => (chatId = (e.currentTarget as HTMLSelectElement).value)}
-				aria-label="Select conversation"
-			>
+	{#if historyOpen}
+		<div
+			class="absolute top-14 right-0 bottom-0 z-30 flex w-80 flex-col border-l border-surface-700 bg-surface-900 p-3 shadow-[var(--shadow-elevated)]"
+			data-testid="copilot-history-overlay"
+		>
+			<div class="mb-2 flex items-center justify-between">
+				<h3 class="text-xs font-semibold text-slate-700">Conversation history</h3>
+				<button
+					type="button"
+					class="rounded p-1 text-slate-500 hover:text-slate-800"
+					onclick={() => (historyOpen = false)}
+					title="Close history"
+					aria-label="Close history"
+				>
+					<span aria-hidden="true">✕</span>
+				</button>
+			</div>
+			<div class="min-h-0 flex-1 space-y-2 overflow-y-auto">
 				{#each chats as thread (thread.chat_id)}
-					<option value={thread.chat_id}>{thread.title}</option>
+					<button
+						type="button"
+						class="w-full rounded-lg border border-surface-700 bg-surface-950 p-3 text-left transition hover:border-accent/40 hover:bg-surface-800 {thread.chat_id ===
+						chatId
+							? 'border-accent/50'
+							: ''}"
+						onclick={() => {
+							chatId = thread.chat_id;
+							historyOpen = false;
+						}}
+						data-testid="copilot-history-item"
+					>
+						<p class="truncate text-xs font-semibold text-slate-800">{thread.title}</p>
+						{#if workspaceName}
+							<p class="mt-1 text-[10px] text-slate-500">Scoped to {workspaceName}</p>
+						{/if}
+					</button>
+				{:else}
+					<p class="px-1 py-4 text-center text-xs text-slate-500">
+						No conversations yet. Send a message to start one.
+					</p>
 				{/each}
-			</select>
+			</div>
 		</div>
 	{/if}
 
@@ -105,12 +188,4 @@
 	</div>
 
 	<ChatComposer onSubmit={send} activeExecutionId={null} {busy} />
-
-	<button
-		type="button"
-		class="border-t border-surface-700 px-4 py-2 text-center text-[11px] text-slate-600 hover:text-accent"
-		onclick={() => goto(`/w/${workspaceId}/chats`)}
-	>
-		Open full-page chats →
-	</button>
 </aside>

@@ -24,7 +24,7 @@
 
 	const NAV: { id: string; label: string; icon: string; count?: keyof WorkspaceSnapshot['counts'] }[] = [
 		{ id: 'overview', label: 'Overview', icon: '◎' },
-		{ id: 'chats', label: 'AI chats', icon: '❍', count: 'chats' },
+		{ id: 'chats', label: 'Conversations', icon: '❍', count: 'chats' },
 		{ id: 'strategies', label: 'Strategies', icon: '❮', count: 'strategies' },
 		{ id: 'backtests', label: 'Backtests', icon: '⛃', count: 'backtests' },
 		{ id: 'deployments', label: 'Deployments', icon: '➤', count: 'deployments' },
@@ -46,7 +46,7 @@
 >
 	<div class="flex items-center gap-2 px-4 pt-4 pb-3">
 		<span
-			class="flex h-8 w-8 items-center justify-center rounded-lg border border-surface-600 bg-surface-800 font-mono text-sm font-bold text-slate-300"
+			class="flex h-8 w-8 items-center justify-center rounded-lg border border-surface-600 bg-surface-800 font-mono text-sm font-bold text-slate-700"
 			aria-hidden="true"
 		>
 			Θ
@@ -66,7 +66,7 @@
 	<div class="px-3 pt-3">
 		<button
 			type="button"
-			class="flex w-full items-center gap-2 rounded-lg border border-surface-700 bg-surface-800 px-2.5 py-2 text-left text-sm text-slate-500 transition hover:border-surface-600 hover:text-slate-400"
+			class="flex w-full items-center gap-2 rounded-lg border border-surface-700 bg-surface-800 px-2.5 py-2 text-left text-sm text-slate-500 transition hover:border-surface-600 hover:text-slate-500"
 			onclick={onSearch}
 			data-testid="search-trigger"
 		>
@@ -87,8 +87,8 @@
 						href="/w/{workspaceId}/{item.id}"
 						class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] transition
 							{page === item.id
-							? 'bg-surface-800 font-medium text-slate-100'
-							: 'text-slate-400 hover:bg-surface-800 hover:text-slate-300'}"
+							? 'bg-surface-800 font-medium text-slate-800'
+							: 'text-slate-500 hover:bg-surface-800 hover:text-slate-700'}"
 						aria-current={page === item.id ? 'page' : undefined}
 						data-testid="nav-{item.id}"
 					>
@@ -97,7 +97,7 @@
 						{#if item.count && snapshot.counts[item.count] > 0}
 							<span
 								class="rounded-full bg-surface-800 px-1.5 font-mono text-[11px] {page === item.id
-									? 'text-slate-300'
+									? 'text-slate-700'
 									: 'text-slate-500'}"
 							>
 								{snapshot.counts[item.count]}
@@ -109,21 +109,21 @@
 		</ul>
 
 		<div class="mt-5 mb-1 flex items-center justify-between px-2.5">
-			<span class="text-[10px] font-semibold tracking-wider text-slate-600 uppercase">Pinned</span>
+			<span class="text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Pinned</span>
 		</div>
 		<ul class="space-y-0.5 pb-4">
 			{#each pinned as widget (widget.id)}
 				<li class="group flex items-center">
 					<a
 						href="/w/{workspaceId}/dashboards"
-						class="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-400 transition hover:bg-surface-800 hover:text-slate-200"
+						class="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-500 transition hover:bg-surface-800 hover:text-slate-800"
 					>
 						<span class="w-4 text-center text-xs" aria-hidden="true">▤</span>
 						<span class="truncate">{widget.title}</span>
 					</a>
 					<button
 						type="button"
-						class="mr-1 hidden px-1 text-[10px] text-slate-600 group-hover:block hover:text-loss"
+						class="mr-1 hidden px-1 text-[10px] text-slate-500 group-hover:block hover:text-loss"
 						title="Unpin"
 						onclick={() => togglePin(workspaceId, widget.id)}
 					>
@@ -131,7 +131,7 @@
 					</button>
 				</li>
 			{:else}
-				<li class="px-2.5 text-[11px] text-slate-600">Your favorites will feel at home here.</li>
+				<li class="px-2.5 text-[11px] text-slate-500">Your favorites will feel at home here.</li>
 			{/each}
 		</ul>
 	</nav>
@@ -150,17 +150,17 @@
 		</div>
 		<div class="mt-2 flex items-center gap-2">
 			<span
-				class="flex h-7 w-7 items-center justify-center rounded-full border border-surface-600 bg-surface-800 font-mono text-[10px] text-slate-300"
+				class="flex h-7 w-7 items-center justify-center rounded-full border border-surface-600 bg-surface-800 font-mono text-[10px] text-slate-700"
 			>
 				AM
 			</span>
 			<span class="min-w-0 flex-1">
-				<span class="block truncate text-xs font-medium text-slate-300">Alex Morgan</span>
-				<span class="block truncate text-[10px] text-slate-600">Personal account</span>
+				<span class="block truncate text-xs font-medium text-slate-700">Alex Morgan</span>
+				<span class="block truncate text-[10px] text-slate-500">Personal account</span>
 			</span>
 			<a
 				href="/w/{workspaceId}/workspace-state"
-				class="rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-slate-300"
+				class="rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-slate-700"
 			>
 				Settings
 			</a>

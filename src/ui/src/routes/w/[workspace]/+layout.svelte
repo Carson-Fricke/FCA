@@ -95,10 +95,13 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 	</div>
 
 	{#if copilotVisible}
-		<CopilotPanel
-			{workspaceId}
-			onExpand={switchToChats}
-		/>
+		<div class="relative flex">
+			<CopilotPanel
+				{workspaceId}
+				workspaceName={data.snapshot.overview.workspace.name}
+				onExpand={switchToChats}
+			/>
+		</div>
 	{/if}
 </div>
 
