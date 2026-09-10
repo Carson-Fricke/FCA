@@ -10,3 +10,6 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+
+[dev-dependencies]
+harness-num = { path = "../harness-num" }
