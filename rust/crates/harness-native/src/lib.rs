@@ -17,11 +17,14 @@
 //! Determinism rules: no wall-clock, no unseeded random, no network. Errors are
 //! returned, never panicked, so no panic can cross the FFI boundary.
 
+pub mod bars;
+pub mod books;
 pub mod capi;
 pub mod clock;
 pub mod decimal;
 pub mod latency_size;
 pub mod market;
+pub mod market_bus;
 mod sha256;
 pub mod simple_touch;
 pub mod types;
