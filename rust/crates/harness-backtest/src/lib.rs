@@ -14,6 +14,7 @@
 pub mod backtest;
 pub mod canonical_json;
 pub mod results;
+pub mod runtime;
 pub mod sha256;
 
 pub use canonical_json::JsonValue;

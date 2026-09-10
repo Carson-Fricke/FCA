@@ -57,6 +57,17 @@ impl JsonValue {
         out
     }
 
+    /// Render the value as canonical JSON with literal (non-escaped) Unicode.
+    ///
+    /// Mirrors `json.dumps(..., ensure_ascii=False)` as used by
+    /// `harness.configuration.hashing.canonical_configuration_json`.
+    #[must_use]
+    pub fn to_canonical_string_utf8(&self) -> String {
+        let mut out = String::new();
+        self.write_utf8(&mut out);
+        out
+    }
+
     fn write(&self, out: &mut String) {
         match self {
             Self::Null => out.push_str("null"),
@@ -88,6 +99,43 @@ impl JsonValue {
                     write_string(key, out);
                     out.push(':');
                     value.write(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+
+    fn write_utf8(&self, out: &mut String) {
+        match self {
+            Self::Null => out.push_str("null"),
+            Self::Bool(true) => out.push_str("true"),
+            Self::Bool(false) => out.push_str("false"),
+            Self::Int(value) => {
+                let _ = write!(out, "{value}");
+            }
+            Self::UInt(value) => {
+                let _ = write!(out, "{value}");
+            }
+            Self::String(value) => write_string_utf8(value, out),
+            Self::Array(items) => {
+                out.push('[');
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    item.write_utf8(out);
+                }
+                out.push(']');
+            }
+            Self::Object(entries) => {
+                out.push('{');
+                for (index, (key, value)) in entries.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    write_string_utf8(key, out);
+                    out.push(':');
+                    value.write_utf8(out);
                 }
                 out.push('}');
             }
@@ -126,6 +174,26 @@ fn write_string(value: &str, out: &mut String) {
     out.push('"');
 }
 
+fn write_string_utf8(value: &str, out: &mut String) {
+    out.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            control if (control as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", control as u32);
+            }
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +224,12 @@ mod tests {
             JsonValue::Object(BTreeMap::new()).to_canonical_string(),
             "{}"
         );
+    }
+
+    #[test]
+    fn utf8_variant_keeps_literal_unicode() {
+        let value = JsonValue::String("caf\u{00e9}\u{1f600}".to_string());
+        assert_eq!(value.to_canonical_string(), "\"caf\\u00e9\\ud83d\\ude00\"");
+        assert_eq!(value.to_canonical_string_utf8(), "\"caf\u{00e9}\u{1f600}\"");
     }
 }
