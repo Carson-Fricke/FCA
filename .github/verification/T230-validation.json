@@ -1,0 +1,27 @@
+{
+  "taskId": "T230",
+  "numTotalTests": 47,
+  "numPassedTests": 47,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "screener-ui-contract-tests",
+      "status": "passed",
+      "command": "npx vitest run (src/ui)",
+      "result": "47 passed across 7 files: filter builder add/remove/edit payload correctness (buildFilters JSON assertions), validation mirroring backend FilterError semantics blocking invalid runs, round-trip hydration of saved definitions, summaries, HTTP-error mapping, script lint cases, and the fixture-translation proof that listScreeners emits real ScreenerSavedDefinitions"
+    },
+    {
+      "name": "type-and-build-gates",
+      "status": "passed",
+      "command": "npx svelte-check && npm run build",
+      "result": "svelte-check 0 errors 0 warnings; production build succeeds with the rebuilt screener page (FilterBuilder, PythonScreenerEditor, SavedStudies, ScreenerResultsTable)"
+    }
+  ],
+  "limitations": [
+    "The HTTP run/save contract carries declarative filters only; the Python editor provides client-side feedback and renders server lint errors until the T229 sandbox gains a program field on the run contract",
+    "No DELETE route exists for saved screeners; deletion is deferred until the backend adds it",
+    "api.ts's frozen legacy translator mangles real-shaped fixture rows, so fixtures carry translator-input vocabulary; pass-through is an api.ts-owner follow-up"
+  ]
+}
