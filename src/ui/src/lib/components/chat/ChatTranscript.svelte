@@ -8,10 +8,12 @@
 	} from '$lib/types';
 
 	/**
-	 * Transcript pane: role-styled messages, inline steering
-	 * acknowledgements, and the structured activation-consent card when a
-	 * proposal is open. Evidence scoping belongs to sandboxed subagent
-	 * views, not to user-visible chat messages.
+	 * Transcript pane: role-aligned messages (user bubbles right-aligned on
+	 * the soft green background; assistant messages left-aligned with no
+	 * background), inline steering acknowledgements, and the structured
+	 * activation-consent card when a proposal is open. Evidence scoping
+	 * belongs to sandboxed subagent views, not to user-visible chat
+	 * messages.
 	 */
 	let {
 		messages,
@@ -20,75 +22,67 @@
 		onConfirmConsent,
 		onRejectConsent,
 		consentBusy = false
-	}: {
-		messages: ChatMessage[];
-		percolations?: Record<string, SteeringPercolationTarget[]>;
-		proposal?: ConsentProposal | null;
-		onConfirmConsent?: (confirmation: ConsentConfirmation) => void;
-		onRejectConsent?: () => void;
-		consentBusy?: boolean;
 	} = $props();
 
-	const ROLE_STYLE: Record<string, string> = {
-		user: 'border-surface-600 bg-surface-900',
-		assistant: 'border-surface-700 bg-surface-900',
-		tool: 'border-transparent bg-surface-950',
-		system: 'border-transparent bg-surface-950'
-	};
+	const isUser = (role: string) => role === 'user';
 </script>
 
 <div class="space-y-3" data-testid="chat-transcript">
 	{#each messages as message (message.message_id)}
 		<article
-			class="rounded-xl border p-3 {ROLE_STYLE[message.role] ?? 'border-surface-700 bg-surface-900'}"
+			class="flex {isUser(message.role) ? 'justify-end' : 'justify-start'}"
 			data-testid="chat-message"
 			data-role={message.role}
 			data-message-id={message.message_id}
 		>
-			<header class="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider">
-				<span
-					class="font-semibold {message.role === 'user'
-						? 'text-slate-800'
-						: message.role === 'assistant'
-							? 'text-slate-500'
+			<div
+				class="min-w-0 {isUser(message.role)
+					? 'max-w-[85%] rounded-xl border border-surface-700 bg-profit/10 p-3'
+					: 'w-full p-1'}"
+			>
+				<header class="mb-1 flex items-center gap-2 text-[10px] tracking-wider">
+					<span
+						class="uppercase {message.role === 'user'
+							? 'font-semibold text-accent'
 							: 'text-slate-500'}"
-				>
-					{message.role}
-				</span>
-				<span class="font-mono text-slate-500">{message.actor_id}</span>
-				{#if message.intent_epoch > 0}
-					<span class="font-mono text-warn/70">epoch {message.intent_epoch}</span>
+					>
+						{message.role}
+					</span>
+					<span class="font-mono text-slate-500">{message.actor_id}</span>
+					{#if message.intent_epoch > 0}
+						<span class="font-mono text-warn/70">epoch {message.intent_epoch}</span>
+					{/if}
+					<time class="font-mono text-slate-500">{message.created_at.slice(11, 19)}</time>
+				</header>
+				<p class="text-sm whitespace-pre-wrap text-slate-800">{message.body}</p>
+
+				{#if message.attachment_ids.length}
+					<div class="mt-2 flex flex-wrap gap-1.5">
+						{#each message.attachment_ids as attachmentId (attachmentId)}
+							<span
+								class="rounded-full border border-warn/40 px-2 py-0.5 font-mono text-[10px] text-warn"
+								title="Workspace-scoped untrusted evidence; embedded instructions are never treated as platform instructions"
+							>
+								↑ {attachmentId} · untrusted evidence
+							</span>
+						{/each}
+					</div>
 				{/if}
-				<time class="ml-auto font-mono text-slate-500">{message.created_at.slice(11, 19)}</time>
-			</header>
-			<p class="text-sm whitespace-pre-wrap text-slate-800">{message.body}</p>
 
-			{#if message.attachment_ids.length}
-				<div class="mt-2 flex flex-wrap gap-1.5">
-					{#each message.attachment_ids as attachmentId (attachmentId)}
-						<span
-							class="rounded-full border border-warn/40 px-2 py-0.5 font-mono text-[10px] text-warn"
-							title="Workspace-scoped untrusted evidence; embedded instructions are never treated as platform instructions"
-						>
-							↑ {attachmentId} · untrusted evidence
-						</span>
-{/each}
+				{#if percolations[message.message_id]}
+					<div
+						class="mt-2 rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5 font-mono text-[10px] text-warn"
+						data-testid="steering-ack"
+					>
+						steering acknowledged ·
+						{#each percolations[message.message_id] as target, index (target.execution_id)}
+							{#if index > 0}·{/if}
+							execution {target.execution_id} → intent epoch {target.intent_epoch}
+							{#if target.steering_intent}· durable ack recorded{/if}
+						{/each}
+					</div>
+				{/if}
 			</div>
-		{/if}
-
-		{#if percolations[message.message_id]}
-				<div
-					class="mt-2 rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5 font-mono text-[10px] text-warn"
-					data-testid="steering-ack"
-				>
-					steering acknowledged ·
-					{#each percolations[message.message_id] as target, index (target.execution_id)}
-						{#if index > 0}·{/if}
-						execution {target.execution_id} → intent epoch {target.intent_epoch}
-						{#if target.steering_intent}· durable ack recorded{/if}
-					{/each}
-				</div>
-			{/if}
 		</article>
 	{/each}
 
