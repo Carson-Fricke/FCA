@@ -1,0 +1,6 @@
+Nasdaq Traded|Symbol|Security Name|Listing Exchange|Market Category|ETF|Round Lot Size|Test Issue|Financial Status|CQS Symbol|NASDAQ Symbol|NextShares
+Y|AAPL|Apple Inc. Common Stock|Q|Q|N|100|N|Q|AAPL|AAPL|N
+Y|MSFT|Microsoft Corporation Common Stock|Q|Q|N|100|N|Q|MSFT|MSFT|N
+N|GOOG|Alphabet Inc. Class C Capital Stock|N|S|N|100|N||GOOG|GOOG|N
+Y|ZVZZT|ZVZZT Widget Test Security|Z|Z|N|100|Y||ZVZZT|ZVZZT|N
+File Creation Time|0419202417:20##

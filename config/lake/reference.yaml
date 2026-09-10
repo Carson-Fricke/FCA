@@ -1,0 +1,31 @@
+# Point-in-time reference dataset ingest configuration.
+# Non-secret defaults only: there are no credentials here. The SEC EDGAR
+# fair-access policy requires a descriptive User-Agent identifying the
+# requester (format: "Sample Company Name AdminContact@domain.com") and caps
+# programmatic access at 10 requests per second. Replace the placeholder
+# contact before running any production ingest, or override it at runtime
+# with LAKE_REFERENCE__USER_AGENT.
+# This file must stay inside the strict YAML subset parsed by
+# lake.configuration.loader.load_yaml_mapping (no anchors, no tabs, no
+# secret-bearing keys).
+schema_version: 1
+
+user_agent: "FCA market lake ingest AdminContact@example.com"
+
+classification_url: "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt"
+
+company_facts_url_template: "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:0>10}.json"
+
+company_concept_url_template: "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik:0>10}/{taxonomy}/{tag}.json"
+
+# Nightly bulk archive used for one-shot historical backfill.
+bulk_company_facts_url: "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"
+
+http:
+  requests_per_second: 10
+  timeout_seconds: 30
+  retry:
+    max_attempts: 5
+    honor_retry_after: true
+    backoff_seconds: 0.5
+    max_backoff_seconds: 30.0
