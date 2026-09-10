@@ -74,5 +74,14 @@ def serve(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the standalone API process command."""
+    """Run the standalone API process command.
+
+    When the Rust entrypoint flip is enabled and a Rust ``api`` binary is
+    available, this dispatches to it; otherwise it runs the Python command.
+    """
+    from harness.cli.rust_entrypoints import exec_rust_entrypoint
+
+    rust_result = exec_rust_entrypoint("api", [] if argv is None else list(argv))
+    if rust_result is not None:
+        return rust_result
     return run(app, prog_name="api", argv=argv)
