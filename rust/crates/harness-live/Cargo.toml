@@ -1,0 +1,23 @@
+[package]
+name = "harness-live"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic live-trading core (OMS, fills, venues, portfolio, risk) for the quant-harness Rust engine (staged port)."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[[bin]]
+name = "trader"
+path = "src/bin/trader.rs"
+
+[dependencies]
+harness-num = { path = "../harness-num" }
+tokio = { version = "1", default-features = false, features = ["rt", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[features]
