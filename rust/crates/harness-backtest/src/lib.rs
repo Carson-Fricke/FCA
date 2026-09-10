@@ -16,5 +16,6 @@ pub mod canonical_json;
 pub mod results;
 pub mod runtime;
 pub mod sha256;
+pub mod sweeps;
 
 pub use canonical_json::JsonValue;
