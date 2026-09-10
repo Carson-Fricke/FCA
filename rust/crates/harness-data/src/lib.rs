@@ -20,6 +20,7 @@ pub mod gap_healing;
 pub mod history;
 pub mod lake;
 pub mod listing_events;
+pub mod options_replay;
 pub mod options_universe;
 pub mod replay;
 pub mod security_master;

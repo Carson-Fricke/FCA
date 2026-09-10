@@ -369,7 +369,7 @@ fn validate_file(file: &FileQueryFile) -> Result<(), DataError> {
 }
 
 /// A stable 64-bit FNV-1a fingerprint, hex encoded.
-fn fingerprint_hex(frames: &[Vec<u8>]) -> String {
+pub(crate) fn fingerprint_hex(frames: &[Vec<u8>]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for frame in frames {
         for byte in (frame.len() as u64).to_be_bytes() {
@@ -384,7 +384,7 @@ fn fingerprint_hex(frames: &[Vec<u8>]) -> String {
     format!("{hash:016x}")
 }
 
-fn canonical_fields(values: &[String]) -> Vec<u8> {
+pub(crate) fn canonical_fields(values: &[String]) -> Vec<u8> {
     let mut output = Vec::new();
     for value in values {
         let payload = value.as_bytes();
