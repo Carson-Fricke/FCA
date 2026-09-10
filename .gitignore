@@ -31,6 +31,11 @@ pip-wheel-metadata/
 zig-out/
 .zig-cache/
 
+# PyO3 bridge cdylib built in place by setuptools-rust (harness._rust)
+src/harness/_rust*.pyd
+src/harness/_rust*.so
+src/harness/_rust*.dylib
+
 # Tests, coverage, and generated reports
 .tox/
 .nox/
