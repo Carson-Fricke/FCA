@@ -302,6 +302,70 @@ pub unsafe extern "C" fn harness_trade_row_serialize(
     }
 }
 
+/// Write the unscaled values of the pinned Arrow decimal batch as 16
+/// little-endian bytes per value. `cap_values` bounds the write; the number of
+/// written values lands in `written`. A null pointer with `cap_values == 0`
+/// reports the batch size only.
+///
+/// # Safety
+///
+/// `out_ptr` must reference `cap_values * 16` writable bytes when non-null, and
+/// `written` must be a valid writable pointer.
+#[no_mangle]
+pub unsafe extern "C" fn harness_decimal_batch_values(
+    out_ptr: *mut u8,
+    cap_values: usize,
+    written: *mut usize,
+) -> c_int {
+    if written.is_null() {
+        return code::INVALID_ARGUMENT;
+    }
+    let batch_len = crate::arrow::BATCH_LEN;
+    if cap_values < batch_len {
+        if out_ptr.is_null() {
+            if cap_values == 0 {
+                unsafe { *written = batch_len };
+                return code::OK;
+            }
+            return code::INVALID_ARGUMENT;
+        }
+        return code::BUFFER_TOO_SMALL;
+    }
+    let out = match unsafe { out_slice(out_ptr, cap_values * 16) } {
+        Ok(out) => out,
+        Err(code) => return code,
+    };
+    for (index, value) in crate::arrow::BATCH_VALUES.iter().enumerate() {
+        out[index * 16..index * 16 + 16].copy_from_slice(&value.to_le_bytes());
+    }
+    unsafe { *written = batch_len };
+    code::OK
+}
+
+/// Export the pinned deterministic decimal128(38, 18) batch through the Arrow
+/// C Data Interface: `out_schema` and `out_array` receive initialized
+/// ArrowSchema/ArrowArray structs. The consumer must call `release` exactly
+/// once on each after importing.
+///
+/// # Safety
+///
+/// `out_schema` and `out_array` must point to writable `ArrowSchema` /
+/// `ArrowArray` storage.
+#[no_mangle]
+pub unsafe extern "C" fn harness_arrow_decimal_batch(
+    out_schema: *mut crate::arrow::ArrowSchema,
+    out_array: *mut crate::arrow::ArrowArray,
+) -> c_int {
+    if out_schema.is_null() || out_array.is_null() {
+        return code::INVALID_ARGUMENT;
+    }
+    if unsafe { crate::arrow::export_decimal_batch(out_schema, out_array) } {
+        code::OK
+    } else {
+        code::UNKNOWN
+    }
+}
+
 /// Largest binomial step count the quant kernels accept.
 #[no_mangle]
 pub extern "C" fn harness_quant_max_steps() -> u32 {
