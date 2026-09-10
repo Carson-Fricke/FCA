@@ -359,6 +359,41 @@ impl MultiLegOrder {
     }
 }
 
+/// Either kind of order a venue accepts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OrderRequest {
+    /// A single-leg order.
+    Single(SingleLegOrder),
+    /// A multi-leg group.
+    Multi(MultiLegOrder),
+}
+
+impl OrderRequest {
+    /// The order identifier.
+    pub fn order_id(&self) -> &str {
+        match self {
+            Self::Single(order) => &order.order_id,
+            Self::Multi(order) => &order.order_id,
+        }
+    }
+
+    /// The single-leg payload, when present.
+    pub fn as_single(&self) -> Option<&SingleLegOrder> {
+        match self {
+            Self::Single(order) => Some(order),
+            Self::Multi(_) => None,
+        }
+    }
+
+    /// The multi-leg payload, when present.
+    pub fn as_multi(&self) -> Option<&MultiLegOrder> {
+        match self {
+            Self::Multi(order) => Some(order),
+            Self::Single(_) => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use harness_num::Decimal18;

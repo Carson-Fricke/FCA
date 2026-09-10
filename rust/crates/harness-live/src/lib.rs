@@ -16,6 +16,7 @@ pub mod fills;
 pub mod oms;
 pub mod orders;
 pub mod symbol;
+pub mod venues;
 
 pub use error::{LiveError, LiveResult};
 pub use harness_num::Decimal18;
