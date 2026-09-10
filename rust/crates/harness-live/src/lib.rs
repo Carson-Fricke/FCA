@@ -18,6 +18,7 @@ pub mod orders;
 pub mod portfolio;
 pub mod risk;
 pub mod symbol;
+pub mod trader;
 pub mod venues;
 
 pub use error::{LiveError, LiveResult};
