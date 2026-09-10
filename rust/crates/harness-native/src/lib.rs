@@ -25,6 +25,7 @@ pub mod decimal;
 pub mod latency_size;
 pub mod market;
 pub mod market_bus;
+pub mod oms;
 mod sha256;
 pub mod simple_touch;
 pub mod types;
