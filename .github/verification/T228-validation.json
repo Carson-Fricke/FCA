@@ -1,0 +1,35 @@
+{
+  "taskId": "T228",
+  "numTotalTests": 126,
+  "numPassedTests": 126,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "screening-engine-and-ports",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/screening -q",
+      "result": "80 passed: 22 pre-existing T219 tests unbroken, plus 58 new covering indicator bridge via the harness registry (13), extended declarative filters for security type, exchange, SIC industry, fundamentals, and indicator conditions (17), the concrete LakeScreenerContext point-in-time surface (9), ScreenerService validate-run-persist with content ids (15), and the T229 ProgramExecutor seam (6)"
+    },
+    {
+      "name": "screening-api-routes",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/http -q",
+      "result": "46 passed including the new screening router at /v1/workspaces/{id}/screening with bearer auth, run/save/list/result routes, provenance in every response, and 422/503 fail-closed shapes; concurrently-landed routers unbroken"
+    },
+    {
+      "name": "ui-contract-alignment",
+      "status": "passed",
+      "command": "svelte-check on src/ui/src/lib/api.ts (0 errors); vitest api tests 16/18 (2 failures are the UX agent's ScreenerPanel rebuild surface, tracked on T230)",
+      "result": "api.ts screener functions aligned to the real contract: listScreeners, saveScreener, runScreener, getScreenerResult with ScreenerFilterSpec params, ScreenerRunInput including as_of, and ScreenerRunResult with rank/metric hits; fixture mode translates legacy filters to the native vocabulary"
+    }
+  ],
+  "limitations": [
+    "ProgramExecutor seam left for T229: run_program(program, ctx, executor=InProcessProgramExecutor) is the single documented replacement point; the T229 sandbox plugs in there",
+    "Classification schema has no SIC columns yet (D006 selection: Nasdaq file lacks SIC); sic_code and sic_industry facts populate when the reference ingest adds them - filter logic is port-tested and ready",
+    "OhlcvPort and CikIndex are thin protocols; production adapters for the local lake root and the symbol-to-CIK index are the remaining production wiring",
+    "ScreenerStore is in-memory; a durable persistence adapter is deferred",
+    "A concurrently-landed src/thesis/http/screeners.py serves the legacy UI vocabulary at /screeners while the engine-native router lives at /screening; both are mounted and the coordinator owns reconciling which surface api.ts targets"
+  ]
+}

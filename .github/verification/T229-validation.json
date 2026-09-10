@@ -1,0 +1,40 @@
+{
+  "taskId": "T229",
+  "numTotalTests": 155,
+  "numPassedTests": 155,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "static-validation-malicious-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/screening/test_validator.py",
+      "result": "42 cases: imports, dunder access, dangerous calls, wall-clock, sleeping, networking, subprocess, concurrency, async syntax, and nested-import evasion all rejected with stable error kinds"
+    },
+    {
+      "name": "subprocess-runner-limits",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/screening/test_runner.py",
+      "result": "fresh-subprocess execution with wall-clock kill (tested at 3 seconds against idle and busy infinite loops), 64 MiB request cap, protocol tampering rejected, Windows spawn verified; worker killed and reaped on timeout with a TIMEOUT error carrying the script hash"
+    },
+    {
+      "name": "sandbox-parity-and-determinism",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/screening/test_parity.py",
+      "result": "Deterministic scripts produce exact-equality results in the sandbox vs the in-process reference executor, and repeated sandbox runs are deterministic"
+    },
+    {
+      "name": "golden-and-cold-start",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/screening/test_golden.py tests/harness/screening/test_cold_start.py",
+      "result": "Legitimate script using facts and host-computed sma_5 series produces hand-computed per-symbol booleans; worker cold start measured at mean 111 ms worst 113 ms over three runs, five-symbol batch through one worker at 109 ms"
+    }
+  ],
+  "limitations": [
+    "No OS-level memory cap is available in the Windows stdlib sandbox; the wall-clock kill plus 64 MiB request cap plus the locked import surface are the production mitigations and scripts are trusted-author artifacts by policy",
+    "A killed batch loses all its work by design (never partial results)",
+    "Scripts see only their own symbol's context; cross-sectional surfaces are deferred",
+    "Integration finding reported: tests/harness/test_package.py::test_product_and_capability_facades_import failed in the implementing agent's environment with a missing harness.configuration.hashing module, but the coordinator's full-suite rerun passed 2809 tests with zero failures, so this was environmental to that agent run and is not a wave finding"
+  ]
+}
