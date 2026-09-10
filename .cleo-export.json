@@ -3,14 +3,14 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-10T02:20:32.229Z",
+    "exportedAt": "2026-09-10T04:16:20.021Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
-      "nextId": 234
+      "nextId": 280
     },
-    "checksum": "e851669401dc672b",
-    "taskCount": 230,
+    "checksum": "8a4cb13f28e37371",
+    "taskCount": 276,
     "exportMode": "full"
   },
   "selection": {
@@ -48,6 +48,14 @@
       "T174",
       "T182",
       "T225",
+      "T235",
+      "T242",
+      "T247",
+      "T254",
+      "T259",
+      "T265",
+      "T271",
+      "T275",
       "T003",
       "T014",
       "T017",
@@ -80,6 +88,14 @@
       "T175",
       "T183",
       "T226",
+      "T236",
+      "T243",
+      "T248",
+      "T255",
+      "T260",
+      "T266",
+      "T272",
+      "T276",
       "T004",
       "T015",
       "T018",
@@ -111,6 +127,14 @@
       "T176",
       "T184",
       "T227",
+      "T237",
+      "T244",
+      "T249",
+      "T256",
+      "T261",
+      "T267",
+      "T273",
+      "T277",
       "T005",
       "T019",
       "T024",
@@ -140,6 +164,15 @@
       "T185",
       "T216",
       "T228",
+      "T234",
+      "T238",
+      "T245",
+      "T250",
+      "T257",
+      "T262",
+      "T268",
+      "T274",
+      "T278",
       "T006",
       "T020",
       "T025",
@@ -164,6 +197,13 @@
       "T188",
       "T214",
       "T229",
+      "T239",
+      "T246",
+      "T251",
+      "T258",
+      "T263",
+      "T269",
+      "T279",
       "T007",
       "T026",
       "T038",
@@ -186,6 +226,10 @@
       "T218",
       "T219",
       "T230",
+      "T240",
+      "T252",
+      "T264",
+      "T270",
       "T008",
       "T027",
       "T039",
@@ -201,6 +245,8 @@
       "T205",
       "T208",
       "T222",
+      "T241",
+      "T253",
       "T009",
       "T075",
       "T085",
@@ -564,9 +610,80 @@
     "T225": {
       "type": "task",
       "title": "Tick-native incremental indicator library with cross-mode parity",
-      "status": "pending",
+      "status": "done",
       "parentId": "T224",
       "depends": []
+    },
+    "T235": {
+      "type": "epic",
+      "title": "Rust workspace foundation and parity-oracle backbone",
+      "status": "pending",
+      "parentId": "T234",
+      "depends": []
+    },
+    "T242": {
+      "type": "task",
+      "title": "Scaffold Rust workspace with cdylib harness-native crate",
+      "status": "pending",
+      "parentId": "T235",
+      "depends": []
+    },
+    "T247": {
+      "type": "task",
+      "title": "Port native foundations: types, decimal, clock to Rust",
+      "status": "pending",
+      "parentId": "T236",
+      "depends": [
+        "T244",
+        "T245"
+      ]
+    },
+    "T254": {
+      "type": "task",
+      "title": "Port data storage core: lake, bars, history to Rust",
+      "status": "pending",
+      "parentId": "T237",
+      "depends": [
+        "T242",
+        "T245"
+      ]
+    },
+    "T259": {
+      "type": "task",
+      "title": "Port results recorder with byte-identical artifacts",
+      "status": "pending",
+      "parentId": "T238",
+      "depends": [
+        "T242",
+        "T245"
+      ]
+    },
+    "T265": {
+      "type": "task",
+      "title": "Port OMS service layer to Rust",
+      "status": "pending",
+      "parentId": "T239",
+      "depends": [
+        "T245"
+      ]
+    },
+    "T271": {
+      "type": "task",
+      "title": "Port harness and backtest-job CLIs to clap",
+      "status": "pending",
+      "parentId": "T240",
+      "depends": [
+        "T242"
+      ]
+    },
+    "T275": {
+      "type": "task",
+      "title": "Build PyO3 strategy host for user strategies and screeners",
+      "status": "pending",
+      "parentId": "T241",
+      "depends": [
+        "T243"
+      ]
     },
     "T003": {
       "type": "epic",
@@ -887,6 +1004,74 @@
       "parentId": "T224",
       "depends": []
     },
+    "T236": {
+      "type": "epic",
+      "title": "Port Zig native core to Rust and retire Zig",
+      "status": "pending",
+      "parentId": "T234",
+      "depends": [
+        "T235"
+      ]
+    },
+    "T243": {
+      "type": "task",
+      "title": "PyO3 extension bridge between Python and Rust core",
+      "status": "pending",
+      "parentId": "T235",
+      "depends": [
+        "T242"
+      ]
+    },
+    "T248": {
+      "type": "task",
+      "title": "Port market data structures: books, bars, market bus to Rust",
+      "status": "pending",
+      "parentId": "T236",
+      "depends": [
+        "T247"
+      ]
+    },
+    "T255": {
+      "type": "task",
+      "title": "Port security master and universe views to Rust",
+      "status": "pending",
+      "parentId": "T237",
+      "depends": [
+        "T254"
+      ]
+    },
+    "T260": {
+      "type": "task",
+      "title": "Port backtest engine core to Rust",
+      "status": "pending",
+      "parentId": "T238",
+      "depends": [
+        "T253",
+        "T258",
+        "T259"
+      ]
+    },
+    "T266": {
+      "type": "task",
+      "title": "Port fill and fee models to Rust",
+      "status": "pending",
+      "parentId": "T239",
+      "depends": []
+    },
+    "T272": {
+      "type": "task",
+      "title": "Port HTTP API to axum",
+      "status": "pending",
+      "parentId": "T240",
+      "depends": []
+    },
+    "T276": {
+      "type": "task",
+      "title": "Port strategy package onto the host boundary",
+      "status": "pending",
+      "parentId": "T241",
+      "depends": []
+    },
     "T004": {
       "type": "epic",
       "title": "E1 Azure infrastructure and budget controls",
@@ -1194,11 +1379,77 @@
     "T227": {
       "type": "task",
       "title": "Fundamentals and security-classification ingest",
-      "status": "pending",
+      "status": "done",
       "parentId": "T224",
       "depends": [
         "T226"
       ]
+    },
+    "T237": {
+      "type": "epic",
+      "title": "Port data layer to Rust",
+      "status": "pending",
+      "parentId": "T234",
+      "depends": [
+        "T235"
+      ]
+    },
+    "T244": {
+      "type": "task",
+      "title": "Implement scale-18 fixed-point numeric core in Rust",
+      "status": "pending",
+      "parentId": "T235",
+      "depends": [
+        "T242"
+      ]
+    },
+    "T249": {
+      "type": "task",
+      "title": "Port OMS state machine to Rust",
+      "status": "pending",
+      "parentId": "T236",
+      "depends": [
+        "T248"
+      ]
+    },
+    "T256": {
+      "type": "task",
+      "title": "Port replay engines: equity and options to Rust",
+      "status": "pending",
+      "parentId": "T237",
+      "depends": [
+        "T255"
+      ]
+    },
+    "T261": {
+      "type": "task",
+      "title": "Port paper and shadow runtimes to Rust",
+      "status": "pending",
+      "parentId": "T238",
+      "depends": [
+        "T260"
+      ]
+    },
+    "T267": {
+      "type": "task",
+      "title": "Port venue adapters to Rust",
+      "status": "pending",
+      "parentId": "T239",
+      "depends": []
+    },
+    "T273": {
+      "type": "task",
+      "title": "Port MCP server to Rust",
+      "status": "pending",
+      "parentId": "T240",
+      "depends": []
+    },
+    "T277": {
+      "type": "task",
+      "title": "Port configuration package behavior-identically",
+      "status": "pending",
+      "parentId": "T241",
+      "depends": []
     },
     "T005": {
       "type": "epic",
@@ -1500,6 +1751,80 @@
         "T227"
       ]
     },
+    "T234": {
+      "type": "saga",
+      "title": "Migrate quant-harness engine to Rust",
+      "status": "pending",
+      "parentId": null,
+      "depends": []
+    },
+    "T238": {
+      "type": "epic",
+      "title": "Port backtest runtime, sweeps, and results to Rust",
+      "status": "pending",
+      "parentId": "T234",
+      "depends": [
+        "T236",
+        "T237"
+      ]
+    },
+    "T245": {
+      "type": "task",
+      "title": "Port determinism and parity oracles to drive the Rust core",
+      "status": "pending",
+      "parentId": "T235",
+      "depends": [
+        "T243"
+      ]
+    },
+    "T250": {
+      "type": "task",
+      "title": "Port matching venue and fill models to Rust",
+      "status": "pending",
+      "parentId": "T236",
+      "depends": [
+        "T249"
+      ]
+    },
+    "T257": {
+      "type": "task",
+      "title": "Port live market data ingest: websockets and recorder to Rust",
+      "status": "pending",
+      "parentId": "T237",
+      "depends": [
+        "T256"
+      ]
+    },
+    "T262": {
+      "type": "task",
+      "title": "Port sweeps engine to Rust",
+      "status": "pending",
+      "parentId": "T238",
+      "depends": [
+        "T261"
+      ]
+    },
+    "T268": {
+      "type": "task",
+      "title": "Port portfolio accounting to Rust",
+      "status": "pending",
+      "parentId": "T239",
+      "depends": []
+    },
+    "T274": {
+      "type": "task",
+      "title": "Complete api entrypoint and interface integration parity",
+      "status": "pending",
+      "parentId": "T240",
+      "depends": []
+    },
+    "T278": {
+      "type": "task",
+      "title": "Flip entrypoints to Rust and delete Python engine paths",
+      "status": "pending",
+      "parentId": "T241",
+      "depends": []
+    },
     "T006": {
       "type": "epic",
       "title": "E3 CI/CD and GitHub OIDC",
@@ -1744,6 +2069,65 @@
         "T225"
       ]
     },
+    "T239": {
+      "type": "epic",
+      "title": "Port live trading surfaces to Rust",
+      "status": "pending",
+      "parentId": "T234",
+      "depends": [
+        "T236",
+        "T237"
+      ]
+    },
+    "T246": {
+      "type": "task",
+      "title": "Add cargo CI gates and Docker Rust build stage",
+      "status": "pending",
+      "parentId": "T235",
+      "depends": [
+        "T244",
+        "T245"
+      ]
+    },
+    "T251": {
+      "type": "task",
+      "title": "Port metrics and quant pricing kernels to Rust",
+      "status": "pending",
+      "parentId": "T236",
+      "depends": [
+        "T250"
+      ]
+    },
+    "T258": {
+      "type": "task",
+      "title": "Data layer integration parity versus Python",
+      "status": "pending",
+      "parentId": "T237",
+      "depends": [
+        "T257"
+      ]
+    },
+    "T263": {
+      "type": "task",
+      "title": "Port built-in signal and indicator kernels to Rust",
+      "status": "pending",
+      "parentId": "T238",
+      "depends": []
+    },
+    "T269": {
+      "type": "task",
+      "title": "Port risk engine to Rust",
+      "status": "pending",
+      "parentId": "T239",
+      "depends": []
+    },
+    "T279": {
+      "type": "task",
+      "title": "Decommission Zig and Python engine, update architecture docs",
+      "status": "pending",
+      "parentId": "T241",
+      "depends": []
+    },
     "T007": {
       "type": "epic",
       "title": "E4 Equities SIP ingest",
@@ -1966,6 +2350,38 @@
         "T229"
       ]
     },
+    "T240": {
+      "type": "epic",
+      "title": "Port CLI, HTTP API, and MCP server to Rust",
+      "status": "pending",
+      "parentId": "T234",
+      "depends": [
+        "T235"
+      ]
+    },
+    "T252": {
+      "type": "task",
+      "title": "Port event kernel and replay to Rust",
+      "status": "pending",
+      "parentId": "T236",
+      "depends": [
+        "T251"
+      ]
+    },
+    "T264": {
+      "type": "task",
+      "title": "Backtest-job end-to-end on Rust core",
+      "status": "pending",
+      "parentId": "T238",
+      "depends": []
+    },
+    "T270": {
+      "type": "task",
+      "title": "Trader entrypoint on Rust core with lifecycle parity",
+      "status": "pending",
+      "parentId": "T239",
+      "depends": []
+    },
     "T008": {
       "type": "epic",
       "title": "E5 HTTP ensure and query API",
@@ -2129,6 +2545,26 @@
       "status": "done",
       "parentId": "T076",
       "depends": []
+    },
+    "T241": {
+      "type": "epic",
+      "title": "Python strategy host and decommission of Python/Zig engine",
+      "status": "pending",
+      "parentId": "T234",
+      "depends": [
+        "T238",
+        "T239",
+        "T240"
+      ]
+    },
+    "T253": {
+      "type": "task",
+      "title": "Arrow bridge via arrow-rs FFI and retire Zig",
+      "status": "pending",
+      "parentId": "T236",
+      "depends": [
+        "T252"
+      ]
     },
     "T009": {
       "type": "epic",
@@ -2495,7 +2931,7 @@
     "T231": {
       "type": "task",
       "title": "TH6.8 Thesis API workspace data routes over local persistence and harness adapters",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": []
     },
@@ -2511,7 +2947,7 @@
     "T232": {
       "type": "task",
       "title": "TH6.9 Model providers: OpenRouter adapter and Azure AI Foundry invocation client",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": []
     },
@@ -6840,7 +7276,7 @@
     {
       "id": "T225",
       "title": "Tick-native incremental indicator library with cross-mode parity",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T224",
@@ -6869,18 +7305,436 @@
         "tests/harness/indicators/"
       ],
       "createdAt": "2026-09-10T00:04:22.866Z",
-      "updatedAt": "2026-09-10T00:31:05.674Z",
+      "updatedAt": "2026-09-10T02:34:44.622Z",
+      "completedAt": "2026-09-10T02:34:39.173Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 0,
-        "gates": {},
-        "evidence": {},
-        "lastAgent": null,
-        "lastUpdated": null,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/indicators/__init__.py",
+                    "sha256": "0c1006b29b45568a401e2412254909a6447c361a7b3d92c99bde150fdc1bde4a"
+                  },
+                  {
+                    "path": "src/harness/indicators/base.py",
+                    "sha256": "e84106bea0f8524a2f4a44642bf676e37be117da57fc31d730f4071e3dcbc2ac"
+                  },
+                  {
+                    "path": "src/harness/indicators/registry.py",
+                    "sha256": "1ad67d40ca07af809d95a5d8ebedde0af72e2737ca26c86fff27a1a873602a40"
+                  },
+                  {
+                    "path": "src/harness/testing/indicator_parity.py",
+                    "sha256": "de175724276182cf8d200feb178fc965c4c01240af48d0f7146636700c8daedc"
+                  }
+                ]
+              },
+              {
+                "kind": "commit",
+                "sha": "24133c84003dcedef7a2a877f584eff550a28b39",
+                "shortSha": "24133c8"
+              }
+            ],
+            "capturedAt": "2026-09-10T02:34:05.775Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T225-validation.json",
+                "sha256": "4058af13680c1ab80e1a6e04ad3d0b1207d3d35005d4311e3c7f3668505deaca",
+                "passCount": 54,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-10T02:34:13.576Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 230 CLEO tasks through T233.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T02:34:22.147Z",
+            "capturedBy": "orchestrator"
+          }
+        },
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T02:34:21.961Z",
         "failureLog": []
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "assignee": "local",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T235",
+      "title": "Rust workspace foundation and parity-oracle backbone",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T234",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Stand up the Rust workspace for the quant-harness engine: cargo workspace layout under src/harness with cdylib and PyO3 targets, scale-18 fixed-point numeric core, and port the harness.testing determinism/parity oracles so every subsequent port step is verified against golden artifacts. Add cargo fmt/clippy/test CI gates and a Docker build stage for the Rust library.",
+      "acceptance": [
+        "Cargo workspace scaffolded with cdylib and PyO3 targets building in CI and Docker",
+        "harness.testing determinism and parity oracles ported to drive the Rust core and wired as CI gates",
+        "scale-18 fixed-point numeric core implemented in Rust with property tests against the Python reference",
+        "cargo fmt clippy and test gates added alongside existing Zig and Python gates",
+        "Complete child T242: Scaffold Rust workspace with cdylib harness-native crate",
+        "Complete child T243: PyO3 extension bridge between Python and Rust core",
+        "Complete child T244: Implement scale-18 fixed-point numeric core in Rust",
+        "Complete child T245: Port determinism and parity oracles to drive the Rust core",
+        "Complete child T246: Add cargo CI gates and Docker Rust build stage"
+      ],
+      "createdAt": "2026-09-10T03:04:51.632Z",
+      "updatedAt": "2026-09-10T03:27:23.344Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T242",
+      "title": "Scaffold Rust workspace with cdylib harness-native crate",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T235",
+      "size": "medium",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Create the Cargo workspace rooted at rust/ for the quant-harness Rust engine. Declare member crates up front so the workspace members list is stable and later crates can be filled in with disjoint file ownership: harness-native (cdylib crate-type, initial exported symbol placeholder that will grow into the ported Zig core surface), plus empty harness-py and harness-num member crates. Pin a stable toolchain via rust/rust-toolchain.toml and make cargo fmt --check pass. Update .github/architecture/repository.md with a short quant-harness Rust workspace section describing the layout and that the Python engine and Zig native core remain authoritative until the migration flips.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Cargo workspace rooted at rust/ with member crates harness-native (cdylib) plus empty harness-py and harness-num crates pre-declared",
+        "harness-native cdylib builds locally and in CI producing a loadable shared library artifact",
+        "rust-toolchain.toml pins a stable toolchain and cargo fmt --check passes on the workspace",
+        ".github/architecture/repository.md gains a quant-harness Rust workspace section"
+      ],
+      "files": [
+        "rust/",
+        ".github/architecture/repository.md"
+      ],
+      "createdAt": "2026-09-10T03:27:05.639Z",
+      "updatedAt": "2026-09-10T03:27:05.639Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:27:05.639Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T247",
+      "title": "Port native foundations: types, decimal, clock to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T236",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Port the Zig native core foundations (src/harness/native/types.zig, decimal.zig, clock.zig, latency_size.zig) into the harness-native crate on top of the harness-num scale-18 fixed-point core. Define the C ABI surface layout that later ports will extend. Unit tests plus parity against decimal golden vectors from the Zig implementation.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "types decimal clock and latency-size semantics ported into harness-native with unit tests",
+        "Scale-18 decimal semantics match harness-num and Zig golden vectors",
+        "C ABI surface layout defined for subsequent kernel ports"
+      ],
+      "files": [
+        "rust/crates/harness-native/"
+      ],
+      "depends": [
+        "T244",
+        "T245"
+      ],
+      "createdAt": "2026-09-10T03:55:36.968Z",
+      "updatedAt": "2026-09-10T03:55:36.968Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:55:36.968Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T254",
+      "title": "Port data storage core: lake, bars, history to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T237",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Create the harness-data crate and port src/harness/data/lake.py, bars.py, and history.py to Rust on arrow-rs: market-lake reads, bar assembly, and history backfill semantics preserved.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "harness-data crate created with lake bars and history ported to Rust on arrow-rs",
+        "Behavior-identical reads versus the Python data layer verified by parity tests",
+        "Config schema for lake and bars sources unchanged"
+      ],
+      "files": [
+        "rust/crates/harness-data/"
+      ],
+      "depends": [
+        "T242",
+        "T245"
+      ],
+      "createdAt": "2026-09-10T03:57:10.669Z",
+      "updatedAt": "2026-09-10T03:57:10.669Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:57:10.669Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T259",
+      "title": "Port results recorder with byte-identical artifacts",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T238",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Create the harness-engine crate and port src/harness/results/recorder (manifest, config, artifacts, schemas, writer) to Rust first, since every downstream engine path writes through it. Artifact bytes must be identical to the Python recorder output.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Recorder manifest config artifacts schemas and writer ported to Rust",
+        "Artifact output byte-identical versus Python recorder goldens",
+        "Schema versioning preserved"
+      ],
+      "files": [
+        "rust/crates/harness-engine/",
+        "src/harness/results/recorder/"
+      ],
+      "depends": [
+        "T242",
+        "T245"
+      ],
+      "createdAt": "2026-09-10T03:58:14.828Z",
+      "updatedAt": "2026-09-10T03:58:14.828Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:58:14.828Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T265",
+      "title": "Port OMS service layer to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T239",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Create the harness-live crate and port src/harness/oms (state.py, manager.py, groups.py) to Rust on top of the native OMS state machine from T236.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "OMS service layer state manager and groups ported to Rust",
+        "Order lifecycle parity versus Python service layer passes",
+        "Built on the Rust native OMS state machine"
+      ],
+      "files": [
+        "rust/crates/harness-live/"
+      ],
+      "depends": [
+        "T245"
+      ],
+      "createdAt": "2026-09-10T03:59:21.816Z",
+      "updatedAt": "2026-09-10T03:59:21.816Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:59:21.816Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T271",
+      "title": "Port harness and backtest-job CLIs to clap",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T240",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Create the harness-api crate and reimplement the harness CLI facade and backtest_job command (src/harness/cli/__init__.py, _runner.py, backtest.py, backtest_job.py, supervisor.py) with clap, feature-identical to the Typer surface. Trader command arrives with T239; api command with the integration task.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "harness and backtest-job commands reimplemented with clap feature-identical",
+        "Command help flags and exit codes match the Typer CLI",
+        "CLI drives the Rust backtest pipeline"
+      ],
+      "files": [
+        "rust/crates/harness-api/"
+      ],
+      "depends": [
+        "T242"
+      ],
+      "createdAt": "2026-09-10T04:00:29.115Z",
+      "updatedAt": "2026-09-10T04:00:29.115Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:00:29.115Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T275",
+      "title": "Build PyO3 strategy host for user strategies and screeners",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T241",
+      "size": "large",
+      "position": 1,
+      "positionVersion": 0,
+      "description": "Extend the harness-py crate into the full strategy host: load and execute user-facing strategies, user-authored indicators, and screener scripts from strategies/ unmodified inside the Rust engine, exposing the engine context and callbacks across the PyO3 boundary per the strategy contracts.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "User strategies from strategies/ run unmodified inside the Rust engine",
+        "User-authored Python indicators execute via the host",
+        "Screener scripts execute via the host",
+        "GIL handling and callback latency bounded in hot loops"
+      ],
+      "files": [
+        "rust/crates/harness-py/",
+        "strategies/"
+      ],
+      "depends": [
+        "T243"
+      ],
+      "createdAt": "2026-09-10T04:01:27.674Z",
+      "updatedAt": "2026-09-10T04:01:27.674Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:01:27.674Z"
+      },
+      "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -11366,6 +12220,351 @@
       "relates": []
     },
     {
+      "id": "T236",
+      "title": "Port Zig native core to Rust and retire Zig",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T234",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Port the entire Zig native core (src/harness/native, 29 files ~8.7k LOC): event kernel, OMS state machine, matching venue, fill models, metrics, and quant/CRR pricing kernels, to Rust. Reimplement the Arrow C Data Interface bridge using arrow-rs FFI. Prove byte-identical parity against Zig golden artifacts, then remove build.zig and all Zig sources and switch native loading to the Rust library.",
+      "acceptance": [
+        "Event kernel OMS state machine matching venue fill models metrics and quant CRR kernels ported to Rust",
+        "Arrow C Data Interface bridge reimplemented via arrow-rs FFI",
+        "Byte-identical parity versus Zig golden artifacts proven before Zig removal",
+        "build.zig and all Zig sources removed and native loading switched to the Rust library",
+        "Complete child T247: Port native foundations: types, decimal, clock to Rust",
+        "Complete child T248: Port market data structures: books, bars, market bus to Rust",
+        "Complete child T249: Port OMS state machine to Rust",
+        "Complete child T250: Port matching venue and fill models to Rust",
+        "Complete child T251: Port metrics and quant pricing kernels to Rust",
+        "Complete child T252: Port event kernel and replay to Rust",
+        "Complete child T253: Arrow bridge via arrow-rs FFI and retire Zig"
+      ],
+      "depends": [
+        "T235"
+      ],
+      "createdAt": "2026-09-10T03:04:55.468Z",
+      "updatedAt": "2026-09-10T03:56:02.935Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T243",
+      "title": "PyO3 extension bridge between Python and Rust core",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T235",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Fill in the harness-py member crate as a PyO3 extension-module crate exposing a minimal smoke-test surface callable from Python, and wire pyproject.toml so the extension builds under editable installs and wheel builds. This establishes the load path that the strategy host (epic T241) and the parity oracle will reuse. Must not regress the existing Zig-native loading via _native.py; existing Python gates stay green.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "harness-py PyO3 extension-module crate exposes a smoke-test function callable from Python",
+        "pyproject.toml build config compiles the extension for editable install and wheel builds",
+        "pytest smoke test imports the extension and round-trips a value",
+        "Existing Zig-native loading and Python test gates remain green"
+      ],
+      "files": [
+        "rust/crates/harness-py/",
+        "pyproject.toml"
+      ],
+      "depends": [
+        "T242"
+      ],
+      "createdAt": "2026-09-10T03:27:10.069Z",
+      "updatedAt": "2026-09-10T03:27:43.525Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:27:10.069Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T248",
+      "title": "Port market data structures: books, bars, market bus to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T236",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Port src/harness/native/books.zig, bars.zig, market.zig, and bus.zig to harness-native: order book models, bar aggregation, market data bus, using the ported foundations. Parity-tested against Zig golden artifacts.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Order books bars and market bus ported to harness-native",
+        "Parity versus Zig golden artifacts is byte-identical",
+        "Cargo test suite covers book replay and bar aggregation edges"
+      ],
+      "files": [
+        "rust/crates/harness-native/"
+      ],
+      "depends": [
+        "T247"
+      ],
+      "createdAt": "2026-09-10T03:55:41.580Z",
+      "updatedAt": "2026-09-10T04:02:17.692Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:55:41.580Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T255",
+      "title": "Port security master and universe views to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T237",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Port src/harness/data/security_master.py, universe_view.py, listing_events.py, and gap_healing.py to harness-data.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Security master universe view listing events and gap healing ported to Rust",
+        "Parity tests versus the Python implementations pass",
+        "Gap healing edge cases covered"
+      ],
+      "files": [
+        "rust/crates/harness-data/"
+      ],
+      "depends": [
+        "T254"
+      ],
+      "createdAt": "2026-09-10T03:57:14.925Z",
+      "updatedAt": "2026-09-10T04:11:04.997Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:57:14.925Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T260",
+      "title": "Port backtest engine core to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T238",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Port src/harness/runtime/backtest engine core (engine.py, fills.py, fees.py, errors.py, fixture.py, preflight.py, manifest.py, strategies.py) to harness-engine, consuming the Rust native core (T236) and Rust data layer (T237). Strategy callbacks remain Python via the host boundary.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Backtest engine fills fees fixture preflight and manifest ported to Rust",
+        "Engine consumes the Rust native core and Rust data layer",
+        "Determinism artifacts byte-identical versus the Python engine goldens"
+      ],
+      "files": [
+        "rust/crates/harness-engine/"
+      ],
+      "depends": [
+        "T253",
+        "T258",
+        "T259"
+      ],
+      "createdAt": "2026-09-10T03:58:19.140Z",
+      "updatedAt": "2026-09-10T04:15:32.324Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:58:19.140Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T266",
+      "title": "Port fill and fee models to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T239",
+      "size": "medium",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Port src/harness/fills (simple_touch.py, mid_touch.py, trade_through.py, latency_size.py, fees.py) to harness-live using the native fill model ports.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "All fill models and fee schedules ported to Rust",
+        "Fill parity versus Python models is byte-identical",
+        "Fee computation edge cases covered"
+      ],
+      "files": [
+        "rust/crates/harness-live/"
+      ],
+      "createdAt": "2026-09-10T03:59:26.221Z",
+      "updatedAt": "2026-09-10T03:59:26.221Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:59:26.221Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T272",
+      "title": "Port HTTP API to axum",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T240",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Port src/harness/http (application.py, launcher.py, models.py, routes/launch.py, routes/runs.py) to axum in harness-api, preserving route shapes and response models.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "HTTP application launcher and routes ported to axum",
+        "Route paths payloads and response models match the Python API",
+        "Launch and runs endpoints drive the Rust runtime"
+      ],
+      "files": [
+        "rust/crates/harness-api/"
+      ],
+      "createdAt": "2026-09-10T04:00:33.420Z",
+      "updatedAt": "2026-09-10T04:00:33.420Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:00:33.420Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T276",
+      "title": "Port strategy package onto the host boundary",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T241",
+      "size": "large",
+      "position": 2,
+      "positionVersion": 0,
+      "description": "Port src/harness/strategy (contracts.py, context.py, binding.py, lint.py, reference.py) onto the Rust host boundary: contracts enforced in Rust, context and binding bridged via PyO3, lint and reference behavior preserved.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Strategy contracts enforced in Rust with identical rejection behavior",
+        "Context and binding bridged via PyO3 with parity versus Python",
+        "Strategy lint and reference behavior preserved"
+      ],
+      "files": [
+        "rust/crates/harness-py/",
+        "src/harness/strategy/"
+      ],
+      "createdAt": "2026-09-10T04:01:32.138Z",
+      "updatedAt": "2026-09-10T04:01:32.138Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:01:32.138Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T004",
       "title": "E1 Azure infrastructure and budget controls",
       "status": "done",
@@ -15305,7 +16504,7 @@
     {
       "id": "T227",
       "title": "Fundamentals and security-classification ingest",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T224",
@@ -15333,7 +16532,154 @@
         "T226"
       ],
       "createdAt": "2026-09-10T00:04:31.280Z",
-      "updatedAt": "2026-09-10T00:32:10.197Z",
+      "updatedAt": "2026-09-10T02:36:28.094Z",
+      "completedAt": "2026-09-10T02:36:23.737Z",
+      "verification": {
+        "passed": true,
+        "round": 1,
+        "gates": {
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
+        },
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T02:36:15.232Z",
+        "failureLog": [],
+        "initializedAt": "2026-09-10T00:04:31.280Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/lake/reference/__init__.py",
+                    "sha256": "b50e11c98cc7ab8c6c3487d5628877a04d184501e66882587693404c69e12030"
+                  },
+                  {
+                    "path": "src/lake/reference/ingest.py",
+                    "sha256": "b523007510b15e80c79fdd4881a58c29740ceb1305759d2d7534d2aea1c38712"
+                  },
+                  {
+                    "path": "src/lake/reference/query.py",
+                    "sha256": "dd53f613672cf2c51b20e2b47148b8a955aae9d47e77181cf944f144178e6a2b"
+                  },
+                  {
+                    "path": "src/lake/reference/schemas.py",
+                    "sha256": "60fb046c475e01546d68257645377e0ec74eb1f0ce3807e2d0f43ce75d840278"
+                  },
+                  {
+                    "path": "config/lake/reference.yaml",
+                    "sha256": "cdefaa02b078cc55ec01b361b52780241082fc910a6db7f0b81c4b3e96f9ef6a"
+                  }
+                ]
+              },
+              {
+                "kind": "commit",
+                "sha": "24133c84003dcedef7a2a877f584eff550a28b39",
+                "shortSha": "24133c8"
+              }
+            ],
+            "capturedAt": "2026-09-10T02:35:10.929Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T227-validation.json",
+                "sha256": "2630489002f95f573b9e9e18ae1e2c80788473a3706ff1b15a572d9eced9d871",
+                "passCount": 92,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-10T02:35:48.626Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 230 CLEO tasks through T233.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T02:36:15.338Z",
+            "capturedBy": "orchestrator"
+          }
+        }
+      },
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T237",
+      "title": "Port data layer to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T234",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Reimplement harness.data (14 modules: ingestion, caching, storage) in Rust on arrow-rs. Preserve existing adapter behavior and configuration schema so downstream consumers are unaffected. Parity-tested against the Python data layer.",
+      "acceptance": [
+        "Data ingestion caching and storage reimplemented in Rust with arrow-rs",
+        "Existing data adapters and config schema behavior-identical",
+        "Parity tests versus the Python data layer pass",
+        "Complete child T254: Port data storage core: lake, bars, history to Rust",
+        "Complete child T255: Port security master and universe views to Rust",
+        "Complete child T256: Port replay engines: equity and options to Rust",
+        "Complete child T257: Port live market data ingest: websockets and recorder to Rust",
+        "Complete child T258: Data layer integration parity versus Python"
+      ],
+      "depends": [
+        "T235"
+      ],
+      "createdAt": "2026-09-10T03:04:58.880Z",
+      "updatedAt": "2026-09-10T03:57:27.994Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T244",
+      "title": "Implement scale-18 fixed-point numeric core in Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T235",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Fill in the harness-num member crate with the scale-18 fixed-point numeric core matching the semantics used by the Zig native core and Python core types: i128-backed fixed-point with arithmetic, comparisons, conversions to/from decimal and float, and explicit rounding modes. Generate golden vectors from the Python reference implementation (harness core types) and property-test the Rust implementation against them, including overflow and rounding edge cases. No allocation in hot arithmetic paths.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "harness-num implements the scale-18 fixed-point type with arithmetic comparisons conversions and explicit rounding modes",
+        "Golden vectors generated from the Python core-types reference and property tests pass against them",
+        "Overflow and rounding edge cases covered by the cargo test suite",
+        "Hot arithmetic paths are allocation-free"
+      ],
+      "files": [
+        "rust/crates/harness-num/"
+      ],
+      "depends": [
+        "T242"
+      ],
+      "createdAt": "2026-09-10T03:27:14.322Z",
+      "updatedAt": "2026-09-10T03:28:04.397Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -15345,9 +16691,271 @@
         "lastAgent": null,
         "lastUpdated": null,
         "failureLog": [],
-        "initializedAt": "2026-09-10T00:04:31.280Z"
+        "initializedAt": "2026-09-10T03:27:14.322Z"
       },
-      "pipelineStage": "research",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T249",
+      "title": "Port OMS state machine to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T236",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Port src/harness/native/oms.zig, oms_state.zig, and oms_manager.zig to harness-native as the Rust OMS state machine. Parity-tested against Zig golden artifacts for order lifecycle transitions.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "OMS state machine and manager ported to harness-native",
+        "Order lifecycle transition parity versus Zig goldens is byte-identical",
+        "Invalid transition rejection paths covered by tests"
+      ],
+      "files": [
+        "rust/crates/harness-native/"
+      ],
+      "depends": [
+        "T248"
+      ],
+      "createdAt": "2026-09-10T03:55:46.064Z",
+      "updatedAt": "2026-09-10T04:02:35.422Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:55:46.064Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T256",
+      "title": "Port replay engines: equity and options to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T237",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Port src/harness/data/replay.py, options_replay.py, and options_universe.py to harness-data: deterministic event replay feeds for the backtest runtime.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Equity and options replay engines ported to Rust",
+        "Replay event streams byte-identical versus Python reference",
+        "Options universe construction parity verified"
+      ],
+      "files": [
+        "rust/crates/harness-data/"
+      ],
+      "depends": [
+        "T255"
+      ],
+      "createdAt": "2026-09-10T03:57:19.473Z",
+      "updatedAt": "2026-09-10T04:11:21.996Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:57:19.473Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T261",
+      "title": "Port paper and shadow runtimes to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T238",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Port src/harness/runtime/paper.py (PaperShell), shadow.py, state_store.py, recovery.py, reconciler.py, and go_live.py to harness-engine.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "PaperShell shadow state store recovery reconciler and go-live ported to Rust",
+        "Paper trading behavior parity versus Python verified",
+        "State store recovery round-trips are byte-identical"
+      ],
+      "files": [
+        "rust/crates/harness-engine/"
+      ],
+      "depends": [
+        "T260"
+      ],
+      "createdAt": "2026-09-10T03:58:23.501Z",
+      "updatedAt": "2026-09-10T04:15:49.364Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:58:23.501Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T267",
+      "title": "Port venue adapters to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T239",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Port src/harness/venues (base.py, sim.py, scripted.py, options_matching.py, alpaca.py, alpaca_options.py, alpaca_crypto.py) to harness-live.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Simulated scripted options and Alpaca venue adapters ported to Rust",
+        "Venue behavior parity versus Python adapters passes",
+        "Async venue IO uses tokio"
+      ],
+      "files": [
+        "rust/crates/harness-live/"
+      ],
+      "createdAt": "2026-09-10T03:59:30.627Z",
+      "updatedAt": "2026-09-10T03:59:30.627Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:59:30.627Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T273",
+      "title": "Port MCP server to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T240",
+      "size": "large",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Reimplement the MCP server (src/harness/mcp/server.py, tools.py, transport.py, auth.py) in Rust within harness-api, protocol-compliant with the existing MCP client contract.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "MCP server transport auth and tools reimplemented in Rust",
+        "Protocol compliance verified against the existing client contract",
+        "Tool surface matches the Python server"
+      ],
+      "files": [
+        "rust/crates/harness-api/"
+      ],
+      "createdAt": "2026-09-10T04:00:37.843Z",
+      "updatedAt": "2026-09-10T04:00:37.843Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:00:37.843Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T277",
+      "title": "Port configuration package behavior-identically",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T241",
+      "size": "medium",
+      "position": 3,
+      "positionVersion": 0,
+      "description": "Port src/harness/configuration (models.py, loader.py, hashing.py) to Rust behavior-identically: same YAML handling, validation errors, and config hashing so determinism manifests are unchanged.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Configuration models loader and hashing ported to Rust",
+        "Config hashes identical versus Python for all existing config files",
+        "Validation error parity verified"
+      ],
+      "files": [
+        "rust/crates/harness-api/",
+        "src/harness/configuration/"
+      ],
+      "createdAt": "2026-09-10T04:01:36.492Z",
+      "updatedAt": "2026-09-10T04:01:36.492Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:01:36.492Z"
+      },
+      "pipelineStage": "implementation",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -18910,6 +20518,401 @@
       "relates": []
     },
     {
+      "id": "T234",
+      "title": "Migrate quant-harness engine to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "saga",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Full migration of the quant-harness engine (src/harness Python runtime, ~43k LOC, plus the 29-file ~8.7k LOC Zig native core) to a Rust workspace. Scope ruling: engine internals (native core, data layer, backtest runtime, sweeps, risk/OMS/portfolio/venues/fills, HTTP/MCP/CLI, results) become Rust; user-facing strategies, user-authored indicators, and screener scripts remain Python, executed by a PyO3 strategy host inside the Rust engine. Built-in indicator/quant kernel libraries (harness.signal, harness.quant) move to Rust as engine hot-path code. Supersedes the Zig-native endgame of epic T181; in-flight Zig M6 wave work is absorbed into the Rust port rather than completed as Zig.",
+      "acceptance": [
+        "Rust workspace replaces the Python engine runtime and Zig native core for all quant-harness engine paths",
+        "Entrypoints harness, api, backtest-job, trader, and MCP server are Rust-native and feature-identical",
+        "Determinism and cross-language parity oracles pass byte-identically against golden reference artifacts",
+        "User-facing strategies, user indicators, and screener scripts remain Python and run unmodified under the Rust engine host",
+        "Zig build stage and Python engine paths are decommissioned and .github/architecture docs updated",
+        "Complete child T235: Rust workspace foundation and parity-oracle backbone",
+        "Complete child T236: Port Zig native core to Rust and retire Zig",
+        "Complete child T237: Port data layer to Rust",
+        "Complete child T238: Port backtest runtime, sweeps, and results to Rust",
+        "Complete child T239: Port live trading surfaces to Rust",
+        "Complete child T240: Port CLI, HTTP API, and MCP server to Rust",
+        "Complete child T241: Python strategy host and decommission of Python/Zig engine"
+      ],
+      "createdAt": "2026-09-10T03:03:38.535Z",
+      "updatedAt": "2026-09-10T03:11:57.481Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:03:38.535Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": [
+        {
+          "taskId": "T181",
+          "type": "related",
+          "reason": "Rust migration pivots away from the Zig-native endgame tracked by epic T181; in-flight Zig M6 wave work is absorbed into the Rust port T236 rather than completed as Zig"
+        }
+      ]
+    },
+    {
+      "id": "T238",
+      "title": "Port backtest runtime, sweeps, and results to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "epic",
+      "parentId": "T234",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Port the deterministic backtest runner and PaperShell (harness.runtime.backtest), the sweeps engine (harness.sweeps), and results/recorder (harness.results) to Rust. Artifact output must remain byte-identical so existing golden references and downstream consumers keep working.",
+      "acceptance": [
+        "Deterministic backtest runner and PaperShell ported to Rust",
+        "harness.sweeps engine ported to Rust",
+        "harness.results and recorder ported with byte-identical artifact format",
+        "backtest-job entrypoint runs end-to-end on the Rust core matching golden artifacts",
+        "Complete child T259: Port results recorder with byte-identical artifacts",
+        "Complete child T260: Port backtest engine core to Rust",
+        "Complete child T261: Port paper and shadow runtimes to Rust",
+        "Complete child T262: Port sweeps engine to Rust",
+        "Complete child T263: Port built-in signal and indicator kernels to Rust",
+        "Complete child T264: Backtest-job end-to-end on Rust core"
+      ],
+      "depends": [
+        "T236",
+        "T237"
+      ],
+      "createdAt": "2026-09-10T03:05:02.254Z",
+      "updatedAt": "2026-09-10T03:58:36.172Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T245",
+      "title": "Port determinism and parity oracles to drive the Rust core",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T235",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Extend harness.testing so the cross-language parity oracle pattern used for the Zig core (zig_backtest runner comparing byte-identical determinism artifacts against the Python engine) also drives the Rust core: add a rust-backed runner path alongside the zig runner, with golden artifact comparison, actionable diffs on mismatch, and pytest invocation. Depends on the PyO3 bridge for the Python-side call path.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "harness.testing gains a rust-backed runner path alongside the zig_backtest oracle",
+        "Rust-produced artifacts compare byte-identically against golden determinism artifacts",
+        "Mismatch failures report actionable diffs",
+        "Oracle runs are invocable from pytest and documented"
+      ],
+      "files": [
+        "src/harness/testing/",
+        "tests/harness/testing/"
+      ],
+      "depends": [
+        "T243"
+      ],
+      "createdAt": "2026-09-10T03:27:19.232Z",
+      "updatedAt": "2026-09-10T03:28:24.549Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:27:19.232Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T250",
+      "title": "Port matching venue and fill models to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T236",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Port src/harness/native/matching.zig, fills.zig, simple_touch.zig, and trade_through.zig to harness-native. Parity-tested against Zig matching_test golden artifacts.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Matching venue and fill models ported to harness-native",
+        "Fill parity versus Zig goldens is byte-identical including trade-through and simple-touch paths",
+        "Matching edge cases from matching_test.zig covered in cargo tests"
+      ],
+      "files": [
+        "rust/crates/harness-native/"
+      ],
+      "depends": [
+        "T249"
+      ],
+      "createdAt": "2026-09-10T03:55:50.305Z",
+      "updatedAt": "2026-09-10T04:04:34.929Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:55:50.305Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T257",
+      "title": "Port live market data ingest: websockets and recorder to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T237",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Port src/harness/data/opra_ws.py, alpaca_ws.py, and live_recorder.py to harness-data using tokio-tungstenite for live WS ingest and the live recorder write path.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "OPRA and Alpaca websocket adapters ported to Rust",
+        "Live recorder write path ported with identical artifact output",
+        "Reconnect and gap-handling behavior matches the Python adapters"
+      ],
+      "files": [
+        "rust/crates/harness-data/"
+      ],
+      "depends": [
+        "T256"
+      ],
+      "createdAt": "2026-09-10T03:57:23.800Z",
+      "updatedAt": "2026-09-10T04:11:48.731Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:57:23.800Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T262",
+      "title": "Port sweeps engine to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T238",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Port src/harness/sweeps (spec.py, runner.py, sensitivity.py) to harness-engine on top of the Rust backtest runtime.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Sweep spec runner and sensitivity analysis ported to Rust",
+        "Sweep results parity versus Python reference",
+        "Parallel sweep execution preserves determinism per run"
+      ],
+      "files": [
+        "rust/crates/harness-engine/"
+      ],
+      "depends": [
+        "T261"
+      ],
+      "createdAt": "2026-09-10T03:58:27.663Z",
+      "updatedAt": "2026-09-10T04:16:09.146Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:58:27.663Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T268",
+      "title": "Port portfolio accounting to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T239",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Port src/harness/portfolio (book.py, hub.py, options_lifecycle.py) to harness-live with scale-18 accounting.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Portfolio book hub and options lifecycle ported to Rust",
+        "Position and PnL accounting parity versus Python is byte-identical",
+        "Options lifecycle events covered by tests"
+      ],
+      "files": [
+        "rust/crates/harness-live/"
+      ],
+      "createdAt": "2026-09-10T03:59:34.918Z",
+      "updatedAt": "2026-09-10T03:59:34.918Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:59:34.918Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T274",
+      "title": "Complete api entrypoint and interface integration parity",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T240",
+      "size": "medium",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Complete the scaffolded api entrypoint (src/harness/cli/api.py) on the Rust stack and run cross-interface parity across CLI, HTTP, and MCP. Completes epic T240. Integration-owned: depends on engine and live stacks.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "api entrypoint completed on the Rust stack",
+        "Cross-interface parity across CLI HTTP and MCP passes",
+        "All four entrypoints exercise Rust paths"
+      ],
+      "files": [
+        "rust/crates/harness-api/",
+        "src/harness/cli/api.py",
+        "tests/harness/"
+      ],
+      "createdAt": "2026-09-10T04:00:42.255Z",
+      "updatedAt": "2026-09-10T04:00:42.255Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:00:42.255Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T278",
+      "title": "Flip entrypoints to Rust and delete Python engine paths",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T241",
+      "size": "large",
+      "position": 4,
+      "positionVersion": 0,
+      "description": "Flip the console scripts harness, api, backtest-job, trader to Rust binaries and delete the Python engine modules they replace (runtime, backtest engine, native loader, engine-side data paths). The Python strategy host boundary stays. Integration-owned: depends on all port epics.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "All four console scripts resolve to Rust binaries",
+        "Python engine modules deleted with no dangling imports",
+        "Python test suites for ported areas removed or converted to parity suites"
+      ],
+      "files": [
+        "pyproject.toml",
+        "src/harness/"
+      ],
+      "createdAt": "2026-09-10T04:01:40.818Z",
+      "updatedAt": "2026-09-10T04:01:40.818Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:01:40.818Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T006",
       "title": "E3 CI/CD and GitHub OIDC",
       "status": "done",
@@ -21822,6 +23825,309 @@
       "relates": []
     },
     {
+      "id": "T239",
+      "title": "Port live trading surfaces to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T234",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Port the live and paper trading surfaces to Rust: harness.risk, harness.portfolio, harness.oms, harness.venues, and harness.fills service paths. Wire the trader entrypoint onto the Rust core with parity checks on risk checks and order lifecycle.",
+      "acceptance": [
+        "Risk portfolio oms venues and fills service paths ported to Rust",
+        "trader entrypoint runs on the Rust core",
+        "Order lifecycle and risk check parity versus Python pass",
+        "Complete child T265: Port OMS service layer to Rust",
+        "Complete child T266: Port fill and fee models to Rust",
+        "Complete child T267: Port venue adapters to Rust",
+        "Complete child T268: Port portfolio accounting to Rust",
+        "Complete child T269: Port risk engine to Rust",
+        "Complete child T270: Trader entrypoint on Rust core with lifecycle parity"
+      ],
+      "depends": [
+        "T236",
+        "T237"
+      ],
+      "createdAt": "2026-09-10T03:05:05.667Z",
+      "updatedAt": "2026-09-10T03:59:43.253Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T246",
+      "title": "Add cargo CI gates and Docker Rust build stage",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T235",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Wire the Rust workspace into CI and Docker alongside the existing Zig and Python gates: cargo fmt --check, clippy with denials, and cargo test as CI checks; a Docker build stage compiling the harness-native cdylib and carrying the artifact; and the parity oracle from the testing task wired as a required gate. Completes the CI/Docker acceptance criteria of epic T235.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "CI workflow runs cargo fmt --check clippy and cargo test for the rust workspace",
+        "Dockerfile gains a Rust build stage producing the shared library artifact",
+        "Parity oracle wired as a required CI gate alongside existing Zig and Python gates"
+      ],
+      "files": [
+        ".github/workflows/",
+        "Dockerfile"
+      ],
+      "depends": [
+        "T244",
+        "T245"
+      ],
+      "createdAt": "2026-09-10T03:27:23.344Z",
+      "updatedAt": "2026-09-10T03:28:44.777Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:27:23.344Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T251",
+      "title": "Port metrics and quant pricing kernels to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T236",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Port src/harness/native/metrics.zig and quant.zig (CRR option pricing kernels) to harness-native. harness.quant Python facade continues to work via the new Rust kernels through the ABI bridge.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Metrics and CRR quant kernels ported to harness-native",
+        "Parity versus Zig goldens is byte-identical",
+        "harness.quant facade validated against Rust kernels"
+      ],
+      "files": [
+        "rust/crates/harness-native/"
+      ],
+      "depends": [
+        "T250"
+      ],
+      "createdAt": "2026-09-10T03:55:54.504Z",
+      "updatedAt": "2026-09-10T04:05:35.426Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:55:54.504Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T258",
+      "title": "Data layer integration parity versus Python",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T237",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Compose the harness-data crate facade and run the full data-layer parity suite versus the Python implementations, closing out epic T237.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "harness-data public facade composes all ported modules",
+        "Full data-layer parity suite versus Python passes",
+        "Downstream backtest runtime consumes the Rust data layer in tests"
+      ],
+      "files": [
+        "rust/crates/harness-data/",
+        "tests/harness/data/"
+      ],
+      "depends": [
+        "T257"
+      ],
+      "createdAt": "2026-09-10T03:57:27.994Z",
+      "updatedAt": "2026-09-10T04:15:07.737Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:57:27.994Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T263",
+      "title": "Port built-in signal and indicator kernels to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T238",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Port the built-in engine kernel libraries to Rust as hot-path code: src/harness/signal (wavelets.py, scalogram.py, analytic.py) and the built-in indicator library (indicators momentum volatility volume overlays registry base). User-authored indicators remain Python via the strategy host.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Wavelet scalogram and analytic signal kernels ported to Rust",
+        "Built-in indicator library ported with registry semantics preserved",
+        "Kernel outputs parity versus NumPy references within exact determinism bounds",
+        "User-authored Python indicators unaffected"
+      ],
+      "files": [
+        "rust/crates/harness-engine/",
+        "src/harness/signal/",
+        "src/harness/indicators/"
+      ],
+      "createdAt": "2026-09-10T03:58:31.910Z",
+      "updatedAt": "2026-09-10T03:58:31.910Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:58:31.910Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T269",
+      "title": "Port risk engine to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T239",
+      "size": "large",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Port src/harness/risk (engine.py, pipeline.py, rules.py, limits.py, models.py, collateral.py, kill_switch.py) to harness-live.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Risk engine pipeline rules limits models collateral and kill switch ported to Rust",
+        "Risk check parity versus Python passes",
+        "Kill switch semantics identical"
+      ],
+      "files": [
+        "rust/crates/harness-live/"
+      ],
+      "createdAt": "2026-09-10T03:59:39.156Z",
+      "updatedAt": "2026-09-10T03:59:39.156Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:59:39.156Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T279",
+      "title": "Decommission Zig and Python engine, update architecture docs",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T241",
+      "size": "medium",
+      "position": 5,
+      "positionVersion": 0,
+      "description": "Final decommission: remove Zig build stages and Python engine paths from Docker and CI, prune pyproject dependencies that only served the engine, and update .github/architecture/*.md to the Rust workspace layout with the Python strategy host boundary documented. Completes the saga.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Docker and CI contain no Zig or Python engine stages",
+        "pyproject dependencies pruned to the strategy host surface",
+        ".github/architecture docs updated to the Rust layout",
+        "Repository-wide verification green on the Rust stack"
+      ],
+      "files": [
+        "Dockerfile",
+        ".github/architecture/",
+        "pyproject.toml"
+      ],
+      "createdAt": "2026-09-10T04:01:45.185Z",
+      "updatedAt": "2026-09-10T04:01:45.185Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T04:01:45.185Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T007",
       "title": "E4 Equities SIP ingest",
       "status": "done",
@@ -24725,6 +27031,170 @@
       "relates": []
     },
     {
+      "id": "T240",
+      "title": "Port CLI, HTTP API, and MCP server to Rust",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T234",
+      "size": "medium",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Reimplement the user-facing interfaces in Rust: harness and backtest-job CLIs with clap (feature-identical), harness.http routes on axum, and the MCP server (transport, auth, tools) in Rust. Complete the scaffolded api entrypoint on the Rust stack.",
+      "acceptance": [
+        "harness and backtest-job CLIs reimplemented with clap feature-identical",
+        "harness.http routes ported to axum",
+        "MCP server transport auth and tools reimplemented in Rust and protocol-compliant",
+        "api entrypoint completed on the Rust stack",
+        "Complete child T271: Port harness and backtest-job CLIs to clap",
+        "Complete child T272: Port HTTP API to axum",
+        "Complete child T273: Port MCP server to Rust",
+        "Complete child T274: Complete api entrypoint and interface integration parity"
+      ],
+      "depends": [
+        "T235"
+      ],
+      "createdAt": "2026-09-10T03:05:09.168Z",
+      "updatedAt": "2026-09-10T04:00:42.255Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T252",
+      "title": "Port event kernel and replay to Rust",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T236",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Port src/harness/native/replay.zig and root.zig event plumbing to harness-native: deterministic event kernel and replay driver wiring the bus, books, OMS, matching, and fills ports together.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Event kernel and replay driver ported to harness-native",
+        "Deterministic replay parity versus Zig goldens is byte-identical",
+        "End-to-end native pipeline exercises bus books oms matching and fills"
+      ],
+      "files": [
+        "rust/crates/harness-native/"
+      ],
+      "depends": [
+        "T251"
+      ],
+      "createdAt": "2026-09-10T03:55:58.670Z",
+      "updatedAt": "2026-09-10T04:05:58.788Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:55:58.670Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T264",
+      "title": "Backtest-job end-to-end on Rust core",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T238",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Port results metrics.py and report.py, then wire the backtest-job pipeline end-to-end on the Rust core (data layer, native core, engine, recorder) matching golden artifacts. Completes the epic T238 integration gate.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Results metrics and report ported to Rust",
+        "backtest-job runs end-to-end on the Rust stack",
+        "Golden artifact parity is byte-identical versus the Python pipeline"
+      ],
+      "files": [
+        "rust/crates/harness-engine/",
+        "src/harness/results/",
+        "tests/harness/"
+      ],
+      "createdAt": "2026-09-10T03:58:36.172Z",
+      "updatedAt": "2026-09-10T03:58:36.172Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:58:36.172Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T270",
+      "title": "Trader entrypoint on Rust core with lifecycle parity",
+      "status": "pending",
+      "priority": "medium",
+      "type": "task",
+      "parentId": "T239",
+      "size": "large",
+      "position": 6,
+      "positionVersion": 0,
+      "description": "Wire the trader entrypoint onto the Rust live stack (OMS, fills, venues, portfolio, risk) and prove order lifecycle and risk-check parity versus the Python pipeline. Completes epic T239.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "trader entrypoint runs on the Rust core",
+        "Order lifecycle parity versus Python passes",
+        "Risk check parity versus Python passes"
+      ],
+      "files": [
+        "rust/crates/harness-live/",
+        "src/harness/cli/trader.py",
+        "tests/harness/"
+      ],
+      "createdAt": "2026-09-10T03:59:43.253Z",
+      "updatedAt": "2026-09-10T03:59:43.253Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:59:43.253Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
       "id": "T008",
       "title": "E5 HTTP ensure and query API",
       "status": "done",
@@ -26700,6 +29170,89 @@
       },
       "pipelineStage": "contribution",
       "kind": "research",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T241",
+      "title": "Python strategy host and decommission of Python/Zig engine",
+      "status": "pending",
+      "priority": "medium",
+      "type": "epic",
+      "parentId": "T234",
+      "size": "medium",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Build the PyO3 strategy host so user-facing strategies, user-authored indicators, and screener scripts remain Python and run unmodified inside the Rust engine. Port the strategy and configuration packages behavior-identically. Then flip entrypoints, delete Python engine paths and the Zig build, and update .github/architecture docs to the Rust layout.",
+      "acceptance": [
+        "PyO3 strategy host loads user strategies user indicators and screener scripts unmodified",
+        "strategy and configuration packages ported behavior-identical",
+        "Python engine paths and Zig build removed and entrypoints flipped to Rust",
+        ".github/architecture docs updated to the Rust layout",
+        "Complete child T275: Build PyO3 strategy host for user strategies and screeners",
+        "Complete child T276: Port strategy package onto the host boundary",
+        "Complete child T277: Port configuration package behavior-identically",
+        "Complete child T278: Flip entrypoints to Rust and delete Python engine paths",
+        "Complete child T279: Decommission Zig and Python engine, update architecture docs"
+      ],
+      "depends": [
+        "T238",
+        "T239",
+        "T240"
+      ],
+      "createdAt": "2026-09-10T03:05:12.789Z",
+      "updatedAt": "2026-09-10T04:01:45.185Z",
+      "pipelineStage": "implementation",
+      "kind": "work",
+      "scope": "feature",
+      "relates": []
+    },
+    {
+      "id": "T253",
+      "title": "Arrow bridge via arrow-rs FFI and retire Zig",
+      "status": "pending",
+      "priority": "high",
+      "type": "task",
+      "parentId": "T236",
+      "size": "large",
+      "position": 7,
+      "positionVersion": 0,
+      "description": "Reimplement the Arrow C Data Interface bridge (src/harness/native/arrow.zig, arrow_batch.zig, ffi.zig) using arrow-rs FFI in harness-native, flip src/harness/_native.py to load the Rust library, prove byte-identical parity versus all Zig golden artifacts, then delete build.zig, src/harness/native/*.zig, and the CI Zig gates. Integration-owned: touches workflows after T246.",
+      "labels": [
+        "harness-rust"
+      ],
+      "acceptance": [
+        "Arrow C Data Interface bridge reimplemented via arrow-rs FFI",
+        "_native.py loads the Rust library with no Zig fallback and all parity oracles stay byte-identical",
+        "build.zig all Zig sources and CI Zig gates removed",
+        "Full Python harness test suite green on the Rust native core"
+      ],
+      "files": [
+        "rust/crates/harness-native/",
+        "src/harness/_native.py",
+        "build.zig",
+        ".github/workflows/"
+      ],
+      "depends": [
+        "T252"
+      ],
+      "createdAt": "2026-09-10T03:56:02.935Z",
+      "updatedAt": "2026-09-10T04:07:28.477Z",
+      "verification": {
+        "passed": false,
+        "round": 1,
+        "gates": {
+          "implemented": false,
+          "testsPassed": false,
+          "qaPassed": false
+        },
+        "lastAgent": null,
+        "lastUpdated": null,
+        "failureLog": [],
+        "initializedAt": "2026-09-10T03:56:02.935Z"
+      },
+      "pipelineStage": "implementation",
+      "kind": "work",
       "scope": "feature",
       "relates": []
     },
@@ -31633,7 +34186,7 @@
     {
       "id": "T231",
       "title": "TH6.8 Thesis API workspace data routes over local persistence and harness adapters",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T150",
@@ -31657,21 +34210,83 @@
         "src/thesis/http/"
       ],
       "createdAt": "2026-09-10T02:00:36.554Z",
-      "updatedAt": "2026-09-10T02:00:36.554Z",
+      "updatedAt": "2026-09-10T04:04:42.763Z",
+      "completedAt": "2026-09-10T04:04:37.784Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T03:57:01.820Z",
         "failureLog": [],
-        "initializedAt": "2026-09-10T02:00:36.554Z"
+        "initializedAt": "2026-09-10T02:00:36.554Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b8c0d178fa861db6fb441f00b1ad966bf7331fa2",
+                "shortSha": "b8c0d17"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/http/workspaces.py",
+                    "sha256": "2eec62b7dbf3897c1151fbc456e5084e02ec23f2f88e51e9b030884fdd333aec"
+                  },
+                  {
+                    "path": "src/thesis/http/backtests.py",
+                    "sha256": "6d0a4f4785f2222f3e2f8c9af5cea372dccb98b78b59af49e3d107469c708713"
+                  },
+                  {
+                    "path": "src/thesis/http/deployments.py",
+                    "sha256": "8889bb546fa594f979f9edc99bb9f60a27e17d3b95d0aa82b85fb16db930a997"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-10T03:55:06.693Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 230 CLEO tasks through T233.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T03:57:02.131Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T231-validation.json",
+                "sha256": "8624b4aa766e2d4e7d7ede635d592f77ea9fd9defcdc867dd427ebff6138a491",
+                "passCount": 2712,
+                "failCount": 0,
+                "skipCount": 15
+              }
+            ],
+            "capturedAt": "2026-09-10T03:55:32.838Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -31779,7 +34394,7 @@
     {
       "id": "T232",
       "title": "TH6.9 Model providers: OpenRouter adapter and Azure AI Foundry invocation client",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T150",
@@ -31804,21 +34419,83 @@
         "src/thesis/providers/"
       ],
       "createdAt": "2026-09-10T02:01:44.135Z",
-      "updatedAt": "2026-09-10T02:01:44.135Z",
+      "updatedAt": "2026-09-10T04:15:30.331Z",
+      "completedAt": "2026-09-10T04:15:26.081Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T04:15:07.787Z",
         "failureLog": [],
-        "initializedAt": "2026-09-10T02:01:44.135Z"
+        "initializedAt": "2026-09-10T02:01:44.135Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "b8c0d178fa861db6fb441f00b1ad966bf7331fa2",
+                "shortSha": "b8c0d17"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/providers/openrouter.py",
+                    "sha256": "37edcd37dcc4695d9efd3f7bfd4db5976f1181b10a3e7e3d8f657f70a9480f73"
+                  },
+                  {
+                    "path": "src/thesis/providers/invocations.py",
+                    "sha256": "78ddb77cbe7641e5bffdeea4ba29d59c979f638164a2acf8dbf0d987b949e7b3"
+                  },
+                  {
+                    "path": "src/thesis/providers/foundry.py",
+                    "sha256": "46df8cd246cd31a2d18fb736402429c6536afc776389ab8bb39987cda5842a70"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-10T04:07:04.935Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T232-validation.json",
+                "sha256": "8b5817c358f8d5c82a848d232e7b9eefbb81dc24d3216733bc320a94cc617e4f",
+                "passCount": 2712,
+                "failCount": 0,
+                "skipCount": 15
+              }
+            ],
+            "capturedAt": "2026-09-10T04:07:28.547Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 230 CLEO tasks through T233.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T04:15:07.979Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -32480,6 +35157,67 @@
         "T228",
         "T229",
         "T230"
+      ],
+      "T234": [
+        "T235",
+        "T236",
+        "T237",
+        "T238",
+        "T239",
+        "T240",
+        "T241"
+      ],
+      "T235": [
+        "T242",
+        "T243",
+        "T244",
+        "T245",
+        "T246"
+      ],
+      "T236": [
+        "T247",
+        "T248",
+        "T249",
+        "T250",
+        "T251",
+        "T252",
+        "T253"
+      ],
+      "T237": [
+        "T254",
+        "T255",
+        "T256",
+        "T257",
+        "T258"
+      ],
+      "T238": [
+        "T259",
+        "T260",
+        "T261",
+        "T262",
+        "T263",
+        "T264"
+      ],
+      "T239": [
+        "T265",
+        "T266",
+        "T267",
+        "T268",
+        "T269",
+        "T270"
+      ],
+      "T240": [
+        "T271",
+        "T272",
+        "T273",
+        "T274"
+      ],
+      "T241": [
+        "T275",
+        "T276",
+        "T277",
+        "T278",
+        "T279"
       ]
     },
     "dependencies": {
@@ -32602,6 +35340,27 @@
         "T153",
         "T154",
         "T178"
+      ],
+      "T247": [
+        "T244",
+        "T245"
+      ],
+      "T254": [
+        "T242",
+        "T245"
+      ],
+      "T259": [
+        "T242",
+        "T245"
+      ],
+      "T265": [
+        "T245"
+      ],
+      "T271": [
+        "T242"
+      ],
+      "T275": [
+        "T243"
       ],
       "T014": [
         "T013"
@@ -32726,6 +35485,23 @@
       ],
       "T183": [
         "T182"
+      ],
+      "T236": [
+        "T235"
+      ],
+      "T243": [
+        "T242"
+      ],
+      "T248": [
+        "T247"
+      ],
+      "T255": [
+        "T254"
+      ],
+      "T260": [
+        "T253",
+        "T258",
+        "T259"
       ],
       "T004": [
         "T003"
@@ -32853,6 +35629,21 @@
       "T227": [
         "T226"
       ],
+      "T237": [
+        "T235"
+      ],
+      "T244": [
+        "T242"
+      ],
+      "T249": [
+        "T248"
+      ],
+      "T256": [
+        "T255"
+      ],
+      "T261": [
+        "T260"
+      ],
       "T005": [
         "T003"
       ],
@@ -32977,6 +35768,22 @@
         "T226",
         "T227"
       ],
+      "T238": [
+        "T236",
+        "T237"
+      ],
+      "T245": [
+        "T243"
+      ],
+      "T250": [
+        "T249"
+      ],
+      "T257": [
+        "T256"
+      ],
+      "T262": [
+        "T261"
+      ],
       "T006": [
         "T003",
         "T004"
@@ -33075,6 +35882,20 @@
       "T229": [
         "T225"
       ],
+      "T239": [
+        "T236",
+        "T237"
+      ],
+      "T246": [
+        "T244",
+        "T245"
+      ],
+      "T251": [
+        "T250"
+      ],
+      "T258": [
+        "T257"
+      ],
       "T007": [
         "T004",
         "T005"
@@ -33159,6 +35980,12 @@
         "T228",
         "T229"
       ],
+      "T240": [
+        "T235"
+      ],
+      "T252": [
+        "T251"
+      ],
       "T008": [
         "T003",
         "T005",
@@ -33230,6 +36057,14 @@
       "T208": [
         "T018",
         "T031"
+      ],
+      "T241": [
+        "T238",
+        "T239",
+        "T240"
+      ],
+      "T253": [
+        "T252"
       ],
       "T009": [
         "T004",
@@ -33376,7 +36211,8 @@
     "roots": [
       "T001",
       "T068",
-      "T143"
+      "T143",
+      "T234"
     ]
   }
 }
