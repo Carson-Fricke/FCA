@@ -22,11 +22,13 @@ pub mod lake;
 pub mod listing_events;
 pub mod options_replay;
 pub mod options_universe;
+pub mod recorder;
 pub mod replay;
 pub mod security_master;
 pub mod symbol;
 pub mod time;
 pub mod universe_view;
+pub mod ws;
 
 pub use error::DataError;
 pub use time::{Date, DateTime, Nanos};

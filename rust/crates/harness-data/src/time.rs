@@ -145,6 +145,73 @@ impl DateTime {
     pub fn date(self) -> Date {
         Date::from_days(self.micros.div_euclid(MICROS_PER_DAY) as i32)
     }
+
+    /// The `YYYY-MM-DDTHH:MM:SS.ffffff` ISO rendering at microsecond precision.
+    pub fn isoformat_micros(self) -> String {
+        let micros = self.micros;
+        let day_micros = micros.div_euclid(MICROS_PER_DAY);
+        let mut remainder = micros.rem_euclid(MICROS_PER_DAY);
+        let day = Date::from_days(day_micros as i32);
+        let seconds = remainder / MICROS_PER_SECOND;
+        remainder %= MICROS_PER_SECOND;
+        let (year, month, date) = day.ymd();
+        let hour = seconds / 3_600;
+        let minute = (seconds % 3_600) / 60;
+        let second = seconds % 60;
+        format!("{year:04}-{month:02}-{date:02}T{hour:02}:{minute:02}:{second:02}.{remainder:06}")
+    }
+
+    /// Parse an ISO-8601 UTC timestamp as Alpaca and lake files emit it.
+    ///
+    /// Accepts `Z`, `+00:00`, and explicit offsets; fractional seconds beyond
+    /// six digits are truncated to microseconds like Python's `fromisoformat`.
+    pub fn parse_iso_utc(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let (body, offset_seconds) = if let Some(stripped) = text.strip_suffix('Z') {
+            (stripped, 0i64)
+        } else if let Some(index) = text.rfind(['+', '-']) {
+            if index <= 10 {
+                return None;
+            }
+            let (body, offset) = text.split_at(index);
+            let sign = if offset.starts_with('+') { 1 } else { -1 };
+            let digits: String = offset[1..].chars().filter(|c| c.is_ascii_digit()).collect();
+            if digits.len() != 4 {
+                return None;
+            }
+            let hours: i64 = digits[..2].parse().ok()?;
+            let minutes: i64 = digits[2..].parse().ok()?;
+            (body, sign * (hours * 3_600 + minutes * 60))
+        } else {
+            (text, 0)
+        };
+        let (date_part, time_part) = body.split_once('T')?;
+        let mut date_parts = date_part.split('-');
+        let year: i32 = date_parts.next()?.parse().ok()?;
+        let month: u32 = date_parts.next()?.parse().ok()?;
+        let day: u32 = date_parts.next()?.parse().ok()?;
+        let date = Date::from_ymd(year, month, day)?;
+        let (clock, fraction) = match time_part.split_once('.') {
+            Some((clock, fraction)) => (clock, fraction),
+            None => (time_part, ""),
+        };
+        let mut clock_parts = clock.split(':');
+        let hour: u32 = clock_parts.next()?.parse().ok()?;
+        let minute: u32 = clock_parts.next()?.parse().ok()?;
+        let second: u32 = clock_parts.next()?.parse().ok()?;
+        let mut micros = 0u32;
+        let mut scale = 100_000u32;
+        for digit in fraction.chars().filter(|c| c.is_ascii_digit()).take(6) {
+            micros += digit.to_digit(10)? * scale;
+            scale /= 10;
+        }
+        let seconds = hour as i64 * 3_600 + minute as i64 * 60 + second as i64;
+        let local =
+            date.days() as i64 * MICROS_PER_DAY + seconds * MICROS_PER_SECOND + micros as i64;
+        Some(Self::from_micros(
+            local - offset_seconds * MICROS_PER_SECOND,
+        ))
+    }
 }
 
 impl fmt::Display for DateTime {

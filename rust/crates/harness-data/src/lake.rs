@@ -20,7 +20,7 @@ use crate::time::{Date, DateTime};
 pub const DEFAULT_EGRESS_WARNING_THRESHOLD_BYTES: u64 = 1_000_000_000;
 
 /// Supported Hive `asset_class` values.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AssetClass {
     /// Listed equity.
     Equity,
@@ -62,7 +62,7 @@ impl fmt::Display for AssetClass {
 }
 
 /// Supported Hive `data_type` values.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DataType {
     /// Trade prints.
     Trade,

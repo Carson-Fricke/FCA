@@ -23,6 +23,8 @@ pub enum DataError {
     EnsureJob(String),
     /// Fixed-point arithmetic overflowed or divided by zero.
     Arithmetic(String),
+    /// A provider stream sent an invalid frame or rejected an operation.
+    Protocol(String),
 }
 
 impl DataError {
@@ -46,7 +48,8 @@ impl fmt::Display for DataError {
             | Self::Incomplete(message)
             | Self::Unsupported(message)
             | Self::EnsureJob(message)
-            | Self::Arithmetic(message) => formatter.write_str(message),
+            | Self::Arithmetic(message)
+            | Self::Protocol(message) => formatter.write_str(message),
         }
     }
 }
