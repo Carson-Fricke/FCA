@@ -7,6 +7,11 @@
 //! - [`lake`] — synchronous market-lake access, sessions, and Hive paths.
 //! - [`bars`] — exact OHLCV derivation from immutable trade events.
 //! - [`history`] — bounded point-in-time history with look-ahead clipping.
+//! - [`security_master`] / [`listing_events`] — point-in-time listings.
+//! - [`options_universe`] / [`universe_view`] — point-in-time universes.
+//! - [`replay`] / [`options_replay`] — deterministic bounded replay.
+//! - [`gap_healing`] — live-feed gap detection and lake backfill.
+//! - [`ws`] / [`recorder`] — live ingest and recording.
 //!
 //! No code path in this crate reads wall time, consumes randomness, touches
 //! the network, or performs I/O. Every instant comes from an injected clock.
@@ -30,8 +35,61 @@ pub mod time;
 pub mod universe_view;
 pub mod ws;
 
+pub use bars::{build_bars, interval_delta, Bar, BarAggregator, BarBuilder, Ohlcv, OhlcvBar};
+pub use catalog::{
+    ContractRecord, ContractsCatalogPort, DailyFrontSet, DelistingType, ListingRecord, ListingType,
+    ListingsCatalogPort, MemoryContractsCatalog, MemoryListingsCatalog, OptionType,
+};
+pub use clock::{Clock, ManualClock};
 pub use error::DataError;
+pub use events::{
+    cutoff_key, end_key, ordering_key, start_key, EventType, MarketEvent, OrderingKey, QuoteEvent,
+    TradeEvent,
+};
+pub use gap_healing::{
+    CoverageCalendar, CoverageGap, HealingAction, HealingStatus, LakeGapBackfiller,
+    LakeSessionCalendar, LiveGapDetector, LiveGapHealer, UncoveredGapError,
+};
+pub use history::{
+    HistoricalView, HistoryAggregate, HistorySelector, HistorySubscription, StrategyHistory,
+    DEFAULT_HISTORY_CAPACITY,
+};
+pub use lake::{
+    crypto_utc_days, partition_path, resolve_sessions, symbol_filename, xnys_sessions, AssetClass,
+    CoverageEntry, CoverageResponse, CoverageState, DataType, DatasetRequest, EnsureAccepted,
+    EnsureResponse, ExchangeSession, FileQueryFile, FileQueryResponse, FileQueryState,
+    FileQuerySummary, JobStatus, LakeClientPort, MarketLakeAdapter, MarketLakeLoad,
+    MarketLakeRequest,
+};
+pub use listing_events::{
+    CorporateActionEvent, CorporateActionKind, ListingEventDeriver, PessimisticDelistingSettlement,
+};
+pub use options_replay::{
+    MemoryOptionPartitionPort, OptionPartitionPort, OptionsDayPlan, OptionsReplayFeed,
+};
+pub use options_universe::{
+    DteFilter, MoneynessFilter, OptionUniverseSnapshot, OptionUniverseSpec, OptionUniverseView,
+    SelectionMode, StrikeFilter, UnderlyingView,
+};
+pub use recorder::{
+    event_row, live_part_path, schema_columns, LiveObjectStore, LiveRecorder, LiveRecorderConfig,
+    LocalLiveObjectStore, RecordedRow, SessionResolver, UtcDaySessionResolver, XnysSessionResolver,
+};
+pub use replay::{LakeReplayFeed, ParquetReader, ReplayFingerprints, ReplayStream, StaticReader};
+pub use security_master::{SecurityMasterView, SecuritySnapshot};
+pub use symbol::{canonical_osi_symbol, canonical_symbol, is_osi_symbol};
 pub use time::{Date, DateTime, Nanos};
+pub use universe_view::{
+    EquityListingUniverse, MemberKind, OptionContractUniverse, UniverseComposition, UniverseMember,
+    UniverseSnapshot, UniverseSource, UniverseView,
+};
+pub use ws::{
+    backoff_delay, rotation_delta, AlpacaCryptoInbox, AlpacaCryptoSubscription,
+    AlpacaCryptoWebSocketFeed, AlpacaInbox, AlpacaMessage, AlpacaOpraInbox, AlpacaOpraSubscription,
+    AlpacaOpraWebSocketFeed, AlpacaSipInbox, AlpacaSipSubscription, AlpacaSipWebSocketFeed,
+    AlpacaWebSocketFeed, AlpacaWebSocketProtocolError, AsyncClock, AsyncWebSocketConnection,
+    AsyncWebSocketTransport, InboxKind, OpraRotationDelta, StaleHandler,
+};
 
 /// The persisted market-data schema version shared with `lake.contracts`.
 pub const SCHEMA_VERSION: &str = "1";
