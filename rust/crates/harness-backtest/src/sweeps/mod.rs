@@ -12,7 +12,7 @@ pub mod spec;
 
 pub use runner::{
     sweep_prefix, CatalogRecord, InMemoryRunBlobStore, InMemoryRunCatalog, RecordingLauncher,
-    RunBlobStore, RunCatalog, RunStatus, SweepJobLauncher, SweepRunner, SweepRunView, SweepStatus,
+    RunBlobStore, RunCatalog, RunStatus, SweepJobLauncher, SweepRunView, SweepRunner, SweepStatus,
     SweepSubmission,
 };
 pub use sensitivity::{

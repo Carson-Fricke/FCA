@@ -71,14 +71,32 @@ pub fn run_digest(run_id: &str, digests: &std::collections::BTreeMap<String, Str
 #[must_use]
 pub fn code_fingerprint() -> String {
     const MODULES: [(&str, &str); 9] = [
-        ("harness-backtest.backtest.config", include_str!("config.rs")),
-        ("harness-backtest.backtest.engine", include_str!("engine.rs")),
-        ("harness-backtest.backtest.errors", include_str!("errors.rs")),
+        (
+            "harness-backtest.backtest.config",
+            include_str!("config.rs"),
+        ),
+        (
+            "harness-backtest.backtest.engine",
+            include_str!("engine.rs"),
+        ),
+        (
+            "harness-backtest.backtest.errors",
+            include_str!("errors.rs"),
+        ),
         ("harness-backtest.backtest.fees", include_str!("fees.rs")),
         ("harness-backtest.backtest.fills", include_str!("fills.rs")),
-        ("harness-backtest.backtest.fixture", include_str!("fixture.rs")),
-        ("harness-backtest.backtest.manifest", include_str!("manifest.rs")),
-        ("harness-backtest.backtest.preflight", include_str!("preflight.rs")),
+        (
+            "harness-backtest.backtest.fixture",
+            include_str!("fixture.rs"),
+        ),
+        (
+            "harness-backtest.backtest.manifest",
+            include_str!("manifest.rs"),
+        ),
+        (
+            "harness-backtest.backtest.preflight",
+            include_str!("preflight.rs"),
+        ),
         ("harness-backtest.backtest.rng", include_str!("rng.rs")),
     ];
     let mut hasher = Sha256::new();
@@ -264,10 +282,7 @@ impl BacktestManifest {
                 "fill_model_fingerprint",
                 JsonValue::String(self.fill_model_fingerprint.clone()),
             ),
-            (
-                "fee_schedule",
-                JsonValue::String(self.fee_schedule.clone()),
-            ),
+            ("fee_schedule", JsonValue::String(self.fee_schedule.clone())),
             (
                 "fee_fingerprint",
                 JsonValue::String(self.fee_fingerprint.clone()),
@@ -359,24 +374,15 @@ impl BacktestResult {
                     ("market_events", JsonValue::UInt(self.market_event_count)),
                     ("orders", JsonValue::UInt(self.order_count)),
                     ("fills", JsonValue::UInt(self.fill_count)),
-                    (
-                        "risk_decisions",
-                        JsonValue::UInt(self.risk_decision_count),
-                    ),
+                    ("risk_decisions", JsonValue::UInt(self.risk_decision_count)),
                 ]),
             ),
             (
                 "strategies",
                 JsonValue::object([
-                    (
-                        "halted",
-                        string_array(&self.halted_strategies),
-                    ),
+                    ("halted", string_array(&self.halted_strategies)),
                     ("stopped", string_array(&self.stopped_strategies)),
-                    (
-                        "teardown_errors",
-                        string_array(&self.teardown_errors),
-                    ),
+                    ("teardown_errors", string_array(&self.teardown_errors)),
                     (
                         "lookahead_violations",
                         string_array(&self.lookahead_violations),
@@ -478,10 +484,7 @@ pub fn configuration_to_json(configuration: &BacktestConfig) -> JsonValue {
             JsonValue::UInt(configuration.schema_version),
         ),
         ("seed", JsonValue::UInt(configuration.seed)),
-        (
-            "start_ns",
-            JsonValue::Int(configuration.start_ns),
-        ),
+        ("start_ns", JsonValue::Int(configuration.start_ns)),
         ("end_ns", JsonValue::Int(configuration.end_ns)),
         (
             "base_currency",
@@ -491,10 +494,7 @@ pub fn configuration_to_json(configuration: &BacktestConfig) -> JsonValue {
             "initial_cash",
             JsonValue::String(configuration.initial_cash.clone()),
         ),
-        (
-            "symbols",
-            string_array(&configuration.symbols),
-        ),
+        ("symbols", string_array(&configuration.symbols)),
     ])
 }
 

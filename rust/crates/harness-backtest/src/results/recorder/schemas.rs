@@ -59,11 +59,7 @@ pub struct FieldDef {
     pub nullable: bool,
 }
 
-const fn field(
-    name: &'static str,
-    logical_type: LogicalType,
-    nullable: bool,
-) -> FieldDef {
+const fn field(name: &'static str, logical_type: LogicalType, nullable: bool) -> FieldDef {
     FieldDef {
         name,
         logical_type,
@@ -204,14 +200,8 @@ impl Artifact {
     pub fn metadata(self) -> Vec<(&'static str, String)> {
         vec![
             ("harness.schema", self.schema_name().to_string()),
-            (
-                "harness.schema.version",
-                SCHEMA_VERSION.to_string(),
-            ),
-            (
-                "harness.decimal.encoding",
-                DECIMAL_ENCODING.to_string(),
-            ),
+            ("harness.schema.version", SCHEMA_VERSION.to_string()),
+            ("harness.decimal.encoding", DECIMAL_ENCODING.to_string()),
         ]
     }
 }
@@ -436,7 +426,10 @@ mod tests {
     #[test]
     fn schema_metadata_matches_python() {
         let metadata = Artifact::Actions.metadata();
-        assert_eq!(metadata[0], ("harness.schema", "recorder.actions".to_string()));
+        assert_eq!(
+            metadata[0],
+            ("harness.schema", "recorder.actions".to_string())
+        );
         assert_eq!(metadata[1], ("harness.schema.version", "1".to_string()));
         assert_eq!(
             metadata[2],

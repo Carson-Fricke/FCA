@@ -99,7 +99,12 @@ impl KillSwitch {
         reason: Option<&str>,
         actor: Option<&str>,
     ) -> LiveResult<KillSwitchEvent> {
-        self.record(KillSwitchAction::Trip, KillSwitchState::Engaged, reason, actor)
+        self.record(
+            KillSwitchAction::Trip,
+            KillSwitchState::Engaged,
+            reason,
+            actor,
+        )
     }
 
     /// Disengage the switch and record one audited release action.
@@ -169,11 +174,7 @@ impl RiskRule for KillSwitch {
 
     fn evaluate(&self, order: &OrderRequest, _context: &RiskContext) -> LiveResult<RuleDecision> {
         let decision = if self.state == KillSwitchState::Engaged {
-            RuleDecision::reject(
-                order.clone(),
-                &format!("{} engaged", self.rule_id),
-                true,
-            )
+            RuleDecision::reject(order.clone(), &format!("{} engaged", self.rule_id), true)
         } else {
             RuleDecision::allow(order.clone())
         };
@@ -194,7 +195,7 @@ mod tests {
     use super::{KillSwitch, KillSwitchAction, KillSwitchState};
     use crate::orders::{OrderRequest, OrderType, Side, SingleLegOrder, TimeInForce};
     use crate::portfolio::hub::PortfolioHub;
-    use crate::risk::models::{RiskContext, RiskRule, RiskAction};
+    use crate::risk::models::{RiskAction, RiskContext, RiskRule};
     use crate::symbol::Symbol;
 
     fn order() -> OrderRequest {

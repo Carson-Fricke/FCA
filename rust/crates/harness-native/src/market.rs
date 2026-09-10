@@ -148,11 +148,10 @@ fn require_canonical_symbol(symbol: &str) -> Result<(), Error> {
     if bytes.len() > buffer.len() {
         return Err(Error::InvalidSymbol);
     }
-    let (len, _) =
-        canonical_symbol(bytes, &mut buffer).map_err(|error| match error {
-            TypeError::BufferTooSmall => Error::InvalidSymbol,
-            _ => Error::InvalidSymbol,
-        })?;
+    let (len, _) = canonical_symbol(bytes, &mut buffer).map_err(|error| match error {
+        TypeError::BufferTooSmall => Error::InvalidSymbol,
+        _ => Error::InvalidSymbol,
+    })?;
     if &buffer[..len] != bytes {
         return Err(Error::InvalidSymbol);
     }

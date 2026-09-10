@@ -115,10 +115,7 @@ pub fn interval_delta_ns(interval: &str) -> Result<i128, Error> {
     }
     let value = interval.to_ascii_lowercase();
     let value = value.trim_matches(|character: char| matches!(character, ' ' | '\t' | '\r' | '\n'));
-    let digits = value
-        .bytes()
-        .take_while(u8::is_ascii_digit)
-        .count();
+    let digits = value.bytes().take_while(u8::is_ascii_digit).count();
     if digits == 0 {
         return Err(Error::InvalidArgument);
     }
@@ -218,13 +215,7 @@ impl<'a> BarAggregator<'a> {
         self.buckets.sort_by_key(|bucket| bucket.start_ns);
         self.buckets
             .iter()
-            .map(|bucket| {
-                make_bar(
-                    bucket.start_ns,
-                    self.interval_ns,
-                    &bucket.trades,
-                )
-            })
+            .map(|bucket| make_bar(bucket.start_ns, self.interval_ns, &bucket.trades))
             .collect()
     }
 }
@@ -239,12 +230,11 @@ fn make_bar<'a>(
     }
     let mut indices: Vec<usize> = (0..trades.len()).collect();
     indices.sort_by(|&a, &b| {
-        (
-            trades[a].timestamp_ns,
-            trades[a].sequence,
-            a,
-        )
-            .cmp(&(trades[b].timestamp_ns, trades[b].sequence, b))
+        (trades[a].timestamp_ns, trades[a].sequence, a).cmp(&(
+            trades[b].timestamp_ns,
+            trades[b].sequence,
+            b,
+        ))
     });
 
     let mut high = trades[indices[0]].price;
@@ -291,7 +281,9 @@ pub fn build_bars<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{bucket_start_ns, build_bars, interval_delta_ns, BarAggregator, Error, NS_PER_SECOND};
+    use super::{
+        bucket_start_ns, build_bars, interval_delta_ns, BarAggregator, Error, NS_PER_SECOND,
+    };
     use crate::decimal::{add, from_int, ONE};
     use crate::market::TradeEvent;
 
@@ -320,9 +312,27 @@ mod tests {
     #[test]
     fn golden_bars_reconcile_prices_volume_and_boundaries_exactly() {
         let trades = [
-            golden_trade("t3", 61, 3, from_int(101) + 250_000_000_000_000_000, 750_000_000_000_000_000),
-            golden_trade("t1", 0, 1, from_int(100) + 100_000_000_000_000_000, from_int(2) + 500_000_000_000_000_000),
-            golden_trade("t2", 30, 2, from_int(99) + 900_000_000_000_000_000, from_int(1) + 250_000_000_000_000_000),
+            golden_trade(
+                "t3",
+                61,
+                3,
+                from_int(101) + 250_000_000_000_000_000,
+                750_000_000_000_000_000,
+            ),
+            golden_trade(
+                "t1",
+                0,
+                1,
+                from_int(100) + 100_000_000_000_000_000,
+                from_int(2) + 500_000_000_000_000_000,
+            ),
+            golden_trade(
+                "t2",
+                30,
+                2,
+                from_int(99) + 900_000_000_000_000_000,
+                from_int(1) + 250_000_000_000_000_000,
+            ),
             golden_trade("t4", 120, 4, from_int(102), from_int(3)),
         ];
 
@@ -420,8 +430,14 @@ mod tests {
     fn bucket_boundaries_are_half_open_and_floored_from_the_epoch() {
         let boundary = bucket_start_ns(STAMP_NS, MINUTE_NS);
         assert_eq!(boundary, STAMP_NS);
-        assert_eq!(bucket_start_ns(STAMP_NS + MINUTE_NS, MINUTE_NS), STAMP_NS + MINUTE_NS);
-        assert_eq!(bucket_start_ns(STAMP_NS + MINUTE_NS - 1, MINUTE_NS), STAMP_NS);
+        assert_eq!(
+            bucket_start_ns(STAMP_NS + MINUTE_NS, MINUTE_NS),
+            STAMP_NS + MINUTE_NS
+        );
+        assert_eq!(
+            bucket_start_ns(STAMP_NS + MINUTE_NS - 1, MINUTE_NS),
+            STAMP_NS
+        );
         assert_eq!(bucket_start_ns(-1, MINUTE_NS), -MINUTE_NS);
     }
 }

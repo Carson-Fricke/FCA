@@ -113,7 +113,8 @@ impl SingleLegOms {
                 .insert(replacement_id.clone(), replacement_machine);
             self.replaced_by
                 .insert(order_id.clone(), replacement_id.clone());
-            self.replaces.insert(replacement_id.clone(), order_id.clone());
+            self.replaces
+                .insert(replacement_id.clone(), order_id.clone());
             self.order.push(replacement_id);
             if let Some(entry) = self.replacements.get_mut(&order_id) {
                 entry.status = ReplaceStatus::Applied;
@@ -160,7 +161,9 @@ impl SingleLegOms {
             )));
         }
         if replacement.symbol != original.order.symbol {
-            return Err(LiveError::Replace("replacement cannot change symbol".into()));
+            return Err(LiveError::Replace(
+                "replacement cannot change symbol".into(),
+            ));
         }
         if replacement.side != original.order.side {
             return Err(LiveError::Replace("replacement cannot change side".into()));
@@ -294,8 +297,7 @@ impl SingleLegOms {
     }
 
     fn validate_expiry_report(report: &ExecutionReport) -> LiveResult<()> {
-        if report.execution_type != ExecutionType::Expired
-            || report.status != OrderStatus::Expired
+        if report.execution_type != ExecutionType::Expired || report.status != OrderStatus::Expired
         {
             return Err(LiveError::Validation(
                 "expiry policy requires an expired execution report".into(),
@@ -311,9 +313,7 @@ mod tests {
 
     use super::{ReplaceStatus, SessionAction, SingleLegOms};
     use crate::accounting::ExecutionReport;
-    use crate::orders::{
-        ExecutionType, OrderStatus, OrderType, Side, SingleLegOrder, TimeInForce,
-    };
+    use crate::orders::{ExecutionType, OrderStatus, OrderType, Side, SingleLegOrder, TimeInForce};
     use crate::symbol::Symbol;
 
     fn dec(value: &str) -> Decimal18 {
@@ -425,7 +425,9 @@ mod tests {
             .request_replace("orig", order("repl", TimeInForce::Day))
             .unwrap();
         assert_eq!(record.status, ReplaceStatus::Pending);
-        assert!(oms.request_replace("orig", order("repl2", TimeInForce::Day)).is_err());
+        assert!(oms
+            .request_replace("orig", order("repl2", TimeInForce::Day))
+            .is_err());
 
         let replaced = report(
             &oms,

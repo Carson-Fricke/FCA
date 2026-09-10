@@ -187,7 +187,11 @@ pub fn fill_slippage(
     fill_price: Decimal18,
 ) -> Decimal18 {
     quantity
-        .checked_mul(fill_price.checked_sub(reference_price).unwrap_or(Decimal18::ZERO))
+        .checked_mul(
+            fill_price
+                .checked_sub(reference_price)
+                .unwrap_or(Decimal18::ZERO),
+        )
         .unwrap_or(Decimal18::ZERO)
 }
 
@@ -232,7 +236,9 @@ pub fn cagr(points: &[EquityPoint]) -> Option<f64> {
     if !growth.is_positive() {
         return None;
     }
-    let years = Decimal18::from_i64(span).checked_div(Decimal18::from_i64(NANOS_PER_YEAR_365)).ok()?;
+    let years = Decimal18::from_i64(span)
+        .checked_div(Decimal18::from_i64(NANOS_PER_YEAR_365))
+        .ok()?;
     let exponent = 1.0 / years.to_f64();
     Some(growth.to_f64().powf(exponent))
 }
@@ -342,7 +348,9 @@ pub fn trade_stats(trades: &[TradeRow]) -> TradeStats {
         hit_rate: if count == 0 {
             None
         } else {
-            Decimal18::from_i64(win_count as i64).checked_div(Decimal18::from_i64(count as i64)).ok()
+            Decimal18::from_i64(win_count as i64)
+                .checked_div(Decimal18::from_i64(count as i64))
+                .ok()
         },
         total_pnl: total,
         gross_profit,
@@ -480,7 +488,9 @@ pub fn execution_stats(fills: &[FillRow], orders: &[OrderRow]) -> ExecutionStats
     let mut slippage_total = Decimal18::ZERO;
     for fill in fills {
         fees_total = fees_total.checked_add(fill.fee).unwrap_or(fees_total);
-        slippage_total = slippage_total.checked_add(fill.slippage).unwrap_or(slippage_total);
+        slippage_total = slippage_total
+            .checked_add(fill.slippage)
+            .unwrap_or(slippage_total);
     }
     ExecutionStats {
         fill_count: fills.len(),
@@ -500,15 +510,24 @@ pub fn per_strategy_attribution(
 ) -> BTreeMap<String, StrategyAttribution> {
     let mut grouped_fills: BTreeMap<&str, Vec<FillRow>> = BTreeMap::new();
     for fill in fills {
-        grouped_fills.entry(fill.strategy_id.as_str()).or_default().push(fill.clone());
+        grouped_fills
+            .entry(fill.strategy_id.as_str())
+            .or_default()
+            .push(fill.clone());
     }
     let mut grouped_orders: BTreeMap<&str, Vec<OrderRow>> = BTreeMap::new();
     for order in orders {
-        grouped_orders.entry(order.strategy_id.as_str()).or_default().push(order.clone());
+        grouped_orders
+            .entry(order.strategy_id.as_str())
+            .or_default()
+            .push(order.clone());
     }
     let mut grouped_trades: BTreeMap<&str, Vec<TradeRow>> = BTreeMap::new();
     for trade in trades {
-        grouped_trades.entry(trade.strategy_id.as_str()).or_default().push(trade.clone());
+        grouped_trades
+            .entry(trade.strategy_id.as_str())
+            .or_default()
+            .push(trade.clone());
     }
     let mut strategies: Vec<&str> = grouped_fills
         .keys()
@@ -527,11 +546,17 @@ pub fn per_strategy_attribution(
             let attribution = StrategyAttribution {
                 strategy_id: strategy_id.to_string(),
                 trades: trade_stats(
-                    grouped_trades.get(strategy_id).map_or(empty_trades, Vec::as_slice),
+                    grouped_trades
+                        .get(strategy_id)
+                        .map_or(empty_trades, Vec::as_slice),
                 ),
                 execution: execution_stats(
-                    grouped_fills.get(strategy_id).map_or(empty_fills, Vec::as_slice),
-                    grouped_orders.get(strategy_id).map_or(empty_orders, Vec::as_slice),
+                    grouped_fills
+                        .get(strategy_id)
+                        .map_or(empty_fills, Vec::as_slice),
+                    grouped_orders
+                        .get(strategy_id)
+                        .map_or(empty_orders, Vec::as_slice),
                 ),
             };
             (strategy_id.to_string(), attribution)

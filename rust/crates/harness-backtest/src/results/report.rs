@@ -76,8 +76,14 @@ fn equity_svg(points: &[EquityPoint]) -> String {
     if picked.is_empty() {
         return String::new();
     }
-    let values: Vec<f64> = picked.iter().map(|index| points[*index].equity.to_f64()).collect();
-    let timestamps: Vec<i64> = picked.iter().map(|index| points[*index].timestamp_ns).collect();
+    let values: Vec<f64> = picked
+        .iter()
+        .map(|index| points[*index].equity.to_f64())
+        .collect();
+    let timestamps: Vec<i64> = picked
+        .iter()
+        .map(|index| points[*index].timestamp_ns)
+        .collect();
     let low = values.iter().copied().fold(f64::INFINITY, f64::min);
     let high = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let span = if (high - low).abs() < f64::EPSILON {
@@ -118,11 +124,7 @@ aria-label=\"Equity curve\"><polyline class=\"line\" points=\"{}\" /></svg>",
 /// clock, randomness, I/O, or network access participates, and repeated calls
 /// return byte-identical strings.
 #[must_use]
-pub fn render_report(
-    header: &ReportHeader,
-    equity: &[EquityPoint],
-    trades: &TradeStats,
-) -> String {
+pub fn render_report(header: &ReportHeader, equity: &[EquityPoint], trades: &TradeStats) -> String {
     let metrics = equity_curve_metrics(equity);
     let mut document = String::new();
     document.push_str("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">");
@@ -172,7 +174,9 @@ pub fn render_report(
     let total_return = metrics
         .total_return
         .map_or_else(|| "-".to_string(), |value| value.to_string());
-    let cagr = metrics.cagr.map_or_else(|| "-".to_string(), |value| format!("{value:.4}"));
+    let cagr = metrics
+        .cagr
+        .map_or_else(|| "-".to_string(), |value| format!("{value:.4}"));
     let _ = write!(
         document,
         "<p><code>Total return {total_return}</code> <code>CAGR {cagr}</code> \
@@ -248,15 +252,16 @@ mod tests {
         assert!(first.contains("<polyline"));
         assert!(!first.contains("http://"));
         assert!(!first.contains("https://"));
-        assert!(!equity_curve_metrics(&equity).max_drawdown.to_string().is_empty());
+        assert!(!equity_curve_metrics(&equity)
+            .max_drawdown
+            .to_string()
+            .is_empty());
     }
 
     #[test]
     fn escapes_untrusted_text() {
         let mut header = ReportHeader::new("<script>");
-        header
-            .metadata
-            .insert("k<".to_string(), "v&".to_string());
+        header.metadata.insert("k<".to_string(), "v&".to_string());
         let report = render_report(&header, &[], &crate::results::metrics::trade_stats(&[]));
         assert!(!report.contains("<script>"));
         assert!(report.contains("&lt;script&gt;"));

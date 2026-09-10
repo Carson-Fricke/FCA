@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use harness_backtest::results::recorder::{
-    ActionKind, ActionRecord, Artifact, EquityRecord, EngineIdSource, EventRecord,
+    ActionKind, ActionRecord, Artifact, EngineIdSource, EquityRecord, EventRecord,
     ExecutionReportRecord, FillRecord, FixedClock, MarkerScope, PositionTransitionRecord,
     RecorderConfig, RecorderError, RunRecorder, Seed, TransitionReason,
 };
@@ -182,10 +182,8 @@ fn recorder_replays_byte_identically() {
     assert_eq!(left_manifest.run_digest, right_manifest.run_digest);
     assert_eq!(left_manifest.row_counts, right_manifest.row_counts);
     for artifact in Artifact::ALL {
-        let left_bytes =
-            std::fs::read(left_manifest.path(artifact)).expect("left artifact");
-        let right_bytes =
-            std::fs::read(right_manifest.path(artifact)).expect("right artifact");
+        let left_bytes = std::fs::read(left_manifest.path(artifact)).expect("left artifact");
+        let right_bytes = std::fs::read(right_manifest.path(artifact)).expect("right artifact");
         assert_eq!(left_bytes, right_bytes, "{artifact:?} differs");
     }
     let _ = std::fs::remove_dir_all(&left_dir);
@@ -214,7 +212,10 @@ fn recorder_counts_and_manifest_are_stable() {
     for (name, count) in expected {
         assert_eq!(manifest.row_counts[name], count, "{name}");
     }
-    assert_eq!(manifest.metadata.get("origin"), Some(&"unit-test".to_string()));
+    assert_eq!(
+        manifest.metadata.get("origin"),
+        Some(&"unit-test".to_string())
+    );
     // The manifest is one row per entry, and `row_count` is self-consistent.
     let manifest_rows = manifest.row_counts["manifest"];
     assert!(manifest_rows > 30);

@@ -135,10 +135,9 @@ pub fn fill_model_latency_us(plugin: &FillPlugin) -> i64 {
 #[must_use]
 pub fn fill_model_identity(plugin: &FillPlugin) -> JsonValue {
     match plugin {
-        FillPlugin::SimpleTouch => JsonValue::object([(
-            "model",
-            JsonValue::string(FillModel::SimpleTouch.value()),
-        )]),
+        FillPlugin::SimpleTouch => {
+            JsonValue::object([("model", JsonValue::string(FillModel::SimpleTouch.value()))])
+        }
         FillPlugin::LatencySize {
             response_latency_ns,
             remainder_policy,
@@ -149,7 +148,10 @@ pub fn fill_model_identity(plugin: &FillPlugin) -> JsonValue {
                 "response_latency_us",
                 JsonValue::Int(response_latency_ns.div_euclid(super::errors::MICROSECOND_NS)),
             ),
-            ("remainder_policy", JsonValue::string(remainder_policy.value())),
+            (
+                "remainder_policy",
+                JsonValue::string(remainder_policy.value()),
+            ),
             (
                 "require_trade_through",
                 JsonValue::Bool(*require_trade_through),
@@ -161,10 +163,7 @@ pub fn fill_model_identity(plugin: &FillPlugin) -> JsonValue {
             strict,
             remainder_policy,
         } => JsonValue::object([
-            (
-                "model",
-                JsonValue::string(FillModel::TradeThrough.value()),
-            ),
+            ("model", JsonValue::string(FillModel::TradeThrough.value())),
             (
                 "response_latency_us",
                 JsonValue::Int(response_latency_ns.div_euclid(super::errors::MICROSECOND_NS)),
@@ -174,7 +173,10 @@ pub fn fill_model_identity(plugin: &FillPlugin) -> JsonValue {
                 JsonValue::String(minimum_trade_through.clone()),
             ),
             ("strict", JsonValue::Bool(*strict)),
-            ("remainder_policy", JsonValue::string(remainder_policy.value())),
+            (
+                "remainder_policy",
+                JsonValue::string(remainder_policy.value()),
+            ),
         ]),
     }
 }

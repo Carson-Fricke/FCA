@@ -16,7 +16,10 @@ use std::f64::consts::PI;
 pub fn fft_in_place(re: &mut [f64], im: &mut [f64]) {
     assert_eq!(re.len(), im.len(), "real and imaginary lengths must match");
     let n = re.len();
-    assert!(n.is_power_of_two(), "radix-2 FFT requires a power-of-two length");
+    assert!(
+        n.is_power_of_two(),
+        "radix-2 FFT requires a power-of-two length"
+    );
     bit_reverse(re, im);
     let mut len = 2usize;
     while len <= n {

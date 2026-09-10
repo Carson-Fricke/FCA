@@ -443,6 +443,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-backtest"
+version = "0.1.0"
+dependencies = [
+ "harness-num",
+]
+
+[[package]]
 name = "harness-config"
 version = "0.1.0"
 dependencies = [
@@ -454,11 +461,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-data"
+version = "0.1.0"
+dependencies = [
+ "harness-num",
+]
+
+[[package]]
 name = "harness-host"
 version = "0.1.0"
 dependencies = [
  "pyo3",
  "serde_json",
+]
+
+[[package]]
+name = "harness-live"
+version = "0.1.0"
+dependencies = [
+ "harness-num",
+ "tokio",
 ]
 
 [[package]]
@@ -468,13 +490,6 @@ dependencies = [
  "percent-encoding",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "harness-data"
-version = "0.1.0"
-dependencies = [
- "harness-num",
 ]
 
 [[package]]

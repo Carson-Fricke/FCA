@@ -102,7 +102,9 @@ pub trait PaperShell {
     /// The current session result.
     fn result(&self) -> PaperSessionResult;
     /// Exported strategy state values, keyed by instance id.
-    fn strategy_state_export(&self) -> std::collections::BTreeMap<String, crate::canonical_json::JsonValue>;
+    fn strategy_state_export(
+        &self,
+    ) -> std::collections::BTreeMap<String, crate::canonical_json::JsonValue>;
 }
 
 #[cfg(test)]

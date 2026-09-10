@@ -203,9 +203,15 @@ mod tests {
         let value = JsonValue::object([
             ("b", JsonValue::Int(2)),
             ("a", JsonValue::String("x".to_string())),
-            ("c", JsonValue::Array(vec![JsonValue::Bool(true), JsonValue::Null])),
+            (
+                "c",
+                JsonValue::Array(vec![JsonValue::Bool(true), JsonValue::Null]),
+            ),
         ]);
-        assert_eq!(value.to_canonical_string(), r#"{"a":"x","b":2,"c":[true,null]}"#);
+        assert_eq!(
+            value.to_canonical_string(),
+            r#"{"a":"x","b":2,"c":[true,null]}"#
+        );
     }
 
     #[test]

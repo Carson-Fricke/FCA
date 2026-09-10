@@ -13,7 +13,9 @@ pub mod recovery;
 pub mod shadow;
 pub mod state_store;
 
-pub use go_live::{clean_streak, evaluate, GateCriteria, GateDecision, GateState, PaperSessionEvidence};
+pub use go_live::{
+    clean_streak, evaluate, GateCriteria, GateDecision, GateState, PaperSessionEvidence,
+};
 pub use paper::{PaperOptions, PaperSessionPolicy, PaperSessionResult, PaperShell};
 pub use reconciler::{
     reconcile_cash, reconcile_positions, ExpectedPosition, PositionDelta, ReconcileDecision,

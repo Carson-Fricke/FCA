@@ -22,9 +22,7 @@ pub enum ClockError {
 impl core::fmt::Display for ClockError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let message = match self {
-            Self::RetrogradeTimestamp => {
-                "timestamp cannot be older than the SimClock head"
-            }
+            Self::RetrogradeTimestamp => "timestamp cannot be older than the SimClock head",
             Self::NegativeDelta => "delta must not be negative",
         };
         formatter.write_str(message)

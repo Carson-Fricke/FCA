@@ -89,9 +89,8 @@ pub struct FeeRounding {
 impl FeeRounding {
     /// Construct a validated rounding rule.
     pub fn new(precision: Decimal18, mode: FeeRoundingMode) -> LiveResult<Self> {
-        let places = power_of_ten_places(precision).ok_or_else(|| {
-            LiveError::Fee("rounding.precision must be a power of ten".into())
-        })?;
+        let places = power_of_ten_places(precision)
+            .ok_or_else(|| LiveError::Fee("rounding.precision must be a power of ten".into()))?;
         Ok(Self {
             precision,
             mode,
@@ -120,11 +119,7 @@ pub struct FeeContext {
 
 impl FeeContext {
     /// Construct a validated context.
-    pub fn new(
-        run_id: &str,
-        strategy_id: &str,
-        asset_class: AssetClass,
-    ) -> LiveResult<Self> {
+    pub fn new(run_id: &str, strategy_id: &str, asset_class: AssetClass) -> LiveResult<Self> {
         Ok(Self {
             run_id: require_text(run_id, "run_id")?,
             strategy_id: require_text(strategy_id, "strategy_id")?,
@@ -289,7 +284,10 @@ impl EquityRegulatoryFeeModel {
                 "sec-regulatory",
                 self.rounding.apply(sec_fee),
             )?);
-            components.push(FeeComponent::new("finra-taf", self.rounding.apply(taf_fee))?);
+            components.push(FeeComponent::new(
+                "finra-taf",
+                self.rounding.apply(taf_fee),
+            )?);
         }
         Ok(components)
     }
@@ -338,7 +336,8 @@ impl OptionsPerContractFeeModel {
         Ok(vec![
             FeeComponent::new(
                 "contract-commission",
-                self.rounding.apply(fill.quantity * self.commission_per_contract),
+                self.rounding
+                    .apply(fill.quantity * self.commission_per_contract),
             )?,
             FeeComponent::new(
                 "contract-fee",
@@ -367,9 +366,7 @@ impl CryptoMakerTakerFeeModel {
         taker_rate_bps: Decimal18,
     ) -> LiveResult<Self> {
         if taker_rate_bps.is_negative() {
-            return Err(LiveError::Fee(
-                "taker_rate_bps must not be negative".into(),
-            ));
+            return Err(LiveError::Fee("taker_rate_bps must not be negative".into()));
         }
         Ok(Self {
             rounding,
@@ -390,8 +387,7 @@ impl CryptoMakerTakerFeeModel {
             LiquidityRole::Maker => self.maker_rate_bps,
             LiquidityRole::Taker => self.taker_rate_bps,
         };
-        let amount =
-            fill.quantity * fill.price * rate / Decimal18::from_i64(BASIS_POINTS);
+        let amount = fill.quantity * fill.price * rate / Decimal18::from_i64(BASIS_POINTS);
         Ok(vec![FeeComponent::new(
             &format!("{}-fee", role_name(role)),
             self.rounding.apply(amount),
@@ -495,7 +491,11 @@ pub fn aggregate_fees(assessments: &[FeeAssessment]) -> LiveResult<FeeAggregatio
         }
         add_total(&mut by_run, assessment.run_id(), assessment);
         add_total(&mut by_strategy, assessment.strategy_id(), assessment);
-        add_total(&mut by_asset_class, assessment.asset_class().as_str(), assessment);
+        add_total(
+            &mut by_asset_class,
+            assessment.asset_class().as_str(),
+            assessment,
+        );
     }
     Ok(FeeAggregation {
         by_run: aggregates(by_run),
@@ -588,9 +588,8 @@ mod tests {
     use harness_num::Decimal18;
 
     use super::{
-        aggregate_fees, AssetClass, CryptoMakerTakerFeeModel, EquityRegulatoryFeeModel,
-        FeeContext, FeeRounding, FeeRoundingMode, FeeSchedule, LiquidityRole,
-        OptionsPerContractFeeModel,
+        aggregate_fees, AssetClass, CryptoMakerTakerFeeModel, EquityRegulatoryFeeModel, FeeContext,
+        FeeRounding, FeeRoundingMode, FeeSchedule, LiquidityRole, OptionsPerContractFeeModel,
     };
     use crate::accounting::Fill;
     use crate::orders::Side;

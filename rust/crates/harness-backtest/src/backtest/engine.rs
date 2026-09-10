@@ -20,13 +20,9 @@ use super::errors::{
     AbortPolicy, BacktestError, BacktestStatus, FillModel, StrategyHaltPolicy, TeardownPolicy,
 };
 use super::fees::{fee_schedule_from_config, DEFAULT_FEE_PRECISION};
-use super::fills::{
-    build_fill_model, fill_model_identity, FillModelOptions, FillPlugin,
-};
-use super::fixture::{MarketEvent, ReplayFixture, ReplayFingerprints, SyntheticDataOptions};
-use super::manifest::{
-    build_manifest, BacktestManifest, BacktestResult, StrategyIdentity,
-};
+use super::fills::{build_fill_model, fill_model_identity, FillModelOptions, FillPlugin};
+use super::fixture::{MarketEvent, ReplayFingerprints, ReplayFixture, SyntheticDataOptions};
+use super::manifest::{build_manifest, BacktestManifest, BacktestResult, StrategyIdentity};
 use super::preflight::{preflight_data, resolve_data_source};
 
 /// Explicit, reproducible knobs for one [`run_backtest`] call.
@@ -425,7 +421,10 @@ pub struct TradeBuyStrategy {
 
 impl StrategyRuntime for TradeBuyStrategy {
     fn on_market(&mut self, event: &MarketEvent, orders: &mut Vec<OrderIntent>) {
-        if let MarketEvent::Trade { sequence, symbol, .. } = event {
+        if let MarketEvent::Trade {
+            sequence, symbol, ..
+        } = event
+        {
             orders.push(OrderIntent {
                 order_id: format!("order-{sequence}"),
                 symbol: symbol.clone(),
@@ -449,8 +448,8 @@ pub type Counts = BTreeMap<String, u64>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::fixture::days_from_civil;
     use crate::backtest::errors::ONE_DAY_NS;
+    use crate::backtest::fixture::days_from_civil;
 
     fn config() -> BacktestConfig {
         let start = days_from_civil(2024, 1, 1) * ONE_DAY_NS;
@@ -522,7 +521,10 @@ mod tests {
         assert_eq!(first.artifact_json(), second.artifact_json());
         assert_eq!(first.artifact_digest(), second.artifact_digest());
         assert_eq!(first.outcome_digest(), second.outcome_digest());
-        assert_eq!(first.manifest.manifest_hash(), second.manifest.manifest_hash());
+        assert_eq!(
+            first.manifest.manifest_hash(),
+            second.manifest.manifest_hash()
+        );
     }
 
     #[test]

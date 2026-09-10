@@ -47,8 +47,16 @@ fn hilbert(values: &[f64]) -> Vec<(f64, f64)> {
             *weight = 2.0;
         }
     }
-    let spectral_re: Vec<f64> = re.iter().zip(weights.iter()).map(|(value, weight)| value * weight).collect();
-    let spectral_im: Vec<f64> = im.iter().zip(weights.iter()).map(|(value, weight)| value * weight).collect();
+    let spectral_re: Vec<f64> = re
+        .iter()
+        .zip(weights.iter())
+        .map(|(value, weight)| value * weight)
+        .collect();
+    let spectral_im: Vec<f64> = im
+        .iter()
+        .zip(weights.iter())
+        .map(|(value, weight)| value * weight)
+        .collect();
     let (out_re, out_im) = idft(&spectral_re, &spectral_im);
     out_re.into_iter().zip(out_im).collect()
 }
@@ -71,7 +79,11 @@ pub fn instantaneous_phase_velocity(phase: &[f64]) -> Vec<f64> {
 /// Mean resultant length of successive phase increments.
 #[must_use]
 pub fn phase_coherence(phase: &[f64]) -> f64 {
-    let finite: Vec<f64> = phase.iter().copied().filter(|value| value.is_finite()).collect();
+    let finite: Vec<f64> = phase
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect();
     if finite.len() < 2 {
         return f64::NAN;
     }
@@ -100,7 +112,11 @@ pub fn block_phase_features(phase: &[f64], blocks: &[(usize, usize)]) -> (Vec<f6
             continue;
         }
         let samples = &velocity[start..stop];
-        let finite: Vec<f64> = samples.iter().copied().filter(|value| value.is_finite()).collect();
+        let finite: Vec<f64> = samples
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect();
         if finite.is_empty() {
             continue;
         }

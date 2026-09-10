@@ -176,7 +176,10 @@ mod tests {
             },
         );
         assert_eq!(
-            plan.steps.iter().map(|step| step.action).collect::<Vec<_>>(),
+            plan.steps
+                .iter()
+                .map(|step| step.action)
+                .collect::<Vec<_>>(),
             vec![RecoveryAction::RestoreSnapshot, RecoveryAction::Resume]
         );
         assert_eq!(plan.terminal, RecoveryAction::Resume);
@@ -206,7 +209,10 @@ mod tests {
             },
         );
         assert_eq!(
-            plan.steps.iter().map(|step| step.action).collect::<Vec<_>>(),
+            plan.steps
+                .iter()
+                .map(|step| step.action)
+                .collect::<Vec<_>>(),
             vec![
                 RecoveryAction::CancelOrders,
                 RecoveryAction::FlattenPositions,

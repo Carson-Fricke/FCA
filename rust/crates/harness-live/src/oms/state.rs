@@ -287,7 +287,8 @@ impl OrderStateMachine {
                 "partially_filled status requires an incomplete positive fill".into(),
             ));
         }
-        if report.status == OrderStatus::Filled && report.filled_quantity != current.order.quantity {
+        if report.status == OrderStatus::Filled && report.filled_quantity != current.order.quantity
+        {
             return Err(LiveError::ExecutionLedger(
                 "filled status requires the complete order quantity".into(),
             ));
@@ -313,9 +314,7 @@ mod tests {
     use super::{OrderStateMachine, ZERO};
     use crate::accounting::ExecutionReport;
     use crate::error::LiveError;
-    use crate::orders::{
-        ExecutionType, OrderStatus, OrderType, Side, SingleLegOrder, TimeInForce,
-    };
+    use crate::orders::{ExecutionType, OrderStatus, OrderType, Side, SingleLegOrder, TimeInForce};
     use crate::symbol::Symbol;
 
     fn dec(value: &str) -> Decimal18 {
@@ -553,16 +552,15 @@ mod tests {
                 None,
             ))
             .unwrap();
-        let after = machine
-            .apply(report(
-                &machine,
-                OrderStatus::Canceled,
-                ExecutionType::Status,
-                "late",
-                ZERO,
-                None,
-                None,
-            ));
+        let after = machine.apply(report(
+            &machine,
+            OrderStatus::Canceled,
+            ExecutionType::Status,
+            "late",
+            ZERO,
+            None,
+            None,
+        ));
         assert!(matches!(after, Err(LiveError::IllegalTransition(_))));
     }
 }

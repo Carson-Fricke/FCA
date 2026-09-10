@@ -114,8 +114,8 @@ pub fn resolve_data_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::fixture::{days_from_civil, synthetic_fixture, MarketEvent};
     use crate::backtest::errors::ONE_DAY_NS;
+    use crate::backtest::fixture::{days_from_civil, synthetic_fixture, MarketEvent};
 
     fn config() -> BacktestConfig {
         let start = days_from_civil(2024, 1, 1) * ONE_DAY_NS;

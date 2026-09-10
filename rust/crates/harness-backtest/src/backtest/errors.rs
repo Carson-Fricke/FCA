@@ -240,7 +240,10 @@ mod tests {
     #[test]
     fn defaults_match_python() {
         assert_eq!(AbortPolicy::default(), AbortPolicy::Raise);
-        assert_eq!(StrategyHaltPolicy::default(), StrategyHaltPolicy::HaltStrategy);
+        assert_eq!(
+            StrategyHaltPolicy::default(),
+            StrategyHaltPolicy::HaltStrategy
+        );
         assert_eq!(TeardownPolicy::default(), TeardownPolicy::Always);
         assert_eq!(FillModel::default(), FillModel::SimpleTouch);
     }

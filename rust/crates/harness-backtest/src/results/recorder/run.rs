@@ -20,9 +20,7 @@ use super::manifest::{
     file_digest, manifest_rows, run_fingerprint, ManifestRowsInput, RunManifest,
 };
 use super::schemas::{Artifact, STREAM_ARTIFACTS};
-use super::writer::{
-    build_row, CanonicalArtifactWriter, Row, RowSink, Value, WriterError,
-};
+use super::writer::{build_row, CanonicalArtifactWriter, Row, RowSink, Value, WriterError};
 
 /// Recorder construction or streaming failure.
 #[derive(Debug)]
@@ -51,9 +49,7 @@ impl std::fmt::Display for RecorderError {
             Self::Closed => formatter.write_str("the recorder is closed"),
             Self::TimestampRequired => formatter
                 .write_str("timestamp is required when the recorder has no configured clock"),
-            Self::AccountRequired => {
-                formatter.write_str("account_id is required for this record")
-            }
+            Self::AccountRequired => formatter.write_str("account_id is required for this record"),
             Self::Config(error) => write!(formatter, "{error}"),
             Self::ManifestUnavailable => {
                 formatter.write_str("the run manifest is only available after close()")
@@ -279,9 +275,8 @@ impl RunRecorder {
     /// be created.
     pub fn new(config: RecorderConfig) -> Result<Self, RecorderError> {
         let ids = EngineIdSource::new(config.seed.clone())?;
-        std::fs::create_dir_all(&config.directory).map_err(|error| {
-            RecorderError::Writer(WriterError::Io(error))
-        })?;
+        std::fs::create_dir_all(&config.directory)
+            .map_err(|error| RecorderError::Writer(WriterError::Io(error)))?;
         let directory = config.directory.clone();
         let batch_size = config.batch_size;
         let mut writers = BTreeMap::new();
@@ -423,7 +418,9 @@ impl RunRecorder {
                 ("reason", Value::optional_utf8(action.reason.clone())),
                 (
                     "detail",
-                    Value::optional_utf8(action.detail.as_ref().map(JsonValue::to_canonical_string)),
+                    Value::optional_utf8(
+                        action.detail.as_ref().map(JsonValue::to_canonical_string),
+                    ),
                 ),
             ],
         )?;
@@ -702,7 +699,9 @@ impl RunRecorder {
                 ("symbol", Value::optional_utf8(event.symbol.clone())),
                 (
                     "payload",
-                    Value::optional_utf8(event.payload.as_ref().map(JsonValue::to_canonical_string)),
+                    Value::optional_utf8(
+                        event.payload.as_ref().map(JsonValue::to_canonical_string),
+                    ),
                 ),
             ],
         )
@@ -715,7 +714,10 @@ impl RunRecorder {
     /// Returns [`RecorderError`] when an artifact cannot be finalized.
     pub fn close(&mut self) -> Result<RunManifest, RecorderError> {
         if self.closed {
-            return self.manifest.clone().ok_or(RecorderError::ManifestUnavailable);
+            return self
+                .manifest
+                .clone()
+                .ok_or(RecorderError::ManifestUnavailable);
         }
         let mut row_counts: BTreeMap<String, u64> = BTreeMap::new();
         let mut digests: BTreeMap<String, String> = BTreeMap::new();
@@ -728,9 +730,8 @@ impl RunRecorder {
             let name = artifact.value().to_string();
             row_counts.insert(name.clone(), writer.row_count());
             let path = artifact_path(&self.config.directory, artifact);
-            let digest = file_digest(&path).map_err(|error| {
-                RecorderError::Writer(WriterError::Io(error))
-            })?;
+            let digest = file_digest(&path)
+                .map_err(|error| RecorderError::Writer(WriterError::Io(error)))?;
             digests.insert(name, digest);
         }
         let run_digest = run_fingerprint(&row_counts, &digests);

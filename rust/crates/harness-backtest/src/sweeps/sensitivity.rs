@@ -281,11 +281,7 @@ mod tests {
 
     #[test]
     fn ranks_by_value_then_run_id() {
-        let records = vec![
-            record("b", "1.5"),
-            record("a", "1.5"),
-            record("c", "0.5"),
-        ];
+        let records = vec![record("b", "1.5"), record("a", "1.5"), record("c", "0.5")];
         let ranked = rank_runs(&records, "sharpe", true).expect("rank");
         assert_eq!(
             ranked

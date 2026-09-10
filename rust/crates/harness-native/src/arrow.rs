@@ -221,11 +221,7 @@ mod tests {
         for (index, expected) in BATCH_VALUES.iter().enumerate() {
             let mut bytes = [0u8; 16];
             unsafe {
-                core::ptr::copy_nonoverlapping(
-                    buffers[1].add(index * 16),
-                    bytes.as_mut_ptr(),
-                    16,
-                );
+                core::ptr::copy_nonoverlapping(buffers[1].add(index * 16), bytes.as_mut_ptr(), 16);
             }
             assert_eq!(i128::from_le_bytes(bytes), *expected);
         }

@@ -706,36 +706,16 @@ mod tests {
     #[test]
     fn deterministic_ids_match_the_python_derivation() {
         let cases: [(&[u8], &[u8], u64, &str); 6] = [
-            (
-                b"str:abc",
-                b"engine",
-                0,
-                "5e07f8554e5454c59b2e82a1c23e8715",
-            ),
-            (
-                b"str:abc",
-                b"event",
-                1,
-                "5f4bc7e603ae59d7b9c9d8629073e430",
-            ),
-            (
-                b"str:abc",
-                b"order",
-                7,
-                "ca17e7b50d2b5a1589208240bda7da65",
-            ),
+            (b"str:abc", b"engine", 0, "5e07f8554e5454c59b2e82a1c23e8715"),
+            (b"str:abc", b"event", 1, "5f4bc7e603ae59d7b9c9d8629073e430"),
+            (b"str:abc", b"order", 7, "ca17e7b50d2b5a1589208240bda7da65"),
             (
                 b"str:abc",
                 b"fill",
                 123456789012345,
                 "0ee8754800535aac8f01b962ae39ef7d",
             ),
-            (
-                b"int:42",
-                b"engine",
-                0,
-                "13a861e80e2c570cade52b8498edf905",
-            ),
+            (b"int:42", b"engine", 0, "13a861e80e2c570cade52b8498edf905"),
             (b"XY", b"engine", 3, "617fa2b4386d5472b63a760a3bae48bb"),
         ];
         for (seed, kind, ordinal, hex) in cases {

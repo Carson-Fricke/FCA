@@ -119,9 +119,7 @@ fn validate(field: &FieldDef, value: &Value) -> Result<(), WriterError> {
         if field.nullable {
             return Ok(());
         }
-        return Err(WriterError::NullNotAllowed {
-            field: field.name,
-        });
+        return Err(WriterError::NullNotAllowed { field: field.name });
     }
     let matches = matches!(
         (field.logical_type, value),
@@ -167,9 +165,7 @@ pub fn format_timestamp_ns(timestamp_ns: i64) -> String {
     let hour = seconds_of_day / 3_600;
     let minute = (seconds_of_day % 3_600) / 60;
     let second = seconds_of_day % 60;
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{reminder_micros:06}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{reminder_micros:06}Z")
 }
 
 /// Convert a day count since 1970-01-01 to a proleptic Gregorian date.
@@ -240,11 +236,7 @@ impl CanonicalArtifactWriter {
     ///
     /// The file is opened lazily on the first flush.
     #[must_use]
-    pub fn new(
-        path: impl Into<PathBuf>,
-        artifact: Artifact,
-        batch_size: usize,
-    ) -> Self {
+    pub fn new(path: impl Into<PathBuf>, artifact: Artifact, batch_size: usize) -> Self {
         Self {
             artifact,
             path: path.into(),
@@ -397,10 +389,18 @@ impl std::fmt::Display for WriterError {
                 artifact.value()
             ),
             Self::MissingField { artifact, field } => {
-                write!(formatter, "{} row is missing field {field}", artifact.value())
+                write!(
+                    formatter,
+                    "{} row is missing field {field}",
+                    artifact.value()
+                )
             }
             Self::UnknownField { artifact, field } => {
-                write!(formatter, "{} row has unknown field {field}", artifact.value())
+                write!(
+                    formatter,
+                    "{} row has unknown field {field}",
+                    artifact.value()
+                )
             }
             Self::NullNotAllowed { field } => write!(formatter, "field {field} must not be null"),
             Self::TypeMismatch { field, expected } => {
@@ -440,10 +440,7 @@ mod tests {
             format_timestamp_ns(1_704_153_600_123_456_000),
             "2024-01-02T00:00:00.123456Z"
         );
-        assert_eq!(
-            format_timestamp_ns(-1),
-            "1969-12-31T23:59:59.999999Z"
-        );
+        assert_eq!(format_timestamp_ns(-1), "1969-12-31T23:59:59.999999Z");
     }
 
     #[test]
@@ -453,7 +450,10 @@ mod tests {
             [("value", Value::utf8("x")), ("key", Value::utf8("a"))],
         )
         .expect("row");
-        assert_eq!(row_to_canonical_json(Artifact::Manifest, &row), r#"{"key":"a","value":"x"}"#);
+        assert_eq!(
+            row_to_canonical_json(Artifact::Manifest, &row),
+            r#"{"key":"a","value":"x"}"#
+        );
     }
 
     #[test]
@@ -480,10 +480,8 @@ mod tests {
 
     #[test]
     fn append_and_close_batches_rows() {
-        let directory = std::env::temp_dir().join(format!(
-            "harness-backtest-writer-{}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("harness-backtest-writer-{}", std::process::id()));
         let path = directory.join("manifest.parquet");
         let mut writer = CanonicalArtifactWriter::new(&path, Artifact::Manifest, 2);
         for index in 0..5u64 {

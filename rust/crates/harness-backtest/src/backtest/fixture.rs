@@ -596,7 +596,8 @@ mod tests {
 
     #[test]
     fn synthetic_events_match_python_drift() {
-        let fixture = synthetic_fixture(&config(), &SyntheticDataOptions::default()).expect("fixture");
+        let fixture =
+            synthetic_fixture(&config(), &SyntheticDataOptions::default()).expect("fixture");
         // Two weekday sessions, 12 quotes and 6 trades each.
         assert_eq!(fixture.events.len(), 36);
         let quotes: Vec<&MarketEvent> = fixture

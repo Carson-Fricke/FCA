@@ -132,12 +132,7 @@ mod tests {
     #[test]
     fn pending_until_the_streak_is_reached() {
         let sessions: Vec<PaperSessionEvidence> = (0..3).map(|id| session(id, true)).collect();
-        let decision = evaluate(
-            &sessions,
-            GateCriteria {
-                required_streak: 5,
-            },
-        );
+        let decision = evaluate(&sessions, GateCriteria { required_streak: 5 });
         assert_eq!(decision.state, GateState::Pending);
         assert_eq!(decision.clean_streak, 3);
     }
@@ -145,12 +140,7 @@ mod tests {
     #[test]
     fn promotes_on_a_full_clean_streak() {
         let sessions: Vec<PaperSessionEvidence> = (0..5).map(|id| session(id, true)).collect();
-        let decision = evaluate(
-            &sessions,
-            GateCriteria {
-                required_streak: 5,
-            },
-        );
+        let decision = evaluate(&sessions, GateCriteria { required_streak: 5 });
         assert_eq!(decision.state, GateState::Promoted);
     }
 

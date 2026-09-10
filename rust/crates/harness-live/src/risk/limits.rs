@@ -58,10 +58,7 @@ pub fn order_notional(order: &OrderRequest, context: &RiskContext) -> Option<Dec
 pub fn order_size(order: &OrderRequest) -> Decimal18 {
     match order {
         OrderRequest::Single(single) => single.quantity,
-        OrderRequest::Multi(multi) => multi
-            .legs
-            .iter()
-            .fold(ZERO, |sum, leg| sum + leg.quantity),
+        OrderRequest::Multi(multi) => multi.legs.iter().fold(ZERO, |sum, leg| sum + leg.quantity),
     }
 }
 
@@ -166,9 +163,7 @@ fn gross_quantity(
     delta: Decimal18,
 ) -> Decimal18 {
     if !delta.is_negative() {
-        long_quantity
-            + nonneg(delta - short_quantity)
-            + nonneg(short_quantity - delta)
+        long_quantity + nonneg(delta - short_quantity) + nonneg(short_quantity - delta)
     } else {
         nonneg(long_quantity + delta) + short_quantity + nonneg(-delta - long_quantity)
     }
@@ -268,16 +263,16 @@ fn max_valid_scale(
         } else if exposure == "net" {
             let mut total = ZERO;
             for symbol in prices.keys() {
-                let quantity =
-                    current.get(symbol).copied().unwrap_or(ZERO) + deltas.get(symbol).copied().unwrap_or(ZERO) * scale;
+                let quantity = current.get(symbol).copied().unwrap_or(ZERO)
+                    + deltas.get(symbol).copied().unwrap_or(ZERO) * scale;
                 total += quantity * prices[symbol];
             }
             total.abs()
         } else if exposure == "position" {
             let mut best = ZERO;
             for symbol in deltas.keys() {
-                let quantity =
-                    current.get(symbol).copied().unwrap_or(ZERO) + deltas.get(symbol).copied().unwrap_or(ZERO) * scale;
+                let quantity = current.get(symbol).copied().unwrap_or(ZERO)
+                    + deltas.get(symbol).copied().unwrap_or(ZERO) * scale;
                 let value = quantity.abs() * prices[symbol];
                 if value > best {
                     best = value;
@@ -345,7 +340,8 @@ fn max_valid_scale(
         let slope = (right_value - left_value) / (right - left);
         if slope != ZERO {
             let crossing = left + (capacity - left_value) / slope;
-            if left < crossing && crossing < right && value(crossing) <= capacity && crossing > best {
+            if left < crossing && crossing < right && value(crossing) <= capacity && crossing > best
+            {
                 best = crossing;
             }
         }
@@ -402,9 +398,7 @@ impl RiskRule for MaxOrderNotional {
                     "max_order_notional has no permitted quantity",
                     false,
                 ),
-                Some(reduced) => {
-                    RuleDecision::reduce(reduced, "max_order_notional reduced order")
-                }
+                Some(reduced) => RuleDecision::reduce(reduced, "max_order_notional reduced order"),
             }
         };
         Ok(decision
@@ -560,9 +554,10 @@ impl RiskRule for MaxNetExposure {
                     "max_net_exposure has no permitted quantity",
                     false,
                 ),
-                Some(scale) => {
-                    RuleDecision::reduce(scale_order(order, scale)?, "max_net_exposure reduced order")
-                }
+                Some(scale) => RuleDecision::reduce(
+                    scale_order(order, scale)?,
+                    "max_net_exposure reduced order",
+                ),
             }
         };
         Ok(decision

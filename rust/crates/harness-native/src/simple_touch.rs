@@ -88,10 +88,7 @@ pub fn validate_pair(order: &MarketOrder<'_>, snap: &MarketEvent<'_>) -> Result<
 }
 
 /// Resolve the authoritative remaining quantity for a decision.
-pub fn resolve_remaining(
-    order: &MarketOrder<'_>,
-    opts: &DecideOptions,
-) -> Result<i128, Error> {
+pub fn resolve_remaining(order: &MarketOrder<'_>, opts: &DecideOptions) -> Result<i128, Error> {
     let remaining = opts.remaining_quantity.unwrap_or(order.quantity);
     if remaining <= 0 {
         return Err(Error::InvalidArgument);
@@ -114,10 +111,7 @@ pub fn displayed_quantity(side: Side, snap: &MarketEvent<'_>) -> i128 {
 }
 
 /// Whether a stop order is armed by this market snapshot.
-pub fn is_triggered(
-    order: &MarketOrder<'_>,
-    snap: &MarketEvent<'_>,
-) -> Result<bool, Error> {
+pub fn is_triggered(order: &MarketOrder<'_>, snap: &MarketEvent<'_>) -> Result<bool, Error> {
     if matches!(order.order_type, OrderType::Market | OrderType::Limit) {
         return Ok(true);
     }
@@ -277,11 +271,7 @@ pub(crate) mod testing {
     }
 
     /// Build a trade snapshot for symbol `AAPL`.
-    pub fn make_trade(
-        event_id: &'static str,
-        price: i128,
-        quantity: i128,
-    ) -> MarketEvent<'static> {
+    pub fn make_trade(event_id: &'static str, price: i128, quantity: i128) -> MarketEvent<'static> {
         MarketEvent::Trade(TradeEvent {
             event_id,
             timestamp_ns: STAMP_NS,
@@ -358,7 +348,14 @@ mod tests {
         expect_decision(buy, TEN, ONE0ONE, Liquidity::Taker);
         let sell = plugin
             .decide(
-                &make_order("market-sell", Side::Sell, OrderType::Market, TEN, None, None),
+                &make_order(
+                    "market-sell",
+                    Side::Sell,
+                    OrderType::Market,
+                    TEN,
+                    None,
+                    None,
+                ),
                 &default_quote("q"),
                 &DecideOptions::default(),
             )
@@ -371,7 +368,14 @@ mod tests {
         let plugin = SimpleTouch;
         let crossing = plugin
             .decide(
-                &make_order("cross-buy", Side::Buy, OrderType::Limit, TEN, Some(ONE0ONE), None),
+                &make_order(
+                    "cross-buy",
+                    Side::Buy,
+                    OrderType::Limit,
+                    TEN,
+                    Some(ONE0ONE),
+                    None,
+                ),
                 &large_quote("crossing", HUNDRED, ONE0ONE),
                 &DecideOptions::default(),
             )
@@ -379,7 +383,14 @@ mod tests {
         expect_decision(crossing, TEN, ONE0ONE, Liquidity::Taker);
         let resting = plugin
             .decide(
-                &make_order("rest-buy", Side::Buy, OrderType::Limit, TEN, Some(ONE0ONE), None),
+                &make_order(
+                    "rest-buy",
+                    Side::Buy,
+                    OrderType::Limit,
+                    TEN,
+                    Some(ONE0ONE),
+                    None,
+                ),
                 &large_quote("resting", dec(99), dec(102)),
                 &DecideOptions::default(),
             )
@@ -388,7 +399,14 @@ mod tests {
 
         let sell_crossing = plugin
             .decide(
-                &make_order("cross-sell", Side::Sell, OrderType::Limit, TEN, Some(HUNDRED), None),
+                &make_order(
+                    "cross-sell",
+                    Side::Sell,
+                    OrderType::Limit,
+                    TEN,
+                    Some(HUNDRED),
+                    None,
+                ),
                 &large_quote("crossing-sell", HUNDRED, ONE0ONE),
                 &DecideOptions::default(),
             )
@@ -396,7 +414,14 @@ mod tests {
         expect_decision(sell_crossing, TEN, HUNDRED, Liquidity::Taker);
         let sell_resting = plugin
             .decide(
-                &make_order("rest-sell", Side::Sell, OrderType::Limit, TEN, Some(HUNDRED), None),
+                &make_order(
+                    "rest-sell",
+                    Side::Sell,
+                    OrderType::Limit,
+                    TEN,
+                    Some(HUNDRED),
+                    None,
+                ),
                 &large_quote("resting-sell", dec(99), dec(102)),
                 &DecideOptions::default(),
             )
@@ -420,9 +445,20 @@ mod tests {
     #[test]
     fn stop_orders_arm_only_on_the_correct_touch() {
         let plugin = SimpleTouch;
-        let buy_stop = make_order("stop-buy", Side::Buy, OrderType::Stop, TEN, None, Some(ONE0ONE));
+        let buy_stop = make_order(
+            "stop-buy",
+            Side::Buy,
+            OrderType::Stop,
+            TEN,
+            None,
+            Some(ONE0ONE),
+        );
         assert!(super::is_triggered(&buy_stop, &default_quote("buy-trigger")).unwrap());
-        assert!(!super::is_triggered(&buy_stop, &make_quote("buy-rest", HUNDRED, HUNDRED, TEN, TEN)).unwrap());
+        assert!(!super::is_triggered(
+            &buy_stop,
+            &make_quote("buy-rest", HUNDRED, HUNDRED, TEN, TEN)
+        )
+        .unwrap());
         assert!(plugin
             .decide(
                 &buy_stop,
@@ -432,13 +468,32 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(plugin
-            .decide(&buy_stop, &default_quote("buy-trigger"), &DecideOptions::default())
+            .decide(
+                &buy_stop,
+                &default_quote("buy-trigger"),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_some());
 
-        let sell_stop = make_order("stop-sell", Side::Sell, OrderType::Stop, TEN, None, Some(HUNDRED));
-        assert!(super::is_triggered(&sell_stop, &make_quote("sell-trigger", HUNDRED, ONE0ONE, TEN, TEN)).unwrap());
-        assert!(!super::is_triggered(&sell_stop, &make_quote("sell-rest", ONE0ONE, dec(102), TEN, TEN)).unwrap());
+        let sell_stop = make_order(
+            "stop-sell",
+            Side::Sell,
+            OrderType::Stop,
+            TEN,
+            None,
+            Some(HUNDRED),
+        );
+        assert!(super::is_triggered(
+            &sell_stop,
+            &make_quote("sell-trigger", HUNDRED, ONE0ONE, TEN, TEN)
+        )
+        .unwrap());
+        assert!(!super::is_triggered(
+            &sell_stop,
+            &make_quote("sell-rest", ONE0ONE, dec(102), TEN, TEN)
+        )
+        .unwrap());
         assert!(plugin
             .decide(
                 &sell_stop,
@@ -448,7 +503,11 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(plugin
-            .decide(&sell_stop, &make_quote("sell-trigger", HUNDRED, ONE0ONE, TEN, TEN), &DecideOptions::default())
+            .decide(
+                &sell_stop,
+                &make_quote("sell-trigger", HUNDRED, ONE0ONE, TEN, TEN),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_some());
     }
@@ -465,7 +524,11 @@ mod tests {
             Some(ONE0ONE),
         );
         let decision = plugin
-            .decide(&stop_order, &default_quote("trigger"), &DecideOptions::default())
+            .decide(
+                &stop_order,
+                &default_quote("trigger"),
+                &DecideOptions::default(),
+            )
             .unwrap();
         assert!(decision.is_some());
         assert_eq!(decision.unwrap().triggering_market.event_id(), "trigger");
@@ -479,7 +542,11 @@ mod tests {
             Some(ONE0ONE),
         );
         assert!(plugin
-            .decide(&no_limit_touch, &default_quote("armed"), &DecideOptions::default())
+            .decide(
+                &no_limit_touch,
+                &default_quote("armed"),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_none());
     }
@@ -490,12 +557,24 @@ mod tests {
         let traded = make_trade("trade", HUNDRED + 250_000_000_000_000_000, dec(2));
         let decision = plugin
             .decide(
-                &make_order("trade-market", Side::Sell, OrderType::Market, dec(3), None, None),
+                &make_order(
+                    "trade-market",
+                    Side::Sell,
+                    OrderType::Market,
+                    dec(3),
+                    None,
+                    None,
+                ),
                 &traded,
                 &DecideOptions::default(),
             )
             .unwrap();
-        expect_decision(decision, dec(2), HUNDRED + 250_000_000_000_000_000, Liquidity::Taker);
+        expect_decision(
+            decision,
+            dec(2),
+            HUNDRED + 250_000_000_000_000_000,
+            Liquidity::Taker,
+        );
     }
 
     #[test]
@@ -504,7 +583,14 @@ mod tests {
         let traded = make_trade("trade-limit", dec(99), TEN);
         let decision = plugin
             .decide(
-                &make_order("limit-trade", Side::Buy, OrderType::Limit, dec(2), Some(HUNDRED), None),
+                &make_order(
+                    "limit-trade",
+                    Side::Buy,
+                    OrderType::Limit,
+                    dec(2),
+                    Some(HUNDRED),
+                    None,
+                ),
                 &traded,
                 &DecideOptions::default(),
             )

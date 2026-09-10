@@ -172,11 +172,7 @@ pub type Scalogram = (Vec<Vec<f64>>, Vec<Vec<bool>>);
 /// # Errors
 ///
 /// Returns [`SignalError`] under the same conditions as [`morlet_cwt`].
-pub fn scalogram(
-    values: &[f64],
-    scales: &[f64],
-    omega0: f64,
-) -> Result<Scalogram, SignalError> {
+pub fn scalogram(values: &[f64], scales: &[f64], omega0: f64) -> Result<Scalogram, SignalError> {
     let coefficients = morlet_cwt(values, scales, omega0)?;
     let power = coefficients
         .iter()

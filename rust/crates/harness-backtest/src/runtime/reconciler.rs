@@ -166,9 +166,7 @@ pub fn reconcile_cash(
     let difference = parse(expected)
         .checked_sub(parse(actual))
         .unwrap_or(Decimal18::ZERO);
-    if difference.abs().less_than(tolerances.cash_abs)
-        || difference.abs() == tolerances.cash_abs
-    {
+    if difference.abs().less_than(tolerances.cash_abs) || difference.abs() == tolerances.cash_abs {
         None
     } else {
         Some(difference.to_string())

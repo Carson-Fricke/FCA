@@ -153,7 +153,8 @@ impl OptionsMatchingEngine {
 
     /// Feed one quote event into the matching engine.
     pub fn on_quote(&mut self, event: QuoteEvent) -> LiveResult<()> {
-        self.latest_quotes.insert(event.symbol.clone(), event.clone());
+        self.latest_quotes
+            .insert(event.symbol.clone(), event.clone());
         let mut pool = HashMap::new();
         pool.insert(Side::Buy, event.ask_quantity);
         pool.insert(Side::Sell, event.bid_quantity);
@@ -168,17 +169,14 @@ impl OptionsMatchingEngine {
             if !active {
                 continue;
             }
-            let contains = self
-                .groups
-                .get(&group_id)
-                .is_some_and(|working| {
-                    working
-                        .group
-                        .order()
-                        .legs
-                        .iter()
-                        .any(|leg| leg.symbol == event.symbol)
-                });
+            let contains = self.groups.get(&group_id).is_some_and(|working| {
+                working
+                    .group
+                    .order()
+                    .legs
+                    .iter()
+                    .any(|leg| leg.symbol == event.symbol)
+            });
             if contains {
                 self.evaluate(&group_id)?;
             }
@@ -239,9 +237,9 @@ impl OptionsMatchingEngine {
         let Some(limit) = order.limit_price else {
             return false;
         };
-        let natural = net(candidate.iter().map(|entry| {
-            (entry.leg.clone(), touch_price(&entry.leg, &entry.quote))
-        }));
+        let natural = net(candidate
+            .iter()
+            .map(|entry| (entry.leg.clone(), touch_price(&entry.leg, &entry.quote))));
         let mid_net = net(candidate
             .iter()
             .map(|entry| (entry.leg.clone(), entry.price)));
@@ -401,11 +399,15 @@ mod tests {
 
     #[test]
     fn market_group_fills_atomically_when_all_legs_quoted() {
-        let mut engine =
-            OptionsMatchingEngine::new("options", MidTouch::default()).unwrap();
+        let mut engine = OptionsMatchingEngine::new("options", MidTouch::default()).unwrap();
         engine.on_quote(quote("AAPL", "100", "101", "5")).unwrap();
-        engine.submit(spread("g1", OrderType::Market, None), None).unwrap();
-        assert_eq!(engine.state("g1").unwrap().status, crate::oms::groups::GroupStatus::Accepted);
+        engine
+            .submit(spread("g1", OrderType::Market, None), None)
+            .unwrap();
+        assert_eq!(
+            engine.state("g1").unwrap().status,
+            crate::oms::groups::GroupStatus::Accepted
+        );
         engine.on_quote(quote("MSFT", "99", "100", "5")).unwrap();
         let snapshot = engine.state("g1").unwrap();
         assert_eq!(snapshot.status, crate::oms::groups::GroupStatus::Filled);
@@ -414,8 +416,7 @@ mod tests {
 
     #[test]
     fn ioc_group_expires_without_a_complete_cross() {
-        let mut engine =
-            OptionsMatchingEngine::new("options", MidTouch::default()).unwrap();
+        let mut engine = OptionsMatchingEngine::new("options", MidTouch::default()).unwrap();
         let order = MultiLegOrder::new(
             "g2",
             vec![leg("AAPL", Side::Buy), leg("MSFT", Side::Sell)],
@@ -434,8 +435,7 @@ mod tests {
 
     #[test]
     fn net_debit_limit_requires_net_debit() {
-        let mut engine =
-            OptionsMatchingEngine::new("options", MidTouch::default()).unwrap();
+        let mut engine = OptionsMatchingEngine::new("options", MidTouch::default()).unwrap();
         engine
             .submit(
                 spread("g3", OrderType::Limit, Some("3")),

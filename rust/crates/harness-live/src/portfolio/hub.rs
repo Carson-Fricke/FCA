@@ -332,8 +332,10 @@ fn aggregate_position(symbol: &Symbol, positions: &[PositionSnapshot]) -> Aggreg
         .iter()
         .filter(|position| position.quantity != ZERO)
         .collect();
-    let mut marks: Vec<Option<Decimal18>> =
-        open_positions.iter().map(|position| position.mark_price).collect();
+    let mut marks: Vec<Option<Decimal18>> = open_positions
+        .iter()
+        .map(|position| position.mark_price)
+        .collect();
     marks.sort();
     marks.dedup();
     let mark_price = if marks.len() == 1 && marks[0].is_some() {
@@ -420,7 +422,9 @@ mod tests {
         hub.create_book("b", dec("1000")).unwrap();
         hub.apply_fill("a", &fill("f1", Side::Buy, "1", "100"))
             .unwrap();
-        assert!(hub.apply_fill("b", &fill("f1", Side::Buy, "1", "100")).is_err());
+        assert!(hub
+            .apply_fill("b", &fill("f1", Side::Buy, "1", "100"))
+            .is_err());
     }
 
     #[test]
@@ -432,7 +436,12 @@ mod tests {
             .unwrap();
         hub.mark("AAPL", dec("110")).unwrap();
         assert_eq!(
-            hub.book("b").unwrap().marker("AAPL").unwrap().unwrap().price,
+            hub.book("b")
+                .unwrap()
+                .marker("AAPL")
+                .unwrap()
+                .unwrap()
+                .price,
             dec("110")
         );
         assert_eq!(hub.equity(), Some(dec("2010")));

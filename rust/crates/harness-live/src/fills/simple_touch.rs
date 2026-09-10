@@ -78,11 +78,7 @@ impl SimpleTouch {
     }
 
     /// Return whether a stop order is armed by this market snapshot.
-    pub fn is_triggered(
-        &self,
-        order: &SingleLegOrder,
-        market: &MarketEvent,
-    ) -> LiveResult<bool> {
+    pub fn is_triggered(&self, order: &SingleLegOrder, market: &MarketEvent) -> LiveResult<bool> {
         validate(order, market)?;
         if !matches!(order.order_type, OrderType::Stop | OrderType::StopLimit) {
             return Ok(true);
@@ -206,7 +202,13 @@ mod tests {
     #[test]
     fn market_order_fills_at_ask_bounded_by_size() {
         let decision = SimpleTouch::new()
-            .decide(&order(OrderType::Market, None), &quote("101", "3"), None, None, false)
+            .decide(
+                &order(OrderType::Market, None),
+                &quote("101", "3"),
+                None,
+                None,
+                false,
+            )
             .unwrap()
             .unwrap();
         assert_eq!(decision.quantity, dec("3"));

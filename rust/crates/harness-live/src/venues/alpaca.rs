@@ -197,7 +197,10 @@ impl AlpacaExecutionInbox {
     pub fn drain(&mut self, limit: Option<usize>) -> Vec<VenueOutcome> {
         match limit {
             None => self.outcomes.drain(..).collect(),
-            Some(limit) => self.outcomes.drain(..limit.min(self.outcomes.len())).collect(),
+            Some(limit) => self
+                .outcomes
+                .drain(..limit.min(self.outcomes.len()))
+                .collect(),
         }
     }
 
@@ -250,10 +253,7 @@ impl<T: AsyncBrokerTransport> AlpacaBroker<T> {
             order.quantity,
             order.side.as_str()
         );
-        let response = self
-            .transport
-            .request("POST", &url, Some(body))
-            .await?;
+        let response = self.transport.request("POST", &url, Some(body)).await?;
         if !response.is_success() {
             return Err(LiveError::Venue(format!(
                 "alpaca submit failed with status {}",
@@ -386,10 +386,13 @@ mod tests {
             ..Default::default()
         };
         let source = AlpacaClientOrderIdSource::new("strat").unwrap();
-        let mut broker = AlpacaBroker::new(transport, "https://paper-api.alpaca.markets", source)
-            .unwrap();
+        let mut broker =
+            AlpacaBroker::new(transport, "https://paper-api.alpaca.markets", source).unwrap();
         let receipt = broker.submit(&order()).await.unwrap();
         assert_eq!(receipt.status_code, 200);
-        assert_eq!(broker.directory().client_order_id_for("o1"), Some("strat-1"));
+        assert_eq!(
+            broker.directory().client_order_id_for("o1"),
+            Some("strat-1")
+        );
     }
 }

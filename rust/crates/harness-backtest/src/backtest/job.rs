@@ -38,7 +38,10 @@ impl std::fmt::Display for BacktestJobError {
             Self::Io(message) => write!(formatter, "{message}"),
             Self::MissingShell => formatter.write_str("configuration has no 'shell' key"),
             Self::WrongShell(shell) => {
-                write!(formatter, "configuration shell must be 'backtest', not '{shell}'")
+                write!(
+                    formatter,
+                    "configuration shell must be 'backtest', not '{shell}'"
+                )
             }
             Self::Engine(message) => write!(formatter, "{message}"),
         }
@@ -166,8 +169,7 @@ pub fn run_backtest_job(
     let seed = parse_scalar(&text, "seed")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(7);
-    let mut configuration =
-        BacktestConfig::new(run_id, DEFAULT_START_NS, DEFAULT_END_NS, seed)?;
+    let mut configuration = BacktestConfig::new(run_id, DEFAULT_START_NS, DEFAULT_END_NS, seed)?;
     configuration.shell = "backtest".to_string();
     let options = BacktestOptions::default();
     run_job_with(
@@ -196,7 +198,11 @@ pub fn run_job_with(
 ) -> Result<BacktestJobSummary, BacktestJobError> {
     let result = run_backtest(configuration, None, options, strategy, risk, execution)?;
     let directory = output_dir.map_or_else(
-        || PathBuf::from(".local").join("backtests").join(&configuration.run_id),
+        || {
+            PathBuf::from(".local")
+                .join("backtests")
+                .join(&configuration.run_id)
+        },
         Path::to_path_buf,
     );
     let artifact_path = write_artifact(&directory, &configuration.run_id, &result)?;
@@ -251,10 +257,19 @@ mod tests {
 
     #[test]
     fn parses_shell_and_scalars() {
-        assert_eq!(parse_shell("shell: backtest\n").as_deref(), Some("backtest"));
+        assert_eq!(
+            parse_shell("shell: backtest\n").as_deref(),
+            Some("backtest")
+        );
         assert_eq!(parse_shell("market_data:\n  shell: nested\n"), None);
-        assert_eq!(parse_scalar("run_id: bt-1\n", "run_id").as_deref(), Some("bt-1"));
-        assert_eq!(parse_scalar("\"seed\": 42\n", "seed").as_deref(), Some("42"));
+        assert_eq!(
+            parse_scalar("run_id: bt-1\n", "run_id").as_deref(),
+            Some("bt-1")
+        );
+        assert_eq!(
+            parse_scalar("\"seed\": 42\n", "seed").as_deref(),
+            Some("42")
+        );
     }
 
     #[test]

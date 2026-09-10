@@ -189,7 +189,9 @@ fn as_array(value: &JsonValue) -> Result<&[JsonValue], StateStoreError> {
 fn as_str(value: &JsonValue, name: &str) -> Result<String, StateStoreError> {
     match value {
         JsonValue::String(text) => Ok(text.clone()),
-        _ => Err(StateStoreError::Integrity(format!("{name} must be a string"))),
+        _ => Err(StateStoreError::Integrity(format!(
+            "{name} must be a string"
+        ))),
     }
 }
 
@@ -401,10 +403,7 @@ impl BookState {
             .collect::<Result<Vec<_>, StateStoreError>>()?;
         Ok(Self {
             book_id: as_str(required(entries, "book_id")?, "book_id")?,
-            initial_cash: as_tagged_decimal(
-                required(entries, "initial_cash")?,
-                "initial_cash",
-            )?,
+            initial_cash: as_tagged_decimal(required(entries, "initial_cash")?, "initial_cash")?,
             cash: as_tagged_decimal(required(entries, "cash")?, "cash")?,
             fill_ids,
             fills,
@@ -573,10 +572,7 @@ impl VenueState {
         let entries = as_object(value)?;
         Ok(Self {
             id_ordinal: as_u64(required(entries, "id_ordinal")?, "venue id ordinal")?,
-            event_sequence: as_i64(
-                required(entries, "event_sequence")?,
-                "venue event sequence",
-            )?,
+            event_sequence: as_i64(required(entries, "event_sequence")?, "venue event sequence")?,
         })
     }
 }
@@ -719,17 +715,11 @@ impl RuntimeSnapshot {
             Some(value) => Some(VenueState::from_json(value)?),
         };
         let mut snapshot = Self {
-            format_version: as_u64(
-                required(entries, "format_version")?,
-                "format_version",
-            )?,
+            format_version: as_u64(required(entries, "format_version")?, "format_version")?,
             run_id: as_str(required(entries, "run_id")?, "run_id")?,
             trigger,
             sequence: as_u64(required(entries, "sequence")?, "sequence")?,
-            dispatched_count: as_u64(
-                required(entries, "dispatched_count")?,
-                "dispatched_count",
-            )?,
+            dispatched_count: as_u64(required(entries, "dispatched_count")?, "dispatched_count")?,
             market_event_count: as_u64(
                 required(entries, "market_event_count")?,
                 "market_event_count",
@@ -832,10 +822,7 @@ impl StoredSnapshot {
     /// outside this build.
     pub fn from_json(value: &JsonValue) -> Result<Self, StateStoreError> {
         let entries = as_object(value)?;
-        let format_version = as_u64(
-            required(entries, "format_version")?,
-            "format_version",
-        )?;
+        let format_version = as_u64(required(entries, "format_version")?, "format_version")?;
         if format_version != FORMAT_VERSION {
             return Err(StateStoreError::Version(format!(
                 "snapshot format version {format_version} is not supported; this build reads \
@@ -846,10 +833,7 @@ impl StoredSnapshot {
             format_version,
             run_id: as_str(required(entries, "run_id")?, "run_id")?,
             snapshot_id: as_str(required(entries, "snapshot_id")?, "snapshot_id")?,
-            payload_sha256: as_str(
-                required(entries, "payload_sha256")?,
-                "payload_sha256",
-            )?,
+            payload_sha256: as_str(required(entries, "payload_sha256")?, "payload_sha256")?,
             byte_length: as_u64(required(entries, "byte_length")?, "byte_length")?,
         };
         if pointer.byte_length == 0 {
@@ -1033,7 +1017,10 @@ impl RuntimeStateStore {
         Err(errors.remove(0))
     }
 
-    fn load_from(&self, store: &dyn SnapshotObjectStore) -> Result<RuntimeSnapshot, StateStoreError> {
+    fn load_from(
+        &self,
+        store: &dyn SnapshotObjectStore,
+    ) -> Result<RuntimeSnapshot, StateStoreError> {
         let pointer_key = pointer_key(&self.run_id);
         let raw = store.read(&pointer_key).ok_or_else(|| {
             StateStoreError::Missing(format!(
@@ -1041,7 +1028,9 @@ impl RuntimeStateStore {
             ))
         })?;
         let text = String::from_utf8(raw).map_err(|error| {
-            StateStoreError::Integrity(format!("object {pointer_key:?} is not valid UTF-8: {error}"))
+            StateStoreError::Integrity(format!(
+                "object {pointer_key:?} is not valid UTF-8: {error}"
+            ))
         })?;
         let pointer = StoredSnapshot::from_json(&parse_json(&text, &pointer_key)?)?;
         if pointer.run_id != self.run_id {
@@ -1339,10 +1328,7 @@ mod tests {
             order_owners: BTreeMap::from([("order-1".to_string(), "alpha".to_string())]),
             strategy_state: vec![StrategyState {
                 instance_id: "momentum".to_string(),
-                values: BTreeMap::from([(
-                    "warm".to_string(),
-                    JsonValue::Bool(true),
-                )]),
+                values: BTreeMap::from([("warm".to_string(), JsonValue::Bool(true))]),
             }],
             random_states: vec![RandomState {
                 instance_id: "momentum".to_string(),
@@ -1376,16 +1362,11 @@ mod tests {
     fn snapshot_round_trips_byte_identically() {
         let snapshot = sample_snapshot();
         let payload = snapshot.payload_bytes();
-        let reparsed = parse_json(
-            std::str::from_utf8(&payload).expect("utf8"),
-            "payload",
-        )
-        .expect("parse");
+        let reparsed =
+            parse_json(std::str::from_utf8(&payload).expect("utf8"), "payload").expect("parse");
         let entries = as_object(&reparsed).expect("object");
-        let restored = RuntimeSnapshot::from_json(
-            entries.get("snapshot").expect("snapshot key"),
-        )
-        .expect("restore");
+        let restored = RuntimeSnapshot::from_json(entries.get("snapshot").expect("snapshot key"))
+            .expect("restore");
         assert_eq!(restored.payload_bytes(), payload);
         assert_eq!(restored.snapshot_id(), snapshot.snapshot_id());
         assert_eq!(restored.to_json(), snapshot.to_json());
@@ -1440,9 +1421,6 @@ mod tests {
         store.save(&snapshot).expect("save");
         let key = payload_key("paper-run", &snapshot.snapshot_id());
         store.stores[0].replace(&key, b"tampered");
-        assert!(matches!(
-            store.load(),
-            Err(StateStoreError::Integrity(_))
-        ));
+        assert!(matches!(store.load(), Err(StateStoreError::Integrity(_))));
     }
 }

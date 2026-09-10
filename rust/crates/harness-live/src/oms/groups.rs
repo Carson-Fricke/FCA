@@ -510,8 +510,7 @@ impl MultiLegOrderGroup {
                     Ok(GroupOrderType::Market)
                 } else {
                     Err(LiveError::GroupTransition(
-                        "limit multi-leg order requires NET_DEBIT or NET_CREDIT order_type"
-                            .into(),
+                        "limit multi-leg order requires NET_DEBIT or NET_CREDIT order_type".into(),
                     ))
                 }
             }
@@ -692,10 +691,7 @@ mod tests {
     fn call_spread(order_id: &str, order_type: OrderType, limit: Option<&str>) -> MultiLegOrder {
         MultiLegOrder::new(
             order_id,
-            vec![
-                leg("AAPL", Side::Buy, "1"),
-                leg("MSFT", Side::Sell, "1"),
-            ],
+            vec![leg("AAPL", Side::Buy, "1"), leg("MSFT", Side::Sell, "1")],
             order_type,
             crate::orders::TimeInForce::Day,
             None,
@@ -704,7 +700,14 @@ mod tests {
         .unwrap()
     }
 
-    fn fill(order_id: &str, fill_id: &str, symbol: &str, side: Side, quantity: &str, price: &str) -> Fill {
+    fn fill(
+        order_id: &str,
+        fill_id: &str,
+        symbol: &str,
+        side: Side,
+        quantity: &str,
+        price: &str,
+    ) -> Fill {
         Fill::new(
             fill_id,
             order_id,

@@ -53,9 +53,7 @@ impl FillModel {
 mod tests {
     use super::{FillModel, LatencySize, LatencySizeConfig};
     use crate::market::{OrderType, Side};
-    use crate::simple_touch::testing::{
-        default_quote, expect_decision, make_order, ONE0ONE, TEN,
-    };
+    use crate::simple_touch::testing::{default_quote, expect_decision, make_order, ONE0ONE, TEN};
     use crate::simple_touch::{DecideOptions, Liquidity};
 
     #[test]

@@ -194,11 +194,19 @@ mod tests {
         );
 
         assert!(model
-            .decide(&buy, &large_quote("quote", HUNDRED, HUNDRED + HALF), &DecideOptions::default())
+            .decide(
+                &buy,
+                &large_quote("quote", HUNDRED, HUNDRED + HALF),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_none());
         assert!(model
-            .decide(&buy, &make_trade("trade", HUNDRED + HALF, HUNDRED), &DecideOptions::default())
+            .decide(
+                &buy,
+                &make_trade("trade", HUNDRED + HALF, HUNDRED),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_none());
 
@@ -229,13 +237,26 @@ mod tests {
             None,
         );
         assert!(model
-            .decide(&buy, &make_trade("at-limit", HUNDRED + HALF, HUNDRED), &DecideOptions::default())
+            .decide(
+                &buy,
+                &make_trade("at-limit", HUNDRED + HALF, HUNDRED),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_none());
         let buy_through = model
-            .decide(&buy, &make_trade("through", HUNDRED + HALF - 10_000_000_000_000_000, HUNDRED), &DecideOptions::default())
+            .decide(
+                &buy,
+                &make_trade("through", HUNDRED + HALF - 10_000_000_000_000_000, HUNDRED),
+                &DecideOptions::default(),
+            )
             .unwrap();
-        expect_decision(buy_through, HUNDRED, HUNDRED + HALF - 10_000_000_000_000_000, Liquidity::Maker);
+        expect_decision(
+            buy_through,
+            HUNDRED,
+            HUNDRED + HALF - 10_000_000_000_000_000,
+            Liquidity::Maker,
+        );
 
         let sell = make_order(
             "direction-sell",
@@ -246,13 +267,26 @@ mod tests {
             None,
         );
         assert!(model
-            .decide(&sell, &make_trade("at-limit", HUNDRED + HALF, HUNDRED), &DecideOptions::default())
+            .decide(
+                &sell,
+                &make_trade("at-limit", HUNDRED + HALF, HUNDRED),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_none());
         let sell_through = model
-            .decide(&sell, &make_trade("through", HUNDRED + HALF + 10_000_000_000_000_000, HUNDRED), &DecideOptions::default())
+            .decide(
+                &sell,
+                &make_trade("through", HUNDRED + HALF + 10_000_000_000_000_000, HUNDRED),
+                &DecideOptions::default(),
+            )
             .unwrap();
-        expect_decision(sell_through, HUNDRED, HUNDRED + HALF + 10_000_000_000_000_000, Liquidity::Maker);
+        expect_decision(
+            sell_through,
+            HUNDRED,
+            HUNDRED + HALF + 10_000_000_000_000_000,
+            Liquidity::Maker,
+        );
     }
 
     #[test]
@@ -281,10 +315,17 @@ mod tests {
         );
         let print_event = make_trade("print", HUNDRED + HALF - 10_000_000_000_000_000, HUNDRED);
 
-        let cancel_decision = cancel_model.decide(&cancel_order, &print_event, &DecideOptions::default()).unwrap();
-        let rest_decision = rest_model.decide(&rest_order, &print_event, &DecideOptions::default()).unwrap();
+        let cancel_decision = cancel_model
+            .decide(&cancel_order, &print_event, &DecideOptions::default())
+            .unwrap();
+        let rest_decision = rest_model
+            .decide(&rest_order, &print_event, &DecideOptions::default())
+            .unwrap();
         assert!(cancel_decision.is_some() && rest_decision.is_some());
-        assert_eq!(cancel_decision.unwrap().quantity, rest_decision.unwrap().quantity);
+        assert_eq!(
+            cancel_decision.unwrap().quantity,
+            rest_decision.unwrap().quantity
+        );
         assert_eq!(rest_decision.unwrap().quantity, HUNDRED);
         assert!(cancel_model.is_cancelled(cancel_order.order_id));
         assert!(!rest_model.is_cancelled(rest_order.order_id));
@@ -322,15 +363,31 @@ mod tests {
         );
 
         assert!(default_model
-            .decide(&buy, &make_trade("trade", HUNDRED + HALF, HUNDRED), &DecideOptions::default())
+            .decide(
+                &buy,
+                &make_trade("trade", HUNDRED + HALF, HUNDRED),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_none());
         let decision = configured
-            .decide(&buy, &make_trade("configured", HUNDRED + 400_000_000_000_000_000, HUNDRED), &DecideOptions::default())
+            .decide(
+                &buy,
+                &make_trade("configured", HUNDRED + 400_000_000_000_000_000, HUNDRED),
+                &DecideOptions::default(),
+            )
             .unwrap();
-        expect_decision(decision, HUNDRED, HUNDRED + 400_000_000_000_000_000, Liquidity::Maker);
+        expect_decision(
+            decision,
+            HUNDRED,
+            HUNDRED + 400_000_000_000_000_000,
+            Liquidity::Maker,
+        );
         assert_eq!(configured.metadata().response_latency_us, 40);
-        assert_eq!(configured.metadata().minimum_trade_through, 100_000_000_000_000_000);
+        assert_eq!(
+            configured.metadata().minimum_trade_through,
+            100_000_000_000_000_000
+        );
     }
 
     #[test]

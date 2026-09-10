@@ -174,19 +174,16 @@ impl IndicatorRegistry {
         let resolved = resolve_parameters(spec, params)?;
         let indicator: Box<dyn TickIndicator> = match spec.kind {
             IndicatorKind::Sma => Box::new(SimpleMovingAverage::new(resolved_integer(
-                &resolved,
-                "period",
+                &resolved, "period",
             )?)?),
             IndicatorKind::Ema => Box::new(ExponentialMovingAverage::new(resolved_integer(
                 &resolved, "span",
             )?)?),
             IndicatorKind::Rsi => Box::new(RelativeStrengthIndex::new(resolved_integer(
-                &resolved,
-                "period",
+                &resolved, "period",
             )?)?),
             IndicatorKind::MidSma => Box::new(MidSimpleMovingAverage::new(resolved_integer(
-                &resolved,
-                "period",
+                &resolved, "period",
             )?)?),
         };
         Ok(ConfiguredIndicator {
@@ -214,7 +211,9 @@ fn is_valid_name(name: &str) -> bool {
         Some(first) if first.is_ascii_lowercase() => {}
         _ => return false,
     }
-    chars.all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_')
+    chars.all(|character| {
+        character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+    })
 }
 
 fn resolve_parameters(
@@ -264,10 +263,7 @@ fn validate(param: &IndicatorParam, value: &ParamValue) -> Result<ParamValue, In
         ))),
         (IndicatorParamKind::Duration, ParamValue::Duration(text)) => {
             parse_duration_ns(text).map_err(|message| {
-                IndicatorError::Configuration(format!(
-                    "parameter {:?} {message}",
-                    param.name
-                ))
+                IndicatorError::Configuration(format!("parameter {:?} {message}", param.name))
             })?;
             Ok(ParamValue::Duration(text.clone()))
         }

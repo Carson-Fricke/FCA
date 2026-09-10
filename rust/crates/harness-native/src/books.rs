@@ -321,8 +321,11 @@ impl VirtualBook {
 
         let mut next_cost_basis: i128;
         if quantity == 0 || (quantity > 0) == (signed > 0) {
-            next_cost_basis = decimal::add(cost_basis, decimal::mul(signed, fill.price).map_err(decimal_error)?)
-                .map_err(decimal_error)?;
+            next_cost_basis = decimal::add(
+                cost_basis,
+                decimal::mul(signed, fill.price).map_err(decimal_error)?,
+            )
+            .map_err(decimal_error)?;
         } else if abs_less_or_equal(signed, quantity) {
             let released_basis = if abs_equal(signed, quantity) {
                 cost_basis
@@ -351,8 +354,7 @@ impl VirtualBook {
                 .map_err(decimal_error)?,
             )
             .map_err(decimal_error)?;
-            next_cost_basis =
-                decimal::mul(next_quantity, fill.price).map_err(decimal_error)?;
+            next_cost_basis = decimal::mul(next_quantity, fill.price).map_err(decimal_error)?;
         }
 
         realized_pnl = decimal::sub(realized_pnl, fill.fee).map_err(decimal_error)?;
@@ -370,8 +372,11 @@ impl VirtualBook {
             realized_pnl = next_cash_flow;
         }
         let next_cash = decimal::sub(
-            decimal::sub(self.cash, decimal::mul(signed, fill.price).map_err(decimal_error)?)
-                .map_err(decimal_error)?,
+            decimal::sub(
+                self.cash,
+                decimal::mul(signed, fill.price).map_err(decimal_error)?,
+            )
+            .map_err(decimal_error)?,
             fill.fee,
         )
         .map_err(decimal_error)?;
@@ -402,8 +407,8 @@ impl VirtualBook {
         if self.ledgers[index].quantity == 0 {
             return Err(Error::PositionFlat);
         }
-        let next_cash_flow = decimal::add(self.ledgers[index].cash_flow, settlement_value)
-            .map_err(decimal_error)?;
+        let next_cash_flow =
+            decimal::add(self.ledgers[index].cash_flow, settlement_value).map_err(decimal_error)?;
         let stored_symbol = self.ledgers[index].symbol.clone();
         self.ledgers[index] = Ledger {
             symbol: stored_symbol,
@@ -488,13 +493,14 @@ impl VirtualBook {
     }
 
     fn marker_index(&self, symbol: &str) -> Option<usize> {
-        self.markers
-            .iter()
-            .position(|entry| entry.symbol == symbol)
+        self.markers.iter().position(|entry| entry.symbol == symbol)
     }
 
     fn upsert_ledger(&mut self, ledger: Ledger) {
-        match self.ledgers.binary_search_by(|existing| existing.symbol.as_str().cmp(ledger.symbol.as_str())) {
+        match self
+            .ledgers
+            .binary_search_by(|existing| existing.symbol.as_str().cmp(ledger.symbol.as_str()))
+        {
             Ok(index) => self.ledgers[index] = ledger,
             Err(index) => self.ledgers.insert(index, ledger),
         }
@@ -547,7 +553,14 @@ mod tests {
         let mut book = VirtualBook::new("alpha", from_int(10_000));
 
         let first = book
-            .apply_fill(&book_fill("buy-1", Side::Buy, from_int(10), from_int(100), ONE, "AAPL"))
+            .apply_fill(&book_fill(
+                "buy-1",
+                Side::Buy,
+                from_int(10),
+                from_int(100),
+                ONE,
+                "AAPL",
+            ))
             .unwrap();
         assert_eq!(first.quantity, from_int(10));
         assert_eq!(first.average_cost().unwrap(), from_int(100));
@@ -601,7 +614,10 @@ mod tests {
         assert_eq!(marker.price, from_int(85));
         assert_eq!(marked.mark_price, Some(from_int(85)));
         assert_eq!(marked.unrealized_pnl().unwrap(), Some(from_int(15)));
-        assert_eq!(marked.total_pnl().unwrap(), Some(-7_500_000_000_000_000_000));
+        assert_eq!(
+            marked.total_pnl().unwrap(),
+            Some(-7_500_000_000_000_000_000)
+        );
 
         let snap = book.snapshot();
         assert_eq!(snap.equity().unwrap(), Some(9_992_500_000_000_000_000_000));
@@ -617,8 +633,15 @@ mod tests {
     #[test]
     fn flat_position_retains_realized_pnl_and_needs_no_marker() {
         let mut book = VirtualBook::new("round-trip", from_int(1_000));
-        book.apply_fill(&book_fill("buy", Side::Buy, from_int(2), from_int(10), 0, "AAPL"))
-            .unwrap();
+        book.apply_fill(&book_fill(
+            "buy",
+            Side::Buy,
+            from_int(2),
+            from_int(10),
+            0,
+            "AAPL",
+        ))
+        .unwrap();
         book.apply_fill(&book_fill(
             "buy-recurring-average",
             Side::Buy,
@@ -697,7 +720,10 @@ mod tests {
 
         let snap = book.snapshot();
         assert_eq!(snap.equity().unwrap(), Some(from_int(800)));
-        assert_eq!(snap.total_pnl().unwrap(), Some(-200_000_000_000_000_000_000));
+        assert_eq!(
+            snap.total_pnl().unwrap(),
+            Some(-200_000_000_000_000_000_000)
+        );
 
         let mut assigned = VirtualBook::new("assignment", from_int(1_000));
         assigned
@@ -752,7 +778,8 @@ mod tests {
                 let buy = ((case_index >> step) + step) % 2 == 0;
                 let side = if buy { Side::Buy } else { Side::Sell };
                 let quantity: i128 = ((case_index * (step + 3) + step) % 7 + 1) as i128 * ONE;
-                let price: i128 = (9000 + (case_index * 37 + step * 101) % 3001) as i128 * ONE / 100;
+                let price: i128 =
+                    (9000 + (case_index * 37 + step * 101) % 3001) as i128 * ONE / 100;
                 let fee: i128 = (((case_index + step * 3) % 7) as i128 - 2) * ONE / 100;
                 let signed: i128 = if buy { quantity } else { -quantity };
                 expected_cash -= mul_div(signed, price, ONE).unwrap() + fee;

@@ -264,8 +264,14 @@ impl VirtualBook {
         };
         let current = self.positions.get(&fill.symbol).cloned();
         let quantity = current.as_ref().map(|entry| entry.quantity).unwrap_or(ZERO);
-        let cost_basis = current.as_ref().map(|entry| entry.cost_basis).unwrap_or(ZERO);
-        let cash_flow = current.as_ref().map(|entry| entry.cash_flow).unwrap_or(ZERO);
+        let cost_basis = current
+            .as_ref()
+            .map(|entry| entry.cost_basis)
+            .unwrap_or(ZERO);
+        let cash_flow = current
+            .as_ref()
+            .map(|entry| entry.cash_flow)
+            .unwrap_or(ZERO);
         let mut realized_pnl = current
             .as_ref()
             .map(|entry| entry.realized_pnl)
@@ -302,7 +308,8 @@ impl VirtualBook {
             realized_pnl,
         };
         self.cash = self.cash - signed_quantity * fill.price - fill.fee;
-        self.positions.insert(fill.symbol.clone(), next_ledger.clone());
+        self.positions
+            .insert(fill.symbol.clone(), next_ledger.clone());
         self.fill_ids.push(fill.fill_id.clone());
         self.seen_fill_ids.insert(fill.fill_id.clone());
         Ok(self.position_snapshot(&fill.symbol, &next_ledger))
@@ -316,9 +323,7 @@ impl VirtualBook {
     ) -> LiveResult<PositionSnapshot> {
         let canonical = canonical_symbol(symbol)?;
         let Some(ledger) = self.positions.get(&canonical) else {
-            return Err(LiveError::Portfolio(format!(
-                "unknown position {symbol:?}"
-            )));
+            return Err(LiveError::Portfolio(format!("unknown position {symbol:?}")));
         };
         if ledger.quantity == ZERO {
             return Err(LiveError::Portfolio(format!(
@@ -332,7 +337,8 @@ impl VirtualBook {
             cash_flow: next_cash_flow,
             realized_pnl: next_cash_flow,
         };
-        self.positions.insert(canonical.clone(), next_ledger.clone());
+        self.positions
+            .insert(canonical.clone(), next_ledger.clone());
         self.cash += settlement_value;
         Ok(self.position_snapshot(&canonical, &next_ledger))
     }
@@ -357,17 +363,14 @@ impl VirtualBook {
     /// The current immutable state for one previously held symbol.
     pub fn position(&self, symbol: &str) -> LiveResult<PositionSnapshot> {
         let canonical = canonical_symbol(symbol)?;
-        let ledger = self.positions.get(&canonical).ok_or_else(|| {
-            LiveError::Portfolio(format!("unknown position {symbol:?}"))
-        })?;
+        let ledger = self
+            .positions
+            .get(&canonical)
+            .ok_or_else(|| LiveError::Portfolio(format!("unknown position {symbol:?}")))?;
         Ok(self.position_snapshot(&canonical, ledger))
     }
 
-    fn position_snapshot(
-        &self,
-        symbol: &Symbol,
-        ledger: &PositionLedger,
-    ) -> PositionSnapshot {
+    fn position_snapshot(&self, symbol: &Symbol, ledger: &PositionLedger) -> PositionSnapshot {
         PositionSnapshot {
             symbol: symbol.clone(),
             quantity: ledger.quantity,

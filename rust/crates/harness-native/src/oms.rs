@@ -393,8 +393,8 @@ fn validated_notional(current: &OrderSnapshot, report: &ExecutionReport) -> Resu
         current.filled_notional
     };
 
-    let expected_remaining = decimal::sub(current.order.quantity, report.filled_quantity)
-        .map_err(decimal_error)?;
+    let expected_remaining =
+        decimal::sub(current.order.quantity, report.filled_quantity).map_err(decimal_error)?;
     if report.remaining_quantity != expected_remaining {
         return Err(Error::ExecutionLedger);
     }
@@ -404,8 +404,8 @@ fn validated_notional(current: &OrderSnapshot, report: &ExecutionReport) -> Resu
             return Err(Error::ExecutionLedger);
         }
     } else {
-        let expected_average = decimal::div(filled_notional, report.filled_quantity)
-            .map_err(decimal_error)?;
+        let expected_average =
+            decimal::div(filled_notional, report.filled_quantity).map_err(decimal_error)?;
         if report.average_fill_price != Some(expected_average) {
             return Err(Error::ExecutionLedger);
         }
@@ -474,8 +474,7 @@ pub fn report_from(
         execution_type,
         order_quantity: snapshot.order.quantity,
         filled_quantity: filled,
-        remaining_quantity: decimal::sub(snapshot.order.quantity, filled)
-            .map_err(decimal_error)?,
+        remaining_quantity: decimal::sub(snapshot.order.quantity, filled).map_err(decimal_error)?,
         average_fill_price: match average {
             AverageArg::Computed => calculated,
             AverageArg::Explicit(value) => value,
@@ -656,7 +655,8 @@ impl SingleLegOMS {
         };
         self.replacements
             .push((original_order_id.to_owned(), record.clone()));
-        self.used_order_ids.push(record.replacement.order_id.clone());
+        self.used_order_ids
+            .push(record.replacement.order_id.clone());
         Ok(record)
     }
 
@@ -776,9 +776,7 @@ impl SingleLegOMS {
     }
 
     fn find_used_order_id(&self, order_id: &str) -> Option<usize> {
-        self.used_order_ids
-            .iter()
-            .position(|used| used == order_id)
+        self.used_order_ids.iter().position(|used| used == order_id)
     }
 
     fn replacement_index(&self, original_order_id: &str) -> Option<usize> {
@@ -820,8 +818,8 @@ pub fn snapshots_equal(a: &OrderSnapshot, b: &OrderSnapshot) -> bool {
 mod tests {
     use super::{
         computed_average, report_from, snapshots_equal, AverageArg, Error, ExecutionType,
-        OrderSnapshot, OrderStateMachine, OrderStatus, ReplaceStatus, SessionAction,
-        SingleLegOMS, SingleLegOrder,
+        OrderSnapshot, OrderStateMachine, OrderStatus, ReplaceStatus, SessionAction, SingleLegOMS,
+        SingleLegOrder,
     };
     use crate::decimal::from_int;
     use crate::market::{OrderType, Side, TimeInForce};
@@ -1112,28 +1110,32 @@ mod tests {
                 let mut machine = OrderStateMachine::new(order);
                 apply_ack(&mut machine, "ack").unwrap();
                 let partial = machine
-                    .apply(report_for(
-                        &machine,
-                        OrderStatus::PartiallyFilled,
-                        ExecutionType::PartialFill,
-                        "partial",
-                        from_int(3),
-                        Some(from_int(100)),
-                        computed_average(),
+                    .apply(
+                        report_for(
+                            &machine,
+                            OrderStatus::PartiallyFilled,
+                            ExecutionType::PartialFill,
+                            "partial",
+                            from_int(3),
+                            Some(from_int(100)),
+                            computed_average(),
+                        )
+                        .unwrap(),
                     )
-                    .unwrap())
                     .unwrap();
                 let filled = machine
-                    .apply(report_for(
-                        &machine,
-                        OrderStatus::Filled,
-                        ExecutionType::Fill,
-                        "fill",
-                        from_int(7),
-                        Some(from_int(101)),
-                        computed_average(),
+                    .apply(
+                        report_for(
+                            &machine,
+                            OrderStatus::Filled,
+                            ExecutionType::Fill,
+                            "fill",
+                            from_int(7),
+                            Some(from_int(101)),
+                            computed_average(),
+                        )
+                        .unwrap(),
                     )
-                    .unwrap())
                     .unwrap();
                 assert_eq!(partial.status, OrderStatus::PartiallyFilled);
                 assert_eq!(filled.status, OrderStatus::Filled);
@@ -1150,52 +1152,60 @@ mod tests {
         let mut machine = OrderStateMachine::new(test_order("order-1"));
         apply_ack(&mut machine, "ack").unwrap();
         machine
-            .apply(report_for(
-                &machine,
-                OrderStatus::PartiallyFilled,
-                ExecutionType::PartialFill,
-                "partial-1",
-                125_000_000_000_000_000,
-                Some(10_010_000_000_000_000_000),
-                computed_average(),
+            .apply(
+                report_for(
+                    &machine,
+                    OrderStatus::PartiallyFilled,
+                    ExecutionType::PartialFill,
+                    "partial-1",
+                    125_000_000_000_000_000,
+                    Some(10_010_000_000_000_000_000),
+                    computed_average(),
+                )
+                .unwrap(),
             )
-            .unwrap())
             .unwrap();
         let partial = machine
-            .apply(report_for(
-                &machine,
-                OrderStatus::PartiallyFilled,
-                ExecutionType::PartialFill,
-                "partial-2",
-                375_000_000_000_000_000,
-                Some(10_030_000_000_000_000_000),
-                computed_average(),
+            .apply(
+                report_for(
+                    &machine,
+                    OrderStatus::PartiallyFilled,
+                    ExecutionType::PartialFill,
+                    "partial-2",
+                    375_000_000_000_000_000,
+                    Some(10_030_000_000_000_000_000),
+                    computed_average(),
+                )
+                .unwrap(),
             )
-            .unwrap())
             .unwrap();
         machine
-            .apply(report_for(
-                &machine,
-                OrderStatus::CancelPending,
-                ExecutionType::Status,
-                "cancel-pending",
-                0,
-                None,
-                computed_average(),
+            .apply(
+                report_for(
+                    &machine,
+                    OrderStatus::CancelPending,
+                    ExecutionType::Status,
+                    "cancel-pending",
+                    0,
+                    None,
+                    computed_average(),
+                )
+                .unwrap(),
             )
-            .unwrap())
             .unwrap();
         let canceled = machine
-            .apply(report_for(
-                &machine,
-                OrderStatus::Canceled,
-                ExecutionType::Canceled,
-                "canceled",
-                0,
-                None,
-                computed_average(),
+            .apply(
+                report_for(
+                    &machine,
+                    OrderStatus::Canceled,
+                    ExecutionType::Canceled,
+                    "canceled",
+                    0,
+                    None,
+                    computed_average(),
+                )
+                .unwrap(),
             )
-            .unwrap())
             .unwrap();
 
         assert_eq!(partial.filled_quantity, 500_000_000_000_000_000);
@@ -1363,11 +1373,20 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let replacement = manager_order("replacement", TimeInForce::Day, Side::Buy, "AAPL", from_int(6));
+        let replacement = manager_order(
+            "replacement",
+            TimeInForce::Day,
+            Side::Buy,
+            "AAPL",
+            from_int(6),
+        );
 
         let pending = oms.request_replace("original", replacement).unwrap();
         assert_eq!(pending.status, ReplaceStatus::Pending);
-        assert_eq!(oms.state("original").unwrap().status, OrderStatus::PartiallyFilled);
+        assert_eq!(
+            oms.state("original").unwrap().status,
+            OrderStatus::PartiallyFilled
+        );
         assert!(oms.replaced_by("original").is_none());
         assert_eq!(oms.state("replacement"), Err(Error::UnknownOrder));
 
@@ -1389,7 +1408,10 @@ mod tests {
 
         assert_eq!(replaced.status, OrderStatus::Replaced);
         assert_eq!(replaced.filled_quantity, 1_250_000_000_000_000_000);
-        assert_eq!(replaced.average_fill_price, Some(100_100_000_000_000_000_000));
+        assert_eq!(
+            replaced.average_fill_price,
+            Some(100_100_000_000_000_000_000)
+        );
         assert_eq!(oms.state("replacement").unwrap().status, OrderStatus::New);
         assert_eq!(oms.replaced_by("original"), Some("replacement"));
         assert_eq!(oms.replaces("replacement"), Some("original"));
@@ -1539,14 +1561,38 @@ mod tests {
     #[test]
     fn ioc_expiry_and_gtc_session_carry_over() {
         let mut oms = SingleLegOMS::new();
-        oms.submit(manager_order("local-new", TimeInForce::Gtc, Side::Buy, "AAPL", ten()))
-            .unwrap();
-        oms.submit(manager_order("day", TimeInForce::Day, Side::Buy, "AAPL", ten()))
-            .unwrap();
-        oms.submit(manager_order("gtc", TimeInForce::Gtc, Side::Buy, "AAPL", ten()))
-            .unwrap();
-        oms.submit(manager_order("ioc", TimeInForce::Ioc, Side::Buy, "AAPL", ten()))
-            .unwrap();
+        oms.submit(manager_order(
+            "local-new",
+            TimeInForce::Gtc,
+            Side::Buy,
+            "AAPL",
+            ten(),
+        ))
+        .unwrap();
+        oms.submit(manager_order(
+            "day",
+            TimeInForce::Day,
+            Side::Buy,
+            "AAPL",
+            ten(),
+        ))
+        .unwrap();
+        oms.submit(manager_order(
+            "gtc",
+            TimeInForce::Gtc,
+            Side::Buy,
+            "AAPL",
+            ten(),
+        ))
+        .unwrap();
+        oms.submit(manager_order(
+            "ioc",
+            TimeInForce::Ioc,
+            Side::Buy,
+            "AAPL",
+            ten(),
+        ))
+        .unwrap();
         acknowledge(&mut oms, "day", "ack-day").unwrap();
         acknowledge(&mut oms, "gtc", "ack-gtc").unwrap();
         acknowledge(&mut oms, "ioc", "ack-ioc").unwrap();
@@ -1589,7 +1635,10 @@ mod tests {
         assert_eq!(ioc_expired.status, OrderStatus::Expired);
         assert_eq!(ioc_expired.filled_quantity, 2_500_000_000_000_000_000);
         assert_eq!(ioc_expired.remaining_quantity, 7_500_000_000_000_000_000);
-        assert_eq!(ioc_expired.average_fill_price, Some(100_050_000_000_000_000_000));
+        assert_eq!(
+            ioc_expired.average_fill_price,
+            Some(100_050_000_000_000_000_000)
+        );
         assert_eq!(day_expired.status, OrderStatus::Expired);
         assert_eq!(oms.state("gtc").unwrap().status, OrderStatus::Accepted);
         assert_eq!(oms.state("local-new").unwrap().status, OrderStatus::New);
@@ -1621,10 +1670,22 @@ mod tests {
     #[test]
     fn expiry_policy_refusals() {
         let mut oms = SingleLegOMS::new();
-        oms.submit(manager_order("gtc", TimeInForce::Gtc, Side::Buy, "AAPL", ten()))
-            .unwrap();
-        oms.submit(manager_order("day", TimeInForce::Day, Side::Buy, "AAPL", ten()))
-            .unwrap();
+        oms.submit(manager_order(
+            "gtc",
+            TimeInForce::Gtc,
+            Side::Buy,
+            "AAPL",
+            ten(),
+        ))
+        .unwrap();
+        oms.submit(manager_order(
+            "day",
+            TimeInForce::Day,
+            Side::Buy,
+            "AAPL",
+            ten(),
+        ))
+        .unwrap();
         acknowledge(&mut oms, "gtc", "ack-gtc").unwrap();
         acknowledge(&mut oms, "day", "ack-day").unwrap();
 

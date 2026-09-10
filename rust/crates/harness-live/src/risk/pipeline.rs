@@ -121,8 +121,7 @@ impl RiskPipeline {
                 }
                 RiskAction::Reduce => {
                     if result.order == current {
-                        let message =
-                            format!("{} returned an unchanged reduction", rule.rule_id());
+                        let message = format!("{} returned an unchanged reduction", rule.rule_id());
                         reasons.push(message.clone());
                         audits.push(RiskAudit {
                             sequence: audits.len(),
@@ -268,7 +267,9 @@ mod tests {
     #[test]
     fn daily_loss_halt_rejects_with_scope() {
         let pipeline = RiskPipeline::new(
-            vec![Box::new(DailyLossHalt::new("daily-loss", dec("10")).unwrap())],
+            vec![Box::new(
+                DailyLossHalt::new("daily-loss", dec("10")).unwrap(),
+            )],
             OnReject::HaltStrategy,
         )
         .unwrap();

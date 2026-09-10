@@ -381,7 +381,10 @@ pub mod replay {
         }
     }
 
-    fn validate_source_event(source: &EventSource<'_>, event: MarketEvent<'_>) -> Result<(), Error> {
+    fn validate_source_event(
+        source: &EventSource<'_>,
+        event: MarketEvent<'_>,
+    ) -> Result<(), Error> {
         if event.symbol() != source.symbol() {
             return Err(Error::SymbolMismatch);
         }
@@ -400,7 +403,9 @@ mod tests {
     use crate::books::{Fill, VirtualBook};
     use crate::decimal::from_int;
     use crate::fills::FillModel;
-    use crate::market::{EventType, MarketEvent, MarketOrder, OrderType, QuoteEvent, Side, TimeInForce, TradeEvent};
+    use crate::market::{
+        EventType, MarketEvent, MarketOrder, OrderType, QuoteEvent, Side, TimeInForce, TradeEvent,
+    };
     use crate::market_bus::shared_clock;
     use crate::matching::SimulatedVenue;
     use crate::oms::{self, ExecutionType, OrderStatus};
@@ -409,7 +414,11 @@ mod tests {
     const MICRO: i128 = 1_000;
     const DAY_NS: i128 = 86_400 * 1_000_000_000;
 
-    fn replay_quote(event_id: &'static str, offset_us: i128, sequence: u64) -> MarketEvent<'static> {
+    fn replay_quote(
+        event_id: &'static str,
+        offset_us: i128,
+        sequence: u64,
+    ) -> MarketEvent<'static> {
         MarketEvent::Quote(QuoteEvent {
             event_id,
             timestamp_ns: STAMP_NS + offset_us * MICRO,
@@ -423,7 +432,11 @@ mod tests {
         })
     }
 
-    fn replay_trade(event_id: &'static str, offset_us: i128, sequence: u64) -> MarketEvent<'static> {
+    fn replay_trade(
+        event_id: &'static str,
+        offset_us: i128,
+        sequence: u64,
+    ) -> MarketEvent<'static> {
         MarketEvent::Trade(TradeEvent {
             event_id,
             timestamp_ns: STAMP_NS + offset_us * MICRO,
@@ -438,7 +451,10 @@ mod tests {
 
     #[test]
     fn same_timestamp_merge_uses_sequence_class_priority_then_feed_order() {
-        let trades = [replay_trade("trade-sequence", 0, 2), replay_trade("trade-tie", 0, 4)];
+        let trades = [
+            replay_trade("trade-sequence", 0, 2),
+            replay_trade("trade-tie", 0, 4),
+        ];
         let quotes = [
             replay_quote("quote-sequence", 0, 2),
             replay_quote("quote-first", 0, 4),
@@ -529,11 +545,9 @@ mod tests {
             .unwrap();
         feed.add_session(Session::new(19_741, STAMP_NS, STAMP_NS + 60 * MICRO).unwrap())
             .unwrap();
-        feed.add_session(Session::new(
-            19_742,
-            STAMP_NS + 60 * MICRO,
-            STAMP_NS + 120 * MICRO,
-        ).unwrap())
+        feed.add_session(
+            Session::new(19_742, STAMP_NS + 60 * MICRO, STAMP_NS + 120 * MICRO).unwrap(),
+        )
         .unwrap();
 
         let mut merged = Vec::new();
@@ -568,22 +582,22 @@ mod tests {
         let quote_events = [replay_quote("q1", 0, 1)];
         let trade_events = [replay_trade("t1", 0, 2)];
         let mut feed = ReplayFeed::new();
-        feed.add_source(EventSource::new("SPY", Some(EventType::Quote), None, &quote_events).unwrap())
-            .unwrap();
-        feed.add_source(EventSource::new("SPY", Some(EventType::Trade), None, &trade_events).unwrap())
-            .unwrap();
+        feed.add_source(
+            EventSource::new("SPY", Some(EventType::Quote), None, &quote_events).unwrap(),
+        )
+        .unwrap();
+        feed.add_source(
+            EventSource::new("SPY", Some(EventType::Trade), None, &trade_events).unwrap(),
+        )
+        .unwrap();
         feed.add_session(Session::utc_day(19_741)).unwrap();
         let mut merged = Vec::new();
         feed.merge_all(&mut merged).unwrap();
         assert_eq!(merged.len(), 2);
 
         // Matching venue turns a crossing order into reports and fills.
-        let mut venue = SimulatedVenue::new(
-            FillModel::SimpleTouch,
-            0,
-            Some(shared_clock(STAMP_NS)),
-        )
-        .unwrap();
+        let mut venue =
+            SimulatedVenue::new(FillModel::SimpleTouch, 0, Some(shared_clock(STAMP_NS))).unwrap();
         venue.on_market(replay_quote("q1", 0, 1)).unwrap();
         venue.drain().unwrap();
         let order = MarketOrder {

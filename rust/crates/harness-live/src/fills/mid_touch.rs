@@ -65,11 +65,7 @@ impl MidTouch {
     }
 
     /// Return whether a stop order is armed by this market snapshot.
-    pub fn is_triggered(
-        &self,
-        order: &SingleLegOrder,
-        market: &MarketEvent,
-    ) -> LiveResult<bool> {
+    pub fn is_triggered(&self, order: &SingleLegOrder, market: &MarketEvent) -> LiveResult<bool> {
         SimpleTouch::new().is_triggered(order, market)
     }
 
@@ -188,9 +184,7 @@ impl MidTouch {
         }
 
         let Some(limit) = order.limit_price else {
-            return Err(LiveError::Fill(
-                "limit order is missing limit_price".into(),
-            ));
+            return Err(LiveError::Fill("limit order is missing limit_price".into()));
         };
         let Some(midpoint) = self.mid_execution(quote)? else {
             return Ok(None);
@@ -247,7 +241,10 @@ fn is_multiple(value: Decimal18, tick: Decimal18) -> bool {
         return false;
     }
     let quotient = value / tick;
-    quotient == quotient.round_to(RoundingMode::Truncate, 0).unwrap_or(quotient)
+    quotient
+        == quotient
+            .round_to(RoundingMode::Truncate, 0)
+            .unwrap_or(quotient)
 }
 
 #[cfg(test)]
@@ -325,7 +322,13 @@ mod tests {
     #[test]
     fn market_order_fills_at_far_touch() {
         let decision = MidTouch::default()
-            .decide(&order(OrderType::Market, None), &quote("100", "101"), None, None, false)
+            .decide(
+                &order(OrderType::Market, None),
+                &quote("100", "101"),
+                None,
+                None,
+                false,
+            )
             .unwrap()
             .unwrap();
         assert_eq!(decision.price, dec("101"));

@@ -276,8 +276,8 @@ pub fn total_return(points: &[EquityPoint]) -> Result<Option<i128>, MetricsError
     if points.len() < 2 || points[0].equity == ZERO {
         return Ok(None);
     }
-    let ratio = decimal::div(points[points.len() - 1].equity, points[0].equity)
-        .map_err(decimal_error)?;
+    let ratio =
+        decimal::div(points[points.len() - 1].equity, points[0].equity).map_err(decimal_error)?;
     Ok(Some(decimal::sub(ratio, ONE).map_err(decimal_error)?))
 }
 
@@ -297,11 +297,8 @@ pub fn cagr(points: &[EquityPoint]) -> Result<Option<f64>, MetricsError> {
     if growth <= ZERO {
         return Ok(None);
     }
-    let years = decimal::div(
-        i128::from(span) * ONE,
-        i128::from(NANOS_PER_YEAR_365) * ONE,
-    )
-    .map_err(decimal_error)?;
+    let years = decimal::div(i128::from(span) * ONE, i128::from(NANOS_PER_YEAR_365) * ONE)
+        .map_err(decimal_error)?;
     let exponent = decimal::div(ONE, years).map_err(decimal_error)?;
     Ok(Some(
         unscaled_to_f64(growth).powf(unscaled_to_f64(exponent)),
@@ -413,8 +410,7 @@ pub fn dec_sqrt(value: i128) -> Result<i128, MetricsError> {
         }
     }
     let below = wide.wrapping_sub(square(low));
-    let above = square(low.checked_add(U256::from_u128(1)).expect("root fits"))
-        .wrapping_sub(wide);
+    let above = square(low.checked_add(U256::from_u128(1)).expect("root fits")).wrapping_sub(wide);
     let mut root = low;
     if above < below || (above == below && low.bit(0)) {
         root = low.checked_add(U256::from_u128(1)).expect("root fits");
@@ -437,10 +433,7 @@ fn square(value: U256) -> U256 {
 }
 
 /// Annualized Sharpe ratio (`ddof=0`).
-pub fn sharpe(
-    returns: &[i128],
-    periods_per_year: u32,
-) -> Result<Option<f64>, MetricsError> {
+pub fn sharpe(returns: &[i128], periods_per_year: u32) -> Result<Option<f64>, MetricsError> {
     if returns.len() < 2 || periods_per_year == 0 {
         return Ok(None);
     }
@@ -735,7 +728,11 @@ mod tests {
 
     #[test]
     fn total_return_and_cagr_match_the_hand_computed_vectors() {
-        let curve = [pt(0, dec_text("100")), pt(DAY, dec_text("80")), pt(2 * DAY, dec_text("121"))];
+        let curve = [
+            pt(0, dec_text("100")),
+            pt(DAY, dec_text("80")),
+            pt(2 * DAY, dec_text("121")),
+        ];
         assert_eq!(total_return(&curve).unwrap(), Some(dec_text("0.21")));
         assert_eq!(total_return(&[pt(0, dec_text("100"))]).unwrap(), None);
         assert_eq!(
@@ -776,7 +773,11 @@ mod tests {
         let span = longest_drawdown(&curve).unwrap();
         assert_eq!(span.duration_ns, 2 * DAY);
         assert!(span.recovered);
-        let open = [pt(0, dec_text("100")), pt(DAY, dec_text("50")), pt(2 * DAY, dec_text("0"))];
+        let open = [
+            pt(0, dec_text("100")),
+            pt(DAY, dec_text("50")),
+            pt(2 * DAY, dec_text("0")),
+        ];
         let span = longest_drawdown(&open).unwrap();
         assert_eq!(span.duration_ns, 2 * DAY);
         assert!(!span.recovered);
@@ -791,21 +792,40 @@ mod tests {
         assert_eq!(dec_sqrt(ONE).unwrap(), ONE);
         assert_eq!(dec_sqrt(0).unwrap(), 0);
         assert_eq!(dec_sqrt(-1), Err(MetricsError::InvalidInput));
-        assert_eq!(dec_sqrt(dec_text("2.25")).unwrap(), 1_500_000_000_000_000_000);
+        assert_eq!(
+            dec_sqrt(dec_text("2.25")).unwrap(),
+            1_500_000_000_000_000_000
+        );
     }
 
     #[test]
     fn sharpe_and_sortino_pin_the_hand_computed_vectors() {
-        let returns = [dec_text("0.05"), dec_text("0.05"), dec_text("-0.01"), dec_text("-0.01")];
+        let returns = [
+            dec_text("0.05"),
+            dec_text("0.05"),
+            dec_text("-0.01"),
+            dec_text("-0.01"),
+        ];
         let expected = (2.0 / 3.0) * 252.0f64.sqrt();
         assert!((sharpe(&returns, 252).unwrap().unwrap() - expected).abs() < 1e-12);
-        assert_eq!(sharpe(&[dec_text("0.02"), dec_text("0.02")], 252).unwrap(), None);
+        assert_eq!(
+            sharpe(&[dec_text("0.02"), dec_text("0.02")], 252).unwrap(),
+            None
+        );
         assert_eq!(sharpe(&[dec_text("0.02")], 252).unwrap(), None);
 
-        let returns = [dec_text("0.03"), dec_text("-0.01"), dec_text("0.05"), dec_text("-0.03")];
+        let returns = [
+            dec_text("0.03"),
+            dec_text("-0.01"),
+            dec_text("0.05"),
+            dec_text("-0.03"),
+        ];
         let downside = ((0.0001 + 0.0009) / 4.0f64).sqrt();
         assert!((sortino(&returns, 4, 0).unwrap().unwrap() - 0.01 / downside * 2.0).abs() < 1e-12);
-        assert_eq!(sortino(&[dec_text("0.01"), dec_text("0.02")], 4, 0).unwrap(), None);
+        assert_eq!(
+            sortino(&[dec_text("0.01"), dec_text("0.02")], 4, 0).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -842,8 +862,14 @@ mod tests {
 
     #[test]
     fn execution_stats_pin_the_hand_computed_vectors() {
-        assert_eq!(fill_slippage(dec_text("2"), dec_text("100"), dec_text("100.5")).unwrap(), dec_text("1.0"));
-        assert_eq!(fill_slippage(dec_text("-3"), dec_text("200"), dec_text("199.5")).unwrap(), dec_text("1.5"));
+        assert_eq!(
+            fill_slippage(dec_text("2"), dec_text("100"), dec_text("100.5")).unwrap(),
+            dec_text("1.0")
+        );
+        assert_eq!(
+            fill_slippage(dec_text("-3"), dec_text("200"), dec_text("199.5")).unwrap(),
+            dec_text("1.5")
+        );
 
         let fills = [
             fill(Some(100), 0, 0),
@@ -860,8 +886,12 @@ mod tests {
         let orders = [
             OrderRow { outcome: "filled" },
             OrderRow { outcome: "filled" },
-            OrderRow { outcome: "rejected" },
-            OrderRow { outcome: "cancelled" },
+            OrderRow {
+                outcome: "rejected",
+            },
+            OrderRow {
+                outcome: "cancelled",
+            },
             OrderRow { outcome: "expired" },
         ];
         let counts = order_outcome_counts(&orders);
@@ -871,8 +901,16 @@ mod tests {
         assert_eq!(counts.cancelled, 1);
         assert_eq!(counts.other, 1);
 
-        let fills = [fill(Some(10), dec_text("1.5"), dec_text("1.0")), fill(Some(30), dec_text("2.5"), dec_text("0.2"))];
-        let orders = [OrderRow { outcome: "filled" }, OrderRow { outcome: "rejected" }];
+        let fills = [
+            fill(Some(10), dec_text("1.5"), dec_text("1.0")),
+            fill(Some(30), dec_text("2.5"), dec_text("0.2")),
+        ];
+        let orders = [
+            OrderRow { outcome: "filled" },
+            OrderRow {
+                outcome: "rejected",
+            },
+        ];
         let stats = execution_stats(&fills, &orders).unwrap();
         assert_eq!(stats.fill_count, 2);
         assert_eq!(stats.fees_total, dec_text("4.0"));

@@ -28,5 +28,7 @@ pub use alpaca_options::{
 pub use base::ExecutionVenue;
 pub use options_matching::OptionsMatchingEngine;
 pub use plugin::FillPlugin;
-pub use scripted::{ScriptedStep, ScriptedVenue, UnexpectedVenueCall, VenueCall, VenueOperation, VenueOutcome};
+pub use scripted::{
+    ScriptedStep, ScriptedVenue, UnexpectedVenueCall, VenueCall, VenueOperation, VenueOutcome,
+};
 pub use sim::{SimOrderState, SimulatedVenue};

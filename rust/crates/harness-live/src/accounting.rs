@@ -56,7 +56,9 @@ impl ExecutionReport {
         let report_id = require_text(report_id, "report_id")?;
         let order_id = require_text(order_id, "order_id")?;
         if !order_quantity.is_positive() {
-            return Err(LiveError::Validation("order_quantity must be positive".into()));
+            return Err(LiveError::Validation(
+                "order_quantity must be positive".into(),
+            ));
         }
         if filled_quantity.is_negative() {
             return Err(LiveError::Validation(
@@ -211,7 +213,9 @@ impl Position {
         }
         if let Some(value) = market_price {
             if !value.is_positive() {
-                return Err(LiveError::Validation("market_price must be positive".into()));
+                return Err(LiveError::Validation(
+                    "market_price must be positive".into(),
+                ));
             }
         }
         Ok(Self {

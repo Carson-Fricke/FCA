@@ -26,8 +26,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         initial_cash: dec("100000")?,
         venue: "sim".to_string(),
     };
-    let rules: Vec<Box<dyn RiskRule>> =
-        vec![Box::new(MaxOrderNotional::new("max-notional", dec("100000")?)?)];
+    let rules: Vec<Box<dyn RiskRule>> = vec![Box::new(MaxOrderNotional::new(
+        "max-notional",
+        dec("100000")?,
+    )?)];
     let mut trader = TraderCore::new(config, rules, OnReject::RejectOrder)?;
 
     let symbol = Symbol::new("AAPL")?;
@@ -66,10 +68,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     let position = trader.position("AAPL")?;
-    println!(
-        "position={} cash={}",
-        position.quantity,
-        trader.cash()?
-    );
+    println!("position={} cash={}", position.quantity, trader.cash()?);
     Ok(())
 }

@@ -105,7 +105,8 @@ impl PythonRandom {
 
     fn twist(&mut self) {
         for index in 0..N {
-            let value = (self.state[index] & UPPER_MASK) | (self.state[(index + 1) % N] & LOWER_MASK);
+            let value =
+                (self.state[index] & UPPER_MASK) | (self.state[(index + 1) % N] & LOWER_MASK);
             let mut next = self.state[(index + M) % N] ^ (value >> 1);
             if value & 1 != 0 {
                 next ^= MATRIX_A;

@@ -150,7 +150,10 @@ mod tests {
             Ok(750_000_000_000_000_000)
         );
         assert_eq!(div(ONE, 0), Err(DecimalError::InvalidDecimal));
-        assert_eq!(mul(MAX_UNSCALED, from_int(2)), Err(DecimalError::OutOfRange));
+        assert_eq!(
+            mul(MAX_UNSCALED, from_int(2)),
+            Err(DecimalError::OutOfRange)
+        );
     }
 
     #[test]
@@ -158,7 +161,10 @@ mod tests {
         assert_eq!(add(ONE, ONE), Ok(2 * ONE));
         assert_eq!(sub(0, ONE), Ok(-ONE));
         assert_eq!(add(MAX_UNSCALED, 1), Err(DecimalError::OutOfRange));
-        assert_eq!(mul_div(from_int(3), ONE, from_int(2)), Ok(1_500_000_000_000_000_000));
+        assert_eq!(
+            mul_div(from_int(3), ONE, from_int(2)),
+            Ok(1_500_000_000_000_000_000)
+        );
         assert_eq!(mul_div(ONE, ONE, 0), Err(DecimalError::InvalidDecimal));
     }
 

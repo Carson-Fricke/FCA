@@ -155,8 +155,7 @@ impl OptionLifecycle {
             hub,
             today_days,
             multiplier,
-            assignment_policy: assignment_policy
-                .unwrap_or_else(|| Box::new(PessimisticAssignment)),
+            assignment_policy: assignment_policy.unwrap_or_else(|| Box::new(PessimisticAssignment)),
             dte_thresholds: thresholds,
             settlement_fee,
             retired: HashSet::new(),
@@ -527,7 +526,16 @@ mod tests {
         assert_eq!(fill.side, Side::Buy);
         assert_eq!(fill.quantity, dec("200"));
         assert_eq!(fill.price, dec("150"));
-        assert!(lifecycle.hub().book("book").unwrap().position("AAPL").unwrap().quantity == dec("200"));
+        assert!(
+            lifecycle
+                .hub()
+                .book("book")
+                .unwrap()
+                .position("AAPL")
+                .unwrap()
+                .quantity
+                == dec("200")
+        );
         assert!(lifecycle.is_retired("AAPL240115C00150000"));
     }
 
@@ -547,7 +555,10 @@ mod tests {
         assert_eq!(settlement.kind, SettlementKind::Assigned);
         assert_eq!(settlement.contracts, dec("1"));
         assert_eq!(settlement.settlement_value, Decimal18::ZERO);
-        assert_eq!(settlement.underlying_fill.as_ref().unwrap().side, Side::Sell);
+        assert_eq!(
+            settlement.underlying_fill.as_ref().unwrap().side,
+            Side::Sell
+        );
     }
 
     #[test]

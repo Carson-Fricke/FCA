@@ -265,10 +265,7 @@ fn record_payload(spec: &SweepSpec, points: &[SweepPoint]) -> JsonValue {
                                 "configuration_digest",
                                 JsonValue::String(point.configuration_digest.clone()),
                             ),
-                            (
-                                "parameters",
-                                JsonValue::Object(point.parameters.clone()),
-                            ),
+                            ("parameters", JsonValue::Object(point.parameters.clone())),
                         ])
                     })
                     .collect(),
@@ -422,7 +419,8 @@ mod tests {
             symbols: vec!["SPY".to_string()],
             capital_fraction: "0.5".to_string(),
         });
-        let level = |text: &str| JsonValue::object([("$decimal", JsonValue::String(text.to_string()))]);
+        let level =
+            |text: &str| JsonValue::object([("$decimal", JsonValue::String(text.to_string()))]);
         SweepSpec::grid(
             base,
             "momentum",
@@ -482,7 +480,10 @@ mod tests {
             Box::new(InMemoryRunCatalog::new()),
         );
         second.submit(&spec).expect("second");
-        let key = format!("{}/{RECORD_NAME}", sweep_prefix(&spec.sweep_id()).expect("prefix"));
+        let key = format!(
+            "{}/{RECORD_NAME}",
+            sweep_prefix(&spec.sweep_id()).expect("prefix")
+        );
         assert_eq!(
             first.blobs.read(&key).expect("first bytes"),
             second.blobs.read(&key).expect("second bytes")

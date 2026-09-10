@@ -202,11 +202,10 @@ impl LatencySize {
 
 #[cfg(test)]
 mod tests {
-    use super::{LatencySize, LatencySizeConfig, LatencyMetadata, RemainderPolicy};
+    use super::{LatencyMetadata, LatencySize, LatencySizeConfig, RemainderPolicy};
     use crate::market::{OrderType, Side};
     use crate::simple_touch::testing::{
-        dec, expect_decision, large_quote, make_order, make_trade, HUNDRED, ONE0ONE,
-        THREE_HUNDRED,
+        dec, expect_decision, large_quote, make_order, make_trade, HUNDRED, ONE0ONE, THREE_HUNDRED,
     };
     use crate::simple_touch::{DecideOptions, Liquidity};
 
@@ -227,7 +226,11 @@ mod tests {
         );
 
         let first = cancel_model
-            .decide(&buy, &large_quote("q-1", HUNDRED, ONE0ONE), &DecideOptions::default())
+            .decide(
+                &buy,
+                &large_quote("q-1", HUNDRED, ONE0ONE),
+                &DecideOptions::default(),
+            )
             .unwrap();
         expect_decision(first, HUNDRED, ONE0ONE, Liquidity::Taker);
         assert!(cancel_model.is_cancelled(buy.order_id));
@@ -245,7 +248,11 @@ mod tests {
         assert!(cancelled_second.is_none());
 
         let rest_first = rest_model
-            .decide(&buy, &large_quote("q-1", HUNDRED, ONE0ONE), &DecideOptions::default())
+            .decide(
+                &buy,
+                &large_quote("q-1", HUNDRED, ONE0ONE),
+                &DecideOptions::default(),
+            )
             .unwrap();
         expect_decision(rest_first, HUNDRED, ONE0ONE, Liquidity::Taker);
         assert!(!rest_model.is_cancelled(buy.order_id));
@@ -265,11 +272,20 @@ mod tests {
     #[test]
     fn partial_fills_across_quote_events_are_snapshot_deterministic() {
         let mut model = LatencySize::new(LatencySizeConfig::default());
-        let buy = make_order("snapshots", Side::Buy, OrderType::Market, THREE_HUNDRED, None, None);
+        let buy = make_order(
+            "snapshots",
+            Side::Buy,
+            OrderType::Market,
+            THREE_HUNDRED,
+            None,
+            None,
+        );
         let first_quote = large_quote("q-1", HUNDRED, ONE0ONE);
         let second_quote = large_quote("q-2", HUNDRED, HUNDRED);
 
-        let first = model.decide(&buy, &first_quote, &DecideOptions::default()).unwrap();
+        let first = model
+            .decide(&buy, &first_quote, &DecideOptions::default())
+            .unwrap();
         let second = model
             .decide(
                 &buy,
@@ -313,7 +329,11 @@ mod tests {
         );
 
         assert!(model
-            .decide(&buy, &large_quote("q-1", HUNDRED, ONE0ONE), &DecideOptions::default())
+            .decide(
+                &buy,
+                &large_quote("q-1", HUNDRED, ONE0ONE),
+                &DecideOptions::default()
+            )
             .unwrap()
             .is_none());
         assert!(model
@@ -367,7 +387,9 @@ mod tests {
             .decide(&buy, &inside, &DecideOptions::default())
             .unwrap()
             .is_none());
-        let decision = optimistic.decide(&buy, &inside, &DecideOptions::default()).unwrap();
+        let decision = optimistic
+            .decide(&buy, &inside, &DecideOptions::default())
+            .unwrap();
         expect_decision(
             decision,
             HUNDRED,

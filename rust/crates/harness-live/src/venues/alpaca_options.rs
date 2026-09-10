@@ -187,11 +187,7 @@ impl AlpacaOptionsCapabilityMatrix {
     }
 }
 
-fn rejection(
-    reason: UnsupportedFeatureReason,
-    feature: &str,
-    detail: &str,
-) -> CapabilityRejection {
+fn rejection(reason: UnsupportedFeatureReason, feature: &str, detail: &str) -> CapabilityRejection {
     CapabilityRejection {
         reason,
         feature: feature.to_string(),
@@ -230,7 +226,9 @@ pub fn require_option_symbol(symbol: &Symbol) -> LiveResult<()> {
     if is_osi_symbol(symbol.as_str()) {
         Ok(())
     } else {
-        Err(LiveError::Venue("symbol must be an OSI option contract".into()))
+        Err(LiveError::Venue(
+            "symbol must be an OSI option contract".into(),
+        ))
     }
 }
 

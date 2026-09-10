@@ -243,10 +243,7 @@ impl ScriptedVenue {
         };
         if call != step.call {
             return Err(UnexpectedVenueCall {
-                message: format!(
-                    "unexpected venue call {call:?}; expected {:?}",
-                    step.call
-                ),
+                message: format!("unexpected venue call {call:?}; expected {:?}", step.call),
             });
         }
         let step = self.steps.pop_front().expect("front checked");
@@ -282,13 +279,8 @@ mod tests {
     #[test]
     fn scripted_venue_matches_calls_in_order() {
         let step = ScriptedStep {
-            call: VenueCall::new(
-                VenueOperation::Submit,
-                Some("o1".to_string()),
-                None,
-                None,
-            )
-            .unwrap(),
+            call: VenueCall::new(VenueOperation::Submit, Some("o1".to_string()), None, None)
+                .unwrap(),
             outcomes: vec![],
         };
         let mut venue = ScriptedVenue::new(vec![step]);
@@ -300,13 +292,8 @@ mod tests {
     #[test]
     fn scripted_venue_rejects_mismatch() {
         let step = ScriptedStep {
-            call: VenueCall::new(
-                VenueOperation::Cancel,
-                Some("o1".to_string()),
-                None,
-                None,
-            )
-            .unwrap(),
+            call: VenueCall::new(VenueOperation::Cancel, Some("o1".to_string()), None, None)
+                .unwrap(),
             outcomes: vec![],
         };
         let mut venue = ScriptedVenue::new(vec![step]);

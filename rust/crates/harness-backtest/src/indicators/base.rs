@@ -179,7 +179,10 @@ mod tests {
     fn bucket_start_floors_to_the_grid() {
         assert_eq!(bucket_start_ns(0, 60_000_000_000), 0);
         assert_eq!(bucket_start_ns(59_999_999_999, 60_000_000_000), 0);
-        assert_eq!(bucket_start_ns(60_000_000_000, 60_000_000_000), 60_000_000_000);
+        assert_eq!(
+            bucket_start_ns(60_000_000_000, 60_000_000_000),
+            60_000_000_000
+        );
         assert_eq!(
             bucket_start_ns(125_000_000_000, 60_000_000_000),
             120_000_000_000

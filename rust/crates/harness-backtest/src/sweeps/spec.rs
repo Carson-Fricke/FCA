@@ -72,7 +72,10 @@ impl std::fmt::Display for SweepError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptySpace(name) => {
-                write!(formatter, "sweep parameter {name:?} must list at least one value")
+                write!(
+                    formatter,
+                    "sweep parameter {name:?} must list at least one value"
+                )
             }
             Self::BlankParameter => {
                 formatter.write_str("sweep parameter names must be non-empty strings")
@@ -181,20 +184,18 @@ impl SweepSpec {
     pub fn payload(&self) -> JsonValue {
         JsonValue::object([
             ("version", JsonValue::string(SWEEP_VERSION)),
-            ("base", configuration_json(&self.base, &self.instance_id, None)),
             (
-                "instance_id",
-                JsonValue::String(self.instance_id.clone()),
+                "base",
+                configuration_json(&self.base, &self.instance_id, None),
             ),
+            ("instance_id", JsonValue::String(self.instance_id.clone())),
             ("mode", JsonValue::string(self.mode.value())),
             (
                 "space",
                 JsonValue::Object(
                     self.space
                         .iter()
-                        .map(|(name, values)| {
-                            (name.clone(), JsonValue::Array(values.clone()))
-                        })
+                        .map(|(name, values)| (name.clone(), JsonValue::Array(values.clone())))
                         .collect(),
                 ),
             ),

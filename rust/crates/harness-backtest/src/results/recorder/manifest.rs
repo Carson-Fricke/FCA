@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::sha256::{digest_hex, Sha256};
 
 use super::artifacts::artifact_path;
-use super::schemas::{Artifact, STREAM_ARTIFACTS, SCHEMA_VERSION};
+use super::schemas::{Artifact, SCHEMA_VERSION, STREAM_ARTIFACTS};
 
 /// Immutable summary of one closed recorded run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +34,10 @@ impl RunManifest {
     /// Recorded artifact names in stable recorder order.
     #[must_use]
     pub fn artifacts(&self) -> Vec<&'static str> {
-        Artifact::ALL.iter().map(|artifact| artifact.value()).collect()
+        Artifact::ALL
+            .iter()
+            .map(|artifact| artifact.value())
+            .collect()
     }
 
     /// Total row count across every artifact.
@@ -178,10 +181,7 @@ pub fn manifest_rows(input: &ManifestRowsInput<'_>) -> Vec<(String, String)> {
         entries.push((format!("digest:{name}"), digest.to_string()));
     }
     entries.push(("run_digest".to_string(), input.run_digest.to_string()));
-    entries.push((
-        "row_count".to_string(),
-        (entries.len() + 1).to_string(),
-    ));
+    entries.push(("row_count".to_string(), (entries.len() + 1).to_string()));
     entries
 }
 
@@ -190,7 +190,10 @@ mod tests {
     use super::*;
 
     fn counts(entries: &[(&str, u64)]) -> BTreeMap<String, u64> {
-        entries.iter().map(|(k, v)| ((*k).to_string(), *v)).collect()
+        entries
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), *v))
+            .collect()
     }
 
     fn digests(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -249,11 +252,15 @@ mod tests {
         let expected = rows.len().to_string();
         assert_eq!(last.1, expected);
         assert_eq!(
-            rows.iter().find(|(key, _)| key == "run_id").map(|(_, value)| value.as_str()),
+            rows.iter()
+                .find(|(key, _)| key == "run_id")
+                .map(|(_, value)| value.as_str()),
             Some("run")
         );
         assert_eq!(
-            rows.iter().find(|(key, _)| key == "record_events").map(|(_, value)| value.as_str()),
+            rows.iter()
+                .find(|(key, _)| key == "record_events")
+                .map(|(_, value)| value.as_str()),
             Some("true")
         );
     }

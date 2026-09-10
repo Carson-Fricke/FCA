@@ -305,7 +305,10 @@ impl RecorderConfig {
     ///
     /// Returns [`ConfigError`] when `run_id` is blank, `batch_size` is zero,
     /// `compression` or `parquet_version` is blank, or a metadata key is blank.
-    pub fn new(run_id: impl Into<String>, directory: impl Into<PathBuf>) -> Result<Self, ConfigError> {
+    pub fn new(
+        run_id: impl Into<String>,
+        directory: impl Into<PathBuf>,
+    ) -> Result<Self, ConfigError> {
         let run_id = text(&run_id.into(), "run_id")?;
         Ok(Self {
             run_id,
@@ -425,7 +428,8 @@ impl RecorderConfig {
         key: &str,
         value: impl Into<String>,
     ) -> Result<Self, ConfigError> {
-        let key = text(key, "metadata key").map_err(|_| ConfigError::MetadataKey(key.to_string()))?;
+        let key =
+            text(key, "metadata key").map_err(|_| ConfigError::MetadataKey(key.to_string()))?;
         self.metadata.insert(key, value.into());
         Ok(self)
     }
@@ -457,7 +461,10 @@ mod tests {
     #[test]
     fn zero_batch_size_is_rejected() {
         let config = RecorderConfig::new("run", "out").expect("config");
-        assert_eq!(config.with_batch_size(0).err(), Some(ConfigError::BatchSize));
+        assert_eq!(
+            config.with_batch_size(0).err(),
+            Some(ConfigError::BatchSize)
+        );
     }
 
     #[test]

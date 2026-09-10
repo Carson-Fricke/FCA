@@ -61,14 +61,20 @@ impl OsiSymbol {
         }
         let bytes = candidate.as_bytes();
         if bytes.len() < 16 {
-            return Err(LiveError::Validation(format!("invalid OSI symbol: {value:?}")));
+            return Err(LiveError::Validation(format!(
+                "invalid OSI symbol: {value:?}"
+            )));
         }
         let (body, tail) = candidate.split_at(candidate.len() - 15);
         if tail.len() != 15 {
-            return Err(LiveError::Validation(format!("invalid OSI symbol: {value:?}")));
+            return Err(LiveError::Validation(format!(
+                "invalid OSI symbol: {value:?}"
+            )));
         }
         if body.is_empty() || body.len() > 6 || !body.bytes().all(is_root_byte) {
-            return Err(LiveError::Validation(format!("invalid OSI symbol: {value:?}")));
+            return Err(LiveError::Validation(format!(
+                "invalid OSI symbol: {value:?}"
+            )));
         }
         let exp = &tail[..6];
         let right = tail.as_bytes()[6] as char;
@@ -77,7 +83,9 @@ impl OsiSymbol {
             || !(right == 'C' || right == 'P')
             || !strike_text.bytes().all(|b| b.is_ascii_digit())
         {
-            return Err(LiveError::Validation(format!("invalid OSI symbol: {value:?}")));
+            return Err(LiveError::Validation(format!(
+                "invalid OSI symbol: {value:?}"
+            )));
         }
         let strike_int: i128 = strike_text
             .parse()

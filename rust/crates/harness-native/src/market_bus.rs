@@ -672,7 +672,12 @@ mod tests {
         let mut queue = EventQueue::new(Some(sim.clone()));
 
         assert_eq!(
-            queue.enqueue(Event::new_default(EventType::Quote, STAMP_NS - MICRO, 0, "stale")),
+            queue.enqueue(Event::new_default(
+                EventType::Quote,
+                STAMP_NS - MICRO,
+                0,
+                "stale"
+            )),
             Err(super::Error::StaleTimestamp)
         );
 
@@ -729,8 +734,13 @@ mod tests {
             .unwrap();
         bus.subscribe(Selector::EventType(EventType::Fill), on_fill, sink_ptr)
             .unwrap();
-        bus.publish(Event::new_default(EventType::Quote, STAMP_NS, 7, "market-quote"))
-            .unwrap();
+        bus.publish(Event::new_default(
+            EventType::Quote,
+            STAMP_NS,
+            7,
+            "market-quote",
+        ))
+        .unwrap();
 
         assert_eq!(bus.drain(None).unwrap(), 2);
         assert_eq!(bus.dispatched_count(), 2);
@@ -743,8 +753,13 @@ mod tests {
     fn scheduled_response_cannot_precede_the_last_dispatch_key() {
         let sim = shared_clock(STAMP_NS);
         let mut bus = EventBus::new(Some(sim));
-        bus.publish(Event::new_default(EventType::Trade, STAMP_NS, 7, "market-trade"))
-            .unwrap();
+        bus.publish(Event::new_default(
+            EventType::Trade,
+            STAMP_NS,
+            7,
+            "market-trade",
+        ))
+        .unwrap();
         assert!(bus.dispatch_next().unwrap().is_some());
 
         assert_eq!(
@@ -762,7 +777,9 @@ mod tests {
     fn dispatch_digest_is_byte_identical_to_the_python_bus() {
         let sim = shared_clock(STAMP_NS);
         let mut bus = EventBus::new(Some(sim));
-        let ids: Vec<String> = (0..10_000usize).map(|index| format!("event-{index}")).collect();
+        let ids: Vec<String> = (0..10_000usize)
+            .map(|index| format!("event-{index}"))
+            .collect();
         for (index, id) in ids.iter().enumerate() {
             let offset_us = (index % 29) as i128;
             let sequence = (index % 17) as u64;

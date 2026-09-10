@@ -144,9 +144,7 @@ impl TradeThrough {
 
     fn qualifies(&self, order: &SingleLegOrder, price: Decimal18) -> LiveResult<bool> {
         let Some(limit) = order.limit_price else {
-            return Err(LiveError::Fill(
-                "limit order is missing limit_price".into(),
-            ));
+            return Err(LiveError::Fill("limit order is missing limit_price".into()));
         };
         if order.side == Side::Buy {
             let threshold = limit - self.minimum_trade_through;
@@ -230,7 +228,13 @@ mod tests {
             .unwrap(),
         );
         let decision = TradeThrough::default()
-            .decide(&order(OrderType::Limit, Some("101")), &quote, None, None, false)
+            .decide(
+                &order(OrderType::Limit, Some("101")),
+                &quote,
+                None,
+                None,
+                false,
+            )
             .unwrap();
         assert!(decision.is_none());
     }

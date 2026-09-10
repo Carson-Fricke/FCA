@@ -17,5 +17,6 @@ pub use momentum::RelativeStrengthIndex;
 pub use overlays::{ExponentialMovingAverage, MidSimpleMovingAverage, SimpleMovingAverage};
 pub use registry::{
     create_indicator, default_registry, indicator_names, parse_duration_ns, ConfiguredIndicator,
-    IndicatorKind, IndicatorParam, IndicatorParamKind, IndicatorRegistry, IndicatorSpec, ParamValue,
+    IndicatorKind, IndicatorParam, IndicatorParamKind, IndicatorRegistry, IndicatorSpec,
+    ParamValue,
 };

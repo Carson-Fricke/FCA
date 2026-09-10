@@ -110,7 +110,8 @@ mod tests {
 
     #[test]
     fn deterministic_and_versioned() {
-        let mut source = EngineIdSource::new(Seed::Text("recorder-seed".to_string())).expect("seed");
+        let mut source =
+            EngineIdSource::new(Seed::Text("recorder-seed".to_string())).expect("seed");
         let first = source.next_id("action").expect("id");
         let second = source.next_id("action").expect("id");
         assert_ne!(first, second);

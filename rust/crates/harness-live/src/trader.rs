@@ -68,10 +68,7 @@ impl TraderCore {
         let mut hub = PortfolioHub::new(&config.account_id, vec![])?;
         hub.create_book(&config.book_id, config.initial_cash)?;
         let pipeline = RiskPipeline::new(rules, on_reject)?;
-        let venue = SimulatedVenue::with_plugin(
-            &config.venue,
-            Box::new(SimpleTouch::new()),
-        )?;
+        let venue = SimulatedVenue::with_plugin(&config.venue, Box::new(SimpleTouch::new()))?;
         Ok(Self {
             book_id: require_text(&config.book_id, "book_id")?,
             oms: SingleLegOms::new(),
@@ -343,8 +340,12 @@ mod tests {
                 ))
             }
         }
-        let trader = TraderCore::new(config(), vec![Box::new(AlwaysReject)], OnReject::RejectOrder)
-            .unwrap();
+        let trader = TraderCore::new(
+            config(),
+            vec![Box::new(AlwaysReject)],
+            OnReject::RejectOrder,
+        )
+        .unwrap();
         let check = trader.check(&order("1")).unwrap();
         assert!(check.rejected());
         assert!(!check.audits.is_empty() || check.reason.as_deref() == Some("rejected"));

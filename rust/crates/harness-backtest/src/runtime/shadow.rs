@@ -123,6 +123,9 @@ mod tests {
     fn reports_length_divergence() {
         let expected = vec![intent("o1", "10")];
         let actual = vec![intent("o1", "10"), intent("o2", "5")];
-        assert_eq!(compare_intents(&expected, &actual).first_difference, Some(1));
+        assert_eq!(
+            compare_intents(&expected, &actual).first_difference,
+            Some(1)
+        );
     }
 }

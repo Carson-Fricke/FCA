@@ -155,10 +155,11 @@ impl AlpacaCryptoVenue {
             ));
         };
         let liquidity = LiquidityRole::parse(liquidity_text)?;
-        let local_fee = self.local.calculate(fill)?.iter().fold(
-            Decimal18::ZERO,
-            |sum, component| sum + component.amount,
-        );
+        let local_fee = self
+            .local
+            .calculate(fill)?
+            .iter()
+            .fold(Decimal18::ZERO, |sum, component| sum + component.amount);
         let venue_fee = self.schedule.charge(fill.quantity, fill.price, liquidity)?;
         self.ledger.push(CryptoFeeLedgerEntry {
             fill_id: fill.fill_id.clone(),

@@ -105,7 +105,10 @@ impl SimOrderState {
 
     /// Whether a stop order has crossed its trigger.
     pub fn triggered(&self) -> bool {
-        if matches!(self.order.order_type, OrderType::Stop | OrderType::StopLimit) {
+        if matches!(
+            self.order.order_type,
+            OrderType::Stop | OrderType::StopLimit
+        ) {
             return !self.armed;
         }
         true
@@ -305,7 +308,13 @@ impl SimulatedVenue {
         });
         self.used_order_ids.push(order.order_id.to_owned());
         let index = self.orders.len() - 1;
-        self.schedule_report(index, ExecutionType::Acknowledged, OrderStatus::Accepted, 0, None)?;
+        self.schedule_report(
+            index,
+            ExecutionType::Acknowledged,
+            OrderStatus::Accepted,
+            0,
+            None,
+        )?;
         if let Some(latest) = self.latest_market_for(self.orders[index].order.symbol) {
             if !self.orders[index].armed {
                 let decision = self.attempt(index, latest, None)?;
@@ -328,7 +337,13 @@ impl SimulatedVenue {
         }
         self.orders[index].status = OrderStatus::Canceled;
         self.orders[index].response_pending = true;
-        self.schedule_report(index, ExecutionType::Canceled, OrderStatus::Canceled, 0, None)
+        self.schedule_report(
+            index,
+            ExecutionType::Canceled,
+            OrderStatus::Canceled,
+            0,
+            None,
+        )
     }
 
     /// Atomically report replacement and begin the replacement order.
@@ -354,7 +369,13 @@ impl SimulatedVenue {
         self.orders[index].status = OrderStatus::Replaced;
         self.orders[index].response_pending = true;
         self.used_order_ids.push(replacement.order_id.to_owned());
-        self.schedule_report(index, ExecutionType::Replaced, OrderStatus::Replaced, 0, None)?;
+        self.schedule_report(
+            index,
+            ExecutionType::Replaced,
+            OrderStatus::Replaced,
+            0,
+            None,
+        )?;
 
         let armed = matches!(
             replacement.order_type,
@@ -468,18 +489,12 @@ impl SimulatedVenue {
     /// Dispatch all queued outcomes in deterministic order; returns the count.
     pub fn drain(&mut self) -> Result<usize, Error> {
         self.response_queue.sort_by(|a, b| {
-            (
-                a.timestamp_ns,
-                a.sequence,
-                a.class_priority,
-                a.feed_ordinal,
-            )
-                .cmp(&(
-                    b.timestamp_ns,
-                    b.sequence,
-                    b.class_priority,
-                    b.feed_ordinal,
-                ))
+            (a.timestamp_ns, a.sequence, a.class_priority, a.feed_ordinal).cmp(&(
+                b.timestamp_ns,
+                b.sequence,
+                b.class_priority,
+                b.feed_ordinal,
+            ))
         });
         let envelopes: Vec<ScheduledEnvelope> = core::mem::take(&mut self.response_queue);
         let mut count = 0usize;
@@ -534,15 +549,14 @@ impl SimulatedVenue {
             available_quantity,
             stop_triggered,
         };
-        let mut decision =
-            match self
-                .fill_model
-                .decide(&self.orders[index].order, &snap, &opts)
-                .map_err(market_error)?
-            {
-                Some(decision) => decision,
-                None => return Ok(None),
-            };
+        let mut decision = match self
+            .fill_model
+            .decide(&self.orders[index].order, &snap, &opts)
+            .map_err(market_error)?
+        {
+            Some(decision) => decision,
+            None => return Ok(None),
+        };
         if is_stop {
             if let Some(triggering) = self.orders[index].triggering_market {
                 if !same_market(decision.triggering_market, triggering) {
@@ -674,7 +688,15 @@ impl SimulatedVenue {
             last_fill_quantity,
             last_fill_price,
         });
-        self.enqueue(timestamp, sequence, 4, report_id, &order_id, Some(execution_type), false);
+        self.enqueue(
+            timestamp,
+            sequence,
+            4,
+            report_id,
+            &order_id,
+            Some(execution_type),
+            false,
+        );
         Ok(())
     }
 
@@ -766,8 +788,7 @@ impl SimulatedVenue {
                 return;
             }
         }
-        self.latest_markets
-            .push((event.symbol().to_owned(), event));
+        self.latest_markets.push((event.symbol().to_owned(), event));
     }
 
     fn latest_market_for(&self, symbol: &str) -> Option<MarketEvent<'static>> {
@@ -778,9 +799,7 @@ impl SimulatedVenue {
     }
 
     fn find_used_order_id(&self, order_id: &str) -> Option<usize> {
-        self.used_order_ids
-            .iter()
-            .position(|used| used == order_id)
+        self.used_order_ids.iter().position(|used| used == order_id)
     }
 
     fn working_index(&self, order_id: &str) -> Result<usize, Error> {
@@ -822,7 +841,9 @@ impl SimulatedVenue {
 }
 
 fn same_market(a: MarketEvent<'_>, b: MarketEvent<'_>) -> bool {
-    a.timestamp_ns() == b.timestamp_ns() && a.sequence() == b.sequence() && a.event_id() == b.event_id()
+    a.timestamp_ns() == b.timestamp_ns()
+        && a.sequence() == b.sequence()
+        && a.event_id() == b.event_id()
 }
 
 #[cfg(test)]
@@ -916,10 +937,28 @@ mod tests {
         assert_eq!(venue.drain().unwrap(), 0);
 
         venue
-            .submit(order("buy", Side::Buy, OrderType::Limit, ten(), TimeInForce::Day, Some(one0one()), None, 0))
+            .submit(order(
+                "buy",
+                Side::Buy,
+                OrderType::Limit,
+                ten(),
+                TimeInForce::Day,
+                Some(one0one()),
+                None,
+                0,
+            ))
             .unwrap();
         venue
-            .submit(order("sell", Side::Sell, OrderType::Limit, ten(), TimeInForce::Day, Some(hundred()), None, 0))
+            .submit(order(
+                "sell",
+                Side::Sell,
+                OrderType::Limit,
+                ten(),
+                TimeInForce::Day,
+                Some(hundred()),
+                None,
+                0,
+            ))
             .unwrap();
 
         venue.drain().unwrap();
@@ -950,11 +989,28 @@ mod tests {
     fn resting_orders_fill_only_when_a_later_quote_touches() {
         let mut venue = venue(0);
         venue
-            .on_market(quote("resting", 0, 0, from_int(99), one0one(), ten(), ten()))
+            .on_market(quote(
+                "resting",
+                0,
+                0,
+                from_int(99),
+                one0one(),
+                ten(),
+                ten(),
+            ))
             .unwrap();
         venue.drain().unwrap();
         venue
-            .submit(order("rest-buy", Side::Buy, OrderType::Limit, ten(), TimeInForce::Day, Some(hundred()), None, 0))
+            .submit(order(
+                "rest-buy",
+                Side::Buy,
+                OrderType::Limit,
+                ten(),
+                TimeInForce::Day,
+                Some(hundred()),
+                None,
+                0,
+            ))
             .unwrap();
         venue.drain().unwrap();
         assert_eq!(venue.fill_records().len(), 0);
@@ -973,7 +1029,16 @@ mod tests {
         venue.on_market(default_quote("before")).unwrap();
         venue.drain().unwrap();
         venue
-            .submit(order("stop-buy", Side::Buy, OrderType::Stop, ten(), TimeInForce::Day, None, Some(one0one()), 0))
+            .submit(order(
+                "stop-buy",
+                Side::Buy,
+                OrderType::Stop,
+                ten(),
+                TimeInForce::Day,
+                None,
+                Some(one0one()),
+                0,
+            ))
             .unwrap();
         venue.drain().unwrap();
         assert!(venue.state("stop-buy").unwrap().armed);
@@ -996,10 +1061,27 @@ mod tests {
     fn partial_fill_then_worsening_quotes_never_improve_the_fill() {
         let mut venue = venue(0);
         venue
-            .submit(order("partial", Side::Buy, OrderType::Limit, ten(), TimeInForce::Day, Some(one0one()), None, 0))
+            .submit(order(
+                "partial",
+                Side::Buy,
+                OrderType::Limit,
+                ten(),
+                TimeInForce::Day,
+                Some(one0one()),
+                None,
+                0,
+            ))
             .unwrap();
         venue
-            .on_market(quote("first", 0, 1, hundred(), one0one(), ten(), from_int(3)))
+            .on_market(quote(
+                "first",
+                0,
+                1,
+                hundred(),
+                one0one(),
+                ten(),
+                from_int(3),
+            ))
             .unwrap();
         venue.drain().unwrap();
         assert_eq!(venue.fill_records().len(), 1);
@@ -1012,7 +1094,15 @@ mod tests {
         assert_eq!(venue.fill_records().len(), 1);
 
         venue
-            .on_market(quote("better", 2, 3, hundred(), hundred(), ten(), from_int(7)))
+            .on_market(quote(
+                "better",
+                2,
+                3,
+                hundred(),
+                hundred(),
+                ten(),
+                from_int(7),
+            ))
             .unwrap();
         venue.drain().unwrap();
         assert_eq!(venue.fill_records().len(), 2);
@@ -1038,11 +1128,27 @@ mod tests {
             .on_market(quote("trigger", 0, 1, hundred(), one0one(), ten(), ten()))
             .unwrap();
         venue.drain().unwrap();
-        assert_eq!(venue.state("stop-limit").unwrap().triggering_market.unwrap().event_id(), "trigger");
+        assert_eq!(
+            venue
+                .state("stop-limit")
+                .unwrap()
+                .triggering_market
+                .unwrap()
+                .event_id(),
+            "trigger"
+        );
         assert_eq!(venue.fill_records().len(), 0);
 
         venue
-            .on_market(quote("touch", 1, 2, hundred(), hundred() + 500_000_000_000_000_000, ten(), ten()))
+            .on_market(quote(
+                "touch",
+                1,
+                2,
+                hundred(),
+                hundred() + 500_000_000_000_000_000,
+                ten(),
+                ten(),
+            ))
             .unwrap();
         venue.drain().unwrap();
         assert_eq!(venue.fill_records().len(), 1);
@@ -1052,7 +1158,16 @@ mod tests {
     fn cancellation_and_replacement_outcomes_are_scheduled() {
         let mut venue = venue(0);
         venue
-            .submit(order("cancel", Side::Buy, OrderType::Limit, ten(), TimeInForce::Day, Some(from_int(99)), None, 0))
+            .submit(order(
+                "cancel",
+                Side::Buy,
+                OrderType::Limit,
+                ten(),
+                TimeInForce::Day,
+                Some(from_int(99)),
+                None,
+                0,
+            ))
             .unwrap();
         venue.drain().unwrap();
         venue.cancel("cancel").unwrap();
@@ -1060,20 +1175,46 @@ mod tests {
         assert_eq!(venue.state("cancel").unwrap().status, OrderStatus::Canceled);
 
         venue
-            .submit(order("original", Side::Buy, OrderType::Limit, ten(), TimeInForce::Day, Some(from_int(99)), None, 0))
+            .submit(order(
+                "original",
+                Side::Buy,
+                OrderType::Limit,
+                ten(),
+                TimeInForce::Day,
+                Some(from_int(99)),
+                None,
+                0,
+            ))
             .unwrap();
         venue.drain().unwrap();
-        venue.on_market(default_quote("replacement-market")).unwrap();
+        venue
+            .on_market(default_quote("replacement-market"))
+            .unwrap();
         venue.drain().unwrap();
         venue
             .replace(
                 "original",
-                order("replacement", Side::Buy, OrderType::Limit, from_int(4), TimeInForce::Day, Some(one0one()), None, 0),
+                order(
+                    "replacement",
+                    Side::Buy,
+                    OrderType::Limit,
+                    from_int(4),
+                    TimeInForce::Day,
+                    Some(one0one()),
+                    None,
+                    0,
+                ),
             )
             .unwrap();
-        assert_eq!(venue.state("original").unwrap().status, OrderStatus::Replaced);
+        assert_eq!(
+            venue.state("original").unwrap().status,
+            OrderStatus::Replaced
+        );
         venue.drain().unwrap();
-        assert_eq!(venue.state("replacement").unwrap().status, OrderStatus::Filled);
+        assert_eq!(
+            venue.state("replacement").unwrap().status,
+            OrderStatus::Filled
+        );
         assert!(venue
             .report_records()
             .iter()
@@ -1084,9 +1225,28 @@ mod tests {
     fn ioc_non_fill_expires_during_drain() {
         let mut venue = venue(0);
         venue
-            .submit(order("ioc", Side::Buy, OrderType::Limit, ten(), TimeInForce::Ioc, Some(from_int(99)), None, 0))
+            .submit(order(
+                "ioc",
+                Side::Buy,
+                OrderType::Limit,
+                ten(),
+                TimeInForce::Ioc,
+                Some(from_int(99)),
+                None,
+                0,
+            ))
             .unwrap();
-        venue.on_market(quote("opportunity", 0, 1, hundred(), one0one(), ten(), ten())).unwrap();
+        venue
+            .on_market(quote(
+                "opportunity",
+                0,
+                1,
+                hundred(),
+                one0one(),
+                ten(),
+                ten(),
+            ))
+            .unwrap();
         venue.drain().unwrap();
 
         let reports = venue.report_records();
@@ -1100,7 +1260,16 @@ mod tests {
     fn commands_do_not_inline_outcomes_or_allow_pending_races() {
         let mut venue = venue(MICRO);
         venue
-            .submit(order("pending", Side::Buy, OrderType::Market, ten(), TimeInForce::Day, None, None, 0))
+            .submit(order(
+                "pending",
+                Side::Buy,
+                OrderType::Market,
+                ten(),
+                TimeInForce::Day,
+                None,
+                None,
+                0,
+            ))
             .unwrap();
         venue.on_market(default_quote("q")).unwrap();
         // Only the acknowledgement has been dispatched so far.

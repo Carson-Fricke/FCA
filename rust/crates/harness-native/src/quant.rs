@@ -511,7 +511,9 @@ mod tests {
         let tau = 1.0 / (1.0 + 0.3275911 * ax);
         let poly = tau
             * (0.254829592
-                + tau * (-0.284496736 + tau * (1.421413741 + tau * (-1.453152027 + tau * 1.061405429))));
+                + tau
+                    * (-0.284496736
+                        + tau * (1.421413741 + tau * (-1.453152027 + tau * 1.061405429))));
         let erf = 1.0 - poly * (-ax * ax).exp();
         0.5 * (1.0 + if x < 0.0 { -erf } else { erf })
     }
@@ -542,7 +544,17 @@ mod tests {
     #[test]
     fn american_put_is_worth_at_least_the_european_put() {
         let american = price(90.0, 100.0, 30.0 / 365.0, 0.05, 0.0, 0.25, false, true, 256);
-        let european = price(90.0, 100.0, 30.0 / 365.0, 0.05, 0.0, 0.25, false, false, 256);
+        let european = price(
+            90.0,
+            100.0,
+            30.0 / 365.0,
+            0.05,
+            0.0,
+            0.25,
+            false,
+            false,
+            256,
+        );
         assert!(american >= european);
         assert!(american >= 100.0 - 90.0);
     }
@@ -554,7 +566,10 @@ mod tests {
         assert!(greeks.delta > 0.0 && greeks.delta < 1.0);
         assert!(greeks.gamma > 0.0);
         assert!(greeks.vega > 0.0);
-        assert!((black_scholes(500.0, 500.0, 1.0 / 365.0, 0.04, 0.0, 0.30, true) - greeks.price).abs() < 5e-3);
+        assert!(
+            (black_scholes(500.0, 500.0, 1.0 / 365.0, 0.04, 0.0, 0.30, true) - greeks.price).abs()
+                < 5e-3
+        );
     }
 
     #[test]
@@ -569,7 +584,18 @@ mod tests {
     fn invalid_inputs_produce_nan_instead_of_errors() {
         assert!(price(100.0, 100.0, 0.01, 0.04, 0.0, 0.0, true, false, 64).is_nan());
         assert!(price(100.0, 100.0, 0.01, 0.04, 0.0, 0.20, true, false, 1).is_nan());
-        assert!(price(100.0, 100.0, 0.01, 0.04, 0.0, 0.20, true, false, MAX_STEPS + 1).is_nan());
+        assert!(price(
+            100.0,
+            100.0,
+            0.01,
+            0.04,
+            0.0,
+            0.20,
+            true,
+            false,
+            MAX_STEPS + 1
+        )
+        .is_nan());
         assert!(price(-100.0, 100.0, 0.01, 0.04, 0.0, 0.20, true, false, 64).is_nan());
     }
 

@@ -128,7 +128,11 @@ fn projected_quantities(
             .collect(),
     };
     for (symbol, side, quantity) in legs {
-        let signed = if side == Side::Buy { quantity } else { -quantity };
+        let signed = if side == Side::Buy {
+            quantity
+        } else {
+            -quantity
+        };
         *projected.entry(symbol).or_insert(ZERO) += signed;
     }
     (current, projected)
@@ -203,16 +207,19 @@ fn build_groups(
                 shares.insert(symbol.as_str().to_string(), quantity);
             }
             Ok(contract) => {
-                let key = (contract.root().to_string(), contract.expiration().to_string());
+                let key = (
+                    contract.root().to_string(),
+                    contract.expiration().to_string(),
+                );
                 let target = if contract.option_type() == 'C' {
                     &mut calls
                 } else {
                     &mut puts
                 };
-                target
-                    .entry(key)
-                    .or_default()
-                    .push(OptionPosition { contract, contracts: quantity });
+                target.entry(key).or_default().push(OptionPosition {
+                    contract,
+                    contracts: quantity,
+                });
             }
         }
     }
@@ -306,7 +313,11 @@ fn build_groups(
                     .unwrap_or(ZERO);
                 let adjusted = position.contracts + covered;
                 let short_remaining = maximum(-adjusted, ZERO);
-                let has_long = if is_call { has_long_calls } else { has_long_puts };
+                let has_long = if is_call {
+                    has_long_calls
+                } else {
+                    has_long_puts
+                };
                 let naked = if !position.contracts.is_negative() || has_long {
                     ZERO
                 } else {
@@ -441,7 +452,10 @@ impl RiskRule for NoNakedShortOptions {
             }
         }
         Ok(RuleDecision::allow(order.clone())
-            .with_metric("total_collateral", format_decimal(report.total_collateral()))
+            .with_metric(
+                "total_collateral",
+                format_decimal(report.total_collateral()),
+            )
             .with_metric(
                 "naked_put_contracts",
                 report.naked_put_contracts().to_string(),
@@ -503,7 +517,9 @@ impl RiskRule for OptionCollateralLimit {
 }
 
 fn format_decimal(value: Option<Decimal18>) -> String {
-    value.map(|value| value.to_string()).unwrap_or_else(|| "unlimited".into())
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unlimited".into())
 }
 
 #[cfg(test)]
@@ -513,9 +529,9 @@ mod tests {
     use harness_num::Decimal18;
 
     use super::{option_collateral_report, NoNakedShortOptions};
-    use crate::orders::{OrderRequest, Side, SingleLegOrder, OrderType, TimeInForce};
+    use crate::orders::{OrderRequest, OrderType, Side, SingleLegOrder, TimeInForce};
     use crate::portfolio::hub::PortfolioHub;
-    use crate::risk::models::{RiskContext, RiskRule, RiskAction};
+    use crate::risk::models::{RiskAction, RiskContext, RiskRule};
     use crate::symbol::Symbol;
 
     fn dec(value: &str) -> Decimal18 {

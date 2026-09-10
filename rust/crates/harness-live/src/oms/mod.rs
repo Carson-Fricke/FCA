@@ -8,8 +8,7 @@ pub mod manager;
 pub mod state;
 
 pub use groups::{
-    GroupLegSnapshot, GroupOrderType, GroupSnapshot, GroupStatus, MultiLegOms,
-    MultiLegOrderGroup,
+    GroupLegSnapshot, GroupOrderType, GroupSnapshot, GroupStatus, MultiLegOms, MultiLegOrderGroup,
 };
 pub use manager::{ReplaceRecord, ReplaceStatus, SessionAction, SessionDirective, SingleLegOms};
 pub use state::{OrderSnapshot, OrderStateMachine};

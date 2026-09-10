@@ -5,9 +5,7 @@ use harness_backtest::backtest::engine::{
     run_backtest, ApproveAll, BacktestOptions, ImmediateFill, TradeBuyStrategy,
 };
 use harness_backtest::backtest::errors::ONE_DAY_NS;
-use harness_backtest::backtest::fixture::{
-    synthetic_fixture, MarketEvent, SyntheticDataOptions,
-};
+use harness_backtest::backtest::fixture::{synthetic_fixture, MarketEvent, SyntheticDataOptions};
 use harness_backtest::backtest::preflight::preflight_data;
 
 fn config() -> BacktestConfig {
@@ -19,8 +17,7 @@ fn config() -> BacktestConfig {
 
 #[test]
 fn synthetic_path_matches_the_python_reference() {
-    let fixture =
-        synthetic_fixture(&config(), &SyntheticDataOptions::default()).expect("fixture");
+    let fixture = synthetic_fixture(&config(), &SyntheticDataOptions::default()).expect("fixture");
     assert_eq!(fixture.events.len(), 36);
     let MarketEvent::Quote { bid, ask, .. } = &fixture.events[0] else {
         panic!("first event must be a quote");
@@ -63,7 +60,10 @@ fn backtest_is_deterministic_and_preflights_cleanly() {
     assert_eq!(first.artifact_json(), second.artifact_json());
     assert_eq!(first.artifact_digest(), second.artifact_digest());
     assert_eq!(first.outcome_digest(), second.outcome_digest());
-    assert_eq!(first.manifest.manifest_hash(), second.manifest.manifest_hash());
+    assert_eq!(
+        first.manifest.manifest_hash(),
+        second.manifest.manifest_hash()
+    );
     // The artifact document embeds the manifest and preflight records.
     let document = first.artifact_json();
     assert!(document.contains("\"manifest\""));

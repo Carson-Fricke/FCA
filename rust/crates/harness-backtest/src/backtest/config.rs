@@ -8,8 +8,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::canonical_json::JsonValue;
 use crate::backtest::errors::BacktestError;
+use crate::canonical_json::JsonValue;
 
 /// The fee basis used to derive a fee schedule from configuration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -241,19 +241,18 @@ pub fn modwt(
     boundary: Boundary,
 ) -> Result<ModwtResult, SignalError> {
     if values.is_empty() {
-        return Err(SignalError::InvalidInput("MODWT input must be non-empty".to_string()));
+        return Err(SignalError::InvalidInput(
+            "MODWT input must be non-empty".to_string(),
+        ));
     }
     if values.iter().any(|value| !value.is_finite()) {
-        return Err(SignalError::InvalidInput("MODWT input must be finite".to_string()));
+        return Err(SignalError::InvalidInput(
+            "MODWT input must be finite".to_string(),
+        ));
     }
     let length = values.len();
     let (lowpass, highpass) = wavelet_filters(wavelet)?;
-    let resolved = resolve_level(
-        length,
-        level,
-        wavelet,
-        boundary == Boundary::Reflection,
-    )?;
+    let resolved = resolve_level(length, level, wavelet, boundary == Boundary::Reflection)?;
     let sqrt2 = std::f64::consts::SQRT_2;
     let scaled_low: Vec<f64> = lowpass.iter().map(|value| value / sqrt2).collect();
     let scaled_high: Vec<f64> = highpass.iter().map(|value| value / sqrt2).collect();
@@ -422,12 +421,7 @@ pub fn modwt_mra(
     }
     let length = values.len();
     let (lowpass, _) = wavelet_filters(wavelet)?;
-    let resolved = resolve_level(
-        length,
-        level,
-        wavelet,
-        boundary == Boundary::Reflection,
-    )?;
+    let resolved = resolve_level(length, level, wavelet, boundary == Boundary::Reflection)?;
     let pad = if boundary == Boundary::Reflection {
         level_filter_width(resolved, lowpass.len()) - 1
     } else {
@@ -571,7 +565,10 @@ mod tests {
         let result = modwt(&values, "la8", Some(2), Boundary::Reflection).expect("modwt");
         let variance = wavelet_variance(&result);
         assert_eq!(variance.counts.len(), 2);
-        assert_eq!(variance.counts[0], result.length - result.boundary_widths[0]);
+        assert_eq!(
+            variance.counts[0],
+            result.length - result.boundary_widths[0]
+        );
         assert!(variance.variance[0].is_finite());
     }
 

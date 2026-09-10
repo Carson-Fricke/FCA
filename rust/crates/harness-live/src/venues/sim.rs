@@ -65,7 +65,10 @@ impl SimOrderState {
 
     /// Whether a stop order has crossed its trigger.
     pub fn triggered(&self) -> bool {
-        if matches!(self.order.order_type, OrderType::Stop | OrderType::StopLimit) {
+        if matches!(
+            self.order.order_type,
+            OrderType::Stop | OrderType::StopLimit
+        ) {
             !self.armed
         } else {
             true
@@ -229,7 +232,10 @@ impl SimulatedVenue {
             if !armed {
                 let decision = self.attempt(&order_id, &market, None)?;
                 if decision.is_none() {
-                    let tif = self.orders.get(&order_id).map(|order| order.order.time_in_force);
+                    let tif = self
+                        .orders
+                        .get(&order_id)
+                        .map(|order| order.order.time_in_force);
                     if tif == Some(TimeInForce::Ioc)
                         && self.is_matching_opportunity(&order_id, &market)?
                     {
@@ -446,7 +452,10 @@ impl SimulatedVenue {
             };
             (
                 working.remaining_quantity(),
-                matches!(working.order.order_type, OrderType::Stop | OrderType::StopLimit),
+                matches!(
+                    working.order.order_type,
+                    OrderType::Stop | OrderType::StopLimit
+                ),
                 working.stop_triggered,
                 working.triggering_market.clone(),
             )
@@ -455,10 +464,10 @@ impl SimulatedVenue {
             return Ok(None);
         }
         if is_stop && !stop_triggered {
-            if !self.fill_model.is_triggered(
-                &self.orders.get(order_id).expect("present").order,
-                market,
-            )? {
+            if !self
+                .fill_model
+                .is_triggered(&self.orders.get(order_id).expect("present").order, market)?
+            {
                 return Ok(None);
             }
             stop_triggered = true;
@@ -635,15 +644,14 @@ impl SimulatedVenue {
         Ok(())
     }
 
-    fn is_matching_opportunity(
-        &self,
-        order_id: &str,
-        market: &MarketEvent,
-    ) -> LiveResult<bool> {
+    fn is_matching_opportunity(&self, order_id: &str, market: &MarketEvent) -> LiveResult<bool> {
         let Some(working) = self.orders.get(order_id) else {
             return Ok(false);
         };
-        if matches!(working.order.order_type, OrderType::Stop | OrderType::StopLimit) {
+        if matches!(
+            working.order.order_type,
+            OrderType::Stop | OrderType::StopLimit
+        ) {
             if working.stop_triggered {
                 return Ok(true);
             }
@@ -678,18 +686,17 @@ impl Default for SimulatedVenue {
 }
 
 /// Convenience alias used by venue tests.
-pub fn simple_quote(
-    symbol: &str,
-    bid: &str,
-    ask: &str,
-    quantity: &str,
-) -> LiveResult<MarketEvent> {
+pub fn simple_quote(symbol: &str, bid: &str, ask: &str, quantity: &str) -> LiveResult<MarketEvent> {
     Ok(MarketEvent::Quote(QuoteEvent::new(
         Symbol::new(symbol)?,
         bid.parse().map_err(|_| LiveError::Venue("bid".into()))?,
-        quantity.parse().map_err(|_| LiveError::Venue("qty".into()))?,
+        quantity
+            .parse()
+            .map_err(|_| LiveError::Venue("qty".into()))?,
         ask.parse().map_err(|_| LiveError::Venue("ask".into()))?,
-        quantity.parse().map_err(|_| LiveError::Venue("qty".into()))?,
+        quantity
+            .parse()
+            .map_err(|_| LiveError::Venue("qty".into()))?,
         None,
     )?))
 }
@@ -698,8 +705,12 @@ pub fn simple_quote(
 pub fn simple_trade(symbol: &str, price: &str, quantity: &str) -> LiveResult<MarketEvent> {
     Ok(MarketEvent::Trade(TradeEvent::new(
         Symbol::new(symbol)?,
-        price.parse().map_err(|_| LiveError::Venue("price".into()))?,
-        quantity.parse().map_err(|_| LiveError::Venue("qty".into()))?,
+        price
+            .parse()
+            .map_err(|_| LiveError::Venue("price".into()))?,
+        quantity
+            .parse()
+            .map_err(|_| LiveError::Venue("qty".into()))?,
         None,
         None,
     )?))
@@ -736,7 +747,9 @@ mod tests {
     #[test]
     fn market_order_fills_against_latest_quote() {
         let mut venue = SimulatedVenue::new("sim").unwrap();
-        venue.on_market(simple_quote("AAPL", "100", "101", "3").unwrap()).unwrap();
+        venue
+            .on_market(simple_quote("AAPL", "100", "101", "3").unwrap())
+            .unwrap();
         venue.submit(market_order()).unwrap();
         let state = venue.state("o1").unwrap();
         assert_eq!(state.status, OrderStatus::PartiallyFilled);
@@ -760,19 +773,25 @@ mod tests {
     fn trade_through_plugin_ignores_quotes() {
         let mut venue = SimulatedVenue::with_plugin(
             "sim",
-            Box::new(crate::fills::trade_through::TradeThrough::new(
-                0,
-                Decimal18::ZERO,
-                true,
-                crate::fills::latency_size::RemainderPolicy::Rest,
-            )
-            .unwrap()),
+            Box::new(
+                crate::fills::trade_through::TradeThrough::new(
+                    0,
+                    Decimal18::ZERO,
+                    true,
+                    crate::fills::latency_size::RemainderPolicy::Rest,
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
-        venue.on_market(simple_quote("AAPL", "100", "101", "10").unwrap()).unwrap();
+        venue
+            .on_market(simple_quote("AAPL", "100", "101", "10").unwrap())
+            .unwrap();
         venue.submit(market_order()).unwrap();
         assert_eq!(venue.state("o1").unwrap().status, OrderStatus::Accepted);
-        venue.on_market(simple_trade("AAPL", "100", "10").unwrap()).unwrap();
+        venue
+            .on_market(simple_trade("AAPL", "100", "10").unwrap())
+            .unwrap();
         assert_eq!(venue.state("o1").unwrap().status, OrderStatus::Filled);
     }
 }
