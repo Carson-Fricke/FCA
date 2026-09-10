@@ -13,4 +13,5 @@ members = [
     "crates/harness-api",
     "crates/harness-mcp",
     "crates/harness-host",
+    "crates/harness-config",
 ]
