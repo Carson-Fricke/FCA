@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 from urllib.parse import urlsplit
+
+from thesis.providers.invocations import (
+    ChatMessage,
+    ModelCompletion,
+    ProviderRejectedError,
+    ProviderUnreachableError,
+    Role,
+    messages_payload,
+    parse_chat_completion,
+)
 
 CapabilityReason = Literal[
     "ready",
@@ -294,11 +306,157 @@ def runtime_capability_preflight(
     return RuntimeCapabilityReport(provider=snapshot.auth, models=snapshot.models)
 
 
+_FOUNDRY_API_VERSION = "2024-05-01-preview"
+
+
+class FoundryInvocationTransport(Protocol):
+    """Narrow HTTP boundary for deployment-bound chat completions."""
+
+    def post(
+        self, url: str, headers: Mapping[str, str], payload: Mapping[str, object]
+    ) -> tuple[int, str]: ...
+
+
+class FoundryDeploymentInvoker:
+    """Deployment-bound chat completions composed with the existing preflight.
+
+    The bearer token is resolved per call through the injected Entra credential
+    and is never stored on the invoker or included in any serializable record.
+    """
+
+    __slots__ = (
+        "_api_version",
+        "_client_factory",
+        "_credential",
+        "_profile",
+        "_transport",
+    )
+
+    def __init__(
+        self,
+        profile: FoundryProviderProfile,
+        credential: EntraCredential,
+        transport: FoundryInvocationTransport,
+        *,
+        api_version: str = _FOUNDRY_API_VERSION,
+        client_factory: FoundryClientFactory | None = None,
+    ) -> None:
+        self._profile = profile
+        self._credential = credential
+        self._transport = transport
+        self._api_version = api_version
+        self._client_factory = client_factory
+
+    @property
+    def provider_name(self) -> str:
+        return "azure_ai_foundry"
+
+    @property
+    def profile_id(self) -> str:
+        return self._profile.profile_id
+
+    def __repr__(self) -> str:
+        return (
+            "FoundryDeploymentInvoker("
+            f"profile_id={self.profile_id!r}, "
+            f"endpoint={self._profile.endpoint!r}, "
+            f"model_deployment={self._profile.model_deployment!r})"
+        )
+
+    def complete(
+        self, *, messages: Sequence[ChatMessage], role: Role = "primary"
+    ) -> ModelCompletion:
+        """Run one deployment-bound chat completion, failing closed."""
+        token = self._resolve_token()
+        headers = {
+            "Authorization": f"Bearer {token.token}",
+            "Content-Type": "application/json",
+        }
+        payload: dict[str, object] = {
+            "model": self._profile.model_deployment,
+            "messages": list(messages_payload(messages)),
+        }
+        status, body = self._post(self._invocation_url(), headers, payload)
+        if not 200 <= status < 300:
+            raise _rejected(status, body)
+        return parse_chat_completion(
+            body=body,
+            provider=self.provider_name,
+            fallback_model=self._profile.model_deployment,
+            role=role,
+        )
+
+    def preflight(self) -> ProviderCapabilitySnapshot:
+        """Compose the existing credential-injected preflight snapshot."""
+        if self._client_factory is None:
+            raise RuntimeError("client factory is required to compose preflight")
+        return FoundryProvider(
+            self._profile, self._credential, self._client_factory
+        ).preflight()
+
+    def _resolve_token(self) -> EntraAccessToken:
+        try:
+            token = self._credential.get_token(_FOUNDRY_SCOPE)
+        except Exception as error:
+            raise ProviderRejectedError(
+                "foundry credential is not available"
+            ) from error
+        if not token.token:
+            raise ProviderRejectedError("credential returned an empty access token")
+        return token
+
+    def _invocation_url(self) -> str:
+        return (
+            f"{self._profile.endpoint}/openai/deployments/"
+            f"{self._profile.model_deployment}/chat/completions"
+            f"?api-version={self._api_version}"
+        )
+
+    def _post(
+        self,
+        url: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+    ) -> tuple[int, str]:
+        try:
+            return self._transport.post(url, headers, payload)
+        except Exception as error:
+            raise ProviderUnreachableError(
+                "foundry transport is unreachable"
+            ) from error
+
+
+def _rejected(status: int, body: str) -> ProviderRejectedError:
+    message = _provider_message(body)
+    detail = f": {message}" if message else ""
+    return ProviderRejectedError(
+        f"foundry rejected the request (status {status}){detail}",
+        status=status,
+    )
+
+
+def _provider_message(body: str) -> str:
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return ""
+    error = data.get("error") if isinstance(data, dict) else None
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str):
+            return message
+    if isinstance(error, str):
+        return error
+    return ""
+
+
 __all__ = [
     "EntraAccessToken",
     "EntraCredential",
     "FoundryClientFactory",
     "FoundryDeploymentClient",
+    "FoundryDeploymentInvoker",
+    "FoundryInvocationTransport",
     "FoundryProvider",
     "FoundryProviderProfile",
     "ModelCapabilityStatus",

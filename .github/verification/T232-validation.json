@@ -1,0 +1,31 @@
+{
+  "taskId": "T232",
+  "numTotalTests": 2712,
+  "numPassedTests": 2712,
+  "numFailedTests": 0,
+  "numPendingTests": 15,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-provider-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/providers/",
+      "result": "30 tests (21 new): OpenRouter adapter (OpenAI-compatible payload with Authorization + HTTP-Referer/X-Title attribution headers, response parsing with usage, per-call key resolution from the injected EnvironmentKeySource with no key ever stored or serialized, fail-closed ProviderUnreachableError/ProviderRejectedError on network/401/429/5xx, preflight without credential exposure) and the FoundryDeploymentInvoker (deployment-bound chat-completions through the project endpoint with the Entra bearer from the credential protocol, composing the existing preflight snapshot); shared ModelInvocation records carry provider/model/version/role/request+response digests from an injected clock, and bind_role stamps the pre-result assignment with a deterministic assignment digest"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2712 passed, 15 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/providers tests/thesis/providers && uv run --extra dev ty check src/thesis/providers",
+      "result": "ruff, format, and ty clean; preflight surfaces untouched (append-only invoker)"
+    }
+  ],
+  "limitations": [
+    "Router binding is a recommendation: register adapters in the ModelRouter providers mapping keyed by profile provider, call bind_role before invoking, translate provider errors to the error:// provenance path, and record ModelInvocation through a shared InMemoryInvocationLedger"
+  ]
+}

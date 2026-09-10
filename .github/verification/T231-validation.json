@@ -1,0 +1,32 @@
+{
+  "taskId": "T231",
+  "numTotalTests": 2712,
+  "numPassedTests": 2712,
+  "numFailedTests": 0,
+  "numPendingTests": 15,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "focused-data-route-tests",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/http/",
+      "result": "46 tests (25 new): workspace list/create/snapshot, backtests history + declared-split detail + launch delegation to the harness adapter, deployments with orders and fail-closed portfolio/risk surfaces (503 {error:{code,message}}, never fabricated), dashboards widget CRUD with JSON persistence round-trip, screeners delegating to the T219 engine with SavedStudy persistence, workspace-state (CLEO projection, lineage, evidence, consent audit), all under the bearer-auth boundary with services resolved from app.state mirroring the chat router pattern"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider",
+      "result": "2712 passed, 15 skipped, 1 xfailed at wave edit freeze"
+    },
+    {
+      "name": "lint-and-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check src/thesis/http tests/thesis/http && uv run --extra dev ty check src/thesis/http",
+      "result": "ruff, format, and ty clean; chat/streaming/application tests stayed green"
+    }
+  ],
+  "limitations": [
+    "Backtest/deployment stores are local JSON/in-memory per the local-mode scope; promotion to the Azure workspace persistence is the Azure-mode adapter's later work",
+    "The screener market port is injected; wiring it to live lake/universe data is a follow-on integration step"
+  ]
+}

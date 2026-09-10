@@ -26,12 +26,23 @@ from jwt import PyJWK, PyJWKClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from thesis.chat import ChatService
+from thesis.http.backtests import create_backtest_router
 from thesis.http.chat import create_chat_router
+from thesis.http.dashboards import create_dashboard_router
+from thesis.http.deployments import create_deployment_router
+from thesis.http.screeners import create_screeners_router
+from thesis.http.screening import create_screener_router
+from thesis.http.state import create_workspace_state_router
 from thesis.http.streaming import (
     ProviderDeltaSource,
     StreamSleeper,
     create_streaming_router,
 )
+from thesis.http.workspaces import (
+    WorkspaceDataBundle,
+    create_workspaces_router,
+)
+from thesis.screening.service import ScreenerService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -211,12 +222,22 @@ def create_app(
     stream_sleeper: StreamSleeper | None = None,
     provider_delta_source: ProviderDeltaSource | None = None,
     stream_max_poll_cycles: int | None = None,
+    screener_service: ScreenerService | None = None,
+    workspace_data: WorkspaceDataBundle | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
     The chat and streaming routers resolve their :class:`ChatService` from
     ``app.state.chat_service``; pass ``chat_service`` to inject one, otherwise
-    the first request constructs an in-memory service.
+    the first request constructs an in-memory service.  The screener router
+    resolves its :class:`ScreenerService` from ``app.state.screener_service``;
+    without an injected service the screener surface answers 503 (fail closed
+    when no data source is configured).  The workspace DATA routers
+    (workspaces, backtests, deployments, dashboards, screeners, and workspace
+    state) resolve their services from ``app.state`` the same way; pass
+    ``workspace_data`` — typically built by
+    :func:`thesis.http.workspaces.build_local_workspace_data` — to compose the
+    local-mode services.
     """
     entra_authenticator = (
         EntraJwtAuthenticator(
@@ -241,6 +262,17 @@ def create_app(
     )
     if chat_service is not None:
         application.state.chat_service = chat_service
+    if workspace_data is not None:
+        application.state.workspace_service = workspace_data.workspaces
+        application.state.backtest_service = workspace_data.backtests
+        application.state.deployment_service = workspace_data.deployments
+        application.state.dashboard_service = workspace_data.dashboards
+        application.state.screener_data_service = workspace_data.screeners
+        application.state.workspace_state_service = workspace_data.state
+        if workspace_data.harness is not None:
+            application.state.harness_boundary = workspace_data.harness
+    if screener_service is not None:
+        application.state.screener_service = screener_service
 
     @application.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
@@ -303,6 +335,34 @@ def create_app(
             provider_delta_source=provider_delta_source,
             max_poll_cycles=stream_max_poll_cycles,
         ),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_workspaces_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_backtest_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_deployment_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_dashboard_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_screeners_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_workspace_state_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_screener_router(),
         dependencies=[Depends(authenticator)],
     )
     return application
