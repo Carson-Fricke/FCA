@@ -65,7 +65,7 @@
 
 	<div class="flex flex-wrap items-center gap-2">
 		<select
-			class="rounded-lg border border-white/10 bg-surface-900 px-2 py-1.5 text-xs text-slate-300 outline-none"
+			class="rounded-lg border border-surface-600 bg-surface-900 px-2 py-1.5 text-xs text-slate-300 outline-none"
 			bind:value={strategyFilter}
 			aria-label="Filter by strategy"
 		>
@@ -83,10 +83,10 @@
 	{#if filtered.length === 0}
 		<EmptyState title="No backtests" hint="Runs submitted from chats will appear here." />
 	{:else}
-		<div class="overflow-hidden rounded-xl border border-white/5 bg-surface-850/40" data-testid="backtest-history">
+		<div class="overflow-hidden rounded-xl border border-surface-700 bg-surface-900" data-testid="backtest-history">
 			<table class="w-full border-collapse font-mono text-xs">
 				<thead>
-					<tr class="bg-surface-900/80 text-left text-[10px] tracking-wider text-slate-500 uppercase">
+					<tr class="bg-surface-900 text-left text-[10px] tracking-wider text-slate-500 uppercase">
 						<th class="px-4 py-2">Run</th>
 						<th class="px-4 py-2">Strategy</th>
 						<th class="px-4 py-2">Period</th>
@@ -98,7 +98,7 @@
 				</thead>
 				<tbody>
 					{#each filtered as backtest (backtest.id)}
-						<tr class="border-t border-white/5 hover:bg-surface-850/60">
+						<tr class="border-t border-surface-700 hover:bg-surface-900">
 							<td class="px-4 py-2">
 								<a href="/w/{workspaceId}/backtests/{backtest.id}" class="text-accent hover:underline">
 									{backtest.name}

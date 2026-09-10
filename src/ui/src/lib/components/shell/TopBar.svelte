@@ -44,7 +44,7 @@
 
 <svelte:window onpointerdown={onWindowPointerDown} />
 
-<header class="flex h-14 shrink-0 items-center gap-3 border-b border-white/5 bg-surface-900/60 px-4">
+<header class="flex h-14 shrink-0 items-center gap-3 border-b border-surface-700 bg-surface-900 px-4">
 	<nav class="flex min-w-0 items-center gap-1.5 text-sm text-slate-500" aria-label="Breadcrumb">
 		<a href="/w" class="hover:text-slate-300">Workspace</a>
 		<span aria-hidden="true">›</span>
@@ -77,7 +77,7 @@
 		<div class="relative" bind:this={holder}>
 			<button
 				type="button"
-				class="relative rounded-lg border border-white/5 px-2 py-1.5 text-slate-400 transition hover:border-white/10 hover:text-slate-200 {notificationsOpen
+				class="relative rounded-lg border border-surface-700 px-2 py-1.5 text-slate-400 transition hover:border-surface-600 hover:text-slate-200 {notificationsOpen
 					? 'border-accent/40 text-accent'
 					: ''}"
 				aria-label="Notifications"
@@ -94,7 +94,7 @@
 			</button>
 			{#if notificationsOpen}
 				<div
-					class="absolute top-full right-0 z-40 mt-1 w-80 rounded-xl border border-white/10 bg-surface-850 p-2 shadow-2xl"
+					class="absolute top-full right-0 z-40 mt-1 w-80 rounded-xl border border-surface-600 bg-surface-850 p-2 shadow-2xl"
 					data-testid="notifications-popover"
 				>
 					<div class="mb-1 flex items-center justify-between px-1">
@@ -128,7 +128,7 @@
 				class="rounded-lg border px-2 py-1.5 text-xs transition
 					{copilotVisible
 					? 'border-accent/40 bg-accent/10 text-accent'
-					: 'border-white/5 text-slate-400 hover:border-white/10 hover:text-slate-200'}"
+					: 'border-surface-700 text-slate-400 hover:border-surface-600 hover:text-slate-200'}"
 				onclick={onToggleCopilot}
 				data-testid="copilot-toggle"
 				title="Toggle workspace copilot"

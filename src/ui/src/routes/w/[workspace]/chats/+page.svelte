@@ -206,8 +206,8 @@
 <svelte:head><title>AI chats — Thesis</title></svelte:head>
 
 <div class="flex h-full min-h-0 gap-4">
-	<section class="flex w-72 shrink-0 flex-col rounded-xl border border-white/5 bg-surface-850/60">
-		<div class="flex items-center gap-2 border-b border-white/5 px-4 py-3">
+	<section class="flex w-72 shrink-0 flex-col rounded-xl border border-surface-700 bg-surface-900">
+		<div class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
 			<h2 class="text-sm font-semibold text-slate-200">Conversations</h2>
 			<span class="rounded-full bg-surface-800 px-1.5 font-mono text-[10px] text-slate-400">
 				{chats.length}
@@ -240,14 +240,14 @@
 				</li>
 			{/each}
 		</ul>
-		<div class="border-t border-white/5 px-4 py-2 font-mono text-[10px] text-slate-600">
+		<div class="border-t border-surface-700 px-4 py-2 font-mono text-[10px] text-slate-600">
 			Scoped to workspace {workspaceId}
 		</div>
 	</section>
 
-	<section class="flex min-w-0 flex-1 flex-col rounded-xl border border-white/5 bg-surface-900/50">
+	<section class="flex min-w-0 flex-1 flex-col rounded-xl border border-surface-700 bg-surface-900">
 		{#if activeChat}
-			<header class="flex items-center gap-2 border-b border-white/5 px-4 py-3">
+			<header class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
 				<h1 class="truncate text-sm font-semibold text-slate-100">{activeChat.title}</h1>
 				{#if activeChat.kind === 'investigation'}
 					<span class="rounded-full border border-accent/40 px-2 py-0.5 font-mono text-[10px] text-accent">
@@ -276,7 +276,7 @@
 				/>
 			</div>
 
-			<div class="border-t border-white/5 p-3">
+			<div class="border-t border-surface-700 p-3">
 				<WorkflowTimeline events={events} />
 			</div>
 		{:else}
@@ -295,7 +295,7 @@
 		/>
 	</section>
 
-	<aside class="hidden w-80 shrink-0 overflow-y-auto rounded-xl border border-white/5 bg-surface-850/60 p-3 xl:block">
+	<aside class="hidden w-80 shrink-0 overflow-y-auto rounded-xl border border-surface-700 bg-surface-900 p-3 xl:block">
 		<h2 class="mb-2 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
 			CLEO projection · read-only
 		</h2>

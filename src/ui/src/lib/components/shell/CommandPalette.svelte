@@ -46,7 +46,7 @@
 
 <Dialog title="Find your next move" {onClose}>
 	<div class="p-2" data-testid="command-palette">
-		<label class="flex items-center gap-2 rounded-lg border border-white/10 bg-surface-950/70 px-3 py-2">
+		<label class="flex items-center gap-2 rounded-lg border border-surface-600 bg-surface-950 px-3 py-2">
 			<span class="text-slate-500" aria-hidden="true">⌕</span>
 			<input
 				type="text"
@@ -54,7 +54,7 @@
 				placeholder="Search strategies, pages, dashboards…"
 				bind:value={query}
 			/>
-			<kbd class="rounded border border-white/10 px-1 font-mono text-[10px] text-slate-500">ESC</kbd>
+			<kbd class="rounded border border-surface-600 px-1 font-mono text-[10px] text-slate-500">ESC</kbd>
 		</label>
 
 		<div class="mt-2 max-h-80 overflow-y-auto">
@@ -63,7 +63,7 @@
 				{#each pages as page (page.id)}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800/70"
+						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
 						onclick={() => go(`/w/${workspaceId}/${page.id}`)}
 					>
 						<span aria-hidden="true">◎</span>{page.label}<span class="ml-auto text-slate-600" aria-hidden="true">→</span>
@@ -75,7 +75,7 @@
 				{#each matchedStrategies as strategy (strategy.id)}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800/70"
+						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
 						onclick={() => go(`/w/${workspaceId}/strategies/${strategy.id}`)}
 					>
 						<span class="font-mono text-xs text-accent">{strategy.symbol}</span>
@@ -89,7 +89,7 @@
 				{#each matchedWidgets as widget (widget.id)}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800/70"
+						class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
 						onclick={() => go(`/w/${workspaceId}/dashboards`)}
 					>
 						<span aria-hidden="true">▤</span>{widget.title}
@@ -109,14 +109,14 @@
 			</div>
 			<button
 				type="button"
-				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800/70"
+				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
 				onclick={() => go(`/w/${workspaceId}/chats`)}
 			>
 				<span aria-hidden="true">＋</span>New chat
 			</button>
 			<button
 				type="button"
-				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800/70"
+				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-300 hover:bg-surface-800"
 				onclick={() => go(`/w/${workspaceId}/screener`)}
 			>
 				<span aria-hidden="true">＋</span>New screener
@@ -124,7 +124,7 @@
 		</div>
 
 		<div
-			class="mt-1 flex items-center justify-between border-t border-white/5 px-3 py-2 text-[10px] text-slate-600"
+			class="mt-1 flex items-center justify-between border-t border-surface-700 px-3 py-2 text-[10px] text-slate-600"
 		>
 			<span>⌘K to open anytime</span>
 			<span>Searching in workspace <strong class="text-slate-500">{workspaceId}</strong></span>

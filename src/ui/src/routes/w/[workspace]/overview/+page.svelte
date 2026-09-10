@@ -31,12 +31,12 @@
 	</div>
 
 	<div class="grid gap-4 lg:grid-cols-3">
-		<section class="rounded-xl border border-white/5 bg-surface-850/60 p-4 lg:col-span-2">
+		<section class="rounded-xl border border-surface-700 bg-surface-900 p-4 lg:col-span-2">
 			<h2 class="mb-3 text-sm font-semibold text-slate-200">Recent activity</h2>
 			{#if activity.length}
 				<ul class="space-y-2">
 					{#each activity as item (item.id)}
-						<li class="flex items-center gap-3 rounded-lg border border-white/5 bg-surface-900/60 px-3 py-2">
+						<li class="flex items-center gap-3 rounded-lg border border-surface-700 bg-surface-900 px-3 py-2">
 							<span
 								class="h-1.5 w-1.5 shrink-0 rounded-full
 									{item.type === 'backtest'
@@ -64,7 +64,7 @@
 		</section>
 
 		<section class="space-y-4">
-			<div class="rounded-xl border border-white/5 bg-surface-850/60 p-4">
+			<div class="rounded-xl border border-surface-700 bg-surface-900 p-4">
 				<h2 class="mb-3 text-sm font-semibold text-slate-200">Open chats</h2>
 				{#if openChats.length}
 					<ul class="space-y-2">
@@ -72,7 +72,7 @@
 							<li>
 								<a
 									href="/w/{workspaceId}/chats?chat={chat.chat_id}"
-									class="block rounded-lg border border-white/5 bg-surface-900/60 px-3 py-2 hover:border-accent/30"
+									class="block rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 hover:border-accent/30"
 								>
 									<p class="truncate text-sm text-slate-200">{chat.title}</p>
 									<p class="text-[11px] text-slate-500">
@@ -88,7 +88,7 @@
 				{/if}
 			</div>
 
-			<div class="rounded-xl border border-white/5 bg-surface-850/60 p-4">
+			<div class="rounded-xl border border-surface-700 bg-surface-900 p-4">
 				<h2 class="mb-2 text-sm font-semibold text-slate-200">Workspace health</h2>
 				<p class="flex items-center gap-2 text-sm">
 					<span

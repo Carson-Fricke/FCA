@@ -19,7 +19,7 @@
 
 {#if surface.state === 'unavailable' || surface.value === null}
 	<div
-		class="rounded-lg border border-dashed border-surface-600/60 bg-surface-900/40 px-4 py-3 text-xs"
+		class="rounded-lg border border-dashed border-surface-600/60 bg-surface-950 px-4 py-3 text-xs"
 		data-testid="surface-unavailable"
 	>
 		<div class="flex items-center gap-2 text-slate-400">

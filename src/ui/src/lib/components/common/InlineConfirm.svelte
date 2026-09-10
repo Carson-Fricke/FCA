@@ -38,7 +38,7 @@
 		</button>
 		<button
 			type="button"
-			class="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-slate-200"
+			class="rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-slate-200"
 			onclick={() => (armed = false)}
 			data-testid="inline-confirm-no"
 		>

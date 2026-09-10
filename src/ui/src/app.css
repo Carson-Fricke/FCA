@@ -1,50 +1,78 @@
 @import 'tailwindcss';
 
+/*
+ * Theme: the workspace-app reference mockup ("svelte-trading-workspace-ui")
+ * light sage/cream design language â€” white cards on a soft off-white
+ * surface, muted sage-green accents, low-contrast borders, Inter at compact
+ * sizes. Adopted across the whole Thesis UI (spec: thesis-ui-design.md,
+ * Decision Record, visual source update 2026-09-09).
+ */
+
 @theme {
 	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-	--font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+	--font-mono: 'SFMono-Regular', 'SF Mono', Consolas, 'Liberation Mono', monospace;
 
-	--color-surface-950: #070b14;
-	--color-surface-900: #0c1220;
-	--color-surface-850: #111827;
-	--color-surface-800: #1a2332;
-	--color-surface-700: #243044;
-	--color-surface-600: #334155;
+	/* Surfaces (light): page canvas, cards, rails */
+	--color-surface-950: #f8faf9;
+	--color-surface-900: #ffffff;
+	--color-surface-850: #ffffff;
+	--color-surface-800: #f8fbf8;
+	--color-surface-700: #e5eae6;
+	--color-surface-600: #dce3dd;
 
-	--color-accent: #6c9bd2;
-	--color-accent-dim: #4a7098;
-	--color-profit: #34d399;
-	--color-loss: #f87171;
-	--color-warn: #fbbf24;
+	/* Accents: the mockup's sage green family */
+	--color-accent: #2a8761;
+	--color-accent-dim: #287452;
+	--color-profit: #2a8761;
+	--color-loss: #c76868;
+	--color-warn: #d6ad58;
+
+	/*
+	 * Dark-theme bridge: the workspace routes were authored against a dark
+	 * palette (slate text on navy). Under the light sage theme the slate
+	 * scale is remapped so existing utility classes render with correct
+	 * light-theme contrast (slate-100/200 -> dark text, slate-400/500 ->
+	 * muted gray-green, slate-600 -> light rail, white/5 borders -> soft
+	 * sage borders).
+	 */
+	--color-slate-100: #33402f;
+	--color-slate-200: #3c4a38;
+	--color-slate-300: #4a5a46;
+	--color-slate-400: #6b7a67;
+	--color-slate-500: #8b948e;
+	--color-slate-600: #c2cdc2;
 }
 
 @layer base {
 	html {
-		color-scheme: dark;
+		color-scheme: light;
 	}
 
 	body {
 		margin: 0;
 		min-height: 100vh;
 		font-family: var(--font-sans);
+		font-size: 13px;
 		background: var(--color-surface-950);
-		color: #e2e8f0;
+		color: #242d29;
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
 	}
 
 	* {
 		scrollbar-width: thin;
-		scrollbar-color: var(--color-surface-600) transparent;
+		scrollbar-color: #dce3dd transparent;
+	}
+
+	::selection {
+		background: #dbeddf;
 	}
 }
 
 @layer utilities {
+	/* The mockup has no grid backdrop; keep the utility as a no-op surface. */
 	.grid-bg {
-		background-image:
-			linear-gradient(rgb(108 155 210 / 0.02) 1px, transparent 1px),
-			linear-gradient(90deg, rgb(108 155 210 / 0.02) 1px, transparent 1px);
-		background-size: 48px 48px;
+		background-image: none;
 	}
 
 	.font-tabular {
@@ -54,30 +82,35 @@
 
 /*
  * Legacy bridge: the pre-existing chart/report components and demo pages
- * read these custom properties. They are mapped onto the adopted m2 theme
- * tokens so the whole app shares one palette without rewriting the
- * canvas-drawing components.
+ * read these custom properties at draw time. They map the light sage theme
+ * onto the same names so canvas-drawing components follow the palette
+ * without rewrites.
  */
 :root {
-	--bg: #070b14;
-	--panel: #111827;
-	--panel-raised: #1a2332;
-	--panel-sunken: #0c1220;
-	--surface-well: #0c1220;
-	--border: rgb(255 255 255 / 0.05);
-	--border-strong: rgb(255 255 255 / 0.12);
-	--shadow-card: 0 6px 20px rgb(2 6 16 / 0.5);
-	--text: #e2e8f0;
-	--muted: #94a3b8;
-	--faint: #64748b;
-	--accent: #22d3ee;
-	--accent-dim: #0891b2;
-	--green: #34d399;
-	--red: #f87171;
-	--amber: #fbbf24;
-	--purple: #a78bfa;
-	--font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-	--radius: 12px;
+	--bg: #f8faf9;
+	--panel: #ffffff;
+	--panel-raised: #ffffff;
+	--panel-sunken: #f8faf9;
+	--surface-well: #f9fbf9;
+	--border: #e5eae6;
+	--border-strong: #d2e0d5;
+	--shadow-card: 0 1px 2px rgb(28 57 33 / 0.02);
+	--shadow-elevated: 0 10px 40px rgb(50 71 41 / 0.13);
+	--text: #242d29;
+	--muted: #8b948e;
+	--faint: #a1a9a3;
+	--accent: #2a8761;
+	--accent-dim: #287452;
+	--green: #2a8761;
+	--red: #c76868;
+	--amber: #d6ad58;
+	--purple: #8a74af;
+	--font-mono: 'SFMono-Regular', 'SF Mono', Consolas, 'Liberation Mono', monospace;
+	--radius: 8px;
+
+	/* Chart canvas tokens (read by TimeSeriesChart/HistogramChart at draw) */
+	--surface-900: #ffffff;
+	--surface-700: #e5eae6;
 }
 
 /* Keep the demo laboratory pages legible under the new tokens. */
@@ -114,4 +147,25 @@ h1 {
 a {
 	color: var(--accent);
 	text-decoration: none;
+}
+
+button {
+	transition:
+		background 0.16s,
+		color 0.16s,
+		border-color 0.16s,
+		box-shadow 0.16s;
+}
+
+button:focus-visible,
+a:focus-visible {
+	outline: 2px solid #85b599;
+	outline-offset: 3px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+	border-color: #87b49a;
+	box-shadow: 0 0 0 3px rgb(40 116 82 / 0.05);
 }

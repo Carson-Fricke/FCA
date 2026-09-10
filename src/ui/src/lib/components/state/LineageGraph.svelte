@@ -43,7 +43,7 @@
 </script>
 
 <div
-	class="rounded-xl border border-white/5 bg-surface-850/60 p-4"
+	class="rounded-xl border border-surface-700 bg-surface-900 p-4"
 	data-testid="lineage-graph"
 	data-strategy={lineage.strategy_id}
 >
@@ -63,7 +63,7 @@
 				{/if}
 			{#each column as entry (entry.node.id)}
 				<div
-					class="rounded-lg border border-white/10 bg-surface-900/70 px-3 py-2"
+					class="rounded-lg border border-surface-600 bg-surface-900 px-3 py-2"
 					data-testid="lineage-node"
 					data-version={entry.node.version}
 				>

@@ -41,12 +41,12 @@
 </script>
 
 <aside
-	class="flex w-60 shrink-0 flex-col border-r border-white/5 bg-surface-900/80"
+	class="flex w-60 shrink-0 flex-col border-r border-surface-700 bg-surface-900"
 	data-testid="sidebar"
 >
 	<div class="flex items-center gap-2 px-4 pt-4 pb-3">
 		<span
-			class="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-surface-800 font-mono text-sm font-bold text-slate-300"
+			class="flex h-8 w-8 items-center justify-center rounded-lg border border-surface-600 bg-surface-800 font-mono text-sm font-bold text-slate-300"
 			aria-hidden="true"
 		>
 			Θ
@@ -66,13 +66,13 @@
 	<div class="px-3 pt-3">
 		<button
 			type="button"
-			class="flex w-full items-center gap-2 rounded-lg border border-white/5 bg-surface-850/50 px-2.5 py-2 text-left text-sm text-slate-500 transition hover:border-white/10 hover:text-slate-400"
+			class="flex w-full items-center gap-2 rounded-lg border border-surface-700 bg-surface-800 px-2.5 py-2 text-left text-sm text-slate-500 transition hover:border-surface-600 hover:text-slate-400"
 			onclick={onSearch}
 			data-testid="search-trigger"
 		>
 			<span aria-hidden="true">⌕</span>
 			<span class="flex-1">Search anything…</span>
-			<kbd class="rounded border border-white/10 bg-surface-900 px-1 font-mono text-[10px]">⌘K</kbd>
+			<kbd class="rounded border border-surface-600 bg-surface-900 px-1 font-mono text-[10px]">⌘K</kbd>
 		</button>
 	</div>
 
@@ -87,8 +87,8 @@
 						href="/w/{workspaceId}/{item.id}"
 						class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] transition
 							{page === item.id
-							? 'bg-surface-800/70 font-medium text-slate-100'
-							: 'text-slate-400 hover:bg-surface-800/60 hover:text-slate-300'}"
+							? 'bg-surface-800 font-medium text-slate-100'
+							: 'text-slate-400 hover:bg-surface-800 hover:text-slate-300'}"
 						aria-current={page === item.id ? 'page' : undefined}
 						data-testid="nav-{item.id}"
 					>
@@ -116,7 +116,7 @@
 				<li class="group flex items-center">
 					<a
 						href="/w/{workspaceId}/dashboards"
-						class="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-400 transition hover:bg-surface-800/60 hover:text-slate-200"
+						class="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-400 transition hover:bg-surface-800 hover:text-slate-200"
 					>
 						<span class="w-4 text-center text-xs" aria-hidden="true">▤</span>
 						<span class="truncate">{widget.title}</span>
@@ -136,7 +136,7 @@
 		</ul>
 	</nav>
 
-	<div class="border-t border-white/5 px-4 py-3" data-testid="sidebar-footer">
+	<div class="border-t border-surface-700 px-4 py-3" data-testid="sidebar-footer">
 		<div class="flex items-center gap-2 text-xs">
 			<span class="relative flex h-2 w-2" aria-hidden="true">
 				<span
@@ -150,7 +150,7 @@
 		</div>
 		<div class="mt-2 flex items-center gap-2">
 			<span
-				class="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-surface-800 font-mono text-[10px] text-slate-300"
+				class="flex h-7 w-7 items-center justify-center rounded-full border border-surface-600 bg-surface-800 font-mono text-[10px] text-slate-300"
 			>
 				AM
 			</span>
@@ -160,7 +160,7 @@
 			</span>
 			<a
 				href="/w/{workspaceId}/workspace-state"
-				class="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-slate-300"
+				class="rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-slate-300"
 			>
 				Settings
 			</a>

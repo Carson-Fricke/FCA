@@ -48,8 +48,8 @@
 			</div>
 		</header>
 
-		<section class="rounded-xl border border-white/5 bg-surface-900/70">
-			<h2 class="border-b border-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200">Code</h2>
+		<section class="rounded-xl border border-surface-700 bg-surface-900">
+			<h2 class="border-b border-surface-700 px-4 py-2.5 text-sm font-semibold text-slate-200">Code</h2>
 			<pre
 				class="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-slate-300"
 				data-testid="strategy-code">{s.code}</pre>
@@ -78,6 +78,6 @@
 			/>
 		</section>
 	{:else}
-		<div class="h-40 animate-pulse rounded-xl border border-white/5 bg-surface-850/40"></div>
+		<div class="h-40 animate-pulse rounded-xl border border-surface-700 bg-surface-900"></div>
 	{/if}
 </div>

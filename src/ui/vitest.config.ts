@@ -7,7 +7,8 @@ export default defineConfig({
 	resolve: {
 		conditions: process.env.VITEST ? ['browser'] : undefined,
 		alias: {
-			$lib: fileURLToPath(new URL('./src/lib', import.meta.url))
+			$lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
+			$app: fileURLToPath(new URL('./.svelte-kit/generated/app-mock', import.meta.url))
 		}
 	},
 	test: {

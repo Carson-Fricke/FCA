@@ -49,7 +49,7 @@
 </script>
 
 <div
-	class="rounded-xl border border-warn/40 bg-surface-900/80 p-4"
+	class="rounded-xl border border-warn/40 bg-surface-900 p-4"
 	data-testid="consent-card"
 	data-action={proposal.action}
 	data-environment={proposal.environment}
@@ -106,7 +106,7 @@
 		{#if onReject && !confirmed}
 			<button
 				type="button"
-				class="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+				class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
 				onclick={onReject}
 				disabled={busy}
 			>

@@ -36,7 +36,7 @@
 	</header>
 
 	{#if !state}
-		<div class="h-40 animate-pulse rounded-xl border border-white/5 bg-surface-850/40"></div>
+		<div class="h-40 animate-pulse rounded-xl border border-surface-700 bg-surface-900"></div>
 	{:else}
 		<section class="space-y-2">
 			<h2 class="text-sm font-semibold text-slate-200">CLEO plan &amp; workflow</h2>

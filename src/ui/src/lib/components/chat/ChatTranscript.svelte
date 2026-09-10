@@ -30,17 +30,17 @@
 	} = $props();
 
 	const ROLE_STYLE: Record<string, string> = {
-		user: 'border-white/10 bg-surface-850/60',
-		assistant: 'border-white/5 bg-surface-850/40',
-		tool: 'border-transparent bg-surface-900/40',
-		system: 'border-transparent bg-surface-900/40'
+		user: 'border-surface-600 bg-surface-900',
+		assistant: 'border-surface-700 bg-surface-900',
+		tool: 'border-transparent bg-surface-950',
+		system: 'border-transparent bg-surface-950'
 	};
 </script>
 
 <div class="space-y-3" data-testid="chat-transcript">
 	{#each messages as message (message.message_id)}
 		<article
-			class="rounded-xl border p-3 {ROLE_STYLE[message.role] ?? 'border-white/5 bg-surface-850/40'}"
+			class="rounded-xl border p-3 {ROLE_STYLE[message.role] ?? 'border-surface-700 bg-surface-900'}"
 			data-testid="chat-message"
 			data-role={message.role}
 			data-message-id={message.message_id}

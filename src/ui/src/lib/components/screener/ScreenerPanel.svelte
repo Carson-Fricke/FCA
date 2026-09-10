@@ -81,7 +81,7 @@
 
 <div class="grid gap-4 lg:grid-cols-[1fr_320px]" data-testid="screener-panel">
 	<div class="space-y-4">
-		<section class="rounded-xl border border-white/5 bg-surface-850/60 p-4">
+		<section class="rounded-xl border border-surface-700 bg-surface-900 p-4">
 			<h3 class="mb-3 text-sm font-semibold text-slate-200">Filters</h3>
 			<div class="flex flex-wrap gap-2">
 				{#each PRESETS as preset (`${preset.kind}:${preset.value}`)}
@@ -93,7 +93,7 @@
 						class="rounded-full border px-3 py-1 text-xs transition
 							{active
 							? 'border-accent/50 bg-accent/15 text-accent'
-							: 'border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'}"
+							: 'border-surface-600 text-slate-400 hover:border-white/20 hover:text-slate-200'}"
 						onclick={() => togglePreset(preset)}
 						data-testid="screener-preset"
 						data-preset={preset.label}
@@ -118,8 +118,8 @@
 			</div>
 		</section>
 
-		<section class="rounded-xl border border-white/5 bg-surface-850/60">
-			<h3 class="border-b border-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200">
+		<section class="rounded-xl border border-surface-700 bg-surface-900">
+			<h3 class="border-b border-surface-700 px-4 py-2.5 text-sm font-semibold text-slate-200">
 				Results
 			</h3>
 			{#if results.length}
@@ -136,7 +136,7 @@
 					</thead>
 					<tbody>
 						{#each results as row (row.symbol)}
-							<tr class="border-t border-white/5" data-testid="screener-row" data-symbol={row.symbol}>
+							<tr class="border-t border-surface-700" data-testid="screener-row" data-symbol={row.symbol}>
 								<td class="px-4 py-1.5 font-semibold text-slate-200">{row.symbol}</td>
 								<td class="px-4 py-1.5 text-right text-slate-300">{row.last.toFixed(2)}</td>
 								<td class="px-4 py-1.5 text-right text-slate-400">{row.volume.toLocaleString('en-US')}</td>
@@ -172,13 +172,13 @@
 
 	<aside class="space-y-4">
 		<section
-			class="rounded-xl border border-white/5 bg-surface-850/60 p-4"
+			class="rounded-xl border border-surface-700 bg-surface-900 p-4"
 			data-testid="screener-save"
 		>
 			<h3 class="mb-2 text-sm font-semibold text-slate-200">Save as workspace artifact</h3>
 			<input
 				type="text"
-				class="w-full rounded-lg border border-surface-600/60 bg-surface-950/70 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-accent/50"
+				class="w-full rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-accent/50"
 				placeholder="Screener name…"
 				bind:value={saveName}
 				data-testid="screener-name-input"
@@ -201,13 +201,13 @@
 			</button>
 		</section>
 
-		<section class="rounded-xl border border-white/5 bg-surface-850/60 p-4">
+		<section class="rounded-xl border border-surface-700 bg-surface-900 p-4">
 			<h3 class="mb-2 text-sm font-semibold text-slate-200">
 				Saved screeners &amp; studies <span class="font-mono text-[10px] text-slate-500">({saved.length})</span>
 			</h3>
 			<ul class="space-y-1.5" data-testid="saved-screeners">
 				{#each saved as screener (screener.id)}
-					<li class="rounded-lg border border-white/5 bg-surface-900/60 px-2.5 py-1.5">
+					<li class="rounded-lg border border-surface-700 bg-surface-900 px-2.5 py-1.5">
 						<div class="flex items-baseline gap-2">
 							<span class="truncate text-xs font-medium text-slate-200">{screener.name}</span>
 							<span class="ml-auto font-mono text-[10px] text-slate-600">

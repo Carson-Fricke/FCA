@@ -38,7 +38,7 @@
 </script>
 
 <div
-	class="rounded-xl border border-white/5 bg-surface-850/60 px-4 py-3"
+	class="rounded-xl border border-surface-700 bg-surface-900 px-4 py-3"
 	data-testid="metric-card"
 >
 	<div class="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>

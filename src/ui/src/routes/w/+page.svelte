@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto, afterNavigate } from '$app/navigation';
-	import { createWorkspace, listWorkspaces } from '$lib/api';
+	import { createWorkspace, fixtureMode, listWorkspaces, setFixtureMode } from '$lib/api';
 	import CreateWorkspaceDialog from '$lib/components/shell/CreateWorkspaceDialog.svelte';
 	import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 	import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
@@ -71,7 +71,7 @@
 	<div class="w-full max-w-3xl">
 		<div class="mb-8 flex items-center gap-3">
 			<span
-				class="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-surface-800 font-mono text-lg font-bold text-slate-300"
+				class="flex h-11 w-11 items-center justify-center rounded-xl border border-surface-600 bg-surface-800 font-mono text-lg font-bold text-slate-300"
 				aria-hidden="true"
 			>
 				Θ
@@ -102,7 +102,7 @@
 				</button>
 				<button
 					type="button"
-					class="rounded border border-white/10 px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
+					class="rounded border border-surface-600 px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
 					onclick={dismissStale}
 				>
 					Dismiss
@@ -111,7 +111,7 @@
 		{/if}
 
 		{#if loading}
-			<div class="h-24 animate-pulse rounded-xl border border-white/5 bg-surface-850/40"></div>
+			<div class="h-24 animate-pulse rounded-xl border border-surface-700 bg-surface-900"></div>
 		{:else if loadError}
 			<div class="rounded-xl border border-loss/30 bg-loss/10 p-4 text-sm text-slate-300">
 				<p class="font-semibold text-loss">Workspace list unavailable</p>
@@ -127,7 +127,7 @@
 					{#if !fixtureMode}
 						<button
 							type="button"
-							class="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-accent/40 hover:text-accent"
+							class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-300 hover:border-accent/40 hover:text-accent"
 							onclick={() => setFixtureMode(true)}
 							data-testid="picker-use-fixtures"
 						>
@@ -142,7 +142,7 @@
 					<li>
 						<button
 							type="button"
-							class="w-full rounded-xl border border-white/5 bg-surface-850/60 p-4 text-left transition hover:border-accent/40 hover:bg-surface-800/70"
+							class="w-full rounded-xl border border-surface-700 bg-surface-900 p-4 text-left transition hover:border-accent/40 hover:bg-surface-800"
 							onclick={() => enter(workspace.id)}
 							data-testid="picker-workspace"
 							data-workspace={workspace.id}

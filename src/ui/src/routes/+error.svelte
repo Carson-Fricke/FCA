@@ -15,7 +15,7 @@
 		{#if !fixtureMode}
 			<button
 				type="button"
-				class="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-accent/40 hover:text-accent"
+				class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-300 hover:border-accent/40 hover:text-accent"
 				onclick={() => setFixtureMode(true)}
 				data-testid="error-use-fixtures"
 			>

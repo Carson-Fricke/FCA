@@ -44,7 +44,7 @@
 			<p class="text-sm text-slate-500">Registry with status filters and version lineage.</p>
 		</div>
 		<div class="ml-auto flex items-center gap-2">
-			<div class="flex overflow-hidden rounded-lg border border-white/10">
+			<div class="flex overflow-hidden rounded-lg border border-surface-600">
 				<button
 					type="button"
 					class="px-3 py-1.5 text-xs {view === 'grid' ? 'bg-accent/15 text-accent' : 'text-slate-400'}"
@@ -61,7 +61,7 @@
 				</button>
 			</div>
 			<select
-				class="rounded-lg border border-white/10 bg-surface-900 px-2 py-1.5 text-xs text-slate-300 outline-none"
+				class="rounded-lg border border-surface-600 bg-surface-900 px-2 py-1.5 text-xs text-slate-300 outline-none"
 				bind:value={statusFilter}
 				aria-label="Filter by status"
 			>
@@ -88,7 +88,7 @@
 				<li>
 					<a
 						href="/w/{workspaceId}/strategies/{strategy.id}"
-						class="block rounded-xl border border-white/5 bg-surface-850/60 p-4 transition hover:border-accent/40"
+						class="block rounded-xl border border-surface-700 bg-surface-900 p-4 transition hover:border-accent/40"
 						data-testid="strategy-card"
 					>
 						<div class="flex items-center gap-2">
@@ -109,10 +109,10 @@
 			{/each}
 		</ul>
 	{:else}
-		<div class="overflow-hidden rounded-xl border border-white/5">
+		<div class="overflow-hidden rounded-xl border border-surface-700">
 			<table class="w-full border-collapse text-sm">
 				<thead>
-					<tr class="bg-surface-900/80 text-left text-[10px] tracking-wider text-slate-500 uppercase">
+					<tr class="bg-surface-900 text-left text-[10px] tracking-wider text-slate-500 uppercase">
 						<th class="px-4 py-2">Strategy</th>
 						<th class="px-4 py-2">Symbol</th>
 						<th class="px-4 py-2">Status</th>
@@ -123,7 +123,7 @@
 				</thead>
 				<tbody>
 					{#each filtered as strategy (strategy.id)}
-						<tr class="border-t border-white/5 hover:bg-surface-850/40">
+						<tr class="border-t border-surface-700 hover:bg-surface-900">
 							<td class="px-4 py-2">
 								<a href="/w/{workspaceId}/strategies/{strategy.id}" class="text-slate-200 hover:text-accent">
 									{strategy.name}

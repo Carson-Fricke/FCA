@@ -58,7 +58,14 @@ export const canUseRealApi: boolean = base.trim() !== '';
  * default choice, and an absent value keeps the build-time default.
  */
 function storedFixtureOverride(): string | null {
-	return browser ? localStorage.getItem('thesis.fixtures') : null;
+	// Node 26 exposes a non-functional localStorage without
+	// --localstorage-file; guard the read so module import never throws.
+	try {
+		if (!browser || typeof localStorage === 'undefined') return null;
+		return localStorage.getItem('thesis.fixtures');
+	} catch {
+		return null;
+	}
 }
 
 /** True when the UI renders from fixtures instead of the Thesis API. */

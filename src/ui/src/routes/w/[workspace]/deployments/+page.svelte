@@ -66,7 +66,7 @@
 	{:else}
 		<ul class="grid gap-3 lg:grid-cols-2">
 			{#each deployments as deployment (deployment.id)}
-				<li class="rounded-xl border border-white/5 bg-surface-850/60 p-4" data-testid="deployment-card">
+				<li class="rounded-xl border border-surface-700 bg-surface-900 p-4" data-testid="deployment-card">
 					<div class="flex items-center gap-2">
 						<h2 class="truncate text-sm font-semibold text-slate-100">{deployment.strategy_name}</h2>
 						<span class="rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase {MODE_BADGE[deployment.mode]}">
@@ -103,7 +103,7 @@
 					</div>
 					{#if deployment.request_ref && risk[deployment.request_ref]?.state === 'available'}
 						{@const decisions = risk[deployment.request_ref]?.value ?? []}
-						<div class="mt-3 border-t border-white/5 pt-2">
+						<div class="mt-3 border-t border-surface-700 pt-2">
 							<h3 class="mb-1 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
 								Risk decisions · {deployment.request_ref}
 							</h3>
@@ -127,8 +127,8 @@
 		</ul>
 	{/if}
 
-	<section class="rounded-xl border border-white/5 bg-surface-850/60">
-		<h2 class="border-b border-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200">
+	<section class="rounded-xl border border-surface-700 bg-surface-900">
+		<h2 class="border-b border-surface-700 px-4 py-2.5 text-sm font-semibold text-slate-200">
 			Orders &amp; fills
 		</h2>
 		{#if orders.length}
@@ -147,7 +147,7 @@
 				</thead>
 				<tbody>
 					{#each orders as order (order.id)}
-						<tr class="border-t border-white/5">
+						<tr class="border-t border-surface-700">
 							<td class="px-4 py-1.5 text-slate-500">{order.id}</td>
 							<td class="px-4 py-1.5 text-slate-200">{order.symbol}</td>
 							<td class="px-4 py-1.5 {order.side === 'buy' ? 'text-profit' : 'text-loss'}">{order.side}</td>
@@ -174,14 +174,14 @@
 		<StatusSurfaceView surface={portfolio} label="Portfolio">
 			{#snippet children(value)}
 				{@const summary = value as PortfolioSummary}
-				<div class="rounded-xl border border-white/5 bg-surface-850/60 p-4 font-mono text-xs" data-testid="portfolio-summary">
+				<div class="rounded-xl border border-surface-700 bg-surface-900 p-4 font-mono text-xs" data-testid="portfolio-summary">
 					<div class="mb-2 flex gap-6">
 						<span class="text-slate-500">cash <span class="text-slate-200">{summary.cash}</span></span>
 						<span class="text-slate-500">equity <span class="text-accent">{summary.equity}</span></span>
 					</div>
 					<ul class="space-y-2">
 						{#each summary.books as book (book.name)}
-							<li class="rounded-lg border border-white/5 bg-surface-900/60 px-3 py-2">
+							<li class="rounded-lg border border-surface-700 bg-surface-900 px-3 py-2">
 								<div class="flex gap-4">
 									<span class="font-semibold text-slate-200">{book.name}</span>
 									<span class="text-slate-500">cash {book.cash}</span>

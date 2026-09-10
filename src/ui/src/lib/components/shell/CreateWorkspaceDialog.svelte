@@ -33,7 +33,7 @@
 			<span class="mb-1 block text-xs text-slate-400">Name</span>
 			<input
 				type="text"
-				class="w-full rounded-lg border border-surface-600/60 bg-surface-950/70 px-3 py-2 text-sm text-slate-200 outline-none focus:border-accent/50"
+				class="w-full rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-accent/50"
 				bind:value={name}
 				placeholder="e.g. Gamma Options"
 				data-testid="workspace-name-input"
@@ -43,7 +43,7 @@
 			<span class="mb-1 block text-xs text-slate-400">Description</span>
 			<input
 				type="text"
-				class="w-full rounded-lg border border-surface-600/60 bg-surface-950/70 px-3 py-2 text-sm text-slate-200 outline-none focus:border-accent/50"
+				class="w-full rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-accent/50"
 				bind:value={description}
 				placeholder="What is this workspace for?"
 			/>

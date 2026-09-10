@@ -48,6 +48,6 @@
 
 		<SplitEquityView {backtest} />
 	{:else}
-		<div class="h-64 animate-pulse rounded-xl border border-white/5 bg-surface-850/40"></div>
+		<div class="h-64 animate-pulse rounded-xl border border-surface-700 bg-surface-900"></div>
 	{/if}
 </div>

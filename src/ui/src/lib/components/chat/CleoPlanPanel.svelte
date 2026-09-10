@@ -27,7 +27,7 @@
 </script>
 
 <section
-	class="rounded-xl border border-white/5 bg-surface-900/60 p-3"
+	class="rounded-xl border border-surface-700 bg-surface-900 p-3"
 	data-testid="cleo-plan-panel"
 	data-stage={plan.current_stage}
 >

@@ -6,13 +6,13 @@
 	let { evidence }: { evidence: EvidenceItem[] } = $props();
 </script>
 
-<div class="rounded-xl border border-white/5 bg-surface-850/60 p-4" data-testid="evidence-index">
+<div class="rounded-xl border border-surface-700 bg-surface-900 p-4" data-testid="evidence-index">
 	<h3 class="mb-3 text-sm font-semibold text-slate-200">
 		Evidence index <span class="font-mono text-[10px] text-slate-500">({evidence.length})</span>
 	</h3>
 	<ul class="space-y-1.5">
 		{#each evidence as item (item.id)}
-			<li class="flex flex-wrap items-center gap-2 rounded-lg border border-white/5 bg-surface-900/60 px-3 py-2">
+			<li class="flex flex-wrap items-center gap-2 rounded-lg border border-surface-700 bg-surface-900 px-3 py-2">
 				<EvidenceBadge evidence={item} />
 				<span class="font-mono text-[10px] text-slate-600">{item.reference}</span>
 				{#if item.digest}

@@ -33,11 +33,11 @@
 	}
 </script>
 
-<div class="rounded-lg border border-white/5 bg-surface-900/60 p-2" data-testid="knowledge-search">
+<div class="rounded-lg border border-surface-700 bg-surface-900 p-2" data-testid="knowledge-search">
 	<div class="flex gap-2">
 		<input
 			type="search"
-			class="min-w-0 flex-1 rounded-md border border-surface-600/60 bg-surface-950/60 px-2 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-accent/50"
+			class="min-w-0 flex-1 rounded-md border border-surface-600/60 bg-surface-950 px-2 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-accent/50"
 			placeholder="Search knowledge corpus…"
 			bind:value={query}
 			onkeydown={(e) => e.key === 'Enter' && run()}
@@ -57,7 +57,7 @@
 	{#if results.length}
 		<ul class="mt-2 space-y-1.5">
 			{#each results as hit (hit.path)}
-				<li class="rounded-md border border-white/5 bg-surface-850/60 p-2">
+				<li class="rounded-md border border-surface-700 bg-surface-900 p-2">
 					<div class="flex items-baseline gap-2">
 						<span class="truncate text-xs font-medium text-slate-200">{hit.title}</span>
 						<span

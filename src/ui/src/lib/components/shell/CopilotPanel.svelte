@@ -69,15 +69,15 @@
 </script>
 
 <aside
-	class="flex w-80 shrink-0 flex-col border-l border-white/5 bg-surface-900/80"
+	class="flex w-80 shrink-0 flex-col border-l border-surface-700 bg-surface-900"
 	data-testid="copilot-panel"
 >
-	<div class="flex items-center gap-2 border-b border-white/5 px-4 py-3">
+	<div class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
 		<span class="text-accent" aria-hidden="true">✦</span>
 		<h2 class="text-sm font-semibold text-slate-200">Copilot</h2>
 		<button
 			type="button"
-			class="ml-auto rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-accent"
+			class="ml-auto rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-accent"
 			onclick={onExpand}
 			title="Expand to full chat"
 		>
@@ -86,9 +86,9 @@
 	</div>
 
 	{#if activeThread}
-		<div class="border-b border-white/5 px-4 py-2">
+		<div class="border-b border-surface-700 px-4 py-2">
 			<select
-				class="w-full rounded border border-surface-600/60 bg-surface-950/70 px-2 py-1 text-xs text-slate-300 outline-none"
+				class="w-full rounded border border-surface-600/60 bg-surface-950 px-2 py-1 text-xs text-slate-300 outline-none"
 				value={chatId}
 				onchange={(e) => (chatId = (e.currentTarget as HTMLSelectElement).value)}
 				aria-label="Select conversation"
@@ -108,7 +108,7 @@
 
 	<button
 		type="button"
-		class="border-t border-white/5 px-4 py-2 text-center text-[11px] text-slate-600 hover:text-accent"
+		class="border-t border-surface-700 px-4 py-2 text-center text-[11px] text-slate-600 hover:text-accent"
 		onclick={() => goto(`/w/${workspaceId}/chats`)}
 	>
 		Open full-page chats →

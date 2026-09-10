@@ -105,7 +105,7 @@
 {:else}
 	<div data-testid="split-not-declared">
 		<div
-			class="mb-3 rounded-xl border border-dashed border-surface-600/70 bg-surface-900/40 px-4 py-2.5 text-xs"
+			class="mb-3 rounded-xl border border-dashed border-surface-600/70 bg-surface-950 px-4 py-2.5 text-xs"
 		>
 			<span class="font-semibold text-slate-300">Train/test split not declared</span>
 			<span class="ml-2 text-slate-500">
@@ -131,10 +131,10 @@
 />
 
 {#if backtest.trades.length}
-	<div class="mt-3 overflow-hidden rounded-xl border border-white/5">
+	<div class="mt-3 overflow-hidden rounded-xl border border-surface-700">
 		<table class="w-full border-collapse font-mono text-xs">
 			<thead>
-				<tr class="bg-surface-900/80 text-left text-[10px] tracking-wider text-slate-500 uppercase">
+				<tr class="bg-surface-900 text-left text-[10px] tracking-wider text-slate-500 uppercase">
 					<th class="px-3 py-2">Order</th>
 					<th class="px-3 py-2">Symbol</th>
 					<th class="px-3 py-2">Side</th>
@@ -146,7 +146,7 @@
 			</thead>
 			<tbody>
 				{#each backtest.trades as trade (trade.id)}
-					<tr class="border-t border-white/5">
+					<tr class="border-t border-surface-700">
 						<td class="px-3 py-1.5 text-slate-500">{trade.id}</td>
 						<td class="px-3 py-1.5 text-slate-300">{trade.symbol}</td>
 						<td class="px-3 py-1.5 {trade.side === 'buy' ? 'text-profit' : 'text-loss'}">{trade.side}</td>

@@ -29,7 +29,7 @@
 <div class="relative" bind:this={holder} data-testid="workspace-switcher">
 	<button
 		type="button"
-		class="flex w-full items-center gap-2 rounded-lg border border-white/5 bg-surface-850/70 px-2.5 py-2 text-left transition hover:border-white/10"
+		class="flex w-full items-center gap-2 rounded-lg border border-surface-700 bg-surface-850/70 px-2.5 py-2 text-left transition hover:border-surface-600"
 		aria-expanded={open}
 		onclick={() => (open = !open)}
 		data-testid="workspace-switcher-button"
@@ -48,7 +48,7 @@
 
 	{#if open}
 		<div
-			class="absolute top-full right-0 left-0 z-40 mt-1 rounded-xl border border-white/10 bg-surface-850 p-1 shadow-2xl"
+			class="absolute top-full right-0 left-0 z-40 mt-1 rounded-xl border border-surface-600 bg-surface-850 p-1 shadow-2xl"
 			data-testid="workspace-menu"
 		>
 			<div class="px-2 py-1.5 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
@@ -67,7 +67,7 @@
 					data-workspace={workspace.id}
 				>
 					<span
-						class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-white/10 bg-surface-900 font-mono text-[10px] {workspace.id ===
+						class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-surface-600 bg-surface-900 font-mono text-[10px] {workspace.id ===
 						currentId
 							? 'text-accent'
 							: 'text-slate-400'}"
@@ -83,7 +83,7 @@
 					{/if}
 				</button>
 			{/each}
-			<div class="my-1 border-t border-white/5"></div>
+			<div class="my-1 border-t border-surface-700"></div>
 			<button
 				type="button"
 				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-accent transition hover:bg-accent/10"
