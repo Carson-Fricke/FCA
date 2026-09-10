@@ -3,13 +3,13 @@
   "_meta": {
     "format": "cleo-export",
     "version": "1.0.0",
-    "exportedAt": "2026-09-10T04:16:20.021Z",
+    "exportedAt": "2026-09-10T05:03:21.376Z",
     "source": {
       "project": "unknown",
       "cleo_version": "0.95.0",
       "nextId": 280
     },
-    "checksum": "8a4cb13f28e37371",
+    "checksum": "bde619e31ec0d174",
     "taskCount": 276,
     "exportMode": "full"
   },
@@ -664,7 +664,8 @@
       "status": "pending",
       "parentId": "T239",
       "depends": [
-        "T245"
+        "T245",
+        "T249"
       ]
     },
     "T271": {
@@ -1056,21 +1057,27 @@
       "title": "Port fill and fee models to Rust",
       "status": "pending",
       "parentId": "T239",
-      "depends": []
+      "depends": [
+        "T265"
+      ]
     },
     "T272": {
       "type": "task",
       "title": "Port HTTP API to axum",
       "status": "pending",
       "parentId": "T240",
-      "depends": []
+      "depends": [
+        "T271"
+      ]
     },
     "T276": {
       "type": "task",
       "title": "Port strategy package onto the host boundary",
       "status": "pending",
       "parentId": "T241",
-      "depends": []
+      "depends": [
+        "T275"
+      ]
     },
     "T004": {
       "type": "epic",
@@ -1435,21 +1442,27 @@
       "title": "Port venue adapters to Rust",
       "status": "pending",
       "parentId": "T239",
-      "depends": []
+      "depends": [
+        "T266"
+      ]
     },
     "T273": {
       "type": "task",
       "title": "Port MCP server to Rust",
       "status": "pending",
       "parentId": "T240",
-      "depends": []
+      "depends": [
+        "T272"
+      ]
     },
     "T277": {
       "type": "task",
       "title": "Port configuration package behavior-identically",
       "status": "pending",
       "parentId": "T241",
-      "depends": []
+      "depends": [
+        "T276"
+      ]
     },
     "T005": {
       "type": "epic",
@@ -1743,7 +1756,7 @@
     "T228": {
       "type": "task",
       "title": "Screening data ports, declarative filter expansion, and API serving",
-      "status": "pending",
+      "status": "done",
       "parentId": "T224",
       "depends": [
         "T225",
@@ -1809,21 +1822,30 @@
       "title": "Port portfolio accounting to Rust",
       "status": "pending",
       "parentId": "T239",
-      "depends": []
+      "depends": [
+        "T267"
+      ]
     },
     "T274": {
       "type": "task",
       "title": "Complete api entrypoint and interface integration parity",
       "status": "pending",
       "parentId": "T240",
-      "depends": []
+      "depends": [
+        "T264",
+        "T270",
+        "T273"
+      ]
     },
     "T278": {
       "type": "task",
       "title": "Flip entrypoints to Rust and delete Python engine paths",
       "status": "pending",
       "parentId": "T241",
-      "depends": []
+      "depends": [
+        "T274",
+        "T277"
+      ]
     },
     "T006": {
       "type": "epic",
@@ -2063,7 +2085,7 @@
     "T229": {
       "type": "task",
       "title": "Process-isolated custom screener evaluation in the harness",
-      "status": "pending",
+      "status": "done",
       "parentId": "T224",
       "depends": [
         "T225"
@@ -2112,21 +2134,27 @@
       "title": "Port built-in signal and indicator kernels to Rust",
       "status": "pending",
       "parentId": "T238",
-      "depends": []
+      "depends": [
+        "T262"
+      ]
     },
     "T269": {
       "type": "task",
       "title": "Port risk engine to Rust",
       "status": "pending",
       "parentId": "T239",
-      "depends": []
+      "depends": [
+        "T268"
+      ]
     },
     "T279": {
       "type": "task",
       "title": "Decommission Zig and Python engine, update architecture docs",
       "status": "pending",
       "parentId": "T241",
-      "depends": []
+      "depends": [
+        "T278"
+      ]
     },
     "T007": {
       "type": "epic",
@@ -2343,7 +2371,7 @@
     "T230": {
       "type": "task",
       "title": "Production screener UX",
-      "status": "pending",
+      "status": "done",
       "parentId": "T224",
       "depends": [
         "T228",
@@ -2373,14 +2401,18 @@
       "title": "Backtest-job end-to-end on Rust core",
       "status": "pending",
       "parentId": "T238",
-      "depends": []
+      "depends": [
+        "T263"
+      ]
     },
     "T270": {
       "type": "task",
       "title": "Trader entrypoint on Rust core with lifecycle parity",
       "status": "pending",
       "parentId": "T239",
-      "depends": []
+      "depends": [
+        "T269"
+      ]
     },
     "T008": {
       "type": "epic",
@@ -2836,7 +2868,7 @@
     "T224": {
       "type": "epic",
       "title": "Market intelligence and production screening",
-      "status": "pending",
+      "status": "done",
       "parentId": "T068",
       "depends": []
     },
@@ -2966,7 +2998,7 @@
     "T233": {
       "type": "task",
       "title": "TH6.10 Local end-to-end stack runbook: harness api + thesis serve + UI real mode",
-      "status": "pending",
+      "status": "done",
       "parentId": "T150",
       "depends": [
         "T231",
@@ -7625,10 +7657,11 @@
         "rust/crates/harness-live/"
       ],
       "depends": [
-        "T245"
+        "T245",
+        "T249"
       ],
       "createdAt": "2026-09-10T03:59:21.816Z",
-      "updatedAt": "2026-09-10T03:59:21.816Z",
+      "updatedAt": "2026-09-10T04:26:20.262Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -12459,8 +12492,11 @@
       "files": [
         "rust/crates/harness-live/"
       ],
+      "depends": [
+        "T265"
+      ],
       "createdAt": "2026-09-10T03:59:26.221Z",
-      "updatedAt": "2026-09-10T03:59:26.221Z",
+      "updatedAt": "2026-09-10T04:21:32.062Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -12501,8 +12537,11 @@
       "files": [
         "rust/crates/harness-api/"
       ],
+      "depends": [
+        "T271"
+      ],
       "createdAt": "2026-09-10T04:00:33.420Z",
-      "updatedAt": "2026-09-10T04:00:33.420Z",
+      "updatedAt": "2026-09-10T04:40:25.965Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -12544,8 +12583,11 @@
         "rust/crates/harness-py/",
         "src/harness/strategy/"
       ],
+      "depends": [
+        "T275"
+      ],
       "createdAt": "2026-09-10T04:01:32.138Z",
-      "updatedAt": "2026-09-10T04:01:32.138Z",
+      "updatedAt": "2026-09-10T04:50:06.859Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -16855,8 +16897,11 @@
       "files": [
         "rust/crates/harness-live/"
       ],
+      "depends": [
+        "T266"
+      ],
       "createdAt": "2026-09-10T03:59:30.627Z",
-      "updatedAt": "2026-09-10T03:59:30.627Z",
+      "updatedAt": "2026-09-10T04:27:11.276Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -16897,8 +16942,11 @@
       "files": [
         "rust/crates/harness-api/"
       ],
+      "depends": [
+        "T272"
+      ],
       "createdAt": "2026-09-10T04:00:37.843Z",
-      "updatedAt": "2026-09-10T04:00:37.843Z",
+      "updatedAt": "2026-09-10T04:44:30.696Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -16940,8 +16988,11 @@
         "rust/crates/harness-api/",
         "src/harness/configuration/"
       ],
+      "depends": [
+        "T276"
+      ],
       "createdAt": "2026-09-10T04:01:36.492Z",
-      "updatedAt": "2026-09-10T04:01:36.492Z",
+      "updatedAt": "2026-09-10T05:00:44.692Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -20464,7 +20515,7 @@
     {
       "id": "T228",
       "title": "Screening data ports, declarative filter expansion, and API serving",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "task",
       "parentId": "T224",
@@ -20498,21 +20549,92 @@
         "T227"
       ],
       "createdAt": "2026-09-10T00:04:35.478Z",
-      "updatedAt": "2026-09-10T00:32:32.427Z",
+      "updatedAt": "2026-09-10T04:33:30.378Z",
+      "completedAt": "2026-09-10T04:33:26.403Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T04:33:17.880Z",
         "failureLog": [],
-        "initializedAt": "2026-09-10T00:04:35.478Z"
+        "initializedAt": "2026-09-10T00:04:35.478Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/thesis/screening/context.py",
+                    "sha256": "ba1dc8a602c51ea75242357c8d02281f73e6c5d03d5a65079c6c379ee5c328b4"
+                  },
+                  {
+                    "path": "src/thesis/screening/indicators.py",
+                    "sha256": "1f742f486e477a3fc7ae2e5b1c7408cd40d7b0cc26b5d5ced98a4baebaaea8b2"
+                  },
+                  {
+                    "path": "src/thesis/screening/presets.py",
+                    "sha256": "cf21c83dc1e8c113cb87048c64cbffbe3a20bab1b5d314c5fea1582220ed3dcd"
+                  },
+                  {
+                    "path": "src/thesis/http/screening.py",
+                    "sha256": "c1849584411be5559c901b2353450045ade79a054ec3f34bf9321762e19a51d9"
+                  },
+                  {
+                    "path": "src/ui/src/lib/api.ts",
+                    "sha256": "05473c15058e31f54b629e78cb804e1d4ab58581e090031f04e1a9f6ba086ea2"
+                  }
+                ]
+              },
+              {
+                "kind": "commit",
+                "sha": "5ec1a0eb74faa02323e922bbd743ddc4305caf18",
+                "shortSha": "5ec1a0e"
+              }
+            ],
+            "capturedAt": "2026-09-10T04:33:03.278Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T228-validation.json",
+                "sha256": "eeaa91d58af03de95c1ec4972523b5b7ed5a5eca66d7d4784bdd51529f7f7e49",
+                "passCount": 126,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-10T04:33:10.535Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 276 CLEO tasks through T279.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T04:33:18.057Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
+      "assignee": "local",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -20805,8 +20927,11 @@
       "files": [
         "rust/crates/harness-live/"
       ],
+      "depends": [
+        "T267"
+      ],
       "createdAt": "2026-09-10T03:59:34.918Z",
-      "updatedAt": "2026-09-10T03:59:34.918Z",
+      "updatedAt": "2026-09-10T04:31:23.714Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -20849,8 +20974,13 @@
         "src/harness/cli/api.py",
         "tests/harness/"
       ],
+      "depends": [
+        "T264",
+        "T270",
+        "T273"
+      ],
       "createdAt": "2026-09-10T04:00:42.255Z",
-      "updatedAt": "2026-09-10T04:00:42.255Z",
+      "updatedAt": "2026-09-10T04:49:43.934Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -20892,8 +21022,12 @@
         "pyproject.toml",
         "src/harness/"
       ],
+      "depends": [
+        "T274",
+        "T277"
+      ],
       "createdAt": "2026-09-10T04:01:40.818Z",
-      "updatedAt": "2026-09-10T04:01:40.818Z",
+      "updatedAt": "2026-09-10T04:55:28.947Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -23777,7 +23911,7 @@
     {
       "id": "T229",
       "title": "Process-isolated custom screener evaluation in the harness",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T224",
@@ -23805,21 +23939,87 @@
         "T225"
       ],
       "createdAt": "2026-09-10T00:04:39.871Z",
-      "updatedAt": "2026-09-10T00:32:40.153Z",
+      "updatedAt": "2026-09-10T04:34:24.563Z",
+      "completedAt": "2026-09-10T04:34:20.316Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T04:34:13.569Z",
         "failureLog": [],
-        "initializedAt": "2026-09-10T00:04:39.871Z"
+        "initializedAt": "2026-09-10T00:04:39.871Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/harness/screening/runner.py",
+                    "sha256": "ae2fd4a4e56e6000b29b0541f312eed676aaa69b803c481da9226d7dae705011"
+                  },
+                  {
+                    "path": "src/harness/screening/_worker.py",
+                    "sha256": "7b4abbc068d87211f79475c83680b5275607b5cad667fbaf76af6c2d73853d46"
+                  },
+                  {
+                    "path": "src/harness/screening/context.py",
+                    "sha256": "bc3cebc6a549d830efffd6a314d449c075ede64476aaaf1f801d1f8c5a6ba21a"
+                  },
+                  {
+                    "path": "src/harness/screening/errors.py",
+                    "sha256": "b99f7d93cc6ce73a82b9997ce2243d025499e7f0f665551c72548dec775f9f44"
+                  }
+                ]
+              },
+              {
+                "kind": "commit",
+                "sha": "cb54c76e820c786f1e97b4e3289da4c6cc09ad47",
+                "shortSha": "cb54c76"
+              }
+            ],
+            "capturedAt": "2026-09-10T04:33:58.643Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T229-validation.json",
+                "sha256": "0ad12beb67e69a1f9f992e233c087f1db527c99d11c2ad3e58ecc473bcf43298",
+                "passCount": 155,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-10T04:34:06.072Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 276 CLEO tasks through T279.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T04:34:13.682Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -24020,8 +24220,11 @@
         "src/harness/signal/",
         "src/harness/indicators/"
       ],
+      "depends": [
+        "T262"
+      ],
       "createdAt": "2026-09-10T03:58:31.910Z",
-      "updatedAt": "2026-09-10T03:58:31.910Z",
+      "updatedAt": "2026-09-10T04:16:26.747Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -24062,8 +24265,11 @@
       "files": [
         "rust/crates/harness-live/"
       ],
+      "depends": [
+        "T268"
+      ],
       "createdAt": "2026-09-10T03:59:39.156Z",
-      "updatedAt": "2026-09-10T03:59:39.156Z",
+      "updatedAt": "2026-09-10T04:34:19.558Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -24107,8 +24313,11 @@
         ".github/architecture/",
         "pyproject.toml"
       ],
+      "depends": [
+        "T278"
+      ],
       "createdAt": "2026-09-10T04:01:45.185Z",
-      "updatedAt": "2026-09-10T04:01:45.185Z",
+      "updatedAt": "2026-09-10T05:03:03.363Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -26981,7 +27190,7 @@
     {
       "id": "T230",
       "title": "Production screener UX",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T224",
@@ -27011,21 +27220,91 @@
         "T229"
       ],
       "createdAt": "2026-09-10T00:04:44.081Z",
-      "updatedAt": "2026-09-10T00:32:47.524Z",
+      "updatedAt": "2026-09-10T05:02:36.525Z",
+      "completedAt": "2026-09-10T05:02:32.738Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T05:02:24.305Z",
         "failureLog": [],
-        "initializedAt": "2026-09-10T00:04:44.081Z"
+        "initializedAt": "2026-09-10T00:04:44.081Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": "src/ui/src/lib/components/screener/FilterBuilder.svelte",
+                    "sha256": "2850372d11df4b0a5baef8fd94c7d85ce66e97e0312582b87e42e7340eec8867"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/screener/PythonScreenerEditor.svelte",
+                    "sha256": "bef707d7befa325b98ceb2c263e57a09eb5f14b6908f7c7ae81eb4e6cef35528"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/screener/SavedStudies.svelte",
+                    "sha256": "66e3728bf164f03f69770e9e628bb1ccb60a47dc0f5fa365ea1027e4057fa2ee"
+                  },
+                  {
+                    "path": "src/ui/src/lib/components/screener/ScreenerResultsTable.svelte",
+                    "sha256": "0dc1ff07bc9c0d9a64eae727b79728adf7fe40d0de3f151c45143fbdb5ca0455"
+                  },
+                  {
+                    "path": "src/ui/src/routes/w/[workspace]/screener/+page.svelte",
+                    "sha256": "cd7da40f1c794bf3adbe795a5b3156b7639c96073d640db761b7bc072fdb3549"
+                  }
+                ]
+              },
+              {
+                "kind": "commit",
+                "sha": "8be7ef2b73194207e19cc7065f1f179927ce9117",
+                "shortSha": "8be7ef2"
+              }
+            ],
+            "capturedAt": "2026-09-10T05:02:09.484Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T230-validation.json",
+                "sha256": "5bc499bec354111c68d6ec327b86d50dc16a2a502be7bef0012c681a27ec7862",
+                "passCount": 47,
+                "failCount": 0,
+                "skipCount": 0
+              }
+            ],
+            "capturedAt": "2026-09-10T05:02:16.784Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 276 CLEO tasks through T279.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T05:02:24.486Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "research",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -27130,8 +27409,11 @@
         "src/harness/results/",
         "tests/harness/"
       ],
+      "depends": [
+        "T263"
+      ],
       "createdAt": "2026-09-10T03:58:36.172Z",
-      "updatedAt": "2026-09-10T03:58:36.172Z",
+      "updatedAt": "2026-09-10T04:21:14.673Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -27174,8 +27456,11 @@
         "src/harness/cli/trader.py",
         "tests/harness/"
       ],
+      "depends": [
+        "T269"
+      ],
       "createdAt": "2026-09-10T03:59:43.253Z",
-      "updatedAt": "2026-09-10T03:59:43.253Z",
+      "updatedAt": "2026-09-10T04:34:41.856Z",
       "verification": {
         "passed": false,
         "round": 1,
@@ -32717,7 +33002,7 @@
     {
       "id": "T224",
       "title": "Market intelligence and production screening",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "type": "epic",
       "parentId": "T068",
@@ -32733,7 +33018,8 @@
         "thesis"
       ],
       "notes": [
-        "2026-09-10 00:00:33 UTC: 2026-09-09 23:30 UTC: Created from the orchestrator directive that the screener must reach production quality on par with finviz-class screeners, with orchestrator decisions: indicators must work 100 percent on tick data and behave identically in live, paper, and backtest; custom scripts execute server-side in the harness inside a process-isolated sandbox; fundamentals and classification data come from free sources to be explored (SEC EDGAR, Nasdaq symbol files, Schwab, and similar candidates)."
+        "2026-09-10 00:00:33 UTC: 2026-09-09 23:30 UTC: Created from the orchestrator directive that the screener must reach production quality on par with finviz-class screeners, with orchestrator decisions: indicators must work 100 percent on tick data and behave identically in live, paper, and backtest; custom scripts execute server-side in the harness inside a process-isolated sandbox; fundamentals and classification data come from free sources to be explored (SEC EDGAR, Nasdaq symbol files, Schwab, and similar candidates).",
+        "2026-09-10 05:03:03 UTC: 2026-09-10 05:05 UTC: Epic complete - all six children delivered across two parallel waves. T225 tick-native indicator library (nine indicators as O(1) event-time state machines with a cross-mode parity oracle); T226 source evaluation stored as decision D006; T227 point-in-time reference-data ingest (Nasdaq classification snapshots + EDGAR XBRL fundamentals); T228 screening data ports, declarative filter expansion, and Thesis API serving at /v1/workspaces/{id}/screening; T229 process-isolated custom-script sandbox (fresh subprocess, wall-clock kill, locked imports, exact-equality parity); T230 production screener UX (filter builder over 15 kinds, embedded Python editor, saved studies, results table). Integration: full repo suite 2890 passed 0 failed at final verification. Deferred follow-ups: sandbox program field on the screening run contract, DELETE route for saved screeners, SIC columns in the classification schema, Azure-backed query surface and durable screener store, and an api.ts fixture pass-through fix."
       ],
       "acceptance": [
         "Complete child tasks deliver the tick-native indicator library, the fundamentals and classification reference-data ingest, screening data ports and serving, sandboxed custom-script evaluation, and the production screener UX",
@@ -32757,8 +33043,9 @@
         "src/ui/src/routes/w/[workspace]/screener/"
       ],
       "createdAt": "2026-09-10T00:00:33.493Z",
-      "updatedAt": "2026-09-10T00:04:44.081Z",
-      "pipelineStage": "research",
+      "updatedAt": "2026-09-10T05:03:03.010Z",
+      "completedAt": "2026-09-10T05:02:32.738Z",
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -34614,7 +34901,7 @@
     {
       "id": "T233",
       "title": "TH6.10 Local end-to-end stack runbook: harness api + thesis serve + UI real mode",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "type": "task",
       "parentId": "T150",
@@ -34643,21 +34930,79 @@
         "T232"
       ],
       "createdAt": "2026-09-10T02:02:13.506Z",
-      "updatedAt": "2026-09-10T02:12:25.220Z",
+      "updatedAt": "2026-09-10T05:03:19.888Z",
+      "completedAt": "2026-09-10T05:03:15.939Z",
       "verification": {
-        "passed": false,
+        "passed": true,
         "round": 1,
         "gates": {
-          "implemented": false,
-          "testsPassed": false,
-          "qaPassed": false
+          "implemented": true,
+          "testsPassed": true,
+          "qaPassed": true
         },
-        "lastAgent": null,
-        "lastUpdated": null,
+        "lastAgent": "orchestrator",
+        "lastUpdated": "2026-09-10T04:55:24.980Z",
         "failureLog": [],
-        "initializedAt": "2026-09-10T02:02:13.506Z"
+        "initializedAt": "2026-09-10T02:02:13.506Z",
+        "evidence": {
+          "implemented": {
+            "atoms": [
+              {
+                "kind": "commit",
+                "sha": "ef38ec1a294340a4270345678d0bf9d1d6a5b234",
+                "shortSha": "ef38ec1"
+              },
+              {
+                "kind": "files",
+                "files": [
+                  {
+                    "path": ".github/runbooks/thesis-local-stack.md",
+                    "sha256": "9ff08f6ecac917b453ad92168a206750d2b67c1c279bc8afbcf955f5fed7d01f"
+                  },
+                  {
+                    "path": "scripts/local/run_local_stack.py",
+                    "sha256": "76ab8e2d23710b37e18fcb699f7698aa7246fc72f3c6afc9cc1c27c680cc4d6c"
+                  }
+                ]
+              }
+            ],
+            "capturedAt": "2026-09-10T04:55:25.502Z",
+            "capturedBy": "orchestrator"
+          },
+          "testsPassed": {
+            "atoms": [
+              {
+                "kind": "test-run",
+                "path": ".github/verification/T233-validation.json",
+                "sha256": "8cf0d6012fa7b24a385772aa9da518df482ff6b212dba712f7b455e3545d7e1c",
+                "passCount": 2759,
+                "failCount": 0,
+                "skipCount": 15
+              }
+            ],
+            "capturedAt": "2026-09-10T04:46:35.839Z",
+            "capturedBy": "orchestrator"
+          },
+          "qaPassed": {
+            "atoms": [
+              {
+                "kind": "tool",
+                "tool": "audit",
+                "exitCode": 0,
+                "stdoutTail": "Validated 276 CLEO tasks through T279.\n"
+              }
+            ],
+            "capturedAt": "2026-09-10T04:34:37.711Z",
+            "capturedBy": "orchestrator"
+          }
+        }
       },
-      "pipelineStage": "implementation",
+      "provenance": {
+        "createdBy": null,
+        "modifiedBy": "cleo",
+        "sessionId": "ses_20260904182631_35e281"
+      },
+      "pipelineStage": "contribution",
       "kind": "work",
       "scope": "feature",
       "relates": []
@@ -35354,7 +35699,8 @@
         "T245"
       ],
       "T265": [
-        "T245"
+        "T245",
+        "T249"
       ],
       "T271": [
         "T242"
@@ -35503,6 +35849,15 @@
         "T258",
         "T259"
       ],
+      "T266": [
+        "T265"
+      ],
+      "T272": [
+        "T271"
+      ],
+      "T276": [
+        "T275"
+      ],
       "T004": [
         "T003"
       ],
@@ -35644,6 +35999,15 @@
       "T261": [
         "T260"
       ],
+      "T267": [
+        "T266"
+      ],
+      "T273": [
+        "T272"
+      ],
+      "T277": [
+        "T276"
+      ],
       "T005": [
         "T003"
       ],
@@ -35784,6 +36148,18 @@
       "T262": [
         "T261"
       ],
+      "T268": [
+        "T267"
+      ],
+      "T274": [
+        "T264",
+        "T270",
+        "T273"
+      ],
+      "T278": [
+        "T274",
+        "T277"
+      ],
       "T006": [
         "T003",
         "T004"
@@ -35896,6 +36272,15 @@
       "T258": [
         "T257"
       ],
+      "T263": [
+        "T262"
+      ],
+      "T269": [
+        "T268"
+      ],
+      "T279": [
+        "T278"
+      ],
       "T007": [
         "T004",
         "T005"
@@ -35985,6 +36370,12 @@
       ],
       "T252": [
         "T251"
+      ],
+      "T264": [
+        "T263"
+      ],
+      "T270": [
+        "T269"
       ],
       "T008": [
         "T003",
