@@ -10,4 +10,5 @@ members = [
     "crates/harness-native",
     "crates/harness-py",
     "crates/harness-num",
+    "crates/harness-api",
 ]
