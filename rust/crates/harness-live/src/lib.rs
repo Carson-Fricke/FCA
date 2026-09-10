@@ -15,6 +15,7 @@ pub mod events;
 pub mod fills;
 pub mod oms;
 pub mod orders;
+pub mod portfolio;
 pub mod symbol;
 pub mod venues;
 
