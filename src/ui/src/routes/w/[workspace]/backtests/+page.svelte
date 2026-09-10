@@ -46,7 +46,7 @@
 <div class="mx-auto max-w-6xl space-y-4">
 	<header class="flex flex-wrap items-center gap-3">
 		<div>
-			<h1 class="text-xl font-semibold text-white">Backtests</h1>
+			<h1 class="text-xl font-semibold text-slate-800">Backtests</h1>
 			<p class="text-sm text-slate-500">Run history and declared-split results.</p>
 		</div>
 		<button
@@ -65,7 +65,7 @@
 
 	<div class="flex flex-wrap items-center gap-2">
 		<select
-			class="rounded-lg border border-surface-600 bg-surface-900 px-2 py-1.5 text-xs text-slate-300 outline-none"
+			class="rounded-lg border border-surface-600 bg-surface-900 px-2 py-1.5 text-xs text-slate-700 outline-none"
 			bind:value={strategyFilter}
 			aria-label="Filter by strategy"
 		>
@@ -74,7 +74,7 @@
 				<option value={id}>{id}</option>
 			{/each}
 		</select>
-		<label class="flex items-center gap-1.5 text-xs text-slate-400">
+		<label class="flex items-center gap-1.5 text-xs text-slate-500">
 			<input type="checkbox" class="accent-cyan-400" bind:checked={onlySplit} />
 			split declared only
 		</label>
@@ -104,14 +104,14 @@
 									{backtest.name}
 								</a>
 							</td>
-							<td class="px-4 py-2 text-slate-400">{backtest.strategy_id}</td>
+							<td class="px-4 py-2 text-slate-500">{backtest.strategy_id}</td>
 							<td class="px-4 py-2 text-slate-500">
 								{shortDate(backtest.period_start)} → {shortDate(backtest.period_end)}
 							</td>
 							<td class="px-4 py-2 text-right {backtest.total_return >= 0 ? 'text-profit' : 'text-loss'}">
 								{(backtest.total_return * 100).toFixed(1)}%
 							</td>
-							<td class="px-4 py-2 text-right text-slate-300">{backtest.sharpe.toFixed(2)}</td>
+							<td class="px-4 py-2 text-right text-slate-700">{backtest.sharpe.toFixed(2)}</td>
 							<td class="px-4 py-2 text-right text-loss">{(backtest.max_drawdown * 100).toFixed(1)}%</td>
 							<td class="px-4 py-2 text-center">
 								{#if backtest.split_declared}

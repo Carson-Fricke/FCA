@@ -11,7 +11,7 @@
 
 <div class="rounded-xl border border-surface-700 bg-surface-950 px-6 py-10 text-center">
 	<div class="mx-auto mb-3 h-8 w-8 rounded-full border border-accent/30 bg-accent/10"></div>
-	<p class="text-sm font-medium text-slate-300">{title}</p>
+	<p class="text-sm font-medium text-slate-700">{title}</p>
 	{#if hint}
 		<p class="mt-1 text-xs text-slate-500">{hint}</p>
 	{/if}

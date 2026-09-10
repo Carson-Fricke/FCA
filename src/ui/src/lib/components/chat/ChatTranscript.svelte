@@ -48,20 +48,20 @@
 			<header class="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider">
 				<span
 					class="font-semibold {message.role === 'user'
-						? 'text-slate-200'
+						? 'text-slate-800'
 						: message.role === 'assistant'
-							? 'text-slate-400'
+							? 'text-slate-500'
 							: 'text-slate-500'}"
 				>
 					{message.role}
 				</span>
-				<span class="font-mono text-slate-600">{message.actor_id}</span>
+				<span class="font-mono text-slate-500">{message.actor_id}</span>
 				{#if message.intent_epoch > 0}
 					<span class="font-mono text-warn/70">epoch {message.intent_epoch}</span>
 				{/if}
-				<time class="ml-auto font-mono text-slate-600">{message.created_at.slice(11, 19)}</time>
+				<time class="ml-auto font-mono text-slate-500">{message.created_at.slice(11, 19)}</time>
 			</header>
-			<p class="text-sm whitespace-pre-wrap text-slate-200">{message.body}</p>
+			<p class="text-sm whitespace-pre-wrap text-slate-800">{message.body}</p>
 
 			{#if message.attachment_ids.length}
 				<div class="mt-2 flex flex-wrap gap-1.5">

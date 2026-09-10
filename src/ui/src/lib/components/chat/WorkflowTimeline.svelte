@@ -35,7 +35,7 @@
 			Execution timeline
 		</h4>
 		{#if summary}
-			<span class="font-mono text-[10px] text-slate-600">{summary} · SSE resume at cursor {events.at(-1)?.cursor}</span>
+			<span class="font-mono text-[10px] text-slate-500">{summary} · SSE resume at cursor {events.at(-1)?.cursor}</span>
 		{/if}
 	</div>
 	{#if events.length === 0}
@@ -45,19 +45,19 @@
 			{#each events as event (event.eventId)}
 				<li class="flex items-center gap-2 font-mono text-xs">
 					<span
-						class="h-1.5 w-1.5 shrink-0 rounded-full border {TONE[event.eventType] ?? 'border-surface-600 text-slate-400'}"
+						class="h-1.5 w-1.5 shrink-0 rounded-full border {TONE[event.eventType] ?? 'border-surface-600 text-slate-500'}"
 						class:bg-accent={event.eventType.startsWith('workflow.')}
 						aria-hidden="true"
 					></span>
-					<span class="w-32 shrink-0 text-slate-600">{event.occurredAt.slice(11, 19)}</span>
-					<span class="{TONE[event.eventType] ?? 'text-slate-300'}">
+					<span class="w-32 shrink-0 text-slate-500">{event.occurredAt.slice(11, 19)}</span>
+					<span class="{TONE[event.eventType] ?? 'text-slate-700'}">
 						{label(event.eventType)}
 					</span>
 					{#if event.intentEpoch > 0}
 						<span class="text-warn/80">epoch {event.intentEpoch}</span>
 					{/if}
 					{#if event.lateResult}
-						<span class="text-slate-600">late result attached</span>
+						<span class="text-slate-500">late result attached</span>
 					{/if}
 					<span class="truncate text-slate-500">{JSON.stringify(event.payload)}</span>
 				</li>

@@ -17,7 +17,7 @@
 
 <div class="mx-auto max-w-6xl space-y-5">
 	<header>
-		<h1 class="text-xl font-semibold text-white">Overview</h1>
+		<h1 class="text-xl font-semibold text-slate-800">Overview</h1>
 		<p class="text-sm text-slate-500">
 			Workspace landing for <span class="text-accent">{data.snapshot.overview.workspace.name}</span>.
 		</p>
@@ -32,7 +32,7 @@
 
 	<div class="grid gap-4 lg:grid-cols-3">
 		<section class="rounded-xl border border-surface-700 bg-surface-900 p-4 lg:col-span-2">
-			<h2 class="mb-3 text-sm font-semibold text-slate-200">Recent activity</h2>
+			<h2 class="mb-3 text-sm font-semibold text-slate-800">Recent activity</h2>
 			{#if activity.length}
 				<ul class="space-y-2">
 					{#each activity as item (item.id)}
@@ -49,10 +49,10 @@
 								aria-hidden="true"
 							></span>
 							<div class="min-w-0">
-								<p class="truncate text-sm text-slate-200">{item.title}</p>
+								<p class="truncate text-sm text-slate-800">{item.title}</p>
 								<p class="truncate text-xs text-slate-500">{item.description}</p>
 							</div>
-							<span class="ml-auto shrink-0 font-mono text-[10px] text-slate-600">
+							<span class="ml-auto shrink-0 font-mono text-[10px] text-slate-500">
 								{relativeTime(item.created_at)}
 							</span>
 						</li>
@@ -65,7 +65,7 @@
 
 		<section class="space-y-4">
 			<div class="rounded-xl border border-surface-700 bg-surface-900 p-4">
-				<h2 class="mb-3 text-sm font-semibold text-slate-200">Open chats</h2>
+				<h2 class="mb-3 text-sm font-semibold text-slate-800">Open chats</h2>
 				{#if openChats.length}
 					<ul class="space-y-2">
 						{#each openChats as chat (chat.chat_id)}
@@ -74,7 +74,7 @@
 									href="/w/{workspaceId}/chats?chat={chat.chat_id}"
 									class="block rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 hover:border-accent/30"
 								>
-									<p class="truncate text-sm text-slate-200">{chat.title}</p>
+									<p class="truncate text-sm text-slate-800">{chat.title}</p>
 									<p class="text-[11px] text-slate-500">
 										{chat.kind === 'investigation' ? 'investigation' : 'chat'} ·
 										{relativeTime(chat.updated_at ?? chat.created_at)}
@@ -89,7 +89,7 @@
 			</div>
 
 			<div class="rounded-xl border border-surface-700 bg-surface-900 p-4">
-				<h2 class="mb-2 text-sm font-semibold text-slate-200">Workspace health</h2>
+				<h2 class="mb-2 text-sm font-semibold text-slate-800">Workspace health</h2>
 				<p class="flex items-center gap-2 text-sm">
 					<span
 						class="h-2 w-2 rounded-full {data.snapshot.overview.health === 'operational'
@@ -97,13 +97,13 @@
 							: 'bg-warn'}"
 						aria-hidden="true"
 					></span>
-					<span class="text-slate-300">
+					<span class="text-slate-700">
 						{data.snapshot.overview.health === 'operational'
 							? 'All systems operational'
 							: 'Degraded surfaces — see deployments'}
 					</span>
 				</p>
-				<p class="mt-2 font-mono text-[10px] text-slate-600">{counts.dashboards} dashboards · {counts.screeners} saved screeners</p>
+				<p class="mt-2 font-mono text-[10px] text-slate-500">{counts.dashboards} dashboards · {counts.screeners} saved screeners</p>
 			</div>
 		</section>
 	</div>

@@ -57,7 +57,7 @@
 
 <div class="mx-auto max-w-6xl space-y-5">
 	<header>
-		<h1 class="text-xl font-semibold text-white">Deployments</h1>
+		<h1 class="text-xl font-semibold text-slate-800">Deployments</h1>
 		<p class="text-sm text-slate-500">Paper/live monitoring: health, capital, P&amp;L, orders, risk.</p>
 	</header>
 
@@ -68,7 +68,7 @@
 			{#each deployments as deployment (deployment.id)}
 				<li class="rounded-xl border border-surface-700 bg-surface-900 p-4" data-testid="deployment-card">
 					<div class="flex items-center gap-2">
-						<h2 class="truncate text-sm font-semibold text-slate-100">{deployment.strategy_name}</h2>
+						<h2 class="truncate text-sm font-semibold text-slate-800">{deployment.strategy_name}</h2>
 						<span class="rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase {MODE_BADGE[deployment.mode]}">
 							{deployment.mode}
 						</span>
@@ -85,17 +85,17 @@
 					</p>
 					<div class="mt-3 grid grid-cols-3 gap-2 font-mono text-xs">
 						<div>
-							<div class="text-[10px] tracking-wider text-slate-600 uppercase">Capital</div>
-							<div class="text-slate-200">${deployment.allocated_capital.toLocaleString('en-US')}</div>
+							<div class="text-[10px] tracking-wider text-slate-500 uppercase">Capital</div>
+							<div class="text-slate-800">${deployment.allocated_capital.toLocaleString('en-US')}</div>
 						</div>
 						<div>
-							<div class="text-[10px] tracking-wider text-slate-600 uppercase">Unrealized</div>
+							<div class="text-[10px] tracking-wider text-slate-500 uppercase">Unrealized</div>
 							<div class={deployment.unrealized_pnl >= 0 ? 'text-profit' : 'text-loss'}>
 								{deployment.unrealized_pnl >= 0 ? '+' : ''}${Math.abs(deployment.unrealized_pnl).toLocaleString('en-US')}
 							</div>
 						</div>
 						<div>
-							<div class="text-[10px] tracking-wider text-slate-600 uppercase">Realized</div>
+							<div class="text-[10px] tracking-wider text-slate-500 uppercase">Realized</div>
 							<div class={deployment.realized_pnl >= 0 ? 'text-profit' : 'text-loss'}>
 								{deployment.realized_pnl >= 0 ? '+' : ''}${Math.abs(deployment.realized_pnl).toLocaleString('en-US')}
 							</div>
@@ -104,7 +104,7 @@
 					{#if deployment.request_ref && risk[deployment.request_ref]?.state === 'available'}
 						{@const decisions = risk[deployment.request_ref]?.value ?? []}
 						<div class="mt-3 border-t border-surface-700 pt-2">
-							<h3 class="mb-1 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
+							<h3 class="mb-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
 								Risk decisions · {deployment.request_ref}
 							</h3>
 							<ul class="space-y-0.5 font-mono text-[10px]">
@@ -113,9 +113,9 @@
 										<span class={decision.decision === 'allow' ? 'text-profit' : decision.decision === 'reject' ? 'text-loss' : 'text-warn'}>
 											{decision.decision}
 										</span>
-										<span class="text-slate-400">{decision.rule}</span>
+										<span class="text-slate-500">{decision.rule}</span>
 										{#if decision.reason}
-											<span class="truncate text-slate-600">{decision.reason}</span>
+											<span class="truncate text-slate-500">{decision.reason}</span>
 										{/if}
 									</li>
 								{/each}
@@ -128,7 +128,7 @@
 	{/if}
 
 	<section class="rounded-xl border border-surface-700 bg-surface-900">
-		<h2 class="border-b border-surface-700 px-4 py-2.5 text-sm font-semibold text-slate-200">
+		<h2 class="border-b border-surface-700 px-4 py-2.5 text-sm font-semibold text-slate-800">
 			Orders &amp; fills
 		</h2>
 		{#if orders.length}
@@ -149,46 +149,46 @@
 					{#each orders as order (order.id)}
 						<tr class="border-t border-surface-700">
 							<td class="px-4 py-1.5 text-slate-500">{order.id}</td>
-							<td class="px-4 py-1.5 text-slate-200">{order.symbol}</td>
+							<td class="px-4 py-1.5 text-slate-800">{order.symbol}</td>
 							<td class="px-4 py-1.5 {order.side === 'buy' ? 'text-profit' : 'text-loss'}">{order.side}</td>
-							<td class="px-4 py-1.5 text-right text-slate-300">{order.quantity}</td>
-							<td class="px-4 py-1.5 text-right text-slate-300">{order.price}</td>
-							<td class="px-4 py-1.5 text-slate-400">{order.status}</td>
+							<td class="px-4 py-1.5 text-right text-slate-700">{order.quantity}</td>
+							<td class="px-4 py-1.5 text-right text-slate-700">{order.price}</td>
+							<td class="px-4 py-1.5 text-slate-500">{order.status}</td>
 							<td class="px-4 py-1.5">
 								<span class="rounded-full border px-2 py-0.5 text-[10px] uppercase {MODE_BADGE[order.mode]}">
 									{order.mode}
 								</span>
 							</td>
-							<td class="px-4 py-1.5 text-right text-slate-600">{relativeTime(order.created_at)}</td>
+							<td class="px-4 py-1.5 text-right text-slate-500">{relativeTime(order.created_at)}</td>
 						</tr>
 					{/each}
 				</tbody>
 			</table>
 		{:else}
-			<p class="px-4 py-6 text-center text-xs text-slate-600">No orders recorded.</p>
+			<p class="px-4 py-6 text-center text-xs text-slate-500">No orders recorded.</p>
 		{/if}
 	</section>
 
 	<section class="space-y-2">
-		<h2 class="text-sm font-semibold text-slate-200">Portfolio (harness-published)</h2>
+		<h2 class="text-sm font-semibold text-slate-800">Portfolio (harness-published)</h2>
 		<StatusSurfaceView surface={portfolio} label="Portfolio">
 			{#snippet children(value)}
 				{@const summary = value as PortfolioSummary}
 				<div class="rounded-xl border border-surface-700 bg-surface-900 p-4 font-mono text-xs" data-testid="portfolio-summary">
 					<div class="mb-2 flex gap-6">
-						<span class="text-slate-500">cash <span class="text-slate-200">{summary.cash}</span></span>
+						<span class="text-slate-500">cash <span class="text-slate-800">{summary.cash}</span></span>
 						<span class="text-slate-500">equity <span class="text-accent">{summary.equity}</span></span>
 					</div>
 					<ul class="space-y-2">
 						{#each summary.books as book (book.name)}
 							<li class="rounded-lg border border-surface-700 bg-surface-900 px-3 py-2">
 								<div class="flex gap-4">
-									<span class="font-semibold text-slate-200">{book.name}</span>
+									<span class="font-semibold text-slate-800">{book.name}</span>
 									<span class="text-slate-500">cash {book.cash}</span>
 									<span class="text-slate-500">equity {book.equity}</span>
 								</div>
 								{#if book.positions.length}
-									<p class="mt-1 text-slate-600">
+									<p class="mt-1 text-slate-500">
 										{#each book.positions as position (position.symbol)}
 											{position.symbol} {position.quantity}{position.average_price ? ` @ ${position.average_price}` : ''}
 										{/each}

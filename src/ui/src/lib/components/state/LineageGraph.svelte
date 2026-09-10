@@ -47,7 +47,7 @@
 	data-testid="lineage-graph"
 	data-strategy={lineage.strategy_id}
 >
-	<h3 class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-200">
+	<h3 class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
 		{lineage.strategy_name}
 		<span class="font-mono text-[10px] text-slate-500">{lineage.strategy_id} · version ancestry</span>
 	</h3>
@@ -69,13 +69,13 @@
 				>
 					<div class="flex items-baseline gap-2">
 						<span class="font-mono text-xs font-semibold text-accent">v{entry.node.version}</span>
-						<span class="ml-auto font-mono text-[10px] text-slate-600">
+						<span class="ml-auto font-mono text-[10px] text-slate-500">
 							{shortDate(entry.node.created_at)}
 						</span>
 					</div>
-					<p class="mt-0.5 text-[11px] text-slate-400">{entry.node.note}</p>
+					<p class="mt-0.5 text-[11px] text-slate-500">{entry.node.note}</p>
 					{#if entry.relation}
-						<p class="mt-1 font-mono text-[10px] text-slate-600">
+						<p class="mt-1 font-mono text-[10px] text-slate-500">
 							↳ {entry.relation.relation.replace('-', ' ')} {entry.relation.from.split('@')[1]}
 						</p>
 					{/if}

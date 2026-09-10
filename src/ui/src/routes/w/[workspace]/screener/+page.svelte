@@ -29,7 +29,7 @@
 
 <div class="mx-auto max-w-6xl space-y-4">
 	<header>
-		<h1 class="text-xl font-semibold text-white">Screener</h1>
+		<h1 class="text-xl font-semibold text-slate-800">Screener</h1>
 		<p class="text-sm text-slate-500">
 			Volume/liquidity presets; saved screeners persist as workspace artifacts.
 		</p>

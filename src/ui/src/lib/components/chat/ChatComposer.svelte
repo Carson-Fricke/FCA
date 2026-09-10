@@ -40,7 +40,7 @@
 <div class="border-t border-surface-700 bg-surface-900 p-3" data-testid="chat-composer">
 	<div class="flex items-end gap-2">
 		<textarea
-			class="max-h-32 min-h-10 flex-1 resize-y rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-accent/50"
+			class="max-h-32 min-h-10 flex-1 resize-y rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-500 focus:border-accent/50"
 			placeholder={activeExecutionId
 				? 'Message the workspace agent — an execution is active; messages percolate as steering…'
 				: 'Message the workspace agent…'}

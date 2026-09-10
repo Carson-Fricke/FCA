@@ -36,7 +36,7 @@
 		<EmptyState title="Backtest unavailable" hint={loadError} />
 	{:else if backtest}
 		<header class="flex flex-wrap items-baseline gap-3">
-			<h1 class="text-xl font-semibold text-white">{backtest.name}</h1>
+			<h1 class="text-xl font-semibold text-slate-800">{backtest.name}</h1>
 			<span class="font-mono text-xs text-slate-500">
 				{backtest.period_start} → {backtest.period_end} · initial ${backtest.initial_capital.toLocaleString('en-US')} · final
 				<span class={backtest.net_pnl >= 0 ? 'text-profit' : 'text-loss'}>

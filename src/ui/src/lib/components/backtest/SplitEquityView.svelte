@@ -69,10 +69,10 @@
 		>
 			<span class="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true"></span>
 			<span class="font-semibold text-accent">Train/test split declared</span>
-			<span class="font-mono text-slate-400">
+			<span class="font-mono text-slate-500">
 				in-sample → {shortDate(backtest.split.boundary)} | out-of-sample {shortDate(backtest.split.boundary)} →
 			</span>
-			<span class="ml-auto font-mono text-[10px] text-slate-600">
+			<span class="ml-auto font-mono text-[10px] text-slate-500">
 				{inSample.length} + {outOfSample.length} points · boundary from manifest
 			</span>
 		</div>
@@ -107,7 +107,7 @@
 		<div
 			class="mb-3 rounded-xl border border-dashed border-surface-600/70 bg-surface-950 px-4 py-2.5 text-xs"
 		>
-			<span class="font-semibold text-slate-300">Train/test split not declared</span>
+			<span class="font-semibold text-slate-700">Train/test split not declared</span>
 			<span class="ml-2 text-slate-500">
 				This run's manifest declares no in-sample/out-of-sample boundary; the curve is shown
 				unsegmented. No split is fabricated.
@@ -148,11 +148,11 @@
 				{#each backtest.trades as trade (trade.id)}
 					<tr class="border-t border-surface-700">
 						<td class="px-3 py-1.5 text-slate-500">{trade.id}</td>
-						<td class="px-3 py-1.5 text-slate-300">{trade.symbol}</td>
+						<td class="px-3 py-1.5 text-slate-700">{trade.symbol}</td>
 						<td class="px-3 py-1.5 {trade.side === 'buy' ? 'text-profit' : 'text-loss'}">{trade.side}</td>
-						<td class="px-3 py-1.5 text-slate-300">{trade.qty}</td>
-						<td class="px-3 py-1.5 text-slate-400">{trade.entryPrice.toFixed(2)}</td>
-						<td class="px-3 py-1.5 text-slate-400">{trade.exitPrice.toFixed(2)}</td>
+						<td class="px-3 py-1.5 text-slate-700">{trade.qty}</td>
+						<td class="px-3 py-1.5 text-slate-500">{trade.entryPrice.toFixed(2)}</td>
+						<td class="px-3 py-1.5 text-slate-500">{trade.exitPrice.toFixed(2)}</td>
 						<td class="px-3 py-1.5 text-right {trade.pnl >= 0 ? 'text-profit' : 'text-loss'}">
 							{trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(0)}
 						</td>
@@ -163,6 +163,6 @@
 	</div>
 {/if}
 
-<p class="mt-2 font-mono text-[10px] text-slate-600">
+<p class="mt-2 font-mono text-[10px] text-slate-500">
 	run {backtest.manifest.run_id} · digest {backtest.manifest.run_digest?.slice(0, 16) ?? '—'}…
 </p>

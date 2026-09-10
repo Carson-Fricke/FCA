@@ -43,7 +43,7 @@
 <div class="mx-auto max-w-6xl space-y-4">
 	<header class="flex flex-wrap items-center gap-3">
 		<div>
-			<h1 class="text-xl font-semibold text-white">Dashboards</h1>
+			<h1 class="text-xl font-semibold text-slate-800">Dashboards</h1>
 			<p class="text-sm text-slate-500">
 				Widget definitions are workspace artifacts, fetched — never authored client-side as state.
 			</p>

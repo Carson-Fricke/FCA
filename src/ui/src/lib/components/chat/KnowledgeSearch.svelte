@@ -37,7 +37,7 @@
 	<div class="flex gap-2">
 		<input
 			type="search"
-			class="min-w-0 flex-1 rounded-md border border-surface-600/60 bg-surface-950 px-2 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-accent/50"
+			class="min-w-0 flex-1 rounded-md border border-surface-600/60 bg-surface-950 px-2 py-1.5 text-xs text-slate-800 outline-none placeholder:text-slate-500 focus:border-accent/50"
 			placeholder="Search knowledge corpus…"
 			bind:value={query}
 			onkeydown={(e) => e.key === 'Enter' && run()}
@@ -59,17 +59,17 @@
 			{#each results as hit (hit.path)}
 				<li class="rounded-md border border-surface-700 bg-surface-900 p-2">
 					<div class="flex items-baseline gap-2">
-						<span class="truncate text-xs font-medium text-slate-200">{hit.title}</span>
+						<span class="truncate text-xs font-medium text-slate-800">{hit.title}</span>
 						<span
 							class="ml-auto shrink-0 rounded-full border px-1.5 font-mono text-[9px]
-								{hit.trust_tier === 'workspace' ? 'border-accent/40 text-accent' : 'border-surface-600 text-slate-400'}"
+								{hit.trust_tier === 'workspace' ? 'border-accent/40 text-accent' : 'border-surface-600 text-slate-500'}"
 						>
 							{hit.trust_tier}
 						</span>
 					</div>
 					<p class="mt-1 line-clamp-2 text-[11px] text-slate-500">{hit.excerpt}</p>
 					<div class="mt-1 flex items-center gap-2">
-						<span class="truncate font-mono text-[10px] text-slate-600"
+						<span class="truncate font-mono text-[10px] text-slate-500"
 							>{hit.path}@{hit.revision}</span
 						>
 						<button

@@ -31,7 +31,7 @@
 		live: 'border-profit/40 text-profit',
 		paper: 'border-accent/40 text-accent',
 		paused: 'border-warn/40 text-warn',
-		draft: 'border-surface-600 text-slate-400'
+		draft: 'border-surface-600 text-slate-500'
 	};
 </script>
 
@@ -40,28 +40,28 @@
 <div class="mx-auto max-w-6xl space-y-4">
 	<header class="flex flex-wrap items-center gap-3">
 		<div>
-			<h1 class="text-xl font-semibold text-white">Strategies</h1>
+			<h1 class="text-xl font-semibold text-slate-800">Strategies</h1>
 			<p class="text-sm text-slate-500">Registry with status filters and version lineage.</p>
 		</div>
 		<div class="ml-auto flex items-center gap-2">
 			<div class="flex overflow-hidden rounded-lg border border-surface-600">
 				<button
 					type="button"
-					class="px-3 py-1.5 text-xs {view === 'grid' ? 'bg-accent/15 text-accent' : 'text-slate-400'}"
+					class="px-3 py-1.5 text-xs {view === 'grid' ? 'bg-accent/15 text-accent' : 'text-slate-500'}"
 					onclick={() => (view = 'grid')}
 				>
 					Grid
 				</button>
 				<button
 					type="button"
-					class="px-3 py-1.5 text-xs {view === 'list' ? 'bg-accent/15 text-accent' : 'text-slate-400'}"
+					class="px-3 py-1.5 text-xs {view === 'list' ? 'bg-accent/15 text-accent' : 'text-slate-500'}"
 					onclick={() => (view = 'list')}
 				>
 					List
 				</button>
 			</div>
 			<select
-				class="rounded-lg border border-surface-600 bg-surface-900 px-2 py-1.5 text-xs text-slate-300 outline-none"
+				class="rounded-lg border border-surface-600 bg-surface-900 px-2 py-1.5 text-xs text-slate-700 outline-none"
 				bind:value={statusFilter}
 				aria-label="Filter by status"
 			>
@@ -92,17 +92,17 @@
 						data-testid="strategy-card"
 					>
 						<div class="flex items-center gap-2">
-							<h2 class="truncate text-sm font-semibold text-slate-100">{strategy.name}</h2>
+							<h2 class="truncate text-sm font-semibold text-slate-800">{strategy.name}</h2>
 							<span class="rounded-full border px-2 py-0.5 font-mono text-[10px] {STATUS_TONE[strategy.status]}">
 								{strategy.status}
 							</span>
 						</div>
 						<p class="mt-0.5 font-mono text-[11px] text-slate-500">{strategy.symbol} · {strategy.versions.at(-1)?.version ?? '—'}</p>
-						<p class="mt-2 truncate text-xs text-slate-400">{strategy.description}</p>
+						<p class="mt-2 truncate text-xs text-slate-500">{strategy.description}</p>
 						<div class="mt-3 flex items-baseline gap-4 font-mono text-xs">
 							<span class={strategy.pnl >= 0 ? 'text-profit' : 'text-loss'}>{signedPct(strategy.return_pct)}</span>
 							<span class="text-slate-500">win {pct(strategy.win_rate, 0)}</span>
-							<span class="ml-auto text-slate-400">{money(strategy.capital)}</span>
+							<span class="ml-auto text-slate-500">{money(strategy.capital)}</span>
 						</div>
 					</a>
 				</li>
@@ -125,11 +125,11 @@
 					{#each filtered as strategy (strategy.id)}
 						<tr class="border-t border-surface-700 hover:bg-surface-900">
 							<td class="px-4 py-2">
-								<a href="/w/{workspaceId}/strategies/{strategy.id}" class="text-slate-200 hover:text-accent">
+								<a href="/w/{workspaceId}/strategies/{strategy.id}" class="text-slate-800 hover:text-accent">
 									{strategy.name}
 								</a>
 							</td>
-							<td class="px-4 py-2 font-mono text-xs text-slate-400">{strategy.symbol}</td>
+							<td class="px-4 py-2 font-mono text-xs text-slate-500">{strategy.symbol}</td>
 							<td class="px-4 py-2">
 								<span class="rounded-full border px-2 py-0.5 font-mono text-[10px] {STATUS_TONE[strategy.status]}">
 									{strategy.status}
@@ -138,8 +138,8 @@
 							<td class="px-4 py-2 text-right font-mono text-xs {strategy.return_pct >= 0 ? 'text-profit' : 'text-loss'}">
 								{signedPct(strategy.return_pct)}
 							</td>
-							<td class="px-4 py-2 text-right font-mono text-xs text-slate-400">{pct(strategy.win_rate, 0)}</td>
-							<td class="px-4 py-2 text-right font-mono text-xs text-slate-400">{money(strategy.capital)}</td>
+							<td class="px-4 py-2 text-right font-mono text-xs text-slate-500">{pct(strategy.win_rate, 0)}</td>
+							<td class="px-4 py-2 text-right font-mono text-xs text-slate-500">{money(strategy.capital)}</td>
 						</tr>
 					{/each}
 				</tbody>

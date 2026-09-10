@@ -71,13 +71,13 @@
 	<div class="w-full max-w-3xl">
 		<div class="mb-8 flex items-center gap-3">
 			<span
-				class="flex h-11 w-11 items-center justify-center rounded-xl border border-surface-600 bg-surface-800 font-mono text-lg font-bold text-slate-300"
+				class="flex h-11 w-11 items-center justify-center rounded-xl border border-surface-600 bg-surface-800 font-mono text-lg font-bold text-slate-700"
 				aria-hidden="true"
 			>
 				Θ
 			</span>
 			<div class="flex-1">
-				<h1 class="text-2xl font-semibold tracking-tight text-white">
+				<h1 class="text-2xl font-semibold tracking-tight text-slate-800">
 					thesis<span class="text-accent">.</span>
 				</h1>
 				<p class="text-sm text-slate-500">Pick a workspace to continue. Every view is workspace-scoped.</p>
@@ -102,7 +102,7 @@
 				</button>
 				<button
 					type="button"
-					class="rounded border border-surface-600 px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
+					class="rounded border border-surface-600 px-2.5 py-1 text-xs text-slate-500 hover:text-slate-800"
 					onclick={dismissStale}
 				>
 					Dismiss
@@ -113,9 +113,9 @@
 		{#if loading}
 			<div class="h-24 animate-pulse rounded-xl border border-surface-700 bg-surface-900"></div>
 		{:else if loadError}
-			<div class="rounded-xl border border-loss/30 bg-loss/10 p-4 text-sm text-slate-300">
+			<div class="rounded-xl border border-loss/30 bg-loss/10 p-4 text-sm text-slate-700">
 				<p class="font-semibold text-loss">Workspace list unavailable</p>
-				<p class="mt-1 text-xs text-slate-400">{loadError}</p>
+				<p class="mt-1 text-xs text-slate-500">{loadError}</p>
 				<div class="mt-3 flex gap-2">
 					<button
 						type="button"
@@ -127,7 +127,7 @@
 					{#if !fixtureMode}
 						<button
 							type="button"
-							class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-300 hover:border-accent/40 hover:text-accent"
+							class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-700 hover:border-accent/40 hover:text-accent"
 							onclick={() => setFixtureMode(true)}
 							data-testid="picker-use-fixtures"
 						>
@@ -154,7 +154,7 @@
 									{workspace.initials}
 								</span>
 								<div>
-									<p class="font-semibold text-slate-100">{workspace.name}</p>
+									<p class="font-semibold text-slate-800">{workspace.name}</p>
 									<p class="text-xs text-slate-500">{workspace.description}</p>
 								</div>
 							</div>

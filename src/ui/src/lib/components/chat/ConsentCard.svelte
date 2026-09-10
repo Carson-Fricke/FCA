@@ -62,24 +62,24 @@
 
 	<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 font-mono text-xs">
 		<dt class="text-slate-500">Bundle hash</dt>
-		<dd class="text-slate-200" title={proposal.bundleHash}>{shortHash(proposal.bundleHash)}</dd>
+		<dd class="text-slate-800" title={proposal.bundleHash}>{shortHash(proposal.bundleHash)}</dd>
 		<dt class="text-slate-500">Environment</dt>
 		<dd class="uppercase text-warn">{proposal.environment}</dd>
 		<dt class="text-slate-500">Action</dt>
 		<dd class="uppercase text-warn">{proposal.action}</dd>
 		<dt class="text-slate-500">Instruments</dt>
-		<dd class="text-slate-200">{proposal.instruments.join(', ')}</dd>
+		<dd class="text-slate-800">{proposal.instruments.join(', ')}</dd>
 		<dt class="text-slate-500">Capital bound</dt>
-		<dd class="text-slate-200">{proposal.capitalBound}</dd>
+		<dd class="text-slate-800">{proposal.capitalBound}</dd>
 		<dt class="text-slate-500">Risk bound</dt>
-		<dd class="text-slate-200">{proposal.riskBound} ({proposal.riskBoundKind})</dd>
+		<dd class="text-slate-800">{proposal.riskBound} ({proposal.riskBoundKind})</dd>
 		<dt class="text-slate-500">Expiry</dt>
-		<dd class="text-slate-200">{proposal.expiration}</dd>
+		<dd class="text-slate-800">{proposal.expiration}</dd>
 		<dt class="text-slate-500">Scope</dt>
-		<dd class="text-slate-200">{scopeText}</dd>
+		<dd class="text-slate-800">{scopeText}</dd>
 	</dl>
 
-	<label class="mt-4 flex items-start gap-2 text-xs text-slate-300">
+	<label class="mt-4 flex items-start gap-2 text-xs text-slate-700">
 		<input
 			type="checkbox"
 			class="mt-0.5 accent-cyan-400"
@@ -106,7 +106,7 @@
 		{#if onReject && !confirmed}
 			<button
 				type="button"
-				class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+				class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-800"
 				onclick={onReject}
 				disabled={busy}
 			>

@@ -37,7 +37,7 @@
 		{@const s = strategy}
 		<header class="flex flex-wrap items-center gap-3">
 			<div>
-				<h1 class="text-xl font-semibold text-white">{s.name}</h1>
+				<h1 class="text-xl font-semibold text-slate-800">{s.name}</h1>
 				<p class="font-mono text-xs text-slate-500">
 					{s.symbol} · {s.status} · capital {money(s.capital)}
 				</p>
@@ -49,14 +49,14 @@
 		</header>
 
 		<section class="rounded-xl border border-surface-700 bg-surface-900">
-			<h2 class="border-b border-surface-700 px-4 py-2.5 text-sm font-semibold text-slate-200">Code</h2>
+			<h2 class="border-b border-surface-700 px-4 py-2.5 text-sm font-semibold text-slate-800">Code</h2>
 			<pre
-				class="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-slate-300"
+				class="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-slate-700"
 				data-testid="strategy-code">{s.code}</pre>
 		</section>
 
 		<section class="space-y-3">
-			<h2 class="text-sm font-semibold text-slate-200">Lineage</h2>
+			<h2 class="text-sm font-semibold text-slate-800">Lineage</h2>
 			<LineageGraph
 				lineage={{
 					strategy_id: s.id,

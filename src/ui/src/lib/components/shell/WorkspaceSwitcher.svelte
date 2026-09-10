@@ -40,7 +40,7 @@
 			{current?.initials}
 		</span>
 		<span class="min-w-0 flex-1">
-			<span class="block truncate text-sm font-semibold text-slate-100">{current?.name}</span>
+			<span class="block truncate text-sm font-semibold text-slate-800">{current?.name}</span>
 			<span class="block truncate text-[11px] text-slate-500">{current?.description}</span>
 		</span>
 		<span class="text-slate-500" aria-hidden="true">⇅</span>
@@ -58,7 +58,7 @@
 				<button
 					type="button"
 					class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition
-						{workspace.id === currentId ? 'bg-surface-800 text-white' : 'text-slate-300 hover:bg-surface-800/60'}"
+						{workspace.id === currentId ? 'bg-surface-800 text-slate-800' : 'text-slate-700 hover:bg-surface-800/60'}"
 					onclick={() => {
 						open = false;
 						if (workspace.id !== currentId) onSwitch(workspace.id);
@@ -70,7 +70,7 @@
 						class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-surface-600 bg-surface-900 font-mono text-[10px] {workspace.id ===
 						currentId
 							? 'text-accent'
-							: 'text-slate-400'}"
+							: 'text-slate-500'}"
 					>
 						{workspace.initials}
 					</span>

@@ -22,8 +22,8 @@
 		aria-label={title}
 	>
 		<div class="flex items-center justify-between border-b border-surface-700 px-4 py-3">
-			<h2 class="text-sm font-semibold text-slate-100">{title}</h2>
-			<button type="button" class="text-slate-500 hover:text-slate-200" onclick={onClose}>✕</button>
+			<h2 class="text-sm font-semibold text-slate-800">{title}</h2>
+			<button type="button" class="text-slate-500 hover:text-slate-800" onclick={onClose}>✕</button>
 		</div>
 		{@render children()}
 	</div>

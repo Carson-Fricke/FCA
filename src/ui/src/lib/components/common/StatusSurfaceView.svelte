@@ -22,7 +22,7 @@
 		class="rounded-lg border border-dashed border-surface-600/60 bg-surface-950 px-4 py-3 text-xs"
 		data-testid="surface-unavailable"
 	>
-		<div class="flex items-center gap-2 text-slate-400">
+		<div class="flex items-center gap-2 text-slate-500">
 			<span class="h-1.5 w-1.5 rounded-full bg-warn/80" aria-hidden="true"></span>
 			<span class="font-semibold uppercase tracking-wider">{label} unavailable</span>
 			{#if surface.reason}

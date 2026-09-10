@@ -51,7 +51,7 @@
 		>
 			Θ
 		</span>
-		<span class="text-lg font-semibold tracking-tight text-white">thesis<span class="text-accent">.</span></span>
+		<span class="text-lg font-semibold tracking-tight text-slate-800">thesis<span class="text-accent">.</span></span>
 	</div>
 
 	<div class="px-3">

@@ -20,7 +20,7 @@
 	const EVENT_TONE: Record<string, string> = {
 		'task.completed': 'text-profit',
 		'task.started': 'text-accent',
-		'task.created': 'text-slate-400',
+		'task.created': 'text-slate-500',
 		'gate.passed': 'text-profit',
 		'gate.blocked': 'text-warn'
 	};
@@ -39,13 +39,13 @@
 			{plan.plan_id} · {plan.current_stage}
 		</span>
 	</div>
-	<p class="mb-3 text-sm text-slate-200">{plan.title}</p>
+	<p class="mb-3 text-sm text-slate-800">{plan.title}</p>
 
 	<ol class="space-y-1.5">
 		{#each plan.steps as step (step.id)}
 			<li class="flex items-start gap-2 text-xs">
 				<span class="mt-0.5 h-3 w-3 shrink-0 rounded-full border {STEP_TONE[step.state]}"></span>
-				<span class="text-slate-300">{step.title}</span>
+				<span class="text-slate-700">{step.title}</span>
 			</li>
 		{/each}
 	</ol>
@@ -57,8 +57,8 @@
 		<ol class="space-y-1">
 			{#each timeline.slice(-5) as item (item.id)}
 				<li class="flex items-center gap-2 font-mono text-[11px]">
-					<span class="text-slate-600">{item.at.slice(11, 19)}</span>
-					<span class="{EVENT_TONE[item.kind] ?? 'text-slate-400'}">{item.kind}</span>
+					<span class="text-slate-500">{item.at.slice(11, 19)}</span>
+					<span class="{EVENT_TONE[item.kind] ?? 'text-slate-500'}">{item.kind}</span>
 					<span class="truncate text-slate-500">{item.detail}</span>
 				</li>
 			{/each}
