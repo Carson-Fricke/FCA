@@ -11,6 +11,8 @@
 
 pub mod accounting;
 pub mod error;
+pub mod events;
+pub mod fills;
 pub mod oms;
 pub mod orders;
 pub mod symbol;
