@@ -9,9 +9,13 @@
 
 use std::collections::BTreeMap;
 
-use super::base::{IndicatorError, TickIndicator};
-use super::momentum::RelativeStrengthIndex;
-use super::overlays::{ExponentialMovingAverage, MidSimpleMovingAverage, SimpleMovingAverage};
+use super::base::{
+    IndicatorError, IndicatorMachine, TickIndicator, DEFAULT_BUCKET_NS, MIDNIGHT_UTC_NS,
+};
+use super::momentum::RsiKernel;
+use super::overlays::{EmaKernel, MidSmaKernel, SmaKernel};
+use super::volatility::{AtrKernel, RealizedVolKernel};
+use super::volume::{DollarVolumeKernel, ObvKernel, VwapKernel};
 
 /// Typed parameter vocabulary supported by indicator specs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +54,18 @@ impl IndicatorParam {
         }
     }
 
+    /// Declare a required duration parameter.
+    #[must_use]
+    pub fn required_duration(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            kind: IndicatorParamKind::Duration,
+            required: true,
+            default_int: None,
+            default_duration: None,
+        }
+    }
+
     /// Declare an optional duration parameter with a default.
     #[must_use]
     pub fn duration(name: &str, default: &str) -> Self {
@@ -59,6 +75,18 @@ impl IndicatorParam {
             required: false,
             default_int: None,
             default_duration: Some(default.to_string()),
+        }
+    }
+
+    /// Declare an optional duration parameter with no default.
+    #[must_use]
+    pub fn optional_duration(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            kind: IndicatorParamKind::Duration,
+            required: false,
+            default_int: None,
+            default_duration: None,
         }
     }
 }
@@ -83,6 +111,16 @@ pub enum IndicatorKind {
     Rsi,
     /// Mid-price simple moving average.
     MidSma,
+    /// Wilder average true range.
+    Atr,
+    /// Rolling realized volatility of returns.
+    RealizedVol,
+    /// Session-cumulative volume-weighted average price.
+    Vwap,
+    /// Traded notional, cumulative or rolling.
+    DollarVolume,
+    /// On-balance volume.
+    Obv,
 }
 
 /// One registered indicator: name, typed parameter schema, and kind.
@@ -172,25 +210,63 @@ impl IndicatorRegistry {
     ) -> Result<ConfiguredIndicator, IndicatorError> {
         let spec = self.spec(name)?;
         let resolved = resolve_parameters(spec, params)?;
-        let indicator: Box<dyn TickIndicator> = match spec.kind {
-            IndicatorKind::Sma => Box::new(SimpleMovingAverage::new(resolved_integer(
-                &resolved, "period",
-            )?)?),
-            IndicatorKind::Ema => Box::new(ExponentialMovingAverage::new(resolved_integer(
-                &resolved, "span",
-            )?)?),
-            IndicatorKind::Rsi => Box::new(RelativeStrengthIndex::new(resolved_integer(
-                &resolved, "period",
-            )?)?),
-            IndicatorKind::MidSma => Box::new(MidSimpleMovingAverage::new(resolved_integer(
-                &resolved, "period",
-            )?)?),
+        let bucket_ns = match resolved_duration(&resolved, "bucket")? {
+            Some(value) => value,
+            None => DEFAULT_BUCKET_NS,
         };
-        Ok(ConfiguredIndicator {
-            symbol: symbol.to_uppercase(),
-            indicator,
-        })
+        let symbol = symbol.to_uppercase();
+        let indicator: Box<dyn TickIndicator> = match spec.kind {
+            IndicatorKind::Sma => machine(
+                SmaKernel::new(resolved_integer(&resolved, "period")?)?,
+                &symbol,
+                bucket_ns,
+            )?,
+            IndicatorKind::Ema => machine(
+                EmaKernel::new(resolved_integer(&resolved, "span")?)?,
+                &symbol,
+                bucket_ns,
+            )?,
+            IndicatorKind::Rsi => machine(
+                RsiKernel::new(resolved_integer(&resolved, "period")?)?,
+                &symbol,
+                bucket_ns,
+            )?,
+            IndicatorKind::MidSma => machine(
+                MidSmaKernel::new(resolved_integer(&resolved, "period")?)?,
+                &symbol,
+                bucket_ns,
+            )?,
+            IndicatorKind::Atr => machine(
+                AtrKernel::new(resolved_integer(&resolved, "period")?)?,
+                &symbol,
+                bucket_ns,
+            )?,
+            IndicatorKind::RealizedVol => {
+                let window = require_duration(&resolved, "window")?;
+                machine(RealizedVolKernel::new(window)?, &symbol, bucket_ns)?
+            }
+            IndicatorKind::Vwap => machine(VwapKernel::new(), &symbol, bucket_ns)?,
+            IndicatorKind::DollarVolume => {
+                let window = resolved_duration(&resolved, "window")?;
+                machine(DollarVolumeKernel::new(window)?, &symbol, bucket_ns)?
+            }
+            IndicatorKind::Obv => machine(ObvKernel::new(), &symbol, bucket_ns)?,
+        };
+        Ok(ConfiguredIndicator { symbol, indicator })
     }
+}
+
+fn machine<K: super::base::IndicatorKernel + 'static>(
+    kernel: K,
+    symbol: &str,
+    bucket_ns: i64,
+) -> Result<Box<dyn TickIndicator>, IndicatorError> {
+    Ok(Box::new(IndicatorMachine::with_kernel(
+        kernel,
+        symbol,
+        bucket_ns,
+        Some(MIDNIGHT_UTC_NS),
+    )?))
 }
 
 fn resolved_integer(
@@ -203,6 +279,32 @@ fn resolved_integer(
             "parameter {name:?} must be an integer"
         ))),
     }
+}
+
+fn resolved_duration(
+    resolved: &BTreeMap<String, ParamValue>,
+    name: &str,
+) -> Result<Option<i64>, IndicatorError> {
+    match resolved.get(name) {
+        Some(ParamValue::Duration(text)) => parse_duration_ns(text)
+            .map(Some)
+            .map_err(|message| {
+                IndicatorError::Configuration(format!("parameter {name:?} {message}"))
+            }),
+        Some(_) => Err(IndicatorError::Configuration(format!(
+            "parameter {name:?} must be a duration string"
+        ))),
+        None => Ok(None),
+    }
+}
+
+fn require_duration(
+    resolved: &BTreeMap<String, ParamValue>,
+    name: &str,
+) -> Result<i64, IndicatorError> {
+    resolved_duration(resolved, name)?.ok_or_else(|| {
+        IndicatorError::Configuration(format!("parameter {name:?} is required"))
+    })
 }
 
 fn is_valid_name(name: &str) -> bool {
@@ -347,6 +449,36 @@ pub fn default_registry() -> IndicatorRegistry {
             vec![IndicatorParam::integer("period")],
         ),
         builtin(
+            "atr",
+            "Wilder average true range over per-bucket trade ranges.",
+            IndicatorKind::Atr,
+            vec![IndicatorParam::integer("period")],
+        ),
+        builtin(
+            "realized_vol",
+            "Rolling standard deviation of tick-to-tick simple returns.",
+            IndicatorKind::RealizedVol,
+            vec![IndicatorParam::required_duration("window")],
+        ),
+        builtin(
+            "dollar_volume",
+            "Traded notional; cumulative per session, or rolling over a window.",
+            IndicatorKind::DollarVolume,
+            vec![IndicatorParam::optional_duration("window")],
+        ),
+        builtin(
+            "vwap",
+            "Session-cumulative volume-weighted average price of trades.",
+            IndicatorKind::Vwap,
+            vec![],
+        ),
+        builtin(
+            "obv",
+            "On-balance volume from the tick rule, cumulative per session.",
+            IndicatorKind::Obv,
+            vec![],
+        ),
+        builtin(
             "mid_sma",
             "Rolling simple mean of the last period quote mid-prices.",
             IndicatorKind::MidSma,
@@ -385,45 +517,103 @@ mod tests {
     use crate::indicators::base::{Tick, TickDriver, TickKind};
     use harness_num::Decimal18;
 
+    fn params(pairs: &[(&str, ParamValue)]) -> BTreeMap<String, ParamValue> {
+        pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), value.clone()))
+            .collect()
+    }
+
+    fn trade(sequence: u64, price: i64) -> Tick {
+        Tick {
+            timestamp_ns: sequence as i64,
+            sequence,
+            kind: TickKind::Trade {
+                price: Decimal18::from_i64(price),
+                quantity: Decimal18::from_i64(1),
+            },
+        }
+    }
+
     #[test]
     fn default_registry_names_are_sorted() {
         assert_eq!(
             indicator_names(),
-            vec!["ema", "mid_sma", "rsi", "sma"]
-                .into_iter()
-                .map(str::to_string)
-                .collect::<Vec<_>>()
+            vec![
+                "atr",
+                "dollar_volume",
+                "ema",
+                "mid_sma",
+                "obv",
+                "realized_vol",
+                "rsi",
+                "sma",
+                "vwap"
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
         );
     }
 
     #[test]
     fn create_validates_and_builds() {
-        let params = BTreeMap::from([("period".to_string(), ParamValue::Int(2))]);
+        let params = params(&[("period", ParamValue::Int(2))]);
         let configured = create_indicator("sma", &params, "spy").expect("create");
         assert_eq!(configured.symbol, "SPY");
         let mut indicator = configured.indicator;
         assert_eq!(indicator.name(), "sma");
         assert_eq!(indicator.drivers(), &[TickDriver::Trade]);
         for sequence in 0..2u64 {
-            indicator
-                .on_tick(&Tick {
-                    timestamp_ns: sequence as i64,
-                    sequence,
-                    kind: TickKind::Trade {
-                        price: Decimal18::from_i64(10),
-                        quantity: Decimal18::from_i64(1),
-                    },
-                })
-                .expect("tick");
+            indicator.on_tick(&trade(sequence, 10)).expect("tick");
         }
         assert_eq!(indicator.value(), Some(Decimal18::from_i64(10)));
+    }
+
+    #[test]
+    fn create_builds_volatility_and_volume_builtins() {
+        let configured = create_indicator(
+            "atr",
+            &params(&[("period", ParamValue::Int(2))]),
+            "spy",
+        )
+        .expect("atr");
+        assert_eq!(configured.indicator.name(), "atr");
+        assert_eq!(configured.symbol, "SPY");
+
+        let configured = create_indicator(
+            "realized_vol",
+            &params(&[("window", ParamValue::Duration("5s".to_string()))]),
+            "spy",
+        )
+        .expect("realized_vol");
+        assert_eq!(configured.indicator.name(), "realized_vol");
+
+        let configured = create_indicator(
+            "dollar_volume",
+            &params(&[("window", ParamValue::Duration("1min".to_string()))]),
+            "spy",
+        )
+        .expect("dollar_volume");
+        assert_eq!(configured.indicator.name(), "dollar_volume");
+
+        let configured = create_indicator("vwap", &BTreeMap::new(), "spy").expect("vwap");
+        assert_eq!(configured.indicator.name(), "vwap");
+
+        let configured = create_indicator("obv", &BTreeMap::new(), "spy").expect("obv");
+        assert_eq!(configured.indicator.name(), "obv");
+    }
+
+    #[test]
+    fn realized_vol_requires_a_window() {
+        assert!(create_indicator("realized_vol", &BTreeMap::new(), "spy").is_err());
     }
 
     #[test]
     fn rejects_unknown_and_missing_params() {
         assert!(create_indicator("nope", &BTreeMap::new(), "spy").is_err());
         assert!(create_indicator("sma", &BTreeMap::new(), "spy").is_err());
-        let unknown = BTreeMap::from([("nope".to_string(), ParamValue::Int(1))]);
+        let unknown = params(&[("nope", ParamValue::Int(1))]);
         assert!(create_indicator("sma", &unknown, "spy").is_err());
     }
 

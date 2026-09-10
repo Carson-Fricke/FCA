@@ -3,13 +3,13 @@
 use harness_num::Decimal18;
 
 use super::base::{
-    add, divide, hundred, multiply, subtract, IndicatorError, OrderGuard, Tick, TickDriver,
-    TickIndicator, TickKind,
+    add, divide, hundred, multiply, subtract, IndicatorError, IndicatorKernel, IndicatorMachine,
+    TickDriver, DEFAULT_BUCKET_NS, MIDNIGHT_UTC_NS,
 };
 
 /// Wilder relative strength index over consecutive trade-price changes.
 #[derive(Clone, Debug)]
-pub struct RelativeStrengthIndex {
+pub struct RsiKernel {
     period: i64,
     previous_price: Option<Decimal18>,
     changes: i64,
@@ -17,11 +17,10 @@ pub struct RelativeStrengthIndex {
     loss_total: Decimal18,
     avg_gain: Option<Decimal18>,
     avg_loss: Option<Decimal18>,
-    guard: OrderGuard,
 }
 
-impl RelativeStrengthIndex {
-    /// Build an RSI with a positive period.
+impl RsiKernel {
+    /// Build an RSI kernel with a positive period.
     ///
     /// # Errors
     ///
@@ -40,12 +39,11 @@ impl RelativeStrengthIndex {
             loss_total: Decimal18::ZERO,
             avg_gain: None,
             avg_loss: None,
-            guard: OrderGuard::default(),
         })
     }
 }
 
-impl TickIndicator for RelativeStrengthIndex {
+impl IndicatorKernel for RsiKernel {
     fn name(&self) -> &'static str {
         "rsi"
     }
@@ -54,15 +52,10 @@ impl TickIndicator for RelativeStrengthIndex {
         &[TickDriver::Trade]
     }
 
-    fn on_tick(&mut self, tick: &Tick) -> Result<(), IndicatorError> {
-        self.guard.accept(tick.timestamp_ns, tick.sequence)?;
-        let TickKind::Trade { price, .. } = &tick.kind else {
-            return Ok(());
-        };
-        let price = *price;
+    fn on_trade(&mut self, price: Decimal18, _quantity: Decimal18, _timestamp_ns: i64) {
         let previous = self.previous_price.replace(price);
         let Some(previous) = previous else {
-            return Ok(());
+            return;
         };
         let change = subtract(price, previous);
         let gain = if change.is_positive() {
@@ -91,7 +84,6 @@ impl TickIndicator for RelativeStrengthIndex {
             self.avg_gain = Some(add(avg_gain, divide(subtract(gain, avg_gain), divisor)));
             self.avg_loss = Some(add(avg_loss, divide(subtract(loss, avg_loss), divisor)));
         }
-        Ok(())
     }
 
     fn value(&self) -> Option<Decimal18> {
@@ -105,8 +97,28 @@ impl TickIndicator for RelativeStrengthIndex {
     }
 }
 
+/// Wilder relative strength index over consecutive trade-price changes.
+pub type RelativeStrengthIndex = IndicatorMachine<RsiKernel>;
+
+impl IndicatorMachine<RsiKernel> {
+    /// Build a symbol-less RSI for direct arithmetic use.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndicatorError::Configuration`] when `period` is not positive.
+    pub fn new(period: i64) -> Result<Self, IndicatorError> {
+        Self::with_kernel(
+            RsiKernel::new(period)?,
+            String::new(),
+            DEFAULT_BUCKET_NS,
+            Some(MIDNIGHT_UTC_NS),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::base::{Tick, TickIndicator, TickKind};
     use super::*;
 
     fn trade(sequence: u64, price: i64) -> Tick {
