@@ -57,10 +57,11 @@ $haveRust = Test-Path -LiteralPath (Join-Path $root 'rust\Cargo.toml')
 $havePy = Test-Path -LiteralPath (Join-Path $root 'pyproject.toml')
 
 # No diff detected (e.g. verify run on the integration branch after merge):
-# fall back to running whichever toolchain the repo actually has.
+# default to the Rust workspace when it exists. Per-task worktrees always have a
+# merge-base diff, so language selection there is by changed files.
 if (-not $rustTouched -and -not $pyTouched) {
     $rustTouched = $haveRust
-    $pyTouched = $havePy
+    $pyTouched = $false
 }
 
 $runRust = $rustTouched -and $haveRust
