@@ -17,16 +17,26 @@ path = "src/bin/harness.rs"
 name = "backtest-job"
 path = "src/bin/backtest_job.rs"
 
+[[bin]]
+name = "api"
+path = "src/bin/api.rs"
+
+[[bin]]
+name = "mcp"
+path = "src/bin/mcp.rs"
+
 [dependencies]
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
+harness-mcp = { path = "../harness-mcp" }
 hex = "0.4"
 percent-encoding = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "sync"] }
+ureq = { version = "2", features = ["json"] }
 
 [dev-dependencies]
 http-body-util = "0.1"

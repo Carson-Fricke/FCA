@@ -643,7 +643,11 @@ impl HarnessTools {
                     "remote harness launch response requires a non-empty 'state' string",
                 )
             })?;
-        let location = response.headers.get("Location").cloned();
+        let location = response
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("location"))
+            .map(|(_, value)| value.clone());
         Ok(json!({
             "boundary": "remote",
             "job_id": job_id,

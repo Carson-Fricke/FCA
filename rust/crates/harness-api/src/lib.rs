@@ -31,6 +31,7 @@ use std::process::ExitCode;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
 pub mod http;
+pub mod mcp_cli;
 
 /// Root help/`about` text for the `harness` facade.
 ///
@@ -101,7 +102,7 @@ pub struct BacktestJobArgs {
 }
 
 /// Options for `harness api`, mirroring `harness.cli.api.serve`.
-#[derive(Debug, Clone, Default, Args)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Args)]
 pub struct ApiArgs {
     /// Path to a typed API configuration document.
     #[arg(long, value_name = "PATH")]
@@ -153,7 +154,7 @@ pub struct TraderStatusArgs {
 }
 
 /// Options for `harness mcp`, mirroring `harness.mcp.__main__.serve`.
-#[derive(Debug, Clone, Args)]
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct McpArgs {
     /// `run_backtest` boundary: 'local' process or 'remote' API launch.
     #[arg(long, value_name = "MODE", default_value = "local")]
@@ -298,14 +299,21 @@ pub enum CommandResult {
         /// Failure reason written to stderr.
         stderr: String,
     },
+    /// Run the axum HTTP server with these options (handled by the binary).
+    ServeApi(ApiArgs),
+    /// Run the MCP stdio server with these options (handled by the binary).
+    ServeMcp(McpArgs),
 }
 
 impl CommandResult {
     /// The process exit code this result maps to.
+    ///
+    /// The serve variants are dispatched by the binary rather than emitted and
+    /// therefore report success.
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Help(_) | Self::Completed { .. } => 0,
+            Self::Help(_) | Self::Completed { .. } | Self::ServeApi(_) | Self::ServeMcp(_) => 0,
             Self::Failed { .. } => 1,
             Self::UsageError(_) => 2,
         }
@@ -320,16 +328,17 @@ pub fn root_help() -> String {
 
 /// Dispatch a parsed facade invocation to its process group.
 ///
-/// `runner` is the injected backtest engine seam; the `api`, `trader`, and
-/// `mcp` groups report that their Rust ports are pending.
+/// `runner` is the injected backtest engine seam; the `api` and `mcp` groups
+/// return their serve requests for the binary to execute, and `trader`
+/// reports that its Rust port is pending.
 #[must_use]
 pub fn run(cli: HarnessCli, runner: &dyn BacktestJobRunner) -> CommandResult {
     match cli.command {
         None => CommandResult::Help(root_help()),
         Some(HarnessCommand::BacktestJob(args)) => execute_backtest_job(&args, runner),
-        Some(HarnessCommand::Api(_)) => not_yet_ported("api"),
+        Some(HarnessCommand::Api(args)) => CommandResult::ServeApi(args),
         Some(HarnessCommand::Trader(_)) => not_yet_ported("trader"),
-        Some(HarnessCommand::Mcp(_)) => not_yet_ported("mcp"),
+        Some(HarnessCommand::Mcp(args)) => CommandResult::ServeMcp(args),
     }
 }
 
@@ -408,6 +417,10 @@ pub fn emit(result: CommandResult) -> ExitCode {
             }
             eprintln!("{stderr}");
             ExitCode::from(1)
+        }
+        CommandResult::ServeApi(_) | CommandResult::ServeMcp(_) => {
+            eprintln!("an internal error occurred while dispatching a server command");
+            ExitCode::from(2)
         }
     }
 }
@@ -686,14 +699,40 @@ mod tests {
 
     #[test]
     fn pending_groups_report_not_yet_ported() {
-        for group in ["api", "trader", "mcp"] {
-            let cli = HarnessCli::try_parse_from(["harness", group]).expect("parse");
-            match run(cli, &UnportedBacktestJobRunner) {
-                CommandResult::UsageError(message) => {
-                    assert!(message.contains(group), "missing group in {message}");
-                }
-                other => panic!("expected usage error for {group}, got {other:?}"),
+        let cli = HarnessCli::try_parse_from(["harness", "trader"]).expect("parse");
+        match run(cli, &UnportedBacktestJobRunner) {
+            CommandResult::UsageError(message) => {
+                assert!(message.contains("trader"), "missing group in {message}");
             }
+            other => panic!("expected usage error for trader, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn api_and_mcp_dispatch_to_their_servers() {
+        let api = HarnessCli::try_parse_from(["harness", "api"]).expect("parse");
+        match run(api, &UnportedBacktestJobRunner) {
+            CommandResult::ServeApi(args) => assert!(args.config.is_none()),
+            other => panic!("expected api serve, got {other:?}"),
+        }
+
+        let mcp = HarnessCli::try_parse_from([
+            "harness",
+            "mcp",
+            "--mode",
+            "remote",
+            "--api-base-url",
+            "https://api.example.test",
+            "--enable-trader",
+        ])
+        .expect("parse");
+        match run(mcp, &UnportedBacktestJobRunner) {
+            CommandResult::ServeMcp(args) => {
+                assert_eq!(args.mode, "remote");
+                assert!(args.enable_trader);
+                assert_eq!(args.api_base_url.as_deref(), Some("https://api.example.test"));
+            }
+            other => panic!("expected mcp serve, got {other:?}"),
         }
     }
 

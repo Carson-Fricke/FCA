@@ -8,6 +8,7 @@
 //! without the Python engine.
 
 pub mod auth;
+pub mod cli;
 pub mod clock;
 pub mod configuration;
 pub mod launcher;
