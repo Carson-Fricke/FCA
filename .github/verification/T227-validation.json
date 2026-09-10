@@ -1,0 +1,33 @@
+{
+  "taskId": "T227",
+  "numTotalTests": 92,
+  "numPassedTests": 92,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "reference-ingest-test-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/lake/reference -q",
+      "result": "92 passed: nasdaq parser 15, edgar parsing 13, schemas 12, partitions 9, ingest idempotency 14, point-in-time query semantics 10, http limiter and retries 14, configuration 8; all network access mocked with bundled fixtures"
+    },
+    {
+      "name": "focused-lake-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/lake -q",
+      "result": "529 passed, 1 pre-existing Azure live-integration skip, 0 failures"
+    },
+    {
+      "name": "type-and-lint-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ty check src/lake/reference tests/lake/reference && uv run --extra dev ruff check src/lake/reference tests/lake/reference",
+      "result": "ty zero diagnostics on the reference package and tests (repo-wide count reduced from 95 to 46, all pre-existing in other waves' files); ruff check and format clean"
+    }
+  ],
+  "limitations": [
+    "No CLI wiring in this task (CLI registration was outside the file ownership); entrypoints are callable as library functions and CLI wiring is deferred to the serving task T228",
+    "Query layer is local-filesystem-only; an Azure-backed as-of query surface is deferred to the serving wave",
+    "Production ingest requires LAKE_REFERENCE__USER_AGENT with a real contact per the SEC fair-access policy"
+  ]
+}

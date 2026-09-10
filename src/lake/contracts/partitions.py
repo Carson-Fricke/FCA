@@ -22,6 +22,7 @@ class AssetClass(StrEnum):
     EQUITY = "equity"
     OPTION = "option"
     CRYPTO = "crypto"
+    REFERENCE = "reference"
 
 
 class DataType(StrEnum):
@@ -29,6 +30,8 @@ class DataType(StrEnum):
 
     TRADE = "trade"
     QUOTE = "quote"
+    CLASSIFICATION = "classification"
+    FUNDAMENTALS = "fundamentals"
 
 
 type Dataset = tuple[AssetClass, DataType]

@@ -1,0 +1,38 @@
+{
+  "taskId": "T225",
+  "numTotalTests": 54,
+  "numPassedTests": 54,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "indicator-state-machine-and-guards",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/indicators/test_base.py",
+      "result": "16 tests: kernel-order guard, half-open bucket boundary at exact microsecond, quote-vs-trade rotation, flush idempotence, point-in-time reads, snapshot resume equality, basket round-trip, and bucket_start equivalence with the kernel bar bucketing"
+    },
+    {
+      "name": "golden-values-nine-indicators",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/indicators/test_golden_values.py",
+      "result": "18 hand-computed exact-value tests covering sma, ema, mid_sma, rsi, atr, realized_vol, vwap, dollar_volume, and obv including rolling expiry, warm-up, midnight reset, and a session boundary inside a bucket"
+    },
+    {
+      "name": "registry-contracts",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/indicators/test_registry.py",
+      "result": "11 tests: name lookup, typed parameter validation, bucket override changing the emission grid, schema description, duplicate and reserved-parameter rejection"
+    },
+    {
+      "name": "cross-mode-parity-oracle",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/harness/indicators/test_parity.py",
+      "result": "9 tests: parity clean over a canonical two-symbol tick stream across streamed reference, kernel-bus replay, reversed-arrival chunks, and snapshot-resume-from-fresh-router, plus byte-exact snapshot comparison and determinism re-run"
+    }
+  ],
+  "limitations": [
+    "realized_vol reports raw per-window sigma without an annualization factor and the pipeline is Decimal-only; both are flagged screener-facing policy choices rather than silently decided",
+    "harness.testing.__init__.py was left untouched per file ownership; import indicator_parity directly until integration exports it"
+  ]
+}
