@@ -32,12 +32,19 @@ implement the UI and does not modify any backend contract.
   palette, and the Overview / AI chats / Strategies / Backtests / Deployments /
   Dashboards page set. It is extended with two pages this specification adds:
   **Screener** and **Workspace state**.
-- **Visual source: the backtest mockup** ("trading-backtest-ui-design",
-  Vite React). Its design language is adopted verbatim: dark navy surfaces
-  (`#070b14` → `#334155` scale), cyan accent (`#22d3ee`), profit green
-  (`#34d399`), loss red (`#f87171`), warning amber (`#fbbf24`), Inter for
-  UI text with JetBrains Mono for all numerics, faint cyan grid background,
-  subtle cyan glow on primary elements, Tailwind v4 `@theme` tokens.
+- **Visual source: the workspace-app mockup** ("svelte-trading-workspace-ui").
+  Product decision 2026-09-09: the UI adopts the mockup's **light sage/cream
+  design language across the board** — white cards on an off-white canvas,
+  visible sage-gray borders, muted sage-green accents
+  (`--color-accent: #2a8761`, profit `#2a8761`, loss `#c76868`, warn
+  `#d6ad58`), Inter at compact sizes with dark sage numerics, solid white
+  card surfaces, and focus rings in the sage family. This replaces the
+  earlier dark navy/cyan reading taken from the backtest mockup; the dark
+  utility classes (`text-slate-*`, `border-white/*`, translucent surface
+  variants) are remapped to the light tokens globally so existing markup
+  renders with correct light-theme contrast. The backtest mockup's data
+  composition (metric cards, split equity, trades table, risk panel) is
+  retained as layout guidance only.
 - **`src/ui` disposition:** the existing SvelteKit app is promoted from
   demo playground to the seed of the production UI. Its `demo/*` routes and
   component laboratory remain during early implementation and retire as the
