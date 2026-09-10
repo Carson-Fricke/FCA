@@ -92,11 +92,16 @@ or bootstrapping the environment.
 
 - Work only within the task's assigned files and behavior.
 - Run focused tests and focused Ruff and ty checks only.
-- Orient before exploring: use the Fast Lookups commands from
-  `.github/instructions/cleo.instructions.md` — `cleo memory find` /
+- Orient before exploring: start from `cleo focus <task-id>` (one envelope
+  replacing about eight orientation calls), then use the Fast Lookups commands
+  from `.github/instructions/cleo.instructions.md` — `cleo memory find` /
   `decision-find` for prior knowledge, `cleo graph search` / `impact` /
-  `deps` for code structure and blast radius. These read-only BRAIN and nexus
-  queries are safe for subagents and cheaper than re-deriving context.
+  `deps` for code structure and blast radius. Budget at most three BRAIN or
+  nexus lookups per task phase; past that, report the task prompt as
+  underspecified instead of re-deriving context by grep. These read-only
+  BRAIN and nexus queries are safe for subagents and cheaper than re-deriving
+  context. Run `cleo graph impact <symbol>` before renaming or moving any
+  public symbol; HIGH/CRITICAL blast-radius findings stop the change.
 - Do not run the complete repository suite unless acting as the integration
   owner.
 - Use the Canonical Commands table above instead of ad-hoc interpreter or

@@ -22,6 +22,11 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - Focus the session with `cleo start <task-id>` when picking up work, and clear
   it with `cleo stop` when done. Do not leave a completed task focused;
   `cleo current` and briefings otherwise report stale focus.
+- Orient on a task with `cleo focus <task-id>` — a single envelope holding
+  identity, scope, blockers, ready wave, attached docs, and BRAIN context
+  (about 1 500 tokens) that replaces roughly eight separate calls. Use
+  `cleo show <id> --full --json` only when the focus envelope lacks a field
+  you need. Do not orient with repeated `cleo show` calls.
 - Record durable discoveries with `cleo memory observe` and session-scoped
   decisions with `cleo session record-decision` as they happen, not
   retroactively. Cross-session architectural decisions belong in
@@ -64,6 +69,16 @@ subagents doing focused task work.
 - Session context: `cleo briefing` (session start) already includes a BRAIN
   digest; `cleo memory digest --json` and `cleo memory recent --since 24h`
   give focused memory recaps mid-session.
+- JIT budget: at most three BRAIN or nexus lookups per task phase. If the
+  budget is exhausted and context is still missing, report the task prompt as
+  underspecified instead of re-deriving knowledge with open-ended grep sweeps.
+- Blast radius is mandatory before structural moves: run `cleo graph impact
+  <symbol>` before renaming or relocating any public symbol. HIGH/CRITICAL
+  findings stop the change and surface as integration findings.
+- Trust requires freshness: if `cleo graph status` or `cleo nexus status`
+  reports a high stale-file count, nexus results are untrustworthy — run
+  `cleo graph sync --incremental` before relying on impact/context answers,
+  or say that `git grep` was used as ground truth instead.
 - Write-backs are covered by the Session Lifecycle section above: observe
   durable discoveries (`cleo memory observe`), store architectural decisions
   (`cleo memory decision-store`), and keep embeddings current with
@@ -140,9 +155,19 @@ subagents doing focused task work.
 ## Hierarchy And Batches
 
 - CLEO enforces `Saga -> Epic -> Task -> Subtask`. It rejects `Saga -> Task` and other shortcuts.
-- Use `cleo add-batch --file <json>` for multiple tasks. Its payload is `{ "tasks": [...] }`; `acceptance`, `labels`, `depends`, and `files` are JSON arrays.
+- Decompose epics with the WorkGraph pipeline, not repeated `cleo add` calls:
+  build the scaffold JSON, validate it with `cleo workgraph validate --file
+  <scaffold.json> --dry-run` (returns `wouldCreate`/`wouldUpdate`/
+  `wouldDelete` with zero writes), then apply once with `cleo workgraph apply
+  --file <scaffold.json>` for a single-transaction insert. Check structure
+  with `cleo workgraph structure --file <scaffold.json>` for cycles, depth
+  violations, and orphans before applying.
+- For plain multi-task creation, use `cleo add-batch --file <json>` — payload
+  `{ "tasks": [...] }` with `acceptance`, `labels`, `depends`, and `files` as
+  JSON arrays — in chunks of at most 20 tasks per transaction. Never loop
+  single `cleo add` calls to create more than two tasks.
+- Use `cleo add-batch --file <json> --dry-run` first. A successful dry run returns `wouldCreate` and `validatedCount` without writes.
 - Prefer `--file` or `--params-file` on Windows. PowerShell 5.1 invocation can strip quotes from inline `--params` JSON before CLEO parses it.
-- Run `cleo add-batch --file <json> --dry-run` first. A successful dry run returns `wouldCreate` and `validatedCount` without writes.
 - Large atomic batches can exceed a two-minute caller timeout even when valid. Use a long timeout and confirm the task count afterward. A timed-out transaction observed here rolled back without partial task inserts.
 - New child acceptance criteria are automatically projected onto parent epics and the root saga as `Complete child ...` criteria.
 
@@ -212,18 +237,24 @@ subagents doing focused task work.
 - Subagents run focused tests plus focused Ruff and ty checks for their owned
   behavior. They do not run the complete repository suite, mutate CLEO, or
   write final verification records.
-- After all subagents finish, freeze edits and run repository-wide lock, Ruff,
-  format, ty, pytest, Bicep, and workflow checks once as applicable. A second
-  full run is permitted only after fixing a failure from the first run.
+- After all subagents finish, freeze edits and run `cleo graph sync
+  --incremental` and `cleo nexus refresh-bridge` (integration-owned) so nexus
+  impact, context, and bridge lookups reflect the wave's changes. Then run
+  repository-wide lock, Ruff, format, ty, pytest, Bicep, and workflow checks
+  once as applicable. A second full run is permitted only after fixing a
+  failure from the first integration run.
 - If a suite hangs or times out, do not rerun it unchanged. Isolate the hanging
   test with a hard timeout, fix the cause, then run one final full suite.
 - Keep completed task evidence immutable when later work increases the global
   test count. Task records contain stable focused evidence; store global
   integration results in one wave-level artifact and reuse them with
   `--shared-evidence` when appropriate.
-- Prefer one `cleo verify <id> --all` call with implemented, test, QA, and
-  acceptance evidence over separate calls for each gate when the evidence
-  contract permits it.
+- Assemble every evidence atom before the first `cleo verify` call: capture
+  the commit sha, file list, test-run JSON, and tool results up front, then
+  make one `cleo verify <id> --all` invocation covering implemented, test,
+  QA, and acceptance evidence. Iterative per-gate verify attempts are an
+  anti-pattern — a failed gate forces evidence recapture, and files changed
+  after an earlier `verify` trigger staleness re-verification.
 - Use `tool:audit` only for CLEO export portability and task-state publication,
   not as generic application QA evidence.
 - Run the Validation Checklist once after all task-state mutations in the

@@ -36,3 +36,26 @@
   facades, entrypoints, dependency direction, or deployment shape.
 - Treat architecture-documentation updates as integration-owned unless a wave
   explicitly assigns that file.
+- Orient before exploring. Spawned subagents start from a `cleo focus <taskId>`
+  orientation pack plus a BRAIN/nexus JIT budget of at most three lookups,
+  instead of open-ended grep/glob/read sweeps. `cleo focus` replaces repeated
+  `cleo show` calls.
+- Generate every CLEO-task subagent prompt from `cleo orchestrate spawn
+  <taskId> --tier 1` output and dispatch it to a CLEO-specific agent from
+  `.opencode/agent/` (`cleo-task-executor`, `cleo-explorer`, or
+  `cleo-planner`). Do not hand-roll task prompts for built-in agents.
+- Create tasks atomically. Decompose epics with `cleo workgraph validate
+  --dry-run` followed by `cleo workgraph apply`; for plain multi-task creation
+  use `cleo add-batch` with `--dry-run` first, in chunks of at most 20 tasks
+  per transaction. Never loop single `cleo add` calls to create more than two
+  tasks.
+- Assemble every evidence atom before the first `cleo verify` call, then make
+  one `cleo verify <id> --all` invocation. Iterative per-gate verify attempts
+  are an anti-pattern; each failed gate forces evidence recapture and
+  staleness re-verification.
+- At every wave edit freeze, run `cleo graph sync --incremental` and `cleo
+  nexus refresh-bridge` (integration-owned) before integration verification so
+  nexus impact and context lookups reflect the wave's changes.
+- Run `cleo graph impact <symbol>` before moving or renaming any public
+  symbol. HIGH/CRITICAL blast-radius findings stop the change and surface as
+  integration findings.
