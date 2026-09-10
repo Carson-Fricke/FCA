@@ -1,5 +1,5 @@
 [package]
-name = "harness-cli"
+name = "harness-api"
 version = "0.1.0"
 edition = "2021"
 description = "Clap-based command-line surface for the quant-harness Rust port."

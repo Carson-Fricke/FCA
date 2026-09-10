@@ -6,7 +6,7 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use harness_cli::{emit, run_backtest_job, BacktestJobCli, UnportedBacktestJobRunner};
+use harness_api::{emit, run_backtest_job, BacktestJobCli, UnportedBacktestJobRunner};
 
 fn main() -> ExitCode {
     let cli = BacktestJobCli::parse();
