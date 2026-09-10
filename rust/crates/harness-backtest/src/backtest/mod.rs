@@ -14,6 +14,7 @@ pub mod errors;
 pub mod fees;
 pub mod fills;
 pub mod fixture;
+pub mod job;
 pub mod manifest;
 pub mod preflight;
 pub mod rng;

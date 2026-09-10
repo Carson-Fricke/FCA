@@ -1,7 +1,9 @@
 //! Results recording, metrics, and report kernels for the backtest engine.
 //!
-//! The first resident is the streaming results recorder
-//! ([`recorder`]) ported from `harness.results.recorder`. Metrics, reports, and
-//! the results store follow in the backtest-job task.
+//! The first residents are the streaming results recorder ([`recorder`]), the
+//! pure deterministic metrics ([`metrics`]), and the offline HTML report
+//! ([`report`]) ported from `harness.results`.
 
+pub mod metrics;
 pub mod recorder;
+pub mod report;
