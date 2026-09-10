@@ -1,23 +1,33 @@
 //! Native core for the quant-harness Rust engine.
 //!
-//! This crate hosts the C ABI surface that will grow into the ported Zig core.
-//! It currently exposes a single placeholder symbol so the `cdylib` artifact
-//! is loadable; the real event-kernel, OMS, replay, and quant surfaces follow
-//! in later tasks.
+//! This crate hosts the Rust port of the pinned Zig native core under
+//! `src/harness/native`. The C ABI surface consumed by `src/harness/_native.py`
+//! lives in [`capi`], and the deterministic domain kernels are exposed as
+//! focused modules:
 //!
-//! The Python engine and the pinned Zig native core remain authoritative until
-//! the migration flips.
+//! - [`types`]: canonical symbols, deterministic ids, canonical decimal text,
+//!   UTC ISO-8601 timestamps, and canonical trade-row serialization.
+//! - [`decimal`]: the pinned scale-18 fixed-point kernel
+//!   (`decimal128(38, 18)`).
+//! - [`clock`]: the deterministic `SimClock`.
+//! - [`market`]: quote/trade/order domain records and the event-class
+//!   priority table.
+//! - [`simple_touch`] and [`latency_size`]: the deterministic fill models.
+//!
+//! Determinism rules: no wall-clock, no unseeded random, no network. Errors are
+//! returned, never panicked, so no panic can cross the FFI boundary.
 
-use core::ffi::c_char;
+pub mod capi;
+pub mod clock;
+pub mod decimal;
+pub mod latency_size;
+pub mod market;
+mod sha256;
+pub mod simple_touch;
+pub mod types;
+mod wide;
 
-/// Semantic version of this crate as a NUL-terminated C string.
-static VERSION: &[u8] = b"0.1.0\0";
-
-/// Returns a pointer to the crate's NUL-terminated version string.
-///
-/// Placeholder C ABI entry point. The returned pointer references static
-/// storage owned by this library; callers must not free or mutate it.
-#[no_mangle]
-pub extern "C" fn harness_native_version() -> *const c_char {
-    VERSION.as_ptr().cast::<c_char>()
+/// Returns the semantic version of this crate as a static string.
+pub const fn version() -> &'static str {
+    "0.1.0"
 }
