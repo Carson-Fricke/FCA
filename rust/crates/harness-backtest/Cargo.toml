@@ -1,0 +1,13 @@
+[package]
+name = "harness-backtest"
+version = "0.1.0"
+edition = "2021"
+description = "Backtest, sweeps, and results kernels for the quant-harness Rust engine (staged port)."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+harness-num = { path = "../harness-num" }
