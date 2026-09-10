@@ -1,6 +1,7 @@
 **
 !pyproject.toml
 !uv.lock
+!setup.py
 !build.zig
 !build.zig.zon
 !src/
@@ -9,6 +10,9 @@
 !config/**
 !strategies/
 !strategies/**
+!rust/
+!rust/**
+rust/target/
 **/__pycache__/
 **/*.py[cod]
 **/*.egg-info/
