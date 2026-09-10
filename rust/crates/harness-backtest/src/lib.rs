@@ -11,6 +11,7 @@
 //! (`harness-native`) or the Rust data layer is not yet available, the crate
 //! exposes clean traits and is tested with deterministic fakes.
 
+pub mod backtest;
 pub mod canonical_json;
 pub mod results;
 pub mod sha256;
