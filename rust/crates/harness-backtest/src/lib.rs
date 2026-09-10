@@ -13,9 +13,11 @@
 
 pub mod backtest;
 pub mod canonical_json;
+pub mod indicators;
 pub mod results;
 pub mod runtime;
 pub mod sha256;
+pub mod signal;
 pub mod sweeps;
 
 pub use canonical_json::JsonValue;
