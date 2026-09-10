@@ -12,13 +12,20 @@
 //! the network, or performs I/O. Every instant comes from an injected clock.
 
 pub mod bars;
+pub mod catalog;
 pub mod clock;
 pub mod error;
 pub mod events;
+pub mod gap_healing;
 pub mod history;
 pub mod lake;
+pub mod listing_events;
+pub mod options_universe;
+pub mod replay;
+pub mod security_master;
 pub mod symbol;
 pub mod time;
+pub mod universe_view;
 
 pub use error::DataError;
 pub use time::{Date, DateTime, Nanos};
