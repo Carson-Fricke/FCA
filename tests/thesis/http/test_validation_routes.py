@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from fastapi.testclient import TestClient
 
@@ -42,6 +43,7 @@ from thesis.workflows.hypothesis_validation import (
     HypothesisVerdict,
     build_hypothesis_evidence_report,
 )
+from thesis.workflows.runtime import WorkflowRuntime
 
 WORKSPACE = "workspace-a"
 BEARER_TOKEN = "thesis-test-token"
@@ -193,7 +195,9 @@ class FakeRuntime:
 
 
 def make_client(*, runtime: FakeRuntime | None) -> TestClient:
-    app = create_app(bearer_token=BEARER_TOKEN, workflow_runtime=runtime)
+    app = create_app(
+        bearer_token=BEARER_TOKEN, workflow_runtime=cast(WorkflowRuntime, runtime)
+    )
     return TestClient(app)
 
 
