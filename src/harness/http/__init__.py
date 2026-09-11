@@ -1,1 +1,0 @@
-"""Quant-harness HTTP boundary."""

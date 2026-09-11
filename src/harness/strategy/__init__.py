@@ -1,37 +1,15 @@
-"""Public, mode-independent strategy contracts and context boundaries."""
+"""Public, mode-independent strategy contracts and plugin surface.
 
-from harness.data.listing_events import (
-    CorporateActionEvent,
-    DelistingEvent,
-    RenameEvent,
-)
-from harness.strategy.binding import (
-    StrategyBinding,
-    bind_strategy,
-    instantiate_strategy,
-)
-from harness.strategy.context import (
-    AccountView,
-    BooksView,
-    Emission,
-    EmissionSink,
-    Emitter,
-    EventScheduler,
-    LogRecord,
-    OrdersView,
-    PointInTimeData,
-    ReadonlyClock,
-    Scheduler,
-    StateStore,
-    StrategyContext,
-    StrategyHistory,
-    StructuredLog,
-    StructuredLogger,
-    Subscription,
-    SubscriptionSet,
-    UniverseView,
-)
-from harness.strategy.contracts import CALLBACK_ORDER, Strategy
+A strategy is a Python class deriving from :class:`~harness.strategy.contracts.Strategy`
+and implementing the documented callbacks. The engine -- whether the Python
+runtime or the native Rust engine through PyO3 -- supplies the strategy a
+constrained context object matching
+:class:`~harness.strategy.contracts.StrategyContext`. The plugin surface is
+deliberately free of engine imports, so authoring a strategy only pulls in the
+contract, the sandbox lint, and the reference fixture.
+"""
+
+from harness.strategy.contracts import CALLBACK_ORDER, Strategy, StrategyContext
 from harness.strategy.lint import (
     ASYNC_SYNTAX_RULE,
     RULES,
@@ -55,43 +33,19 @@ from harness.strategy.reference import ReferenceStrategy
 
 __all__ = [
     "ASYNC_SYNTAX_RULE",
-    "AccountView",
-    "BooksView",
     "CALLBACK_ORDER",
-    "CorporateActionEvent",
-    "DelistingEvent",
-    "Emission",
-    "EmissionSink",
-    "Emitter",
-    "EventScheduler",
     "LintReport",
-    "LogRecord",
-    "OrdersView",
-    "PointInTimeData",
     "RULES",
-    "ReadonlyClock",
     "ReferenceStrategy",
-    "RenameEvent",
     "SandboxRule",
     "SandboxViolation",
     "SandboxViolationError",
-    "Scheduler",
-    "StateStore",
     "Strategy",
-    "StrategyBinding",
     "StrategyContext",
-    "StrategyHistory",
     "StrategyLintError",
     "StrategyTarget",
-    "StructuredLog",
-    "StructuredLogger",
-    "Subscription",
-    "SubscriptionSet",
-    "UniverseView",
     "ViolationCategory",
     "assert_sandbox_clean",
-    "bind_strategy",
-    "instantiate_strategy",
     "iter_strategy_files",
     "lint_strategy",
     "lint_strategy_class",

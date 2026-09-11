@@ -1,34 +1,32 @@
-"""Determinism, runtime-parity, and paper-parity test support."""
+"""Determinism, indicator-parity, and Rust-core parity test support.
 
-from harness.testing.determinism import (
+The native Rust engine replaces the Python execution oracles, so this package
+retains the engine-free canonicalization support
+(:mod:`harness.testing.canonical`), the Rust-core parity oracle
+(:mod:`harness.testing.rust_oracle`), and the cross-mode tick-indicator parity
+oracle (:mod:`harness.testing.indicator_parity`).
+"""
+
+from harness.testing.canonical import (
     ArtifactCanonicalizer,
     ArtifactDigest,
     DeterminismArtifact,
     DeterminismError,
     DeterminismManifest,
-    DeterminismRun,
-    DeterminismScenario,
     ManifestComparison,
-    SyntheticFeed,
-    ToyStrategy,
     assert_manifest_equal,
-    assert_reproducible,
-    assert_same_artifacts,
     compare_manifests,
-    run_scenario,
-    run_twice,
 )
-from harness.testing.paper_parity import (
-    EXCLUDED_DIMENSIONS,
-    PaperParityConfigurationError,
-    PaperParityError,
-    PaperParityReport,
-    PaperParityScenario,
-    ParityDimension,
-    ParityDivergence,
-    assert_paper_parity,
-    compare_paper_backtest,
-    run_paper_parity,
+from harness.testing.indicator_parity import (
+    IndicatorParityConfigurationError,
+    IndicatorParityDimension,
+    IndicatorParityError,
+    IndicatorParityReport,
+    IndicatorParityScenario,
+    IndicatorRequest,
+    ParityMode,
+    assert_indicator_parity,
+    run_indicator_parity,
 )
 from harness.testing.rust_oracle import (
     DEFAULT_PROGRAM,
@@ -60,19 +58,17 @@ __all__ = [
     "ArtifactDiffReport",
     "ArtifactDigest",
     "DEFAULT_PROGRAM",
-    "DeterminismError",
     "DeterminismArtifact",
+    "DeterminismError",
     "DeterminismManifest",
-    "DeterminismRun",
-    "DeterminismScenario",
-    "EXCLUDED_DIMENSIONS",
+    "IndicatorParityConfigurationError",
+    "IndicatorParityDimension",
+    "IndicatorParityError",
+    "IndicatorParityReport",
+    "IndicatorParityScenario",
+    "IndicatorRequest",
     "ManifestComparison",
-    "PaperParityConfigurationError",
-    "PaperParityError",
-    "PaperParityReport",
-    "PaperParityScenario",
-    "ParityDimension",
-    "ParityDivergence",
+    "ParityMode",
     "RUST_GOLDEN_ROOT",
     "RustOracleConfigurationError",
     "RustOracleError",
@@ -80,16 +76,11 @@ __all__ = [
     "RustOracleProgram",
     "RustOracleRun",
     "RustOracleUnavailable",
-    "SyntheticFeed",
-    "ToyStrategy",
     "assert_golden_is_current",
+    "assert_indicator_parity",
     "assert_manifest_equal",
-    "assert_paper_parity",
-    "assert_reproducible",
     "assert_rust_matches_golden",
-    "assert_same_artifacts",
     "compare_manifests",
-    "compare_paper_backtest",
     "default_program",
     "deterministic_vector",
     "diff_payloads",
@@ -97,9 +88,7 @@ __all__ = [
     "golden_payloads",
     "load_rust_core",
     "reference_run",
-    "run_paper_parity",
+    "run_indicator_parity",
     "run_rust_program",
-    "run_scenario",
-    "run_twice",
     "write_golden",
 ]

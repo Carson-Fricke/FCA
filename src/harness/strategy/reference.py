@@ -15,8 +15,7 @@ from harness.core.types import (
     SingleLegOrder,
     TradeEvent,
 )
-from harness.strategy.context import StrategyContext
-from harness.strategy.contracts import Strategy
+from harness.strategy.contracts import Strategy, StrategyContext
 
 
 class ReferenceStrategy(Strategy):

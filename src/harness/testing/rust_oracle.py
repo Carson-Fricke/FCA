@@ -42,7 +42,7 @@ from types import MappingProxyType, ModuleType
 from typing import Final
 
 from harness.configuration.hashing import configuration_hash
-from harness.testing.determinism import (
+from harness.testing.canonical import (
     ArtifactCanonicalizer,
     DeterminismArtifact,
     DeterminismManifest,

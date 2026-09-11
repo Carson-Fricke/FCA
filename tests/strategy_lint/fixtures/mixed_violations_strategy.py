@@ -3,8 +3,7 @@
 import socket
 import time
 
-from harness.strategy.context import StrategyContext
-from harness.strategy.contracts import Strategy
+from harness.strategy.contracts import Strategy, StrategyContext
 
 
 class MixedViolationStrategy(Strategy):

@@ -1,8 +1,19 @@
-"""Quant-harness command-line facade."""
+"""Quant-harness command-line facade.
 
-from harness.cli.application import app, main
-from harness.mcp.__main__ import app as mcp_app
+The facade delegates to the Rust ``harness`` binary, which dispatches the
+``api``, ``mcp``, and ``backtest-job`` process groups.
+"""
 
-app.add_typer(mcp_app, name="mcp")
+from __future__ import annotations
 
-__all__ = ["app", "main"]
+from collections.abc import Sequence
+
+from harness.cli.rust_entrypoints import run_entrypoint
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the Rust ``harness`` facade and return its exit code."""
+    return run_entrypoint("harness", argv)
+
+
+__all__ = ["main"]
