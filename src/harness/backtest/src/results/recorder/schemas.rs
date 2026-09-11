@@ -8,10 +8,10 @@
 //! whose fields mirror the verbatim core execution-report schema.
 //!
 //! The Python recorder writes Parquet through `pyarrow`. The staged Rust port
-//! has no Arrow/native dependency yet, so artifacts are serialized through the
-//! deterministic [`crate::results::recorder::writer`] canonical encoding; the
-//! field order and metadata below are preserved exactly so an Arrow-backed
-//! writer can be dropped in without touching callers.
+//! records the same field order and metadata below through the
+//! [`ParquetArtifactWriter`](crate::results::recorder::ParquetArtifactWriter),
+//! which encodes the fields as Arrow types, so the recorded artifacts are real
+//! Parquet readable by Arrow.
 
 /// Harness schema version, mirroring `harness.core.types.common.SCHEMA_VERSION`.
 pub const SCHEMA_VERSION: &str = "1";

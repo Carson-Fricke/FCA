@@ -427,9 +427,13 @@ dependencies = [
 name = "backtest"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-schema",
  "host",
  "marketdata",
  "num",
+ "parquet",
+ "serde_json",
 ]
 
 [[package]]

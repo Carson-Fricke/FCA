@@ -1,13 +1,16 @@
 //! Deterministic artifact writing and row serialization.
 //!
 //! The Python recorder streams rows into Parquet through `pyarrow`. The staged
-//! Rust port has no Arrow/native dependency yet, so this module defines the
-//! [`RowSink`] seam plus a canonical, byte-stable writer: every artifact file
-//! is the concatenation of one canonical JSON object per row (sorted keys, no
-//! insignificant whitespace, ASCII-only escapes, string-exact decimals, and
-//! RFC3339 microsecond timestamps). The logical field order and values match
-//! the Parquet writer exactly, so an Arrow-backed [`RowSink`] can replace
-//! [`CanonicalArtifactWriter`] without touching the recorder.
+//! Rust port defines the [`RowSink`] seam plus two sinks: the production
+//! [`super::parquet::ParquetArtifactWriter`] encodes real Arrow/Parquet objects,
+//! while [`CanonicalArtifactWriter`] keeps a canonical, byte-stable JSON-line
+//! encoding for reference output and tests. The canonical encoding concatenates
+//! one JSON object per row (sorted keys, no insignificant whitespace, ASCII-only
+//! escapes, string-exact decimals, and RFC3339 microsecond timestamps) with the
+//! same logical field order and values as the Parquet sink.
+//!
+//! The [`RowSink`] seam means an Arrow-backed writer can replace the canonical
+//! writer without touching the recorder.
 
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
@@ -114,7 +117,7 @@ pub fn build_row(
     Ok(row)
 }
 
-fn validate(field: &FieldDef, value: &Value) -> Result<(), WriterError> {
+pub(crate) fn validate(field: &FieldDef, value: &Value) -> Result<(), WriterError> {
     if value.is_null() {
         if field.nullable {
             return Ok(());
