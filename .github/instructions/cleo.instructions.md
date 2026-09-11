@@ -197,7 +197,7 @@ subagents doing focused task work.
   anti-pattern; the bulk script closes the same set in seconds.
 - Bulk-completion manifest shape:
   `{ "testRunPath": ".cleo/test-runs/<file>.json", "tasks": [ { "id": "T251",
-  "commit": "<sha>", "files": ["rust/..."] } ] }`. `files` is optional and is
+  "commit": "<sha>", "files": ["src/harness/rust/..."] } ] }`. `files` is optional and is
   derived from `git show --name-only` when omitted. Back up `.cleo/cleo.db`
   first, constrain updates by task ID and non-terminal status (the script does),
   and run the Validation Checklist once after the batch.

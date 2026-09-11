@@ -39,14 +39,17 @@ native core through `harness.runtime.zig_backtest` (retained module name) and
 `harness.testing.rust_oracle`, asserting byte-identical determinism artifacts
 against the pure-Python engine.
 
-The Rust migration is staged and gated. The `rust/` workspace ports the engine
-and its interfaces crate by crate. The complete interface processes are flipped
-behind `HARNESS_USE_RUST_ENTRYPOINTS`, while the Python engine under
-`src/harness` remains authoritative for the unported engine surfaces. The
-strategy contract, binding, reference fixture, and sandbox lint are ported
-natively, and the sandbox walker no longer bridges to the Python AST checker.
-Zig is already retired; removal of the remaining Python engine paths is gated by
-the decommission criteria below and has not started.
+The Rust migration is at its final structural stage. The engine workspace now
+lives under `src/harness/rust/` and provides the authoritative engine core
+(clock, event bus, replay, matching/fills, fees, portfolio, risk, results, and
+the backtest runtime) plus the `api`, `mcp`, and `backtest-job` processes. The
+Python engine under `src/harness` is retained only where active Python code
+still imports it: the user-authored strategy/indicator plugin surface, the
+Python `trader` supervision runtime, and the reference fixtures the parity
+oracle compares against. The strategy contract, binding, reference fixture, and
+sandbox lint are ported natively, and the sandbox walker no longer bridges to
+the Python AST checker. Zig is already retired; removal of the remaining Python
+engine paths is gated by the decommission criteria below.
 
 ## Product Boundaries
 
@@ -181,31 +184,34 @@ runs it locally over the built-in deterministic synthetic benchmark fixture or
 a user-supplied local Parquet lake directory, writing canonical run artifacts
 under `.local/backtests/`.
 
-The `api` process is served by both the Python boundary and the Rust axum
-binary; `trader` remains a thin Python process boundary and fails clearly until
-its Rust supervision runner is ported.
+The `api` and `mcp` processes are served by the Rust binaries, and
+`backtest-job` runs the native Rust engine; the Python console scripts dispatch
+to them behind `HARNESS_USE_RUST_ENTRYPOINTS`. `trader` remains a thin Python
+process boundary until its Rust supervision runner is ported.
 
 ## Quant-Harness Rust Workspace
 
-`rust/` is a Cargo workspace porting the quant-harness engine and its
-interfaces. The Python engine under `src/harness` remains authoritative for the
-unported engine surfaces; the Rust interface processes are flipped behind
+`src/harness/rust/` is a Cargo workspace providing the quant-harness engine and
+its interfaces. The native engine core and the `api`, `mcp`, and `backtest-job`
+processes are authoritative; the Python engine under `src/harness` remains only
+for the Python plugin surface, the `trader` runtime, and the parity reference.
+The Rust interface processes are flipped behind
 `HARNESS_USE_RUST_ENTRYPOINTS` (see `rust-interface-migration.md`). The Zig
 native core was retired in T253, and `harness-native` is the native core the
 Python ctypes loader consumes.
 
 ```text
-rust/
+src/harness/rust/
 |-- Cargo.toml                 Workspace manifest (resolver 2)
 |-- rust-toolchain.toml        Pinned stable toolchain
 `-- crates/
     |-- harness-native/        C ABI native core (`cdylib` + `rlib`)
     |-- harness-py/            Python extension bindings (`_rust` cdylib)
     |-- harness-num/           Numeric kernels
-    |-- harness-data/          Staged market-data port
-    |-- harness-backtest/      Staged backtest, sweeps, and results port
-    |-- harness-live/          Staged OMS, fills, venues, portfolio, and risk port
-    |-- harness-api/           CLI facade, axum HTTP boundary, api/mcp binaries
+    |-- harness-data/          Market-data port
+    |-- harness-backtest/      Backtest, sweeps, and results port
+    |-- harness-live/          OMS, fills, venues, portfolio, and risk port
+    |-- harness-api/           CLI facade, axum HTTP boundary, api/mcp/backtest-job binaries
     |-- harness-mcp/           JSON-RPC 2.0 / MCP server and tool catalog
     |-- harness-host/          PyO3 strategy, indicator, and screener host
     `-- harness-config/        YAML-subset loader, models, canonical hashing
@@ -213,9 +219,9 @@ rust/
 
 - `harness-api` owns the `harness`, `api`, `backtest-job`, and `mcp` process
   binaries; its axum routes, bearer authentication, and provenance fields
-  mirror `harness.http`. The `backtest-job` binary still drives the
-  `UnportedBacktestJobRunner` seam until the Rust backtest engine is wired and
-  parity-proven.
+  mirror `harness.http`. The `backtest-job` binary drives the native engine
+  through the `harness-host` PyO3 strategy adapter and is parity-proven against
+  the Python reference.
 - `harness-mcp` owns the pure JSON-RPC dispatch, the capability-filtered tool
   catalog, bearer credential resolution, and newline-delimited stdio framing.
 - `harness-host` embeds the interpreter for user strategy, indicator, and
@@ -226,9 +232,10 @@ rust/
 - `harness-config` reproduces the Python loader, strict models, exact-decimal
   normalization, datetime formatting, and domain-separated hashes; its parity
   suite asserts the exact hashes of every committed config file.
-- `harness-data`, `harness-backtest`, and `harness-live` are staged engine
-  ports with focused unit tests; they are not yet wired into the interface
-  binaries, so the Python engine remains authoritative.
+- `harness-data`, `harness-backtest`, and `harness-live` are engine ports with
+  focused unit tests. `harness-backtest` backs the flipped `backtest-job`;
+  `harness-live` is not yet wired into the interface binaries, so the Python
+  `trader` runtime remains authoritative.
 
 The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, and `cargo test --workspace`.
@@ -237,48 +244,53 @@ The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 
 The Zig native core is already retired: T253 deleted `build.zig`,
 `build.zig.zon`, and every `.zig` source, and the ctypes loader now consumes the
-Rust `harness-native` library. The remaining decommission is partial: the
-Python engine still builds and runs and remains authoritative for the unported
-engine surfaces, and no Python engine module has been deleted.
+Rust `harness-native` library. The engine core now lives in Rust under
+`src/harness/rust/`, the `api`, `mcp`, and `backtest-job` entrypoints are
+flipped, and the native `backtest-job` is parity-proven. The Python engine is
+retained only where active Python code or the parity oracle still imports it,
+and only modules with zero importers are deleted.
 
 ### Gate
 
-The gate opens only when every criterion holds and repository-wide verification
-is green on the Rust stack.
+The remaining Python engine paths close when every criterion holds and
+repository-wide verification is green on the Rust stack.
 
-1. `backtest-job` executes the Rust engine end to end. The `harness-api` binary
-   currently drives `UnportedBacktestJobRunner`; the backtest job in
-   `harness-backtest` runs a built-in deterministic strategy/risk/fill seam
-   (`TradeBuyStrategy`, `ApproveAll`, `ImmediateFill`) and does not load the
-   configured `strategy_instances` through the strategy host, so it is not yet
-   the engine the console script needs.
-2. The Rust `backtest-job` artifact is parity-proven against Python. The
-   committed benchmark configuration must produce byte-identical
-   `backtest.json` (manifest, digests, and counts) on both stacks; no
-   cross-stack replay test exists yet.
-3. `trader` has a Rust supervision runner. The Rust facade reports the `trader`
-   group as not yet ported, and `harness-live` is not wired to the CLI.
-4. Engine-side strategy execution runs through the Rust strategy host rather
-   than the Python context and binding.
+1. ~~`backtest-job` executes the Rust engine end to end.~~ Met: the
+   `harness-api` binary drives `harness_host::backtest::run_backtest_job` over
+   the configured `strategy_instances`.
+2. ~~The Rust `backtest-job` artifact is parity-proven against Python.~~ Met:
+   `harness-backtest/tests/parity.rs` asserts byte-identical artifacts except
+   `manifest.code_fingerprint`, which hashes each engine's own source by design.
+3. `trader` has a Rust supervision runner. The Rust `trader` binary is a
+   deterministic core demo that does not load configuration or supervise a
+   session, so the Python runtime remains authoritative.
+4. The retained Python strategy plugin surface is decoupled from the engine.
+   `harness.strategy.context` still imports `harness.data`, `harness.portfolio`,
+   `harness.venues`, and `harness.core`, so the protocol-only-imports refactor
+   is a prerequisite for deleting those engine modules. The target state is
+   recorded as an expected failure in
+   `tests/harness/strategy/test_import_boundary.py`.
 
 ### Staged, not deleted
 
-Until the gate opens:
+Until the gate closes:
 
 - Docker and CI keep the Python test and packaging gates. The Zig build stage
   and `zig build test` gate are gone (T253); the Docker `rust` stage builds and
-  tests the Rust workspace, and the runtime image ships the Rust entrypoint
-  binaries under `/opt/rust/bin` for the gated flip.
-- `pyproject.toml` keeps its engine dependencies. Pruning them to the
-  strategy-host surface is gated on deleting the Python engine, because the
-  retained engine and its suites still import them.
-- The Python suites for ported areas (`tests/harness/http`, `tests/harness/mcp`,
-  `tests/strategy_lint`, and configuration) remain as parity oracles alongside
-  the Rust parity suites.
-- The entrypoint flip covers `api`, `mcp`, and the `harness` facade's ported
-  groups. `backtest-job` and `trader` are wired to the flip switch but gated
-  off, so they fall back to Python. `rust-interface-migration.md` tracks the
-  flip itself.
+  tests the workspace under `src/harness/rust/`, and the runtime image ships the
+  Rust entrypoint binaries under `/opt/rust/bin` for the gated flip.
+- `pyproject.toml` keeps its engine dependencies because the retained Python
+  plugin surface, the `trader` runtime, and the parity reference still import
+  them. Pruning them to the strategy-host surface is gated on closing the
+  remaining engine paths.
+- The Python suites for the retained surfaces remain as parity oracles
+  (`tests/harness/http`, `tests/harness/mcp`, `tests/strategy_lint`,
+  configuration, and the Rust and native determinism oracles) alongside the
+  Rust parity suites.
+- The entrypoint flip covers `api`, `mcp`, and `backtest-job`. `trader` is
+  wired to the flip switch but deferred, and `backtest-job --data-dir` stays on
+  Python until the native engine wires a lake reader.
+  `rust-interface-migration.md` tracks the flip itself.
 
 ## Thesis Packages
 
@@ -301,9 +313,9 @@ The products share repository-level mechanics where divergence would create
 operational drift:
 
 - `pyproject.toml` defines the Python project and common quality tooling.
-- `rust/` is a Cargo workspace with a pinned stable toolchain. It builds
-  `harness-native` (the native core the Python loader consumes) and the harness
-  interface binaries. CI enforces `cargo fmt --all --check`,
+- `src/harness/rust/` is a Cargo workspace with a pinned stable toolchain. It
+  builds `harness-native` (the native core the Python loader consumes) and the
+  harness interface binaries. CI enforces `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`, and
   `cargo test --workspace` alongside the Python gates. The pinned Zig toolchain
   from the earlier native-core effort was retired in T253.
