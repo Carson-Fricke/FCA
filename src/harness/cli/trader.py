@@ -408,5 +408,18 @@ def status(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the standalone trader process command."""
-    return run(app, prog_name="trader", argv=argv)
+    """Run the standalone trader process command.
+
+    ``trader`` is wired to the Rust entrypoint switch but stays on the Python
+    engine: the Rust live trader supervision runner is not ported, so it is
+    absent from ``PORTED_ENTRYPOINTS`` and ``exec_rust_entrypoint`` returns
+    ``None``. Wiring it here keeps the flip a one-line gate change once the
+    decommission criteria are met.
+    """
+    from harness.cli.rust_entrypoints import exec_rust_entrypoint, resolved_argv
+
+    args = resolved_argv(argv)
+    rust_result = exec_rust_entrypoint("trader", args)
+    if rust_result is not None:
+        return rust_result
+    return run(app, prog_name="trader", argv=args)

@@ -14,14 +14,14 @@
 //!
 //! * Command names, help descriptions, flags, and exit codes match the Typer
 //!   CLI for the facade and `backtest-job`.
-//! * `api`, `trader`, and `mcp` are recognized so the facade help is
-//!   identical, but their execution bodies arrive with their own port tasks
-//!   (`api` and `mcp` with the integration task, `trader` with T239). Until
-//!   then they report that the Rust port is not yet available and exit `2`.
-//! * The Rust engine is not yet ported, so `backtest-job` drives an injected
-//!   [`BacktestJobRunner`] seam. [`UnportedBacktestJobRunner`] is the default
-//!   and reports the missing engine; the ported engine plugs in here without
-//!   touching the parsed command surface.
+//! * `api` and `mcp` are recognized and served by the Rust process
+//!   implementations; `trader` is recognized so the facade help is identical,
+//!   but its execution body arrives with its own port task and until then it
+//!   reports that the Rust port is not yet available and exits `2`.
+//! * The Rust engine is not yet wired to the command, so `backtest-job` drives
+//!   an injected [`BacktestJobRunner`] seam. [`UnportedBacktestJobRunner`] is
+//!   the default and reports the missing engine; the ported engine plugs in
+//!   here without touching the parsed command surface.
 
 use std::fmt;
 use std::fs;

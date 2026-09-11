@@ -217,13 +217,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     When the Rust entrypoint flip is enabled and a Rust ``mcp`` binary is
     available, this dispatches to it; otherwise it runs the Python command.
     """
-    from harness.cli.rust_entrypoints import exec_rust_entrypoint
+    from harness.cli.rust_entrypoints import exec_rust_entrypoint, resolved_argv
 
-    rust_result = exec_rust_entrypoint("mcp", [] if argv is None else list(argv))
+    args = resolved_argv(argv)
+    rust_result = exec_rust_entrypoint("mcp", args)
     if rust_result is not None:
         return rust_result
     try:
-        app(args=None if argv is None else list(argv), prog_name="harness-mcp")
+        app(args=args, prog_name="harness-mcp")
     except SystemExit as error:
         return error.code if isinstance(error.code, int) else 1
     return 0

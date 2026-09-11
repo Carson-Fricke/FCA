@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+import sys
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
 
-from harness.cli import rust_entrypoints
+from harness.cli import backtest_job, rust_entrypoints, trader
 
 
 def test_flag_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,9 +108,129 @@ def test_api_main_falls_back_when_the_port_is_disabled(
     assert calls == ["api"]
 
 
-def test_facade_and_engine_entrypoints_are_never_flipped() -> None:
-    """Only the complete interface processes are flipped."""
+def test_deferred_entrypoints_stay_on_python() -> None:
+    """The engine entrypoints are wired but gated until parity is proven."""
     assert rust_entrypoints.PORTED_ENTRYPOINTS == frozenset({"api", "mcp"})
+    assert set(rust_entrypoints.DEFERRED_ENTRYPOINTS) == {"backtest-job", "trader"}
     for name in ("harness", "backtest-job", "trader"):
         assert not rust_entrypoints.rust_entrypoint_available(name)
         assert rust_entrypoints.exec_rust_entrypoint(name, []) is None
+
+
+def test_facade_group_finds_the_first_positional_token() -> None:
+    assert rust_entrypoints.facade_group([]) is None
+    assert rust_entrypoints.facade_group(["--help"]) is None
+    assert rust_entrypoints.facade_group(["api", "--config", "x"]) == "api"
+    assert (
+        rust_entrypoints.facade_group(["backtest-job", "--config", "x"])
+        == "backtest-job"
+    )
+
+
+def test_resolved_argv_reads_the_process_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["harness", "api", "--config", "x"])
+    assert rust_entrypoints.resolved_argv(None) == ["api", "--config", "x"]
+    assert rust_entrypoints.resolved_argv(["--help"]) == ["--help"]
+
+
+def test_facade_console_script_flips_through_the_process_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from harness.cli import application
+
+    monkeypatch.setenv(rust_entrypoints.RUST_ENTRYPOINTS_FLAG, "1")
+    monkeypatch.setattr(sys, "argv", ["harness", "api", "--config", "api.yaml"])
+    calls: list[list[str]] = []
+
+    def fake(argv: Sequence[str]) -> int:
+        calls.append(list(argv))
+        return 13
+
+    monkeypatch.setattr(rust_entrypoints, "exec_rust_facade", fake)
+
+    assert application.main() == 13
+    assert calls == [["api", "--config", "api.yaml"]]
+
+
+def test_facade_dispatches_only_ported_groups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(rust_entrypoints.RUST_ENTRYPOINTS_FLAG, "1")
+    calls: list[list[str]] = []
+
+    def fake(name: str, argv: Sequence[str]) -> int:
+        calls.append([name, *argv])
+        return 5
+
+    monkeypatch.setattr(rust_entrypoints, "_exec", fake)
+
+    assert rust_entrypoints.exec_rust_facade(["api", "--config", "api.yaml"]) == 5
+    assert rust_entrypoints.exec_rust_facade(["mcp"]) == 5
+    assert calls == [
+        ["harness", "api", "--config", "api.yaml"],
+        ["harness", "mcp"],
+    ]
+
+
+def test_facade_keeps_unported_groups_on_python(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(rust_entrypoints.RUST_ENTRYPOINTS_FLAG, "1")
+
+    def fail(name: str, argv: Sequence[str]) -> int:
+        raise AssertionError("an unported facade group must not exec")
+
+    monkeypatch.setattr(rust_entrypoints, "_exec", fail)
+
+    assert rust_entrypoints.exec_rust_facade([]) is None
+    assert rust_entrypoints.exec_rust_facade(["--help"]) is None
+    assert rust_entrypoints.exec_rust_facade(["backtest-job"]) is None
+    assert rust_entrypoints.exec_rust_facade(["trader", "--config", "t.yaml"]) is None
+
+
+def test_facade_falls_back_when_the_flip_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(rust_entrypoints.RUST_ENTRYPOINTS_FLAG, raising=False)
+    assert rust_entrypoints.exec_rust_facade(["api"]) is None
+
+
+def test_facade_main_dispatches_through_the_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from harness.cli import application
+
+    calls: list[list[str]] = []
+
+    def fake(argv: Sequence[str]) -> int:
+        calls.append(list(argv))
+        return 11
+
+    monkeypatch.setattr(rust_entrypoints, "exec_rust_facade", fake)
+
+    assert application.main(["api", "--config", "api.yaml"]) == 11
+    assert calls == [["api", "--config", "api.yaml"]]
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "prog_name"),
+    [(backtest_job.main, "backtest-job"), (trader.main, "trader")],
+)
+def test_engine_entrypoints_stay_on_python_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint: Callable[[Sequence[str] | None], int],
+    prog_name: str,
+) -> None:
+    """The engine console scripts consult the switch and keep Python."""
+    calls: list[str] = []
+
+    def no_port(name: str, argv: Sequence[str]) -> None:
+        calls.append(name)
+        return None
+
+    monkeypatch.setattr(rust_entrypoints, "exec_rust_entrypoint", no_port)
+
+    assert entrypoint(["--help"]) == 0
+    assert calls == [prog_name]
