@@ -123,6 +123,7 @@ jobs:
       - name: Run workspace tests
         env:
           PYO3_PYTHON: ${{ github.workspace }}/.venv/bin/python
+          PYTHONPATH: ${{ github.workspace }}/.venv/lib/python3.12/site-packages
         run: cargo test --workspace --locked
 
   parity:
