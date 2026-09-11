@@ -1,18 +1,34 @@
 //! Deterministic fractional crypto execution venue for Alpaca accounts.
 //!
-//! Quantities stay exact through the full command path, and every fill is
-//! reconciled against the locally configured maker-taker model and the venue
-//! fee schedule before any outcome reaches the kernel.
+//! Crypto trades continuously, so commands never consult a session calendar.
+//! Quantities stay exact through the full submit/cancel/replace path, resting
+//! orders match later market events as maker fills, and submit-time fills
+//! against the already visible book are taker fills. Every fill is reconciled
+//! against the locally configured maker-taker model and the venue fee schedule
+//! before any outcome is scheduled, and a disagreement surfaces as an error
+//! rather than a silently recorded fee.
+//!
+//! Like [`SimulatedVenue`](crate::venues::sim::SimulatedVenue), the venue owns
+//! no clock, network, or random resource: the runtime feeds market events and
+//! drains scheduled outcomes in order.
+
+use std::collections::{HashMap, HashSet};
 
 use harness_num::Decimal18;
 
-use crate::accounting::Fill;
+use crate::accounting::{ExecutionReport, Fill};
 use crate::error::{require_text, LiveError, LiveResult};
+use crate::events::MarketEvent;
+use crate::fills::decision::FillDecision;
 use crate::fills::fees::{CryptoMakerTakerFeeModel, FeeRounding, LiquidityRole};
-use crate::orders::Side;
+use crate::fills::simple_touch::SimpleTouch;
+use crate::orders::{ExecutionType, OrderStatus, OrderType, Side, SingleLegOrder, TimeInForce};
 use crate::symbol::Symbol;
+use crate::venues::plugin::FillPlugin;
+use crate::venues::scripted::VenueOutcome;
 
 const BASIS_POINTS: i64 = 10_000;
+const ZERO: Decimal18 = Decimal18::ZERO;
 
 /// Return whether a canonical symbol is a `BASE/QUOTE` crypto pair.
 pub fn is_crypto_pair(symbol: &str) -> bool {
@@ -20,6 +36,24 @@ pub fn is_crypto_pair(symbol: &str) -> bool {
     match (parts.next(), parts.next()) {
         (Some(base), Some(quote)) => !base.is_empty() && !quote.is_empty() && !quote.contains('/'),
         _ => false,
+    }
+}
+
+fn is_terminal(status: OrderStatus) -> bool {
+    matches!(
+        status,
+        OrderStatus::Filled
+            | OrderStatus::Canceled
+            | OrderStatus::Rejected
+            | OrderStatus::Expired
+            | OrderStatus::Replaced
+    )
+}
+
+fn role_name(role: LiquidityRole) -> &'static str {
+    match role {
+        LiquidityRole::Maker => "maker",
+        LiquidityRole::Taker => "taker",
     }
 }
 
@@ -116,27 +150,386 @@ pub struct CryptoFeeLedgerEntry {
     pub venue_fee: Decimal18,
 }
 
-/// The deterministic crypto venue shell with fee reconciliation.
+/// Immutable inspection snapshot of one venue-side crypto order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CryptoOrderState {
+    /// The immutable order.
+    pub order: SingleLegOrder,
+    /// Current status.
+    pub status: OrderStatus,
+    /// Cumulative filled quantity.
+    pub filled_quantity: Decimal18,
+    /// Remaining quantity.
+    pub remaining_quantity: Decimal18,
+    /// Cumulative reconciled fees.
+    pub fees_paid: Decimal18,
+    /// The last immutable fill decision.
+    pub last_decision: Option<FillDecision>,
+}
+
+impl CryptoOrderState {
+    /// The order identifier.
+    pub fn order_id(&self) -> &str {
+        &self.order.order_id
+    }
+
+    /// Whether the venue can still match or cancel the order.
+    pub fn is_active(&self) -> bool {
+        !is_terminal(self.status)
+    }
+}
+
 #[derive(Clone, Debug)]
+struct WorkingOrder {
+    order: SingleLegOrder,
+    status: OrderStatus,
+    filled_quantity: Decimal18,
+    filled_notional: Decimal18,
+    fees_paid: Decimal18,
+    last_decision: Option<FillDecision>,
+    response_pending: bool,
+}
+
+impl WorkingOrder {
+    fn new(order: SingleLegOrder, status: OrderStatus) -> Self {
+        Self {
+            order,
+            status,
+            filled_quantity: ZERO,
+            filled_notional: ZERO,
+            fees_paid: ZERO,
+            last_decision: None,
+            response_pending: false,
+        }
+    }
+
+    fn remaining_quantity(&self) -> Decimal18 {
+        self.order.quantity - self.filled_quantity
+    }
+
+    fn is_active(&self) -> bool {
+        !is_terminal(self.status)
+    }
+}
+
+/// The deterministic crypto venue with matching and fee reconciliation.
 pub struct AlpacaCryptoVenue {
+    fill_model: Box<dyn FillPlugin>,
+    venue: String,
     local: CryptoMakerTakerFeeModel,
     schedule: AlpacaCryptoFeeSchedule,
     ledger: Vec<CryptoFeeLedgerEntry>,
+    orders: HashMap<String, WorkingOrder>,
+    order_ids: Vec<String>,
+    used_order_ids: HashSet<String>,
+    latest_market: Option<MarketEvent>,
+    latest_markets: HashMap<Symbol, MarketEvent>,
+    decisions: Vec<FillDecision>,
+    outcomes: Vec<VenueOutcome>,
+    ordinal: usize,
 }
 
 impl AlpacaCryptoVenue {
-    /// Construct a venue from a local fee model and a venue schedule.
+    /// Construct a venue using [`SimpleTouch`] by default.
     pub fn new(local: CryptoMakerTakerFeeModel, schedule: AlpacaCryptoFeeSchedule) -> Self {
+        Self::with_plugin(local, schedule, Box::new(SimpleTouch::new()))
+    }
+
+    /// Construct a venue with a specific fill plugin.
+    pub fn with_plugin(
+        local: CryptoMakerTakerFeeModel,
+        schedule: AlpacaCryptoFeeSchedule,
+        fill_model: Box<dyn FillPlugin>,
+    ) -> Self {
         Self {
+            fill_model,
+            venue: "alpaca-crypto".to_string(),
             local,
             schedule,
             ledger: Vec::new(),
+            orders: HashMap::new(),
+            order_ids: Vec::new(),
+            used_order_ids: HashSet::new(),
+            latest_market: None,
+            latest_markets: HashMap::new(),
+            decisions: Vec::new(),
+            outcomes: Vec::new(),
+            ordinal: 0,
         }
+    }
+
+    /// The venue identifier embedded in generated ids.
+    pub fn venue(&self) -> &str {
+        &self.venue
+    }
+
+    /// The local maker-taker fee model used for reconciliation.
+    pub fn fee_model(&self) -> &CryptoMakerTakerFeeModel {
+        &self.local
+    }
+
+    /// The venue-reported fee schedule used for reconciliation.
+    pub fn fee_schedule(&self) -> &AlpacaCryptoFeeSchedule {
+        &self.schedule
+    }
+
+    /// The latest immutable market snapshot observed by the venue.
+    pub fn latest_market(&self) -> Option<&MarketEvent> {
+        self.latest_market.as_ref()
+    }
+
+    /// Fill decisions in deterministic matching order.
+    pub fn decisions(&self) -> &[FillDecision] {
+        &self.decisions
     }
 
     /// The reconciled fee ledger.
     pub fn fee_ledger(&self) -> &[CryptoFeeLedgerEntry] {
         &self.ledger
+    }
+
+    /// Outcomes scheduled so far, in scheduling order.
+    pub fn outcomes(&self) -> &[VenueOutcome] {
+        &self.outcomes
+    }
+
+    /// Drain the scheduled outcomes.
+    pub fn drain_outcomes(&mut self) -> Vec<VenueOutcome> {
+        std::mem::take(&mut self.outcomes)
+    }
+
+    /// Active order snapshots in submission order.
+    pub fn active_orders(&self) -> Vec<CryptoOrderState> {
+        self.order_ids
+            .iter()
+            .filter_map(|id| self.orders.get(id))
+            .filter(|order| order.is_active())
+            .map(snapshot)
+            .collect()
+    }
+
+    /// Accept a fractional order and schedule its venue outcomes.
+    pub fn submit(&mut self, order: SingleLegOrder) -> LiveResult<()> {
+        validate_crypto_order(&order)?;
+        if self.used_order_ids.contains(&order.order_id) {
+            return Err(LiveError::Venue(format!(
+                "order_id {:?} was already used",
+                order.order_id
+            )));
+        }
+        let order_id = order.order_id.clone();
+        let symbol = order.symbol.clone();
+        self.orders.insert(
+            order_id.clone(),
+            WorkingOrder::new(order, OrderStatus::Accepted),
+        );
+        self.order_ids.push(order_id.clone());
+        self.used_order_ids.insert(order_id.clone());
+        self.schedule_report(
+            &order_id,
+            ExecutionType::Acknowledged,
+            OrderStatus::Accepted,
+            ZERO,
+            None,
+        )?;
+        if let Some(market) = self.latest_markets.get(&symbol).cloned() {
+            let decision = self.attempt(&order_id, &market, LiquidityRole::Taker, None)?;
+            if decision.is_none() {
+                let tif = self
+                    .orders
+                    .get(&order_id)
+                    .map(|order| order.order.time_in_force);
+                if tif == Some(TimeInForce::Ioc) {
+                    self.schedule_expiry(&order_id, false)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Schedule cancellation confirmation for an active, non-pending order.
+    pub fn cancel(&mut self, order_id: &str) -> LiveResult<()> {
+        let active = self
+            .orders
+            .get(order_id)
+            .ok_or_else(|| LiveError::Venue(format!("unknown order {order_id:?}")))?;
+        if !active.is_active() {
+            return Err(LiveError::Venue(format!(
+                "order {order_id:?} is not active"
+            )));
+        }
+        if active.response_pending {
+            return Err(LiveError::Venue(
+                "cannot cancel while an execution outcome is pending".into(),
+            ));
+        }
+        {
+            let working = self.orders.get_mut(order_id).expect("checked");
+            working.status = OrderStatus::Canceled;
+            working.response_pending = true;
+        }
+        self.schedule_report(
+            order_id,
+            ExecutionType::Canceled,
+            OrderStatus::Canceled,
+            ZERO,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// Atomically report replacement and begin the replacement order.
+    pub fn replace(&mut self, order_id: &str, replacement: SingleLegOrder) -> LiveResult<()> {
+        validate_crypto_order(&replacement)?;
+        let (active, symbol, side, pending) = {
+            let working = self
+                .orders
+                .get(order_id)
+                .ok_or_else(|| LiveError::Venue(format!("unknown order {order_id:?}")))?;
+            (
+                working.is_active(),
+                working.order.symbol.clone(),
+                working.order.side,
+                working.response_pending,
+            )
+        };
+        if !active {
+            return Err(LiveError::Venue(format!(
+                "order {order_id:?} is not active"
+            )));
+        }
+        if pending {
+            return Err(LiveError::Venue(
+                "cannot replace while an execution outcome is pending".into(),
+            ));
+        }
+        if self.used_order_ids.contains(&replacement.order_id) {
+            return Err(LiveError::Venue(format!(
+                "order_id {:?} was already used",
+                replacement.order_id
+            )));
+        }
+        if replacement.symbol != symbol {
+            return Err(LiveError::Venue("replacement cannot change symbol".into()));
+        }
+        if replacement.side != side {
+            return Err(LiveError::Venue("replacement cannot change side".into()));
+        }
+
+        {
+            let working = self.orders.get_mut(order_id).expect("checked");
+            working.status = OrderStatus::Replaced;
+            working.response_pending = true;
+        }
+        self.used_order_ids.insert(replacement.order_id.clone());
+        self.schedule_report(
+            order_id,
+            ExecutionType::Replaced,
+            OrderStatus::Replaced,
+            ZERO,
+            None,
+        )?;
+
+        let replacement_id = replacement.order_id.clone();
+        let replacement_symbol = replacement.symbol.clone();
+        self.orders.insert(
+            replacement_id.clone(),
+            WorkingOrder::new(replacement, OrderStatus::Accepted),
+        );
+        self.order_ids.push(replacement_id.clone());
+        self.schedule_report(
+            &replacement_id,
+            ExecutionType::Acknowledged,
+            OrderStatus::Accepted,
+            ZERO,
+            None,
+        )?;
+        if let Some(market) = self.latest_markets.get(&replacement_symbol).cloned() {
+            let decision = self.attempt(&replacement_id, &market, LiquidityRole::Taker, None)?;
+            if decision.is_none() {
+                let tif = self
+                    .orders
+                    .get(&replacement_id)
+                    .map(|order| order.order.time_in_force);
+                if tif == Some(TimeInForce::Ioc) {
+                    self.schedule_expiry(&replacement_id, false)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate the protocol command; positions belong to the accounting hub.
+    pub fn request_position_snapshot(&self, account_id: &str) -> LiveResult<()> {
+        require_text(account_id, "account_id")?;
+        Ok(())
+    }
+
+    /// Return an immutable venue-side state snapshot.
+    pub fn state(&self, order_id: &str) -> LiveResult<CryptoOrderState> {
+        let working = self
+            .orders
+            .get(order_id)
+            .ok_or_else(|| LiveError::Venue(format!("unknown order {order_id:?}")))?;
+        Ok(snapshot(working))
+    }
+
+    /// Return all decisions made for one order.
+    pub fn decisions_for(&self, order_id: &str) -> LiveResult<Vec<FillDecision>> {
+        if !self.orders.contains_key(order_id) {
+            return Err(LiveError::Venue(format!("unknown order {order_id:?}")));
+        }
+        Ok(self
+            .decisions
+            .iter()
+            .filter(|decision| decision.order_id == order_id)
+            .cloned()
+            .collect())
+    }
+
+    /// Feed one market event into the matching engine.
+    pub fn on_market(&mut self, event: MarketEvent) -> LiveResult<()> {
+        self.latest_market = Some(event.clone());
+        let symbol = event.symbol().clone();
+        self.latest_markets.insert(symbol.clone(), event.clone());
+        let (buy_available, sell_available) = match &event {
+            MarketEvent::Trade(trade) => (trade.quantity, trade.quantity),
+            MarketEvent::Quote(quote) => (quote.ask_quantity, quote.bid_quantity),
+        };
+        let order_ids = self.order_ids.clone();
+        for order_id in order_ids {
+            let (active, pending, order_symbol, side, tif) = {
+                let Some(working) = self.orders.get(&order_id) else {
+                    continue;
+                };
+                (
+                    working.is_active(),
+                    working.response_pending,
+                    working.order.symbol.clone(),
+                    working.order.side,
+                    working.order.time_in_force,
+                )
+            };
+            if !active || pending || order_symbol != symbol {
+                continue;
+            }
+            let mut available = if side == Side::Buy {
+                buy_available
+            } else {
+                sell_available
+            };
+            let decision =
+                self.attempt(&order_id, &event, LiquidityRole::Maker, Some(available))?;
+            match decision {
+                Some(decision) => available -= decision.quantity,
+                None => {
+                    if tif == TimeInForce::Ioc {
+                        self.schedule_expiry(&order_id, false)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Reconcile one fill's local fee against the venue schedule.
@@ -159,7 +552,7 @@ impl AlpacaCryptoVenue {
             .local
             .calculate(fill)?
             .iter()
-            .fold(Decimal18::ZERO, |sum, component| sum + component.amount);
+            .fold(ZERO, |sum, component| sum + component.amount);
         let venue_fee = self.schedule.charge(fill.quantity, fill.price, liquidity)?;
         self.ledger.push(CryptoFeeLedgerEntry {
             fill_id: fill.fill_id.clone(),
@@ -180,20 +573,250 @@ impl AlpacaCryptoVenue {
         }
         Ok(local_fee)
     }
+
+    fn attempt(
+        &mut self,
+        order_id: &str,
+        market: &MarketEvent,
+        role: LiquidityRole,
+        available: Option<Decimal18>,
+    ) -> LiveResult<Option<FillDecision>> {
+        let Some(remaining) = self
+            .orders
+            .get(order_id)
+            .map(WorkingOrder::remaining_quantity)
+        else {
+            return Ok(None);
+        };
+        if !remaining.is_positive() {
+            return Ok(None);
+        }
+        let order = self.orders.get(order_id).expect("present").order.clone();
+        let Some(mut decision) =
+            self.fill_model
+                .decide(&order, market, Some(remaining), available, false)?
+        else {
+            return Ok(None);
+        };
+        decision.liquidity = role_name(role).to_string();
+        if let Some(working) = self.orders.get_mut(order_id) {
+            working.last_decision = Some(decision.clone());
+        }
+        self.decisions.push(decision.clone());
+        self.schedule_fill(order_id, &decision)?;
+        Ok(Some(decision))
+    }
+
+    fn schedule_fill(&mut self, order_id: &str, decision: &FillDecision) -> LiveResult<()> {
+        if decision.order_id != order_id {
+            return Err(LiveError::Venue(
+                "fill decision order_id does not match working order".into(),
+            ));
+        }
+        let order = self
+            .orders
+            .get(order_id)
+            .ok_or_else(|| LiveError::Venue(format!("unknown order {order_id:?}")))?
+            .order
+            .clone();
+        if decision.quantity
+            > self
+                .orders
+                .get(order_id)
+                .expect("present")
+                .remaining_quantity()
+        {
+            return Err(LiveError::Venue(
+                "fill decision exceeds the order remainder".into(),
+            ));
+        }
+        let fill_id = self.next_id("fill");
+        let provisional = Fill::new(
+            &fill_id,
+            order_id,
+            order.symbol.clone(),
+            order.side,
+            decision.quantity,
+            decision.price,
+            ZERO,
+            Some(decision.liquidity.clone()),
+        )?;
+        let fee = self.reconcile_fee(&provisional)?;
+        let mut fill = provisional;
+        fill.fee = fee;
+
+        let status = {
+            let working = self.orders.get_mut(order_id).expect("present");
+            working.filled_quantity += decision.quantity;
+            working.filled_notional += decision.quantity * decision.price;
+            working.fees_paid += fee;
+            working.last_decision = Some(decision.clone());
+            working.status = if working.remaining_quantity().is_zero() {
+                OrderStatus::Filled
+            } else {
+                OrderStatus::PartiallyFilled
+            };
+            working.response_pending = true;
+            working.status
+        };
+        let execution_type = if status == OrderStatus::Filled {
+            ExecutionType::Fill
+        } else {
+            ExecutionType::PartialFill
+        };
+        self.schedule_report(
+            order_id,
+            execution_type,
+            status,
+            decision.quantity,
+            Some(decision.price),
+        )?;
+        self.outcomes.push(VenueOutcome::Fill(fill));
+        if status == OrderStatus::PartiallyFilled && order.time_in_force == TimeInForce::Ioc {
+            self.schedule_expiry(order_id, true)?;
+        }
+        if let Some(working) = self.orders.get_mut(order_id) {
+            working.response_pending = false;
+        }
+        Ok(())
+    }
+
+    fn schedule_expiry(&mut self, order_id: &str, allow_pending: bool) -> LiveResult<()> {
+        let (active, pending) = {
+            let Some(working) = self.orders.get(order_id) else {
+                return Ok(());
+            };
+            (working.is_active(), working.response_pending)
+        };
+        if !active || (pending && !allow_pending) {
+            return Ok(());
+        }
+        if let Some(working) = self.orders.get_mut(order_id) {
+            working.status = OrderStatus::Expired;
+            working.response_pending = true;
+        }
+        self.schedule_report(
+            order_id,
+            ExecutionType::Expired,
+            OrderStatus::Expired,
+            ZERO,
+            None,
+        )?;
+        if let Some(working) = self.orders.get_mut(order_id) {
+            working.response_pending = false;
+        }
+        Ok(())
+    }
+
+    fn schedule_report(
+        &mut self,
+        order_id: &str,
+        execution_type: ExecutionType,
+        status: OrderStatus,
+        last_fill_quantity: Decimal18,
+        last_fill_price: Option<Decimal18>,
+    ) -> LiveResult<()> {
+        let (order, filled, remaining, notional, last_decision) = {
+            let working = self
+                .orders
+                .get(order_id)
+                .ok_or_else(|| LiveError::Venue(format!("unknown order {order_id:?}")))?;
+            (
+                working.order.clone(),
+                working.filled_quantity,
+                working.remaining_quantity(),
+                working.filled_notional,
+                working.last_decision.clone(),
+            )
+        };
+        let average = if filled.is_zero() {
+            None
+        } else {
+            Some(notional / filled)
+        };
+        let text = last_decision.map(|decision| {
+            format!(
+                "decision_price={};triggering_market={:?}",
+                decision.decision_price, decision.triggering_market
+            )
+        });
+        let report_id = self.next_id("report");
+        let report = ExecutionReport::new(
+            &report_id,
+            order_id,
+            status,
+            execution_type,
+            order.quantity,
+            filled,
+            remaining,
+            average,
+            last_fill_quantity,
+            last_fill_price,
+            text,
+        )?;
+        self.outcomes.push(VenueOutcome::Report(report));
+        Ok(())
+    }
+
+    fn next_id(&mut self, kind: &str) -> String {
+        self.ordinal += 1;
+        format!("{}-{}-{}", self.venue, kind, self.ordinal)
+    }
+}
+
+fn snapshot(working: &WorkingOrder) -> CryptoOrderState {
+    CryptoOrderState {
+        order: working.order.clone(),
+        status: working.status,
+        filled_quantity: working.filled_quantity,
+        remaining_quantity: working.remaining_quantity(),
+        fees_paid: working.fees_paid,
+        last_decision: working.last_decision.clone(),
+    }
+}
+
+fn validate_crypto_order(order: &SingleLegOrder) -> LiveResult<()> {
+    if !is_crypto_pair(order.symbol.as_str()) {
+        return Err(LiveError::Venue(format!(
+            "crypto orders must use BASE/QUOTE pairs, not {:?}",
+            order.symbol.as_str()
+        )));
+    }
+    if !matches!(order.order_type, OrderType::Market | OrderType::Limit) {
+        return Err(LiveError::Venue(
+            "crypto orders support market and limit types only".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use harness_num::Decimal18;
 
-    use super::{is_crypto_pair, AlpacaCryptoFeeSchedule, AlpacaCryptoVenue};
+    use super::{is_crypto_pair, AlpacaCryptoFeeSchedule, AlpacaCryptoVenue, CryptoOrderState};
     use crate::accounting::Fill;
+    use crate::events::{MarketEvent, QuoteEvent};
     use crate::fills::fees::{CryptoMakerTakerFeeModel, FeeRounding, FeeRoundingMode};
-    use crate::orders::Side;
+    use crate::orders::{OrderStatus, OrderType, Side, SingleLegOrder, TimeInForce};
     use crate::symbol::Symbol;
+    use crate::venues::scripted::VenueOutcome;
 
     fn dec(value: &str) -> Decimal18 {
         value.parse().unwrap()
+    }
+
+    fn rounding() -> FeeRounding {
+        FeeRounding::new(dec("0.01"), FeeRoundingMode::HalfEven).unwrap()
+    }
+
+    fn schedule(maker: &str, taker: &str) -> AlpacaCryptoFeeSchedule {
+        AlpacaCryptoFeeSchedule::new("alpaca-crypto", "USD", dec(maker), dec(taker), rounding())
+            .unwrap()
+    }
+
+    fn fee_model(maker: &str, taker: &str) -> CryptoMakerTakerFeeModel {
+        CryptoMakerTakerFeeModel::new(rounding(), dec(maker), dec(taker)).unwrap()
     }
 
     fn fill(quantity: &str, price: &str, liquidity: &str) -> Fill {
@@ -210,6 +833,35 @@ mod tests {
         .unwrap()
     }
 
+    fn order(order_id: &str, side: Side, quantity: &str, order_type: OrderType) -> SingleLegOrder {
+        SingleLegOrder::new(
+            order_id,
+            Symbol::new("BTC/USD").unwrap(),
+            side,
+            dec(quantity),
+            order_type,
+            TimeInForce::Day,
+            (order_type == OrderType::Limit).then(|| dec("100")),
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    fn quote(bid: &str, ask: &str, quantity: &str) -> MarketEvent {
+        MarketEvent::Quote(
+            QuoteEvent::new(
+                Symbol::new("BTC/USD").unwrap(),
+                dec(bid),
+                dec(quantity),
+                dec(ask),
+                dec(quantity),
+                None,
+            )
+            .unwrap(),
+        )
+    }
+
     #[test]
     fn crypto_pair_detection() {
         assert!(is_crypto_pair("BTC/USD"));
@@ -219,17 +871,7 @@ mod tests {
 
     #[test]
     fn reconciling_matching_fees_succeeds() {
-        let rounding = FeeRounding::new(dec("0.01"), FeeRoundingMode::HalfEven).unwrap();
-        let local = CryptoMakerTakerFeeModel::new(rounding, dec("0.10"), dec("0.25")).unwrap();
-        let schedule = AlpacaCryptoFeeSchedule::new(
-            "alpaca-crypto",
-            "USD",
-            dec("0.10"),
-            dec("0.25"),
-            rounding,
-        )
-        .unwrap();
-        let mut venue = AlpacaCryptoVenue::new(local, schedule);
+        let mut venue = AlpacaCryptoVenue::new(fee_model("0.10", "0.25"), schedule("0.10", "0.25"));
         let fee = venue.reconcile_fee(&fill("200", "100", "taker")).unwrap();
         assert_eq!(fee, dec("0.50"));
         assert_eq!(venue.fee_ledger().len(), 1);
@@ -237,18 +879,99 @@ mod tests {
 
     #[test]
     fn mismatched_fees_surface_an_error() {
-        let rounding = FeeRounding::new(dec("0.01"), FeeRoundingMode::HalfEven).unwrap();
-        let local = CryptoMakerTakerFeeModel::new(rounding, dec("0.10"), dec("0.25")).unwrap();
-        let schedule = AlpacaCryptoFeeSchedule::new(
-            "alpaca-crypto",
-            "USD",
-            dec("0.10"),
-            dec("0.30"),
-            rounding,
-        )
-        .unwrap();
-        let mut venue = AlpacaCryptoVenue::new(local, schedule);
+        let mut venue = AlpacaCryptoVenue::new(fee_model("0.10", "0.25"), schedule("0.10", "0.30"));
         assert!(venue.reconcile_fee(&fill("200", "100", "taker")).is_err());
         assert_eq!(venue.fee_ledger().len(), 1);
+    }
+
+    #[test]
+    fn submit_fills_against_visible_book_as_taker() {
+        let mut venue = AlpacaCryptoVenue::new(fee_model("0.10", "0.25"), schedule("0.10", "0.25"));
+        venue.on_market(quote("99", "100", "200")).unwrap();
+        venue
+            .submit(order("c1", Side::Buy, "200", OrderType::Market))
+            .unwrap();
+        let state = venue.state("c1").unwrap();
+        assert_eq!(state.status, OrderStatus::Filled);
+        assert_eq!(state.filled_quantity, dec("200"));
+        assert_eq!(state.fees_paid, dec("0.50"));
+        let fills = venue
+            .outcomes()
+            .iter()
+            .filter(|outcome| matches!(outcome, VenueOutcome::Fill(_)))
+            .count();
+        assert_eq!(fills, 1);
+        let decision = &venue.decisions()[0];
+        assert_eq!(decision.liquidity, "taker");
+    }
+
+    #[test]
+    fn resting_order_fills_as_maker_on_later_event() {
+        let mut venue = AlpacaCryptoVenue::new(fee_model("0.10", "0.25"), schedule("0.10", "0.25"));
+        venue
+            .submit(order("c2", Side::Buy, "200", OrderType::Limit))
+            .unwrap();
+        assert_eq!(venue.state("c2").unwrap().status, OrderStatus::Accepted);
+        venue.on_market(quote("99", "100", "200")).unwrap();
+        let state = venue.state("c2").unwrap();
+        assert_eq!(state.status, OrderStatus::Filled);
+        let decision = &venue.decisions()[0];
+        assert_eq!(decision.liquidity, "maker");
+        assert_eq!(state.fees_paid, dec("0.20"));
+    }
+
+    #[test]
+    fn ioc_expires_without_a_touch() {
+        let mut venue = AlpacaCryptoVenue::new(fee_model("0.10", "0.25"), schedule("0.10", "0.25"));
+        let mut ioc = order("c3", Side::Buy, "1", OrderType::Limit);
+        ioc.time_in_force = TimeInForce::Ioc;
+        ioc.limit_price = Some(dec("90"));
+        venue.submit(ioc).unwrap();
+        venue.on_market(quote("99", "100", "2")).unwrap();
+        assert_eq!(venue.state("c3").unwrap().status, OrderStatus::Expired);
+    }
+
+    #[test]
+    fn duplicate_submit_and_replace_keep_identity() {
+        let mut venue = AlpacaCryptoVenue::new(fee_model("0.10", "0.25"), schedule("0.10", "0.25"));
+        let first = order("c4", Side::Buy, "1", OrderType::Limit);
+        venue.submit(first.clone()).unwrap();
+        assert!(venue.submit(first).is_err());
+        let replacement = order("c5", Side::Buy, "2", OrderType::Limit);
+        venue.replace("c4", replacement).unwrap();
+        assert_eq!(venue.state("c4").unwrap().status, OrderStatus::Replaced);
+        assert_eq!(venue.state("c5").unwrap().status, OrderStatus::Accepted);
+        let _: CryptoOrderState = venue.active_orders()[0].clone();
+    }
+
+    #[test]
+    fn non_crypto_and_stop_orders_are_rejected() {
+        let mut venue = AlpacaCryptoVenue::new(fee_model("0.10", "0.25"), schedule("0.10", "0.25"));
+        let equity = SingleLegOrder::new(
+            "e1",
+            Symbol::new("AAPL").unwrap(),
+            Side::Buy,
+            dec("1"),
+            OrderType::Market,
+            TimeInForce::Day,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(venue.submit(equity).is_err());
+        let stop = SingleLegOrder::new(
+            "s1",
+            Symbol::new("BTC/USD").unwrap(),
+            Side::Buy,
+            dec("1"),
+            OrderType::Stop,
+            TimeInForce::Day,
+            None,
+            Some(dec("100")),
+            None,
+        )
+        .unwrap();
+        assert!(venue.submit(stop).is_err());
     }
 }
