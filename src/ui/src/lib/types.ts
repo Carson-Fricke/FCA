@@ -44,6 +44,8 @@ export interface ArtifactEntry {
 	size: number;
 	object_path: string;
 	sas_url: string | null;
+	/** Content digest when the run manifest publishes one. */
+	sha256?: string | null;
 }
 
 export interface PositionRecord {
@@ -339,6 +341,42 @@ export interface BacktestDetail {
 		artifact_count: number;
 		total_bytes: number;
 	};
+	/**
+	 * Manifest-imported artifacts when the API publishes them. The UI renders
+	 * name/size/digest from this list and never fabricates entries.
+	 */
+	artifacts?: ArtifactEntry[];
+}
+
+/**
+ * Payload for `POST /v1/workspaces/{ws}/backtests/launch`, mirroring the
+ * Thesis `LaunchBacktestRequest` contract at the activation seam.
+ */
+export interface LaunchBacktestInput {
+	/** Content-addressed strategy bundle reference. */
+	bundleRef: string;
+	/** Harness configuration path, e.g. `config/harness/backtest.yaml`. */
+	configPath: string;
+	/** Activation environment; the API defaults to `paper`. */
+	environment?: 'paper' | 'shadow' | 'live';
+	/** Optional strategy attribution. */
+	strategyId?: string | null;
+	/** Optional run display name. */
+	name?: string | null;
+}
+
+/**
+ * The activation outcome document returned by the launch route. Thesis
+ * reports the harness result as inert data; it never interprets it.
+ */
+export interface BacktestLaunchResult {
+	action: string;
+	bundle_ref: string;
+	environment: string;
+	exit_code: number | null;
+	job_id: string | null;
+	state: string | null;
+	request_payload: Record<string, unknown>;
 }
 
 export interface DeploymentCard {

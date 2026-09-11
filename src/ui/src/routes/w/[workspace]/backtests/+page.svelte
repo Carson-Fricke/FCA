@@ -1,9 +1,10 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import MetricCard from '$lib/components/common/MetricCard.svelte';
-	import { listBacktests } from '$lib/api';
+	import { launchBacktest, listBacktests } from '$lib/api';
 	import { shortDate } from '$lib/format';
 	import type { BacktestSummaryRow } from '$lib/types';
+	import { notify } from '$lib/workspace.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -13,6 +14,7 @@
 	let backtests = $state<BacktestSummaryRow[]>([]);
 	let strategyFilter = $state('all');
 	let onlySplit = $state(false);
+	let launching = $state(false);
 
 	$effect(() => {
 		let cancelled = false;
@@ -23,6 +25,39 @@
 			cancelled = true;
 		};
 	});
+
+	/** Re-read the workspace's run history from the API. */
+	async function refresh(): Promise<void> {
+		backtests = await listBacktests(workspaceId);
+	}
+
+	/**
+	 * Launch a backtest with the UI defaults and refresh the run history. The
+	 * harness reports an accepted outcome; the list reflects whatever the API
+	 * persisted, never a client-fabricated row.
+	 */
+	async function runBacktest(): Promise<void> {
+		if (launching) return;
+		launching = true;
+		try {
+			const outcome = await launchBacktest(workspaceId, {
+				bundleRef: 'ui-run',
+				configPath: 'config/harness/backtest.yaml',
+				environment: 'paper'
+			});
+			await refresh();
+			notify(
+				`Backtest launched (${outcome.state ?? 'accepted'}${outcome.job_id ? ` · ${outcome.job_id}` : ''})`
+			);
+		} catch (error) {
+			notify(
+				`Backtest launch failed: ${error instanceof Error ? error.message : String(error)}`,
+				true
+			);
+		} finally {
+			launching = false;
+		}
+	}
 
 	const strategyIds = $derived([...new Set(backtests.map((b) => b.strategy_id))]);
 	const filtered = $derived(
@@ -51,9 +86,12 @@
 		</div>
 		<button
 			type="button"
-			class="ml-auto rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25"
+			data-testid="run-backtest"
+			disabled={launching}
+			onclick={runBacktest}
+			class="ml-auto rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-60"
 		>
-			＋ Run backtest
+			{launching ? 'Launching…' : '＋ Run backtest'}
 		</button>
 	</header>
 

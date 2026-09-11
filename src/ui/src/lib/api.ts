@@ -19,8 +19,10 @@
 import { browser } from '$app/environment';
 import { fixtures } from './fixtures';
 import type {
+	ArtifactEntry,
 	BackendKind,
 	BacktestDetail,
+	BacktestLaunchResult,
 	BacktestSummaryRow,
 	Capabilities,
 	ChatMessage,
@@ -29,6 +31,7 @@ import type {
 	DeploymentCard,
 	ExecutionEvent,
 	KnowledgeHit,
+	LaunchBacktestInput,
 	OrderRecord,
 	PortfolioSummary,
 	PostMessageResult,
@@ -737,6 +740,43 @@ export function listBacktests(workspaceId: string): Promise<BacktestSummaryRow[]
 	).then((r) => r.items);
 }
 
+const FIXTURE_ARTIFACT_NAMES = [
+	'manifest.json',
+	'metrics.json',
+	'equity.parquet',
+	'trades.parquet',
+	'report.html',
+	'orders.csv'
+];
+
+/**
+ * Deterministic fixture artifact list derived from the fixture manifest's
+ * declared `artifact_count`/`total_bytes`/`run_digest`. Fixture mode has no
+ * stored artifact documents, so the client synthesizes exactly the manifest's
+ * declared count; real mode returns whatever the API publishes.
+ */
+function fixtureArtifacts(
+	doc: Omit<BacktestDetail, 'equity' | 'trades'>
+): ArtifactEntry[] {
+	const count = Math.max(0, Math.trunc(doc.manifest?.artifact_count ?? 0));
+	const total = Math.max(0, Math.trunc(doc.manifest?.total_bytes ?? 0));
+	if (!count) return [];
+	const per = Math.floor(total / count);
+	const digest = doc.manifest?.run_digest ?? null;
+	const runId = doc.manifest?.run_id ?? doc.id;
+	return Array.from({ length: count }, (_, index) => {
+		const name = FIXTURE_ARTIFACT_NAMES[index] ?? `artifact-${index + 1}.bin`;
+		const size = index === count - 1 ? Math.max(0, total - per * (count - 1)) : per;
+		return {
+			name,
+			size,
+			object_path: `backtests/${runId}/artifacts/${name}`,
+			sas_url: null,
+			sha256: digest
+		};
+	});
+}
+
 export function getBacktest(workspaceId: string, backtestId: string): Promise<BacktestDetail> {
 	if (fixtureMode) {
 		return wait(10).then(() => {
@@ -745,11 +785,49 @@ export function getBacktest(workspaceId: string, backtestId: string): Promise<Ba
 			const series =
 				fixtures.backtestSeries[backtestId];
 			if (!doc || !series) throw new Error(`unknown backtest ${backtestId}`);
-			return { ...plain(doc), equity: plain(series.equity), trades: plain(series.trades) };
+			return {
+				...plain(doc),
+				equity: plain(series.equity),
+				trades: plain(series.trades),
+				artifacts: fixtureArtifacts(doc)
+			};
 		});
 	}
 	return apiFetch<BacktestDetail>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/${encodeURIComponent(backtestId)}`
+	);
+}
+
+/**
+ * Launch a backtest through `POST /v1/workspaces/{ws}/backtests/launch`.
+ * Real mode delegates to the harness activation adapter; fixture mode resolves
+ * a synthetic accepted outcome shaped exactly like the API document.
+ */
+export function launchBacktest(
+	workspaceId: string,
+	input: LaunchBacktestInput
+): Promise<BacktestLaunchResult> {
+	const body = {
+		bundle_ref: input.bundleRef,
+		config_path: input.configPath,
+		strategy_id: input.strategyId ?? null,
+		name: input.name ?? null,
+		environment: input.environment ?? 'paper'
+	};
+	if (fixtureMode) {
+		return wait(15).then(() => ({
+			action: 'backtest',
+			bundle_ref: body.bundle_ref,
+			environment: body.environment,
+			exit_code: 0,
+			job_id: `job-local-${store.nextId++}`,
+			state: 'accepted',
+			request_payload: { ...body }
+		}));
+	}
+	return apiFetch<BacktestLaunchResult>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/launch`,
+		{ method: 'POST', body: JSON.stringify(body) }
 	);
 }
 
