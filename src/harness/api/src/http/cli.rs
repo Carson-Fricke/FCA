@@ -185,7 +185,7 @@ pub fn resolve_api_settings(
 /// Returns [`ApiConfigError`] for configuration or bind failures.
 pub async fn serve_api(args: &crate::ApiArgs) -> Result<(), ApiConfigError> {
     let (settings, bearer) = resolve_api_settings(args)?;
-    let mut config = AppConfig::in_memory();
+    let mut config = AppConfig::durable_default();
     config.bearer_token = bearer;
     let app = create_app(config).map_err(|error| ApiConfigError(error.to_string()))?;
     let addr: SocketAddr = format!("{}:{}", settings.host, settings.port)

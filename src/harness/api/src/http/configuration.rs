@@ -49,6 +49,8 @@ pub struct ValidatedConfiguration {
     pub data_end: Option<NaiveDate>,
     /// Domain-separated digest of the submitted document.
     pub configuration_digest: String,
+    /// The submitted document, retained for the native engine launcher.
+    pub document: Value,
 }
 
 /// A submitted document that is not a valid backtest configuration.
@@ -175,6 +177,7 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
             data_start,
             data_end,
             configuration_digest: configuration_hash(&document),
+            document,
         })
     }
 }

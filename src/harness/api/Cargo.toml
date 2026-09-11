@@ -34,6 +34,7 @@ host = { path = "../host" }
 live = { path = "../live" }
 mcp = { path = "../mcp" }
 hex = "0.4"
+num = { path = "../num" }
 percent-encoding = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

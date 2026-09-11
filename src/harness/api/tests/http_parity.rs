@@ -753,3 +753,140 @@ fn in_memory_store_helpers_are_deterministic() {
     assert_eq!(store.list(None, Some("s")).len(), 1);
     assert_eq!(store.list(None, Some("other")).len(), 0);
 }
+
+fn temp_root(tag: &str) -> std::path::PathBuf {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or(0);
+    let root = std::env::temp_dir().join(format!(
+        "harness-api-durable-{}-{tag}-{unique}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    root
+}
+
+fn durable_router(root: &std::path::Path, runner: Arc<dyn BacktestRunner>) -> Router {
+    let mut config = AppConfig::durable_with_runner(root.to_path_buf(), runner);
+    config.bearer_token = Some(BEARER.to_string());
+    create_app(config).expect("app")
+}
+
+#[tokio::test]
+async fn durable_launch_survives_a_process_restart() {
+    let root = temp_root("restart");
+    {
+        let router = durable_router(&root, Arc::new(StubRunner { fail: false }));
+        let (status, _, body) = send(
+            &router,
+            post_json(
+                "/v1/backtests/jobs",
+                Some(BEARER),
+                backtest_document("run-durable"),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(json_body(&body)["state"], "succeeded");
+    }
+
+    // A fresh process composition from the same root must still be able to
+    // serve the run without re-executing it.
+    let router = durable_router(&root, Arc::new(StubRunner { fail: true }));
+
+    let (run_status, _, run_body) = send(
+        &router,
+        get_auth("/v1/backtests/runs/run-durable", BEARER),
+    )
+    .await;
+    assert_eq!(run_status, StatusCode::OK);
+    assert_eq!(json_body(&run_body)["status"], "complete");
+    assert_eq!(json_body(&run_body)["strategy_id"], "spy-momentum");
+
+    let (job_status, _, job_body) = send(
+        &router,
+        get_auth("/v1/backtests/jobs/run-durable", BEARER),
+    )
+    .await;
+    assert_eq!(job_status, StatusCode::OK);
+    assert_eq!(json_body(&job_body)["state"], "succeeded");
+
+    let (artifact_status, _, artifact_body) = send(
+        &router,
+        get_auth(
+            "/v1/backtests/runs/run-durable/artifacts/backtest.json",
+            BEARER,
+        ),
+    )
+    .await;
+    assert_eq!(artifact_status, StatusCode::OK);
+    assert_eq!(json_body(&artifact_body)["manifest"]["run_id"], "run-durable");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn native_engine_launch_reaches_a_terminal_state() {
+    let root = temp_root("native");
+    let router = durable_router(&root, Arc::new(api::http::native::NativeBacktestRunner::default()));
+    let document = json!({
+        "schema_version": 1,
+        "shell": "backtest",
+        "run_id": "native-api-run",
+        "start": "2024-01-02T14:30:00Z",
+        "end": "2024-01-04T21:00:00Z",
+        "seed": 7,
+        "strategy_instances": [{
+            "instance_id": "spy-momentum",
+            "implementation": "strategies.harness_examples.intraday_momentum:IntradayMomentumStrategy",
+            "bundle_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "capital_fraction": 1.0,
+            "symbols": ["SPY"],
+            "parameters": {}
+        }]
+    });
+
+    let (status, _, body) = send(
+        &router,
+        post_json("/v1/backtests/jobs", Some(BEARER), document),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    assert_eq!(
+        json_body(&body)["state"],
+        "succeeded",
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+
+    let (run_status, _, run_body) = send(
+        &router,
+        get_auth("/v1/backtests/runs/native-api-run", BEARER),
+    )
+    .await;
+    assert_eq!(run_status, StatusCode::OK);
+    assert_eq!(json_body(&run_body)["status"], "complete");
+
+    let (artifact_status, _, artifact_body) = send(
+        &router,
+        get_auth(
+            "/v1/backtests/runs/native-api-run/artifacts/backtest.json",
+            BEARER,
+        ),
+    )
+    .await;
+    assert_eq!(artifact_status, StatusCode::OK);
+    assert_eq!(json_body(&artifact_body)["status"], "completed");
+    assert_eq!(
+        json_body(&artifact_body)["manifest"]["run_id"],
+        "native-api-run"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
