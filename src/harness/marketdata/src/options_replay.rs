@@ -185,59 +185,32 @@ impl OptionsReplayFeed {
         })
     }
 
-    /// Plan every session in order.
-    pub fn days(&self) -> Result<Vec<OptionsDayPlan>, DataError> {
-        self.sessions
-            .iter()
-            .map(|session| self.plan(session))
-            .collect()
+    /// Plan every session lazily, in chronological order.
+    ///
+    /// The iterator resolves and opens one session at a time, so planning a
+    /// long range never materializes more than that range's day plan in
+    /// memory at once.
+    pub fn days(&self) -> impl Iterator<Item = Result<OptionsDayPlan, DataError>> + '_ {
+        self.sessions.iter().map(move |session| self.plan(session))
+    }
+
+    /// Stream the merged events of every session in chronological order.
+    ///
+    /// Each session is planned and drained before the next one is opened, so a
+    /// multi-year run holds at most one day of event lookahead at a time.
+    /// Fingerprints describe the most recent completed run once the stream is
+    /// exhausted; a stream abandoned early leaves the previous run's
+    /// fingerprints in place.
+    pub fn stream(&mut self) -> impl Iterator<Item = Result<MarketEvent, DataError>> + '_ {
+        EventStream::new(self)
     }
 
     /// Yield the merged events of every session in chronological order.
     pub fn events(&mut self) -> Result<Vec<MarketEvent>, DataError> {
-        let header = self.header_frames();
-        let mut file_digest = Sha256::new();
-        let mut row_digest = Sha256::new();
-        let mut data_digest = Sha256::new();
-        for frame in &header {
-            update_frame(&mut file_digest, frame);
-            update_frame(&mut row_digest, frame);
-            update_frame(&mut data_digest, frame);
-        }
         let mut emitted = Vec::new();
-        for index in 0..self.sessions.len() {
-            let session = self.sessions[index];
-            let mut plan = self.plan(&session)?;
-            let events = plan.feed.events()?;
-            let fingerprints = plan.feed.fingerprints().clone();
-            update_frame(
-                &mut file_digest,
-                &canonical_fields(&[
-                    session.session_date.isoformat(),
-                    fingerprints.file_fingerprint().to_string(),
-                ]),
-            );
-            emitted.extend(events);
-            update_frame(
-                &mut row_digest,
-                &canonical_fields(&[
-                    session.session_date.isoformat(),
-                    fingerprints.row_fingerprint().to_string(),
-                ]),
-            );
-            update_frame(
-                &mut data_digest,
-                &canonical_fields(&[
-                    session.session_date.isoformat(),
-                    fingerprints.data_fingerprint().to_string(),
-                ]),
-            );
+        for event in self.stream() {
+            emitted.push(event?);
         }
-        self.last_fingerprints = ReplayFingerprints {
-            file: hex_string(&file_digest.finalize()),
-            row: hex_string(&row_digest.finalize()),
-            data: hex_string(&data_digest.finalize()),
-        };
         Ok(emitted)
     }
 
@@ -275,6 +248,106 @@ impl OptionsReplayFeed {
             file: value.clone(),
             row: value.clone(),
             data: value,
+        }
+    }
+}
+
+/// Day-bounded event stream backing [`OptionsReplayFeed::stream`].
+struct EventStream<'a> {
+    feed: &'a mut OptionsReplayFeed,
+    session_index: usize,
+    current: std::vec::IntoIter<MarketEvent>,
+    file_digest: Sha256,
+    row_digest: Sha256,
+    data_digest: Sha256,
+    finished: bool,
+}
+
+impl<'a> EventStream<'a> {
+    fn new(feed: &'a mut OptionsReplayFeed) -> Self {
+        let mut file_digest = Sha256::new();
+        let mut row_digest = Sha256::new();
+        let mut data_digest = Sha256::new();
+        for frame in feed.header_frames() {
+            update_frame(&mut file_digest, &frame);
+            update_frame(&mut row_digest, &frame);
+            update_frame(&mut data_digest, &frame);
+        }
+        Self {
+            feed,
+            session_index: 0,
+            current: Vec::new().into_iter(),
+            file_digest,
+            row_digest,
+            data_digest,
+            finished: false,
+        }
+    }
+
+    fn finish(&mut self) {
+        self.finished = true;
+        self.feed.last_fingerprints = ReplayFingerprints {
+            file: hex_string(&self.file_digest.clone().finalize()),
+            row: hex_string(&self.row_digest.clone().finalize()),
+            data: hex_string(&self.data_digest.clone().finalize()),
+        };
+    }
+}
+
+impl Iterator for EventStream<'_> {
+    type Item = Result<MarketEvent, DataError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        loop {
+            if let Some(event) = self.current.next() {
+                return Some(Ok(event));
+            }
+            if self.session_index >= self.feed.sessions.len() {
+                self.finish();
+                return None;
+            }
+            let session = self.feed.sessions[self.session_index];
+            self.session_index += 1;
+            let mut plan = match self.feed.plan(&session) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    self.finished = true;
+                    return Some(Err(error));
+                }
+            };
+            let events = match plan.feed.events() {
+                Ok(events) => events,
+                Err(error) => {
+                    self.finished = true;
+                    return Some(Err(error));
+                }
+            };
+            let fingerprints = plan.feed.fingerprints().clone();
+            update_frame(
+                &mut self.file_digest,
+                &canonical_fields(&[
+                    session.session_date.isoformat(),
+                    fingerprints.file_fingerprint().to_string(),
+                ]),
+            );
+            update_frame(
+                &mut self.row_digest,
+                &canonical_fields(&[
+                    session.session_date.isoformat(),
+                    fingerprints.row_fingerprint().to_string(),
+                ]),
+            );
+            update_frame(
+                &mut self.data_digest,
+                &canonical_fields(&[
+                    session.session_date.isoformat(),
+                    fingerprints.data_fingerprint().to_string(),
+                ]),
+            );
+            self.current = events.into_iter();
         }
     }
 }
