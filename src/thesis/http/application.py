@@ -14,7 +14,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from secrets import compare_digest
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -42,11 +42,15 @@ from thesis.http.streaming import (
     StreamSleeper,
     create_streaming_router,
 )
+from thesis.http.validation import create_validation_router
 from thesis.http.workspaces import (
     WorkspaceDataBundle,
     create_workspaces_router,
 )
 from thesis.screening.service import ScreenerService
+
+if TYPE_CHECKING:
+    from thesis.workflows.runtime import WorkflowRuntime
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -230,6 +234,7 @@ def create_app(
     stream_max_poll_cycles: int | None = None,
     screener_service: ScreenerService | None = None,
     workspace_data: WorkspaceDataBundle | None = None,
+    workflow_runtime: WorkflowRuntime | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
@@ -284,6 +289,8 @@ def create_app(
             application.state.harness_boundary = workspace_data.harness
     if screener_service is not None:
         application.state.screener_service = screener_service
+    if workflow_runtime is not None:
+        application.state.workflow_runtime = workflow_runtime
 
     @application.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
@@ -382,6 +389,10 @@ def create_app(
     )
     application.include_router(
         create_knowledge_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_validation_router(),
         dependencies=[Depends(authenticator)],
     )
     return application
