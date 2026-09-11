@@ -15,7 +15,7 @@
 # {
 #   "testRunPath": "C:/.../.cleo/test-runs/rust-workspace.json",   # optional
 #   "tasks": [
-#     { "id": "T251", "commit": "<full-or-short-sha>", "files": ["rust/..."] }
+#     { "id": "T251", "commit": "<full-or-short-sha>", "files": ["src/harness/rust/..."] }
 #   ]
 # }
 # `files` is optional; when omitted it is derived from `git show --name-only`.

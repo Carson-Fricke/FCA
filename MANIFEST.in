@@ -3,8 +3,8 @@
 # that builds its cdylib must travel with the sdist so a wheel can be rebuilt
 # from it.
 include setup.py
-include rust/Cargo.toml
-include rust/Cargo.lock
-include rust/rust-toolchain.toml
-recursive-include rust/crates *.rs
-recursive-include rust/crates Cargo.toml
+include src/harness/rust/Cargo.toml
+include src/harness/rust/Cargo.lock
+include src/harness/rust/rust-toolchain.toml
+recursive-include src/harness/rust/crates *.rs
+recursive-include src/harness/rust/crates Cargo.toml

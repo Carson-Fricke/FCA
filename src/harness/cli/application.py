@@ -31,8 +31,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the quant-harness command line.
 
     When the Rust entrypoint flip is enabled, the facade dispatches its
-    complete process groups (``api`` and ``mcp``) to the Rust ``harness``
-    binary; every other group stays on the Python engine.
+    complete process groups (``api``, ``mcp``, and ``backtest-job``) to the
+    Rust ``harness`` binary; every other group stays on the Python engine.
     """
     from harness.cli.rust_entrypoints import exec_rust_facade, resolved_argv
 

@@ -8,13 +8,13 @@ FROM rust:bookworm AS rust
 # /opt/rust and the harness entrypoint binaries used by the environment-gated
 # flip. The Python builder stage reuses the same toolchain to compile the PyO3
 # extension.
-WORKDIR /build/rust
+WORKDIR /build/src/harness/rust
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY rust/ ./rust/
+COPY src/harness/rust/ ./src/harness/rust/
 
 RUN cargo test --locked --workspace \
     && cargo build --locked --release -p harness-native \
@@ -47,7 +47,6 @@ COPY pyproject.toml uv.lock setup.py ./
 RUN uv sync --locked --no-dev --no-install-project
 
 COPY src/ ./src/
-COPY rust/ ./rust/
 # The strategy packages live at the repository root, outside src/: the
 # packaged wheel must include them or deployed backtests cannot import
 # configured strategy implementations (e.g. strategies.harness_examples).
@@ -73,14 +72,14 @@ RUN groupadd --gid 10001 lake \
 
 COPY --from=builder /opt/venv /opt/venv
 # The Rust native core shared library consumed by the ctypes loader.
-COPY --from=rust /build/rust/target/release/libharness_native.so /opt/rust/libharness_native.so
+COPY --from=rust /build/src/harness/rust/target/release/libharness_native.so /opt/rust/libharness_native.so
 # The Rust interface binaries for the environment-gated entrypoint flip
 # (`HARNESS_USE_RUST_ENTRYPOINTS`); discovery uses HARNESS_RUST_BINARY_DIR.
 COPY --from=rust \
-    /build/rust/target/release/harness \
-    /build/rust/target/release/api \
-    /build/rust/target/release/backtest-job \
-    /build/rust/target/release/mcp \
+    /build/src/harness/rust/target/release/harness \
+    /build/src/harness/rust/target/release/api \
+    /build/src/harness/rust/target/release/backtest-job \
+    /build/src/harness/rust/target/release/mcp \
     /opt/rust/bin/
 COPY config/ /app/config/
 

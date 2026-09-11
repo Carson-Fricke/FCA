@@ -1,6 +1,6 @@
 """Smoke test for the PyO3 bridge exposed as ``harness._rust``.
 
-The extension module is compiled from ``rust/crates/harness-py`` by the
+The extension module is compiled from ``src/harness/rust/crates/harness-py`` by the
 setuptools-rust build backend configured in ``setup.py``. It is additive: the
 legacy ctypes loader in ``harness._native`` is unaffected and remains the only
 supported path to the pinned Zig native core.

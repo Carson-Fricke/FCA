@@ -3,7 +3,7 @@
 This module is the Rust-backed sibling of the Zig parity oracle
 (:mod:`harness.runtime.zig_backtest`).  It drives the staged Rust core through
 the PyO3 extension module :mod:`harness._rust` — compiled from
-``rust/crates/harness-py`` by the setuptools-rust build backend — and compares
+``src/harness/rust/crates/harness-py`` by the setuptools-rust build backend — and compares
 the canonical determinism artifacts the core produces against committed golden
 artifacts byte-for-byte.  A mismatch raises :class:`RustOracleError` carrying an
 :class:`ArtifactDiffReport` that names every differing artifact, the first
@@ -63,7 +63,7 @@ DEFAULT_RUST_ORACLE_SEED: Final = 20_260_910
 
 _BUILD_HINT: Final = (
     "The Rust core extension `harness._rust` is built from "
-    "`rust/crates/harness-py` by the setuptools-rust build backend. Run "
+    "`src/harness/rust/crates/harness-py` by the setuptools-rust build backend. Run "
     "`uv sync --locked --extra dev` (or `uv run --extra dev ...`) from the "
     "repository root to compile it, then retry."
 )
