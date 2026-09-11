@@ -1,16 +1,13 @@
-"""Historical and live market-data capabilities."""
+"""Point-in-time market-data boundaries and views retained with the plugin surface.
 
-from harness.data.alpaca_ws import (
-    AlpacaCryptoInbox,
-    AlpacaCryptoSubscription,
-    AlpacaCryptoWebSocketFeed,
-    AlpacaSipInbox,
-    AlpacaSipSubscription,
-    AlpacaSipWebSocketFeed,
-    AlpacaWebSocketProtocolError,
-    AsyncWebSocketConnection,
-    AsyncWebSocketTransport,
-)
+The native Rust engine owns live and replay ingestion, so only the market-data
+views the surviving Python products and the strategy plugin surface consume
+remain here: exact OHLCV bar derivation, the engine-clocked history and
+strategy-history capabilities, derived listing lifecycle events, the
+point-in-time option contract universe with its DTE/strike/moneyness filters,
+the SecurityMaster listings view, and the composite universe view.
+"""
+
 from harness.data.bars import (
     OHLCV,
     Bar,
@@ -21,17 +18,6 @@ from harness.data.bars import (
     bars_from_trades,
     build_bars,
     interval_delta,
-)
-from harness.data.gap_healing import (
-    CoverageCalendar,
-    CoverageGap,
-    HealingAction,
-    HealingStatus,
-    LakeGapBackfiller,
-    LakeSessionCalendar,
-    LiveGapDetector,
-    LiveGapHealer,
-    UncoveredGapError,
 )
 from harness.data.history import (
     DEFAULT_HISTORY_CAPACITY,
@@ -44,22 +30,6 @@ from harness.data.history import (
     from_nanos,
     to_nanos,
 )
-from harness.data.lake import (
-    DEFAULT_EGRESS_WARNING_THRESHOLD_BYTES,
-    EnsureJobError,
-    IncompleteMarketDataError,
-    LakeClientPort,
-    LakeRequest,
-    LoadedMarketData,
-    MarketLake,
-    MarketLakeAdapter,
-    MarketLakeError,
-    MarketLakeLoad,
-    MarketLakeRequest,
-    ProjectedEgressWarning,
-    UnsupportedMarketDataError,
-    resolve_sessions,
-)
 from harness.data.listing_events import (
     CorporateActionEvent,
     CorporateActionKind,
@@ -68,28 +38,6 @@ from harness.data.listing_events import (
     PessimisticDelistingSettlement,
     RenameEvent,
     UnknownDelistingPriceError,
-)
-from harness.data.live_recorder import (
-    LiveObjectStore,
-    LiveRecorder,
-    LiveRecorderConfig,
-    LocalLiveObjectStore,
-    SessionResolver,
-    UtcDaySessionResolver,
-    XnysSessionResolver,
-    live_part_path,
-)
-from harness.data.opra_ws import (
-    AlpacaOpraInbox,
-    AlpacaOpraSubscription,
-    AlpacaOpraWebSocketFeed,
-    OpraRotationDelta,
-    rotation_delta,
-)
-from harness.data.options_replay import (
-    OptionPartitionPort,
-    OptionsDayPlan,
-    OptionsReplayFeed,
 )
 from harness.data.options_universe import (
     ContractsCatalogPort,
@@ -101,13 +49,6 @@ from harness.data.options_universe import (
     SelectionMode,
     StrikeFilter,
     UnderlyingView,
-)
-from harness.data.replay import (
-    LakeReplayFeed,
-    MarketEvent,
-    ParquetReader,
-    ReplayFingerprints,
-    ReplayStream,
 )
 from harness.data.security_master import (
     ListingsCatalogPort,
@@ -126,102 +67,49 @@ from harness.data.universe_view import (
 )
 
 __all__ = (
-    "AlpacaCryptoInbox",
-    "AlpacaCryptoSubscription",
-    "AlpacaCryptoWebSocketFeed",
-    "AlpacaSipInbox",
-    "AlpacaSipSubscription",
-    "AlpacaSipWebSocketFeed",
-    "AlpacaWebSocketProtocolError",
     "Bar",
     "BarAggregator",
     "BarBuilder",
-    "AsyncWebSocketConnection",
-    "AsyncWebSocketTransport",
     "ContractsCatalogPort",
     "CorporateActionEvent",
     "CorporateActionKind",
-    "CoverageCalendar",
-    "CoverageGap",
-    "DEFAULT_EGRESS_WARNING_THRESHOLD_BYTES",
     "DEFAULT_HISTORY_CAPACITY",
     "DelistingEvent",
     "DteFilter",
-    "EnsureJobError",
     "EquityListingUniverse",
     "HistoryAggregate",
     "HistoricalView",
     "HistorySubscription",
-    "HealingAction",
-    "HealingStatus",
-    "IncompleteMarketDataError",
-    "LakeClientPort",
-    "LakeGapBackfiller",
-    "LakeRequest",
-    "LakeSessionCalendar",
-    "LoadedMarketData",
-    "LakeReplayFeed",
-    "LiveObjectStore",
-    "LiveGapDetector",
-    "LiveGapHealer",
-    "LiveRecorder",
-    "LiveRecorderConfig",
     "ListingsCatalogPort",
     "ListingEventDeriver",
-    "LocalLiveObjectStore",
     "LookaheadError",
-    "MarketEvent",
-    "MarketLake",
-    "MarketLakeAdapter",
-    "MarketLakeError",
-    "MarketLakeLoad",
-    "MarketLakeRequest",
-    "MoneynessFilter",
     "MemberKind",
+    "MoneynessFilter",
     "Nanos",
     "OHLCV",
     "OHLCVBar",
-    "OptionPartitionPort",
-    "OptionsDayPlan",
-    "OptionsReplayFeed",
+    "OptionContractUniverse",
     "OptionUniverseSnapshot",
     "OptionUniverseSpec",
     "OptionUniverseView",
-    "OptionContractUniverse",
     "PessimisticDelistingSettlement",
-    "AlpacaOpraInbox",
-    "AlpacaOpraSubscription",
-    "AlpacaOpraWebSocketFeed",
-    "OpraRotationDelta",
-    "ProjectedEgressWarning",
-    "ParquetReader",
-    "ReplayFingerprints",
-    "ReplayStream",
     "RenameEvent",
-    "SelectionMode",
-    "SessionResolver",
     "SecurityMasterView",
     "SecuritySnapshot",
+    "SelectionMode",
     "StrikeFilter",
     "StrategyHistory",
+    "UnderlyingView",
     "UniverseComposition",
     "UniverseMember",
     "UniverseSnapshot",
     "UniverseSource",
     "UniverseView",
     "UnknownDelistingPriceError",
-    "UnsupportedMarketDataError",
-    "UnderlyingView",
-    "UncoveredGapError",
-    "UtcDaySessionResolver",
-    "XnysSessionResolver",
     "aggregate_trades",
     "bars_from_trades",
     "build_bars",
     "from_nanos",
     "interval_delta",
-    "live_part_path",
-    "resolve_sessions",
-    "rotation_delta",
     "to_nanos",
 )

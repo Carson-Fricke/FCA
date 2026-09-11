@@ -7,30 +7,12 @@ CAPABILITIES = (
     "configuration",
     "core",
     "data",
-    "fills",
-    "oms",
-    "portfolio",
-    "results",
-    "risk",
-    "runtime",
+    "indicators",
+    "screening",
     "strategy",
     "testing",
-    "venues",
 )
-IMPLEMENTED_CAPABILITIES = {
-    "configuration",
-    "core",
-    "data",
-    "fills",
-    "oms",
-    "portfolio",
-    "results",
-    "risk",
-    "runtime",
-    "strategy",
-    "testing",
-    "venues",
-}
+IMPLEMENTED_CAPABILITIES = set(CAPABILITIES)
 
 
 def test_product_and_capability_facades_import() -> None:

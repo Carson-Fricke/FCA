@@ -18,8 +18,7 @@ from harness.core.types import (
     SingleLegOrder,
     TimeInForce,
 )
-from harness.strategy.context import StrategyContext
-from harness.strategy.contracts import Strategy
+from harness.strategy.contracts import Strategy, StrategyContext
 
 
 def _utc_close_time(value: datetime | str) -> datetime:

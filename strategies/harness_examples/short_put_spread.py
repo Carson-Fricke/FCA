@@ -79,8 +79,7 @@ from harness.core.types import (
     TimeInForce,
 )
 from harness.data.options_universe import OptionUniverseSnapshot
-from harness.strategy.context import StrategyContext
-from harness.strategy.contracts import Strategy
+from harness.strategy.contracts import Strategy, StrategyContext
 
 if TYPE_CHECKING:
     from lake.catalog.models import ContractRecord

@@ -3,8 +3,7 @@
 import socket
 from urllib.request import urlopen
 
-from harness.strategy.context import StrategyContext
-from harness.strategy.contracts import Strategy
+from harness.strategy.contracts import Strategy, StrategyContext
 
 FEED_URL = "https://example.invalid/feed"
 

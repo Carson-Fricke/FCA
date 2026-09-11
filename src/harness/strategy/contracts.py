@@ -13,7 +13,8 @@ exactly as portfolio mutation precedes ``on_fill``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from collections.abc import Mapping, MutableMapping
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 from harness.core.types import (
     AccountSnapshot,
@@ -29,7 +30,6 @@ from harness.core.types import (
 
 if TYPE_CHECKING:
     from harness.data.listing_events import CorporateActionEvent
-    from harness.strategy.context import StrategyContext
 
 
 CALLBACK_ORDER = (
@@ -45,6 +45,83 @@ CALLBACK_ORDER = (
     "on_corporate_action",
     "on_stop",
 )
+
+
+@runtime_checkable
+class StrategyContext(Protocol):
+    """The constrained capabilities a strategy observes through ``on_start``.
+
+    The protocol is the plugin contract: whether the engine supplies the
+    Python :class:`~harness.strategy.context.StrategyContext` (replay, paper,
+    live) or the native Rust context handed across PyO3, a strategy only
+    depends on this structural surface. Every member is duck-typed, so the
+    engine can own a context natively without the strategy importing engine
+    types.
+    """
+
+    @property
+    def book_id(self) -> str:
+        """The strategy's virtual book identifier."""
+        ...
+
+    @property
+    def clock(self) -> Any:
+        """The read-only clock capability (``now()``)."""
+        ...
+
+    @property
+    def universe(self) -> Any:
+        """The immutable canonical symbol universe."""
+        ...
+
+    @property
+    def books(self) -> Any:
+        """The read-only strategy book and account view."""
+        ...
+
+    @property
+    def orders(self) -> Any:
+        """The one-way order-submission boundary."""
+        ...
+
+    @property
+    def data(self) -> Any:
+        """The opaque, now-anchored point-in-time data capability."""
+        ...
+
+    @property
+    def history(self) -> Any:
+        """Alias for the point-in-time data capability."""
+        ...
+
+    @property
+    def state(self) -> MutableMapping[str, object]:
+        """Mutable strategy-local deterministic state."""
+        ...
+
+    @property
+    def random(self) -> Any:
+        """The per-context seeded random source."""
+        ...
+
+    @property
+    def log(self) -> Any:
+        """The structured logging sink."""
+        ...
+
+    @property
+    def emissions(self) -> Any:
+        """The structured emission sink."""
+        ...
+
+    def emit(
+        self,
+        name: str,
+        fields: Mapping[str, object] | None = None,
+        **values: object,
+    ) -> None:
+        """Emit one structured signal through the injected sink."""
+        ...
 
 
 class Strategy:
@@ -104,4 +181,4 @@ class Strategy:
         """Finalize strategy state after the final event."""
 
 
-__all__ = ["CALLBACK_ORDER", "Strategy"]
+__all__ = ["CALLBACK_ORDER", "Strategy", "StrategyContext"]

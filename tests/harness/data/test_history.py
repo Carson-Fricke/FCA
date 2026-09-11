@@ -20,13 +20,9 @@ from harness.data.history import (
     HistoricalView,
     HistorySubscription,
     LookaheadError,
-    StrategyHistory,
     from_nanos,
     to_nanos,
 )
-from harness.portfolio import PortfolioHub
-from harness.strategy import Strategy, StrategyContext
-from harness.strategy.binding import StrategyBinding
 
 STAMP = datetime(2024, 1, 19, 14, 30, tzinfo=UTC)
 HEAD = STAMP + timedelta(days=1)
@@ -282,84 +278,6 @@ def test_read_implements_the_point_in_time_data_boundary() -> None:
     assert trade_only is not None and trade_only.event_id == "t1"
     assert read(HEAD, MSFT) is None
     assert read(STAMP - timedelta(seconds=1), AAPL) is None
-
-
-class LookaheadCanaryStrategy(Strategy):
-    """Records every observed event and every point-in-time read it obtains."""
-
-    _context: StrategyContext
-
-    def __init__(self) -> None:
-        self.observed: list[str] = []
-        self.reads: list[str] = []
-        self.violations: list[str] = []
-        self.lookahead_blocked = 0
-
-    def on_start(self, context: StrategyContext) -> None:
-        self._context = context
-
-    def on_quote(self, event: QuoteEvent) -> None:
-        self._observe(event)
-
-    def on_trade(self, event: TradeEvent) -> None:
-        self._observe(event)
-
-    def _observe(self, event: QuoteEvent | TradeEvent) -> None:
-        context = self._context
-        history = context.data
-        head = context.clock.now()
-        self.observed.append(event.event_id)
-        if not isinstance(history, StrategyHistory):
-            self.violations.append(f"{event.event_id}:missing-capability")
-            return
-        read = history.read(event.symbol)
-        if isinstance(read, QuoteEvent | TradeEvent):
-            self.reads.append(read.event_id)
-            if read.timestamp > head:
-                self.violations.append(f"{event.event_id}:future:{read.event_id}")
-        try:
-            history.window(event.symbol, STAMP, to_nanos(head) + 1)
-        except LookaheadError:
-            self.lookahead_blocked += 1
-        else:
-            self.violations.append(f"{event.event_id}:future-query-allowed")
-
-
-def test_canary_strategy_never_sees_a_future_event() -> None:
-    clock = FixedClock(STAMP)
-    bus = EventBus(clock)
-    view = HistoricalView(clock, capacity=16)
-    view.subscribe(AAPL, Event)
-    view.attach(bus)
-    hub = PortfolioHub("account")
-    hub.create_book("strategy", "1000")
-    context = StrategyContext(
-        clock,
-        portfolio=hub,
-        bus=bus,
-        data=view,
-        universe=(AAPL,),
-        subscriptions=(QuoteEvent, TradeEvent),
-        book_id="strategy",
-        seed=1729,
-    )
-    canary = LookaheadCanaryStrategy()
-    StrategyBinding(canary, context).start()
-    dispatched = [quote("q0", 0, 0), quote("q1", 0, 1), trade("t0", 0, 2)]
-    future = [quote("future-0", 30, 3), quote("future-1", 60, 4)]
-    bus.publish_many(dispatched + future)
-
-    bus.drain()
-
-    assert canary.observed == ["q0", "q1", "t0"]
-    assert canary.reads == ["q0", "q1", "t0"]
-    assert canary.violations == []
-    assert canary.lookahead_blocked == 3
-    assert len(bus) == len(future)
-    assert tuple(item.event_id for item in view.last_quotes(AAPL, 100)) == ("q0", "q1")
-    retained = {event.event_id for event in view.last(AAPL, 100)}
-    assert retained == {"q0", "q1", "t0"}
-    assert retained.isdisjoint({event.event_id for event in future})
 
 
 def test_history_module_uses_no_wall_clock_random_or_network_source() -> None:

@@ -2,12 +2,11 @@ FROM ghcr.io/astral-sh/uv:0.12.6 AS uv
 
 FROM rust:bookworm AS rust
 
-# The Rust workspace is the staged port of the quant-harness native core and
-# its interface processes. This stage compiles and tests it, then produces the
-# loadable shared library (harness-native) that the runtime image carries under
-# /opt/rust and the harness entrypoint binaries used by the environment-gated
-# flip. The Python builder stage reuses the same toolchain to compile the PyO3
-# extension.
+# The Rust workspace is the quant-harness engine and its process interfaces.
+# This stage compiles and tests it, then produces the loadable shared library
+# (harness-native) that the runtime image carries under /opt/rust and the
+# harness entrypoint binaries the Python console-script shims exec. The Python
+# builder stage reuses the same toolchain to compile the PyO3 extension.
 WORKDIR /build/src/harness/rust
 
 RUN apt-get update \
@@ -18,7 +17,8 @@ COPY src/harness/rust/ ./src/harness/rust/
 
 RUN cargo test --locked --workspace \
     && cargo build --locked --release -p harness-native \
-    && cargo build --locked --release -p harness-api --bins
+    && cargo build --locked --release -p harness-api --bins \
+    && cargo build --locked --release -p harness-live --bin trader
 
 FROM python:3.12-slim AS builder
 
@@ -73,13 +73,16 @@ RUN groupadd --gid 10001 lake \
 COPY --from=builder /opt/venv /opt/venv
 # The Rust native core shared library consumed by the ctypes loader.
 COPY --from=rust /build/src/harness/rust/target/release/libharness_native.so /opt/rust/libharness_native.so
-# The Rust interface binaries for the environment-gated entrypoint flip
-# (`HARNESS_USE_RUST_ENTRYPOINTS`); discovery uses HARNESS_RUST_BINARY_DIR.
+# The Rust harness process binaries. The Python console scripts are thin shims
+# that exec these binaries; discovery uses HARNESS_RUST_BINARY_DIR. The
+# `trader` binary is the deferred live-core session demo (the configured
+# supervision runner is not yet ported).
 COPY --from=rust \
     /build/src/harness/rust/target/release/harness \
     /build/src/harness/rust/target/release/api \
     /build/src/harness/rust/target/release/backtest-job \
     /build/src/harness/rust/target/release/mcp \
+    /build/src/harness/rust/target/release/trader \
     /opt/rust/bin/
 COPY config/ /app/config/
 

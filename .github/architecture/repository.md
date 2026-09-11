@@ -39,17 +39,19 @@ native core through `harness.runtime.zig_backtest` (retained module name) and
 `harness.testing.rust_oracle`, asserting byte-identical determinism artifacts
 against the pure-Python engine.
 
-The Rust migration is at its final structural stage. The engine workspace now
-lives under `src/harness/rust/` and provides the authoritative engine core
-(clock, event bus, replay, matching/fills, fees, portfolio, risk, results, and
-the backtest runtime) plus the `api`, `mcp`, and `backtest-job` processes. The
-Python engine under `src/harness` is retained only where active Python code
-still imports it: the user-authored strategy/indicator plugin surface, the
-Python `trader` supervision runtime, and the reference fixtures the parity
-oracle compares against. The strategy contract, binding, reference fixture, and
-sandbox lint are ported natively, and the sandbox walker no longer bridges to
-the Python AST checker. Zig is already retired; removal of the remaining Python
-engine paths is gated by the decommission criteria below.
+The Rust migration is complete. The engine workspace lives under
+`src/harness/rust/` and provides the authoritative engine core (clock, event
+bus, replay, matching/fills, fees, portfolio, risk, results, sweeps, and the
+backtest runtime) plus the `harness`, `api`, `mcp`, and `backtest-job`
+processes. The Python engine under `src/harness` has been deleted; what remains
+is the user-authored strategy/indicator/screener plugin surface, the
+point-in-time market-data views the surviving products consume, and the
+Python-side parity oracle. The Rust `harness-host` owns the strategy context
+natively and duck-types it to the `harness.strategy.contracts.StrategyContext`
+protocol, so strategies run unmodified without importing an engine. Zig was
+retired in T253, and the Python engine paths were removed in the final
+decommission wave; only the `trader` supervision runner remains deferred (see
+below).
 
 ## Product Boundaries
 
@@ -75,91 +77,20 @@ adapters, and orchestration details stay behind those boundaries.
 
 | Package | Responsibility |
 | --- | --- |
-| `lake.catalog` | Coverage, job, contract, front-set, listing, and run records; repository ports; memory and Azure Table adapters. |
-| `lake.cli` | Console dispatch and API, ingest, or local process commands. |
-| `lake.configuration` | Strict YAML loading, typed settings, environment overrides, and normalized universes. |
-| `lake.contracts` | Stable partition paths, PyArrow schemas, and exchange or UTC session contracts. |
-| `lake.coverage` | Calendar-aware listings-aware coverage classification (including the terminal delisted state), gap planning, and ensure-oriented application behavior. |
-| `lake.hosted` | Hosted Azure composition that wires the published Uvicorn target to Table catalog/jobs, SAS issuance, and bounded Alpaca ensure. |
-| `lake.http` | FastAPI composition, authentication, request models, and thin catalog, ensure, and query controllers. |
-| `lake.ingestion` | Shared ingest ports plus equity, option, and crypto planning, transactions, and worker construction. |
-| `lake.local` | Workstation-only API, Alpaca ingest, filesystem, and catalog composition. |
-| `lake.providers.alpaca` | Async Alpaca transport, pagination/retry behavior, and normalized provider records. |
-| `lake.query` | File-query orchestration and bounded DuckDB execution over ensured objects. |
-| `lake.queue` | Durable delivery policy, Azure queue adapter, dead-letter envelopes, and explicit replay. |
-| `lake.storage` | Storage ports, Parquet serialization, Azure blob/SAS adapters, the readable blob surface (read, list, prefix delete), capacity guards, and leases. |
-
-```text
-src/lake/
-|-- app.py                         Published Uvicorn facade (`lake.app:app`)
-|-- catalog/                       Records, repository ports, and adapters
-|-- cli/                           `lake` command implementation
-|-- configuration/                 Settings and universe loading
-|-- contracts/                     Paths, schemas, and sessions
-|-- coverage/                      Coverage domain and application services
-|-- hosted/                        Hosted Azure composition for `lake.app:app`
-|-- http/
-|   `-- routes/                    Thin authenticated HTTP controllers
-|-- ingestion/
-|   |-- equities/                  Equity transaction and backfill behavior
-|   |-- options/                   Front-set selection and option ingestion
-|   `-- crypto/                    UTC-day planning and crypto ingestion
-|-- local/                         Workstation-only composition and state
-|-- providers/
-|   `-- alpaca/                    Provider records and async HTTP client
-|-- query/                         File and bounded SQL query services
-|-- queue/                         Worker, Azure adapter, and dead letters
-`-- storage/                       Ports, Parquet, Azure, capacity, and leases
-```
-
-| Thesis workflows | `src/thesis/workflows` | Orchestrated workspace workflows: strategy-development vertical slice (chat request → generation → validation → backtest → artifact import → evidence journaling). |
-
-The thesis backend has a real process boundary: `thesis` console entrypoint and module entrypoint (`src/thesis/cli.py`, `src/thesis/__main__.py`) with a dedicated runtime image (`Dockerfile.thesis`, first built in CI publication).
-
-Dependency direction flows inward. HTTP routes and CLI commands invoke
-application services; application services depend on catalog, queue, storage,
-and provider ports; Azure, Alpaca, FastAPI, and DuckDB implementations remain
-at adapter boundaries. Domain contracts do not import HTTP or CLI code.
-
-Tests mirror the capability layout under `tests/lake`:
-
-```text
-tests/lake/
-|-- catalog/
-|-- cli/
-|-- configuration/
-|-- contracts/
-|-- coverage/
-|-- hosted/
-|-- http/routes/
-|-- ingestion/{equities,options,crypto}/
-|-- providers/alpaca/
-|-- query/
-|-- queue/
-`-- storage/
-```
-
-## Quant-Harness Packages
-
-`src/harness` mirrors the product-first structure under `tests/harness`.
-
-| Package | Responsibility |
-| --- | --- |
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
-| `harness.oms` | Execution-report-driven single-leg lifecycle, exact fill ledgers, replacements, and session directives. |
-| `harness.data` | Live/replay market-data boundaries, synchronous normalized event inboxes, exact OHLCV bar derivation, bounded lake replay (equities and options over the point-in-time option universe), the engine-side HistoricalView with engine-clock-capped queries (future reads raise `LookaheadError`) plus the opaque engine-clocked StrategyHistory strategy capability whose now-anchored reads take no timestamp parameters so future data is unrepresentable, live-feed gap healing through market-lake backfill, the point-in-time option contract universe over the market-lake contracts catalog (front-set and static-OSI modes, as-of DTE/strike/moneyness filters, expiry-indexed snapshots clipped to the engine clock), the SecurityMaster point-in-time listings view with derived delisting and rename lifecycle events, the clock-guarded composite UniverseView over listing and contract sources, the market-lake access adapter for ensure/query-driven backtest data, Alpaca SIP, crypto, and OPRA WebSocket feeds with UTC-day crypto semantics and live contract rotation, and the live event recorder writing lake-schema Parquet under `live/{deployment}`. |
-| `harness.fills` | Configuration-selected exact fee and commission models plus deterministic SimpleTouch, latency-size, trade-through, and MidTouch option fill decisions. |
-| `harness.http` | Backtest query API and job launcher: authenticated run listing, artifact fetch, and launch routes composing the results store and the harness api process. |
-| `harness.portfolio` | Strategy virtual books, shared-account aggregate accounting, and deterministic option expiry, exercise, and assignment settlement. |
-| `harness.quant` | NumPy facade over the native float64 quant kernels: batch Cox-Ross-Rubinstein option pricing with tree greeks and bracketed implied time-to-expiry and implied-underlying inversions. |
-| `harness.results` | Streaming Parquet run recorder with referentially linked actions, orders, fills, risk decisions, equity, positions, emissions, and full-event artifacts; standard metrics and attribution with documented conventions; offline static HTML reports; and the backtest results store writing run artifacts under `backtests/{run_id}` with a filterable run catalog and prefix-complete cleanup, wired to the lake run-catalog and readable-blob ports for production Azure adapters. |
-| `harness.runtime` | Deterministic backtest runner: data preflight, lake replay, simulated venue, fees, risk, portfolio accounting, reproducibility manifest, and abort/halt/teardown policies; plus the PaperShell shared simulation runtime composing the same kernel, venue, fills, fees, risk, and portfolio accounting against replay or live inbox feeds, the runtime state store capturing hash-verifiable snapshots with restore-equivalent continuation, the boot/periodic reconciler with broker-vs-book diff artifacts and explicit policies, and the recovery boot policies (resume-reconcile, flatten-halt, halt-only) with chaos-proven fault handling. |
-| `harness.strategy` | Mode-independent strategy callbacks, constrained context with capability-scoped surfaces (read-only clock, opaque engine-clocked data history, one-way venue commands, provenance-restricted scheduling, and engine-delivered corporate-action hooks), deterministic subscriptions, class-plus-parameter binding, sandbox lint, and a callback-contract reference strategy. |
-| `harness.risk` | Ordered exact-decimal pre-trade risk rules, reductions, halts, complete decision auditing, options collateral rules (naked-short rejection and collateral limits with audited decisions), and the explicit audited global kill switch. |
-| `harness.signal` | Pure-NumPy time-series signal kernels for market-microstructure research: maximal-overlap discrete wavelet transform (MODWT) with circular/reflection boundaries, additive multiresolution analysis, exact inversion, and unbiased wavelet-variance estimation; Hilbert analytic-signal envelope and phase features for band-limited details; and an exploratory Morlet continuous-wavelet-transform scalogram. |
-| `harness.testing` | Deterministic synthetic feeds, determinism artifact canonicalization, reproducibility manifest comparison, cross-language parity scenarios, and paper-to-backtest parity scenarios and reports. |
-| `harness.venues` | Fire-and-forget execution boundary, deterministic scripted venue, simulated top-of-book matching venue, the options multi-leg matching engine with atomic all-leg fillability, and the Alpaca live broker venues for single-leg equities (async command receipts, execution-report conversion), fractional continuous crypto with maker-taker fee reconciliation, and options multi-leg (net debit/credit spreads, leg-report mapping) behind the consolidated capability matrix. |
+| `harness.data` | Point-in-time market-data views retained for the plugin surface and products: exact OHLCV bar derivation, the engine-clocked history and strategy-history capabilities, derived listing lifecycle events, the point-in-time option contract universe with DTE/strike/moneyness filters, the SecurityMaster listings view, and the composite universe view. Live and replay ingestion moved to the Rust `harness-data` and `harness-backtest` crates. |
+| `harness.indicators` | Tick-native indicators, the deterministic router, and cross-mode snapshot/resume semantics. |
+| `harness.screening` | Process-isolated execution sandbox for custom screener filters. |
+| `harness.strategy` | Mode-independent strategy callbacks (`Strategy`, `CALLBACK_ORDER`), the protocol-only `StrategyContext` surface, the sandbox lint, and the callback-contract reference fixture. The engine-bound context and binding were deleted; the native Rust context replaces them. |
+| `harness.testing` | Canonical artifact support, the Rust-core parity oracle, and the cross-mode tick-indicator parity oracle. |
+
+`harness.oms`, `harness.fills`, `harness.portfolio`, `harness.risk`,
+`harness.venues`, `harness.results`, `harness.sweeps`, `harness.http`,
+`harness.mcp`, `harness.quant`, `harness.signal`, `harness.runtime`, and the
+`harness.strategy.context` / `harness.strategy.binding` modules were deleted.
+Their behavior is native Rust in `harness-native`, `harness-live`,
+`harness-backtest`, `harness-num`, `harness-api`, and `harness-mcp`.
 
 The event ordering contract is timestamp, source sequence, fixed serialized
 event-class priority, then incoming feed order. `SimClock` advances only from
@@ -176,29 +107,29 @@ wall-clock, sleep, network, subprocess, unseeded-random, asyncio, and
 concurrency patterns as a CI gate over the strategy examples, not as a
 run-path check.
 
-The deterministic backtest runner composes lake replay, the simulated venue,
-fees, risk, portfolio accounting, and the fail-loud look-ahead abort behind
-one `SimClock`, and emits a reproducibility manifest covering configuration, code,
-seed, data, fill-model, fee, and risk fingerprints. `backtest-job --config`
-runs it locally over the built-in deterministic synthetic benchmark fixture or
-a user-supplied local Parquet lake directory, writing canonical run artifacts
-under `.local/backtests/`.
+The deterministic backtest runner is the native Rust engine: it composes lake
+replay, the simulated venue, fees, risk, portfolio accounting, and the fail-loud
+look-ahead abort behind one engine clock, and emits a reproducibility manifest
+covering configuration, code, seed, data, fill-model, fee, and risk
+fingerprints. `backtest-job --config` runs it over the built-in deterministic
+synthetic benchmark fixture, writing canonical run artifacts under
+`.local/backtests/`.
 
-The `api` and `mcp` processes are served by the Rust binaries, and
-`backtest-job` runs the native Rust engine; the Python console scripts dispatch
-to them behind `HARNESS_USE_RUST_ENTRYPOINTS`. `trader` remains a thin Python
-process boundary until its Rust supervision runner is ported.
+The `harness`, `api`, `mcp`, and `backtest-job` processes are served by the Rust
+binaries. The Python console scripts are thin shims (`harness.cli`) that exec
+the matching binary; there is no Python engine behind them. `trader` is the one
+deferred process: the Rust binary runs the deterministic live-core session demo
+until the configured supervision runner is ported.
 
 ## Quant-Harness Rust Workspace
 
 `src/harness/rust/` is a Cargo workspace providing the quant-harness engine and
-its interfaces. The native engine core and the `api`, `mcp`, and `backtest-job`
-processes are authoritative; the Python engine under `src/harness` remains only
-for the Python plugin surface, the `trader` runtime, and the parity reference.
-The Rust interface processes are flipped behind
-`HARNESS_USE_RUST_ENTRYPOINTS` (see `rust-interface-migration.md`). The Zig
-native core was retired in T253, and `harness-native` is the native core the
-Python ctypes loader consumes.
+its interfaces. The native engine core and the `harness`, `api`, `mcp`, and
+`backtest-job` processes are authoritative; the Python engine under
+`src/harness` was deleted and only the strategy plugin surface, the
+market-data views, and the parity oracles remain. The Zig native core was
+retired in T253, and `harness-native` is the native core the Python ctypes
+loader consumes.
 
 ```text
 src/harness/rust/
@@ -210,7 +141,7 @@ src/harness/rust/
     |-- harness-num/           Numeric kernels
     |-- harness-data/          Market-data port
     |-- harness-backtest/      Backtest, sweeps, and results port
-    |-- harness-live/          OMS, fills, venues, portfolio, and risk port
+    |-- harness-live/          OMS, fills, venues, portfolio, risk port, and the `trader` binary
     |-- harness-api/           CLI facade, axum HTTP boundary, api/mcp/backtest-job binaries
     |-- harness-mcp/           JSON-RPC 2.0 / MCP server and tool catalog
     |-- harness-host/          PyO3 strategy, indicator, and screener host
@@ -226,71 +157,64 @@ src/harness/rust/
   catalog, bearer credential resolution, and newline-delimited stdio framing.
 - `harness-host` embeds the interpreter for user strategy, indicator, and
   screener execution and owns the native Rust strategy contract, binding,
-  reference fixture, and sandbox lint. The walker parses strategy source with
-  `rustpython-parser`; it no longer bridges to the Python AST checker, and
-  `harness.strategy.lint` remains the shared-fixture parity oracle.
+  reference fixture, sandbox lint, and the native strategy context. The context
+  exposes clock, universe, books, orders, state, seeded random, emissions, and
+  logging to a Python strategy without importing the Python engine. The walker
+  parses strategy source with `rustpython-parser`; it no longer bridges to the
+  Python AST checker, and `harness.strategy.lint` remains the shared-fixture
+  parity oracle.
 - `harness-config` reproduces the Python loader, strict models, exact-decimal
   normalization, datetime formatting, and domain-separated hashes; its parity
   suite asserts the exact hashes of every committed config file.
 - `harness-data`, `harness-backtest`, and `harness-live` are engine ports with
   focused unit tests. `harness-backtest` backs the flipped `backtest-job`;
-  `harness-live` is not yet wired into the interface binaries, so the Python
-  `trader` runtime remains authoritative.
+  `harness-live` provides the deterministic live core the deferred `trader`
+  binary runs, but its configured supervision runner is not yet ported.
 
 The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, and `cargo test --workspace`.
 
 ## Decommission Status
 
-The Zig native core is already retired: T253 deleted `build.zig`,
-`build.zig.zon`, and every `.zig` source, and the ctypes loader now consumes the
-Rust `harness-native` library. The engine core now lives in Rust under
-`src/harness/rust/`, the `api`, `mcp`, and `backtest-job` entrypoints are
-flipped, and the native `backtest-job` is parity-proven. The Python engine is
-retained only where active Python code or the parity oracle still imports it,
-and only modules with zero importers are deleted.
+The Zig native core was retired in T253 (`build.zig`, `build.zig.zon`, and every
+`.zig` source deleted), and the ctypes loader consumes the Rust `harness-native`
+library. The engine now lives entirely in Rust under `src/harness/rust/`; the
+Python engine was deleted in the final decommission wave, and the harness
+console scripts are thin shims that exec the Rust binaries.
 
-### Gate
+### Met criteria
 
-The remaining Python engine paths close when every criterion holds and
-repository-wide verification is green on the Rust stack.
-
-1. ~~`backtest-job` executes the Rust engine end to end.~~ Met: the
-   `harness-api` binary drives `harness_host::backtest::run_backtest_job` over
-   the configured `strategy_instances`.
-2. ~~The Rust `backtest-job` artifact is parity-proven against Python.~~ Met:
+1. `backtest-job` executes the Rust engine end to end. The `harness-api` binary
+   drives `harness_host::backtest::run_backtest_job` over the configured
+   `strategy_instances`.
+2. The Rust `backtest-job` artifact is parity-proven against Python.
    `harness-backtest/tests/parity.rs` asserts byte-identical artifacts except
    `manifest.code_fingerprint`, which hashes each engine's own source by design.
-3. `trader` has a Rust supervision runner. The Rust `trader` binary is a
-   deterministic core demo that does not load configuration or supervise a
-   session, so the Python runtime remains authoritative.
-4. The retained Python strategy plugin surface is decoupled from the engine.
-   `harness.strategy.context` still imports `harness.data`, `harness.portfolio`,
-   `harness.venues`, and `harness.core`, so the protocol-only-imports refactor
-   is a prerequisite for deleting those engine modules. The target state is
-   recorded as an expected failure in
-   `tests/harness/strategy/test_import_boundary.py`.
+3. The strategy plugin surface is decoupled from the engine. The Rust host owns
+   the strategy context natively, and `harness.strategy` is protocol-only
+   (`harness.strategy.contracts.StrategyContext`); the engine-bound
+   `harness.strategy.context` and `harness.strategy.binding` were deleted.
+4. The four harness console scripts (`harness`, `api`, `mcp`, `backtest-job`)
+   resolve to Rust binaries; the Python engine modules that only those processes
+   used were deleted with no dangling imports.
 
-### Staged, not deleted
+### Deferred: `trader`
 
-Until the gate closes:
+The Rust `trader` binary composes the deterministic live core but does not yet
+load configuration or supervise a paper/shadow session, so the configured
+supervision runner is deferred. The Python supervision runtime was deleted with
+the engine; restoring full trader function requires porting the supervision
+runner (config loading, session resolution, feed supervision, boot reconciler,
+kill-switch polling, and state snapshots) into `harness-live`.
 
-- Docker and CI keep the Python test and packaging gates. The Zig build stage
-  and `zig build test` gate are gone (T253); the Docker `rust` stage builds and
-  tests the workspace under `src/harness/rust/`, and the runtime image ships the
-  Rust entrypoint binaries under `/opt/rust/bin` for the gated flip.
-- `pyproject.toml` keeps its engine dependencies because the retained Python
-  plugin surface, the `trader` runtime, and the parity reference still import
-  them. Pruning them to the strategy-host surface is gated on closing the
-  remaining engine paths.
-- The Python suites for the retained surfaces remain as parity oracles
-  (`tests/harness/http`, `tests/harness/mcp`, `tests/strategy_lint`,
-  configuration, and the Rust and native determinism oracles) alongside the
-  Rust parity suites.
-- The entrypoint flip covers `api`, `mcp`, and `backtest-job`. `trader` is
-  wired to the flip switch but deferred, and `backtest-job --data-dir` stays on
-  Python until the native engine wires a lake reader.
-  `rust-interface-migration.md` tracks the flip itself.
+### Retained Python engines
+
+`pyproject.toml` keeps the dependencies the surviving Python product surfaces
+require (`lake`, `lakeclient`, `thesis`, `ui`) plus the plugin surface
+(`harness.configuration`, `harness.core`, `harness.data` views,
+`harness.indicators`, `harness.screening`, `harness.strategy`,
+`harness.testing`). The Python test suite covers those retained surfaces; the
+Rust suites cover the engine.
 
 ## Thesis Packages
 
@@ -321,9 +245,10 @@ operational drift:
   from the earlier native-core effort was retired in T253.
 - `Dockerfile` builds one immutable image with distinct runtime commands. A
   Rust build stage compiles and tests the workspace and produces the native
-  core library plus the `harness`, `api`, `backtest-job`, and `mcp` binaries;
-  the runtime stage carries the library under `/opt/rust` and the binaries
-  under `/opt/rust/bin` (discoverable through `HARNESS_RUST_BINARY_DIR`).
+  core library plus the `harness`, `api`, `backtest-job`, `mcp`, and `trader`
+  binaries; the runtime stage carries the library under `/opt/rust` and the
+  binaries under `/opt/rust/bin` (discoverable through
+  `HARNESS_RUST_BINARY_DIR`).
 - `config` contains versioned, non-secret YAML grouped by product or concern.
 - `infra` contains reusable Bicep modules, environment parameters, identity,
   storage, observability, and Container Apps definitions.

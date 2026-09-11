@@ -183,7 +183,6 @@ def build_sessions(
         open_spot = float(spot.iloc[0]) if len(spot) > 0 else None
         if open_spot is None:
             continue
-        open_ts = spot.index[0]
         equity_quotes_ts = (
             read_lake_dataset(
                 data_root, session_date, AssetClass.EQUITY, DataType.QUOTE

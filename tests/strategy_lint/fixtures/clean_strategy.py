@@ -10,8 +10,7 @@ from decimal import Decimal
 from random import Random
 
 from harness.core.types import QuoteEvent
-from harness.strategy.context import StrategyContext
-from harness.strategy.contracts import Strategy
+from harness.strategy.contracts import Strategy, StrategyContext
 
 SESSION_OPEN = datetime(2024, 1, 2, 14, 30, tzinfo=UTC)
 

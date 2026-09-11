@@ -3,8 +3,7 @@
 import time
 from datetime import datetime
 
-from harness.strategy.context import StrategyContext
-from harness.strategy.contracts import Strategy
+from harness.strategy.contracts import Strategy, StrategyContext
 
 
 class WallClockStrategy(Strategy):
