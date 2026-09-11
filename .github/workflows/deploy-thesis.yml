@@ -17,7 +17,9 @@ on:
       - infra/modules/thesis.bicep
       - infra/modules/thesis-workspaces.bicep
       - infra/parameters/thesis.dev.bicepparam
-      - src/thesis/**
+      # Dockerfile.thesis copies the whole src/ tree, so any source change
+      # (including the Rust workspace under src/harness) is an image input.
+      - src/**
       - config/thesis/**
       - pyproject.toml
       - uv.lock

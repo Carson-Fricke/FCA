@@ -15,6 +15,10 @@ on:
       - .dockerignore
       - pyproject.toml
       - uv.lock
+      # setup.py attaches the PyO3 extension compiled from src/harness/py, and
+      # the Dockerfile copies strategies/ into the runtime image.
+      - setup.py
+      - strategies/**
       - config/**
       - infra/**
       - src/**

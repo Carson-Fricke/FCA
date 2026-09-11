@@ -575,13 +575,13 @@ resource quantApiApp 'Microsoft.App/containerApps@2025-07-01' = {
         {
           name: quantApiContainerName
           image: sharedImageReference
-          // The shared image ENTRYPOINT is `lake`; the harness shells are
-          // sibling console scripts reached through the `harness` entrypoint.
+          // The harness console scripts are sibling entrypoints in the shared
+          // image. The `api` console script execs the Rust axum boundary
+          // directly; the `harness` facade no longer fronts every group.
           command: [
-            'harness'
+            'api'
           ]
           args: [
-            'api'
             '--config'
             'config/harness/api.yaml'
             '--host'
@@ -684,10 +684,10 @@ resource rthTraderApp 'Microsoft.App/containerApps@2025-07-01' = {
         {
           name: traderContainerName
           image: sharedImageReference
+          // The `trader` console script execs the Rust trader binary. The
+          // `harness` facade does not dispatch the deferred trader group, so
+          // the workload must call the entrypoint directly.
           command: [
-            'harness'
-          ]
-          args: [
             'trader'
           ]
           env: rthTraderEnvironment
@@ -755,10 +755,9 @@ resource cryptoTraderApp 'Microsoft.App/containerApps@2025-07-01' = if (enableCr
         {
           name: traderContainerName
           image: sharedImageReference
+          // The `trader` console script execs the Rust trader binary; see the
+          // RTH trader above for why the facade is not used.
           command: [
-            'harness'
-          ]
-          args: [
             'trader'
           ]
           env: cryptoTraderEnvironment
@@ -818,17 +817,17 @@ resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
         {
           name: backtestContainerName
           image: sharedImageReference
-          command: [
-            'harness'
-          ]
+          // The `backtest-job` console script execs the Rust engine binary.
           // The bounded synthetic smoke configuration ships inside the shared
           // image and the job runs it verbatim. Per-run argument overrides are
           // not possible here: az containerapp job start --args cannot pass
           // leading-dash tokens and its --yaml override drops container args,
           // so future per-run backtests need a different transport (env-var
           // configuration or a dedicated job).
-          args: [
+          command: [
             'backtest-job'
+          ]
+          args: [
             '--config'
             'config/harness/backtest.yaml'
           ]
