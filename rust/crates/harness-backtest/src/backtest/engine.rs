@@ -273,7 +273,7 @@ pub fn run_backtest(
         &preflight,
         &identity_fill_model,
         &identity,
-        schedule.schedule_id,
+        &schedule.schedule_id,
         &fee_identity,
         &JsonValue::object([("pipeline", JsonValue::string("default"))]),
         strategy_identities(configuration),
