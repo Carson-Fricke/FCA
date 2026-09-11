@@ -68,6 +68,8 @@ pub struct QuoteEvent {
     pub bid_size: Decimal18,
     /// Best ask size.
     pub ask_size: Decimal18,
+    /// Provider venue, when one was supplied.
+    pub venue: Option<String>,
 }
 
 /// A trade print.
@@ -85,6 +87,8 @@ pub struct TradeEvent {
     pub price: Decimal18,
     /// Executed quantity.
     pub quantity: Decimal18,
+    /// Provider venue, when one was supplied.
+    pub venue: Option<String>,
     /// Provider trade identifier, when one was supplied.
     pub trade_id: Option<String>,
 }
@@ -105,6 +109,7 @@ impl TradeEvent {
             sequence,
             price,
             quantity,
+            venue: None,
             trade_id: None,
         }
     }
@@ -128,6 +133,7 @@ impl QuoteEvent {
             ask_price,
             bid_size: Decimal18::ZERO,
             ask_size: Decimal18::ZERO,
+            venue: None,
         }
     }
 }

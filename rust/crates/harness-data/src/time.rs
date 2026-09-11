@@ -161,6 +161,12 @@ impl DateTime {
         format!("{year:04}-{month:02}-{date:02}T{hour:02}:{minute:02}:{second:02}.{remainder:06}")
     }
 
+    /// The UTC ISO rendering Python's `datetime.isoformat(timespec="microseconds")`
+    /// produces for a timezone-aware UTC instant: a `+00:00` offset suffix.
+    pub fn isoformat_micros_utc(self) -> String {
+        format!("{}+00:00", self.isoformat_micros())
+    }
+
     /// Parse an ISO-8601 UTC timestamp as Alpaca and lake files emit it.
     ///
     /// Accepts `Z`, `+00:00`, and explicit offsets; fractional seconds beyond

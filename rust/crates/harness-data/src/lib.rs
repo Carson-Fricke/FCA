@@ -75,7 +75,10 @@ pub use recorder::{
     event_row, live_part_path, schema_columns, LiveObjectStore, LiveRecorder, LiveRecorderConfig,
     LocalLiveObjectStore, RecordedRow, SessionResolver, UtcDaySessionResolver, XnysSessionResolver,
 };
-pub use replay::{LakeReplayFeed, ParquetReader, ReplayFingerprints, ReplayStream, StaticReader};
+pub use replay::{
+    events_from_parquet, LakeObjectSource, LakeReplayFeed, LocalObjectSource, MemoryObjectSource,
+    ParquetFileReader, ParquetReader, ReplayFingerprints, ReplayStream, StaticReader,
+};
 pub use security_master::{SecurityMasterView, SecuritySnapshot};
 pub use symbol::{canonical_osi_symbol, canonical_symbol, is_osi_symbol};
 pub use time::{Date, DateTime, Nanos};
@@ -84,11 +87,13 @@ pub use universe_view::{
     UniverseSnapshot, UniverseSource, UniverseView,
 };
 pub use ws::{
-    backoff_delay, rotation_delta, AlpacaCryptoInbox, AlpacaCryptoSubscription,
-    AlpacaCryptoWebSocketFeed, AlpacaInbox, AlpacaMessage, AlpacaOpraInbox, AlpacaOpraSubscription,
+    backoff_delay, opra_rotation_payloads, rotation_delta, AlpacaCryptoInbox,
+    AlpacaCryptoSubscription, AlpacaCryptoWebSocketFeed, AlpacaInbox, AlpacaLiveConfig,
+    AlpacaLiveFeed, AlpacaMessage, AlpacaOpraInbox, AlpacaOpraLiveFeed, AlpacaOpraSubscription,
     AlpacaOpraWebSocketFeed, AlpacaSipInbox, AlpacaSipSubscription, AlpacaSipWebSocketFeed,
     AlpacaWebSocketFeed, AlpacaWebSocketProtocolError, AsyncClock, AsyncWebSocketConnection,
-    AsyncWebSocketTransport, InboxKind, OpraRotationDelta, StaleHandler,
+    AsyncWebSocketTransport, InboxKind, OpraRotationDelta, StaleHandler, StopSignal,
+    TungsteniteTransport,
 };
 
 /// The persisted market-data schema version shared with `lake.contracts`.
