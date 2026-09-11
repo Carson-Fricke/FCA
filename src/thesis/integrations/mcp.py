@@ -1,28 +1,42 @@
 """Thesis client for the quant-harness MCP server.
 
 The harness exposes backtests, sweeps, run queries, artifacts, and the
-supervised trader as MCP tools over newline-delimited JSON-RPC 2.0 on stdio
-(``harness mcp``).  This module is the consumer side: a small client plus a
+supervised trader as MCP tools over JSON-RPC 2.0.  This module is the consumer
+side: a small client plus a
 :class:`~thesis.integrations.harness_activation.HarnessBoundary` implementation
 so Thesis can launch and query backtests through the MCP tool catalog instead
 of hand-rolled HTTP or subprocess plumbing.
 
-Two transports compose the client: :class:`StdioMcpTransport` spawns the real
-``harness mcp`` process, and :class:`InProcessMcpTransport` dispatches against
-an in-process server for tests and single-process runtimes.  The MCP server
-resolves the harness API bearer from its own ``HARNESS_API_BEARER_TOKEN``
-environment, so no credential is ever passed per call.
+Three transports compose the client and cover every Thesis/harness topology:
+
+* :class:`InProcessMcpTransport` dispatches against an in-process server for
+  single-process runtimes (harness local, Thesis local).
+* :class:`StdioMcpTransport` spawns the local ``harness mcp`` process and
+  exchanges newline-delimited JSON-RPC over stdio (harness local).
+* :class:`RemoteHttpMcpTransport` posts JSON-RPC to the harness HTTP MCP
+  endpoint at ``POST /mcp`` with a bearer credential (harness remote).
+
+:class:`HarnessMcpTopology` names the deployment locations and
+:func:`open_harness_mcp_client` selects the transport.  Configuration resolves
+from ``HARNESS_MCP_URL``, ``HARNESS_MCP_COMMAND``, and
+``HARNESS_API_BEARER_TOKEN`` (explicit topology fields take precedence).  A
+bearer credential is only ever sent as an ``Authorization`` header on a remote
+exchange and is redacted from every representation.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import count
-from typing import Protocol
+from typing import Literal, Protocol, cast
+from urllib.parse import urlsplit
+
+import httpx
 
 from thesis.integrations.harness_activation import (
     ActivationOutcome,
@@ -34,6 +48,26 @@ from thesis.integrations.harness_activation import (
 PROTOCOL_VERSION = "2024-11-05"
 CLIENT_NAME = "thesis-mcp-client"
 CLIENT_VERSION = "0.1.0"
+
+#: Deployment variable naming the remote harness HTTP MCP endpoint.
+HARNESS_MCP_URL_VARIABLE = "HARNESS_MCP_URL"
+#: Deployment variable naming the local ``harness mcp`` command.
+HARNESS_MCP_COMMAND_VARIABLE = "HARNESS_MCP_COMMAND"
+#: Deployment variable holding the bearer credential for the harness boundary.
+HARNESS_API_BEARER_TOKEN_VARIABLE = "HARNESS_API_BEARER_TOKEN"
+#: Deployment variable naming where Thesis itself runs (``local`` or ``remote``).
+THESIS_LOCATION_VARIABLE = "THESIS_LOCATION"
+
+#: The remote harness MCP JSON-RPC route.
+MCP_HTTP_ROUTE = "mcp"
+#: The remote harness MCP liveness route.
+MCP_HEALTH_ROUTE = "mcp/health"
+#: Default local process command for the harness MCP server.
+DEFAULT_HARNESS_MCP_COMMAND = ("harness", "mcp")
+#: Default timeout applied to every remote harness MCP HTTP exchange.
+DEFAULT_HTTP_TIMEOUT = 30.0
+
+McpLocation = Literal["local", "remote"]
 
 TOOL_RUN_BACKTEST = "run_backtest"
 TOOL_GET_BACKTEST_STATUS = "get_backtest_status"
@@ -49,6 +83,23 @@ class HarnessMcpError(RuntimeError):
 
 class HarnessMcpProtocolError(HarnessMcpError):
     """The MCP server returned a malformed or error response."""
+
+
+class HarnessMcpTransportError(HarnessMcpError):
+    """The MCP transport could not complete an exchange.
+
+    Covers network failures, non-2xx HTTP responses, and non-JSON bodies on the
+    remote HTTP transport.  The optional ``status_code`` is the HTTP status
+    when one was observed, and never carries a credential.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class HarnessMcpAuthError(HarnessMcpTransportError):
+    """The harness MCP endpoint rejected or received no bearer credential."""
 
 
 class HarnessMcpToolError(HarnessMcpError):
@@ -92,6 +143,26 @@ class McpTransport(Protocol):
     def notify(self, request: Mapping[str, object]) -> None: ...
 
     def close(self) -> None: ...
+
+
+class McpBearerSource(Protocol):
+    """Resolve the bearer credential presented to a remote harness MCP endpoint."""
+
+    def bearer_token(self) -> str | None: ...
+
+
+class EnvironmentHarnessTokenSource:
+    """Resolve the harness boundary bearer token from the process environment.
+
+    The token is read on every call so a rotated deployment credential takes
+    effect without rebuilding the transport, and it is never retained.
+    """
+
+    def __init__(self, variable: str = HARNESS_API_BEARER_TOKEN_VARIABLE) -> None:
+        self._variable = variable
+
+    def bearer_token(self) -> str | None:
+        return _clean_text(os.environ.get(self._variable))
 
 
 class _JsonRpcHandler(Protocol):
@@ -191,6 +262,113 @@ class StdioMcpTransport:
                 self._process.kill()
 
 
+class RemoteHttpMcpTransport:
+    """Exchange JSON-RPC with a remote harness MCP server over HTTP.
+
+    Every request is a ``POST /mcp`` carrying one JSON-RPC message.  The bearer
+    credential resolves per request from an explicit token, an injected
+    :class:`McpBearerSource`, or the process environment, in that order of
+    precedence, and is sent only as an ``Authorization`` header.  Network,
+    authentication, and HTTP failures raise :class:`HarnessMcpTransportError`
+    (or its :class:`HarnessMcpAuthError` subclass); JSON-RPC error *objects*
+    are returned to the caller for the client to map.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        bearer_token: str | None = None,
+        bearer_source: McpBearerSource | None = None,
+        transport: httpx.BaseTransport | None = None,
+        timeout: float | httpx.Timeout = DEFAULT_HTTP_TIMEOUT,
+        route: str = MCP_HTTP_ROUTE,
+        health_route: str = MCP_HEALTH_ROUTE,
+    ) -> None:
+        _validate_service_url(base_url, require_https=False)
+        if bearer_token is not None and not bearer_token.strip():
+            raise ValueError("bearer_token must be non-empty when supplied")
+        self._base_url = base_url.rstrip("/")
+        self._bearer_token = None if bearer_token is None else bearer_token.strip()
+        self._bearer_source = bearer_source
+        self._route = _route(route, "route")
+        self._health_route = _route(health_route, "health_route")
+        self._http = httpx.Client(
+            base_url=self._base_url + "/",
+            transport=transport,
+            timeout=timeout,
+        )
+
+    def exchange(self, request: Mapping[str, object]) -> Mapping[str, object]:
+        body = self._post(request, expect_response=True)
+        assert body is not None
+        return body
+
+    def notify(self, request: Mapping[str, object]) -> None:
+        self._post(request, expect_response=False)
+
+    def health(self) -> Mapping[str, object]:
+        """Probe ``GET /mcp/health`` and return the decoded liveness body."""
+        try:
+            response = self._http.get(self._health_route, headers=self._headers())
+        except httpx.HTTPError as error:
+            raise HarnessMcpTransportError(
+                "the harness MCP endpoint is unreachable"
+            ) from error
+        self._raise_for_status(response)
+        return _response_object(response)
+
+    def close(self) -> None:
+        self._http.close()
+
+    def _post(
+        self, request: Mapping[str, object], *, expect_response: bool
+    ) -> Mapping[str, object] | None:
+        try:
+            response = self._http.post(
+                self._route,
+                json=dict(request),
+                headers=self._headers(),
+            )
+        except httpx.HTTPError as error:
+            raise HarnessMcpTransportError(
+                "the harness MCP endpoint is unreachable"
+            ) from error
+        self._raise_for_status(response)
+        if not expect_response:
+            return None
+        return _response_object(response)
+
+    def _headers(self) -> dict[str, str]:
+        token = self._resolve_token()
+        if token is None:
+            raise HarnessMcpAuthError(
+                "the harness MCP endpoint requires a bearer credential "
+                f"({HARNESS_API_BEARER_TOKEN_VARIABLE} is unset)"
+            )
+        return {"Authorization": f"Bearer {token}"}
+
+    def _resolve_token(self) -> str | None:
+        if self._bearer_token is not None:
+            return self._bearer_token
+        if self._bearer_source is not None:
+            return _clean_text(self._bearer_source.bearer_token())
+        return _clean_text(os.environ.get(HARNESS_API_BEARER_TOKEN_VARIABLE))
+
+    @staticmethod
+    def _raise_for_status(response: httpx.Response) -> None:
+        if response.status_code in {401, 403}:
+            raise HarnessMcpAuthError(
+                "the harness MCP endpoint rejected the bearer credential",
+                status_code=response.status_code,
+            )
+        if response.is_error:
+            raise HarnessMcpTransportError(
+                f"the harness MCP endpoint returned HTTP {response.status_code}",
+                status_code=response.status_code,
+            )
+
+
 class HarnessMcpClient:
     """Discover and call quant-harness MCP tools over an injected transport."""
 
@@ -212,6 +390,11 @@ class HarnessMcpClient:
     def server_info(self) -> Mapping[str, object]:
         """Return the ``initialize`` server info, or empty before initialize."""
         return self._server
+
+    @property
+    def transport(self) -> McpTransport:
+        """Return the transport selected for this client's topology."""
+        return self._transport
 
     def initialize(self) -> Mapping[str, object]:
         """Negotiate the protocol and acknowledge the initialization."""
@@ -420,6 +603,207 @@ class HarnessMcpBoundary:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class HarnessMcpTopology:
+    """Where Thesis and the harness run, and how to reach the harness.
+
+    The four Thesis/harness location combinations map onto the transports as:
+
+    ==============  ===============  ==========================================
+    Thesis          Harness          Transport
+    ==============  ===============  ==========================================
+    local           local            :class:`InProcessMcpTransport` when a
+                                     handler is supplied, else
+                                     :class:`StdioMcpTransport`
+    remote          local            :class:`StdioMcpTransport`; only valid when
+                                     the Thesis process can reach a local
+                                     ``harness`` executable (documented
+                                     constraint), so co-locate or inject an
+                                     in-process handler
+    local           remote           :class:`RemoteHttpMcpTransport`
+    remote          remote           :class:`RemoteHttpMcpTransport`
+    ==============  ===============  ==========================================
+
+    ``harness_url`` is required for a remote harness and ``harness_command`` is
+    used for a local harness.  A bearer credential resolves in this order:
+    ``bearer_token``, then ``bearer_source``, then the process environment.
+    The token and source are excluded from the representation.
+    """
+
+    thesis_location: McpLocation = "local"
+    harness_location: McpLocation = "local"
+    harness_url: str | None = None
+    harness_command: tuple[str, ...] = DEFAULT_HARNESS_MCP_COMMAND
+    bearer_token: str | None = field(default=None, repr=False)
+    bearer_source: McpBearerSource | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "thesis_location", _location(self.thesis_location, "thesis_location")
+        )
+        object.__setattr__(
+            self,
+            "harness_location",
+            _location(self.harness_location, "harness_location"),
+        )
+        if self.harness_url is not None:
+            _validate_service_url(self.harness_url, require_https=False)
+        if not isinstance(self.harness_command, (tuple, list)) or any(
+            not isinstance(part, str) or not part.strip()
+            for part in self.harness_command
+        ):
+            raise ValueError("harness_command must be a sequence of non-empty strings")
+        object.__setattr__(self, "harness_command", tuple(self.harness_command))
+        if self.bearer_token is not None:
+            token = _clean_text(self.bearer_token)
+            if token is None:
+                raise ValueError("bearer_token must be non-empty when supplied")
+            object.__setattr__(self, "bearer_token", token)
+        if self.harness_location == "remote" and self.harness_url is None:
+            raise ValueError("harness_url is required for a remote harness")
+
+    def require_harness_url(self) -> str:
+        """Return the validated remote URL or raise when it is not published."""
+        if self.harness_url is None:
+            raise ValueError("harness_url is required for a remote harness")
+        return self.harness_url
+
+    def resolved_bearer_token(self) -> str | None:
+        """Resolve the bearer token from the topology, source, then environment."""
+        if self.bearer_token is not None:
+            return self.bearer_token
+        if self.bearer_source is not None:
+            token = _clean_text(self.bearer_source.bearer_token())
+            if token is not None:
+                return token
+        return _clean_text(os.environ.get(HARNESS_API_BEARER_TOKEN_VARIABLE))
+
+
+def open_harness_mcp_client(
+    topology: HarnessMcpTopology,
+    *,
+    in_process_handler: _JsonRpcHandler | None = None,
+    http_transport: httpx.BaseTransport | None = None,
+    stdio_transport: McpTransport | None = None,
+) -> HarnessMcpClient:
+    """Select and open the harness MCP transport for ``topology``.
+
+    The returned :class:`HarnessMcpClient` is the stable interface the Thesis
+    agent consumes: :meth:`HarnessMcpClient.list_tools` and
+    :meth:`HarnessMcpClient.call_tool`.  ``in_process_handler``,
+    ``http_transport``, and ``stdio_transport`` are test/integration seams that
+    avoid spawning a process or opening a socket.
+    """
+    if topology.harness_location == "remote":
+        transport: McpTransport = RemoteHttpMcpTransport(
+            topology.require_harness_url(),
+            bearer_token=topology.bearer_token,
+            bearer_source=topology.bearer_source,
+            transport=http_transport,
+        )
+    elif topology.thesis_location == "local" and in_process_handler is not None:
+        transport = InProcessMcpTransport(in_process_handler)
+    elif stdio_transport is not None:
+        transport = stdio_transport
+    else:
+        transport = StdioMcpTransport(topology.harness_command)
+    return HarnessMcpClient(transport)
+
+
+def harness_mcp_topology_from_env(
+    environ: Mapping[str, str] | None = None,
+) -> HarnessMcpTopology:
+    """Build a topology from the deployment environment.
+
+    Precedence is explicit: ``HARNESS_MCP_URL`` selects a remote harness (and
+    wins over ``HARNESS_MCP_COMMAND``), ``HARNESS_MCP_COMMAND`` customizes the
+    local process, ``HARNESS_API_BEARER_TOKEN`` supplies the remote bearer, and
+    ``THESIS_LOCATION`` names where Thesis runs (default ``local``).
+    """
+    source = os.environ if environ is None else environ
+    url = _clean_text(source.get(HARNESS_MCP_URL_VARIABLE))
+    token = _clean_text(source.get(HARNESS_API_BEARER_TOKEN_VARIABLE))
+    command = _parse_command(source.get(HARNESS_MCP_COMMAND_VARIABLE))
+    thesis_location = _location(
+        _clean_text(source.get(THESIS_LOCATION_VARIABLE)) or "local",
+        THESIS_LOCATION_VARIABLE,
+    )
+    return HarnessMcpTopology(
+        thesis_location=thesis_location,
+        harness_location="remote" if url is not None else "local",
+        harness_url=url,
+        harness_command=command,
+        bearer_token=token,
+    )
+
+
+def _parse_command(value: str | None) -> tuple[str, ...]:
+    text = _clean_text(value)
+    if text is None:
+        return DEFAULT_HARNESS_MCP_COMMAND
+    try:
+        parts = tuple(shlex.split(text))
+    except ValueError as error:
+        raise ValueError(
+            f"{HARNESS_MCP_COMMAND_VARIABLE} is not a valid command"
+        ) from error
+    if not parts:
+        return DEFAULT_HARNESS_MCP_COMMAND
+    return parts
+
+
+def _location(value: object, field: str) -> McpLocation:
+    if value not in ("local", "remote"):
+        raise ValueError(f"{field} must be 'local' or 'remote'")
+    return cast(McpLocation, value)
+
+
+def _route(value: str, field: str) -> str:
+    text = _clean_text(value)
+    if text is None:
+        raise ValueError(f"{field} must be a non-empty string")
+    return text.strip("/")
+
+
+def _clean_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _validate_service_url(value: str, *, require_https: bool) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("base_url must be a non-empty string")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in ({"https"} if require_https else {"http", "https"})
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        scheme = "HTTPS" if require_https else "HTTP or HTTPS"
+        raise ValueError(f"base_url must be a {scheme} service URL")
+
+
+def _response_object(response: httpx.Response) -> dict[str, object]:
+    try:
+        decoded = response.json()
+    except ValueError as error:
+        raise HarnessMcpProtocolError(
+            "the harness MCP endpoint returned a non-JSON body"
+        ) from error
+    if not isinstance(decoded, Mapping):
+        raise HarnessMcpProtocolError(
+            "the harness MCP endpoint returned a non-object response"
+        )
+    return dict(decoded)
+
+
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -427,21 +811,38 @@ def _optional_str(value: object) -> str | None:
 __all__ = [
     "CLIENT_NAME",
     "CLIENT_VERSION",
+    "DEFAULT_HARNESS_MCP_COMMAND",
+    "DEFAULT_HTTP_TIMEOUT",
+    "HARNESS_API_BEARER_TOKEN_VARIABLE",
+    "HARNESS_MCP_COMMAND_VARIABLE",
+    "HARNESS_MCP_URL_VARIABLE",
+    "MCP_HEALTH_ROUTE",
+    "MCP_HTTP_ROUTE",
     "PROTOCOL_VERSION",
+    "THESIS_LOCATION_VARIABLE",
     "TOOL_GET_BACKTEST_STATUS",
     "TOOL_GET_RUN",
     "TOOL_LAUNCH_TRADER",
     "TOOL_LIST_ARTIFACTS",
     "TOOL_RUN_BACKTEST",
     "TOOL_RUN_SWEEP",
+    "EnvironmentHarnessTokenSource",
+    "HarnessMcpAuthError",
     "HarnessMcpBoundary",
     "HarnessMcpClient",
     "HarnessMcpError",
     "HarnessMcpProtocolError",
     "HarnessMcpToolError",
+    "HarnessMcpTopology",
+    "HarnessMcpTransportError",
     "InProcessMcpTransport",
+    "McpBearerSource",
+    "McpLocation",
     "McpTool",
     "McpToolResult",
     "McpTransport",
+    "RemoteHttpMcpTransport",
     "StdioMcpTransport",
+    "harness_mcp_topology_from_env",
+    "open_harness_mcp_client",
 ]
