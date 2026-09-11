@@ -70,7 +70,7 @@ pub fn run_digest(run_id: &str, digests: &std::collections::BTreeMap<String, Str
 /// module name and an 8-byte big-endian length.
 #[must_use]
 pub fn code_fingerprint() -> String {
-    const MODULES: [(&str, &str); 9] = [
+    const MODULES: [(&str, &str); 12] = [
         (
             "harness-backtest.backtest.config",
             include_str!("config.rs"),
@@ -78,6 +78,10 @@ pub fn code_fingerprint() -> String {
         (
             "harness-backtest.backtest.engine",
             include_str!("engine.rs"),
+        ),
+        (
+            "harness-backtest.backtest.engine_core",
+            include_str!("engine_core.rs"),
         ),
         (
             "harness-backtest.backtest.errors",
@@ -94,10 +98,15 @@ pub fn code_fingerprint() -> String {
             include_str!("manifest.rs"),
         ),
         (
+            "harness-backtest.backtest.portfolio",
+            include_str!("portfolio.rs"),
+        ),
+        (
             "harness-backtest.backtest.preflight",
             include_str!("preflight.rs"),
         ),
         ("harness-backtest.backtest.rng", include_str!("rng.rs")),
+        ("harness-backtest.backtest.yaml", include_str!("yaml.rs")),
     ];
     let mut hasher = Sha256::new();
     hasher.update(b"fca-backtest-code-v1\0");
@@ -456,10 +465,10 @@ pub fn build_manifest(
         run_id: configuration.run_id.clone(),
         shell: configuration.shell.clone(),
         schema_version: configuration.schema_version,
-        configuration_hash: configuration_hash(&configuration_to_json(configuration)),
+        configuration_hash: configuration.configuration_hash(),
         seed: configuration.seed,
-        start: utc_timestamp(configuration.start_ns),
-        end: utc_timestamp(configuration.end_ns),
+        start: utc_timestamp(configuration.start_ns, false),
+        end: utc_timestamp(configuration.end_ns, false),
         base_currency: configuration.base_currency.clone(),
         initial_cash: configuration.initial_cash.clone(),
         data_snapshot_id: configuration.data_snapshot_id.clone(),
@@ -478,10 +487,21 @@ pub fn build_manifest(
 }
 
 /// Format an epoch nanosecond instant as the Python `datetime.isoformat`
-/// timespec-microseconds string for a UTC-aware value (`+00:00`, not `Z`).
-fn utc_timestamp(timestamp_ns: i64) -> String {
+/// timespec-microseconds string for a UTC-aware value.
+///
+/// `with_z` selects the canonical-hash form (`Z` suffix); otherwise the
+/// artifact form (`+00:00` suffix) the manifest fields use.
+#[must_use]
+pub fn utc_timestamp(timestamp_ns: i64, with_z: bool) -> String {
     let mut text = crate::results::recorder::format_timestamp_ns(timestamp_ns);
-    if text.ends_with('Z') {
+    if with_z {
+        if text.ends_with("+00:00") {
+            text.truncate(text.len() - 6);
+        }
+        if !text.ends_with('Z') {
+            text.push('Z');
+        }
+    } else if text.ends_with('Z') {
         text.pop();
         text.push_str("+00:00");
     }

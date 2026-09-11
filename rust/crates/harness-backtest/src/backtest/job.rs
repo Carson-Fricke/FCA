@@ -20,8 +20,13 @@ use crate::backtest::engine::{
     run_backtest, ApproveAll, BacktestOptions, ExecutionModel, ImmediateFill, OrderSide, RiskModel,
     StrategyRuntime, TradeBuyStrategy,
 };
+use crate::backtest::engine_core::{
+    build_default_manifest, run_native_engine, BacktestOutcome, EngineOptions, StrategyInstance,
+};
 use crate::backtest::errors::{BacktestError, ONE_DAY_NS};
+use crate::backtest::fixture::{synthetic_fixture, SyntheticDataOptions};
 use crate::backtest::manifest::BacktestResult;
+use crate::backtest::preflight::preflight_data;
 use crate::canonical_json::JsonValue;
 use crate::results::metrics::{
     equity_curve_metrics, execution_stats, trade_stats, EquityPoint, FillRow, OrderRow,
@@ -240,8 +245,8 @@ pub fn parse_timestamp_ns(value: &str) -> Option<i64> {
 }
 
 /// The default synthetic run window: 2024-01-01 to 2024-01-03 UTC.
-const DEFAULT_START_NS: i64 = 19_723 * ONE_DAY_NS;
-const DEFAULT_END_NS: i64 = 19_725 * ONE_DAY_NS;
+pub(crate) const DEFAULT_START_NS: i64 = 19_723 * ONE_DAY_NS;
+pub(crate) const DEFAULT_END_NS: i64 = 19_725 * ONE_DAY_NS;
 
 /// Run one backtest job using the built-in deterministic strategy seam.
 ///
@@ -282,33 +287,7 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
     if shell != "backtest" {
         return Err(BacktestJobError::WrongShell(shell));
     }
-    let run_id = parse_scalar(&text, "run_id").unwrap_or_else(|| "backtest-job".to_string());
-    let seed = parse_scalar(&text, "seed")
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(7);
-    let start_ns = parse_scalar(&text, "start")
-        .as_deref()
-        .and_then(parse_timestamp_ns)
-        .unwrap_or(DEFAULT_START_NS);
-    let end_ns = parse_scalar(&text, "end")
-        .as_deref()
-        .and_then(parse_timestamp_ns)
-        .unwrap_or(DEFAULT_END_NS);
-    let mut configuration = BacktestConfig::new(run_id, start_ns, end_ns, seed)?;
-    configuration.shell = "backtest".to_string();
-    if let Some(cash) = parse_scalar(&text, "initial_cash") {
-        configuration.initial_cash = cash;
-    }
-    if let Some(currency) = parse_scalar(&text, "base_currency") {
-        configuration.base_currency = currency;
-    }
-    if let Some(snapshot_id) = parse_nested_scalar(&text, "data", "snapshot_id") {
-        configuration.data_snapshot_id = snapshot_id;
-    }
-    if let Some(fingerprint) = parse_nested_scalar(&text, "data", "fingerprint") {
-        configuration.data_fingerprint = fingerprint;
-    }
-    Ok(configuration)
+    BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
 }
 
 /// The seam the `harness-api` binary calls to run one backtest job.
@@ -392,6 +371,53 @@ pub fn run_job_with(
         artifact_dir,
         recorder,
     ))
+}
+
+/// Run one native engine job with injected Python-backed strategy runtimes.
+///
+/// The engine core, fee schedule, venue, portfolio, and risk pipeline are all
+/// native Rust; the strategies stay Python and are driven through
+/// [`StrategyInstance`]. Writes the canonical `backtest.json` artifact and
+/// returns the outcome with its path.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when the configuration, fixture, engine, or
+/// artifact write fails.
+pub fn run_native_job(
+    configuration: &BacktestConfig,
+    engine_options: &EngineOptions,
+    output_dir: Option<&Path>,
+    strategies: Vec<StrategyInstance>,
+) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
+    let synthetic_options = SyntheticDataOptions::default();
+    let fixture = synthetic_fixture(configuration, &synthetic_options)?;
+    let preflight = preflight_data(configuration, &fixture)?;
+    let manifest = build_default_manifest(configuration, &fixture, &preflight)?;
+    let outcome = run_native_engine(
+        configuration,
+        &fixture,
+        &preflight,
+        manifest,
+        engine_options,
+        strategies,
+        &synthetic_options,
+    )?;
+    let directory = output_dir.map_or_else(
+        || {
+            PathBuf::from(".local")
+                .join("backtests")
+                .join(&configuration.run_id)
+        },
+        Path::to_path_buf,
+    );
+    std::fs::create_dir_all(&directory).map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    let artifact_path = directory.join("backtest.json");
+    let mut payload = outcome.artifact_json().into_bytes();
+    payload.push(b'\n');
+    std::fs::write(&artifact_path, payload)
+        .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
+    Ok((outcome, artifact_path))
 }
 
 fn write_artifact(

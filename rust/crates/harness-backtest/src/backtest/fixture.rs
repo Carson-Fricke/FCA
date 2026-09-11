@@ -332,7 +332,7 @@ fn minimal_scale(value: Decimal18) -> u32 {
 ///
 /// Mirrors Python `str(Decimal)`: the arithmetic scale is explicit, so
 /// `450.00` renders as `"450.00"` rather than the scale-18 `"450.000000000000000000"`.
-fn python_decimal(value: Decimal18, scale: u32) -> String {
+pub(crate) fn python_decimal(value: Decimal18, scale: u32) -> String {
     let rounded = value
         .round_to(RoundingMode::HalfEven, scale)
         .unwrap_or(value);
@@ -436,6 +436,18 @@ fn event_framed_fields(
             trade_id.clone(),
         ]),
     }
+}
+
+/// The Python arithmetic scales used by the synthetic quote and trade values.
+#[must_use]
+pub(crate) fn synthetic_scales(options: &SyntheticDataOptions) -> (u32, u32) {
+    let mid_scale = options.base_price_scale.max(options.tick_scale);
+    let half_spread = options
+        .tick
+        .checked_mul(Decimal18::from_i64(options.spread_ticks))
+        .and_then(|value| value.checked_div(Decimal18::from_i64(2)))
+        .unwrap_or(Decimal18::ZERO);
+    (mid_scale.max(minimal_scale(half_spread)), mid_scale)
 }
 
 /// Compute the Python `harness.data.replay` fingerprints for a synthetic run.

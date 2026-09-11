@@ -11,3 +11,6 @@ crate-type = ["rlib"]
 
 [dependencies]
 harness-num = { path = "../harness-num" }
+
+[dev-dependencies]
+harness-host = { path = "../harness-host" }
