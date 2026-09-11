@@ -1,13 +1,21 @@
 FROM ghcr.io/astral-sh/uv:0.12.6 AS uv
 
-FROM rust:bookworm AS rust
+FROM python:3.12-slim AS rust
 
 # The process binaries embed CPython through PyO3 to drive user-authored Python
-# strategies, so they must be compiled against the SAME interpreter the runtime
-# ships (python:3.12-slim), not bookworm's default 3.11. Pull the 3.12 toolchain
-# from the runtime base image and point PyO3 at it.
-COPY --from=python:3.12-slim /usr/local /usr/local
-ENV PYO3_PYTHON=/usr/local/bin/python3.12
+# strategies, so they must be compiled against the SAME interpreter and glibc
+# the runtime ships. Base this stage on the runtime image and install Rust into
+# the canonical /usr/local paths the builder stage copies the toolchain from.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH="/usr/local/cargo/bin:$PATH" \
+    PYO3_PYTHON=/usr/local/bin/python3.12
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl build-essential pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+       | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path
 
 # The Rust workspace is the quant-harness engine and its process interfaces.
 # This stage compiles the loadable shared library (native) the runtime image
