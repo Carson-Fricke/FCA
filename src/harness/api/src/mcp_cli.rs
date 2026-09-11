@@ -15,12 +15,15 @@ use std::sync::Arc;
 use clap::Parser;
 use mcp::auth::{EnvironmentBearerTokenSource, BEARER_TOKEN_VARIABLE};
 use mcp::server::McpServer;
+use mcp::store::{FileSystemJobRepository, FileSystemRunStore, JobRepository, RunStore};
 use mcp::tools::{
     Boundary, ConfigurationLoader, HarnessToolsContext, ProcessOutcome, ProcessRunner,
     RemoteResponse, RemoteTransport,
 };
 use mcp::transport::serve_stdio;
 use serde_json::{Map, Value};
+
+use crate::local::{NativeBacktestSubmitter, NativeSweepSubmitter};
 
 /// Environment variable consulted for the remote API base URL.
 pub const API_BASE_URL_VARIABLE: &str = "HARNESS_API_BASE_URL";
@@ -160,6 +163,18 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
         .map(|_| Arc::new(HttpRemoteTransport) as Arc<dyn RemoteTransport>);
     context.runner = Some(Arc::new(SubprocessRunner));
     context.configuration_loader = default_loader();
+    if boundary == Boundary::Local {
+        let root = crate::http::state::results_root_from_env();
+        let run_store: Arc<dyn RunStore> = Arc::new(FileSystemRunStore::new(&root));
+        let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
+        context.run_store = Some(run_store.clone());
+        context.job_repository = Some(jobs.clone());
+        context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(
+            run_store.clone(),
+            jobs.clone(),
+        )));
+        context.sweep_submitter = Some(Arc::new(NativeSweepSubmitter::new(run_store, jobs, root)));
+    }
     let context = context
         .validate()
         .map_err(|error| McpServeError(error.to_string()))?;

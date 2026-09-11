@@ -13,6 +13,7 @@ pub mod clock;
 pub mod configuration;
 pub mod launcher;
 pub mod models;
+pub mod native;
 pub mod routes;
 pub mod server;
 pub mod state;

@@ -388,9 +388,34 @@ pub fn run_backtest_job_with_data_dir(
 > {
     let configuration = backtest::backtest::job::load_backtest_config(config_path)
         .map_err(|error| HostError::Invalid(error.to_string()))?;
-    let instances = build_strategy_instances(&configuration)?;
+    run_backtest_config(&configuration, output_dir, data_dir)
+}
+
+/// Run one already-validated native backtest configuration with Python strategies.
+///
+/// This is the configuration-in-memory twin of
+/// [`run_backtest_job_with_data_dir`]: the caller has already decoded the
+/// configuration document, so the host only builds the Python-backed strategy
+/// instances and drives the native engine.
+///
+/// # Errors
+///
+/// Returns [`HostError`] when a strategy cannot be built or the engine rejects
+/// the run.
+pub fn run_backtest_config(
+    configuration: &backtest::backtest::config::BacktestConfig,
+    output_dir: Option<&std::path::Path>,
+    data_dir: Option<&std::path::Path>,
+) -> Result<
+    (
+        backtest::backtest::engine_core::BacktestOutcome,
+        std::path::PathBuf,
+    ),
+    HostError,
+> {
+    let instances = build_strategy_instances(configuration)?;
     backtest::backtest::job::run_native_job_with_data_dir(
-        &configuration,
+        configuration,
         &backtest::backtest::engine_core::EngineOptions::default(),
         output_dir,
         instances,

@@ -207,6 +207,7 @@ mod tests {
             data_start: None,
             data_end: None,
             configuration_digest: "digest".to_string(),
+            document: serde_json::Value::Null,
         }
     }
 
