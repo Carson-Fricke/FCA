@@ -77,7 +77,7 @@ resource traderActionGroup 'Microsoft.Insights/actionGroups@2022-06-01' = {
 
 resource traderFaultAlert 'Microsoft.Insights/scheduledQueryRules@2021-08-01' = {
   name: faultAlertName
-  location: 'global'
+  location: resourceGroup().location
   tags: tags
   kind: 'LogAlert'
   properties: {
@@ -110,7 +110,7 @@ resource traderFaultAlert 'Microsoft.Insights/scheduledQueryRules@2021-08-01' = 
 
 resource traderHaltAlert 'Microsoft.Insights/scheduledQueryRules@2021-08-01' = {
   name: haltAlertName
-  location: 'global'
+  location: resourceGroup().location
   tags: tags
   kind: 'LogAlert'
   properties: {
