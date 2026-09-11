@@ -13,8 +13,9 @@ use mcp::store::{
     RunStatus, RunStore,
 };
 use mcp::tools::{
-    BacktestSubmitter, Boundary, HarnessToolsContext, ProcessOutcome, ProcessRunner, SweepSubmitter,
-    TOOL_BACKTEST_STATUS, TOOL_GET_RUN, TOOL_LIST_ARTIFACTS, TOOL_RUN_BACKTEST, TOOL_RUN_SWEEP,
+    BacktestSubmitter, Boundary, HarnessToolsContext, ProcessOutcome, ProcessRunner,
+    SweepSubmitter, TOOL_BACKTEST_STATUS, TOOL_GET_RUN, TOOL_LIST_ARTIFACTS, TOOL_RUN_BACKTEST,
+    TOOL_RUN_SWEEP,
 };
 use mcp::{create_server, McpServer};
 use serde_json::{json, Value};
@@ -57,10 +58,7 @@ impl SweepSubmitter for FixedSweepSubmitter {
     }
 }
 
-fn local_server(
-    store: Arc<InMemoryRunStore>,
-    jobs: Arc<InMemoryJobRepository>,
-) -> McpServer {
+fn local_server(store: Arc<InMemoryRunStore>, jobs: Arc<InMemoryJobRepository>) -> McpServer {
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
     context.runner = Some(Arc::new(EchoRunner));
@@ -98,11 +96,7 @@ fn local_mode_queries_the_durable_store() {
     jobs.upsert(JobRecord::new("run-1", JobState::Succeeded, now, now));
     let server = local_server(store, jobs);
 
-    let status = call(
-        &server,
-        TOOL_BACKTEST_STATUS,
-        json!({"job_id": "run-1"}),
-    );
+    let status = call(&server, TOOL_BACKTEST_STATUS, json!({"job_id": "run-1"}));
     assert_eq!(status["result"]["isError"], false);
     assert_eq!(status["result"]["structuredContent"]["job_id"], "run-1");
     assert_eq!(status["result"]["structuredContent"]["state"], "succeeded");
@@ -127,7 +121,11 @@ fn local_run_backtest_uses_the_composed_submitter() {
     let store = Arc::new(InMemoryRunStore::new());
     let jobs = Arc::new(InMemoryJobRepository::new());
     let server = local_server(store, jobs);
-    let response = call(&server, TOOL_RUN_BACKTEST, json!({"config_path": "bt.yaml"}));
+    let response = call(
+        &server,
+        TOOL_RUN_BACKTEST,
+        json!({"config_path": "bt.yaml"}),
+    );
     assert_eq!(response["result"]["isError"], false);
     assert_eq!(
         response["result"]["structuredContent"]["boundary"],

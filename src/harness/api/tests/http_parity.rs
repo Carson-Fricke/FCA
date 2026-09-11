@@ -795,20 +795,14 @@ async fn durable_launch_survives_a_process_restart() {
     // serve the run without re-executing it.
     let router = durable_router(&root, Arc::new(StubRunner { fail: true }));
 
-    let (run_status, _, run_body) = send(
-        &router,
-        get_auth("/v1/backtests/runs/run-durable", BEARER),
-    )
-    .await;
+    let (run_status, _, run_body) =
+        send(&router, get_auth("/v1/backtests/runs/run-durable", BEARER)).await;
     assert_eq!(run_status, StatusCode::OK);
     assert_eq!(json_body(&run_body)["status"], "complete");
     assert_eq!(json_body(&run_body)["strategy_id"], "spy-momentum");
 
-    let (job_status, _, job_body) = send(
-        &router,
-        get_auth("/v1/backtests/jobs/run-durable", BEARER),
-    )
-    .await;
+    let (job_status, _, job_body) =
+        send(&router, get_auth("/v1/backtests/jobs/run-durable", BEARER)).await;
     assert_eq!(job_status, StatusCode::OK);
     assert_eq!(json_body(&job_body)["state"], "succeeded");
 
@@ -821,7 +815,10 @@ async fn durable_launch_survives_a_process_restart() {
     )
     .await;
     assert_eq!(artifact_status, StatusCode::OK);
-    assert_eq!(json_body(&artifact_body)["manifest"]["run_id"], "run-durable");
+    assert_eq!(
+        json_body(&artifact_body)["manifest"]["run_id"],
+        "run-durable"
+    );
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -829,7 +826,10 @@ async fn durable_launch_survives_a_process_restart() {
 #[tokio::test]
 async fn native_engine_launch_reaches_a_terminal_state() {
     let root = temp_root("native");
-    let router = durable_router(&root, Arc::new(api::http::native::NativeBacktestRunner::default()));
+    let router = durable_router(
+        &root,
+        Arc::new(api::http::native::NativeBacktestRunner::default()),
+    );
     let document = json!({
         "schema_version": 1,
         "shell": "backtest",
