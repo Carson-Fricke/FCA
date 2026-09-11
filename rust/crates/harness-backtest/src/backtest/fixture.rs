@@ -333,7 +333,9 @@ fn minimal_scale(value: Decimal18) -> u32 {
 /// Mirrors Python `str(Decimal)`: the arithmetic scale is explicit, so
 /// `450.00` renders as `"450.00"` rather than the scale-18 `"450.000000000000000000"`.
 fn python_decimal(value: Decimal18, scale: u32) -> String {
-    let rounded = value.round_to(RoundingMode::HalfEven, scale).unwrap_or(value);
+    let rounded = value
+        .round_to(RoundingMode::HalfEven, scale)
+        .unwrap_or(value);
     let negative = rounded.is_negative();
     let magnitude = rounded.unscaled().unsigned_abs();
     // `units` is the value scaled up by `10^scale`.
@@ -744,8 +746,7 @@ fn synthetic_events(
             }
         }
     }
-    let mut ordered: Vec<(u8, MarketEvent)> =
-        Vec::with_capacity(quotes.len() + trades.len());
+    let mut ordered: Vec<(u8, MarketEvent)> = Vec::with_capacity(quotes.len() + trades.len());
     for event in quotes {
         ordered.push((0, event));
     }
@@ -913,9 +914,8 @@ mod tests {
 
     /// The canonical `config/harness/backtest.yaml` window (14 sessions).
     fn canonical_config() -> BacktestConfig {
-        let start = days_from_civil(2024, 1, 2) * ONE_DAY_NS
-            + 14 * 3_600_000_000_000
-            + 30 * 60_000_000_000;
+        let start =
+            days_from_civil(2024, 1, 2) * ONE_DAY_NS + 14 * 3_600_000_000_000 + 30 * 60_000_000_000;
         let end = days_from_civil(2024, 1, 19) * ONE_DAY_NS + 21 * 3_600_000_000_000;
         let mut configuration =
             BacktestConfig::new("momentum-spy-2024-01", start, end, 1729).expect("config");

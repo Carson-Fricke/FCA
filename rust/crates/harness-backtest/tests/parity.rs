@@ -39,7 +39,10 @@ fn golden(name: &str) -> Vec<u8> {
 }
 
 fn canonical_config_path() -> PathBuf {
-    repo_root().join("config").join("harness").join("backtest.yaml")
+    repo_root()
+        .join("config")
+        .join("harness")
+        .join("backtest.yaml")
 }
 
 fn temp_dir(name: &str) -> PathBuf {
