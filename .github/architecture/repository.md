@@ -82,7 +82,7 @@ adapters, and orchestration details stay behind those boundaries.
 | `harness.data` | Point-in-time market-data views retained for the plugin surface and products: exact OHLCV bar derivation, the engine-clocked history and strategy-history capabilities, derived listing lifecycle events, the point-in-time option contract universe with DTE/strike/moneyness filters, the SecurityMaster listings view, and the composite universe view. Live and replay ingestion moved to the Rust `marketdata` and `backtest` crates. |
 | `harness.indicators` | Tick-native indicators, the deterministic router, and cross-mode snapshot/resume semantics. |
 | `harness.screening` | Process-isolated execution sandbox for custom screener filters. |
-| `harness.strategy` | Mode-independent strategy callbacks (`Strategy`, `CALLBACK_ORDER`), the protocol-only `StrategyContext` surface, the sandbox lint, and the callback-contract reference fixture. The engine-bound context and binding were deleted; the native Rust context replaces them. |
+| `harness.strategy` | Mode-independent strategy callbacks (`Strategy`, `CALLBACK_ORDER`), the protocol-only `StrategyContext` surface, the sandbox lint, and the callback-contract reference fixture. The engine-bound context and binding were deleted; the native Rust context replaces them. See `## Strategy Contract` for the implemented loading, dispatch, and context surface. |
 | `harness.testing` | Canonical artifact support, the Rust-core parity oracle, and the cross-mode tick-indicator parity oracle. |
 
 `harness.oms`, `harness.fills`, `harness.portfolio`, `harness.risk`,
@@ -172,6 +172,42 @@ src/harness/
 
 The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, and `cargo test --workspace`.
+
+## Strategy Contract
+
+A strategy is an unmodified Python class loaded from configuration as
+`module:Class` and driven by the native engine. The implemented contract is:
+
+- Loading. `strategy_instances[].implementation` names `module:Class`. The host
+  splits on the last `:`, prepends the repository root, `src`, and the
+  virtualenv site-packages to `sys.path`, constructs the class with the
+  configured `parameters` as keyword arguments (falling back to
+  `parameters=<mapping>`), and calls `on_start(context)` and then
+  `on_stop(context)` (`src/harness/host/src/backtest.rs`,
+  `src/harness/host/src/python.rs`, `src/harness/host/src/strategy.rs`). No
+  engine, host, or harness change is required to add a strategy.
+- Callbacks. The documented order is `on_start`, `on_quote`, `on_trade`,
+  `on_order`, `on_execution_report`, `on_fill`, `on_position`, `on_book`,
+  `on_account`, `on_corporate_action`, `on_stop`
+  (`src/harness/strategy/contracts.py`, mirrored in
+  `src/harness/host/src/contracts.rs`). The native backtest adapter dispatches
+  `on_start`, `on_quote`, `on_trade`, `on_fill`, and `on_stop` today; the
+  remaining callbacks are declared and reserved. `on_fill` is delivered after
+  portfolio mutation.
+- Context. The native `PyEngineContext` supplies `book_id`, `clock`, `universe`,
+  `books`, `orders`, `state`, `random`, `log`, `emissions`, and `emit`
+  (`src/harness/host/src/context.rs`). The protocol in `harness.strategy`
+  additionally declares `data`/`history`, which the native host does not yet
+  supply. `orders.cancel` is a no-op and `orders.replace` records a new
+  submission rather than cancelling the original.
+- Determinism. Strategy source is checked by `harness.strategy.lint`, which
+  rejects wall-clock, sleep, network, subprocess, unseeded-random, asyncio, and
+  concurrency patterns. The Python CI job sweeps `strategies/` with it, and the
+  Rust `host` walker lints strategy source with `rustpython-parser`;
+  `harness.strategy.lint` remains the shared-fixture parity oracle.
+- Guidance. The authoring contract and worked example are in
+  `docs/strategy-authoring-guide.md`; post-v1 realism gaps are tracked in
+  `docs/post-v1-realism-spikes.md`.
 
 ## Decommission Status
 
