@@ -12,13 +12,17 @@ const mocks = vi.hoisted(() => ({
 	listBacktests: vi.fn(),
 	launchBacktest: vi.fn(),
 	getBacktest: vi.fn(),
+	getHarnessStatus: vi.fn(),
+	pollHarnessJob: vi.fn(),
 	notify: vi.fn()
 }));
 
 vi.mock('$lib/api', () => ({
 	listBacktests: mocks.listBacktests,
 	launchBacktest: mocks.launchBacktest,
-	getBacktest: mocks.getBacktest
+	getBacktest: mocks.getBacktest,
+	getHarnessStatus: mocks.getHarnessStatus,
+	pollHarnessJob: mocks.pollHarnessJob
 }));
 
 vi.mock('$lib/workspace.svelte', () => ({ notify: mocks.notify }));
@@ -134,6 +138,17 @@ beforeEach(() => {
 	mocks.listBacktests.mockResolvedValue([]);
 	mocks.launchBacktest.mockResolvedValue(accepted);
 	mocks.getBacktest.mockResolvedValue(detail);
+	mocks.getHarnessStatus.mockResolvedValue({
+		mode: 'local',
+		thesis_location: 'local',
+		harness_location: 'local',
+		reachable: true,
+		server: {},
+		tools: [{ name: 'run_backtest', description: '' }],
+		health: null,
+		error: null
+	});
+	mocks.pollHarnessJob.mockResolvedValue({ job_id: 'job-1', state: 'completed' });
 });
 
 describe('Backtests launch action (T292)', () => {

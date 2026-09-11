@@ -30,6 +30,11 @@ import type {
 	ConsentProposal,
 	DeploymentCard,
 	ExecutionEvent,
+	HarnessArtifactManifest,
+	HarnessJobResult,
+	HarnessJobStatus,
+	HarnessRunRecord,
+	HarnessStatus,
 	KnowledgeHit,
 	LaunchBacktestInput,
 	OrderRecord,
@@ -800,9 +805,10 @@ export function getBacktest(workspaceId: string, backtestId: string): Promise<Ba
 }
 
 /**
- * Launch a backtest through `POST /v1/workspaces/{ws}/backtests/launch`.
- * Real mode delegates to the harness activation adapter; fixture mode resolves
- * a synthetic accepted outcome shaped exactly like the API document.
+ * Launch a backtest through the canonical `POST /v1/backtests/jobs` route.
+ * The Thesis harness router fronts the harness MCP `run_backtest` tool, so the
+ * same call works whether the harness is local or remote. Fixture mode resolves
+ * a synthetic accepted outcome shaped like the legacy launch document.
  */
 export function launchBacktest(
 	workspaceId: string,
@@ -826,10 +832,114 @@ export function launchBacktest(
 			request_payload: { ...body }
 		}));
 	}
-	return apiFetch<BacktestLaunchResult>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/launch`,
-		{ method: 'POST', body: JSON.stringify(body) }
+	return apiFetch<HarnessJobResult>('/v1/backtests/jobs', {
+		method: 'POST',
+		body: JSON.stringify({
+			config_path: input.configPath,
+			workspace: workspaceId
+		})
+	}).then((job) => ({
+		action: job.action,
+		bundle_ref: body.bundle_ref,
+		environment: body.environment,
+		exit_code: job.exit_code,
+		job_id: job.job_id,
+		state: job.state,
+		request_payload: job.result
+	}));
+}
+
+// ---------------------------------------------------------------------------
+// Harness topology + MCP operations (thesis.http.harness, `/v1/harness/status`
+// and the canonical `/v1/backtests/jobs|runs` routes).
+// ---------------------------------------------------------------------------
+
+const TERMINAL_JOB_STATES = new Set([
+	'completed',
+	'failed',
+	'cancelled',
+	'canceled',
+	'archived',
+	'error'
+]);
+
+/**
+ * Read the harness topology and connection status. The route answers 200 even
+ * when the harness is unreachable, so the UI can render `reachable`/`error`
+ * instead of treating the probe as a transport failure.
+ */
+export function getHarnessStatus(): Promise<HarnessStatus> {
+	if (fixtureMode) {
+		return wait(5).then(() => ({
+			mode: 'local' as const,
+			thesis_location: 'local' as const,
+			harness_location: 'local' as const,
+			reachable: true,
+			server: { serverInfo: { name: 'harness', version: '0.1.0' } },
+			tools: [
+				{ name: 'run_backtest', description: 'Run one deterministic backtest' },
+				{ name: 'get_backtest_status', description: 'Read a backtest job' },
+				{ name: 'get_run', description: 'Read a stored run' },
+				{ name: 'list_artifacts', description: 'List a run artifact manifest' }
+			],
+			health: { status: 'ok' },
+			error: null
+		}));
+	}
+	return apiFetch<HarnessStatus>('/v1/harness/status');
+}
+
+/** Read one canonical backtest job row. */
+export function getHarnessJob(jobId: string): Promise<HarnessJobStatus> {
+	if (fixtureMode) {
+		return wait(5).then(() => ({ job_id: jobId, state: 'completed' }));
+	}
+	return apiFetch<HarnessJobStatus>(
+		`/v1/backtests/jobs/${encodeURIComponent(jobId)}`
 	);
+}
+
+/** Read one stored run's catalog row. */
+export function getHarnessRun(runId: string): Promise<HarnessRunRecord> {
+	if (fixtureMode) {
+		return wait(5).then(() => ({
+			run_id: runId,
+			status: 'completed',
+			strategy_id: 'fixture'
+		}));
+	}
+	return apiFetch<HarnessRunRecord>(
+		`/v1/backtests/runs/${encodeURIComponent(runId)}`
+	);
+}
+
+/** Read one run's artifact manifest on the canonical `uri`/`sha256`/`sizeBytes` shape. */
+export function listHarnessArtifacts(runId: string): Promise<HarnessArtifactManifest> {
+	if (fixtureMode) {
+		return wait(5).then(() => ({ run_id: runId, artifacts: [] }));
+	}
+	return apiFetch<HarnessArtifactManifest>(
+		`/v1/backtests/runs/${encodeURIComponent(runId)}/artifacts`
+	);
+}
+
+/**
+ * Poll a launched job until it reaches a terminal state or the attempt budget
+ * is spent. A local harness that completes synchronously resolves immediately.
+ */
+export async function pollHarnessJob(
+	jobId: string,
+	options: { intervalMs?: number; maxAttempts?: number } = {}
+): Promise<HarnessJobStatus> {
+	const intervalMs = options.intervalMs ?? 750;
+	const maxAttempts = options.maxAttempts ?? 40;
+	let status = await getHarnessJob(jobId);
+	for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+		if (TERMINAL_JOB_STATES.has(status.state)) return status;
+		await wait(intervalMs);
+		status = await getHarnessJob(jobId);
+	}
+	return status;
 }
 
 // ---------------------------------------------------------------------------

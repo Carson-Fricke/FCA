@@ -32,6 +32,7 @@ from thesis.http.backtests import create_backtest_router
 from thesis.http.chat import create_chat_router
 from thesis.http.dashboards import create_dashboard_router
 from thesis.http.deployments import create_deployment_router
+from thesis.http.harness import HarnessDataService, create_harness_router
 from thesis.http.knowledge import create_knowledge_router
 from thesis.http.screeners import create_screeners_router
 from thesis.http.screening import create_screener_router
@@ -235,6 +236,7 @@ def create_app(
     screener_service: ScreenerService | None = None,
     workspace_data: WorkspaceDataBundle | None = None,
     workflow_runtime: WorkflowRuntime | None = None,
+    harness_data_service: HarnessDataService | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
@@ -291,6 +293,8 @@ def create_app(
         application.state.screener_service = screener_service
     if workflow_runtime is not None:
         application.state.workflow_runtime = workflow_runtime
+    if harness_data_service is not None:
+        application.state.harness_data_service = harness_data_service
 
     @application.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
@@ -361,6 +365,10 @@ def create_app(
     )
     application.include_router(
         create_backtest_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_harness_router(),
         dependencies=[Depends(authenticator)],
     )
     application.include_router(
