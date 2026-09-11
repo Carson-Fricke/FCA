@@ -33,8 +33,7 @@ pub use contracts::{
 pub use error::HostError;
 pub use indicator::{IndicatorHost, LoadedCallable};
 pub use lint::{
-    default_lint_path, LintReport, PythonStrategyLinter, SandboxViolation, StrategyLintError,
-    ViolationCategory,
+    LintReport, SandboxViolation, StrategyLintError, StrategyLinter, ViolationCategory,
 };
 pub use reference::ReferenceStrategy;
 pub use screener::{LoadedScreener, ScreenerHost, SCREEN_ENTRYPOINT};
