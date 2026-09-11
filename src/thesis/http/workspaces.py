@@ -50,8 +50,8 @@ from thesis.integrations.harness_activation import (
     HarnessApiTransport,
     HarnessBoundary,
     HarnessProcessRunner,
-    LocalHarnessProcess,
 )
+from thesis.integrations.mcp import open_local_harness_boundary
 from thesis.integrations.runtime_status import RuntimeStatusClient
 from thesis.screening.engine import MarketBar, ScreenerPortError, UniverseEntry
 
@@ -456,13 +456,15 @@ def build_local_workspace_data(
     """
     resolved_clock = clock if clock is not None else _utc_now
     ids = id_factory if id_factory is not None else _counting_id_factory()
-    harness = (
-        harness_boundary
-        if harness_boundary is not None
-        else LocalHarnessProcess(harness_runner)
-        if harness_runner is not None
-        else None
-    )
+    # Local composition prefers the harness MCP tool boundary (catalog-derived
+    # capabilities) and falls back to the direct process boundary when the MCP
+    # server cannot start. An explicit boundary always wins.
+    if harness_boundary is not None:
+        harness: HarnessBoundary | None = harness_boundary
+    elif harness_runner is not None:
+        harness = open_local_harness_boundary(process_runner=harness_runner)
+    else:
+        harness = None
     status_client = RuntimeStatusClient(
         harness_base_url,
         harness_transport
