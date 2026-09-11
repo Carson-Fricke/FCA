@@ -56,30 +56,6 @@ RUN test -x /opt/venv/bin/lake \
     && test -x /opt/venv/bin/backtest-job \
     && test -x /opt/venv/bin/trader
 
-FROM debian:bookworm-slim AS native
-
-ARG ZIG_VERSION=0.16.0
-ARG ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
-
-ENV PATH="/opt/zig:$PATH"
-
-WORKDIR /build
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
-    && rm -rf /var/lib/apt/lists/
-
-RUN curl -fsSLo /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
-    && echo "${ZIG_SHA256}  /tmp/zig.tar.xz" | sha256sum -c - \
-    && mkdir /opt/zig \
-    && tar -xJf /tmp/zig.tar.xz --strip-components=1 -C /opt/zig \
-    && rm /tmp/zig.tar.xz
-
-COPY build.zig build.zig.zon ./
-COPY src/harness/native/ ./src/harness/native/
-
-RUN zig build test && zig build --prefix /out
-
 FROM python:3.12-slim AS runtime
 
 ENV PATH="/opt/venv/bin:$PATH" \
@@ -92,8 +68,7 @@ RUN groupadd --gid 10001 lake \
     && useradd --uid 10001 --gid lake --create-home --shell /usr/sbin/nologin lake
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=native /out/ /opt/native/
-# The staged Rust native core shared library, ready for the migration flip.
+# The Rust native core shared library consumed by the ctypes loader.
 COPY --from=rust /build/rust/target/release/libharness_native.so /opt/rust/libharness_native.so
 COPY config/ /app/config/
 

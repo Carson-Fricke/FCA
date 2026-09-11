@@ -20,7 +20,7 @@ def test_missing_library_raises_dedicated_error(
     with pytest.raises(NativeCoreUnavailable) as excinfo:
         load_native_core()
 
-    assert "zig build" in str(excinfo.value)
+    assert "cargo build" in str(excinfo.value)
     assert "does-not-exist.dll" in str(excinfo.value)
 
 
@@ -35,7 +35,7 @@ def test_unloadable_library_raises_dedicated_error(
         load_native_core()
 
     assert "could not be loaded" in str(excinfo.value)
-    assert "zig build" in str(excinfo.value)
+    assert "cargo build" in str(excinfo.value)
 
 
 def test_dedicated_error_is_not_a_bare_import_error() -> None:
@@ -56,18 +56,22 @@ def test_environment_override_points_the_loader_at_one_file(
         load_native_core()
 
 
-def test_default_candidates_search_the_zig_install() -> None:
+def test_default_candidates_search_the_rust_target() -> None:
     monkey_root = Path(__file__).resolve().parents[3]
     candidates = candidate_paths()
     assert candidates
     if sys.platform == "win32":
         assert any(
-            "zig-out" in str(path) and path.name == "harness_native.dll"
+            "rust" in path.parts
+            and "target" in path.parts
+            and path.name == "harness_native.dll"
             for path in candidates
         )
     else:
         assert any(
-            "zig-out" in str(path) and "libharness_native" in path.name
+            "rust" in path.parts
+            and "target" in path.parts
+            and "libharness_native" in path.name
             for path in candidates
         )
     assert all(str(path).startswith(str(monkey_root)) for path in candidates)

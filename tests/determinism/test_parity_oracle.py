@@ -288,5 +288,5 @@ def test_zig_runner_requires_the_built_native_core(
     monkeypatch.setenv(
         "HARNESS_NATIVE_LIBRARY", str(tmp_path / "missing" / "harness_native.dll")
     )
-    with pytest.raises(NativeCoreUnavailable, match="zig build"):
+    with pytest.raises(NativeCoreUnavailable, match="cargo build"):
         run_zig_backtest(_configuration())

@@ -2,8 +2,6 @@
 !pyproject.toml
 !uv.lock
 !setup.py
-!build.zig
-!build.zig.zon
 !src/
 !src/**
 !config/
@@ -16,5 +14,3 @@ rust/target/
 **/__pycache__/
 **/*.py[cod]
 **/*.egg-info/
-**/.zig-cache/
-**/zig-out/

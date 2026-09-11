@@ -1,6 +1,6 @@
 """Loader for the native harness core shared library.
 
-The native core (``src/harness/native``, built by ``build.zig``) exports a
+The native core (``rust/crates/harness-native``, built by Cargo) exports a
 small, versioned C ABI. This module is the only supported way for Python code
 to reach it. Loading is strict: if the library is missing, unloadable, or was
 built against a different ABI version, :func:`load_native_core` raises
@@ -20,8 +20,8 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
-#: ABI version this loader is pinned to. Must match ``types.abi_version`` in
-#: ``src/harness/native/types.zig``. Bump both together.
+#: ABI version this loader is pinned to. Must match ``types::ABI_VERSION`` in
+#: ``rust/crates/harness-native/src/types.rs``. Bump both together.
 NATIVE_ABI_VERSION: Final = 2
 
 #: Pinned fixed-point decimal scale of the native core. Matches the
@@ -40,8 +40,8 @@ _ERROR_NAMES: Final[dict[int, str]] = {
 }
 
 _BUILD_HINT: Final = (
-    "Run `zig build` from the repository root to build the native core "
-    "(outputs under zig-out/), then retry."
+    "Run `cargo build -p harness-native` from the `rust/` workspace to build "
+    "the native core (outputs under `rust/target/`), then retry."
 )
 
 
@@ -74,17 +74,17 @@ def candidate_paths() -> tuple[Path, ...]:
     """Return every location the loader searches for the shared library.
 
     ``HARNESS_NATIVE_LIBRARY`` may point at one explicit shared-library file
-    and takes precedence. Otherwise the loader looks in the Zig install
-    directories of the repository checkout: ``zig-out/bin`` (Windows DLLs) and
-    ``zig-out/lib`` (Unix and import libraries).
+    and takes precedence. Otherwise the loader looks in the Cargo target
+    directories of the repository checkout: ``rust/target/release`` then
+    ``rust/target/debug``. There is no Zig fallback.
     """
     override = os.environ.get("HARNESS_NATIVE_LIBRARY")
     if override:
         return (Path(override),)
     repository_root = Path(__file__).resolve().parents[2]
     directories = (
-        repository_root / "zig-out" / "bin",
-        repository_root / "zig-out" / "lib",
+        repository_root / "rust" / "target" / "release",
+        repository_root / "rust" / "target" / "debug",
     )
     return tuple(
         directory / name for directory in directories for name in _library_names()

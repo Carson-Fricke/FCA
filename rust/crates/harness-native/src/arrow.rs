@@ -1,76 +1,44 @@
 //! Arrow C Data Interface bridge for the native harness core.
 //!
-//! Reimplements the Arrow C struct definitions (`ArrowSchema`/`ArrowArray`) per
-//! the stable `arrow/c/abi.h` layout and exports a deterministic batch of
-//! fixed-point decimals at the pinned scale so Python can consume it through
-//! pyarrow's documented ctypes import path (`pa.Array._import_from_c`). This is
-//! the same bridge `arrow-rs`'s `arrow::ffi` produces; it is written here
-//! directly so the native core stays free of a runtime Arrow dependency.
+//! The bridge is built on arrow-rs's C Data Interface support: the pinned
+//! deterministic batch of fixed-point decimals is produced with
+//! [`Decimal128Array`] at the repository's binary decimal precision and scale,
+//! then exported through arrow-rs's ABI-compatible structs
+//! ([`ArrowSchema`]/[`ArrowArray`], re-exported from `arrow::ffi`) so Python can
+//! consume it through pyarrow's documented ctypes import path
+//! (`pa.Array._import_from_c`). The previous hand-rolled `ArrowSchema`/
+//! `ArrowArray` definitions are gone; the public names, the C struct layout, and
+//! the exported C ABI symbols (`harness_arrow_decimal_batch`,
+//! `harness_decimal_batch_values`) are unchanged.
 //!
 //! Memory ownership follows the Arrow C Data Interface contract: the producer
 //! allocates the schema metadata and value buffers, and the consumer releases
 //! both structs exactly once by invoking their `release` callbacks, which free
-//! everything the producer allocated. Release callbacks are idempotent.
+//! everything the producer allocated. arrow-rs installs and owns those
+//! callbacks, so the release semantics stay identical to the rest of the
+//! ecosystem.
 
-use core::ffi::{c_char, c_void};
-
-/// The Arrow C Data Interface schema descriptor (`arrow/c/abi.h` layout).
-#[repr(C)]
-pub struct ArrowSchema {
-    /// Arrow format string (`d:38,18`).
-    pub format: *const c_char,
-    /// Optional field name.
-    pub name: *const c_char,
-    /// Optional key-value metadata.
-    pub metadata: *const c_char,
-    /// Arrow schema flags.
-    pub flags: i64,
-    /// Number of children.
-    pub n_children: i64,
-    /// Child schemas.
-    pub children: *mut *mut ArrowSchema,
-    /// Dictionary schema.
-    pub dictionary: *mut ArrowSchema,
-    /// Release callback.
-    pub release: Option<unsafe extern "C" fn(*mut ArrowSchema)>,
-    /// Producer-private data.
-    pub private_data: *mut c_void,
-}
+use arrow_array::{Array, Decimal128Array};
+use arrow_schema::{DataType, Field};
 
 /// The Arrow C Data Interface array descriptor (`arrow/c/abi.h` layout).
-#[repr(C)]
-pub struct ArrowArray {
-    /// Logical length.
-    pub length: i64,
-    /// Null count.
-    pub null_count: i64,
-    /// Logical offset.
-    pub offset: i64,
-    /// Number of buffers.
-    pub n_buffers: i64,
-    /// Number of children.
-    pub n_children: i64,
-    /// Buffer pointers.
-    pub buffers: *mut *const u8,
-    /// Child arrays.
-    pub children: *mut *mut ArrowArray,
-    /// Dictionary array.
-    pub dictionary: *mut ArrowArray,
-    /// Release callback.
-    pub release: Option<unsafe extern "C" fn(*mut ArrowArray)>,
-    /// Producer-private data.
-    pub private_data: *mut c_void,
-}
+pub use arrow::ffi::FFI_ArrowArray as ArrowArray;
+/// The Arrow C Data Interface schema descriptor (`arrow/c/abi.h` layout).
+pub use arrow::ffi::FFI_ArrowSchema as ArrowSchema;
 
-/// The pinned Arrow type of the exported batch: decimal128 at the repository's
-/// binary decimal precision and scale.
-pub const FORMAT: &[u8] = b"d:38,18\0";
+/// Precision of the exported type, `decimal128(38, 18)`.
+pub const DECIMAL_PRECISION: u8 = 38;
+/// Scale of the exported type, the repository's binary decimal scale.
+pub const DECIMAL_SCALE: i8 = 18;
 /// The exported field name.
-pub const NAME: &[u8] = b"value\0";
+pub const BATCH_NAME: &str = "value";
 /// The exported batch length.
 pub const BATCH_LEN: usize = 8;
 
-/// The pinned deterministic batch of unscaled decimal128(38, 18) values.
+/// The pinned deterministic batch of unscaled decimal128(38, 18) values. This is
+/// the golden vector carried over from the retired Zig native core; the Python
+/// parity test reads it back through `harness_decimal_batch_values` and asserts
+/// the imported pyarrow values byte-for-byte.
 pub const BATCH_VALUES: [i128; BATCH_LEN] = [
     1_500_000_000_000_000_000,
     1,
@@ -82,31 +50,18 @@ pub const BATCH_VALUES: [i128; BATCH_LEN] = [
     15_025,
 ];
 
-struct SchemaPrivate;
-
-struct ArrayPrivate {
-    #[allow(dead_code)]
-    values: Box<[i128; BATCH_LEN]>,
-    buffers: [*const u8; 2],
+/// Build the pinned decimal array with arrow-rs. Returns `None` only if the
+/// pinned values do not fit the pinned type, which is a compile-time invariant.
+fn pinned_decimal_array() -> Option<Decimal128Array> {
+    Decimal128Array::from_iter_values(BATCH_VALUES)
+        .with_precision_and_scale(DECIMAL_PRECISION, DECIMAL_SCALE)
+        .ok()
 }
 
-fn empty_schema() -> ArrowSchema {
-    ArrowSchema {
-        format: FORMAT.as_ptr().cast::<c_char>(),
-        name: NAME.as_ptr().cast::<c_char>(),
-        metadata: core::ptr::null(),
-        flags: 0,
-        n_children: 0,
-        children: core::ptr::null_mut(),
-        dictionary: core::ptr::null_mut(),
-        release: None,
-        private_data: core::ptr::null_mut(),
-    }
-}
-
-/// Fill `out_schema` and `out_array` with the pinned decimal batch. The value
-/// buffer is heap-allocated with `i128` alignment; both structs are only
-/// written once every allocation has succeeded.
+/// Fill `out_schema` and `out_array` with the pinned decimal batch. Both structs
+/// are built by arrow-rs and then moved into the caller's storage by value, so
+/// the release callbacks and private data transfer together and the caller owns
+/// them exactly as the Arrow C Data Interface requires.
 ///
 /// # Safety
 ///
@@ -119,100 +74,77 @@ pub unsafe fn export_decimal_batch(
     if out_schema.is_null() || out_array.is_null() {
         return false;
     }
-    let schema_private = Box::new(SchemaPrivate);
-    let values = Box::new(BATCH_VALUES);
-    let mut array_private = Box::new(ArrayPrivate {
-        values,
-        buffers: [core::ptr::null(), core::ptr::null()],
-    });
-    array_private.buffers[1] = array_private.values.as_ptr().cast::<u8>();
+    let Some(array) = pinned_decimal_array() else {
+        return false;
+    };
+    let field = Field::new(
+        BATCH_NAME,
+        DataType::Decimal128(DECIMAL_PRECISION, DECIMAL_SCALE),
+        false,
+    );
+    let Ok(schema) = ArrowSchema::try_from(&field) else {
+        return false;
+    };
+    let ffi_array = ArrowArray::new(&array.into_data());
 
-    let schema_private_ptr = Box::into_raw(schema_private).cast::<c_void>();
-    let array_private_ptr = Box::into_raw(array_private);
-
+    // Ownership moves into the caller's storage; arrow-rs's release callbacks
+    // free the buffers exactly once.
     unsafe {
-        *out_schema = ArrowSchema {
-            release: Some(release_schema),
-            private_data: schema_private_ptr,
-            ..empty_schema()
-        };
-        *out_array = ArrowArray {
-            length: BATCH_LEN as i64,
-            null_count: 0,
-            offset: 0,
-            n_buffers: 2,
-            n_children: 0,
-            buffers: (*array_private_ptr).buffers.as_mut_ptr(),
-            children: core::ptr::null_mut(),
-            dictionary: core::ptr::null_mut(),
-            release: Some(release_array),
-            private_data: array_private_ptr.cast::<c_void>(),
-        };
+        core::ptr::write(out_schema, schema);
+        core::ptr::write(out_array, ffi_array);
     }
     true
 }
 
-unsafe extern "C" fn release_schema(schema: *mut ArrowSchema) {
-    if schema.is_null() {
-        return;
-    }
-    let schema_ref = unsafe { &mut *schema };
-    if schema_ref.private_data.is_null() {
-        return;
-    }
-    drop(unsafe { Box::from_raw(schema_ref.private_data.cast::<SchemaPrivate>()) });
-    schema_ref.release = None;
-    schema_ref.private_data = core::ptr::null_mut();
-}
-
-unsafe extern "C" fn release_array(array: *mut ArrowArray) {
-    if array.is_null() {
-        return;
-    }
-    let array_ref = unsafe { &mut *array };
-    if array_ref.private_data.is_null() {
-        return;
-    }
-    drop(unsafe { Box::from_raw(array_ref.private_data.cast::<ArrayPrivate>()) });
-    array_ref.release = None;
-    array_ref.private_data = core::ptr::null_mut();
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{export_decimal_batch, ArrowArray, ArrowSchema, BATCH_LEN, BATCH_VALUES};
+    use core::ffi::CStr;
+
+    use arrow_array::{Array, Decimal128Array};
+    use arrow_schema::{DataType, Field};
+
+    use super::{
+        export_decimal_batch, ArrowArray, ArrowSchema, BATCH_LEN, BATCH_NAME, BATCH_VALUES,
+        DECIMAL_PRECISION, DECIMAL_SCALE,
+    };
+
+    fn zeroed_schema() -> ArrowSchema {
+        unsafe { core::mem::zeroed() }
+    }
+
+    fn zeroed_array() -> ArrowArray {
+        unsafe { core::mem::zeroed() }
+    }
+
+    fn release(schema: &mut ArrowSchema, array: &mut ArrowArray) {
+        unsafe {
+            if let Some(callback) = schema.release {
+                callback(schema);
+            }
+            if let Some(callback) = array.release {
+                callback(array);
+            }
+        }
+    }
 
     #[test]
-    fn exported_batch_carries_the_pinned_schema_and_values() {
-        let mut schema = ArrowSchema {
-            format: core::ptr::null(),
-            name: core::ptr::null(),
-            metadata: core::ptr::null(),
-            flags: 0,
-            n_children: 0,
-            children: core::ptr::null_mut(),
-            dictionary: core::ptr::null_mut(),
-            release: None,
-            private_data: core::ptr::null_mut(),
-        };
-        let mut array = ArrowArray {
-            length: 0,
-            null_count: 0,
-            offset: 0,
-            n_buffers: 0,
-            n_children: 0,
-            buffers: core::ptr::null_mut(),
-            children: core::ptr::null_mut(),
-            dictionary: core::ptr::null_mut(),
-            release: None,
-            private_data: core::ptr::null_mut(),
-        };
+    fn exported_batch_carries_the_pinned_golden_artifacts() {
+        let mut schema = zeroed_schema();
+        let mut array = zeroed_array();
         assert!(unsafe { export_decimal_batch(&mut schema, &mut array) });
 
-        let format = unsafe { core::ffi::CStr::from_ptr(schema.format) };
+        let format = unsafe { CStr::from_ptr(schema.format) };
         assert_eq!(format.to_bytes(), b"d:38,18");
+        let name = unsafe { CStr::from_ptr(schema.name) };
+        assert_eq!(name.to_bytes(), BATCH_NAME.as_bytes());
+        assert_eq!(schema.n_children, 0);
+        assert_eq!(schema.flags, 0);
+
         assert_eq!(array.length, BATCH_LEN as i64);
+        assert_eq!(array.null_count, 0);
+        assert_eq!(array.offset, 0);
         assert_eq!(array.n_buffers, 2);
+        assert_eq!(array.n_children, 0);
         assert!(schema.release.is_some());
         assert!(array.release.is_some());
 
@@ -221,18 +153,70 @@ mod tests {
         for (index, expected) in BATCH_VALUES.iter().enumerate() {
             let mut bytes = [0u8; 16];
             unsafe {
-                core::ptr::copy_nonoverlapping(buffers[1].add(index * 16), bytes.as_mut_ptr(), 16);
+                core::ptr::copy_nonoverlapping(
+                    buffers[1].cast::<u8>().add(index * 16),
+                    bytes.as_mut_ptr(),
+                    16,
+                );
             }
             assert_eq!(i128::from_le_bytes(bytes), *expected);
         }
 
-        unsafe {
-            (schema.release.unwrap())(&mut schema);
-            (array.release.unwrap())(&mut array);
-        }
+        release(&mut schema, &mut array);
         assert!(schema.release.is_none());
         assert!(array.release.is_none());
-        assert!(schema.private_data.is_null());
-        assert!(array.private_data.is_null());
+
+        // Zeroed structs no longer own anything, so dropping them is a no-op.
+    }
+
+    #[test]
+    fn exported_batch_round_trips_through_arrow_rs() {
+        let mut schema = zeroed_schema();
+        let mut array = zeroed_array();
+        assert!(unsafe { export_decimal_batch(&mut schema, &mut array) });
+
+        // Take ownership of the array struct and import it with arrow-rs, which
+        // is the same path pyarrow follows on the Python side.
+        let imported = unsafe {
+            let owned = core::ptr::read(&array);
+            arrow::ffi::from_ffi(owned, &schema).expect("imported arrow batch")
+        };
+        let values = Decimal128Array::from(imported);
+        assert_eq!(values.len(), BATCH_LEN);
+        assert_eq!(
+            values.data_type(),
+            &DataType::Decimal128(DECIMAL_PRECISION, DECIMAL_SCALE)
+        );
+        let round_tripped: Vec<i128> = values.values().to_vec();
+        assert_eq!(round_tripped.as_slice(), BATCH_VALUES.as_slice());
+
+        // The schema was not consumed by `from_ffi`; release it explicitly.
+        unsafe {
+            if let Some(callback) = schema.release {
+                callback(&mut schema);
+            }
+        }
+        assert!(schema.release.is_none());
+        // `from_ffi` consumed the array and freed it on drop; the local struct
+        // still has a stale release pointer, so null it before it drops.
+        array.release = None;
+    }
+
+    #[test]
+    fn schema_describes_the_pinned_decimal_type() {
+        let field = Field::new(
+            BATCH_NAME,
+            DataType::Decimal128(DECIMAL_PRECISION, DECIMAL_SCALE),
+            false,
+        );
+        let mut schema = ArrowSchema::try_from(&field).expect("pinned decimal schema");
+        assert_eq!(schema.format().to_string(), "d:38,18");
+        assert_eq!(schema.name(), Some(BATCH_NAME));
+        unsafe {
+            if let Some(callback) = schema.release {
+                callback(&mut schema);
+            }
+        }
+        assert!(schema.release.is_none());
     }
 }
