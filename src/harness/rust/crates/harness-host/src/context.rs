@@ -1,751 +1,835 @@
-//! PyO3-bridged strategy context.
+//! Native Rust strategy context.
 //!
-//! The Rust engine needs the constrained strategy dependencies (clock, books,
-//! state, seeded randomness, logging, emissions, and subscriptions) without a
-//! second implementation of `harness.strategy.context.StrategyContext`. This
-//! module exposes [`StrategyContextBridge`], the Rust-side surface the host
-//! programs against, and [`PyStrategyContext`], a PyO3 implementation that owns
-//! and drives the *Python* context object. Because every accessor executes
-//! Python, the observed behavior is parity-by-construction with the oracle in
-//! `harness.strategy`.
+//! [`PyEngineContext`] is the constrained strategy surface the native Rust
+//! engine hands to a user-authored Python strategy through PyO3. It is the
+//! native replacement for the Python `harness.strategy.context.StrategyContext`
+//! bridge: the host owns the context itself, so the plugin surface no longer
+//! imports the Python engine.
 //!
-//! The PyO3 implementation lives behind the default `pyo3-bridge` feature so a
-//! consumer that only wants the native linter can opt out.
+//! The object is duck-typed to the historical Python context: it exposes
+//! `clock`, `universe`, `books`, `orders`, `state`, `random`, `log`, `emissions`,
+//! and `emit` with the same attribute and method names strategies already use.
+//! `PyClock`, `PyOrders`, `PyBooks`, `PyStateStore`, `PyEmissions`, and `PyLog`
+//! are the native capabilities. The per-context seeded generator is a standard
+//! `random.Random(seed)` instance, so a strategy that draws from
+//! `context.random` keeps the Python generator's exact sequence.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, BTreeSet};
 
+use harness_backtest::backtest::engine_core::EngineOrder;
+use harness_num::PyDecimal;
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use crate::error::HostError;
-use crate::python::{
-    default_search_paths, install_harness_data_shim, install_search_paths, json_dumps_value,
-    json_loads,
-};
+/// Build a Python `decimal.Decimal` from one native decimal.
+pub(crate) fn py_decimal<'py>(py: Python<'py>, value: PyDecimal) -> PyResult<Bound<'py, PyAny>> {
+    py.import("decimal")?
+        .getattr("Decimal")?
+        .call1((value.to_string(),))
+}
 
-/// Rust-side view of one strategy's constrained context.
-///
-/// The methods deliberately mirror the observable Python surface rather than
-/// introducing Rust-only semantics. A host can depend on `dyn
-/// StrategyContextBridge` and stay independent of the interpreter embedding.
-pub trait StrategyContextBridge {
-    /// The strategy's virtual book identifier.
-    fn book_id(&self) -> Result<String, HostError>;
+/// The canonical universe handed to a strategy.
+#[pyclass(unsendable)]
+pub struct PyUniverse {
+    #[pyo3(get)]
+    symbols: Vec<String>,
+}
 
-    /// The canonical, sorted strategy universe.
-    fn universe(&self) -> Result<Vec<String>, HostError>;
-
+#[pymethods]
+impl PyUniverse {
     /// Whether a symbol belongs to the universe.
-    fn contains_symbol(&self, symbol: &str) -> Result<bool, HostError>;
+    fn contains(&self, symbol: &str) -> bool {
+        self.symbols.iter().any(|candidate| candidate == symbol)
+    }
 
-    /// The engine clock head in ISO-8601 form.
-    fn clock_now(&self) -> Result<String, HostError>;
+    fn __contains__(&self, symbol: &str) -> bool {
+        self.contains(symbol)
+    }
 
-    /// Current strategy cash rendered as a decimal string.
-    fn cash(&self) -> Result<String, HostError>;
+    fn __len__(&self) -> usize {
+        self.symbols.len()
+    }
+}
 
-    /// Marked strategy equity rendered as a decimal string, if marked.
-    fn equity(&self) -> Result<Option<String>, HostError>;
+/// A read-only clock that returns a Python `datetime` for the engine head.
+#[pyclass(unsendable)]
+pub struct PyClock {
+    now_ns: Cell<i64>,
+}
+
+impl PyClock {
+    /// Construct a clock pinned at one epoch-nanosecond instant.
+    #[must_use]
+    pub fn new(now_ns: i64) -> Self {
+        Self {
+            now_ns: Cell::new(now_ns),
+        }
+    }
+
+    /// Advance the engine head to one epoch-nanosecond instant.
+    pub fn set(&self, now_ns: i64) {
+        self.now_ns.set(now_ns);
+    }
+}
+
+#[pymethods]
+impl PyClock {
+    /// The engine head as a timezone-aware Python `datetime`.
+    fn now(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let iso = harness_backtest::backtest::manifest::utc_timestamp(self.now_ns.get(), false);
+        let value = py
+            .import("datetime")?
+            .getattr("datetime")?
+            .call_method1("fromisoformat", (iso,))?;
+        Ok(value.unbind())
+    }
+}
+
+/// A current position snapshot for one symbol.
+#[pyclass(unsendable)]
+pub struct PyPosition {
+    #[pyo3(get)]
+    symbol: String,
+    quantity: PyDecimal,
+}
+
+#[pymethods]
+impl PyPosition {
+    /// The signed position quantity as a Python `decimal.Decimal`.
+    #[getter]
+    fn quantity(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(py_decimal(py, self.quantity)?.unbind())
+    }
+}
+
+/// The strategy order sink: records submitted orders and their ownership.
+#[pyclass(unsendable)]
+pub struct PyOrders {
+    pending: RefCell<Vec<EngineOrder>>,
+    owned: RefCell<BTreeSet<String>>,
+}
+
+impl PyOrders {
+    /// Construct an empty order sink.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            pending: RefCell::new(Vec::new()),
+            owned: RefCell::new(BTreeSet::new()),
+        }
+    }
+
+    /// Drop every order recorded since the last drain.
+    pub fn clear_pending(&self) {
+        self.pending.borrow_mut().clear();
+    }
+
+    /// Take the orders recorded since the last drain.
+    pub fn take_pending(&self) -> Vec<EngineOrder> {
+        std::mem::take(&mut *self.pending.borrow_mut())
+    }
+}
+
+impl Default for PyOrders {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[pymethods]
+impl PyOrders {
+    /// Record one submitted order without synchronously producing an outcome.
+    fn submit(&self, order: &Bound<'_, PyAny>) -> PyResult<()> {
+        let intent = order_from_python(order)?;
+        self.owned.borrow_mut().insert(intent.order_id.clone());
+        self.pending.borrow_mut().push(intent);
+        Ok(())
+    }
+
+    /// Request cancellation of one order by identifier.
+    fn cancel(&self, order_id: &str) {
+        let _ = order_id;
+    }
+
+    /// Replace one order with a replacement intent recorded as a new submission.
+    fn replace(&self, order_id: &str, replacement: &Bound<'_, PyAny>) -> PyResult<()> {
+        let _ = order_id;
+        let intent = order_from_python(replacement)?;
+        self.owned.borrow_mut().insert(intent.order_id.clone());
+        self.pending.borrow_mut().push(intent);
+        Ok(())
+    }
+
+    /// Whether an order identifier was submitted by this strategy.
+    fn owns(&self, order_id: &str) -> bool {
+        self.owned.borrow().contains(order_id)
+    }
+}
+
+/// Native read-only strategy book and account view.
+///
+/// The adapter applies every fill and mark, so a strategy observes the same
+/// cash, positions, and marked equity the Rust engine accounts for.
+#[pyclass(unsendable)]
+pub struct PyBooks {
+    book_id: String,
+    initial_cash: PyDecimal,
+    cash: RefCell<PyDecimal>,
+    positions: RefCell<BTreeMap<String, PyDecimal>>,
+    marks: RefCell<BTreeMap<String, PyDecimal>>,
+    fill_count: Cell<u64>,
+}
+
+impl PyBooks {
+    /// Construct a book view with one opening cash allocation.
+    #[must_use]
+    pub fn new(book_id: String, initial_cash: PyDecimal) -> Self {
+        Self {
+            book_id,
+            initial_cash,
+            cash: RefCell::new(initial_cash),
+            positions: RefCell::new(BTreeMap::new()),
+            marks: RefCell::new(BTreeMap::new()),
+            fill_count: Cell::new(0),
+        }
+    }
+
+    /// Apply one booked fill to cash, the signed position, and the fill count.
+    pub fn apply_fill(
+        &self,
+        side: &str,
+        symbol: &str,
+        quantity: PyDecimal,
+        price: PyDecimal,
+        fee: PyDecimal,
+    ) {
+        let notional = quantity.checked_mul(price).unwrap_or(PyDecimal::ZERO);
+        let mut cash = self.cash.borrow_mut();
+        let updated = if side == "buy" {
+            cash.checked_sub(notional)
+                .and_then(|value| value.checked_sub(fee))
+        } else {
+            cash.checked_add(notional)
+                .and_then(|value| value.checked_sub(fee))
+        };
+        if let Ok(value) = updated {
+            *cash = value;
+        }
+        let signed = if side == "buy" {
+            quantity
+        } else {
+            quantity.negated()
+        };
+        let mut positions = self.positions.borrow_mut();
+        let entry = positions.entry(symbol.to_string()).or_insert(PyDecimal::ZERO);
+        if let Ok(value) = entry.checked_add(signed) {
+            *entry = value;
+        }
+        self.fill_count.set(self.fill_count.get() + 1);
+    }
+
+    /// Mark one symbol at the latest observed price.
+    pub fn mark(&self, symbol: &str, price: PyDecimal) {
+        self.marks.borrow_mut().insert(symbol.to_string(), price);
+    }
+
+    /// A copy of the current book state.
+    fn snapshot(&self) -> Self {
+        Self {
+            book_id: self.book_id.clone(),
+            initial_cash: self.initial_cash,
+            cash: RefCell::new(*self.cash.borrow()),
+            positions: RefCell::new(self.positions.borrow().clone()),
+            marks: RefCell::new(self.marks.borrow().clone()),
+            fill_count: Cell::new(self.fill_count.get()),
+        }
+    }
+}
+
+#[pymethods]
+impl PyBooks {
+    /// The strategy's virtual book identifier.
+    #[getter]
+    fn book_id(&self) -> &str {
+        &self.book_id
+    }
+
+    /// The strategy's own virtual book identifiers.
+    #[getter]
+    fn book_ids(&self) -> (String,) {
+        (self.book_id.clone(),)
+    }
+
+    /// Current strategy cash as a Python `decimal.Decimal`.
+    #[getter]
+    fn cash(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(py_decimal(py, *self.cash.borrow())?.unbind())
+    }
+
+    /// Marked strategy equity, or `None` when no position is marked.
+    #[getter]
+    fn equity(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        let marks = self.marks.borrow();
+        if marks.is_empty() {
+            return Ok(None);
+        }
+        let mut total = *self.cash.borrow();
+        for (symbol, quantity) in self.positions.borrow().iter() {
+            if let Some(price) = marks.get(symbol) {
+                let value = quantity.checked_mul(*price).unwrap_or(PyDecimal::ZERO);
+                total = total.checked_add(value).unwrap_or(total);
+            }
+        }
+        Ok(Some(py_decimal(py, total)?.unbind()))
+    }
 
     /// The number of fills accounted for this strategy book.
-    fn fill_count(&self) -> Result<u64, HostError>;
+    #[getter]
+    fn fill_count(&self) -> u64 {
+        self.fill_count.get()
+    }
 
-    /// The frozen strategy state as a JSON object.
-    fn state_snapshot_json(&self) -> Result<String, HostError>;
+    /// The opening cash allocation.
+    #[getter]
+    fn initial_cash(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(py_decimal(py, self.initial_cash)?.unbind())
+    }
 
-    /// One frozen strategy state value encoded as JSON, or `None` when absent.
-    fn state_get_json(&self, key: &str) -> Result<Option<String>, HostError>;
+    /// The current immutable book snapshot (this same view).
+    #[getter]
+    fn current(&self, py: Python<'_>) -> PyResult<Py<PyBooks>> {
+        Py::new(py, self.snapshot())
+    }
 
-    /// Store one strategy state value from a JSON document.
-    fn state_set_json(&self, key: &str, value_json: &str) -> Result<(), HostError>;
-
-    /// One draw from the per-context seeded generator.
-    fn random_draw(&self) -> Result<f64, HostError>;
-
-    /// One integer draw from the per-context seeded generator.
-    fn random_int(&self, low: i64, high: i64) -> Result<i64, HostError>;
-
-    /// Emit one structured signal from a JSON object of fields.
-    fn emit_json(&self, name: &str, fields_json: &str) -> Result<(), HostError>;
-
-    /// Every structured emission as a JSON array.
-    fn emissions_json(&self) -> Result<String, HostError>;
-
-    /// Append one structured log record.
-    fn log_json(&self, level: &str, message: &str, fields_json: &str) -> Result<(), HostError>;
-
-    /// Every structured log record as a JSON array.
-    fn log_records_json(&self) -> Result<String, HostError>;
-}
-
-/// The description used to build a Python `StrategyContext`.
-///
-/// The spec is data, not behavior: construction delegates every semantic
-/// decision (canonicalization, freezing, seed validation) to Python.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextSpec {
-    /// ISO-8601 engine clock stamp.
-    pub clock: String,
-    /// Shared account identifier.
-    pub account_id: String,
-    /// The strategy's virtual book identifier.
-    pub book_id: String,
-    /// Decimal-rendered initial book cash.
-    pub initial_cash: String,
-    /// Raw universe members, canonicalized by Python.
-    pub universe: Vec<String>,
-    /// Seed for the per-context deterministic generator.
-    pub seed: i64,
-    /// Initial frozen strategy state.
-    pub state: BTreeMap<String, serde_json::Value>,
-}
-
-impl ContextSpec {
-    /// Construct a spec with the default account, cash, seed, and empty state.
-    #[must_use]
-    pub fn new(clock: impl Into<String>, book_id: impl Into<String>) -> Self {
-        Self {
-            clock: clock.into(),
-            account_id: "account".to_string(),
-            book_id: book_id.into(),
-            initial_cash: "1000".to_string(),
-            universe: Vec::new(),
-            seed: 0,
-            state: BTreeMap::new(),
+    /// One current position from this strategy book.
+    fn position(&self, symbol: &str) -> PyPosition {
+        let quantity = self
+            .positions
+            .borrow()
+            .get(symbol)
+            .copied()
+            .unwrap_or(PyDecimal::ZERO);
+        PyPosition {
+            symbol: symbol.to_string(),
+            quantity,
         }
     }
 
-    /// Override the shared account identifier.
-    #[must_use]
-    pub fn with_account_id(mut self, account_id: impl Into<String>) -> Self {
-        self.account_id = account_id.into();
-        self
-    }
-
-    /// Override the initial book cash.
-    #[must_use]
-    pub fn with_initial_cash(mut self, initial_cash: impl Into<String>) -> Self {
-        self.initial_cash = initial_cash.into();
-        self
-    }
-
-    /// Set the raw universe members.
-    #[must_use]
-    pub fn with_universe<I, S>(mut self, universe: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.universe = universe.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Set the deterministic generator seed.
-    #[must_use]
-    pub fn with_seed(mut self, seed: i64) -> Self {
-        self.seed = seed;
-        self
-    }
-
-    /// Add one initial strategy state entry.
-    #[must_use]
-    pub fn with_state_entry(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.state.insert(key.into(), value);
-        self
-    }
-}
-
-/// A Python `StrategyContext` driven through PyO3.
-pub struct PyStrategyContext {
-    object: Py<PyAny>,
-    search_paths: Vec<PathBuf>,
-}
-
-impl PyStrategyContext {
-    /// Build and own a Python context using the checkout's default paths.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HostError`] when Python is unavailable or the context
-    /// constructor rejects the spec.
-    pub fn new(spec: &ContextSpec) -> Result<Self, HostError> {
-        Self::with_search_paths(default_search_paths(), spec)
-    }
-
-    /// Build and own a Python context with explicit import search paths.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HostError`] when Python is unavailable or the context
-    /// constructor rejects the spec.
-    pub fn with_search_paths(
-        search_paths: Vec<PathBuf>,
-        spec: &ContextSpec,
-    ) -> Result<Self, HostError> {
-        let result: PyResult<Py<PyAny>> = Python::attach(|py| {
-            install_search_paths(py, &search_paths)?;
-            install_harness_data_shim(py)?;
-            let stamp = py
-                .import("datetime")?
-                .getattr("datetime")?
-                .call_method1("fromisoformat", (&spec.clock,))?;
-            let clock = py
-                .import("harness.core.clock")?
-                .getattr("SimClock")?
-                .call1((stamp,))?;
-            let bus = py
-                .import("harness.core.events")?
-                .getattr("EventBus")?
-                .call1((&clock,))?;
-            let portfolio = py.import("harness.portfolio")?;
-            let hub = portfolio
-                .getattr("PortfolioHub")?
-                .call1((&spec.account_id,))?;
-            hub.call_method1("create_book", (&spec.book_id, &spec.initial_cash))?;
-            let context_class = py.import("harness.strategy")?.getattr("StrategyContext")?;
-            let kwargs = PyDict::new(py);
-            kwargs.set_item("portfolio", hub)?;
-            kwargs.set_item("bus", bus)?;
-            kwargs.set_item("book_id", &spec.book_id)?;
-            kwargs.set_item("seed", spec.seed)?;
-            if !spec.universe.is_empty() {
-                kwargs.set_item(
-                    "universe",
-                    PyList::new(py, spec.universe.iter().map(String::as_str))?,
-                )?;
-            }
-            if !spec.state.is_empty() {
-                let state = PyDict::new(py);
-                for (key, value) in &spec.state {
-                    state.set_item(key, json_loads(py, &value.to_string())?)?;
-                }
-                kwargs.set_item("state", state)?;
-            }
-            Ok(context_class.call((&clock,), Some(&kwargs))?.unbind())
-        });
-        result
-            .map(|object| Self {
-                object,
-                search_paths,
-            })
-            .map_err(HostError::from)
-    }
-
-    /// Borrow the wrapped Python context for a parity oracle or a Python-side
-    /// call the bridge does not expose.
-    pub fn python_object<'py>(&self, py: Python<'py>) -> Bound<'py, PyAny> {
-        self.object.bind(py).clone()
-    }
-
-    /// The import search paths used to build this context.
-    #[must_use]
-    pub(crate) fn search_paths(&self) -> &[PathBuf] {
-        &self.search_paths
-    }
-
-    /// Wrap an already-materialized Python context object.
-    pub(crate) fn from_object(object: Py<PyAny>, search_paths: Vec<PathBuf>) -> Self {
-        Self {
-            object,
-            search_paths,
+    /// Return the strategy's own book snapshot, rejecting sibling book ids.
+    fn book(&self, py: Python<'_>, book_id: &str) -> PyResult<Py<PyBooks>> {
+        if book_id == self.book_id {
+            Py::new(py, self.snapshot())
+        } else {
+            Err(PyKeyError::new_err(format!("unknown book {book_id:?}")))
         }
     }
 }
 
-impl StrategyContextBridge for PyStrategyContext {
-    fn book_id(&self) -> Result<String, HostError> {
-        let result: PyResult<String> =
-            Python::attach(|py| self.object.bind(py).getattr("book_id")?.extract());
-        result.map_err(HostError::from)
+/// Deterministic strategy-local mutable state.
+#[pyclass(unsendable)]
+pub struct PyStateStore {
+    values: RefCell<BTreeMap<String, Py<PyAny>>>,
+}
+
+impl PyStateStore {
+    /// Construct an empty state store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            values: RefCell::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl Default for PyStateStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[pymethods]
+impl PyStateStore {
+    fn __setitem__(&self, key: String, value: Py<PyAny>) {
+        self.values.borrow_mut().insert(key, value);
     }
 
-    fn universe(&self) -> Result<Vec<String>, HostError> {
-        let result: PyResult<Vec<String>> = Python::attach(|py| {
-            let symbols = self
-                .object
-                .bind(py)
-                .getattr("universe")?
-                .getattr("symbols")?;
-            let mut members = Vec::new();
-            for symbol in symbols.try_iter()? {
-                members.push(symbol?.str()?.to_string());
-            }
-            Ok(members)
-        });
-        result.map_err(HostError::from)
+    fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
+        self.values
+            .borrow()
+            .get(key)
+            .map(|value| value.clone_ref(py))
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
     }
 
-    fn contains_symbol(&self, symbol: &str) -> Result<bool, HostError> {
-        let result: PyResult<bool> = Python::attach(|py| {
-            self.object
-                .bind(py)
-                .getattr("universe")?
-                .call_method1("contains", (symbol,))?
-                .extract()
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn clock_now(&self) -> Result<String, HostError> {
-        let result: PyResult<String> = Python::attach(|py| {
-            self.object
-                .bind(py)
-                .getattr("clock")?
-                .call_method0("now")?
-                .call_method0("isoformat")?
-                .extract()
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn cash(&self) -> Result<String, HostError> {
-        let result: PyResult<String> = Python::attach(|py| {
-            Ok(self
-                .object
-                .bind(py)
-                .getattr("books")?
-                .getattr("cash")?
-                .str()?
-                .to_string())
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn equity(&self) -> Result<Option<String>, HostError> {
-        let result: PyResult<Option<String>> = Python::attach(|py| {
-            let value = self.object.bind(py).getattr("books")?.getattr("equity")?;
-            if value.is_none() {
-                Ok(None)
-            } else {
-                Ok(Some(value.str()?.to_string()))
-            }
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn fill_count(&self) -> Result<u64, HostError> {
-        let result: PyResult<u64> = Python::attach(|py| {
-            self.object
-                .bind(py)
-                .getattr("books")?
-                .getattr("fill_count")?
-                .extract()
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn state_snapshot_json(&self) -> Result<String, HostError> {
-        let result: PyResult<String> = Python::attach(|py| {
-            let snapshot = self.object.bind(py).getattr("state")?.getattr("snapshot")?;
-            json_dumps_value(py, &snapshot)
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn state_get_json(&self, key: &str) -> Result<Option<String>, HostError> {
-        let result: PyResult<Option<String>> = Python::attach(|py| {
-            let state = self.object.bind(py).getattr("state")?;
-            match state.get_item(key) {
-                Ok(value) => Ok(Some(json_dumps_value(py, &value)?)),
-                Err(error) if error.is_instance_of::<PyKeyError>(py) => Ok(None),
-                Err(error) => Err(error),
-            }
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn state_set_json(&self, key: &str, value_json: &str) -> Result<(), HostError> {
-        let result: PyResult<()> = Python::attach(|py| {
-            let value = json_loads(py, value_json)?;
-            self.object.bind(py).getattr("state")?.set_item(key, value)
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn random_draw(&self) -> Result<f64, HostError> {
-        let result: PyResult<f64> = Python::attach(|py| {
-            self.object
-                .bind(py)
-                .getattr("random")?
-                .call_method0("random")?
-                .extract()
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn random_int(&self, low: i64, high: i64) -> Result<i64, HostError> {
-        let result: PyResult<i64> = Python::attach(|py| {
-            self.object
-                .bind(py)
-                .getattr("random")?
-                .call_method1("randint", (low, high))?
-                .extract()
-        });
-        result.map_err(HostError::from)
-    }
-
-    fn emit_json(&self, name: &str, fields_json: &str) -> Result<(), HostError> {
-        let result: PyResult<()> = Python::attach(|py| {
-            let fields = json_loads(py, fields_json)?;
-            self.object.bind(py).call_method1("emit", (name, fields))?;
+    fn __delitem__(&self, key: &str) -> PyResult<()> {
+        if self.values.borrow_mut().remove(key).is_some() {
             Ok(())
-        });
-        result.map_err(HostError::from)
+        } else {
+            Err(PyKeyError::new_err(key.to_string()))
+        }
     }
 
-    fn emissions_json(&self) -> Result<String, HostError> {
-        let result: PyResult<String> = Python::attach(|py| {
-            let records = self
-                .object
-                .bind(py)
-                .getattr("emissions")?
-                .getattr("records")?;
-            let array = PyList::empty(py);
-            for record in records.try_iter()? {
-                let record = record?;
-                let item = PyDict::new(py);
-                item.set_item("name", record.getattr("name")?)?;
-                item.set_item("fields", record.getattr("fields")?)?;
-                array.append(item)?;
+    fn __contains__(&self, key: &str) -> bool {
+        self.values.borrow().contains_key(key)
+    }
+
+    fn __len__(&self) -> usize {
+        self.values.borrow().len()
+    }
+
+    fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let keys: Vec<String> = self.values.borrow().keys().cloned().collect();
+        Ok(PyList::new(py, keys)?.unbind().into_any())
+    }
+
+    /// One stored value, or the supplied default when the key is absent.
+    #[pyo3(signature = (key, default=None))]
+    fn get(
+        &self,
+        py: Python<'_>,
+        key: &str,
+        default: Option<Py<PyAny>>,
+    ) -> Option<Py<PyAny>> {
+        self.values
+            .borrow()
+            .get(key)
+            .map(|value| value.clone_ref(py))
+            .or(default)
+    }
+
+    /// A shallow copy of the current state as a Python `dict`.
+    fn snapshot(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        for (key, value) in self.values.borrow().iter() {
+            dict.set_item(key, value.clone_ref(py))?;
+        }
+        Ok(dict.unbind())
+    }
+}
+
+/// Deterministic structured emission sink.
+#[pyclass(unsendable)]
+pub struct PyEmissions {
+    records: RefCell<Vec<(String, BTreeMap<String, serde_json::Value>)>>,
+}
+
+impl PyEmissions {
+    /// Construct an empty emission sink.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            records: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn record(
+        &self,
+        name: &str,
+        fields: Option<&Bound<'_, PyDict>>,
+        values: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        if name.trim().is_empty() {
+            return Err(PyTypeError::new_err(
+                "emission name must be a non-empty string",
+            ));
+        }
+        let mut combined = BTreeMap::new();
+        for mapping in [fields, values].into_iter().flatten() {
+            for (key, value) in mapping.iter() {
+                combined.insert(key.extract::<String>()?, json_value(&value)?);
             }
-            json_dumps_value(py, array.as_any())
-        });
-        result.map_err(HostError::from)
+        }
+        self.records.borrow_mut().push((name.to_string(), combined));
+        Ok(())
+    }
+}
+
+impl Default for PyEmissions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[pymethods]
+impl PyEmissions {
+    /// Record one named emission with structured fields.
+    #[pyo3(signature = (name, fields=None, **values))]
+    fn emit(
+        &self,
+        name: &str,
+        fields: Option<&Bound<'_, PyDict>>,
+        values: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        self.record(name, fields, values)
     }
 
-    fn log_json(&self, level: &str, message: &str, fields_json: &str) -> Result<(), HostError> {
-        let result: PyResult<()> = Python::attach(|py| {
-            let fields = json_loads(py, fields_json)?;
-            let kwargs = fields
-                .cast::<PyDict>()
-                .map_err(|_| PyTypeError::new_err("log fields must be a JSON object"))?;
-            let method = self.object.bind(py).getattr("log")?.getattr(level)?;
-            method.call((message,), Some(kwargs))?;
-            Ok(())
-        });
-        result.map_err(HostError::from)
+    /// Every recorded emission in insertion order.
+    #[getter]
+    fn records(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        let list = PyList::empty(py);
+        for (name, fields) in self.records.borrow().iter() {
+            let item = PyDict::new(py);
+            item.set_item("name", name)?;
+            item.set_item("fields", json_to_python(py, fields)?)?;
+            list.append(item)?;
+        }
+        Ok(list.unbind())
+    }
+}
+
+/// Deterministic structured log sink.
+#[pyclass(unsendable)]
+pub struct PyLog {
+    records: RefCell<Vec<LogRecord>>,
+}
+
+/// One `(level, message, fields)` structured log record.
+type LogRecord = (String, String, BTreeMap<String, serde_json::Value>);
+
+impl PyLog {
+    /// Construct an empty log sink.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            records: RefCell::new(Vec::new()),
+        }
     }
 
-    fn log_records_json(&self) -> Result<String, HostError> {
-        let result: PyResult<String> = Python::attach(|py| {
-            let records = self.object.bind(py).getattr("log")?.getattr("records")?;
-            let array = PyList::empty(py);
-            for record in records.try_iter()? {
-                let record = record?;
-                let item = PyDict::new(py);
-                item.set_item("level", record.getattr("level")?)?;
-                item.set_item("message", record.getattr("message")?)?;
-                item.set_item("fields", record.getattr("fields")?)?;
-                array.append(item)?;
+    fn record(
+        &self,
+        level: &str,
+        message: &str,
+        fields: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        if message.trim().is_empty() {
+            return Err(PyTypeError::new_err(
+                "log message must be a non-empty string",
+            ));
+        }
+        let mut collected = BTreeMap::new();
+        if let Some(mapping) = fields {
+            for (key, value) in mapping.iter() {
+                collected.insert(key.extract::<String>()?, json_value(&value)?);
             }
-            json_dumps_value(py, array.as_any())
-        });
-        result.map_err(HostError::from)
+        }
+        self.records
+            .borrow_mut()
+            .push((level.to_string(), message.to_string(), collected));
+        Ok(())
     }
+}
+
+impl Default for PyLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[pymethods]
+impl PyLog {
+    /// Record a debug message and its structured fields.
+    #[pyo3(signature = (message, **fields))]
+    fn debug(&self, message: &str, fields: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        self.record("debug", message, fields)
+    }
+
+    /// Record an informational message and its structured fields.
+    #[pyo3(signature = (message, **fields))]
+    fn info(&self, message: &str, fields: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        self.record("info", message, fields)
+    }
+
+    /// Record a warning message and its structured fields.
+    #[pyo3(signature = (message, **fields))]
+    fn warning(&self, message: &str, fields: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        self.record("warning", message, fields)
+    }
+
+    /// Record an error message and its structured fields.
+    #[pyo3(signature = (message, **fields))]
+    fn error(&self, message: &str, fields: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        self.record("error", message, fields)
+    }
+
+    /// Every recorded log record in insertion order.
+    #[getter]
+    fn records(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
+        let list = PyList::empty(py);
+        for (level, message, fields) in self.records.borrow().iter() {
+            let item = PyDict::new(py);
+            item.set_item("level", level)?;
+            item.set_item("message", message)?;
+            item.set_item("fields", json_to_python(py, fields)?)?;
+            list.append(item)?;
+        }
+        Ok(list.unbind())
+    }
+}
+
+/// The constrained context handed to a Python strategy.
+#[pyclass(unsendable)]
+pub struct PyEngineContext {
+    #[pyo3(get)]
+    universe: Py<PyUniverse>,
+    #[pyo3(get)]
+    clock: Py<PyClock>,
+    #[pyo3(get)]
+    orders: Py<PyOrders>,
+    #[pyo3(get)]
+    books: Py<PyBooks>,
+    #[pyo3(get)]
+    state: Py<PyStateStore>,
+    #[pyo3(get)]
+    random: Py<PyAny>,
+    #[pyo3(get)]
+    log: Py<PyLog>,
+    #[pyo3(get)]
+    emissions: Py<PyEmissions>,
+    #[pyo3(get)]
+    book_id: String,
+}
+
+impl PyEngineContext {
+    /// The native books capability, for the adapter's fill and mark updates.
+    #[must_use]
+    pub fn books_handle(&self) -> &Py<PyBooks> {
+        &self.books
+    }
+}
+
+#[pymethods]
+impl PyEngineContext {
+    /// The per-context seeded generator (alias for `random`).
+    #[getter]
+    fn rng(&self, py: Python<'_>) -> Py<PyAny> {
+        self.random.clone_ref(py)
+    }
+
+    /// The structured logging sink (alias for `log`).
+    #[getter]
+    fn logger(&self, py: Python<'_>) -> Py<PyLog> {
+        self.log.clone_ref(py)
+    }
+
+    /// Emit one structured signal through the injected sink.
+    #[pyo3(signature = (name, fields=None, **values))]
+    fn emit(
+        &self,
+        py: Python<'_>,
+        name: &str,
+        fields: Option<&Bound<'_, PyDict>>,
+        values: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        self.emissions.bind(py).borrow().record(name, fields, values)
+    }
+}
+
+/// One Python object rendered as a portable JSON value.
+fn json_value(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    if value.is_none() {
+        return Ok(serde_json::Value::Null);
+    }
+    if let Ok(boolean) = value.extract::<bool>() {
+        return Ok(serde_json::Value::Bool(boolean));
+    }
+    if let Ok(integer) = value.extract::<i64>() {
+        return Ok(serde_json::Value::from(integer));
+    }
+    if let Ok(text) = value.extract::<String>() {
+        return Ok(serde_json::Value::String(text));
+    }
+    if let Ok(float) = value.extract::<f64>() {
+        return Ok(serde_json::Number::from_f64(float)
+            .map_or(serde_json::Value::Null, serde_json::Value::Number));
+    }
+    Ok(serde_json::Value::String(value.str()?.to_string()))
+}
+
+/// Convert a JSON object into a Python dict.
+fn json_to_python<'py>(
+    py: Python<'py>,
+    value: &BTreeMap<String, serde_json::Value>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let text = serde_json::to_string(value)
+        .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+    py.import("json")?.call_method1("loads", (text,))
+}
+
+/// Build one Python order intent from a strategy order object.
+fn order_from_python(order: &Bound<'_, PyAny>) -> PyResult<EngineOrder> {
+    let order_id: String = order.getattr("order_id")?.extract()?;
+    let symbol: String = order.getattr("symbol")?.str()?.to_string();
+    let side = enum_string(&order.getattr("side")?)?;
+    let quantity = decimal_value(&order.getattr("quantity")?)?;
+    let order_type = enum_string(&order.getattr("order_type")?)?;
+    let time_in_force = enum_string(&order.getattr("time_in_force")?)?;
+    let limit_price = optional_decimal(&order.getattr("limit_price")?)?;
+    let stop_price = optional_decimal(&order.getattr("stop_price")?)?;
+    let event_id: String = order.getattr("event_id")?.extract()?;
+    let sequence: u64 = order.getattr("sequence")?.extract()?;
+    Ok(EngineOrder {
+        order_id,
+        symbol,
+        side,
+        quantity,
+        order_type,
+        time_in_force,
+        limit_price,
+        stop_price,
+        timestamp_ns: 0,
+        sequence,
+        event_id,
+    })
+}
+
+fn enum_string(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(text) = value.extract::<String>() {
+        return Ok(text);
+    }
+    if let Ok(member) = value.getattr("value") {
+        if let Ok(text) = member.extract::<String>() {
+            return Ok(text);
+        }
+    }
+    Ok(value.str()?.to_string())
+}
+
+fn decimal_value(value: &Bound<'_, PyAny>) -> PyResult<PyDecimal> {
+    let text = value.str()?.to_string();
+    text.parse::<PyDecimal>()
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+}
+
+fn optional_decimal(value: &Bound<'_, PyAny>) -> PyResult<Option<PyDecimal>> {
+    if value.is_none() {
+        Ok(None)
+    } else {
+        Ok(Some(decimal_value(value)?))
+    }
+}
+
+/// The native handles a started strategy runtime owns.
+pub type BuiltContext = (
+    Py<PyEngineContext>,
+    Py<PyClock>,
+    Py<PyOrders>,
+    Py<PyBooks>,
+);
+
+/// Build the four native handles a started strategy runtime owns.
+pub fn build_context(
+    py: Python<'_>,
+    universe: Vec<String>,
+    start_ns: i64,
+    book_id: String,
+    initial_cash: PyDecimal,
+    seed: u64,
+) -> PyResult<BuiltContext> {
+    let universe = Py::new(py, PyUniverse { symbols: universe })?;
+    let clock = Py::new(py, PyClock::new(start_ns))?;
+    let orders = Py::new(py, PyOrders::new())?;
+    let books = Py::new(py, PyBooks::new(book_id.clone(), initial_cash))?;
+    let state = Py::new(py, PyStateStore::new())?;
+    let log = Py::new(py, PyLog::new())?;
+    let emissions = Py::new(py, PyEmissions::new())?;
+    let random = py
+        .import("random")?
+        .getattr("Random")?
+        .call1((seed,))?
+        .unbind();
+    let context = Py::new(
+        py,
+        PyEngineContext {
+            universe,
+            clock: clock.clone_ref(py),
+            orders: orders.clone_ref(py),
+            books: books.clone_ref(py),
+            state,
+            random,
+            log,
+            emissions,
+            book_id,
+        },
+    )?;
+    Ok((context, clock, orders, books))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn spec() -> ContextSpec {
-        ContextSpec::new("2024-01-19T14:30:00+00:00", "strategy")
-            .with_universe(["spy", "aapl", "AAPL"])
-            .with_seed(1729)
-            .with_state_entry("alpha", serde_json::json!(1))
-            .with_state_entry("beta", serde_json::json!("two"))
-    }
-
-    /// Build the same context directly in Python, independently of the bridge.
-    fn oracle_context<'py>(py: Python<'py>, spec: &ContextSpec) -> PyResult<Bound<'py, PyAny>> {
-        install_search_paths(py, &default_search_paths())?;
-        install_harness_data_shim(py)?;
-        let stamp = py
-            .import("datetime")?
-            .getattr("datetime")?
-            .call_method1("fromisoformat", (&spec.clock,))?;
-        let clock = py
-            .import("harness.core.clock")?
-            .getattr("SimClock")?
-            .call1((stamp,))?;
-        let bus = py
-            .import("harness.core.events")?
-            .getattr("EventBus")?
-            .call1((&clock,))?;
-        let portfolio = py.import("harness.portfolio")?;
-        let hub = portfolio
-            .getattr("PortfolioHub")?
-            .call1((&spec.account_id,))?;
-        hub.call_method1("create_book", (&spec.book_id, &spec.initial_cash))?;
-        let context_class = py.import("harness.strategy")?.getattr("StrategyContext")?;
-        let kwargs = PyDict::new(py);
-        kwargs.set_item("portfolio", hub)?;
-        kwargs.set_item("bus", bus)?;
-        kwargs.set_item("book_id", &spec.book_id)?;
-        kwargs.set_item("seed", spec.seed)?;
-        kwargs.set_item(
-            "universe",
-            PyList::new(py, spec.universe.iter().map(String::as_str))?,
-        )?;
-        let state = PyDict::new(py);
-        for (key, value) in &spec.state {
-            state.set_item(key, json_loads(py, &value.to_string())?)?;
-        }
-        kwargs.set_item("state", state)?;
-        context_class.call((&clock,), Some(&kwargs))
-    }
-
-    fn oracle_universe(context: &Bound<'_, PyAny>) -> Vec<String> {
-        context
-            .getattr("universe")
-            .expect("universe")
-            .getattr("symbols")
-            .expect("symbols")
-            .try_iter()
-            .expect("iter")
-            .map(|symbol| symbol.expect("symbol").str().expect("str").to_string())
-            .collect()
-    }
-
-    fn oracle_state_json(py: Python<'_>, context: &Bound<'_, PyAny>) -> serde_json::Value {
-        let snapshot = context
-            .getattr("state")
-            .expect("state")
-            .getattr("snapshot")
-            .expect("snapshot");
-        let dict = py
-            .import("builtins")
-            .expect("builtins")
-            .getattr("dict")
-            .expect("dict")
-            .call1((snapshot,))
-            .expect("dict()");
-        let text: String = py
-            .import("json")
-            .expect("json")
-            .call_method1("dumps", (dict,))
-            .expect("dumps")
-            .extract()
-            .expect("extract");
-        serde_json::from_str(&text).expect("parse")
-    }
-
     #[test]
-    fn bridged_context_matches_python_construction() {
-        let spec = spec();
-        let bridge = PyStrategyContext::new(&spec).expect("bridge");
+    fn native_context_exposes_the_duck_typed_surface() {
         Python::attach(|py| {
-            let oracle = oracle_context(py, &spec).expect("oracle");
+            let (context, _, _, _) = build_context(
+                py,
+                vec!["SPY".to_string(), "AAPL".to_string()],
+                0,
+                "strategy".to_string(),
+                PyDecimal::from_i128(1000),
+                1729,
+            )
+            .expect("context");
+            let bound = context.bind(py);
             assert_eq!(
-                bridge.book_id().expect("book_id"),
-                oracle
+                bound
                     .getattr("book_id")
                     .expect("book_id")
                     .extract::<String>()
-                    .expect("str")
+                    .expect("str"),
+                "strategy"
             );
-            assert_eq!(
-                bridge.universe().expect("universe"),
-                oracle_universe(&oracle)
-            );
-            assert_eq!(
-                bridge.contains_symbol("aapl").expect("contains"),
-                oracle
+            assert!(
+                bound
                     .getattr("universe")
                     .expect("universe")
-                    .call_method1("contains", ("aapl",))
+                    .call_method1("contains", ("SPY",))
                     .expect("contains")
                     .extract::<bool>()
                     .expect("bool")
             );
-            let expected_now: String = oracle
-                .getattr("clock")
-                .expect("clock")
-                .call_method0("now")
-                .expect("now")
-                .call_method0("isoformat")
-                .expect("isoformat")
-                .extract()
-                .expect("str");
-            assert_eq!(bridge.clock_now().expect("clock_now"), expected_now);
-            assert_eq!(
-                bridge.cash().expect("cash"),
-                oracle
+            assert!(
+                bound
+                    .getattr("random")
+                    .expect("random")
+                    .hasattr("random")
+                    .expect("hasattr")
+            );
+            assert!(
+                bound
                     .getattr("books")
                     .expect("books")
-                    .getattr("cash")
-                    .expect("cash")
-                    .str()
-                    .expect("str")
-                    .to_string()
-            );
-            assert_eq!(
-                bridge.fill_count().expect("fill_count"),
-                oracle
-                    .getattr("books")
-                    .expect("books")
-                    .getattr("fill_count")
-                    .expect("fill_count")
-                    .extract::<u64>()
-                    .expect("u64")
-            );
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(
-                    &bridge.state_snapshot_json().expect("state")
-                )
-                .expect("parse"),
-                oracle_state_json(py, &oracle)
+                    .hasattr("cash")
+                    .expect("hasattr")
             );
         });
     }
 
     #[test]
-    fn bridged_random_matches_the_seeded_python_generator() {
-        let spec = spec();
-        let bridge = PyStrategyContext::new(&spec).expect("bridge");
+    fn native_state_store_round_trips_values() {
         Python::attach(|py| {
-            let oracle = oracle_context(py, &spec).expect("oracle");
-            let oracle_random = oracle.getattr("random").expect("random");
-            for _ in 0..3 {
-                assert_eq!(
-                    bridge.random_draw().expect("draw"),
-                    oracle_random
-                        .call_method0("random")
-                        .expect("random")
-                        .extract::<f64>()
-                        .expect("f64")
-                );
-            }
+            let store = Py::new(py, PyStateStore::new()).expect("state");
+            let bound = store.bind(py);
+            let value = PyList::new(py, [1_i64, 2, 3]).expect("value");
+            bound.set_item("entered", &value).expect("set");
+            assert!(
+                bound
+                    .call_method1("__contains__", ("entered",))
+                    .expect("contains")
+                    .extract::<bool>()
+                    .expect("bool")
+            );
+            let snapshot = bound.call_method0("snapshot").expect("snapshot");
             assert_eq!(
-                bridge.random_int(1, 10).expect("randint"),
-                oracle_random
-                    .call_method1("randint", (1, 10))
-                    .expect("randint")
-                    .extract::<i64>()
-                    .expect("i64")
+                snapshot
+                    .get_item("entered")
+                    .expect("item")
+                    .len()
+                    .expect("len"),
+                3
             );
         });
-    }
-
-    #[test]
-    fn bridged_state_freezes_and_rejects_like_python() {
-        let spec = spec();
-        let bridge = PyStrategyContext::new(&spec).expect("bridge");
-        assert_eq!(
-            bridge.state_get_json("beta").expect("get"),
-            Some("\"two\"".to_string())
-        );
-        assert_eq!(bridge.state_get_json("missing").expect("get"), None);
-
-        bridge
-            .state_set_json("gamma", "{\"nested\": {\"b\": 2}}")
-            .expect("set");
-        assert_eq!(
-            bridge.state_get_json("gamma").expect("get"),
-            Some("{\"nested\":{\"b\":2}}".to_string())
-        );
-
-        let rejection = bridge.state_set_json("bad", "1.5").expect_err("float");
-        assert!(matches!(rejection, HostError::Python(_)), "{rejection}");
-    }
-
-    #[test]
-    fn bridged_emissions_and_logs_match_python() {
-        let spec = spec();
-        let bridge = PyStrategyContext::new(&spec).expect("bridge");
-        bridge
-            .emit_json("metric", "{\"v\": 1}")
-            .expect("bridge emit");
-        bridge
-            .log_json("info", "hello", "{\"a\": 1}")
-            .expect("bridge log");
-
-        Python::attach(|py| {
-            let oracle = oracle_context(py, &spec).expect("oracle");
-            let fields = json_loads(py, "{\"v\": 1}").expect("fields");
-            oracle
-                .call_method1("emit", ("metric", fields))
-                .expect("oracle emit");
-            let kwargs = PyDict::new(py);
-            kwargs.set_item("a", 1).expect("a");
-            oracle
-                .getattr("log")
-                .expect("log")
-                .getattr("info")
-                .expect("info")
-                .call(("hello",), Some(&kwargs))
-                .expect("oracle log");
-
-            let oracle_emissions: String = {
-                let array = PyList::empty(py);
-                for record in oracle
-                    .getattr("emissions")
-                    .expect("emissions")
-                    .getattr("records")
-                    .expect("records")
-                    .try_iter()
-                    .expect("iter")
-                {
-                    let record = record.expect("record");
-                    let item = PyDict::new(py);
-                    item.set_item("name", record.getattr("name").expect("name"))
-                        .expect("name");
-                    item.set_item("fields", record.getattr("fields").expect("fields"))
-                        .expect("fields");
-                    array.append(item).expect("append");
-                }
-                json_dumps_value(py, array.as_any()).expect("emissions json")
-            };
-            let oracle_logs: String = {
-                let array = PyList::empty(py);
-                for record in oracle
-                    .getattr("log")
-                    .expect("log")
-                    .getattr("records")
-                    .expect("records")
-                    .try_iter()
-                    .expect("iter")
-                {
-                    let record = record.expect("record");
-                    let item = PyDict::new(py);
-                    item.set_item("level", record.getattr("level").expect("level"))
-                        .expect("level");
-                    item.set_item("message", record.getattr("message").expect("message"))
-                        .expect("message");
-                    item.set_item("fields", record.getattr("fields").expect("fields"))
-                        .expect("fields");
-                    array.append(item).expect("append");
-                }
-                json_dumps_value(py, array.as_any()).expect("logs json")
-            };
-
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(
-                    &bridge.emissions_json().expect("bridge emissions")
-                )
-                .expect("parse"),
-                serde_json::from_str::<serde_json::Value>(&oracle_emissions).expect("parse")
-            );
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(
-                    &bridge.log_records_json().expect("bridge logs")
-                )
-                .expect("parse"),
-                serde_json::from_str::<serde_json::Value>(&oracle_logs).expect("parse")
-            );
-        });
-    }
-
-    #[test]
-    fn host_can_program_against_the_trait() {
-        fn summarize(context: &dyn StrategyContextBridge) -> Result<String, HostError> {
-            let universe = context.universe()?;
-            Ok(format!("{}:{}", context.book_id()?, universe.join(",")))
-        }
-
-        let bridge = PyStrategyContext::new(&spec()).expect("bridge");
-        assert_eq!(summarize(&bridge).expect("summary"), "strategy:AAPL,SPY");
     }
 }

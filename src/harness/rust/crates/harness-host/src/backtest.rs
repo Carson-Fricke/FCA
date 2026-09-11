@@ -3,107 +3,24 @@
 //! [`PyStrategyRuntime`] implements
 //! [`harness_backtest::backtest::engine_core::StrategyRuntime`] over an
 //! unmodified Python strategy class. The Rust engine owns the clock, event bus,
-//! venue, fees, portfolio, and risk; the adapter hands the strategy a
-//! constrained context object (clock, universe, order sink, emissions) and
-//! converts the Python orders it submits back into engine intents.
+//! venue, fees, portfolio, and risk; the adapter hands the strategy the native
+//! [`PyEngineContext`] (clock, universe, books, state, seeded random, orders,
+//! emissions, log) and converts the Python orders it submits back into engine
+//! intents.
 
-use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use harness_backtest::backtest::engine_core::{
     EngineFill, EngineMarket, EngineOrder, StrategyRuntime, StrategyStart,
 };
 use harness_backtest::backtest::errors::BacktestError;
-use harness_num::PyDecimal;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use crate::context::{build_context, PyBooks, PyClock, PyEngineContext, PyOrders};
 use crate::error::HostError;
 use crate::python::{default_search_paths, install_harness_data_shim, install_search_paths};
-
-/// The canonical universe handed to a strategy.
-#[pyclass(unsendable)]
-pub struct PyUniverse {
-    #[pyo3(get)]
-    symbols: Vec<String>,
-}
-
-/// A read-only clock that returns a Python `datetime` for the engine head.
-#[pyclass(unsendable)]
-pub struct PyClock {
-    now_ns: Cell<i64>,
-}
-
-#[pymethods]
-impl PyClock {
-    /// The engine head as a timezone-aware Python `datetime`.
-    fn now(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let iso = harness_backtest::backtest::manifest::utc_timestamp(self.now_ns.get(), false);
-        let value = py
-            .import("datetime")?
-            .getattr("datetime")?
-            .call_method1("fromisoformat", (iso,))?;
-        Ok(value.unbind())
-    }
-}
-
-/// The strategy order sink: records submitted orders and ownership.
-#[pyclass(unsendable)]
-pub struct PyOrders {
-    pending: RefCell<Vec<EngineOrder>>,
-    owned: RefCell<BTreeSet<String>>,
-}
-
-impl PyOrders {
-    fn clear_pending(&self) {
-        self.pending.borrow_mut().clear();
-    }
-
-    fn take_pending(&self) -> Vec<EngineOrder> {
-        std::mem::take(&mut *self.pending.borrow_mut())
-    }
-}
-
-#[pymethods]
-impl PyOrders {
-    /// Record one submitted order without synchronously producing an outcome.
-    fn submit(&self, order: &Bound<'_, PyAny>) -> PyResult<()> {
-        let intent = order_from_python(order)?;
-        self.owned.borrow_mut().insert(intent.order_id.clone());
-        self.pending.borrow_mut().push(intent);
-        Ok(())
-    }
-
-    /// Whether an order identifier was submitted by this strategy.
-    fn owns(&self, order_id: &str) -> bool {
-        self.owned.borrow().contains(order_id)
-    }
-}
-
-/// The constrained context handed to a Python strategy.
-#[pyclass(unsendable)]
-pub struct PyEngineContext {
-    #[pyo3(get)]
-    universe: Py<PyUniverse>,
-    #[pyo3(get)]
-    clock: Py<PyClock>,
-    #[pyo3(get)]
-    orders: Py<PyOrders>,
-}
-
-#[pymethods]
-impl PyEngineContext {
-    /// Accept one structured emission (recorded by the engine as a no-op sink).
-    #[pyo3(signature = (name, **kwargs))]
-    fn emit(&self, name: &str, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
-        let _ = (name, kwargs);
-        Ok(())
-    }
-}
-
-/// The four PyO3 handles a started strategy runtime owns.
-type BuiltRuntime = (Py<PyAny>, Py<PyEngineContext>, Py<PyClock>, Py<PyOrders>);
 
 /// A Python strategy driven through the native engine plugin seam.
 pub struct PyStrategyRuntime {
@@ -115,6 +32,7 @@ pub struct PyStrategyRuntime {
     context: Option<Py<PyEngineContext>>,
     clock: Option<Py<PyClock>>,
     orders: Option<Py<PyOrders>>,
+    books: Option<Py<PyBooks>>,
 }
 
 impl PyStrategyRuntime {
@@ -144,10 +62,11 @@ impl PyStrategyRuntime {
             context: None,
             clock: None,
             orders: None,
+            books: None,
         })
     }
 
-    /// The instance identifier is owned by the engine, not the adapter.
+    /// Instantiate the strategy and build its native context.
     ///
     /// # Errors
     ///
@@ -159,37 +78,23 @@ impl PyStrategyRuntime {
         let search_paths = self.search_paths.clone();
         let symbols = start.symbols.clone();
         let now_ns = start.start_ns;
+        let book_id = start.instance_id.clone();
+        let initial_cash = start.initial_cash;
+        let seed = start.seed;
+
+        type BuiltRuntime = (
+            Py<PyAny>,
+            Py<PyEngineContext>,
+            Py<PyClock>,
+            Py<PyOrders>,
+            Py<PyBooks>,
+        );
 
         let built: Result<BuiltRuntime, HostError> = Python::attach(|py| {
             install_search_paths(py, &search_paths)?;
             install_harness_data_shim(py)?;
-            let universe = Py::new(
-                py,
-                PyUniverse {
-                    symbols: symbols.clone(),
-                },
-            )?;
-            let clock = Py::new(
-                py,
-                PyClock {
-                    now_ns: Cell::new(now_ns),
-                },
-            )?;
-            let orders = Py::new(
-                py,
-                PyOrders {
-                    pending: RefCell::new(Vec::new()),
-                    owned: RefCell::new(BTreeSet::new()),
-                },
-            )?;
-            let context = Py::new(
-                py,
-                PyEngineContext {
-                    universe,
-                    clock: clock.clone_ref(py),
-                    orders: orders.clone_ref(py),
-                },
-            )?;
+            let (context, clock, orders, books) =
+                build_context(py, symbols, now_ns, book_id, initial_cash, seed)?;
             let module_obj = py.import(module.as_str())?;
             let class_obj = module_obj.getattr(class.as_str())?;
             let kwargs = PyDict::new(py);
@@ -207,13 +112,14 @@ impl PyStrategyRuntime {
                 }
             };
             instance.call_method1("on_start", (context.bind(py),))?;
-            Ok((instance.unbind(), context, clock, orders))
+            Ok((instance.unbind(), context, clock, orders, books))
         });
-        let (strategy, context, clock, orders) = built.map_err(host_to_backtest)?;
+        let (strategy, context, clock, orders, books) = built.map_err(host_to_backtest)?;
         self.strategy = Some(strategy);
         self.context = Some(context);
         self.clock = Some(clock);
         self.orders = Some(orders);
+        self.books = Some(books);
         Ok(())
     }
 }
@@ -228,10 +134,6 @@ impl StrategyRuntime for PyStrategyRuntime {
             .strategy
             .as_ref()
             .ok_or_else(|| BacktestError::StrategyExecution("strategy not started".to_string()))?;
-        let context = self
-            .context
-            .as_ref()
-            .ok_or_else(|| BacktestError::StrategyExecution("context not built".to_string()))?;
         let clock = self
             .clock
             .as_ref()
@@ -240,9 +142,17 @@ impl StrategyRuntime for PyStrategyRuntime {
             .orders
             .as_ref()
             .ok_or_else(|| BacktestError::StrategyExecution("orders not built".to_string()))?;
+        let books = self
+            .books
+            .as_ref()
+            .ok_or_else(|| BacktestError::StrategyExecution("books not built".to_string()))?;
         let timestamp_ns = event.timestamp_ns();
         let result: Result<Vec<EngineOrder>, HostError> = Python::attach(|py| {
-            clock.bind(py).borrow().now_ns.set(timestamp_ns);
+            clock.bind(py).borrow().set(timestamp_ns);
+            books
+                .bind(py)
+                .borrow()
+                .mark(event.symbol(), event.mark_price());
             orders.bind(py).borrow().clear_pending();
             let callback = match event {
                 EngineMarket::Quote { .. } => "on_quote",
@@ -250,7 +160,6 @@ impl StrategyRuntime for PyStrategyRuntime {
             };
             let py_event = market_to_python(py, event)?;
             strategy.bind(py).call_method1(callback, (py_event,))?;
-            let _ = context;
             let mut pending = orders.bind(py).borrow().take_pending();
             for order in &mut pending {
                 order.timestamp_ns = timestamp_ns;
@@ -265,7 +174,18 @@ impl StrategyRuntime for PyStrategyRuntime {
             .strategy
             .as_ref()
             .ok_or_else(|| BacktestError::StrategyExecution("strategy not started".to_string()))?;
+        let books = self
+            .books
+            .as_ref()
+            .ok_or_else(|| BacktestError::StrategyExecution("books not built".to_string()))?;
         let result: Result<(), HostError> = Python::attach(|py| {
+            books.bind(py).borrow().apply_fill(
+                &fill.side,
+                &fill.symbol,
+                fill.quantity,
+                fill.price,
+                fill.fee,
+            );
             let py_fill = fill_to_python(py, fill)?;
             strategy.bind(py).call_method1("on_fill", (py_fill,))?;
             Ok(())
@@ -375,58 +295,6 @@ fn datetime_of<'py>(py: Python<'py>, timestamp_ns: i64) -> Result<Bound<'py, PyA
         .import("datetime")?
         .getattr("datetime")?
         .call_method1("fromisoformat", (iso,))?)
-}
-
-fn order_from_python(order: &Bound<'_, PyAny>) -> PyResult<EngineOrder> {
-    let order_id: String = order.getattr("order_id")?.extract()?;
-    let symbol: String = order.getattr("symbol")?.str()?.to_string();
-    let side = enum_string(&order.getattr("side")?)?;
-    let quantity = decimal_value(&order.getattr("quantity")?)?;
-    let order_type = enum_string(&order.getattr("order_type")?)?;
-    let time_in_force = enum_string(&order.getattr("time_in_force")?)?;
-    let limit_price = optional_decimal(&order.getattr("limit_price")?)?;
-    let stop_price = optional_decimal(&order.getattr("stop_price")?)?;
-    let event_id: String = order.getattr("event_id")?.extract()?;
-    let sequence: u64 = order.getattr("sequence")?.extract()?;
-    Ok(EngineOrder {
-        order_id,
-        symbol,
-        side,
-        quantity,
-        order_type,
-        time_in_force,
-        limit_price,
-        stop_price,
-        timestamp_ns: 0,
-        sequence,
-        event_id,
-    })
-}
-
-fn enum_string(value: &Bound<'_, PyAny>) -> PyResult<String> {
-    if let Ok(text) = value.extract::<String>() {
-        return Ok(text);
-    }
-    if let Ok(member) = value.getattr("value") {
-        if let Ok(text) = member.extract::<String>() {
-            return Ok(text);
-        }
-    }
-    Ok(value.str()?.to_string())
-}
-
-fn decimal_value(value: &Bound<'_, PyAny>) -> PyResult<PyDecimal> {
-    let text = value.str()?.to_string();
-    text.parse::<PyDecimal>()
-        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
-}
-
-fn optional_decimal(value: &Bound<'_, PyAny>) -> PyResult<Option<PyDecimal>> {
-    if value.is_none() {
-        Ok(None)
-    } else {
-        Ok(Some(decimal_value(value)?))
-    }
 }
 
 /// Extract the per-strategy parameters from a configuration JSON object.

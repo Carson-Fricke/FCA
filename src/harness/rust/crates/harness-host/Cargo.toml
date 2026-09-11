@@ -9,12 +9,6 @@ publish = false
 [lib]
 crate-type = ["rlib"]
 
-[features]
-default = ["pyo3-bridge"]
-# Expose the PyO3-backed strategy context and binding bridge. Disable to build
-# only the native contract, linter, and reference surfaces.
-pyo3-bridge = []
-
 [dependencies]
 harness-backtest = { path = "../harness-backtest" }
 harness-num = { path = "../harness-num" }

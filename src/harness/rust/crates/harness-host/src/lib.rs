@@ -10,11 +10,11 @@
 //!   batched hot path.
 //! * [`ScreenerHost`] executes user screener programs and resolves their
 //!   `screen` entry point.
-//! * [`PyStrategyContext`] and [`PyStrategyBinding`] drive the Python
-//!   `StrategyContext` and `StrategyBinding` through the
-//!   [`StrategyContextBridge`] trait, so the Rust host observes the Python
-//!   oracle's values and lifecycle decisions directly (behind the default
-//!   `pyo3-bridge` feature).
+//! * [`PyEngineContext`] is the native, Rust-owned strategy context the engine
+//!   hands to a Python strategy. It exposes clock, universe, books, orders,
+//!   state, seeded random, emissions, and logging with the same attribute and
+//!   method names as the historical Python context, so user strategies run
+//!   unmodified without importing the Python engine.
 //!
 //! Every surface performs its Python work inside a single interpreter
 //! acquisition per call (or per batch), so hot loops do not pay a per-event
@@ -22,9 +22,6 @@
 
 pub mod backtest;
 pub mod binding;
-#[cfg(feature = "pyo3-bridge")]
-pub mod bridge;
-#[cfg(feature = "pyo3-bridge")]
 pub mod context;
 pub mod contracts;
 pub mod error;
@@ -36,10 +33,7 @@ pub mod screener;
 pub mod strategy;
 
 pub use binding::StrategyBinding;
-#[cfg(feature = "pyo3-bridge")]
-pub use bridge::PyStrategyBinding;
-#[cfg(feature = "pyo3-bridge")]
-pub use context::{ContextSpec, PyStrategyContext, StrategyContextBridge};
+pub use context::{PyBooks, PyClock, PyEngineContext, PyEmissions, PyLog, PyOrders, PyStateStore};
 pub use contracts::{
     callback_name_for_event, is_known_callback, require_callbacks, validate_callback_order,
     ContractError, ContractErrorKind, CALLBACK_ORDER,
