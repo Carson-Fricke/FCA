@@ -9,6 +9,12 @@ publish = false
 [lib]
 crate-type = ["rlib"]
 
+[features]
+default = ["pyo3-bridge"]
+# Expose the PyO3-backed strategy context and binding bridge. Disable to build
+# only the native contract, linter, and reference surfaces.
+pyo3-bridge = []
+
 [dependencies]
 pyo3 = { version = "0.29", features = ["auto-initialize"] }
 rustpython-ast = { version = "0.4", features = ["visitor"] }
