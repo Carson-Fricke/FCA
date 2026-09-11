@@ -15,8 +15,8 @@ flipped, and the Python engine remains authoritative for everything else.
 | --- | --- | --- | --- |
 | `api` | `api` | `rust/crates/harness-api` | complete (axum HTTP boundary, bearer auth, provenance) |
 | `mcp` | `mcp` | `rust/crates/harness-mcp` | complete (JSON-RPC dispatch, tool catalog, stdio transport) |
-| `harness` | `harness` | `rust/crates/harness-api` | facade parsed in Rust; `api`/`mcp` served from Rust, `trader` pending |
-| `backtest-job` | `backtest-job` | `rust/crates/harness-api` | surface parsed in Rust; engine injected seam pending |
+| `harness` | `harness` | `rust/crates/harness-api` | facade parsed in Rust; not flipped, `api`/`mcp` are flipped through their standalone binaries, `trader` pending |
+| `backtest-job` | `backtest-job` | `rust/crates/harness-api` | surface parsed in Rust; not flipped, engine injected seam pending |
 
 Configuration is ported behavior-identically in `rust/crates/harness-config`
 (loader, strict models, canonical hashing) and the strategy host surface in
@@ -46,8 +46,9 @@ test suites remain as parity oracles, because:
   `BacktestJobRunner` seam; the Rust backtest engine is not wired.
 * The strategy context and binding bridge is a host surface only; engine-side
   strategy execution still runs through Python.
-* The lint AST walker is bridged to the Python implementation rather than
-  reimplemented in Rust.
+* The lint AST walker is a native Rust walker built on `rustpython-parser`;
+  `harness.strategy.lint` is retained as the shared-fixture parity oracle.
 
 Deletion of the Python engine paths is gated on those items and is tracked by
-the decommission task.
+the decommission task. The precise gate lives in `repository.md` under
+"Decommission Status".
