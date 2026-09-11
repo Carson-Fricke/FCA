@@ -492,6 +492,99 @@ mod tests {
         .unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn contract_full(
+        symbol: &str,
+        expiry: Date,
+        strike: &str,
+        option_type: OptionType,
+        listed: Option<Date>,
+        delisted: Option<Date>,
+    ) -> ContractRecord {
+        ContractRecord::new(
+            symbol,
+            "AAPL",
+            expiry,
+            Decimal18::from_str(strike).unwrap(),
+            option_type,
+            100,
+            listed,
+            delisted,
+        )
+        .unwrap()
+    }
+
+    /// Golden ordering and visibility from `options_universe._contract_sort_key`
+    /// and `_is_visible` evaluated on the same catalog rows.
+    #[test]
+    fn snapshot_order_matches_python_sort_key() {
+        let records = vec![
+            contract(
+                "AAPL240119C00150000",
+                date(2024, 1, 19),
+                "150",
+                OptionType::Call,
+            ),
+            contract_full(
+                "AAPL250119C00150000",
+                date(2025, 1, 19),
+                "150",
+                OptionType::Call,
+                Some(date(2025, 1, 1)),
+                None,
+            ),
+            contract_full(
+                "AAPL250119P00140000",
+                date(2025, 1, 19),
+                "140",
+                OptionType::Put,
+                None,
+                Some(date(2024, 5, 1)),
+            ),
+            contract(
+                "AAPL250119C00160000",
+                date(2025, 1, 19),
+                "160",
+                OptionType::Call,
+            ),
+            contract(
+                "AAPL250119C00140000",
+                date(2025, 1, 19),
+                "140",
+                OptionType::Call,
+            ),
+            contract(
+                "AAPL241220C00150000",
+                date(2024, 12, 20),
+                "150",
+                OptionType::Call,
+            ),
+            contract(
+                "AAPL250119P00140000",
+                date(2025, 1, 19),
+                "140",
+                OptionType::Put,
+            ),
+        ];
+        let snapshot = OptionUniverseSnapshot::new(
+            "AAPL",
+            date(2024, 6, 1),
+            SelectionMode::StaticOsi,
+            records,
+        )
+        .unwrap();
+        assert_eq!(
+            snapshot.symbols(),
+            vec![
+                "AAPL241220C00150000",
+                "AAPL250119C00140000",
+                "AAPL250119P00140000",
+                "AAPL250119C00160000",
+            ]
+        );
+        assert_eq!(snapshot.front_expiry(), Some(date(2024, 12, 20)));
+    }
+
     #[test]
     fn static_universe_clips_to_engine_date() {
         let catalog = MemoryContractsCatalog {

@@ -5,13 +5,30 @@
 //! file objects returned by the market-lake contract. Replay owns at most one
 //! lookahead event per active source and merges events by the deterministic
 //! `(timestamp, sequence, event-class priority, source order)` key.
+//!
+//! Fingerprints reproduce the Python reference exactly: a framed SHA-256 over
+//! the selected sources/files, the ordered emitted rows, and the complete data
+//! run. Frames are `u64` big-endian length prefixes of UTF-8 field text, exactly
+//! matching `harness.data.replay._canonical_fields` and `_update_frame`.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 
+use arrow_array::{
+    Array, Decimal128Array, Int64Array, StringArray, TimestampMicrosecondArray,
+    TimestampNanosecondArray, UInt64Array,
+};
+use bytes::Bytes;
+use harness_num::Decimal18;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use sha2::{Digest, Sha256};
+
 use crate::error::DataError;
-use crate::events::{EventType, MarketEvent};
+use crate::events::{EventType, MarketEvent, QuoteEvent, TradeEvent};
 use crate::lake::{DataType, ExchangeSession, FileQueryFile};
 use crate::symbol::canonical_symbol;
+use crate::time::DateTime;
 
 /// Injected reader for one complete lake file.
 pub trait ParquetReader {
@@ -30,6 +47,306 @@ impl ParquetReader for StaticReader {
     fn read(&self, _file: &FileQueryFile) -> Result<Vec<MarketEvent>, DataError> {
         Ok(self.events.clone())
     }
+}
+
+/// Byte-level read boundary for one lake object.
+pub trait LakeObjectSource {
+    /// Return the complete bytes of one lake object.
+    fn read(&self, file: &FileQueryFile) -> Result<Vec<u8>, DataError>;
+}
+
+/// An in-memory object source keyed by canonical object path.
+#[derive(Clone, Debug, Default)]
+pub struct MemoryObjectSource {
+    /// Object bytes keyed by `FileQueryFile::object_path`.
+    pub objects: HashMap<String, Vec<u8>>,
+}
+
+impl LakeObjectSource for MemoryObjectSource {
+    fn read(&self, file: &FileQueryFile) -> Result<Vec<u8>, DataError> {
+        self.objects.get(&file.object_path).cloned().ok_or_else(|| {
+            DataError::value(format!("no object registered for {}", file.object_path))
+        })
+    }
+}
+
+/// A filesystem object source rooted at one directory.
+#[derive(Clone, Debug)]
+pub struct LocalObjectSource {
+    root: PathBuf,
+}
+
+impl LocalObjectSource {
+    /// Build a source rooted at `root`.
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+}
+
+impl LakeObjectSource for LocalObjectSource {
+    fn read(&self, file: &FileQueryFile) -> Result<Vec<u8>, DataError> {
+        let target = self.root.join(&file.object_path);
+        std::fs::read(&target)
+            .map_err(|error| DataError::value(format!("read object {}: {error}", file.object_path)))
+    }
+}
+
+/// A real Parquet reader that decodes the lake Arrow schemas into market events.
+pub struct ParquetFileReader {
+    /// Object byte source.
+    pub source: Rc<dyn LakeObjectSource>,
+}
+
+impl ParquetFileReader {
+    /// Build a reader over `source`.
+    pub fn new(source: Rc<dyn LakeObjectSource>) -> Self {
+        Self { source }
+    }
+}
+
+impl ParquetReader for ParquetFileReader {
+    fn read(&self, file: &FileQueryFile) -> Result<Vec<MarketEvent>, DataError> {
+        let bytes = self.source.read(file)?;
+        events_from_parquet(file, &bytes)
+    }
+}
+
+/// Decode one Parquet object into normalized market events.
+///
+/// Row semantics mirror `harness.data.replay._row_event`, including the
+/// generated `{object_path}#{row}` event id and `trade_id`/row sequence
+/// fallbacks, so fingerprints computed over file-backed replay match Python.
+pub fn events_from_parquet(
+    file: &FileQueryFile,
+    bytes: &[u8],
+) -> Result<Vec<MarketEvent>, DataError> {
+    let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(bytes))
+        .map_err(|error| DataError::value(format!("open parquet: {error}")))?;
+    let reader = builder
+        .build()
+        .map_err(|error| DataError::value(format!("read parquet: {error}")))?;
+    let mut events = Vec::new();
+    let mut row_number = 0usize;
+    for batch in reader {
+        let batch = batch.map_err(|error| DataError::value(format!("parquet batch: {error}")))?;
+        for row in 0..batch.num_rows() {
+            events.push(parquet_row_event(file, &batch, row, row_number)?);
+            row_number += 1;
+        }
+    }
+    Ok(events)
+}
+
+fn parquet_row_event(
+    file: &FileQueryFile,
+    batch: &arrow_array::RecordBatch,
+    row: usize,
+    row_number: usize,
+) -> Result<MarketEvent, DataError> {
+    let timestamp = read_timestamp(batch, "timestamp", row)?
+        .ok_or_else(|| DataError::value("Parquet replay rows must contain datetime timestamps"))?;
+    let raw_symbol = string_value(batch, "symbol", row)?
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| file.symbol.clone());
+    let symbol = canonical_symbol(&raw_symbol)?;
+    let event_id = string_value(batch, "event_id", row)?
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("{}#{}", file.object_path, row_number));
+    let sequence = integer_value(batch, "sequence", row)?
+        .or(integer_value(batch, "trade_id", row)?)
+        .unwrap_or(row_number as i64);
+    let sequence = u64::try_from(sequence).unwrap_or(row_number as u64);
+    match file.data_type {
+        DataType::Quote => {
+            let bid_price = decimal_value(batch, "bid_price", row)?
+                .ok_or_else(|| DataError::value("quote row is missing bid_price"))?;
+            let ask_price = decimal_value(batch, "ask_price", row)?
+                .ok_or_else(|| DataError::value("quote row is missing ask_price"))?;
+            let bid_size = decimal_value(batch, "bid_quantity", row)?
+                .or(decimal_value(batch, "bid_size", row)?)
+                .ok_or_else(|| DataError::value("quote row is missing bid size"))?;
+            let ask_size = decimal_value(batch, "ask_quantity", row)?
+                .or(decimal_value(batch, "ask_size", row)?)
+                .ok_or_else(|| DataError::value("quote row is missing ask size"))?;
+            let venue = string_value(batch, "venue", row)?
+                .or(string_value(batch, "bid_exchange", row)?)
+                .or(string_value(batch, "ask_exchange", row)?)
+                .filter(|value| !value.is_empty());
+            Ok(MarketEvent::Quote(QuoteEvent {
+                event_id,
+                timestamp,
+                sequence,
+                symbol,
+                bid_price,
+                bid_size,
+                ask_price,
+                ask_size,
+                venue,
+            }))
+        }
+        DataType::Trade => {
+            let price = decimal_value(batch, "price", row)?
+                .ok_or_else(|| DataError::value("trade row is missing price"))?;
+            let quantity = decimal_value(batch, "quantity", row)?
+                .or(decimal_value(batch, "size", row)?)
+                .ok_or_else(|| DataError::value("trade row is missing quantity"))?;
+            let venue = string_value(batch, "venue", row)?
+                .or(string_value(batch, "exchange", row)?)
+                .filter(|value| !value.is_empty());
+            let trade_id = string_value(batch, "trade_id", row)?.filter(|value| !value.is_empty());
+            Ok(MarketEvent::Trade(TradeEvent {
+                event_id,
+                timestamp,
+                sequence,
+                symbol,
+                price,
+                quantity,
+                venue,
+                trade_id,
+            }))
+        }
+        _ => Err(DataError::value(
+            "replay files must be quote or trade partitions",
+        )),
+    }
+}
+
+fn column_index(batch: &arrow_array::RecordBatch, name: &str) -> Option<usize> {
+    batch
+        .schema()
+        .fields()
+        .iter()
+        .position(|field| field.name() == name)
+}
+
+fn string_value(
+    batch: &arrow_array::RecordBatch,
+    name: &str,
+    row: usize,
+) -> Result<Option<String>, DataError> {
+    let Some(index) = column_index(batch, name) else {
+        return Ok(None);
+    };
+    let column = batch.column(index);
+    if column.is_null(row) {
+        return Ok(None);
+    }
+    if let Some(array) = column.as_any().downcast_ref::<StringArray>() {
+        return Ok(Some(array.value(row).to_string()));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<UInt64Array>() {
+        return Ok(Some(array.value(row).to_string()));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<Int64Array>() {
+        return Ok(Some(array.value(row).to_string()));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<arrow_array::UInt32Array>() {
+        return Ok(Some(array.value(row).to_string()));
+    }
+    Err(DataError::value(format!(
+        "Parquet column {name} must be a UTF-8 string"
+    )))
+}
+
+fn integer_value(
+    batch: &arrow_array::RecordBatch,
+    name: &str,
+    row: usize,
+) -> Result<Option<i64>, DataError> {
+    let Some(index) = column_index(batch, name) else {
+        return Ok(None);
+    };
+    let column = batch.column(index);
+    if column.is_null(row) {
+        return Ok(None);
+    }
+    if let Some(array) = column.as_any().downcast_ref::<UInt64Array>() {
+        return Ok(Some(array.value(row) as i64));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<Int64Array>() {
+        return Ok(Some(array.value(row)));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<arrow_array::UInt32Array>() {
+        return Ok(Some(i64::from(array.value(row))));
+    }
+    Err(DataError::value(format!(
+        "Parquet column {name} must be an integer"
+    )))
+}
+
+fn decimal_value(
+    batch: &arrow_array::RecordBatch,
+    name: &str,
+    row: usize,
+) -> Result<Option<Decimal18>, DataError> {
+    let Some(index) = column_index(batch, name) else {
+        return Ok(None);
+    };
+    let column = batch.column(index);
+    if column.is_null(row) {
+        return Ok(None);
+    }
+    if let Some(array) = column.as_any().downcast_ref::<Decimal128Array>() {
+        let unscaled = array.value(row);
+        let adjusted = rescale(unscaled, array.scale())?;
+        return Ok(Some(Decimal18::from_unscaled(adjusted)?));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<arrow_array::UInt32Array>() {
+        return Ok(Some(Decimal18::from_i64(i64::from(array.value(row)))));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<UInt64Array>() {
+        return Ok(Some(Decimal18::from_i64(array.value(row) as i64)));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<Int64Array>() {
+        return Ok(Some(Decimal18::from_i64(array.value(row))));
+    }
+    Err(DataError::value(format!(
+        "Parquet column {name} must be a decimal128 or integer"
+    )))
+}
+
+/// Rescale a decimal128 unscaled value to the crate's fixed scale 18.
+fn rescale(unscaled: i128, scale: i8) -> Result<i128, DataError> {
+    let delta = 18i32 - i32::from(scale);
+    if delta == 0 {
+        return Ok(unscaled);
+    }
+    if delta > 0 {
+        let factor = 10i128
+            .checked_pow(delta as u32)
+            .ok_or_else(|| DataError::value("decimal rescale overflow"))?;
+        unscaled
+            .checked_mul(factor)
+            .ok_or_else(|| DataError::value("decimal rescale overflow"))
+    } else {
+        let factor = 10i128
+            .checked_pow((-delta) as u32)
+            .ok_or_else(|| DataError::value("decimal rescale overflow"))?;
+        Ok(unscaled / factor)
+    }
+}
+
+fn read_timestamp(
+    batch: &arrow_array::RecordBatch,
+    name: &str,
+    row: usize,
+) -> Result<Option<DateTime>, DataError> {
+    let Some(index) = column_index(batch, name) else {
+        return Ok(None);
+    };
+    let column = batch.column(index);
+    if column.is_null(row) {
+        return Ok(None);
+    }
+    if let Some(array) = column.as_any().downcast_ref::<TimestampNanosecondArray>() {
+        return Ok(Some(DateTime::from_nanos(array.value(row))));
+    }
+    if let Some(array) = column.as_any().downcast_ref::<TimestampMicrosecondArray>() {
+        return Ok(Some(DateTime::from_micros(array.value(row))));
+    }
+    Err(DataError::value(format!(
+        "Parquet column {name} must be a timestamp"
+    )))
 }
 
 /// One explicitly ordered, per-symbol event stream.
@@ -86,12 +403,18 @@ impl ReplayFingerprints {
     }
 }
 
+/// One explicit stream source used by the selected-source fingerprint.
+struct StreamEntry {
+    order: usize,
+    symbol: String,
+    data_type: Option<DataType>,
+}
+
 struct Source {
     symbol: String,
     data_type: Option<DataType>,
     session_date: Option<crate::time::Date>,
     order: usize,
-    name: String,
     events: Vec<MarketEvent>,
     cursor: usize,
 }
@@ -127,20 +450,20 @@ impl LakeReplayFeed {
         reader: Option<Rc<dyn ParquetReader>>,
     ) -> Result<Self, DataError> {
         let sessions = normalize_sessions(sessions)?;
+        let mut stream_entries: Vec<StreamEntry> = Vec::new();
         let mut sources: Vec<Source> = Vec::new();
         for (order, stream) in streams.into_iter().enumerate() {
-            let data_type = match (&stream.data_type, &stream.events) {
-                (Some(DataType::Quote), _) => Some(DataType::Quote),
-                (Some(DataType::Trade), _) => Some(DataType::Trade),
-                _ => None,
-            };
             validate_stream(&stream)?;
-            sources.push(Source {
+            stream_entries.push(StreamEntry {
+                order,
                 symbol: stream.symbol.clone(),
-                data_type,
+                data_type: stream.data_type,
+            });
+            sources.push(Source {
+                symbol: stream.symbol,
+                data_type: stream.data_type,
                 session_date: None,
                 order,
-                name: format!("stream:{order}:{}", stream.symbol),
                 events: stream.events,
                 cursor: 0,
             });
@@ -163,34 +486,29 @@ impl LakeReplayFeed {
                     &b.object_path,
                 ))
         });
+        validate_file_sessions(&sorted_files, &sessions)?;
         if !sorted_files.is_empty() && reader.is_none() {
             return Err(DataError::type_error(
                 "reader is required when files are provided",
             ));
         }
+        let file_fingerprint = file_fingerprint(&stream_entries, &sorted_files)?;
+        let last_fingerprints = ReplayFingerprints {
+            file: file_fingerprint.clone(),
+            row: hex_string(&Sha256::new().finalize()),
+            data: empty_data_fingerprint(&file_fingerprint, &sessions),
+        };
         if let Some(reader) = reader {
             for (index, file) in sorted_files.iter().enumerate() {
                 sources.push(Source {
                     symbol: canonical_symbol(&file.symbol)?,
                     data_type: Some(file.data_type),
                     session_date: Some(file.session_date),
-                    order: sources.len() + index,
-                    name: file.object_path.clone(),
+                    order: stream_entries.len() + index,
                     events: reader.read(file)?,
                     cursor: 0,
                 });
             }
-        }
-        let file_fingerprint = file_fingerprint(&sources);
-        let sessions_for_empty: Vec<_> = sessions.clone();
-        let last_fingerprints = ReplayFingerprints {
-            file: file_fingerprint.clone(),
-            row: fingerprint_hex(&[]),
-            data: empty_data_fingerprint(&file_fingerprint, &sessions_for_empty),
-        };
-        // Keep the source `order` dense and session-scoped file sources distinct.
-        for (index, source) in sources.iter_mut().enumerate() {
-            source.order = index;
         }
         Ok(Self {
             file_fingerprint,
@@ -217,18 +535,17 @@ impl LakeReplayFeed {
 
     /// Yield merged events without collecting a full run.
     pub fn events(&mut self) -> Result<Vec<MarketEvent>, DataError> {
+        let mut state = FingerprintState::new(&self.file_fingerprint, &self.sessions);
         let mut emitted = Vec::new();
         for index in 0..self.sessions.len() {
             let session = self.sessions[index];
             let mut merged = self.merge_session(&session)?;
-            emitted.append(&mut merged);
+            for event in merged.drain(..) {
+                state.add(&event);
+                emitted.push(event);
+            }
         }
-        let row = fingerprint_events(&emitted);
-        self.last_fingerprints = ReplayFingerprints {
-            file: self.file_fingerprint.clone(),
-            row: row.clone(),
-            data: fingerprint_hex(&[canonical_fields(&[self.file_fingerprint.clone(), row])]),
-        };
+        self.last_fingerprints = state.fingerprints(&self.file_fingerprint);
         Ok(emitted)
     }
 
@@ -368,22 +685,34 @@ fn validate_file(file: &FileQueryFile) -> Result<(), DataError> {
     Ok(())
 }
 
-/// A stable 64-bit FNV-1a fingerprint, hex encoded.
-pub(crate) fn fingerprint_hex(frames: &[Vec<u8>]) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for frame in frames {
-        for byte in (frame.len() as u64).to_be_bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+fn validate_file_sessions(
+    files: &[FileQueryFile],
+    sessions: &[ExchangeSession],
+) -> Result<(), DataError> {
+    let expected: Vec<crate::time::Date> = sessions
+        .iter()
+        .map(|session| session.session_date)
+        .collect();
+    let mut seen: Vec<(crate::time::Date, String, DataType)> = Vec::new();
+    for file in files {
+        if !expected.contains(&file.session_date) {
+            return Err(DataError::value(
+                "replay file session is not part of the replay",
+            ));
         }
-        for byte in frame {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        let symbol = canonical_symbol(&file.symbol)?;
+        let key = (file.session_date, symbol, file.data_type);
+        if seen.contains(&key) {
+            return Err(DataError::value(
+                "replay files must not duplicate a symbol/data-type session",
+            ));
         }
+        seen.push(key);
     }
-    format!("{hash:016x}")
+    Ok(())
 }
 
+/// A stable SHA-256 over framed UTF-8 fields, hex encoded.
 pub(crate) fn canonical_fields(values: &[String]) -> Vec<u8> {
     let mut output = Vec::new();
     for value in values {
@@ -394,72 +723,140 @@ pub(crate) fn canonical_fields(values: &[String]) -> Vec<u8> {
     output
 }
 
+/// Push one Python `_update_frame`: a `u64` big-endian length then the payload.
+pub(crate) fn update_frame(digest: &mut Sha256, payload: &[u8]) {
+    digest.update((payload.len() as u64).to_be_bytes());
+    digest.update(payload);
+}
+
+/// Lower-hex encode a digest.
+pub(crate) fn hex_string(bytes: &[u8]) -> String {
+    hex::encode(bytes)
+}
+
+/// The streaming fingerprint accumulator shared by replay and options replay.
+struct FingerprintState {
+    row: Sha256,
+    data: Sha256,
+}
+
+impl FingerprintState {
+    fn new(file_fingerprint: &str, sessions: &[ExchangeSession]) -> Self {
+        let mut data = Sha256::new();
+        data.update(b"fca-lake-replay-data-v1\0");
+        update_frame(&mut data, file_fingerprint.as_bytes());
+        for session in sessions {
+            update_frame(
+                &mut data,
+                &canonical_fields(&[
+                    session.session_date.isoformat(),
+                    session.open_time.isoformat_micros_utc(),
+                    session.close_time.isoformat_micros_utc(),
+                ]),
+            );
+        }
+        Self {
+            row: Sha256::new(),
+            data,
+        }
+    }
+
+    fn add(&mut self, event: &MarketEvent) {
+        let payload = event_fingerprint(event);
+        update_frame(&mut self.row, &payload);
+        update_frame(&mut self.data, &payload);
+    }
+
+    fn fingerprints(&self, file_fingerprint: &str) -> ReplayFingerprints {
+        ReplayFingerprints {
+            file: file_fingerprint.to_string(),
+            row: hex_string(&self.row.clone().finalize()),
+            data: hex_string(&self.data.clone().finalize()),
+        }
+    }
+}
+
 fn event_fingerprint(event: &MarketEvent) -> Vec<u8> {
     match event {
         MarketEvent::Quote(quote) => canonical_fields(&[
             "quote".to_string(),
             quote.event_id.clone(),
-            quote.timestamp.to_string(),
+            quote.timestamp.isoformat_micros_utc(),
             quote.sequence.to_string(),
             quote.symbol.clone(),
             quote.bid_price.to_string(),
+            quote.bid_size.to_string(),
             quote.ask_price.to_string(),
+            quote.ask_size.to_string(),
+            quote.venue.clone().unwrap_or_default(),
         ]),
         MarketEvent::Trade(trade) => canonical_fields(&[
             "trade".to_string(),
             trade.event_id.clone(),
-            trade.timestamp.to_string(),
+            trade.timestamp.isoformat_micros_utc(),
             trade.sequence.to_string(),
             trade.symbol.clone(),
             trade.price.to_string(),
             trade.quantity.to_string(),
+            trade.venue.clone().unwrap_or_default(),
+            trade.trade_id.clone().unwrap_or_default(),
         ]),
     }
 }
 
-fn fingerprint_events(events: &[MarketEvent]) -> String {
-    let frames: Vec<Vec<u8>> = events.iter().map(event_fingerprint).collect();
-    fingerprint_hex(&frames)
-}
-
-fn file_fingerprint(sources: &[Source]) -> String {
-    let frames: Vec<Vec<u8>> = sources
-        .iter()
-        .map(|source| {
-            canonical_fields(&[
-                "source".to_string(),
-                source.order.to_string(),
-                source.name.clone(),
-                source.symbol.clone(),
-                source
+fn file_fingerprint(streams: &[StreamEntry], files: &[FileQueryFile]) -> Result<String, DataError> {
+    let mut digest = Sha256::new();
+    digest.update(b"fca-lake-replay-files-v1\0");
+    for stream in streams {
+        update_frame(
+            &mut digest,
+            &canonical_fields(&[
+                "stream".to_string(),
+                stream.order.to_string(),
+                stream.symbol.clone(),
+                stream
                     .data_type
                     .map(|data_type| data_type.value().to_string())
-                    .unwrap_or_default(),
-            ])
-        })
-        .collect();
-    fingerprint_hex(&frames)
+                    .unwrap_or_else(|| "None".to_string()),
+            ]),
+        );
+    }
+    for file in files {
+        update_frame(
+            &mut digest,
+            &canonical_fields(&[
+                "file".to_string(),
+                file.session_date.isoformat(),
+                canonical_symbol(&file.symbol)?,
+                file.data_type.value().to_string(),
+                file.object_path.clone(),
+                file.row_count.to_string(),
+                file.byte_size.to_string(),
+                // The Rust lake model does not carry the optional checksum the
+                // Python FileQueryFile exposes; `checksum or ""` is the empty
+                // string whenever the provider did not issue one.
+                String::new(),
+            ]),
+        );
+    }
+    Ok(hex_string(&digest.finalize()))
 }
 
 fn empty_data_fingerprint(file_fingerprint: &str, sessions: &[ExchangeSession]) -> String {
-    let mut frames: Vec<Vec<u8>> = vec![canonical_fields(&[file_fingerprint.to_string()])];
-    for session in sessions {
-        frames.push(canonical_fields(&[
-            session.session_date.isoformat(),
-            session.open_time.to_string(),
-            session.close_time.to_string(),
-        ]));
-    }
-    fingerprint_hex(&frames)
+    let state = FingerprintState::new(file_fingerprint, sessions);
+    hex_string(&state.data.clone().finalize())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::TradeEvent;
     use crate::time::{Date, DateTime};
     use harness_num::Decimal18;
     use std::str::FromStr;
+
+    fn dec(value: &str) -> Decimal18 {
+        Decimal18::from_str(value).unwrap()
+    }
 
     fn instant(seconds: i64) -> DateTime {
         DateTime::from_micros(seconds * 1_000_000)
@@ -470,8 +867,8 @@ mod tests {
             symbol.to_string(),
             instant(seconds),
             sequence,
-            Decimal18::from_str("10").unwrap(),
-            Decimal18::from_str("1").unwrap(),
+            dec("10"),
+            dec("1"),
         ))
     }
 
@@ -498,5 +895,80 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].sequence(), 1);
         assert_eq!(events[1].sequence(), 3);
+    }
+
+    /// Golden fingerprints produced by `harness.data.replay` on the same events.
+    #[test]
+    fn replay_fingerprints_match_python_golden() {
+        let day = Date::from_ymd(2024, 1, 2).unwrap();
+        let session = ExchangeSession {
+            session_date: day,
+            open_time: DateTime::midnight(day),
+            close_time: DateTime::midnight(day.add_days(1)),
+        };
+        let quote = QuoteEvent {
+            event_id: "q-1".to_string(),
+            timestamp: DateTime::from_ymd_hms(2024, 1, 2, 0, 0, 0, 0).unwrap(),
+            sequence: 1,
+            symbol: "AAPL".to_string(),
+            bid_price: dec("100.000000000000000000"),
+            bid_size: dec("1.000000000000000000"),
+            ask_price: dec("101.000000000000000000"),
+            ask_size: dec("2.000000000000000000"),
+            venue: Some("V".to_string()),
+        };
+        let trade = TradeEvent {
+            event_id: "t-1".to_string(),
+            timestamp: DateTime::from_ymd_hms(2024, 1, 2, 0, 0, 1, 500_000).unwrap(),
+            sequence: 2,
+            symbol: "AAPL".to_string(),
+            price: dec("100.500000000000000000"),
+            quantity: dec("3.000000000000000000"),
+            venue: Some("V".to_string()),
+            trade_id: Some("42".to_string()),
+        };
+        let stream = ReplayStream::new(
+            "AAPL",
+            None,
+            vec![MarketEvent::Quote(quote), MarketEvent::Trade(trade)],
+        )
+        .unwrap();
+        let mut feed = LakeReplayFeed::new(vec![session], vec![stream], Vec::new(), None).unwrap();
+        assert_eq!(
+            feed.file_fingerprint(),
+            "cc00a9100f6bb19947304e4398a16798bbb87e0569a0bbdfd8a90f25842f3fac"
+        );
+        assert_eq!(
+            feed.fingerprints().data_fingerprint(),
+            "85a05a272b90951dab3570794ffc08cdf42e02f17632e3aef658adea8fb0a3ba"
+        );
+        let events = feed.events().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            feed.fingerprints().row_fingerprint(),
+            "225bea5cab11acb50cad8c1533dd3783192520923c470f873de3c132a0fe5321"
+        );
+        assert_eq!(
+            feed.fingerprints().data_fingerprint(),
+            "71969743317ed52e99382036894c167d75c937613b2e803dbe9a2ae75b7f76e2"
+        );
+    }
+
+    #[test]
+    fn event_frames_match_python_byte_layout() {
+        let quote = QuoteEvent {
+            event_id: "q-1".to_string(),
+            timestamp: DateTime::from_ymd_hms(2024, 1, 2, 0, 0, 0, 0).unwrap(),
+            sequence: 1,
+            symbol: "AAPL".to_string(),
+            bid_price: dec("100.000000000000000000"),
+            bid_size: dec("1.000000000000000000"),
+            ask_price: dec("101.000000000000000000"),
+            ask_size: dec("2.000000000000000000"),
+            venue: Some("V".to_string()),
+        };
+        let frame = event_fingerprint(&MarketEvent::Quote(quote));
+        let expected = "000000000000000571756f74650000000000000003712d310000000000000020323032342d30312d30325430303a30303a30302e3030303030302b30303a303000000000000000013100000000000000044141504c00000000000000163130302e3030303030303030303030303030303030300000000000000014312e30303030303030303030303030303030303000000000000000163130312e3030303030303030303030303030303030300000000000000014322e303030303030303030303030303030303030000000000000000156";
+        assert_eq!(hex_string(&frame), expected);
     }
 }

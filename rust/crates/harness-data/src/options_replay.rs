@@ -14,11 +14,12 @@ use crate::events::MarketEvent;
 use crate::lake::{AssetClass, DataType, ExchangeSession, FileQueryFile};
 use crate::options_universe::OptionUniverseView;
 use crate::replay::{
-    canonical_fields, fingerprint_hex, LakeReplayFeed, ParquetReader, ReplayFingerprints,
+    canonical_fields, hex_string, update_frame, LakeReplayFeed, ParquetReader, ReplayFingerprints,
     ReplayStream,
 };
 use crate::symbol::canonical_symbol;
 use crate::time::Date;
+use sha2::{Digest, Sha256};
 
 /// Read boundary over the market-lake option partition layout.
 pub trait OptionPartitionPort {
@@ -195,33 +196,47 @@ impl OptionsReplayFeed {
     /// Yield the merged events of every session in chronological order.
     pub fn events(&mut self) -> Result<Vec<MarketEvent>, DataError> {
         let header = self.header_frames();
-        let mut file_frames = header.clone();
-        let mut row_frames = header.clone();
-        let mut data_frames = header;
+        let mut file_digest = Sha256::new();
+        let mut row_digest = Sha256::new();
+        let mut data_digest = Sha256::new();
+        for frame in &header {
+            update_frame(&mut file_digest, frame);
+            update_frame(&mut row_digest, frame);
+            update_frame(&mut data_digest, frame);
+        }
         let mut emitted = Vec::new();
         for index in 0..self.sessions.len() {
             let session = self.sessions[index];
             let mut plan = self.plan(&session)?;
             let events = plan.feed.events()?;
             let fingerprints = plan.feed.fingerprints().clone();
-            file_frames.push(canonical_fields(&[
-                session.session_date.isoformat(),
-                fingerprints.file_fingerprint().to_string(),
-            ]));
-            row_frames.push(canonical_fields(&[
-                session.session_date.isoformat(),
-                fingerprints.row_fingerprint().to_string(),
-            ]));
-            data_frames.push(canonical_fields(&[
-                session.session_date.isoformat(),
-                fingerprints.data_fingerprint().to_string(),
-            ]));
+            update_frame(
+                &mut file_digest,
+                &canonical_fields(&[
+                    session.session_date.isoformat(),
+                    fingerprints.file_fingerprint().to_string(),
+                ]),
+            );
             emitted.extend(events);
+            update_frame(
+                &mut row_digest,
+                &canonical_fields(&[
+                    session.session_date.isoformat(),
+                    fingerprints.row_fingerprint().to_string(),
+                ]),
+            );
+            update_frame(
+                &mut data_digest,
+                &canonical_fields(&[
+                    session.session_date.isoformat(),
+                    fingerprints.data_fingerprint().to_string(),
+                ]),
+            );
         }
         self.last_fingerprints = ReplayFingerprints {
-            file: fingerprint_hex(&file_frames),
-            row: fingerprint_hex(&row_frames),
-            data: fingerprint_hex(&data_frames),
+            file: hex_string(&file_digest.finalize()),
+            row: hex_string(&row_digest.finalize()),
+            data: hex_string(&data_digest.finalize()),
         };
         Ok(emitted)
     }
@@ -251,10 +266,15 @@ impl OptionsReplayFeed {
 
     fn baseline_fingerprints(&self) -> ReplayFingerprints {
         let header = self.header_frames();
+        let mut digest = Sha256::new();
+        for frame in &header {
+            update_frame(&mut digest, frame);
+        }
+        let value = hex_string(&digest.finalize());
         ReplayFingerprints {
-            file: fingerprint_hex(&header),
-            row: fingerprint_hex(&header),
-            data: fingerprint_hex(&header),
+            file: value.clone(),
+            row: value.clone(),
+            data: value,
         }
     }
 }

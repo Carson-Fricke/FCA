@@ -9,8 +9,14 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
+use async_trait::async_trait;
+use futures_util::{SinkExt, StreamExt};
 use harness_num::Decimal18;
+use serde_json::Value;
 
 use crate::error::DataError;
 use crate::events::{MarketEvent, QuoteEvent, TradeEvent};
@@ -314,10 +320,11 @@ impl AlpacaInbox {
                 bid_size,
                 ask_price,
                 ask_size,
-                venue: _,
+                venue,
             } => {
                 let symbol = self.event_symbol(symbol)?;
                 let event_timestamp = self.event_timestamp(timestamp, observed_at, &symbol)?;
+                let venue = null_or_text(venue.as_deref(), "z")?;
                 let event_id = event_id(
                     self.kind.event_source(),
                     "q",
@@ -334,6 +341,7 @@ impl AlpacaInbox {
                     bid_size: required_decimal(bid_size, "bs")?,
                     ask_price: required_decimal(ask_price, "ap")?,
                     ask_size: required_decimal(ask_size, "as")?,
+                    venue,
                 }))
             }
             AlpacaMessage::Trade {
@@ -341,11 +349,12 @@ impl AlpacaInbox {
                 timestamp,
                 price,
                 size,
+                venue,
                 trade_id,
-                ..
             } => {
                 let symbol = self.event_symbol(symbol)?;
                 let event_timestamp = self.event_timestamp(timestamp, observed_at, &symbol)?;
+                let venue = null_or_text(venue.as_deref(), "x")?;
                 let trade_id = match trade_id {
                     None => return Err(protocol("Alpaca field i must be text or integer")),
                     Some(value) => value.clone(),
@@ -364,6 +373,7 @@ impl AlpacaInbox {
                     symbol,
                     price: required_decimal(price, "p")?,
                     quantity: required_decimal(size, "s")?,
+                    venue,
                     trade_id: Some(trade_id),
                 }))
             }
@@ -409,8 +419,24 @@ fn event_id(
 ) -> String {
     format!(
         "{source}:{message_type}:{symbol}:{}:{sequence}",
-        timestamp.isoformat_micros()
+        timestamp.isoformat_micros_utc()
     )
+}
+
+/// Validate an optional provider text field exactly like Python `_optional_text`.
+fn null_or_text(value: Option<&str>, field: &str) -> Result<Option<String>, DataError> {
+    match value {
+        None => Ok(None),
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Err(protocol(format!(
+                    "Alpaca field {field} must be non-empty text or null"
+                )));
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+    }
 }
 
 fn required_decimal(value: &str, field: &str) -> Result<Decimal18, DataError> {
@@ -858,25 +884,731 @@ fn json_string_array(values: &[String]) -> String {
 }
 
 /// A decoded-frame connection implemented by a network adapter.
-pub trait AsyncWebSocketConnection {
+#[async_trait]
+pub trait AsyncWebSocketConnection: Send + Sync {
     /// Send one JSON text message.
-    fn send(&self, message: &str) -> Result<(), DataError>;
+    async fn send(&self, message: &str) -> Result<(), DataError>;
     /// Receive one frame, returning `None` when the timeout expires.
-    fn receive(&self, timeout_seconds: f64) -> Result<Option<Vec<u8>>, DataError>;
+    async fn receive(&self, timeout_seconds: f64) -> Result<Option<Vec<u8>>, DataError>;
     /// Close the connection.
-    fn close(&self) -> Result<(), DataError>;
+    async fn close(&self) -> Result<(), DataError>;
 }
 
 /// Connection factory kept outside the deterministic market-data kernel.
-pub trait AsyncWebSocketTransport {
+#[async_trait]
+pub trait AsyncWebSocketTransport: Send + Sync {
     /// Open one connection to `url`.
-    fn connect(&self, url: &str) -> Result<Box<dyn AsyncWebSocketConnection>, DataError>;
+    async fn connect(&self, url: &str) -> Result<Arc<dyn AsyncWebSocketConnection>, DataError>;
 }
 
 /// Provider clock supplied by the async shell.
-pub type AsyncClock = Box<dyn Fn() -> DateTime>;
+pub type AsyncClock = Arc<dyn Fn() -> DateTime + Send + Sync>;
 /// Stale-symbol notification sink supplied by the shell.
-pub type StaleHandler = Box<dyn Fn(&[String])>;
+pub type StaleHandler = Arc<dyn Fn(&[String]) + Send + Sync>;
+
+/// Cooperative shutdown signal for the async feed loop.
+#[derive(Clone, Default)]
+pub struct StopSignal(Arc<AtomicBool>);
+
+impl StopSignal {
+    /// Build an unset signal.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Request the loop stop at its next checkpoint.
+    pub fn stop(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether a stop has been requested.
+    pub fn is_set(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// Configuration for one async Alpaca live feed.
+pub struct AlpacaLiveConfig {
+    /// Provider API key.
+    pub api_key: String,
+    /// Provider API secret.
+    pub api_secret: String,
+    /// Provider namespace, which selects the default endpoint.
+    pub kind: InboxKind,
+    /// Canonical channels to subscribe.
+    pub subscription: AlpacaSipSubscription,
+    /// Network transport adapter.
+    pub transport: Arc<dyn AsyncWebSocketTransport>,
+    /// Kernel-facing event inbox.
+    pub inbox: AlpacaInbox,
+    /// Injected shell clock.
+    pub clock: AsyncClock,
+    /// Explicit endpoint, or the kind's production default.
+    pub websocket_url: Option<String>,
+    /// First backoff delay.
+    pub backoff_seconds: f64,
+    /// Maximum backoff delay.
+    pub max_backoff_seconds: f64,
+    /// Receive/watchdog interval.
+    pub watchdog_interval: f64,
+    /// Staleness threshold.
+    pub stale_after: Nanos,
+    /// Handshake timeout.
+    pub handshake_timeout: Nanos,
+    /// Optional stale-symbol sink.
+    pub on_stale: Option<StaleHandler>,
+}
+
+/// Async Alpaca shell with auth, reconnect backoff, and stale monitoring.
+///
+/// The connection and clock are ports supplied by the deployment shell. The
+/// loop mirrors `harness.data.alpaca_ws.AlpacaSipWebSocketFeed`: authenticate,
+/// subscribe, then stream and watchdog until stopped, reconnecting failures
+/// with bounded exponential backoff.
+pub struct AlpacaLiveFeed {
+    api_key: String,
+    api_secret: String,
+    subscription: AlpacaSipSubscription,
+    transport: Arc<dyn AsyncWebSocketTransport>,
+    inbox: AlpacaInbox,
+    clock: AsyncClock,
+    websocket_url: String,
+    backoff_seconds: f64,
+    max_backoff_seconds: f64,
+    watchdog_interval: f64,
+    stale_after: Nanos,
+    handshake_timeout: Nanos,
+    on_stale: Option<StaleHandler>,
+    connection: Arc<tokio::sync::Mutex<Option<Arc<dyn AsyncWebSocketConnection>>>>,
+    stale_symbols: Vec<String>,
+    connection_attempts: u32,
+    last_error: Option<String>,
+}
+
+impl AlpacaLiveFeed {
+    /// Build a validated async feed.
+    pub fn new(config: AlpacaLiveConfig) -> Result<Self, DataError> {
+        if config.api_key.trim().is_empty() {
+            return Err(DataError::value("api_key must not be empty"));
+        }
+        if config.api_secret.trim().is_empty() {
+            return Err(DataError::value("api_secret must not be empty"));
+        }
+        if config.backoff_seconds < 0.0 || config.max_backoff_seconds < 0.0 {
+            return Err(DataError::value("backoff delays must not be negative"));
+        }
+        if config.watchdog_interval <= 0.0 {
+            return Err(DataError::value("watchdog_interval must be positive"));
+        }
+        if config.stale_after <= 0 {
+            return Err(DataError::value("stale_after must be positive"));
+        }
+        if config.handshake_timeout <= 0 {
+            return Err(DataError::value("handshake_timeout must be positive"));
+        }
+        let websocket_url = match config.websocket_url {
+            Some(url) if !url.trim().is_empty() => url.trim_end_matches('/').to_string(),
+            Some(_) => return Err(DataError::value("websocket_url must not be empty")),
+            None => default_websocket_url(config.kind).to_string(),
+        };
+        Ok(Self {
+            api_key: config.api_key,
+            api_secret: config.api_secret,
+            subscription: config.subscription,
+            transport: config.transport,
+            inbox: config.inbox,
+            clock: config.clock,
+            websocket_url,
+            backoff_seconds: config.backoff_seconds,
+            max_backoff_seconds: config.max_backoff_seconds,
+            watchdog_interval: config.watchdog_interval,
+            stale_after: config.stale_after,
+            handshake_timeout: config.handshake_timeout,
+            on_stale: config.on_stale,
+            connection: Arc::new(tokio::sync::Mutex::new(None)),
+            stale_symbols: Vec::new(),
+            connection_attempts: 0,
+            last_error: None,
+        })
+    }
+
+    /// The inbox the feed fills.
+    pub fn inbox(&self) -> &AlpacaInbox {
+        &self.inbox
+    }
+
+    /// The inbox the feed fills, mutably.
+    pub fn inbox_mut(&mut self) -> &mut AlpacaInbox {
+        &mut self.inbox
+    }
+
+    /// The endpoint in use.
+    pub fn websocket_url(&self) -> &str {
+        &self.websocket_url
+    }
+
+    /// The number of connection attempts made.
+    pub fn connection_attempts(&self) -> u32 {
+        self.connection_attempts
+    }
+
+    /// The most recent connection error, if any.
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+
+    /// The most recent watchdog result.
+    pub fn stale_symbols(&self) -> &[String] {
+        &self.stale_symbols
+    }
+
+    /// Replace the subscribed channels and reset staleness tracking.
+    pub fn set_subscription(&mut self, subscription: AlpacaSipSubscription) {
+        self.subscription = subscription;
+        self.stale_symbols.clear();
+    }
+
+    /// The most recent live connection, if one is established.
+    pub async fn live_connection(&self) -> Option<Arc<dyn AsyncWebSocketConnection>> {
+        self.connection.lock().await.clone()
+    }
+
+    /// Consume until stopped, reconnecting failures with bounded backoff.
+    pub async fn run(
+        &mut self,
+        stop: StopSignal,
+        max_connections: Option<u32>,
+    ) -> Result<(), DataError> {
+        if let Some(max) = max_connections {
+            if max < 1 {
+                return Err(DataError::value(
+                    "max_connections must be at least 1 or None",
+                ));
+            }
+        }
+        let mut failures: u32 = 0;
+        while !stop.is_set() {
+            if let Some(max) = max_connections {
+                if self.connection_attempts >= max {
+                    return match self.last_error.take() {
+                        Some(error) => Err(DataError::Protocol(error)),
+                        None => Ok(()),
+                    };
+                }
+            }
+            self.connection_attempts += 1;
+            match self.run_connection(&stop).await {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    self.last_error = Some(error.to_string());
+                    failures += 1;
+                    if stop.is_set() {
+                        return Ok(());
+                    }
+                    if let Some(max) = max_connections {
+                        if self.connection_attempts >= max {
+                            return Err(error);
+                        }
+                    }
+                    let delay =
+                        backoff_delay(failures, self.backoff_seconds, self.max_backoff_seconds);
+                    tokio::time::sleep(Duration::from_secs_f64(delay.max(0.0))).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn run_connection(&mut self, stop: &StopSignal) -> Result<(), DataError> {
+        let connection = self.transport.connect(&self.websocket_url).await?;
+        *self.connection.lock().await = Some(Arc::clone(&connection));
+        let result = self.stream_connection(&connection, stop).await;
+        *self.connection.lock().await = None;
+        let _ = connection.close().await;
+        result
+    }
+
+    async fn stream_connection(
+        &mut self,
+        connection: &Arc<dyn AsyncWebSocketConnection>,
+        stop: &StopSignal,
+    ) -> Result<(), DataError> {
+        if !self.await_control(connection, stop, "connected").await? {
+            return Ok(());
+        }
+        connection
+            .send(&auth_payload_string(&self.api_key, &self.api_secret))
+            .await?;
+        if !self
+            .await_control(connection, stop, "authenticated")
+            .await?
+        {
+            return Ok(());
+        }
+        connection
+            .send(&subscribe_payload_string(&self.subscription))
+            .await?;
+        if !self.await_subscription(connection, stop).await? {
+            return Ok(());
+        }
+        let active_since = self.now();
+        self.stale_symbols.clear();
+        while !stop.is_set() {
+            if let Some(messages) = self
+                .receive_json(connection, self.watchdog_interval)
+                .await?
+            {
+                let market = market_messages(&messages)?;
+                if !market.is_empty() {
+                    let decoded = decode_market_messages(&market)?;
+                    self.inbox.push(&decoded, self.now())?;
+                }
+            }
+            self.check_stale(active_since)?;
+        }
+        Ok(())
+    }
+
+    async fn await_control(
+        &mut self,
+        connection: &Arc<dyn AsyncWebSocketConnection>,
+        stop: &StopSignal,
+        expected: &str,
+    ) -> Result<bool, DataError> {
+        let started = self.now();
+        while !stop.is_set() {
+            if let Some(messages) = self
+                .receive_json(connection, self.watchdog_interval)
+                .await?
+            {
+                for message in &messages {
+                    raise_provider_error(message)?;
+                    if message.get("T").and_then(Value::as_str) == Some("success")
+                        && message.get("msg").and_then(Value::as_str) == Some(expected)
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
+            if self.now().to_nanos() - started.to_nanos() >= self.handshake_timeout {
+                return Err(protocol(format!(
+                    "timed out waiting for Alpaca {expected} response"
+                )));
+            }
+        }
+        Ok(false)
+    }
+
+    async fn await_subscription(
+        &mut self,
+        connection: &Arc<dyn AsyncWebSocketConnection>,
+        stop: &StopSignal,
+    ) -> Result<bool, DataError> {
+        let started = self.now();
+        while !stop.is_set() {
+            if let Some(messages) = self
+                .receive_json(connection, self.watchdog_interval)
+                .await?
+            {
+                let mut subscribed = false;
+                for message in &messages {
+                    raise_provider_error(message)?;
+                    if message.get("T").and_then(Value::as_str) == Some("subscription") {
+                        let trades = control_symbols(message.get("trades"), "trades")?;
+                        let quotes = control_symbols(message.get("quotes"), "quotes")?;
+                        if trades != self.subscription.trades {
+                            return Err(protocol(
+                                "Alpaca acknowledged unexpected trade subscriptions",
+                            ));
+                        }
+                        if quotes != self.subscription.quotes {
+                            return Err(protocol(
+                                "Alpaca acknowledged unexpected quote subscriptions",
+                            ));
+                        }
+                        subscribed = true;
+                    }
+                }
+                if subscribed {
+                    let market = market_messages(&messages)?;
+                    if !market.is_empty() {
+                        let decoded = decode_market_messages(&market)?;
+                        self.inbox.push(&decoded, self.now())?;
+                    }
+                    return Ok(true);
+                }
+            }
+            if self.now().to_nanos() - started.to_nanos() >= self.handshake_timeout {
+                return Err(protocol(
+                    "timed out waiting for Alpaca subscription response",
+                ));
+            }
+        }
+        Ok(false)
+    }
+
+    fn check_stale(&mut self, active_since: DateTime) -> Result<(), DataError> {
+        let observed = self.now();
+        let stale = self.inbox.stale_symbols(
+            &self.subscription.symbols(),
+            observed,
+            active_since,
+            self.stale_after,
+        )?;
+        let changed = stale != self.stale_symbols;
+        self.stale_symbols = stale;
+        if changed && !self.stale_symbols.is_empty() {
+            if let Some(handler) = &self.on_stale {
+                handler(&self.stale_symbols);
+            }
+        }
+        Ok(())
+    }
+
+    fn now(&self) -> DateTime {
+        (self.clock)()
+    }
+
+    async fn receive_json(
+        &self,
+        connection: &Arc<dyn AsyncWebSocketConnection>,
+        timeout_seconds: f64,
+    ) -> Result<Option<Vec<Value>>, DataError> {
+        let Some(frame) = connection.receive(timeout_seconds).await? else {
+            return Ok(None);
+        };
+        let text = String::from_utf8(frame)
+            .map_err(|_| protocol("Alpaca WebSocket frame is not UTF-8"))?;
+        let payload: Value = serde_json::from_str(&text)
+            .map_err(|_| protocol("Alpaca WebSocket frame contains invalid JSON"))?;
+        let Some(array) = payload.as_array() else {
+            return Err(protocol(
+                "Alpaca WebSocket frame must be a non-empty JSON array",
+            ));
+        };
+        if array.is_empty() {
+            return Err(protocol(
+                "Alpaca WebSocket frame must be a non-empty JSON array",
+            ));
+        }
+        if !array.iter().all(Value::is_object) {
+            return Err(protocol("Alpaca WebSocket frame must contain JSON objects"));
+        }
+        Ok(Some(array.clone()))
+    }
+
+    /// The auth control payload as compact JSON.
+    pub fn auth_payload(&self) -> String {
+        auth_payload_string(&self.api_key, &self.api_secret)
+    }
+
+    /// The subscribe control payload as compact JSON.
+    pub fn subscribe_payload(&self) -> String {
+        subscribe_payload_string(&self.subscription)
+    }
+}
+
+/// Async OPRA feed that rotates channel sets without reconnecting.
+pub struct AlpacaOpraLiveFeed {
+    feed: AlpacaLiveFeed,
+    subscription: AlpacaOpraSubscription,
+}
+
+impl AlpacaOpraLiveFeed {
+    /// Wrap an async feed with an OPRA channel selection.
+    pub fn new(mut feed: AlpacaLiveFeed, subscription: AlpacaOpraSubscription) -> Self {
+        feed.set_subscription(AlpacaSipSubscription {
+            trades: subscription.trades.clone(),
+            quotes: subscription.quotes.clone(),
+        });
+        Self { feed, subscription }
+    }
+
+    /// The underlying async feed.
+    pub fn feed(&self) -> &AlpacaLiveFeed {
+        &self.feed
+    }
+
+    /// The currently subscribed OPRA channels.
+    pub fn subscription(&self) -> &AlpacaOpraSubscription {
+        &self.subscription
+    }
+
+    /// Run the underlying feed loop.
+    pub async fn run(
+        &mut self,
+        stop: StopSignal,
+        max_connections: Option<u32>,
+    ) -> Result<(), DataError> {
+        self.feed.run(stop, max_connections).await
+    }
+
+    /// Swap the live channel sets without reconnecting.
+    pub async fn rotate(
+        &mut self,
+        subscription: AlpacaOpraSubscription,
+    ) -> Result<OpraRotationDelta, DataError> {
+        let delta = rotation_delta(&self.subscription, &subscription);
+        let connection = self
+            .feed
+            .live_connection()
+            .await
+            .ok_or_else(|| protocol("cannot rotate an OPRA subscription before connecting"))?;
+        for payload in opra_rotation_payloads(&delta) {
+            connection.send(&payload).await?;
+        }
+        self.feed.set_subscription(AlpacaSipSubscription {
+            trades: subscription.trades.clone(),
+            quotes: subscription.quotes.clone(),
+        });
+        self.subscription = subscription;
+        Ok(delta)
+    }
+}
+
+fn default_websocket_url(kind: InboxKind) -> &'static str {
+    match kind {
+        InboxKind::Sip => "wss://stream.data.alpaca.markets/v2/sip",
+        InboxKind::Crypto => "wss://stream.data.alpaca.markets/v1beta3/crypto",
+        InboxKind::Opra => "wss://stream.data.alpaca.markets/v1beta1/opra",
+    }
+}
+
+fn auth_payload_string(api_key: &str, api_secret: &str) -> String {
+    format!(
+        "{{\"action\":\"auth\",\"key\":{},\"secret\":{}}}",
+        json_string(api_key),
+        json_string(api_secret)
+    )
+}
+
+fn subscribe_payload_string(subscription: &AlpacaSipSubscription) -> String {
+    format!(
+        "{{\"action\":\"subscribe\",\"trades\":{},\"quotes\":{}}}",
+        json_string_array(&subscription.trades),
+        json_string_array(&subscription.quotes)
+    )
+}
+
+/// The rotation payloads one OPRA channel change requires, in send order.
+pub fn opra_rotation_payloads(delta: &OpraRotationDelta) -> Vec<String> {
+    let mut payloads = Vec::new();
+    if !delta.unsubscribe_trades.is_empty() || !delta.unsubscribe_quotes.is_empty() {
+        payloads.push(format!(
+            "{{\"action\":\"unsubscribe\",\"trades\":{},\"quotes\":{}}}",
+            json_string_array(&delta.unsubscribe_trades),
+            json_string_array(&delta.unsubscribe_quotes)
+        ));
+    }
+    if !delta.subscribe_trades.is_empty() || !delta.subscribe_quotes.is_empty() {
+        payloads.push(format!(
+            "{{\"action\":\"subscribe\",\"trades\":{},\"quotes\":{}}}",
+            json_string_array(&delta.subscribe_trades),
+            json_string_array(&delta.subscribe_quotes)
+        ));
+    }
+    payloads
+}
+
+fn market_messages(messages: &[Value]) -> Result<Vec<Value>, DataError> {
+    let mut market = Vec::new();
+    for message in messages {
+        raise_provider_error(message)?;
+        match message.get("T").and_then(Value::as_str) {
+            Some("q") | Some("t") => market.push(message.clone()),
+            Some("success") | Some("subscription") => {}
+            other => {
+                return Err(protocol(format!(
+                    "unexpected Alpaca message type: {other:?}"
+                )))
+            }
+        }
+    }
+    Ok(market)
+}
+
+fn raise_provider_error(message: &Value) -> Result<(), DataError> {
+    if message.get("T").and_then(Value::as_str) != Some("error") {
+        return Ok(());
+    }
+    let code = message.get("code").cloned().unwrap_or(Value::Null);
+    let detail = message.get("msg").cloned().unwrap_or(Value::Null);
+    Err(protocol(format!("Alpaca stream error {code}: {detail}")))
+}
+
+fn control_symbols(value: Option<&Value>, field: &str) -> Result<Vec<String>, DataError> {
+    let Some(Value::Array(items)) = value else {
+        return Err(protocol(format!(
+            "Alpaca subscription field {field} must be a symbol list"
+        )));
+    };
+    let mut values = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(text) = item.as_str() else {
+            return Err(protocol(format!(
+                "Alpaca subscription field {field} must be a symbol list"
+            )));
+        };
+        values.push(canonical_symbol(text)?);
+    }
+    let original = values.len();
+    values.sort();
+    values.dedup();
+    if values.len() != original {
+        return Err(protocol(format!(
+            "Alpaca subscription field {field} must not contain duplicates"
+        )));
+    }
+    Ok(values)
+}
+
+fn decode_market_messages(messages: &[Value]) -> Result<Vec<AlpacaMessage>, DataError> {
+    let mut decoded = Vec::with_capacity(messages.len());
+    for message in messages {
+        match message.get("T").and_then(Value::as_str).unwrap_or_default() {
+            "q" => decoded.push(AlpacaMessage::Quote {
+                symbol: required_text(message, "S")?,
+                timestamp: required_text(message, "t")?,
+                bid_price: number_text(message, "bp")?,
+                bid_size: number_text(message, "bs")?,
+                ask_price: number_text(message, "ap")?,
+                ask_size: number_text(message, "as")?,
+                venue: match optional_text_field(message, "z")? {
+                    Some(venue) => Some(venue),
+                    None => optional_text_field(message, "x")?,
+                },
+            }),
+            "t" => decoded.push(AlpacaMessage::Trade {
+                symbol: required_text(message, "S")?,
+                timestamp: required_text(message, "t")?,
+                price: number_text(message, "p")?,
+                size: number_text(message, "s")?,
+                venue: optional_text_field(message, "x")?,
+                trade_id: Some(trade_id_text(message, "i")?),
+            }),
+            _ => return Err(protocol("Alpaca market message must be a quote or trade")),
+        }
+    }
+    Ok(decoded)
+}
+
+fn required_text(message: &Value, field: &str) -> Result<String, DataError> {
+    match message.get(field).and_then(Value::as_str) {
+        Some(value) if !value.trim().is_empty() => Ok(value.trim().to_string()),
+        _ => Err(protocol(format!(
+            "Alpaca field {field} must be non-empty text"
+        ))),
+    }
+}
+
+fn optional_text_field(message: &Value, field: &str) -> Result<Option<String>, DataError> {
+    match message.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => {
+            Ok(Some(value.trim().to_string()))
+        }
+        _ => Err(protocol(format!(
+            "Alpaca field {field} must be non-empty text or null"
+        ))),
+    }
+}
+
+fn number_text(message: &Value, field: &str) -> Result<String, DataError> {
+    match message.get(field) {
+        Some(Value::Number(number)) => Ok(number.to_string()),
+        Some(Value::String(text)) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        _ => Err(protocol(format!(
+            "Alpaca field {field} must be an exact number"
+        ))),
+    }
+}
+
+fn trade_id_text(message: &Value, field: &str) -> Result<String, DataError> {
+    match message.get(field) {
+        Some(Value::Number(number)) => Ok(number.to_string()),
+        Some(Value::String(text)) => Ok(text.clone()),
+        _ => Err(protocol("Alpaca field i must be text or integer")),
+    }
+}
+
+/// A real network transport backed by `tokio-tungstenite`.
+pub struct TungsteniteTransport;
+
+impl TungsteniteTransport {
+    /// Build a transport.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for TungsteniteTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl AsyncWebSocketTransport for TungsteniteTransport {
+    async fn connect(&self, url: &str) -> Result<Arc<dyn AsyncWebSocketConnection>, DataError> {
+        let (stream, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .map_err(|error| DataError::Protocol(format!("websocket connect: {error}")))?;
+        Ok(Arc::new(TungsteniteConnection {
+            stream: tokio::sync::Mutex::new(stream),
+        }))
+    }
+}
+
+struct TungsteniteConnection {
+    stream: tokio::sync::Mutex<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >,
+}
+
+#[async_trait]
+impl AsyncWebSocketConnection for TungsteniteConnection {
+    async fn send(&self, message: &str) -> Result<(), DataError> {
+        let mut stream = self.stream.lock().await;
+        stream
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                message.to_string().into(),
+            ))
+            .await
+            .map_err(|error| DataError::Protocol(format!("websocket send: {error}")))
+    }
+
+    async fn receive(&self, timeout_seconds: f64) -> Result<Option<Vec<u8>>, DataError> {
+        let timeout = Duration::from_secs_f64(timeout_seconds.max(0.0));
+        let mut stream = self.stream.lock().await;
+        loop {
+            match tokio::time::timeout(timeout, stream.next()).await {
+                Err(_) => return Ok(None),
+                Ok(None) => return Err(DataError::Protocol("websocket closed".to_string())),
+                Ok(Some(Err(error))) => {
+                    return Err(DataError::Protocol(format!("websocket receive: {error}")))
+                }
+                Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                    return Ok(Some(text.as_bytes().to_vec()))
+                }
+                Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(bytes)))) => {
+                    return Ok(Some(bytes.to_vec()))
+                }
+                Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_)))) => {
+                    return Err(DataError::Protocol("websocket closed".to_string()))
+                }
+                Ok(Some(Ok(_))) => continue,
+            }
+        }
+    }
+
+    async fn close(&self) -> Result<(), DataError> {
+        let mut stream = self.stream.lock().await;
+        let _ = stream.close(None).await;
+        Ok(())
+    }
+}
 
 /// The SIP feed shell.
 pub type AlpacaSipWebSocketFeed = AlpacaWebSocketFeed;
@@ -938,5 +1670,134 @@ mod tests {
         assert_eq!(backoff_delay(1, 0.5, 30.0), 0.5);
         assert_eq!(backoff_delay(3, 0.5, 30.0), 2.0);
         assert_eq!(backoff_delay(40, 0.5, 30.0), 30.0);
+    }
+
+    #[test]
+    fn opra_rotation_payloads_match_python() {
+        let current =
+            AlpacaOpraSubscription::new(vec!["AAPL240119C00150000".to_string()], Vec::new())
+                .unwrap();
+        let target =
+            AlpacaOpraSubscription::new(vec!["AAPL240119C00160000".to_string()], Vec::new())
+                .unwrap();
+        let payloads = opra_rotation_payloads(&rotation_delta(&current, &target));
+        assert_eq!(
+            payloads[0],
+            "{\"action\":\"unsubscribe\",\"trades\":[\"AAPL240119C00150000\"],\"quotes\":[]}"
+        );
+        assert_eq!(
+            payloads[1],
+            "{\"action\":\"subscribe\",\"trades\":[\"AAPL240119C00160000\"],\"quotes\":[]}"
+        );
+    }
+
+    struct FakeConnection {
+        frames: std::sync::Mutex<VecDeque<Vec<u8>>>,
+        sent: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl FakeConnection {
+        fn new(frames: Vec<Vec<u8>>) -> Self {
+            Self {
+                frames: std::sync::Mutex::new(frames.into()),
+                sent: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl AsyncWebSocketConnection for FakeConnection {
+        async fn send(&self, message: &str) -> Result<(), DataError> {
+            self.sent.lock().unwrap().push(message.to_string());
+            Ok(())
+        }
+
+        async fn receive(&self, _timeout_seconds: f64) -> Result<Option<Vec<u8>>, DataError> {
+            match self.frames.lock().unwrap().pop_front() {
+                Some(frame) => Ok(Some(frame)),
+                None => Err(DataError::Protocol("fake closed".to_string())),
+            }
+        }
+
+        async fn close(&self) -> Result<(), DataError> {
+            Ok(())
+        }
+    }
+
+    struct FakeTransport {
+        connection: Arc<FakeConnection>,
+    }
+
+    #[async_trait]
+    impl AsyncWebSocketTransport for FakeTransport {
+        async fn connect(
+            &self,
+            _url: &str,
+        ) -> Result<Arc<dyn AsyncWebSocketConnection>, DataError> {
+            Ok(self.connection.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn live_feed_authenticates_subscribes_and_streams() {
+        let stamp = DateTime::from_micros(0).isoformat_micros_utc();
+        let frames = vec![
+            serde_json::to_vec(&serde_json::json!([{"T": "success", "msg": "connected"}])).unwrap(),
+            serde_json::to_vec(&serde_json::json!([{"T": "success", "msg": "authenticated"}]))
+                .unwrap(),
+            serde_json::to_vec(&serde_json::json!([
+                {"T": "subscription", "trades": ["AAPL"], "quotes": ["AAPL"]},
+                {"T": "t", "S": "AAPL", "t": stamp, "p": "10.5", "s": "100", "x": "V", "i": "7"}
+            ]))
+            .unwrap(),
+        ];
+        let connection = Arc::new(FakeConnection::new(frames));
+        let transport = Arc::new(FakeTransport {
+            connection: Arc::clone(&connection),
+        });
+        let inbox = AlpacaInbox::sip(0, 5_000_000_000, 300_000_000_000).unwrap();
+        let clock: AsyncClock = Arc::new(|| DateTime::from_micros(0));
+        let config = AlpacaLiveConfig {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            kind: InboxKind::Sip,
+            subscription: AlpacaSipSubscription::new(
+                vec!["AAPL".to_string()],
+                vec!["AAPL".to_string()],
+            )
+            .unwrap(),
+            transport,
+            inbox,
+            clock,
+            websocket_url: None,
+            backoff_seconds: 0.5,
+            max_backoff_seconds: 30.0,
+            watchdog_interval: 1.0,
+            stale_after: 30_000_000_000,
+            handshake_timeout: 10_000_000_000,
+            on_stale: None,
+        };
+        let mut feed = AlpacaLiveFeed::new(config).unwrap();
+        let stop = StopSignal::new();
+        let error = feed.run_connection(&stop).await.unwrap_err();
+        assert_eq!(error.to_string(), "fake closed");
+        assert_eq!(feed.inbox().len(), 1);
+        let sent = connection.sent.lock().unwrap().clone();
+        assert_eq!(
+            sent[0],
+            "{\"action\":\"auth\",\"key\":\"key\",\"secret\":\"secret\"}"
+        );
+        assert_eq!(
+            sent[1],
+            "{\"action\":\"subscribe\",\"trades\":[\"AAPL\"],\"quotes\":[\"AAPL\"]}"
+        );
+        match feed.inbox_mut().pop().unwrap() {
+            MarketEvent::Trade(trade) => {
+                assert_eq!(trade.symbol, "AAPL");
+                assert_eq!(trade.trade_id.as_deref(), Some("7"));
+                assert_eq!(trade.venue.as_deref(), Some("V"));
+            }
+            _ => panic!("expected trade"),
+        }
     }
 }
