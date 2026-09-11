@@ -81,7 +81,9 @@ from thesis.integrations.mcp import (
     RemoteHttpMcpTransport,
     StdioMcpTransport,
     harness_mcp_topology_from_env,
+    open_harness_mcp_boundary,
     open_harness_mcp_client,
+    open_local_harness_boundary,
 )
 from thesis.integrations.runtime_status import (
     ArtifactEntry,
@@ -178,6 +180,8 @@ __all__ = [
     "ThesisLakeClient",
     "ThesisLakeError",
     "harness_mcp_topology_from_env",
+    "open_harness_mcp_boundary",
     "open_harness_mcp_client",
+    "open_local_harness_boundary",
     "unavailable_report",
 ]

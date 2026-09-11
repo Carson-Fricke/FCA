@@ -28,7 +28,9 @@ from thesis.agent.harness_tools import (
     RunBacktestArgs,
     RunSweepArgs,
     harness_mcp_skill,
+    harness_mcp_skill_ref,
     open_harness_tool_provider,
+    register_harness_mcp_skill,
 )
 from thesis.agent.operations import (
     EditRecord,
@@ -77,6 +79,12 @@ from thesis.agent.subagents import (
     SubagentContextFactory,
     create_subagent_context,
 )
+from thesis.agent.tool_dispatch import (
+    HarnessToolCall,
+    HarnessToolDispatcher,
+    harness_mcp_role_policy,
+    with_harness_mcp,
+)
 
 __all__ = [
     "AgentId",
@@ -91,6 +99,8 @@ __all__ = [
     "HARNESS_MCP_SKILL_VERSION",
     "HARNESS_TOOL_NAMES",
     "HarnessToolCatalog",
+    "HarnessToolCall",
+    "HarnessToolDispatcher",
     "HarnessToolError",
     "HarnessToolFailure",
     "HarnessToolProvider",
@@ -140,6 +150,10 @@ __all__ = [
     "content_hash",
     "create_subagent_context",
     "harness_mcp_skill",
+    "harness_mcp_role_policy",
+    "harness_mcp_skill_ref",
     "open_harness_tool_provider",
+    "register_harness_mcp_skill",
     "resume",
+    "with_harness_mcp",
 ]

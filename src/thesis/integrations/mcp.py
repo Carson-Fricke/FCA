@@ -42,7 +42,10 @@ from thesis.integrations.harness_activation import (
     ActivationOutcome,
     HarnessActivationError,
     HarnessActivationRequest,
+    HarnessBoundary,
     HarnessCapabilities,
+    HarnessProcessRunner,
+    LocalHarnessProcess,
 )
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -712,6 +715,66 @@ def open_harness_mcp_client(
     return HarnessMcpClient(transport)
 
 
+def open_harness_mcp_boundary(
+    topology: HarnessMcpTopology,
+    *,
+    in_process_handler: _JsonRpcHandler | None = None,
+    http_transport: httpx.BaseTransport | None = None,
+    stdio_transport: McpTransport | None = None,
+) -> HarnessMcpBoundary:
+    """Open and connect a harness MCP boundary for ``topology``.
+
+    The boundary initializes the JSON-RPC session and derives its declared
+    capabilities from the discovered ``tools/list`` catalog, so a launch only
+    routes through a tool the harness actually publishes.
+    """
+    client = open_harness_mcp_client(
+        topology,
+        in_process_handler=in_process_handler,
+        http_transport=http_transport,
+        stdio_transport=stdio_transport,
+    )
+    return HarnessMcpBoundary.connect(client)
+
+
+def open_local_harness_boundary(
+    *,
+    topology: HarnessMcpTopology | None = None,
+    process_runner: HarnessProcessRunner | None = None,
+    program: Sequence[str] = ("harness",),
+    capabilities: HarnessCapabilities | None = None,
+    in_process_handler: _JsonRpcHandler | None = None,
+    http_transport: httpx.BaseTransport | None = None,
+    stdio_transport: McpTransport | None = None,
+) -> HarnessBoundary:
+    """Compose the local harness boundary, preferring the MCP tool catalog.
+
+    The MCP boundary is tried first so a local Thesis speaks the published
+    harness MCP contract.  When the MCP server cannot be reached or started and
+    the harness runs locally, the composition falls back to the direct
+    :class:`~thesis.integrations.harness_activation.LocalHarnessProcess`
+    boundary using ``process_runner``.  A remote harness never falls back: an
+    unreachable remote endpoint raises rather than silently switching to local
+    execution.  When no fallback runner is supplied, the MCP failure propagates.
+    """
+    resolved = harness_mcp_topology_from_env() if topology is None else topology
+    try:
+        return open_harness_mcp_boundary(
+            resolved,
+            in_process_handler=in_process_handler,
+            http_transport=http_transport,
+            stdio_transport=stdio_transport,
+        )
+    except (HarnessMcpError, OSError):
+        if resolved.harness_location != "local" or process_runner is None:
+            raise
+        return LocalHarnessProcess(
+            process_runner,
+            program=program,
+            capabilities=capabilities,
+        )
+
+
 def harness_mcp_topology_from_env(
     environ: Mapping[str, str] | None = None,
 ) -> HarnessMcpTopology:
@@ -844,5 +907,7 @@ __all__ = [
     "RemoteHttpMcpTransport",
     "StdioMcpTransport",
     "harness_mcp_topology_from_env",
+    "open_harness_mcp_boundary",
     "open_harness_mcp_client",
+    "open_local_harness_boundary",
 ]
