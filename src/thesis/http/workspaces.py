@@ -12,10 +12,11 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -63,8 +64,10 @@ def _iso_z(moment: datetime) -> str:
 
 
 def _slugify(name: str) -> str:
-    slug = "-".join(part for part in name.lower().split() if part)
-    return slug or "workspace"
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if len(slug) < 3:
+        slug = f"{slug}-ws" if slug else "workspace"
+    return slug[:63].strip("-") or "workspace"
 
 
 def _initials(name: str) -> str:
@@ -84,6 +87,25 @@ def _counting_id_factory() -> Callable[[str], str]:
         return f"{prefix}-{counters[prefix]:03d}"
 
     return factory
+
+
+class WorkspaceStore(Protocol):
+    """Persistence boundary for workspace summaries and activity items.
+
+    The in-memory :class:`WorkspaceCatalogStore` and the filesystem-backed
+    :class:`thesis.workspaces.catalog.LocalWorkspaceCatalogStore` both satisfy
+    this port.
+    """
+
+    def list(self) -> tuple[dict[str, object], ...]: ...
+
+    def get(self, workspace_id: str) -> dict[str, object] | None: ...
+
+    def add(self, summary: dict[str, object]) -> dict[str, object]: ...
+
+    def add_activity(self, item: dict[str, object]) -> dict[str, object]: ...
+
+    def activity(self, workspace_id: str) -> tuple[dict[str, object], ...]: ...
 
 
 class WorkspaceCatalogStore:
@@ -139,7 +161,7 @@ class WorkspaceDataService:
 
     def __init__(
         self,
-        store: WorkspaceCatalogStore | None = None,
+        store: WorkspaceStore | None = None,
         *,
         clock: Callable[[], datetime] | None = None,
         id_factory: Callable[[str], str] | None = None,
@@ -155,7 +177,7 @@ class WorkspaceDataService:
         self._health_provider = health_provider
 
     @property
-    def store(self) -> WorkspaceCatalogStore:
+    def store(self) -> WorkspaceStore:
         return self._store
 
     def list_workspaces(self) -> tuple[dict[str, object], ...]:
@@ -378,9 +400,34 @@ class WorkspaceDataBundle:
     harness: HarnessBoundary | None = None
 
 
+def _workspace_template_path(
+    override: str | pathlib.Path | None,
+) -> pathlib.Path:
+    if override is not None:
+        return pathlib.Path(override)
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    return repo_root / "config" / "thesis" / "workspace.yaml"
+
+
+def _local_catalog_store(
+    workspace_root: pathlib.Path,
+    template: str | pathlib.Path | None,
+    clock: Callable[[], datetime],
+) -> WorkspaceStore:
+    """Build the filesystem-backed workspace catalog (lazy heavy imports)."""
+    from thesis.workspaces.catalog import LocalWorkspaceCatalogStore
+    from thesis.workspaces.local import LocalWorkspaceProvider
+    from thesis.workspaces.manifest import load_workspace_manifest
+
+    manifest = load_workspace_manifest(_workspace_template_path(template))
+    provider = LocalWorkspaceProvider(workspace_root)
+    return LocalWorkspaceCatalogStore(provider, manifest, clock=clock)
+
+
 def build_local_workspace_data(
     *,
     workspace_root: str | pathlib.Path | None = None,
+    workspace_template: str | pathlib.Path | None = None,
     harness_runner: HarnessProcessRunner | None = None,
     harness_transport: HarnessApiTransport | None = None,
     harness_base_url: str = "http://127.0.0.1:8777",
@@ -397,7 +444,9 @@ def build_local_workspace_data(
     ``harness_transport`` builds the status client behind the portfolio and
     risk-decision seams; without one those surfaces fail closed with 503.
     Widget definitions and workspace-state documents persist under
-    ``workspace_root`` when one is supplied, else in memory.
+    ``workspace_root`` when one is supplied, else in memory.  When
+    ``workspace_root`` is supplied, workspaces themselves persist as literal
+    Git-backed directories under it; without one they live in memory.
     """
     resolved_clock = clock if clock is not None else _utc_now
     ids = id_factory if id_factory is not None else _counting_id_factory()
@@ -450,7 +499,14 @@ def build_local_workspace_data(
             if thread.state == ChatState.ACTIVE
         ]
 
+    workspace_store: WorkspaceStore = WorkspaceCatalogStore()
+    if workspace_root is not None:
+        workspace_store = _local_catalog_store(
+            pathlib.Path(workspace_root), workspace_template, resolved_clock
+        )
+
     workspaces = WorkspaceDataService(
+        store=workspace_store,
         clock=resolved_clock,
         id_factory=ids,
         count_providers={

@@ -47,7 +47,19 @@ from thesis.providers.transports import (  # noqa: E402
     openrouter_reply_provider,
 )
 
-WORKSPACE_ROOT = ".local/thesis-workspaces"
+
+def _workspace_root() -> str:
+    """Resolve the local workspace root; default to the OS local app data."""
+    override = os.environ.get("THESIS_WORKSPACE_ROOT")
+    if override and override.strip():
+        return override.strip()
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME")
+    if not base:
+        base = os.path.expanduser("~/.local/share")
+    return os.path.join(base, "FCA", "thesis-workspaces")
+
+
+WORKSPACE_ROOT = _workspace_root()
 HARNESS_BASE_URL = "http://127.0.0.1:8001"
 
 

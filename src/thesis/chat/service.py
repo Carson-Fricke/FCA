@@ -115,12 +115,14 @@ class InMemoryChatPersistence:
     def list(
         self, record_type: type[RecordT], workspace_id: str
     ) -> tuple[RecordT, ...]:
+        # Preserve insertion order: it is the stable tie-break callers rely on
+        # when several records share one clock tick.
         values = tuple(
             record
             for (stored_workspace, _), record in self._records[record_type].items()
             if stored_workspace == workspace_id
         )
-        return cast(tuple[RecordT, ...], tuple(sorted(values, key=_record_id)))
+        return cast(tuple[RecordT, ...], values)
 
     def delete(
         self, record_type: type[RecordT], workspace_id: str, record_id: str
@@ -460,13 +462,9 @@ class ChatService:
             for message in self._list(ChatMessage, workspace_id)
             if message.chat_id == chat_id
         ]
-        # Conversation order is chronological; the message id only breaks ties
-        # for records sharing one clock tick.
-        return tuple(
-            sorted(
-                messages, key=lambda message: (message.created_at, message.message_id)
-            )
-        )
+        # Conversation order is chronological; a stable sort keeps insertion
+        # order for records that share one clock tick.
+        return tuple(sorted(messages, key=lambda message: message.created_at))
 
     def list_attachments(
         self, workspace_id: str, chat_id: str

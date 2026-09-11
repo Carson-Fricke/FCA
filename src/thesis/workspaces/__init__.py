@@ -5,6 +5,11 @@ from thesis.workspaces.azure_contract import (
     azure_workspace_from_entity,
     azure_workspace_to_entity,
 )
+from thesis.workspaces.catalog import (
+    LocalWorkspaceCatalogStore,
+    manifest_for_summary,
+    summary_from_manifest,
+)
 from thesis.workspaces.local import (
     LocalWorkspace,
     LocalWorkspaceProvider,
@@ -32,6 +37,7 @@ from thesis.workspaces.manifest import (
 __all__ = [
     "AzureWorkspaceEntity",
     "LocalWorkspace",
+    "LocalWorkspaceCatalogStore",
     "LocalWorkspaceProvider",
     "PlatformBundleReference",
     "RepositoryIdentity",
@@ -51,5 +57,7 @@ __all__ = [
     "dump_workspace_manifest",
     "load_workspace_manifest",
     "manifest_sha256",
+    "manifest_for_summary",
+    "summary_from_manifest",
     "write_workspace_manifest",
 ]
