@@ -10,18 +10,28 @@
 //! fixture generator, the replay merge order, and the domain-separated replay
 //! fingerprint framing all match the Python `harness.data.replay` reference.
 //!
-//! The full `backtest.json` artifact is not yet byte-identical: the staged Rust
-//! engine does not execute the configured `IntradayMomentumStrategy`, apply the
-//! risk pipeline or fee schedule, or account the portfolio, so `counts`,
-//! `dispatch_hash`, `fills`, `fees`, `portfolio`, and `risk` diverge. The
-//! provenance fields `manifest.code_fingerprint` (Python source vs Rust source)
-//! and `manifest.configuration_hash` (full pydantic model vs the reduced Rust
-//! field set) also differ by construction.
+//! The full `backtest.json` artifact now runs on the native Rust engine core
+//! (clock, event bus, replay, venue, fees, portfolio, risk) driving the real
+//! Python `IntradayMomentumStrategy` through the harness-host PyO3 adapter.
+//! Parity is byte-for-byte across every data-bearing artifact — `counts`,
+//! `dispatch_hash`, `fills`, `fees`, `portfolio`, `risk`, and the manifest's
+//! `configuration_hash` / `fill_model_fingerprint` / `fee_fingerprint` /
+//! `risk_pipeline_fingerprint`.
+//!
+//! Two provenance differences are expected and excluded by the agreed parity
+//! definition:
+//!
+//! * `manifest.code_fingerprint` hashes the engine's own source. Python hashes
+//!   the Python engine modules (`57215b5e…`); Rust hashes the Rust engine
+//!   modules. The two differ by construction, so the comparison masks the 64
+//!   hex digits of that one field in both payloads.
+//! * The golden in this checkout carries CRLF line endings while the writer
+//!   emits LF; both payloads are newline-normalized before comparison.
 
 use std::path::PathBuf;
 
 use harness_backtest::backtest::fixture::{synthetic_fixture, SyntheticDataOptions};
-use harness_backtest::backtest::job::{load_backtest_config, run_backtest_job};
+use harness_backtest::backtest::job::load_backtest_config;
 use harness_backtest::backtest::preflight::preflight_data;
 use harness_backtest::sha256::digest_hex;
 
@@ -82,6 +92,25 @@ fn first_difference(expected: &[u8], actual: &[u8]) -> Option<String> {
     ))
 }
 
+/// Mask the 64 hex digits of `manifest.code_fingerprint` and normalize newlines.
+fn mask_code_fingerprint(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes).replace("\r\n", "\n");
+    let trimmed = text.trim_end_matches('\n');
+    let marker = "\"code_fingerprint\":\"";
+    if let Some(start) = trimmed.find(marker) {
+        let value_start = start + marker.len();
+        let mut out = trimmed.as_bytes().to_vec();
+        if value_start + 64 <= out.len() {
+            for byte in &mut out[value_start..value_start + 64] {
+                *byte = b'x';
+            }
+        }
+        out
+    } else {
+        trimmed.as_bytes().to_vec()
+    }
+}
+
 /// The canonical preflight evidence is byte-identical to the Python reference.
 #[test]
 fn canonical_preflight_is_byte_identical_to_python() {
@@ -98,22 +127,34 @@ fn canonical_preflight_is_byte_identical_to_python() {
     );
 }
 
-/// The full canonical `backtest.json` would be byte-identical to the Python
-/// reference. It is ignored because the staged Rust engine does not yet execute
-/// the configured strategy, risk pipeline, fees, or portfolio accounting; run
-/// it explicitly to print the exact remaining divergence.
+/// The native engine artifact is byte-identical to the Python reference under
+/// the agreed parity definition.
 #[test]
-#[ignore = "full backtest.json parity is blocked by un-ported strategy/risk/fee/portfolio execution and engine-specific provenance"]
-fn canonical_artifact_is_byte_identical_to_python() {
+fn canonical_artifact_matches_python_except_code_fingerprint() {
     let directory = temp_dir("artifact");
-    let summary =
-        run_backtest_job(&canonical_config_path(), Some(&directory)).expect("job summary");
-    let actual = std::fs::read(summary.artifact_path).expect("read artifact");
+    let (outcome, artifact_path) =
+        harness_host::backtest::run_backtest_job(&canonical_config_path(), Some(&directory))
+            .expect("native job");
+    assert!(outcome.completed());
+    assert_eq!(outcome.dispatched_count, 330);
+    assert_eq!(outcome.order_count, 26);
+    assert_eq!(outcome.fills.len(), 26);
+    assert_eq!(outcome.risk_decisions.len(), 26);
+    // The Rust engine reports its own stable code fingerprint; it differs from
+    // the Python reference by construction.
+    assert_eq!(
+        outcome.manifest.code_fingerprint,
+        harness_backtest::backtest::manifest::code_fingerprint()
+    );
+
+    let actual = std::fs::read(&artifact_path).expect("read artifact");
     let expected = golden("backtest_canonical.json");
-    let report = first_difference(&expected, &actual);
+    let masked_expected = mask_code_fingerprint(&expected);
+    let masked_actual = mask_code_fingerprint(&actual);
+    let report = first_difference(&masked_expected, &masked_actual);
     assert!(
         report.is_none(),
-        "artifact diverged from the Python golden:\n{}",
+        "artifact diverged from the Python golden beyond code_fingerprint:\n{}",
         report.unwrap_or_default()
     );
     let _ = std::fs::remove_dir_all(&directory);

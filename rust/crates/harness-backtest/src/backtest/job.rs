@@ -245,10 +245,8 @@ pub fn parse_timestamp_ns(value: &str) -> Option<i64> {
 }
 
 /// The default synthetic run window: 2024-01-01 to 2024-01-03 UTC.
-#[allow(dead_code)]
-const DEFAULT_START_NS: i64 = 19_723 * ONE_DAY_NS;
-#[allow(dead_code)]
-const DEFAULT_END_NS: i64 = 19_725 * ONE_DAY_NS;
+pub(crate) const DEFAULT_START_NS: i64 = 19_723 * ONE_DAY_NS;
+pub(crate) const DEFAULT_END_NS: i64 = 19_725 * ONE_DAY_NS;
 
 /// Run one backtest job using the built-in deterministic strategy seam.
 ///
@@ -285,6 +283,10 @@ pub fn run_backtest_job(
 pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, BacktestJobError> {
     let text = std::fs::read_to_string(config_path)
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
+    if shell != "backtest" {
+        return Err(BacktestJobError::WrongShell(shell));
+    }
     BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
 }
 

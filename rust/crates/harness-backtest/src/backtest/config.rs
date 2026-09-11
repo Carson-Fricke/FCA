@@ -288,8 +288,8 @@ impl BacktestConfig {
             ("schema_version", JsonValue::UInt(self.schema_version)),
             ("shell", JsonValue::String(self.shell.clone())),
             ("run_id", JsonValue::String(self.run_id.clone())),
-            ("start", JsonValue::object([("$datetime", JsonValue::string(&utc_timestamp(self.start_ns, true)))])),
-            ("end", JsonValue::object([("$datetime", JsonValue::string(&utc_timestamp(self.end_ns, true)))])),
+            ("start", JsonValue::object([("$datetime", JsonValue::string(utc_timestamp(self.start_ns, true)))])),
+            ("end", JsonValue::object([("$datetime", JsonValue::string(utc_timestamp(self.end_ns, true)))])),
             ("clock", JsonValue::String(self.clock.clone())),
             (
                 "event_ordering",
@@ -429,8 +429,10 @@ impl BacktestConfig {
             )));
         }
         let run_id = string_field(root, "run_id")?;
-        let start_ns = datetime_field(root, "start")?;
-        let end_ns = datetime_field(root, "end")?;
+        let start_ns = datetime_field(root, "start")
+            .unwrap_or(crate::backtest::job::DEFAULT_START_NS);
+        let end_ns = datetime_field(root, "end")
+            .unwrap_or(crate::backtest::job::DEFAULT_END_NS);
         let seed = int_field(root, "seed").unwrap_or(0);
         if seed < 0 {
             return Err(BacktestError::Configuration(
@@ -551,7 +553,7 @@ fn deployment_json(deployment: &DeploymentConfig) -> JsonValue {
 
 /// One `{"$decimal": <fixed>}` wrapper, matching `_decimal_text`.
 fn decimal_json(value: PyDecimal) -> JsonValue {
-    JsonValue::object([("$decimal", JsonValue::string(&normalized_fixed(value)))])
+    JsonValue::object([("$decimal", JsonValue::string(normalized_fixed(value)))])
 }
 
 /// Python `format(value.normalize(), "f")`.
@@ -829,11 +831,9 @@ fn decimal_field(
 fn datetime_field(
     mapping: &BTreeMap<String, YamlValue>,
     key: &str,
-) -> Result<i64, BacktestError> {
-    let text = string_field(mapping, key)?;
-    crate::backtest::job::parse_timestamp_ns(&text).ok_or_else(|| {
-        BacktestError::Configuration(format!("field {key:?} must be an ISO-8601 datetime"))
-    })
+) -> Option<i64> {
+    let text = mapping.get(key).and_then(YamlValue::as_str)?;
+    crate::backtest::job::parse_timestamp_ns(text)
 }
 
 #[cfg(test)]

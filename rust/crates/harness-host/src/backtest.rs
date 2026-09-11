@@ -102,6 +102,9 @@ impl PyEngineContext {
     }
 }
 
+/// The four PyO3 handles a started strategy runtime owns.
+type BuiltRuntime = (Py<PyAny>, Py<PyEngineContext>, Py<PyClock>, Py<PyOrders>);
+
 /// A Python strategy driven through the native engine plugin seam.
 pub struct PyStrategyRuntime {
     module: String,
@@ -157,7 +160,7 @@ impl PyStrategyRuntime {
         let symbols = start.symbols.clone();
         let now_ns = start.start_ns;
 
-        let built: Result<(Py<PyAny>, Py<PyEngineContext>, Py<PyClock>, Py<PyOrders>), HostError> =
+        let built: Result<BuiltRuntime, HostError> =
             Python::attach(|py| {
                 install_search_paths(py, &search_paths)?;
                 install_harness_data_shim(py)?;

@@ -254,7 +254,7 @@ impl VirtualBook {
         };
         let next_quantity = quantity.checked_add(signed_quantity).unwrap_or(quantity);
 
-        if quantity.is_zero() || quantity.checked_mul(signed_quantity).map_or(false, |v| v.is_positive())
+        if quantity.is_zero() || quantity.checked_mul(signed_quantity).is_ok_and(|v| v.is_positive())
         {
             let addition = signed_quantity
                 .checked_mul(fill.price)
