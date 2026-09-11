@@ -29,9 +29,9 @@ def test_unported_entrypoints_are_never_flipped(
 ) -> None:
     monkeypatch.setenv(rust_entrypoints.RUST_ENTRYPOINTS_FLAG, "1")
     monkeypatch.setenv(rust_entrypoints.RUST_BINARY_DIR_VARIABLE, str(tmp_path))
-    (tmp_path / "backtest-job").write_text("", encoding="utf-8")
-    assert rust_entrypoints.exec_rust_entrypoint("backtest-job", []) is None
-    assert "backtest-job" not in rust_entrypoints.PORTED_ENTRYPOINTS
+    (tmp_path / "trader").write_text("", encoding="utf-8")
+    assert rust_entrypoints.exec_rust_entrypoint("trader", []) is None
+    assert "trader" not in rust_entrypoints.PORTED_ENTRYPOINTS
 
 
 def test_missing_binary_falls_back_to_python(
@@ -110,11 +110,27 @@ def test_api_main_falls_back_when_the_port_is_disabled(
 
 def test_deferred_entrypoints_stay_on_python() -> None:
     """The engine entrypoints are wired but gated until parity is proven."""
-    assert rust_entrypoints.PORTED_ENTRYPOINTS == frozenset({"api", "mcp"})
-    assert set(rust_entrypoints.DEFERRED_ENTRYPOINTS) == {"backtest-job", "trader"}
-    for name in ("harness", "backtest-job", "trader"):
+    assert rust_entrypoints.PORTED_ENTRYPOINTS == frozenset(
+        {"api", "mcp", "backtest-job"}
+    )
+    assert set(rust_entrypoints.DEFERRED_ENTRYPOINTS) == {"trader"}
+    for name in ("harness", "trader"):
         assert not rust_entrypoints.rust_entrypoint_available(name)
         assert rust_entrypoints.exec_rust_entrypoint(name, []) is None
+
+
+def test_backtest_job_data_dir_stays_on_python() -> None:
+    """The local-lake fixture is not wired into the native engine yet."""
+    assert rust_entrypoints.rust_entrypoint_supports(
+        "backtest-job", ["--config", "bt.yaml"]
+    )
+    assert not rust_entrypoints.rust_entrypoint_supports(
+        "backtest-job", ["--config", "bt.yaml", "--data-dir", "lake"]
+    )
+    assert not rust_entrypoints.rust_entrypoint_supports(
+        "backtest-job", ["--data-dir=lake"]
+    )
+    assert rust_entrypoints.rust_entrypoint_supports("api", ["--config", "api.yaml"])
 
 
 def test_facade_group_finds_the_first_positional_token() -> None:
@@ -168,26 +184,30 @@ def test_facade_dispatches_only_ported_groups(
 
     assert rust_entrypoints.exec_rust_facade(["api", "--config", "api.yaml"]) == 5
     assert rust_entrypoints.exec_rust_facade(["mcp"]) == 5
+    assert rust_entrypoints.exec_rust_facade(["backtest-job", "--config", "bt.yaml"]) == 5
     assert calls == [
         ["harness", "api", "--config", "api.yaml"],
         ["harness", "mcp"],
+        ["harness", "backtest-job", "--config", "bt.yaml"],
     ]
 
 
-def test_facade_keeps_unported_groups_on_python(
+def test_facade_keeps_unsupported_groups_on_python(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(rust_entrypoints.RUST_ENTRYPOINTS_FLAG, "1")
 
     def fail(name: str, argv: Sequence[str]) -> int:
-        raise AssertionError("an unported facade group must not exec")
+        raise AssertionError("an unsupported facade group must not exec")
 
     monkeypatch.setattr(rust_entrypoints, "_exec", fail)
 
     assert rust_entrypoints.exec_rust_facade([]) is None
     assert rust_entrypoints.exec_rust_facade(["--help"]) is None
-    assert rust_entrypoints.exec_rust_facade(["backtest-job"]) is None
     assert rust_entrypoints.exec_rust_facade(["trader", "--config", "t.yaml"]) is None
+    assert (
+        rust_entrypoints.exec_rust_facade(["backtest-job", "--data-dir", "lake"]) is None
+    )
 
 
 def test_facade_falls_back_when_the_flip_is_disabled(

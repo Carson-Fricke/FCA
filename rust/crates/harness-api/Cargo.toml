@@ -29,6 +29,8 @@ path = "src/bin/mcp.rs"
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
+harness-backtest = { path = "../harness-backtest" }
+harness-host = { path = "../harness-host" }
 harness-mcp = { path = "../harness-mcp" }
 hex = "0.4"
 percent-encoding = "2"

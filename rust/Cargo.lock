@@ -1006,6 +1006,8 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "harness-backtest",
+ "harness-host",
  "harness-mcp",
  "hex",
  "http-body-util",

@@ -8,11 +8,11 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use harness_api::{emit, http, mcp_cli, run, CommandResult, HarnessCli, UnportedBacktestJobRunner};
+use harness_api::{emit, http, mcp_cli, run, CommandResult, HarnessCli, NativeBacktestJobRunner};
 
 fn main() -> ExitCode {
     let cli = HarnessCli::parse();
-    match run(cli, &UnportedBacktestJobRunner) {
+    match run(cli, &NativeBacktestJobRunner) {
         CommandResult::ServeApi(args) => http::cli::serve_api_blocking(&args),
         CommandResult::ServeMcp(args) => mcp_cli::serve_mcp_blocking(&args),
         other => emit(other),

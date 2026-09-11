@@ -18,10 +18,12 @@
 //!   implementations; `trader` is recognized so the facade help is identical,
 //!   but its execution body arrives with its own port task and until then it
 //!   reports that the Rust port is not yet available and exits `2`.
-//! * The Rust engine is not yet wired to the command, so `backtest-job` drives
-//!   an injected [`BacktestJobRunner`] seam. [`UnportedBacktestJobRunner`] is
-//!   the default and reports the missing engine; the ported engine plugs in
-//!   here without touching the parsed command surface.
+//! * The `backtest-job` command is served by the native Rust engine through
+//!   [`NativeBacktestJobRunner`], which drives the configured Python strategies
+//!   via the `harness-host` PyO3 adapter. [`BacktestJobRunner`] remains the
+//!   seam so the command surface is stable and test doubles are possible;
+//!   [`UnportedBacktestJobRunner`] is retained for the unported `--data-dir`
+//!   fixture path.
 
 use std::fmt;
 use std::fs;
@@ -32,6 +34,9 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 
 pub mod http;
 pub mod mcp_cli;
+pub mod native;
+
+pub use native::NativeBacktestJobRunner;
 
 /// Root help/`about` text for the `harness` facade.
 ///

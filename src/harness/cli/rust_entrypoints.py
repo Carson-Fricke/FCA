@@ -1,10 +1,11 @@
 """Environment-gated flip of harness entrypoints onto Rust binaries.
 
-The Rust migration ports the interfaces in waves. The ``api`` and ``mcp``
-processes are complete on the Rust stack, while ``backtest-job`` and ``trader``
-still drive the Python engine and their Rust engine paths are not yet
-parity-proven. This module is the single switch that lets an operator run the
-ported entrypoints from Rust without changing the Python console scripts.
+The Rust migration ports the interfaces in waves. The ``api``, ``mcp``, and
+``backtest-job`` processes are complete on the Rust stack. ``trader`` still
+drives the Python supervisor: its Rust binary is a deterministic core demo, not
+the configured paper/shadow supervision runner, so it is not yet parity-proven
+and stays on Python. This module is the single switch that lets an operator run
+the ported entrypoints from Rust without changing the Python console scripts.
 
 Enable the flip with ``HARNESS_USE_RUST_ENTRYPOINTS=1`` (or ``true``/``yes``/
 ``on``). Binary discovery order:
@@ -16,15 +17,17 @@ Enable the flip with ``HARNESS_USE_RUST_ENTRYPOINTS=1`` (or ``true``/``yes``/
 The flip is scoped to entrypoints whose Rust implementation is verified
 complete:
 
-* ``api`` and ``mcp`` are flipped outright.
+* ``api``, ``mcp``, and ``backtest-job`` are flipped outright.
 * The ``harness`` facade is flipped for its complete process groups only
-  (:data:`PORTED_FACADE_GROUPS`): ``harness api`` and ``harness mcp`` exec the
-  Rust ``harness`` binary, while ``harness backtest-job`` and ``harness trader``
-  stay on the Python engine.
+  (:data:`PORTED_FACADE_GROUPS`): ``harness api``, ``harness mcp``, and
+  ``harness backtest-job`` exec the Rust ``harness`` binary, while
+  ``harness trader`` stays on the Python runtime.
 
-``backtest-job`` and ``trader`` are wired to the same switch but are absent from
-:data:`PORTED_ENTRYPOINTS` and :data:`DEFERRED_ENTRYPOINTS` records why, so the
-Python implementation remains authoritative until the decommission gate opens.
+``backtest-job --data-dir`` is not yet supported by the Rust engine, so that
+invocation stays on Python (:func:`rust_entrypoint_supports`). ``trader`` is
+wired to the same switch but is absent from :data:`PORTED_ENTRYPOINTS`, and
+:data:`DEFERRED_ENTRYPOINTS` records why, so the Python implementation remains
+authoritative until the decommission gate opens.
 
 When the flag is disabled, the entrypoint is unported, or no binary is found,
 :func:`exec_rust_entrypoint` and :func:`exec_rust_facade` return ``None`` so the
@@ -47,22 +50,26 @@ RUST_ENTRYPOINTS_FLAG = "HARNESS_USE_RUST_ENTRYPOINTS"
 RUST_BINARY_DIR_VARIABLE = "HARNESS_RUST_BINARY_DIR"
 
 #: Entrypoints whose Rust implementations are complete and parity-verified.
-PORTED_ENTRYPOINTS = frozenset({"api", "mcp"})
+PORTED_ENTRYPOINTS = frozenset({"api", "mcp", "backtest-job"})
 
 #: The facade binary that serves the ported process groups.
 FACADE_ENTRYPOINT = "harness"
 
 #: Facade process groups that are complete on the Rust stack. The facade
 #: dispatches only these groups so unported groups keep the Python engine.
-PORTED_FACADE_GROUPS = frozenset({"api", "mcp"})
+PORTED_FACADE_GROUPS = frozenset({"api", "mcp", "backtest-job"})
 
 #: Entrypoints whose Rust command surface exists but whose engine path is not
 #: yet parity-proven. They stay on the Python engine; the reason is recorded so
 #: the decommission gate stays explicit.
 DEFERRED_ENTRYPOINTS = {
-    "backtest-job": "Rust backtest engine is not wired or parity-proven",
     "trader": "Rust live trader supervision runner is not ported",
 }
+
+#: Entrypoints whose Rust engine supports only a subset of the CLI flags.
+#: ``backtest-job --data-dir`` reads a local Parquet lake, which the native
+#: engine does not yet wire, so that invocation stays on Python.
+_DATA_DIR_ENTRYPOINTS = frozenset({"backtest-job"})
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -71,6 +78,23 @@ def rust_entrypoints_enabled() -> bool:
     """Return whether the Rust entrypoint flip is enabled."""
     value = os.environ.get(RUST_ENTRYPOINTS_FLAG, "")
     return value.strip().lower() in _TRUTHY
+
+
+def _requests_data_dir(argv: Sequence[str]) -> bool:
+    """Return whether the invocation selects the local-lake ``--data-dir``."""
+    return any(token == "--data-dir" or token.startswith("--data-dir=") for token in argv)
+
+
+def rust_entrypoint_supports(name: str, argv: Sequence[str]) -> bool:
+    """Return whether the Rust binary supports this invocation of ``name``.
+
+    All ported entrypoints support their full flag surface except
+    ``backtest-job --data-dir``, which the native engine does not yet read.
+    """
+    if name in _DATA_DIR_ENTRYPOINTS and _requests_data_dir(argv):
+        return False
+    return True
+
 
 
 def _candidate_dirs() -> tuple[Path, ...]:
@@ -138,9 +162,12 @@ def exec_rust_entrypoint(name: str, argv: Sequence[str]) -> int | None:
     """Exec the Rust binary for ``name`` when the flip is active.
 
     Returns the process exit code, or ``None`` when the caller should run the
-    Python implementation instead. Only :data:`PORTED_ENTRYPOINTS` ever flip.
+    Python implementation instead. Only :data:`PORTED_ENTRYPOINTS` ever flip,
+    and only when the Rust engine supports the invocation.
     """
     if name not in PORTED_ENTRYPOINTS or not rust_entrypoints_enabled():
+        return None
+    if not rust_entrypoint_supports(name, argv):
         return None
     return _exec(name, argv)
 
@@ -149,12 +176,16 @@ def exec_rust_facade(argv: Sequence[str]) -> int | None:
     """Exec the Rust ``harness`` binary for a ported facade group.
 
     Returns ``None`` when the flip is disabled, the invocation selects no
-    ported group (for example bare ``harness`` or ``harness --help``), or the
-    Rust binary is unavailable, so the caller runs the Python facade.
+    ported group (for example bare ``harness`` or ``harness --help``), the Rust
+    engine does not support the invocation, or the Rust binary is unavailable,
+    so the caller runs the Python facade.
     """
     if not rust_entrypoints_enabled():
         return None
-    if facade_group(argv) not in PORTED_FACADE_GROUPS:
+    group = facade_group(argv)
+    if group not in PORTED_FACADE_GROUPS:
+        return None
+    if not rust_entrypoint_supports(group, argv):
         return None
     return _exec(FACADE_ENTRYPOINT, argv)
 
@@ -172,5 +203,6 @@ __all__ = [
     "resolved_argv",
     "rust_binary",
     "rust_entrypoint_available",
+    "rust_entrypoint_supports",
     "rust_entrypoints_enabled",
 ]

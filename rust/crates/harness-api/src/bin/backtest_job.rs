@@ -6,9 +6,9 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use harness_api::{emit, run_backtest_job, BacktestJobCli, UnportedBacktestJobRunner};
+use harness_api::{emit, run_backtest_job, BacktestJobCli, NativeBacktestJobRunner};
 
 fn main() -> ExitCode {
     let cli = BacktestJobCli::parse();
-    emit(run_backtest_job(cli, &UnportedBacktestJobRunner))
+    emit(run_backtest_job(cli, &NativeBacktestJobRunner))
 }
