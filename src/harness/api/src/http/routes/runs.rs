@@ -11,7 +11,7 @@ use serde_json::json;
 
 use crate::http::models::{ApiError, ArtifactListResponse, ArtifactSummary, RunListResponse};
 use crate::http::state::AppState;
-use crate::http::store::{run_prefix, RunCatalogRecord, RunStatus};
+use crate::http::store::{artifact_digest, run_prefix, RunCatalogRecord, RunStatus};
 
 const IDENTIFIER_MAX: usize = 128;
 const ARTIFACT_NAME_MAX: usize = 512;
@@ -109,8 +109,9 @@ async fn list_artifacts(
                 .map(|issuer| issuer.issue(&object_path));
             ArtifactSummary {
                 name: name.clone(),
-                size: payload.len() as u64,
-                object_path,
+                uri: object_path,
+                sha256: artifact_digest(payload),
+                size_bytes: payload.len() as u64,
                 sas_url,
             }
         })

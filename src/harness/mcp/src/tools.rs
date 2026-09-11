@@ -14,7 +14,7 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::{json, Map, Value};
 
 use crate::auth::{BearerTokenSource, BEARER_TOKEN_VARIABLE};
-use crate::store::{run_prefix, JobRepository, RunStore};
+use crate::store::{artifact_digest, run_prefix, JobRepository, RunStore};
 
 /// Tool name for the backtest runner.
 pub const TOOL_RUN_BACKTEST: &str = "run_backtest";
@@ -666,10 +666,12 @@ impl HarnessTools {
             .artifacts
             .iter()
             .map(|(name, payload)| {
+                let uri = format!("{prefix}/{name}");
                 json!({
                     "name": name,
-                    "size": payload.len() as u64,
-                    "object_path": format!("{prefix}/{name}"),
+                    "uri": uri,
+                    "sha256": artifact_digest(payload),
+                    "sizeBytes": payload.len() as u64,
                     "sas_url": Value::Null,
                 })
             })
@@ -948,8 +950,8 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
         let list_handler = tools.clone();
         candidates.push(Tool::new(
             TOOL_LIST_ARTIFACTS,
-            "List one stored run's artifact summaries {name, size, object_path, sas_url} \
-             from the remote harness API.",
+            "List one stored run's artifact manifest entries \
+             {name, uri, sha256, sizeBytes} from the remote harness API.",
             json!({
                 "type": "object",
                 "additionalProperties": false,

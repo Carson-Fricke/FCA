@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use mcp::auth::EnvironmentBearerTokenSource;
 use mcp::store::{
-    InMemoryJobRepository, InMemoryRunStore, JobRecord, JobRepository, JobState, RunCatalogRecord,
-    RunStatus, RunStore,
+    artifact_digest, InMemoryJobRepository, InMemoryRunStore, JobRecord, JobRepository, JobState,
+    RunCatalogRecord, RunStatus, RunStore,
 };
 use mcp::tools::{
     BacktestSubmitter, Boundary, HarnessToolsContext, ProcessOutcome, ProcessRunner,
@@ -106,14 +106,12 @@ fn local_mode_queries_the_durable_store() {
     assert_eq!(run["result"]["structuredContent"]["status"], "complete");
 
     let artifacts = call(&server, TOOL_LIST_ARTIFACTS, json!({"run_id": "run-1"}));
-    assert_eq!(
-        artifacts["result"]["structuredContent"]["artifacts"][0]["name"],
-        "backtest.json"
-    );
-    assert_eq!(
-        artifacts["result"]["structuredContent"]["artifacts"][0]["object_path"],
-        "backtests/run-1/backtest.json"
-    );
+    let entry = &artifacts["result"]["structuredContent"]["artifacts"][0];
+    assert_eq!(entry["name"], "backtest.json");
+    assert_eq!(entry["uri"], "backtests/run-1/backtest.json");
+    assert_eq!(entry["sizeBytes"], 2);
+    assert_eq!(entry["sha256"], artifact_digest(b"{}"));
+    assert_eq!(entry["sas_url"], Value::Null);
 }
 
 #[test]

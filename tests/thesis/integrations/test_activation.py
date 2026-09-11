@@ -371,7 +371,7 @@ def test_manifests_map_the_published_run_row() -> None:
     )
 
 
-def test_artifacts_map_the_published_artifact_summaries() -> None:
+def test_artifacts_map_the_published_artifact_manifest() -> None:
     transport = FakeTransport(
         {
             "/v1/backtests/runs/run-17/artifacts": HarnessApiResponse(
@@ -381,14 +381,16 @@ def test_artifacts_map_the_published_artifact_summaries() -> None:
                     "artifacts": [
                         {
                             "name": "backtest.json",
-                            "size": 512,
-                            "object_path": "backtests/run-17/backtest.json",
+                            "uri": "backtests/run-17/backtest.json",
+                            "sha256": "a" * 64,
+                            "sizeBytes": 512,
                             "sas_url": "https://sas.test/read/run-17",
                         },
                         {
                             "name": "events.parquet",
-                            "size": 2048,
-                            "object_path": "backtests/run-17/events.parquet",
+                            "uri": "backtests/run-17/events.parquet",
+                            "sha256": "b" * 64,
+                            "sizeBytes": 2048,
                             "sas_url": None,
                         },
                     ],
@@ -404,11 +406,18 @@ def test_artifacts_map_the_published_artifact_summaries() -> None:
     assert surface.value == (
         ArtifactEntry(
             "backtest.json",
-            512,
             "backtests/run-17/backtest.json",
+            "a" * 64,
+            512,
             "https://sas.test/read/run-17",
         ),
-        ArtifactEntry("events.parquet", 2048, "backtests/run-17/events.parquet", None),
+        ArtifactEntry(
+            "events.parquet",
+            "backtests/run-17/events.parquet",
+            "b" * 64,
+            2048,
+            None,
+        ),
     )
 
 
@@ -545,7 +554,9 @@ def _inert_instances() -> dict[type[Any], object]:
             "run-17", "succeeded", "2026-09-08T15:04:05Z", "2026-09-08T15:06:09Z"
         ),
         ManifestSummary: ManifestSummary("run-17", "complete", "spy-momentum"),
-        ArtifactEntry: ArtifactEntry("backtest.json", 512, "backtests/run-17"),
+        ArtifactEntry: ArtifactEntry(
+            "backtest.json", "backtests/run-17", "a" * 64, 512
+        ),
         PositionRecord: PositionRecord("SPY", "100"),
         BookRecord: BookRecord("strategy-book", "95000.00", "101250.00", ()),
         PortfolioSummary: PortfolioSummary((), "100000.00", "101250.00"),

@@ -31,6 +31,13 @@ _HARNESS_CAPABILITIES = (
     "result_artifacts",
 )
 
+# Canonical harness HTTP routes.  The launch route decodes a backtest
+# configuration document, jobs expose lifecycle state, and runs/artifacts
+# expose the manifest, metrics, and artifact references.
+_HEALTH_ROUTE = "healthz"
+_BACKTEST_JOB_ROUTE = "v1/backtests/jobs"
+_BACKTEST_RUN_ROUTE = "v1/backtests/runs"
+
 
 class HarnessError(RuntimeError):
     """Base error for an invalid or unavailable harness operation."""
@@ -331,9 +338,16 @@ class HarnessApiAdapter:
         self._http.close()
 
     def capabilities(self) -> CapabilityReport:
-        """Return declared capabilities, translating absent services to unavailable."""
+        """Declare the capabilities a healthy canonical harness service publishes.
+
+        The canonical harness API exposes public liveness at ``healthz`` and
+        serves the launch, job, run, and artifact routes those capabilities
+        name.  A service that is absent, unauthenticated, or unpublished maps
+        to an explicit fail-closed report instead of a fabricated capability
+        set.
+        """
         try:
-            response = self._http.get("v1/capabilities")
+            response = self._http.get(_HEALTH_ROUTE)
         except httpx.HTTPError:
             return unavailable_report(
                 _HARNESS_CAPABILITIES, reason="transport_unavailable"
@@ -344,28 +358,47 @@ class HarnessApiAdapter:
             return unavailable_report(_HARNESS_CAPABILITIES, reason="not_implemented")
         if response.is_error:
             raise _api_error(response)
-        try:
-            return _capability_report(_response_object(response))
-        except (ValueError, TypeError, json.JSONDecodeError) as error:
-            raise HarnessProtocolError(
-                "harness capabilities response is invalid"
-            ) from error
+        return _available_report()
 
     def launch_backtest(self, request: BacktestRequest) -> HarnessBacktestResult:
-        """Launch a published backtest request over HTTP."""
+        """Launch one backtest as a canonical ``POST /v1/backtests/jobs`` job."""
         report = self.capabilities()
         if not report.status("backtest").available:
             raise HarnessCapabilityUnavailable("backtest", report)
-        response = self._http.post("v1/backtests", json=request.to_payload())
+        response = self._http.post(_BACKTEST_JOB_ROUTE, json=_launch_document(request))
         return _api_result(response, "backtest", fallback=report)
 
     def query_backtest(self, job_id: str) -> HarnessBacktestResult:
-        """Retrieve a published backtest result over HTTP."""
+        """Retrieve one canonical job and enrich it from its run and artifacts."""
         report = self.capabilities()
         if not report.status("result_query").available:
             raise HarnessCapabilityUnavailable("result_query", report)
-        response = self._http.get(f"v1/backtests/{_job_id(job_id)}")
-        return _api_result(response, "result_query", fallback=report)
+        identifier = _job_id(job_id)
+        response = self._http.get(f"{_BACKTEST_JOB_ROUTE}/{identifier}")
+        job = _api_result(response, "result_query", fallback=report)
+        run = self._optional_object(f"{_BACKTEST_RUN_ROUTE}/{identifier}")
+        artifacts = self._optional_object(
+            f"{_BACKTEST_RUN_ROUTE}/{identifier}/artifacts"
+        )
+        manifest, metrics, result_artifacts = _result_documents(run, artifacts)
+        return HarnessBacktestResult(
+            job_id=job.job_id,
+            state=job.state,
+            manifest=manifest,
+            metrics=metrics,
+            result_artifacts=result_artifacts,
+            capability_status=report,
+            raw=job.raw,
+        )
+
+    def _optional_object(self, route: str) -> dict[str, object] | None:
+        """Fetch one companion document, or ``None`` when it is unpublished."""
+        response = self._http.get(route)
+        if response.status_code in {404, 501}:
+            return None
+        if response.is_error:
+            raise _api_error(response)
+        return _response_object(response)
 
 
 class LocalHarnessApiAdapter(HarnessApiAdapter):
@@ -485,6 +518,46 @@ def _backtest_result(
         capability_status=report,
         raw=dict(body),
     )
+
+
+def _available_report() -> CapabilityReport:
+    """Declare the fixed capability set served by a healthy canonical harness."""
+    return CapabilityReport.from_statuses(
+        CapabilityStatus(capability, True, "available")
+        for capability in _HARNESS_CAPABILITIES
+    )
+
+
+def _launch_document(request: BacktestRequest) -> dict[str, object]:
+    """Render the canonical backtest configuration document for the launch route.
+
+    The harness launch route decodes a ``shell: backtest`` configuration
+    document, not a client envelope, so the submitted ``configuration`` is
+    forwarded as-is with the request's ``run_id`` applied.
+    """
+    configuration = request.configuration
+    if not isinstance(configuration, Mapping):
+        raise HarnessProtocolError("backtest configuration must be a JSON object")
+    document = {str(key): _json_value(value) for key, value in configuration.items()}
+    document["run_id"] = request.run_id
+    return document
+
+
+def _result_documents(
+    run: Mapping[str, object] | None,
+    artifacts: Mapping[str, object] | None,
+) -> tuple[object | None, object | None, object | None]:
+    """Assemble manifest, metrics, and artifact references from canonical rows."""
+    metrics = run.get("metrics") if isinstance(run, Mapping) else None
+    entries: object | None = None
+    if isinstance(artifacts, Mapping) and isinstance(artifacts.get("artifacts"), list):
+        entries = artifacts["artifacts"]
+    manifest: object | None = None
+    if isinstance(run, Mapping) and isinstance(entries, list):
+        run_id = run.get("run_id")
+        if isinstance(run_id, str) and run_id.strip():
+            manifest = {"manifestId": run_id.strip(), "artifacts": entries}
+    return manifest, metrics, entries
 
 
 def _capability_report(body: Mapping[str, object] | list[object]) -> CapabilityReport:

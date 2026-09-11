@@ -94,11 +94,12 @@ class ManifestSummary:
 
 @dataclass(frozen=True, slots=True)
 class ArtifactEntry:
-    """One stored run artifact with optional read-only SAS access."""
+    """One stored run artifact in the harness reproducibility-manifest shape."""
 
     name: str
-    size: int
-    object_path: str
+    uri: str
+    sha256: str
+    size_bytes: int
     sas_url: str | None = None
 
 
@@ -339,8 +340,9 @@ def _artifact_entries(
     return tuple(
         ArtifactEntry(
             name=_required_text(entry, "name"),
-            size=_required_int(entry, "size"),
-            object_path=_required_text(entry, "object_path"),
+            uri=_required_text(entry, "uri"),
+            sha256=_required_text(entry, "sha256"),
+            size_bytes=_required_int(entry, "sizeBytes"),
             sas_url=_optional_text(entry, "sas_url"),
         )
         for entry in _entries(body, "artifacts")
