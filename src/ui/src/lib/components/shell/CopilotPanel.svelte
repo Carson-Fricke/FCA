@@ -2,21 +2,36 @@
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
 	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
-	import { conversationTitleFrom, createChat, deleteChat, listChats, listMessages, postMessage } from '$lib/api';
+	import StreamingReply from '$lib/components/chat/StreamingReply.svelte';
+	import {
+		conversationTitleFrom,
+		createChat,
+		deleteChat,
+		listChats,
+		listMessages,
+		postMessage
+	} from '$lib/api';
+	import { ChatStreamController, appendMessage } from '$lib/chat-stream.svelte';
 	import type { ChatMessage, ChatThread, SteeringPercolationTarget } from '$lib/types';
 
 	/**
 	 * Collapsible right-hand assistant on every page except the full-page
-	 * conversations view. The header carries three icon-only controls with
-	 * tooltips: new conversation, conversation history overlay, and expand
-	 * to the full-page view. Evidence scoping and knowledge search are
-	 * agent-side capabilities and never surface here.
+	 * conversations view. The header carries icon-only controls with tooltips:
+	 * new conversation, conversation history overlay, expand to the full-page
+	 * view, and close. Evidence scoping and knowledge search are agent-side
+	 * capabilities and never surface here.
 	 */
 	let {
 		workspaceId,
 		workspaceName = '',
-		onExpand
-	}: { workspaceId: string; workspaceName?: string; onExpand: () => void } = $props();
+		onExpand,
+		onClose
+	}: {
+		workspaceId: string;
+		workspaceName?: string;
+		onExpand: () => void;
+		onClose: () => void;
+	} = $props();
 
 	let chats = $state<ChatThread[]>([]);
 	let chatId = $state<string | null>(null);
@@ -26,6 +41,12 @@
 	/** The conversation queued for modal delete confirmation. */
 	let deleteTarget = $state<ChatThread | null>(null);
 	let percolations = $state<Record<string, SteeringPercolationTarget[]>>({});
+	const chatStream = new ChatStreamController({
+		workspaceId: () => workspaceId,
+		onMessage: (message) => {
+			messages = appendMessage(messages, message);
+		}
+	});
 
 	const activeThread = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
 
@@ -45,14 +66,17 @@
 		const id = chatId;
 		if (!id) {
 			messages = [];
+			chatStream.stop();
 			return;
 		}
 		let cancelled = false;
 		listMessages(workspaceId, id).then((items) => {
 			if (!cancelled) messages = items;
 		});
+		chatStream.start(id);
 		return () => {
 			cancelled = true;
+			chatStream.stop();
 		};
 	});
 
@@ -134,35 +158,45 @@
 		<div class="ml-auto flex items-center gap-1">
 			<button
 				type="button"
-				class="rounded-md border border-transparent p-1.5 text-slate-600 transition hover:border-surface-600 hover:text-accent"
+				class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-slate-700 transition hover:bg-surface-800 hover:text-accent"
 				onclick={newConversation}
 				title="New conversation"
 				aria-label="New conversation"
 				data-testid="copilot-new-conversation"
 			>
-				<span aria-hidden="true">＋</span>
+				<span class="leading-none" aria-hidden="true">＋</span>
 			</button>
 			<button
 				type="button"
-				class="rounded-md border border-transparent p-1.5 text-slate-600 transition hover:border-surface-600 hover:text-accent {historyOpen
-					? 'border-surface-600 text-accent'
-					: ''}"
+				class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent transition {historyOpen
+					? 'bg-surface-800 text-accent'
+					: 'text-slate-700 hover:bg-surface-800 hover:text-accent'}"
 				onclick={() => (historyOpen = !historyOpen)}
 				title="Conversation history"
 				aria-label="Conversation history"
 				data-testid="copilot-history"
 			>
-				<span aria-hidden="true">☰</span>
+				<span class="leading-none" aria-hidden="true">☰</span>
 			</button>
 			<button
 				type="button"
-				class="rounded-md border border-transparent p-1.5 text-slate-600 transition hover:border-surface-600 hover:text-accent"
+				class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-slate-700 transition hover:bg-surface-800 hover:text-accent"
 				onclick={onExpand}
 				title="Expand to full chat"
 				aria-label="Expand to full chat"
 				data-testid="copilot-expand"
 			>
-				<span aria-hidden="true">⤢</span>
+				<span class="leading-none" aria-hidden="true">⤢</span>
+			</button>
+			<button
+				type="button"
+				class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-slate-700 transition hover:bg-surface-800 hover:text-accent"
+				onclick={onClose}
+				title="Close copilot"
+				aria-label="Close copilot"
+				data-testid="copilot-close"
+			>
+				<span class="leading-none" aria-hidden="true">✕</span>
 			</button>
 		</div>
 	</div>
@@ -247,6 +281,11 @@
 			proposal={null}
 			onConfirmConsent={undefined}
 			onRejectConsent={undefined}
+		/>
+		<StreamingReply
+			active={chatStream.active}
+			text={chatStream.streamingText}
+			testId="copilot-streaming-reply"
 		/>
 	</div>
 

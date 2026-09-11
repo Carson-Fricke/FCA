@@ -109,6 +109,9 @@ const forceFixtures = (import.meta.env.PUBLIC_THESIS_UI_FIXTURES as string | und
 const bearerToken: string | null =
 	(import.meta.env.PUBLIC_THESIS_API_BEARER_TOKEN as string | undefined) ?? null;
 
+/** Session bearer for raw transports (SSE streams) that bypass apiFetch. */
+export const apiBearerToken: string | null = bearerToken;
+
 /** Guarded localStorage read: Node exposes a non-functional localStorage. */
 function storedValue(key: string): string | null {
 	try {

@@ -105,6 +105,7 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 				{workspaceId}
 				workspaceName={data.snapshot.overview.workspace.name}
 				onExpand={switchToConversations}
+				onClose={() => (ui.copilotOpen = false)}
 			/>
 		</div>
 	{/if}

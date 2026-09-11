@@ -5,6 +5,7 @@
 	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
 	import CleoPlanPanel from '$lib/components/chat/CleoPlanPanel.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
+	import StreamingReply from '$lib/components/chat/StreamingReply.svelte';
 	import WorkflowTimeline from '$lib/components/chat/WorkflowTimeline.svelte';
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import {
@@ -20,15 +21,9 @@
 		postMessage,
 		replayExecutionEvents
 	} from '$lib/api';
-	import { fixtureMode } from '$lib/api';
-	import {
-		ChatEventStream,
-		ExecutionEventStream,
-		LocalCursorStore,
-		chatMessageOf,
-		executionEventOf,
-		providerDeltaOf
-	} from '$lib/sse';
+	import { apiBaseUrl, apiBearerToken, fixtureMode } from '$lib/api';
+	import { ExecutionEventStream, LocalCursorStore, executionEventOf } from '$lib/sse';
+	import { ChatStreamController, appendMessage } from '$lib/chat-stream.svelte';
 	import { notify } from '$lib/workspace.svelte';
 	import type {
 		ChatMessage,
@@ -62,9 +57,12 @@
 	let deleteTarget = $state<ChatThread | null>(null);
 	let cursorStore = new LocalCursorStore();
 	let stream: ExecutionEventStream | null = null;
-	let chatStream: ChatEventStream | null = null;
-	let streamingId = $state<string | null>(null);
-	let streamingText = $state('');
+	const chatStream = new ChatStreamController({
+		workspaceId: () => workspaceId,
+		onMessage: (message) => {
+			messages = appendMessage(messages, message);
+		}
+	});
 
 	const activeChat = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
 	const activeExecutionId = $derived(execution?.execution_id ?? null);
@@ -102,7 +100,7 @@
 			messages = [];
 			execution = null;
 			events = [];
-			stopChatStream();
+			chatStream.stop();
 			return;
 		}
 		let cancelled = false;
@@ -113,7 +111,7 @@
 		listMessages(workspaceId, id).then((items) => {
 			if (!cancelled) messages = items;
 		});
-		startChatStream(id);
+		chatStream.start(id);
 		getExecution(workspaceId, id).then((exec) => {
 			if (cancelled) return;
 			execution = exec;
@@ -128,45 +126,9 @@
 		});
 		return () => {
 			cancelled = true;
-			stopChatStream();
+			chatStream.stop();
 		};
 	});
-
-	function startChatStream(id: string): void {
-		stopChatStream();
-		if (fixtureMode) {
-			// Fixture mode renders seeded replies; the SSE client is real code
-			// and runs against the API in real-fetch mode.
-			return;
-		}
-		chatStream = new ChatEventStream({ baseUrl: '', workspaceId, chatId: id, cursorStore });
-		void chatStream.start((frame) => {
-			const delta = providerDeltaOf(frame);
-			if (delta) {
-				if (delta.start) {
-					streamingId = delta.messageId ?? null;
-					streamingText = '';
-				}
-				if (delta.text) streamingText += delta.text;
-				if (delta.done) {
-					streamingId = null;
-					streamingText = '';
-				}
-				return;
-			}
-			const message = chatMessageOf(frame);
-			if (message && !messages.some((m) => m.message_id === message.message_id)) {
-				messages = [...messages, message];
-			}
-		});
-	}
-
-	function stopChatStream(): void {
-		chatStream?.stop();
-		chatStream = null;
-		streamingId = null;
-		streamingText = '';
-	}
 
 	function startStream(executionId: string): void {
 		stopStream();
@@ -176,10 +138,11 @@
 			return;
 		}
 		stream = new ExecutionEventStream({
-			baseUrl: '',
+			baseUrl: apiBaseUrl,
 			workspaceId,
 			executionId,
-			cursorStore
+			cursorStore,
+			bearerToken: apiBearerToken
 		});
 		void stream.start((frame) => {
 			const event = executionEventOf(frame);
@@ -421,17 +384,11 @@
 					}}
 					{consentBusy}
 				/>
-				{#if streamingId || streamingText}
-					<div
-						class="mt-3 rounded-lg border border-accent/30 bg-surface-900 p-3"
-						data-testid="streaming-reply"
-					>
-						<p class="mb-1 text-[10px] font-semibold text-accent">thesis-agent</p>
-						<p class="whitespace-pre-wrap text-sm text-slate-700">
-							{streamingText}<span class="animate-pulse text-accent">▍</span>
-						</p>
-					</div>
-				{/if}
+				<StreamingReply
+					active={chatStream.active}
+					text={chatStream.streamingText}
+					testId="streaming-reply"
+				/>
 			</div>
 
 			<div class="border-t border-surface-700 p-3">
