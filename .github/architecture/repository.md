@@ -24,30 +24,29 @@ query API, shadow/live runtimes, and CI/deployment orchestration remain
 planned. The `harness.signal` pure-NumPy wavelet and analytic-signal kernels
 (MODWT with circular/reflection boundaries, additive MRA, wavelet variance,
 Hilbert envelope/phase features, and an exploratory Morlet CWT scalogram) are
-implemented for the intraday-pattern research scripts. The pinned Zig 0.16.0
-toolchain is a first-class build component: the `build.zig` module builds the
-native core under `src/harness/native` (C ABI v2 with the Arrow C Data
-Interface bridge, pinned scale-18 fixed point, and the ported event kernel,
-OMS state machine, virtual book accounting, K-way replay merge, bar
-derivation, resting-order matching venue, SimpleTouch, latency-size, and
-trade-through fill models, the ported metrics modules, and the float64 batch
-quant kernels — the Cox-Ross-Rubinstein option pricer with tree greeks plus
-bracketed implied time-to-expiry and implied-underlying inversions), the
-shared image compiles it in a dedicated Zig build stage, and CI gates the
-native core with
-`zig fmt --check` and `zig build test` alongside the Python gates. The
-cross-language parity oracle drives the native core through a Zig-core runner
-(`zig_backtest`) and asserts byte-identical determinism artifacts against the
-pure-Python engine.
+implemented for the intraday-pattern research scripts. The native core is the
+Rust `harness-native` crate (C ABI v2 with the Arrow C Data Interface bridge,
+pinned scale-18 fixed point, and the ported event kernel, OMS state machine,
+virtual book accounting, K-way replay merge, bar derivation, resting-order
+matching venue, SimpleTouch, latency-size, and trade-through fill models, the
+ported metrics modules, and the float64 batch quant kernels — the
+Cox-Ross-Rubinstein option pricer with tree greeks plus bracketed implied
+time-to-expiry and implied-underlying inversions). The pinned Zig toolchain and
+every `.zig` source were retired in T253; the shared image compiles the native
+library in a Rust build stage, and CI gates it with `cargo fmt --all --check`,
+`cargo clippy`, and `cargo test`. The cross-language parity oracle drives the
+native core through `harness.runtime.zig_backtest` (retained module name) and
+`harness.testing.rust_oracle`, asserting byte-identical determinism artifacts
+against the pure-Python engine.
 
 The Rust migration is staged and gated. The `rust/` workspace ports the engine
 and its interfaces crate by crate. The complete interface processes are flipped
 behind `HARNESS_USE_RUST_ENTRYPOINTS`, while the Python engine under
-`src/harness` and the pinned Zig native core under `src/harness/native` remain
-authoritative for the unported engine surfaces. The strategy contract, binding,
-reference fixture, and sandbox lint are ported natively, and the sandbox walker
-no longer bridges to the Python AST checker. Removal of the Zig and Python
-engine paths is gated by the decommission criteria below and has not started.
+`src/harness` remains authoritative for the unported engine surfaces. The
+strategy contract, binding, reference fixture, and sandbox lint are ported
+natively, and the sandbox walker no longer bridges to the Python AST checker.
+Zig is already retired; removal of the remaining Python engine paths is gated by
+the decommission criteria below and has not started.
 
 ## Product Boundaries
 
@@ -182,16 +181,18 @@ runs it locally over the built-in deterministic synthetic benchmark fixture or
 a user-supplied local Parquet lake directory, writing canonical run artifacts
 under `.local/backtests/`.
 
-The `api` and `trader` command entrypoints remain thin process boundaries and
-fail clearly until composed.
+The `api` process is served by both the Python boundary and the Rust axum
+binary; `trader` remains a thin Python process boundary and fails clearly until
+its Rust supervision runner is ported.
 
 ## Quant-Harness Rust Workspace
 
 `rust/` is a Cargo workspace porting the quant-harness engine and its
-interfaces. The Python engine under `src/harness` and the pinned Zig native
-core under `src/harness/native` remain authoritative for the unported engine
-surfaces; the Rust interface processes are flipped behind
-`HARNESS_USE_RUST_ENTRYPOINTS` (see `rust-interface-migration.md`).
+interfaces. The Python engine under `src/harness` remains authoritative for the
+unported engine surfaces; the Rust interface processes are flipped behind
+`HARNESS_USE_RUST_ENTRYPOINTS` (see `rust-interface-migration.md`). The Zig
+native core was retired in T253, and `harness-native` is the native core the
+Python ctypes loader consumes.
 
 ```text
 rust/
@@ -212,7 +213,9 @@ rust/
 
 - `harness-api` owns the `harness`, `api`, `backtest-job`, and `mcp` process
   binaries; its axum routes, bearer authentication, and provenance fields
-  mirror `harness.http`.
+  mirror `harness.http`. The `backtest-job` binary still drives the
+  `UnportedBacktestJobRunner` seam until the Rust backtest engine is wired and
+  parity-proven.
 - `harness-mcp` owns the pure JSON-RPC dispatch, the capability-filtered tool
   catalog, bearer credential resolution, and newline-delimited stdio framing.
 - `harness-host` embeds the interpreter for user strategy, indicator, and
@@ -232,10 +235,11 @@ The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 
 ## Decommission Status
 
-Removing the pinned Zig core and the Python engine paths is deliberately
-gated. This is a partial decommission: nothing has been deleted, and the Python
-and Zig stacks still build and run. The Rust interfaces are staged, and only
-the complete interface processes are flipped.
+The Zig native core is already retired: T253 deleted `build.zig`,
+`build.zig.zon`, and every `.zig` source, and the ctypes loader now consumes the
+Rust `harness-native` library. The remaining decommission is partial: the
+Python engine still builds and runs and remains authoritative for the unported
+engine surfaces, and no Python engine module has been deleted.
 
 ### Gate
 
@@ -261,16 +265,20 @@ is green on the Rust stack.
 
 Until the gate opens:
 
-- Docker and CI keep the Zig build stage, `zig build test`, and the Python test
-  gates.
-- `pyproject.toml` keeps its engine dependencies; only the strategy-host
-  surface is prunable once the engine flips.
+- Docker and CI keep the Python test and packaging gates. The Zig build stage
+  and `zig build test` gate are gone (T253); the Docker `rust` stage builds and
+  tests the Rust workspace, and the runtime image ships the Rust entrypoint
+  binaries under `/opt/rust/bin` for the gated flip.
+- `pyproject.toml` keeps its engine dependencies. Pruning them to the
+  strategy-host surface is gated on deleting the Python engine, because the
+  retained engine and its suites still import them.
 - The Python suites for ported areas (`tests/harness/http`, `tests/harness/mcp`,
   `tests/strategy_lint`, and configuration) remain as parity oracles alongside
   the Rust parity suites.
-- The entrypoint flip stays limited to `api` and `mcp`; `harness`,
-  `backtest-job`, and `trader` fall back to Python. `rust-interface-migration.md`
-  tracks the flip itself.
+- The entrypoint flip covers `api`, `mcp`, and the `harness` facade's ported
+  groups. `backtest-job` and `trader` are wired to the flip switch but gated
+  off, so they fall back to Python. `rust-interface-migration.md` tracks the
+  flip itself.
 
 ## Thesis Packages
 
@@ -293,14 +301,17 @@ The products share repository-level mechanics where divergence would create
 operational drift:
 
 - `pyproject.toml` defines the Python project and common quality tooling.
-- `build.zig` and `build.zig.zon` define the pinned Zig 0.16.0 toolchain. They
-  expose the `harness-native` module rooted at `src/harness/native`, install
-  the native core library, and provide the `zig build test` smoke gate. CI
-  enforces `zig fmt --check` and `zig build test` alongside the Python gates.
+- `rust/` is a Cargo workspace with a pinned stable toolchain. It builds
+  `harness-native` (the native core the Python loader consumes) and the harness
+  interface binaries. CI enforces `cargo fmt --all --check`,
+  `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo test --workspace` alongside the Python gates. The pinned Zig toolchain
+  from the earlier native-core effort was retired in T253.
 - `Dockerfile` builds one immutable image with distinct runtime commands. A
-  pinned Zig build stage compiles the native core and tests it during image
-  build, and the runtime stage carries the resulting library under
-  `/opt/native`.
+  Rust build stage compiles and tests the workspace and produces the native
+  core library plus the `harness`, `api`, `backtest-job`, and `mcp` binaries;
+  the runtime stage carries the library under `/opt/rust` and the binaries
+  under `/opt/rust/bin` (discoverable through `HARNESS_RUST_BINARY_DIR`).
 - `config` contains versioned, non-secret YAML grouped by product or concern.
 - `infra` contains reusable Bicep modules, environment parameters, identity,
   storage, observability, and Container Apps definitions.

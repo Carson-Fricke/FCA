@@ -28,5 +28,16 @@ def show_help(context: typer.Context) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the quant-harness command line."""
-    return run(app, prog_name="harness", argv=argv)
+    """Run the quant-harness command line.
+
+    When the Rust entrypoint flip is enabled, the facade dispatches its
+    complete process groups (``api`` and ``mcp``) to the Rust ``harness``
+    binary; every other group stays on the Python engine.
+    """
+    from harness.cli.rust_entrypoints import exec_rust_facade, resolved_argv
+
+    args = resolved_argv(argv)
+    rust_result = exec_rust_facade(args)
+    if rust_result is not None:
+        return rust_result
+    return run(app, prog_name="harness", argv=args)

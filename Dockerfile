@@ -2,10 +2,12 @@ FROM ghcr.io/astral-sh/uv:0.12.6 AS uv
 
 FROM rust:bookworm AS rust
 
-# The Rust workspace is the staged port of the quant-harness native core. This
-# stage compiles and tests it, then produces the loadable shared library
-# (harness-native) that the runtime image carries under /opt/rust. The Python
-# builder stage reuses the same toolchain to compile the PyO3 extension.
+# The Rust workspace is the staged port of the quant-harness native core and
+# its interface processes. This stage compiles and tests it, then produces the
+# loadable shared library (harness-native) that the runtime image carries under
+# /opt/rust and the harness entrypoint binaries used by the environment-gated
+# flip. The Python builder stage reuses the same toolchain to compile the PyO3
+# extension.
 WORKDIR /build/rust
 
 RUN apt-get update \
@@ -15,7 +17,8 @@ RUN apt-get update \
 COPY rust/ ./rust/
 
 RUN cargo test --locked --workspace \
-    && cargo build --locked --release -p harness-native
+    && cargo build --locked --release -p harness-native \
+    && cargo build --locked --release -p harness-api --bins
 
 FROM python:3.12-slim AS builder
 
@@ -60,6 +63,7 @@ FROM python:3.12-slim AS runtime
 
 ENV PATH="/opt/venv/bin:$PATH" \
     LAKE_CONFIG_ROOT=/app \
+    HARNESS_RUST_BINARY_DIR=/opt/rust/bin \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONFAULTHANDLER=1 \
     PYTHONUNBUFFERED=1
@@ -70,6 +74,14 @@ RUN groupadd --gid 10001 lake \
 COPY --from=builder /opt/venv /opt/venv
 # The Rust native core shared library consumed by the ctypes loader.
 COPY --from=rust /build/rust/target/release/libharness_native.so /opt/rust/libharness_native.so
+# The Rust interface binaries for the environment-gated entrypoint flip
+# (`HARNESS_USE_RUST_ENTRYPOINTS`); discovery uses HARNESS_RUST_BINARY_DIR.
+COPY --from=rust \
+    /build/rust/target/release/harness \
+    /build/rust/target/release/api \
+    /build/rust/target/release/backtest-job \
+    /build/rust/target/release/mcp \
+    /opt/rust/bin/
 COPY config/ /app/config/
 
 WORKDIR /app

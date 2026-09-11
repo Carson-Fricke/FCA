@@ -79,9 +79,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     When the Rust entrypoint flip is enabled and a Rust ``api`` binary is
     available, this dispatches to it; otherwise it runs the Python command.
     """
-    from harness.cli.rust_entrypoints import exec_rust_entrypoint
+    from harness.cli.rust_entrypoints import exec_rust_entrypoint, resolved_argv
 
-    rust_result = exec_rust_entrypoint("api", [] if argv is None else list(argv))
+    args = resolved_argv(argv)
+    rust_result = exec_rust_entrypoint("api", args)
     if rust_result is not None:
         return rust_result
-    return run(app, prog_name="api", argv=argv)
+    return run(app, prog_name="api", argv=args)
