@@ -366,14 +366,35 @@ pub fn run_backtest_job(
     ),
     HostError,
 > {
+    run_backtest_job_with_data_dir(config_path, output_dir, None)
+}
+
+/// Load, run, and write one native backtest job over a local Parquet lake.
+///
+/// # Errors
+///
+/// Returns [`HostError`] when a strategy cannot be built or the lake directory
+/// cannot be read.
+pub fn run_backtest_job_with_data_dir(
+    config_path: &std::path::Path,
+    output_dir: Option<&std::path::Path>,
+    data_dir: Option<&std::path::Path>,
+) -> Result<
+    (
+        backtest::backtest::engine_core::BacktestOutcome,
+        std::path::PathBuf,
+    ),
+    HostError,
+> {
     let configuration = backtest::backtest::job::load_backtest_config(config_path)
         .map_err(|error| HostError::Invalid(error.to_string()))?;
     let instances = build_strategy_instances(&configuration)?;
-    backtest::backtest::job::run_native_job(
+    backtest::backtest::job::run_native_job_with_data_dir(
         &configuration,
         &backtest::backtest::engine_core::EngineOptions::default(),
         output_dir,
         instances,
+        data_dir,
     )
     .map_err(|error| HostError::Invalid(error.to_string()))
 }

@@ -122,6 +122,7 @@ dependencies = [
  "hex",
  "host",
  "http-body-util",
+ "live",
  "mcp",
  "percent-encoding",
  "serde",
@@ -427,6 +428,7 @@ name = "backtest"
 version = "0.1.0"
 dependencies = [
  "host",
+ "marketdata",
  "num",
 ]
 
@@ -1530,7 +1532,10 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 name = "live"
 version = "0.1.0"
 dependencies = [
+ "backtest",
  "chrono",
+ "clap",
+ "config",
  "futures-util",
  "num",
  "reqwest",

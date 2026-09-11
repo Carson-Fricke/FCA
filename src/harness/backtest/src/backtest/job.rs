@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 
 use num::Decimal18;
 
+use marketdata::{Date, LocalLakeReader};
+
 use crate::backtest::config::BacktestConfig;
 use crate::backtest::engine::{
     run_backtest, ApproveAll, BacktestOptions, ExecutionModel, ImmediateFill, OrderSide, RiskModel,
@@ -24,7 +26,10 @@ use crate::backtest::engine_core::{
     build_default_manifest, run_native_engine, BacktestOutcome, EngineOptions, StrategyInstance,
 };
 use crate::backtest::errors::{BacktestError, ONE_DAY_NS};
-use crate::backtest::fixture::{synthetic_fixture, SyntheticDataOptions};
+use crate::backtest::fixture::{
+    synthetic_fixture, ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture,
+    SyntheticDataOptions,
+};
 use crate::backtest::manifest::BacktestResult;
 use crate::backtest::preflight::preflight_data;
 use crate::canonical_json::JsonValue;
@@ -390,8 +395,37 @@ pub fn run_native_job(
     output_dir: Option<&Path>,
     strategies: Vec<StrategyInstance>,
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    let synthetic_options = SyntheticDataOptions::default();
-    let fixture = synthetic_fixture(configuration, &synthetic_options)?;
+    run_native_job_with_data_dir(configuration, engine_options, output_dir, strategies, None)
+}
+
+/// Run one native engine job over a local Parquet lake or the synthetic fixture.
+///
+/// When `data_dir` is `Some`, the run window's Hive lake partitions are read
+/// from the directory tree and replayed instead of the synthetic benchmark.
+/// The full-precision scales keep the lake's 18-digit decimals lossless through
+/// the Python-compatible decimal seam.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when the configuration, data source, engine, or
+/// artifact write fails.
+#[allow(clippy::too_many_arguments)]
+pub fn run_native_job_with_data_dir(
+    configuration: &BacktestConfig,
+    engine_options: &EngineOptions,
+    output_dir: Option<&Path>,
+    strategies: Vec<StrategyInstance>,
+    data_dir: Option<&Path>,
+) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
+    let synthetic_options = if data_dir.is_some() {
+        lake_scale_options()
+    } else {
+        SyntheticDataOptions::default()
+    };
+    let fixture = match data_dir {
+        Some(directory) => lake_fixture(configuration, directory)?,
+        None => synthetic_fixture(configuration, &synthetic_options)?,
+    };
     let preflight = preflight_data(configuration, &fixture)?;
     let manifest = build_default_manifest(configuration, &fixture, &preflight)?;
     let outcome = run_native_engine(
@@ -418,6 +452,124 @@ pub fn run_native_job(
     std::fs::write(&artifact_path, payload)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
     Ok((outcome, artifact_path))
+}
+
+/// Full-precision scale options for materialized lake data.
+///
+/// Lake decimals are stored at scale 18; carrying the same scale through the
+/// Python-compatible conversion preserves every digit, unlike the 2-digit
+/// synthetic benchmark scales.
+fn lake_scale_options() -> SyntheticDataOptions {
+    SyntheticDataOptions {
+        base_price_scale: num::SCALE,
+        tick_scale: num::SCALE,
+        quantity_scale: num::SCALE,
+        ..SyntheticDataOptions::default()
+    }
+}
+
+/// Build a replay fixture from a local Parquet lake directory.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when the directory holds no in-window events or
+/// cannot be read.
+pub fn lake_fixture(
+    configuration: &BacktestConfig,
+    data_dir: &Path,
+) -> Result<ReplayFixture, BacktestJobError> {
+    let start_date = Date::from_days(configuration.start_ns.div_euclid(ONE_DAY_NS) as i32);
+    let end_date = Date::from_days(configuration.end_ns.div_euclid(ONE_DAY_NS) as i32);
+    let reader = LocalLakeReader::new(data_dir);
+    let read = reader
+        .read(
+            marketdata::AssetClass::Equity,
+            start_date,
+            end_date,
+            &configuration.symbols,
+        )
+        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    let mut events: Vec<MarketEvent> = read
+        .iter()
+        .filter(|event| {
+            let timestamp = event.timestamp().to_nanos();
+            timestamp >= configuration.start_ns && timestamp < configuration.end_ns
+        })
+        .map(lake_event)
+        .collect();
+    if events.is_empty() {
+        return Err(BacktestJobError::Io(format!(
+            "no market-lake events found under {} for the configured window",
+            data_dir.display()
+        )));
+    }
+    events.sort_by(|left, right| {
+        left.timestamp_ns()
+            .cmp(&right.timestamp_ns())
+            .then_with(|| left.sequence().cmp(&right.sequence()))
+            .then_with(|| class_priority(left).cmp(&class_priority(right)))
+    });
+    let sessions = sessions_from_events(&events);
+    let fingerprints = ReplayFingerprints::of_events(&events);
+    Ok(ReplayFixture {
+        sessions,
+        events,
+        source_id: format!("lake:{}", data_dir.display()),
+        symbols: configuration.symbols.clone(),
+        fingerprints,
+        expected_data_fingerprint: None,
+    })
+}
+
+/// Convert one normalized lake event into the engine's fixture event.
+fn lake_event(event: &marketdata::MarketEvent) -> MarketEvent {
+    match event {
+        marketdata::MarketEvent::Quote(quote) => MarketEvent::Quote {
+            event_id: quote.event_id.clone(),
+            timestamp_ns: quote.timestamp.to_nanos(),
+            sequence: quote.sequence,
+            symbol: quote.symbol.clone(),
+            bid: quote.bid_price,
+            ask: quote.ask_price,
+            bid_quantity: quote.bid_size,
+            ask_quantity: quote.ask_size,
+            venue: quote.venue.clone().unwrap_or_default(),
+        },
+        marketdata::MarketEvent::Trade(trade) => MarketEvent::Trade {
+            event_id: trade.event_id.clone(),
+            timestamp_ns: trade.timestamp.to_nanos(),
+            sequence: trade.sequence,
+            symbol: trade.symbol.clone(),
+            price: trade.price,
+            quantity: trade.quantity,
+            venue: trade.venue.clone().unwrap_or_default(),
+            trade_id: trade.trade_id.clone().unwrap_or_default(),
+        },
+    }
+}
+
+const fn class_priority(event: &MarketEvent) -> u8 {
+    match event {
+        MarketEvent::Quote { .. } => 0,
+        MarketEvent::Trade { .. } => 1,
+    }
+}
+
+/// One deterministic UTC session window per day carrying events.
+fn sessions_from_events(events: &[MarketEvent]) -> Vec<ExchangeSession> {
+    let mut days: Vec<i64> = events
+        .iter()
+        .map(|event| event.timestamp_ns().div_euclid(ONE_DAY_NS))
+        .collect();
+    days.sort_unstable();
+    days.dedup();
+    days.into_iter()
+        .map(|day| ExchangeSession {
+            session_date_days: day,
+            open_ns: day * ONE_DAY_NS,
+            close_ns: (day + 1) * ONE_DAY_NS,
+        })
+        .collect()
 }
 
 fn write_artifact(

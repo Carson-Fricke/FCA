@@ -11,6 +11,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 num = { path = "../num" }
+marketdata = { path = "../marketdata" }
 
 [dev-dependencies]
 host = { path = "../host" }

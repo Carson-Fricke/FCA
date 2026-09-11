@@ -14,16 +14,16 @@
 //!
 //! * Command names, help descriptions, flags, and exit codes match the Typer
 //!   CLI for the facade and `backtest-job`.
-//! * `api` and `mcp` are recognized and served by the Rust process
-//!   implementations; `trader` is recognized so the facade help is identical,
-//!   but its execution body arrives with its own port task and until then it
-//!   reports that the Rust port is not yet available and exits `2`.
+//! * `api`, `mcp`, and `trader` are recognized and served by the Rust process
+//!   implementations; `trader` runs the supervised paper/shadow runner in the
+//!   `live` crate.
 //! * The `backtest-job` command is served by the native Rust engine through
 //!   [`NativeBacktestJobRunner`], which drives the configured Python strategies
 //!   via the `harness-host` PyO3 adapter. [`BacktestJobRunner`] remains the
-//!   seam so the command surface is stable and test doubles are possible;
-//!   [`UnportedBacktestJobRunner`] is retained for the unported `--data-dir`
-//!   fixture path.
+//!   seam so the command surface is stable and test doubles are possible. A
+//!   `--data-dir` run reads the local Parquet/Arrow lake through the
+//!   `marketdata` crate; `UnportedBacktestJobRunner` remains as the
+//!   always-failing double.
 
 use std::fmt;
 use std::fs;
@@ -122,7 +122,7 @@ pub struct ApiArgs {
 }
 
 /// Options for `harness trader`, mirroring `harness.cli.trader.launch`.
-#[derive(Debug, Clone, Args)]
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct TraderArgs {
     /// Path to the trader configuration document.
     #[arg(
@@ -138,7 +138,7 @@ pub struct TraderArgs {
 }
 
 /// Subcommands of `harness trader`.
-#[derive(Debug, Clone, Subcommand)]
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum TraderCommand {
     /// Print the latest supervision document for the configured run.
     #[command(name = "status")]
@@ -146,7 +146,7 @@ pub enum TraderCommand {
 }
 
 /// Options for `harness trader status`.
-#[derive(Debug, Clone, Args)]
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct TraderStatusArgs {
     /// Path to the trader configuration document.
     #[arg(
@@ -270,7 +270,7 @@ pub trait BacktestJobRunner {
     fn run(&self, args: &BacktestJobArgs) -> Result<BacktestRunSummary, BacktestJobError>;
 }
 
-/// Default runner used by the binaries until the Rust engine is ported.
+/// Always-failing runner double used to test CLI error handling.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnportedBacktestJobRunner;
 
@@ -307,6 +307,8 @@ pub enum CommandResult {
     ServeApi(ApiArgs),
     /// Run the MCP stdio server with these options (handled by the binary).
     ServeMcp(McpArgs),
+    /// Run the supervised trader process (handled by the binary).
+    RunTrader(TraderArgs),
 }
 
 impl CommandResult {
@@ -317,7 +319,11 @@ impl CommandResult {
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Help(_) | Self::Completed { .. } | Self::ServeApi(_) | Self::ServeMcp(_) => 0,
+            Self::Help(_)
+            | Self::Completed { .. }
+            | Self::ServeApi(_)
+            | Self::ServeMcp(_)
+            | Self::RunTrader(_) => 0,
             Self::Failed { .. } => 1,
             Self::UsageError(_) => 2,
         }
@@ -332,16 +338,15 @@ pub fn root_help() -> String {
 
 /// Dispatch a parsed facade invocation to its process group.
 ///
-/// `runner` is the injected backtest engine seam; the `api` and `mcp` groups
-/// return their serve requests for the binary to execute, and `trader`
-/// reports that its Rust port is pending.
+/// `runner` is the injected backtest engine seam; the `api`, `mcp`, and
+/// `trader` groups return their process requests for the binary to execute.
 #[must_use]
 pub fn run(cli: HarnessCli, runner: &dyn BacktestJobRunner) -> CommandResult {
     match cli.command {
         None => CommandResult::Help(root_help()),
         Some(HarnessCommand::BacktestJob(args)) => execute_backtest_job(&args, runner),
         Some(HarnessCommand::Api(args)) => CommandResult::ServeApi(args),
-        Some(HarnessCommand::Trader(_)) => not_yet_ported("trader"),
+        Some(HarnessCommand::Trader(args)) => CommandResult::RunTrader(args),
         Some(HarnessCommand::Mcp(args)) => CommandResult::ServeMcp(args),
     }
 }
@@ -422,18 +427,34 @@ pub fn emit(result: CommandResult) -> ExitCode {
             eprintln!("{stderr}");
             ExitCode::from(1)
         }
-        CommandResult::ServeApi(_) | CommandResult::ServeMcp(_) => {
-            eprintln!("an internal error occurred while dispatching a server command");
+        CommandResult::ServeApi(_) | CommandResult::ServeMcp(_) | CommandResult::RunTrader(_) => {
+            eprintln!("an internal error occurred while dispatching a subprocess command");
             ExitCode::from(2)
         }
     }
 }
 
-fn not_yet_ported(group: &str) -> CommandResult {
-    CommandResult::UsageError(format!(
-        "the '{group}' command is not yet ported to the Rust CLI; use the Python \
-         entrypoint until its port task lands"
-    ))
+/// Run the supervised trader process described by a parsed `harness trader`.
+///
+/// This is the process body for the facade group; the standalone `trader`
+/// binary serves the same composition through the `live` crate.
+#[must_use]
+pub fn run_trader(args: &TraderArgs) -> ExitCode {
+    match &args.command {
+        Some(TraderCommand::Status(status)) => {
+            match live::supervision::read_supervision_status(status.config.as_path()) {
+                Some(payload) => {
+                    println!("{payload}");
+                    ExitCode::SUCCESS
+                }
+                None => {
+                    eprintln!("no supervision record for {}", status.config.display());
+                    ExitCode::from(1)
+                }
+            }
+        }
+        None => ExitCode::from(live::supervision::run_trader_process(&args.config).code()),
+    }
 }
 
 /// Errors surfaced while reading a configuration document's `shell`.
@@ -700,13 +721,14 @@ mod tests {
     }
 
     #[test]
-    fn pending_groups_report_not_yet_ported() {
+    fn trader_dispatches_to_the_supervision_runner() {
         let cli = HarnessCli::try_parse_from(["harness", "trader"]).expect("parse");
         match run(cli, &UnportedBacktestJobRunner) {
-            CommandResult::UsageError(message) => {
-                assert!(message.contains("trader"), "missing group in {message}");
+            CommandResult::RunTrader(args) => {
+                assert_eq!(args.config, PathBuf::from("config/harness/trader.yaml"));
+                assert!(args.command.is_none());
             }
-            other => panic!("expected usage error for trader, got {other:?}"),
+            other => panic!("expected trader run, got {other:?}"),
         }
     }
 

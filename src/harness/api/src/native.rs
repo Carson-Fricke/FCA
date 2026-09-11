@@ -8,9 +8,9 @@
 //!
 //! The native path is verified by the golden parity suite in
 //! `harness-backtest/tests/parity.rs`, which runs this same entry point over
-//! the committed benchmark configuration. The local-Parquet `--data-dir`
-//! fixture is not yet wired into the Rust engine, so the runner rejects it
-//! rather than silently substituting the synthetic benchmark.
+//! the committed benchmark configuration. `--data-dir` is served by the local
+//! Parquet/Arrow lake reader in the `marketdata` crate, so a run reads the
+//! materialized Hive partitions instead of the synthetic benchmark.
 
 use std::path::PathBuf;
 
@@ -29,16 +29,12 @@ impl BacktestJobRunner for NativeBacktestJobRunner {
                 "A backtest configuration is required: backtest-job --config <path>".to_string(),
             ));
         };
-        if args.data_dir.is_some() {
-            return Err(BacktestJobError::Engine(
-                "the native Rust engine does not yet read a local Parquet lake; \
-                 run without --data-dir or use the Python engine"
-                    .to_string(),
-            ));
-        }
-        let (outcome, artifact_path) =
-            host::backtest::run_backtest_job(config, args.output_dir.as_deref())
-                .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+        let (outcome, artifact_path) = host::backtest::run_backtest_job_with_data_dir(
+            config,
+            args.output_dir.as_deref(),
+            args.data_dir.as_deref(),
+        )
+        .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
         Ok(summary_from_outcome(&outcome, artifact_path))
     }
 }
@@ -65,16 +61,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn data_dir_is_rejected_until_the_lake_reader_is_wired() {
+    fn data_dir_no_longer_short_circuits() {
         let runner = NativeBacktestJobRunner;
         let args = BacktestJobArgs {
-            config: Some(PathBuf::from("backtest.yaml")),
+            config: Some(PathBuf::from("does-not-exist.yaml")),
             data_dir: Some(PathBuf::from("lake")),
             output_dir: None,
         };
         match runner.run(&args) {
             Err(BacktestJobError::Engine(reason)) => {
-                assert!(reason.contains("--data-dir"), "{reason}");
+                assert!(!reason.contains("does not yet read"), "{reason}");
             }
             other => panic!("expected an engine error, got {other:?}"),
         }
