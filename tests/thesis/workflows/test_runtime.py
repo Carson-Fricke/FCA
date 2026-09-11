@@ -1,0 +1,463 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from datetime import UTC, datetime
+from itertools import count
+from pathlib import Path
+
+import pytest
+
+from thesis.agent.context import PromptContext
+from thesis.agent.router import (
+    ModelProfile,
+    ModelResponse,
+    ModelRouter,
+    PolicyBundle,
+    Role,
+    RolePolicy,
+)
+from thesis.agent.skills import SkillRegistry, ThesisSkill
+from thesis.chat.service import ChatService
+from thesis.integrations import (
+    BacktestRequest,
+    CapabilityReport,
+    CapabilityStatus,
+    HarnessBacktestResult,
+    ThesisHarnessClient,
+)
+from thesis.persistence import CommandJournal
+from thesis.strategies import StrategyBundle
+from thesis.strategies.validation import (
+    StrategyValidationRequest,
+    StrategyValidationResult,
+)
+from thesis.workflows import (
+    VERDICT_SUPPORTED,
+    BacktestRunner,
+    BacktestRunRequest,
+    BacktestRunResult,
+    HarnessBacktestRunner,
+    HypothesisValidationPhase,
+    HypothesisValidationWorkflow,
+    StrategyDevelopmentPhase,
+    StrategyDevelopmentWorkflow,
+    WorkflowRuntime,
+    WorkflowRuntimeError,
+    build_model_router,
+    build_workflow_runtime,
+)
+
+WORKSPACE = "workspace-demo"
+OWNER = "owner-1"
+NOW = datetime(2026, 9, 4, 12, 0, tzinfo=UTC)
+CLAIM = (
+    "Five-day momentum in SPY predicts positive five-day forward returns; "
+    "a momentum probe strategy should realize a Sharpe of at least 1.0."
+)
+
+CAPABILITIES = CapabilityReport.from_statuses(
+    (
+        CapabilityStatus("backtest", True, "available"),
+        CapabilityStatus("result_query", True, "available"),
+    )
+)
+
+
+def _clock() -> Callable[[], datetime]:
+    ticks = count(1)
+
+    def clock() -> datetime:
+        return NOW.replace(microsecond=next(ticks))
+
+    return clock
+
+
+def _id_factory() -> Callable[[str], str]:
+    counter = count(1)
+    return lambda prefix: f"{prefix}-{next(counter)}"
+
+
+def _hypothesis_envelope() -> dict[str, object]:
+    return {
+        "claimType": "predictive",
+        "claim": CLAIM,
+        "variables": ["momentum_5d", "forward_return_5d"],
+        "nullHypothesis": (
+            "Five-day momentum has no effect on five-day forward returns."
+        ),
+        "alternativeHypothesis": (
+            "Five-day momentum increases five-day forward returns."
+        ),
+        "estimand": "mean five-day forward return conditional on five-day momentum",
+        "endpoints": ["forward_return_5d at t+5 close"],
+        "dataRequirements": {"symbols": ["SPY"], "minObservations": 60},
+        "criteria": [
+            {"metric": "sharpe", "operator": "gte", "threshold": 1.0},
+            {"metric": "hitRate", "operator": "gte", "threshold": 0.55},
+        ],
+        "strategy": {
+            "strategyId": "momentum-probe",
+            "version": "1.0.0",
+            "files": {
+                "strategy.py": (
+                    "from harness.strategy import Strategy\n\n"
+                    "class MomentumProbe(Strategy):\n    pass\n"
+                )
+            },
+            "tests": {"test_strategy.py": "def test_strategy():\n    assert True\n"},
+            "harnessConfiguration": {"seed": 7, "symbols": ["SPY"]},
+        },
+    }
+
+
+def _strategy_envelope() -> dict[str, object]:
+    return {
+        "strategyId": "momentum",
+        "version": "1.2.0",
+        "files": {
+            "strategy.py": (
+                "from harness.strategy import Strategy\n\n"
+                "class Momentum(Strategy):\n    pass\n"
+            )
+        },
+        "tests": {"test_strategy.py": "def test_strategy():\n    assert True\n"},
+        "harnessConfiguration": {"seed": 7, "symbols": ["SPY"]},
+        "limitations": ["single-symbol momentum only"],
+    }
+
+
+class FakeProvider:
+    """Deterministic fake model provider behind the policy boundary."""
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.prompts: list[str] = []
+
+    def invoke(
+        self,
+        *,
+        profile: ModelProfile,
+        prompt: PromptContext,
+        allowed_tools: tuple[str, ...],
+    ) -> ModelResponse:
+        self.prompts.append(prompt.rendered)
+        return ModelResponse(output=json.dumps(self.payload))
+
+
+class FakeRunner:
+    """Deterministic fake backtest runner behind the runner port."""
+
+    def __init__(
+        self,
+        *,
+        metrics: object | None = None,
+        state: str = "completed",
+        manifest: object | None = None,
+        result_artifacts: object | None = None,
+    ) -> None:
+        self.requests: list[BacktestRunRequest] = []
+        self._metrics = metrics
+        self._state = state
+        self._manifest = manifest
+        self._result_artifacts = result_artifacts
+
+    def run(self, request: BacktestRunRequest) -> BacktestRunResult:
+        self.requests.append(request)
+        return BacktestRunResult(
+            job_id="job-1",
+            state=self._state,
+            mode="local",
+            manifest=self._manifest,
+            metrics=self._metrics,
+            result_artifacts=self._result_artifacts,
+        )
+
+
+class FakeValidator:
+    """Deterministic fake sandbox validator behind the validator port."""
+
+    def __init__(self) -> None:
+        self.requests: list[StrategyValidationRequest] = []
+
+    def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
+        self.requests.append(request)
+        return StrategyValidationResult(True, (), validation_id="validation-1")
+
+
+class FakeHarnessPort:
+    """Fake harness adapter exposing the published client port."""
+
+    def __init__(self) -> None:
+        self.launched: list[BacktestRequest] = []
+
+    def capabilities(self) -> CapabilityReport:
+        return CAPABILITIES
+
+    def launch_backtest(self, request: BacktestRequest) -> HarnessBacktestResult:
+        self.launched.append(request)
+        return HarnessBacktestResult(
+            job_id="job-harness-1",
+            state="completed",
+            manifest={"manifestId": "manifest-1", "sha256": "c" * 64},
+            metrics={"sharpe": 1.5},
+            result_artifacts=[],
+            capability_status=CAPABILITIES,
+            raw={},
+        )
+
+    def query_backtest(self, job_id: str) -> HarnessBacktestResult:
+        raise AssertionError("query_backtest is not expected for a completed job")
+
+
+def _bundle() -> StrategyBundle:
+    return StrategyBundle.create(
+        strategy_id="momentum",
+        version="1.0.0",
+        source={"strategy.py": "from harness.strategy import Strategy\n"},
+        tests={"test_strategy.py": "def test_strategy():\n    assert True\n"},
+        harness_configuration={"seed": 7},
+    )
+
+
+def _runtime(
+    *,
+    provider: FakeProvider,
+    clock: Callable[[], datetime],
+    id_factory: Callable[[str], str],
+    runner: BacktestRunner | None = None,
+    harness: ThesisHarnessClient | None = None,
+) -> WorkflowRuntime:
+    skills = SkillRegistry(
+        (
+            ThesisSkill(
+                "research",
+                "1.0.0",
+                "Turn claims into falsifiable, point-in-time analyses.",
+                ("read_workspace", "run_backtest"),
+            ),
+            ThesisSkill(
+                "coding",
+                "1.0.0",
+                "Inspect tests before changing implementation.",
+                ("read_workspace", "write_patch"),
+            ),
+        )
+    )
+    profiles = {
+        "research-profile": ModelProfile(
+            profile_id="research-profile",
+            version="1.0.0",
+            provider="fake",
+            model="research-model",
+        ),
+        "coding-profile": ModelProfile(
+            profile_id="coding-profile",
+            version="1.0.0",
+            provider="fake",
+            model="coding-model",
+        ),
+    }
+    policies: dict[Role, RolePolicy] = {
+        "research": RolePolicy(
+            role="research",
+            version="1.0.0",
+            model_profile="research-profile",
+            skills=("research",),
+            allowed_tools=("read_workspace", "run_backtest"),
+        ),
+        "coding": RolePolicy(
+            role="coding",
+            version="1.0.0",
+            model_profile="coding-profile",
+            skills=("coding",),
+            allowed_tools=("read_workspace", "write_patch"),
+        ),
+    }
+    return build_workflow_runtime(
+        role_policies=policies,
+        model_profiles=profiles,
+        providers={"fake": provider},
+        skills=skills,
+        harness=harness,
+        runner=runner,
+        bundle=PolicyBundle(
+            bundle_id="thesis-platform",
+            version="1.0.0",
+            bundle_sha256="a" * 64,
+            policy_sha256="b" * 64,
+        ),
+        clock=clock,
+        id_factory=id_factory,
+    )
+
+
+def test_build_workflow_runtime_composes_router_and_harness_runner() -> None:
+    provider = FakeProvider(_hypothesis_envelope())
+    port = FakeHarnessPort()
+    runtime = _runtime(
+        provider=provider,
+        clock=_clock(),
+        id_factory=_id_factory(),
+        harness=ThesisHarnessClient(port),
+    )
+
+    assert isinstance(runtime.router, ModelRouter)
+    assert isinstance(runtime.runner, HarnessBacktestRunner)
+    decision = runtime.router.resolve("research")
+    assert decision.profile.provider == "fake"
+    assert decision.profile.model == "research-model"
+    assert decision.skill_bundle.versions == ("research@1.0.0",)
+
+    result = runtime.runner.run(
+        BacktestRunRequest(
+            run_id="run-1",
+            bundle=_bundle(),
+            workflow_execution_id="execution-1",
+            experiment_id="experiment-1",
+        )
+    )
+
+    assert result.succeeded is True
+    assert len(port.launched) == 1
+    assert port.launched[0].run_id == "run-1"
+
+
+def test_build_workflow_runtime_accepts_injected_runner_override() -> None:
+    runner = FakeRunner(metrics={"sharpe": 1.0})
+    runtime = _runtime(
+        provider=FakeProvider(_hypothesis_envelope()),
+        clock=_clock(),
+        id_factory=_id_factory(),
+        runner=runner,
+    )
+
+    assert runtime.runner is runner
+
+
+def test_build_workflow_runtime_requires_harness_or_runner() -> None:
+    with pytest.raises(WorkflowRuntimeError, match="harness client"):
+        _runtime(
+            provider=FakeProvider(_hypothesis_envelope()),
+            clock=_clock(),
+            id_factory=_id_factory(),
+        )
+
+
+def test_build_model_router_wires_providers_and_skills() -> None:
+    provider = FakeProvider(_hypothesis_envelope())
+    skills = SkillRegistry(
+        (ThesisSkill("research", "1.0.0", "Analyze claims.", ("run_backtest",)),)
+    )
+    router = build_model_router(
+        role_policies={
+            "research": RolePolicy(
+                role="research",
+                version="1.0.0",
+                model_profile="research-profile",
+                skills=("research",),
+                allowed_tools=("run_backtest",),
+            )
+        },
+        model_profiles={
+            "research-profile": ModelProfile(
+                profile_id="research-profile",
+                version="1.0.0",
+                provider="fake",
+                model="research-model",
+            )
+        },
+        providers={"fake": provider},
+        skills=skills,
+    )
+
+    decision = router.resolve("research")
+    assert decision.role == "research"
+    assert decision.allowed_tools == ("run_backtest",)
+
+
+def test_hypothesis_validation_executes_end_to_end(tmp_path: Path) -> None:
+    provider = FakeProvider(_hypothesis_envelope())
+    runner = FakeRunner(
+        metrics={"sharpe": 1.4, "hitRate": 0.58},
+        manifest={"manifestId": "manifest-h-1", "sha256": "c" * 64},
+        result_artifacts=[
+            {"uri": "run-1/fills.csv", "sha256": "d" * 64, "mediaType": "text/csv"}
+        ],
+    )
+    clock = _clock()
+    id_factory = _id_factory()
+    runtime = _runtime(
+        provider=provider,
+        clock=clock,
+        id_factory=id_factory,
+        runner=runner,
+    )
+    chat = ChatService(clock=clock, id_factory=id_factory)
+    journal = CommandJournal(tmp_path / "hypothesis-journal.sqlite3")
+    workflow = runtime.build_hypothesis_validation(chat=chat, journal=journal)
+    assert isinstance(workflow, HypothesisValidationWorkflow)
+    chat_id = chat.create_chat(
+        WORKSPACE, title="hypothesis chat", owner_actor_id=OWNER
+    ).chat_id
+    request = workflow.launch(WORKSPACE, chat_id, actor_id=OWNER, claim=CLAIM)
+
+    outcome = runtime.execute_hypothesis_validation(request, chat=chat, journal=journal)
+
+    assert outcome.phase is HypothesisValidationPhase.COMPLETED
+    assert outcome.verdict is not None
+    assert outcome.verdict.outcome == VERDICT_SUPPORTED
+    assert outcome.report is not None
+    assert outcome.journal_id == f"workflow-{request.execution_id}"
+    assert len(provider.prompts) == 1
+    assert len(runner.requests) == 1
+
+
+def test_strategy_development_executes_end_to_end(tmp_path: Path) -> None:
+    provider = FakeProvider(_strategy_envelope())
+    runner = FakeRunner(metrics={"sharpe": 1.25}, manifest=None)
+    clock = _clock()
+    id_factory = _id_factory()
+    runtime = _runtime(
+        provider=provider,
+        clock=clock,
+        id_factory=id_factory,
+        runner=runner,
+    )
+    chat = ChatService(clock=clock, id_factory=id_factory)
+    validator = FakeValidator()
+    workflow = runtime.build_strategy_development(chat=chat, validator=validator)
+    assert isinstance(workflow, StrategyDevelopmentWorkflow)
+    chat_id = chat.create_chat(
+        WORKSPACE, title="strategy chat", owner_actor_id=OWNER
+    ).chat_id
+    request = workflow.launch(
+        WORKSPACE,
+        chat_id,
+        actor_id=OWNER,
+        objective="Build a momentum strategy",
+    )
+
+    outcome = runtime.execute_strategy_development(
+        request, chat=chat, validator=validator
+    )
+
+    assert outcome.phase is StrategyDevelopmentPhase.COMPLETED
+    assert outcome.bundle is not None
+    assert outcome.backtest is not None
+    assert outcome.backtest.succeeded is True
+    assert outcome.import_receipt is None
+    assert len(provider.prompts) == 1
+    assert len(runner.requests) == 1
+    assert len(validator.requests) == 1
+
+
+def test_workflow_runtime_rejects_runner_without_run_port() -> None:
+    router = build_model_router(
+        role_policies={},
+        model_profiles={},
+        providers={},
+        skills=SkillRegistry(),
+    )
+    with pytest.raises(WorkflowRuntimeError, match="BacktestRunner port"):
+        WorkflowRuntime(router=router, runner=object())  # type: ignore[arg-type]

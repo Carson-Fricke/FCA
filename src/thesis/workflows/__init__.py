@@ -48,6 +48,12 @@ from thesis.workflows.rca import (
     RcaRevisionLoopState,
     RcaRevisionLoopWorkflow,
 )
+from thesis.workflows.runtime import (
+    WorkflowRuntime,
+    WorkflowRuntimeError,
+    build_model_router,
+    build_workflow_runtime,
+)
 from thesis.workflows.strategy_development import (
     STRATEGY_DEVELOPMENT_PHASES,
     STRATEGY_DEVELOPMENT_WORKFLOW,
@@ -115,6 +121,10 @@ __all__ = [
     "VERDICT_REFUTED",
     "VERDICT_SUPPORTED",
     "WorkflowError",
+    "WorkflowRuntime",
+    "WorkflowRuntimeError",
     "build_evidence_report",
+    "build_model_router",
+    "build_workflow_runtime",
     "transition_phase",
 ]
