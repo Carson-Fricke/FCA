@@ -15,6 +15,8 @@ fn config_dir() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
+        .join("..")
+        .join("..")
         .join("config")
         .join("harness")
 }
@@ -92,6 +94,8 @@ fn backtest_canonical_json_matches_python() {
 #[test]
 fn validation_rejects_malformed_documents() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
         .join("..")
         .join("..")
         .join("..")

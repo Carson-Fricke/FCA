@@ -11,7 +11,7 @@ exact strings that drive byte-identical artifacts are covered.
 
 Run from the repository root::
 
-    uv run python rust/crates/harness-num/tests/generate_pydecimal_golden.py
+    uv run python src/harness/rust/crates/harness-num/tests/generate_pydecimal_golden.py
 """
 
 from __future__ import annotations

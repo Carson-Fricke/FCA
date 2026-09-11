@@ -11,8 +11,8 @@ Enable the flip with ``HARNESS_USE_RUST_ENTRYPOINTS=1`` (or ``true``/``yes``/
 ``on``). Binary discovery order:
 
 1. ``HARNESS_RUST_BINARY_DIR`` when set.
-2. ``rust/target/release`` under the repository root.
-3. ``rust/target/debug`` under the repository root.
+2. ``src/harness/rust/target/release`` under the repository root.
+3. ``src/harness/rust/target/debug`` under the repository root.
 
 The flip is scoped to entrypoints whose Rust implementation is verified
 complete:
@@ -103,8 +103,8 @@ def _candidate_dirs() -> tuple[Path, ...]:
     if configured:
         dirs.append(Path(configured))
     repository_root = Path(__file__).resolve().parents[3]
-    dirs.append(repository_root / "rust" / "target" / "release")
-    dirs.append(repository_root / "rust" / "target" / "debug")
+    dirs.append(repository_root / "src" / "harness" / "rust" / "target" / "release")
+    dirs.append(repository_root / "src" / "harness" / "rust" / "target" / "debug")
     return tuple(dirs)
 
 

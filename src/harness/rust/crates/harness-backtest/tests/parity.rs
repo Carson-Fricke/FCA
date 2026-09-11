@@ -40,7 +40,12 @@ fn crate_dir() -> PathBuf {
 }
 
 fn repo_root() -> PathBuf {
-    crate_dir().join("..").join("..").join("..")
+    crate_dir()
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("..")
 }
 
 fn golden(name: &str) -> Vec<u8> {

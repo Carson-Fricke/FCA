@@ -848,6 +848,8 @@ mod tests {
             .join("..")
             .join("..")
             .join("..")
+            .join("..")
+            .join("..")
             .join("config")
             .join("harness")
             .join("backtest.yaml")

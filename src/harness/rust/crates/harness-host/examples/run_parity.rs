@@ -5,6 +5,8 @@ fn repo_root() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
+        .join("..")
+        .join("..")
 }
 
 fn main() {

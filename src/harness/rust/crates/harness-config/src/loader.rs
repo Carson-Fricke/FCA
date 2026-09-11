@@ -128,6 +128,8 @@ pub fn harness_config_dir(root: Option<&std::path::Path>) -> std::path::PathBuf 
             Err(_) => std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("..")
                 .join("..")
+                .join("..")
+                .join("..")
                 .join(".."),
         },
     };

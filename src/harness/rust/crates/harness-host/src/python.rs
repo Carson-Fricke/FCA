@@ -67,8 +67,14 @@ pub fn json_dumps(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<String> 
 /// ambient interpreter instead of the checkout.
 #[must_use]
 pub fn workspace_root() -> Option<PathBuf> {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest.parent()?.parent()?.parent().map(Path::to_path_buf)
+    let mut current = Path::new(env!("CARGO_MANIFEST_DIR"));
+    while let Some(parent) = current.parent() {
+        if parent.join("src").join("harness").is_dir() && parent.join("pyproject.toml").is_file() {
+            return Some(parent.to_path_buf());
+        }
+        current = parent;
+    }
+    None
 }
 
 /// Default import paths for the embedded interpreter.

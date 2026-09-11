@@ -1295,6 +1295,8 @@ mod tests {
             .join("..")
             .join("..")
             .join("..")
+            .join("..")
+            .join("..")
             .join("tests")
             .join("strategy_lint")
             .join("fixtures");

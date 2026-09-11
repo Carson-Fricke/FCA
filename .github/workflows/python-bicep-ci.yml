@@ -10,7 +10,7 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - "setup.py"
-      - "rust/**"
+      - "src/harness/rust/**"
       - "Dockerfile"
       - ".dockerignore"
       - "infra/**"
@@ -26,7 +26,7 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - "setup.py"
-      - "rust/**"
+      - "src/harness/rust/**"
       - "Dockerfile"
       - ".dockerignore"
       - "infra/**"
@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 25
     defaults:
       run:
-        working-directory: rust
+        working-directory: src/harness/rust
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -128,7 +128,7 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
 
       - name: Build Rust native core
-        run: cargo build --locked -p harness-native --manifest-path rust/Cargo.toml
+        run: cargo build --locked -p harness-native --manifest-path src/harness/rust/Cargo.toml
 
       - name: Sync locked development environment
         run: uv sync --locked --extra dev

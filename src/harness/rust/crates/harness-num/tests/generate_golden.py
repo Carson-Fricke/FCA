@@ -12,7 +12,7 @@ aborts generation. The output is checked in as Rust test data.
 
 Run from the repository root::
 
-    uv run python rust/crates/harness-num/tests/generate_golden.py
+    uv run python src/harness/rust/crates/harness-num/tests/generate_golden.py
 """
 
 from __future__ import annotations
