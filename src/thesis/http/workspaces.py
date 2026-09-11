@@ -21,8 +21,9 @@ from typing import Annotated, Protocol
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from thesis.artifacts.importer import ArtifactImporter
 from thesis.chat import ChatService, ChatState
-from thesis.http.backtests import BacktestDataService
+from thesis.http.backtests import BacktestDataService, BacktestStore
 from thesis.http.dashboards import (
     DashboardDataService,
     InMemoryWidgetStore,
@@ -434,6 +435,8 @@ def build_local_workspace_data(
     harness_boundary: HarnessBoundary | None = None,
     chat_service: ChatService | None = None,
     market_port: ScreenerMarketPort | None = None,
+    backtest_store: BacktestStore | None = None,
+    artifact_importer: ArtifactImporter | None = None,
     clock: Callable[[], datetime] | None = None,
     id_factory: Callable[[str], str] | None = None,
 ) -> WorkspaceDataBundle:
@@ -443,6 +446,9 @@ def build_local_workspace_data(
     process runner; without one the backtest launch surface fails closed.
     ``harness_transport`` builds the status client behind the portfolio and
     risk-decision seams; without one those surfaces fail closed with 503.
+    ``backtest_store`` and ``artifact_importer`` inject the backtest run
+    persistence boundary and the harness artifact importer; without them the
+    backtest service keeps its own in-memory store and imports no artifacts.
     Widget definitions and workspace-state documents persist under
     ``workspace_root`` when one is supplied, else in memory.  When
     ``workspace_root`` is supplied, workspaces themselves persist as literal
@@ -478,7 +484,11 @@ def build_local_workspace_data(
     strategies = StrategyDataService(clock=resolved_clock, id_factory=ids)
 
     backtests = BacktestDataService(
-        harness=harness, clock=resolved_clock, id_factory=ids
+        backtest_store,
+        harness=harness,
+        importer=artifact_importer,
+        clock=resolved_clock,
+        id_factory=ids,
     )
     deployments = DeploymentDataService(status_client=status_client)
     dashboards = DashboardDataService(
