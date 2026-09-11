@@ -15,8 +15,10 @@ RUN apt-get update \
 
 COPY src/harness/ ./
 
-RUN cargo test --locked --workspace \
-    && cargo build --locked --release -p native \
+# Compile the workspace and the process binaries. Tests run in CI (and need the
+# Python strategy-host environment plus the repository `config/` tree, neither
+# of which is in this build stage), so this stage only builds artifacts.
+RUN cargo build --locked --release -p native \
     && cargo build --locked --release -p api --bins \
     && cargo build --locked --release -p live --bin trader
 
