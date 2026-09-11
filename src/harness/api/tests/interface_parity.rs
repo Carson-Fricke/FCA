@@ -78,6 +78,7 @@ fn http_app() -> Router {
         sas_issuer: None,
         clock,
         configuration_parser: Arc::new(StrictJsonConfigurationParser),
+        mcp_server: None,
     })
     .expect("app")
 }
