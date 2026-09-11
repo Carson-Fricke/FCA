@@ -5,10 +5,10 @@ console scripts are thin shims that exec the matching Rust binary, so
 ``harness``, ``api``, ``backtest-job``, and ``trader`` all resolve to the Rust
 process implementations.
 
-``trader`` resolves to the Rust ``trader`` binary; the live supervision runner
-is deferred (the Rust live core is a deterministic session demo, not yet a
-configured paper/shadow supervision runner), so that process is documented as
-deferred in ``rust-interface-migration.md``.
+``trader`` resolves to the Rust ``trader`` binary, which runs the configured
+paper/shadow supervision runner (configuration loading, session lifecycle,
+live-feed supervision with reconnect and backoff, continuous reconciliation,
+kill-switch polling, and snapshot save/restore).
 
 Binary discovery order:
 

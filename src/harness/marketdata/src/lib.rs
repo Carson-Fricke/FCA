@@ -24,6 +24,7 @@ pub mod events;
 pub mod gap_healing;
 pub mod history;
 pub mod lake;
+pub mod lake_reader;
 pub mod listing_events;
 pub mod options_replay;
 pub mod options_universe;
@@ -61,6 +62,7 @@ pub use lake::{
     FileQuerySummary, JobStatus, LakeClientPort, MarketLakeAdapter, MarketLakeLoad,
     MarketLakeRequest,
 };
+pub use lake_reader::{write_lake_partition, LocalLakeReader};
 pub use listing_events::{
     CorporateActionEvent, CorporateActionKind, ListingEventDeriver, PessimisticDelistingSettlement,
 };

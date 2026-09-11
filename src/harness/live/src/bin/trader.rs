@@ -1,73 +1,63 @@
-//! Deterministic trader entrypoint over the Rust live core.
+//! Supervised trader process entrypoint over the Rust supervision runner.
 //!
-//! Runs one scripted session: stage a quote, submit a market order, and print
-//! the resulting OMS lifecycle, position, and cash. There is no network,
-//! wall-clock, or random access on this path.
+//! Loads a trader configuration document, composes the durable state store,
+//! kill-switch gate, market-data boundary, and supervision journal, then runs
+//! one supervised paper or shadow session to a terminal outcome. The process
+//! exit code is the supervision exit code the platform observes.
+//!
+//! The market-data boundary is injected: this binary runs the deterministic
+//! in-process paper feed supplied by the deployment composition (no network),
+//! while the configured Alpaca adapter is wired by the runtime environment.
 
-use std::error::Error;
+use std::path::Path;
+use std::process::ExitCode;
 
-use live::events::{MarketEvent, QuoteEvent};
-use live::orders::{OrderType, Side, SingleLegOrder, TimeInForce};
-use live::risk::limits::MaxOrderNotional;
-use live::risk::models::RiskRule;
-use live::risk::pipeline::OnReject;
-use live::symbol::Symbol;
-use live::trader::{SubmitOutcome, TraderConfig, TraderCore};
-use num::Decimal18;
+use clap::{Parser, Subcommand};
 
-fn dec(value: &str) -> Result<Decimal18, Box<dyn Error>> {
-    Ok(value.parse()?)
+use live::supervision::{
+    read_supervision_status, run_trader_process, TraderExitCode, DEFAULT_CONFIG_PATH,
+};
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "trader",
+    about = "Run one supervised paper or shadow trading session to completion.",
+    disable_help_subcommand = true
+)]
+struct TraderCli {
+    /// Path to the trader configuration document.
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_CONFIG_PATH)]
+    config: String,
+
+    /// Optional subcommands.
+    #[command(subcommand)]
+    command: Option<TraderCommand>,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let config = TraderConfig {
-        account_id: "paper-account".to_string(),
-        book_id: "strategy-book".to_string(),
-        initial_cash: dec("100000")?,
-        venue: "sim".to_string(),
-    };
-    let rules: Vec<Box<dyn RiskRule>> = vec![Box::new(MaxOrderNotional::new(
-        "max-notional",
-        dec("100000")?,
-    )?)];
-    let mut trader = TraderCore::new(config, rules, OnReject::RejectOrder)?;
+#[derive(Debug, Subcommand)]
+enum TraderCommand {
+    /// Print the latest supervision document for the configured run.
+    #[command(name = "status")]
+    Status,
+}
 
-    let symbol = Symbol::new("AAPL")?;
-    trader.on_market(MarketEvent::Quote(QuoteEvent::new(
-        symbol.clone(),
-        dec("100")?,
-        dec("50")?,
-        dec("101")?,
-        dec("50")?,
-        Some("sim".to_string()),
-    )?))?;
+fn main() -> ExitCode {
+    let cli = TraderCli::parse();
+    match cli.command {
+        Some(TraderCommand::Status) => status(&cli.config),
+        None => ExitCode::from(run_trader_process(Path::new(&cli.config)).code()),
+    }
+}
 
-    let order = SingleLegOrder::new(
-        "demo-order",
-        symbol,
-        Side::Buy,
-        dec("10")?,
-        OrderType::Market,
-        TimeInForce::Day,
-        None,
-        None,
-        None,
-    )?;
-
-    match trader.submit(order)? {
-        SubmitOutcome::Approved(snapshot) => {
-            println!(
-                "approved order={} status={} filled={}",
-                snapshot.order_id(),
-                snapshot.status.as_str(),
-                snapshot.filled_quantity
-            );
+fn status(config_path: &str) -> ExitCode {
+    match read_supervision_status(Path::new(config_path)) {
+        Some(payload) => {
+            println!("{payload}");
+            ExitCode::SUCCESS
         }
-        SubmitOutcome::Rejected(decision) => {
-            println!("rejected reason={:?}", decision.reason);
+        None => {
+            eprintln!("no supervision record for {config_path}");
+            ExitCode::from(TraderExitCode::Failed.code())
         }
     }
-    let position = trader.position("AAPL")?;
-    println!("position={} cash={}", position.quantity, trader.cash()?);
-    Ok(())
 }

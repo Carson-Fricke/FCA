@@ -15,6 +15,7 @@ fn main() -> ExitCode {
     match run(cli, &NativeBacktestJobRunner) {
         CommandResult::ServeApi(args) => http::cli::serve_api_blocking(&args),
         CommandResult::ServeMcp(args) => mcp_cli::serve_mcp_blocking(&args),
+        CommandResult::RunTrader(args) => api::run_trader(&args),
         other => emit(other),
     }
 }
