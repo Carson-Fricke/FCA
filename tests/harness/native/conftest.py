@@ -3,7 +3,7 @@
 The native library is a build artifact, not a Python dependency. Tests that
 need it load it once per session; when the library has not been built yet the
 tests skip with the loader's explicit reason so the default ``pytest`` run
-stays green on a machine without a prior ``zig build``.
+stays green on a machine without a prior ``cargo build -p harness-native``.
 """
 
 from __future__ import annotations
