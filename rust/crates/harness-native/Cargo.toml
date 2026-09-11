@@ -10,6 +10,13 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# arrow-rs is used only for the Arrow C Data Interface (`arrow::ffi`): the
+# crate itself is pulled in with `default-features = false` so the native core
+# stays free of the CSV/IPC/JSON stacks. The batch producer is expressed with
+# `ArrowArray`/`ArrowSchema` rather than a hand-rolled ABI struct.
+arrow = { version = "59.3", default-features = false, features = ["ffi"] }
+arrow-array = { version = "59.3", features = ["ffi"] }
+arrow-schema = { version = "59.3", features = ["ffi"] }
 
 [dev-dependencies]
 harness-num = { path = "../harness-num" }
