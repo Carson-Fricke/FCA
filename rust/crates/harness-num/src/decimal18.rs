@@ -41,6 +41,10 @@ pub enum DecimalError {
     NonFinite,
     /// The requested rounding precision is outside `0..=SCALE`.
     InvalidScale,
+    /// A context operation (for example `PyDecimal::quantize`) would produce a
+    /// result the context cannot represent. Mirrors Python's
+    /// `decimal.InvalidOperation`.
+    InvalidOperation,
 }
 
 impl fmt::Display for DecimalError {
@@ -51,6 +55,7 @@ impl fmt::Display for DecimalError {
             Self::InvalidText => "invalid decimal literal",
             Self::NonFinite => "non-finite decimal input",
             Self::InvalidScale => "invalid decimal scale",
+            Self::InvalidOperation => "decimal operation is invalid for the context",
         };
         formatter.write_str(message)
     }

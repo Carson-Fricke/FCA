@@ -117,6 +117,29 @@ impl U256 {
         }
     }
 
+    /// Divide by a small 32-bit value, returning the quotient and the `u32`
+    /// remainder. Used by decimal digit extraction. `divisor` must be non-zero.
+    pub(crate) fn div_rem_u32(self, divisor: u32) -> (Self, u32) {
+        debug_assert!(divisor != 0, "division by zero");
+        let limbs = [
+            self.low as u64,
+            (self.low >> 64) as u64,
+            self.high as u64,
+            (self.high >> 64) as u64,
+        ];
+        let divisor = u128::from(divisor);
+        let mut remainder: u128 = 0;
+        let mut quotient_limbs = [0u64; 4];
+        for index in (0..4).rev() {
+            let current = (remainder << 64) | u128::from(limbs[index]);
+            quotient_limbs[index] = (current / divisor) as u64;
+            remainder = current % divisor;
+        }
+        let low = u128::from(quotient_limbs[0]) | (u128::from(quotient_limbs[1]) << 64);
+        let high = u128::from(quotient_limbs[2]) | (u128::from(quotient_limbs[3]) << 64);
+        (Self { high, low }, remainder as u32)
+    }
+
     /// Divide `numerator` by `denominator`, returning the quotient and remainder.
     ///
     /// Binary long division; `denominator` must be non-zero. Allocation-free.

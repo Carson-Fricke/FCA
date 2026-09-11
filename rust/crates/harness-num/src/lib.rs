@@ -6,11 +6,15 @@
 //! `i128` unscaled value at scale 18 (`decimal128(38, 18)`) with checked
 //! arithmetic, explicit rounding modes, and allocation-free hot paths.
 //!
-//! Float64 batch quant kernels arrive in a follow-up task.
+//! [`PyDecimal`] is the variable-scale companion that reproduces Python's
+//! `decimal.Decimal`: it preserves the context-visible scale and formatting
+//! contract needed for byte-identical artifacts.
 
 mod decimal18;
+mod pydecimal;
 mod wide;
 
 pub use decimal18::{
     Decimal18, DecimalError, RoundingMode, MAX_UNSCALED, MIN_UNSCALED, ONE_UNSCALED, SCALE,
 };
+pub use pydecimal::{Context, PyDecimal, DEFAULT_PRECISION, INDICATOR_PRECISION};
