@@ -149,7 +149,7 @@ resource traderRestartAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = 
   location: 'global'
   tags: tags
   properties: {
-    description: 'Operator and deployment management operations on the trader Container Apps: revision restarts, min-replica scale changes, and configuration updates. Platform-internal replica reboots do not appear in the activity log; query alerts and supervision documents cover those.'
+    description: 'Operator and deployment management operations (write and revision restart) on the Container Apps in this resource group, including the trader apps. Activity log conditions cannot filter on a resource-name substring, so this rule is scoped by resource type within the group; platform-internal replica reboots do not appear in the activity log and are covered by query alerts and supervision documents.'
     enabled: true
     scopes: [
       resourceGroup().id
@@ -163,12 +163,6 @@ resource traderRestartAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = 
         {
           field: 'resourceType'
           equals: 'Microsoft.App/containerApps'
-        }
-        {
-          field: 'resourceUri'
-          containsAny: [
-            'trader'
-          ]
         }
         {
           anyOf: [
