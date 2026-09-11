@@ -12,7 +12,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PYO3_PYTHON=/usr/local/bin/python3.12
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl build-essential pkg-config \
+    && apt-get install -y --no-install-recommends ca-certificates curl build-essential pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/* \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
        | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path
