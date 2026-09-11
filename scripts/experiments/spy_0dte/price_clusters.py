@@ -1,9 +1,16 @@
 """SPY intraday price-path clustering study (6-year dataset).
 
 Downloads 6 years of SPY 1-minute bars from Alpaca, normalizes each session
-to a percentage-change-from-open price path, clusters them using k-Shape
-(shape-based distance via normalized cross-correlation), and computes
-per-cluster per-minute statistics (% positive, % negative, mean return).
+to a percentage-change-from-open price path, clusters them using HDBSCAN
+(density-based, finds natural families without pre-specifying the count),
+and computes per-cluster per-minute statistics (% positive, % negative,
+mean return, percentile bands).
+
+HDBSCAN advantages over k-Shape for this use case:
+- Does not require pre-specifying the number of clusters
+- Identifies noise points (sessions that don't belong to any family)
+- Handles clusters of varying density and shape
+- Soft clustering membership probabilities quantify confidence
 
 Writes a JSON fixture consumed by the thesis UI clustering study page:
 
@@ -14,7 +21,7 @@ Run:
     uv run --extra dev python scripts/experiments/spy_0dte/price_clusters.py `
         --data-root .local/spy-clusters `
         --out src/ui/src/lib/data/spy0dteClusters.js `
-        --years 6 --clusters 8
+        --years 6 --min-cluster-size 25
 """
 
 from __future__ import annotations
@@ -25,15 +32,12 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import hdbscan
 import numpy as np
 from osi import closed_sessions
 
 from lake.configuration import load_settings
 from lake.providers.alpaca.client import AlpacaClient
-
-# ---------------------------------------------------------------------------
-# Data download
-# ---------------------------------------------------------------------------
 
 
 async def download_bars(
@@ -80,11 +84,6 @@ async def download_bars(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Normalization
-# ---------------------------------------------------------------------------
-
-
 def normalize_paths(
     raw_bars: dict[str, list[float]], target_length: int = 390
 ) -> tuple[np.ndarray, list[str]]:
@@ -107,113 +106,53 @@ def normalize_paths(
             path = np.pad(pct_change, (0, target_length - len(pct_change)), mode="edge")
         paths.append(path)
         valid_keys.append(key)
-    matrix = np.array(paths, dtype=np.float64)
-    return matrix, valid_keys
+    return np.array(paths, dtype=np.float64), valid_keys
 
 
-# ---------------------------------------------------------------------------
-# k-Shape clustering (SBD distance + normalized centroid)
-# ---------------------------------------------------------------------------
+def zscore_batch(paths: np.ndarray) -> np.ndarray:
+    """Z-normalize every path (remove mean and scale)."""
+    means = np.mean(paths, axis=1, keepdims=True)
+    stds = np.std(paths, axis=1, keepdims=True)
+    stds[stds < 1e-10] = 1.0
+    return (paths - means) / stds
 
 
-def _nccc(x: np.ndarray, y: np.ndarray) -> float:
-    """Normalized cross-correlation between two sequences."""
-    x_norm = np.linalg.norm(x)
-    y_norm = np.linalg.norm(y)
-    if x_norm < 1e-10 or y_norm < 1e-10:
-        return 0.0
-    n = len(x)
-    fft_len = 2 * n
-    fft_x = np.fft.rfft(x, fft_len)
-    fft_y = np.fft.rfft(y[::-1], fft_len)
-    corr = np.fft.irfft(fft_x * fft_y, fft_len)
-    corr = corr[n - 1 :]
-    return float(np.max(corr) / (x_norm * y_norm))
-
-
-def sbd(x: np.ndarray, y: np.ndarray) -> float:
-    """Shape-based distance: 1 - max NCC, invariant to shift and scale."""
-    return 1.0 - _nccc(x, y)
-
-
-def _zscore(path: np.ndarray) -> np.ndarray:
-    std = np.std(path)
-    if std < 1e-10:
-        return np.zeros_like(path)
-    return (path - np.mean(path)) / std
-
-
-def kshape(
-    paths: np.ndarray, k: int, max_iter: int = 100, seed: int = 42
+def hdbscan_cluster(
+    paths: np.ndarray,
+    min_cluster_size: int = 25,
+    min_samples: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """k-Shape clustering. Returns (labels, centroids)."""
-    rng = np.random.default_rng(seed)
-    n = len(paths)
-    zpaths = np.array([_zscore(p) for p in paths])
-    indices = rng.permutation(n)[:k]
-    centroids = np.array([zpaths[i] for i in indices])
+    """HDBSCAN clustering on z-normalized paths.
 
-    labels = np.full(n, -1, dtype=int)
-    for iteration in range(max_iter):
-        new_labels = np.full(n, -1, dtype=int)
-        for i in range(n):
-            distances = [sbd(zpaths[i], centroids[j]) for j in range(k)]
-            new_labels[i] = int(np.argmin(distances))
-        if np.array_equal(new_labels, labels) and iteration > 0:
-            break
-        labels = new_labels
-        for j in range(k):
-            members = np.where(labels == j)[0]
-            if len(members) == 0:
-                continue
-            centroids[j] = _shape_extraction(zpaths[members])
-    return labels, centroids
+    Returns (labels, probabilities). Labels: -1 = noise, 0..k-1 = cluster.
+    """
+    z_paths = zscore_batch(paths)
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=min_cluster_size,
+        min_samples=min_samples,
+        metric="euclidean",
+        cluster_selection_method="eom",
+    )
+    labels = clusterer.fit_predict(z_paths)
+    probabilities = clusterer.probabilities_
 
-
-def _shape_extraction(members: np.ndarray) -> np.ndarray:
-    """Compute the k-Shape centroid via cross-correlation alignment."""
-    m = len(members)
-    if m == 1:
-        return members[0].copy()
-    n = len(members[0])
-    fft_len = 2 * n
-
-    ref = members[0]
-    ref_norm = np.linalg.norm(ref)
-    if ref_norm < 1e-10:
-        ref_norm = 1.0
-
-    # Sum normalized cross-correlation across all members at each shift
-    sum_ncc = np.zeros(n)
-    for i in range(m):
-        y = members[i]
-        y_norm = np.linalg.norm(y)
-        if y_norm < 1e-10:
-            continue
-        corr_full = np.fft.irfft(
-            np.fft.rfft(ref, fft_len) * np.fft.rfft(y[::-1], fft_len),
-            fft_len,
-        )
-        sum_ncc += corr_full[n - 1 : n - 1 + n] / (ref_norm * y_norm)
-
-    best_shift = int(np.argmax(sum_ncc))
-    aligned = np.array([np.roll(m, best_shift) for m in members])
-    centroid = np.mean(aligned, axis=0)
-    return _zscore(centroid)
-
-
-# ---------------------------------------------------------------------------
-# Per-cluster statistics
-# ---------------------------------------------------------------------------
+    unique = sorted(set(labels) - {-1})
+    remap = {old: new for new, old in enumerate(unique)}
+    remapped = np.array([remap.get(label, -1) for label in labels])
+    return remapped, probabilities
 
 
 def cluster_stats(
-    paths: np.ndarray, labels: np.ndarray, keys: list[str], k: int
+    paths: np.ndarray,
+    labels: np.ndarray,
+    keys: list[str],
+    probabilities: np.ndarray | None = None,
 ) -> list[dict]:
-    """Per-cluster statistics: centroid, % positive per minute, count, avg return."""
+    """Per-cluster statistics: centroid, percentile bands, % positive, count."""
     clusters: list[dict] = []
-    for j in range(k):
-        members = np.where(labels == j)[0]
+    unique = sorted(set(labels) - {-1})
+    for cluster_id in unique:
+        members = np.where(labels == cluster_id)[0]
         if len(members) == 0:
             continue
         member_paths = paths[members]
@@ -221,24 +160,28 @@ def cluster_stats(
         pct_positive = np.mean(member_paths > 0, axis=0) * 100
         pct_negative = np.mean(member_paths < 0, axis=0) * 100
         avg_return = float(np.mean(member_paths[:, -1]))
-        clusters.append(
-            {
-                "cluster": j,
-                "count": int(len(members)),
-                "avgReturn": round(avg_return, 4),
-                "sessions": [keys[i] for i in members],
-                "centroid": [round(float(v), 4) for v in centroid],
-                "pctPositive": [round(float(v), 2) for v in pct_positive],
-                "pctNegative": [round(float(v), 2) for v in pct_negative],
-            }
-        )
+        p25 = np.percentile(member_paths, 25, axis=0)
+        p75 = np.percentile(member_paths, 75, axis=0)
+        p10 = np.percentile(member_paths, 10, axis=0)
+        p90 = np.percentile(member_paths, 90, axis=0)
+        entry: dict = {
+            "cluster": cluster_id,
+            "count": int(len(members)),
+            "avgReturn": round(avg_return, 4),
+            "sessions": [keys[i] for i in members],
+            "centroid": [round(float(v), 4) for v in centroid],
+            "pctPositive": [round(float(v), 2) for v in pct_positive],
+            "pctNegative": [round(float(v), 2) for v in pct_negative],
+            "p25": [round(float(v), 4) for v in p25],
+            "p75": [round(float(v), 4) for v in p75],
+            "p10": [round(float(v), 4) for v in p10],
+            "p90": [round(float(v), 4) for v in p90],
+        }
+        if probabilities is not None:
+            entry["avgConfidence"] = round(float(np.mean(probabilities[members])), 4)
+        clusters.append(entry)
     clusters.sort(key=lambda c: -c["count"])
     return clusters
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -246,8 +189,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--years", type=int, default=6)
-    parser.add_argument("--clusters", type=int, default=8)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--min-cluster-size", type=int, default=25)
     args = parser.parse_args(argv)
     args.data_root = args.data_root.resolve()
     args.out = args.out.resolve()
@@ -276,14 +218,20 @@ async def run(args: argparse.Namespace) -> int:
     paths, keys = normalize_paths(raw_bars, target_length=390)
     print(f"normalized {len(paths)} price paths (390 minutes each)", flush=True)
 
-    k = args.clusters
-    labels, centroids = kshape(paths, k, seed=args.seed)
-    print(f"k-Shape clustering complete: k={k}", flush=True)
+    labels, probabilities = hdbscan_cluster(
+        paths, min_cluster_size=args.min_cluster_size
+    )
+    n_clusters = len(set(labels) - {-1})
+    n_noise = int(np.sum(labels == -1))
+    print(
+        f"HDBSCAN complete: {n_clusters} clusters, "
+        f"{n_noise} noise points ({n_noise / len(labels) * 100:.1f}%)",
+        flush=True,
+    )
 
-    cluster_data = cluster_stats(paths, labels, keys, k)
-    print(f"computed stats for {len(cluster_data)} non-empty clusters", flush=True)
+    cluster_data = cluster_stats(paths, labels, keys, probabilities)
+    print(f"computed stats for {len(cluster_data)} clusters", flush=True)
 
-    # Per-minute overall stats (all sessions pooled)
     pct_pos_overall = np.mean(paths > 0, axis=0) * 100
     pct_neg_overall = np.mean(paths < 0, axis=0) * 100
 
@@ -292,10 +240,12 @@ async def run(args: argparse.Namespace) -> int:
             "sessions": len(paths),
             "firstSession": keys[0] if keys else "",
             "lastSession": keys[-1] if keys else "",
-            "clusters": k,
+            "clusters": n_clusters,
+            "noisePoints": n_noise,
             "years": args.years,
+            "minClusterSize": args.min_cluster_size,
             "normalized": "percentage change from open, padded to 390 minutes",
-            "algorithm": "k-Shape (shape-based distance via normalized cross-correlation)",
+            "algorithm": "HDBSCAN (density-based, euclidean on z-normalized paths)",
         },
         "clusters": cluster_data,
         "overall": {
@@ -311,9 +261,11 @@ async def run(args: argparse.Namespace) -> int:
     )
     print(f"wrote {args.out}", flush=True)
     for cluster in cluster_data:
+        conf = cluster.get("avgConfidence")
+        conf_str = f", confidence {conf:.2f}" if conf is not None else ""
         print(
             f"  cluster {cluster['cluster']}: {cluster['count']} sessions, "
-            f"avg return {cluster['avgReturn']:+.2f}%",
+            f"avg return {cluster['avgReturn']:+.2f}%{conf_str}",
             flush=True,
         )
     return 0

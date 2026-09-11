@@ -1,11 +1,9 @@
 """Classification accuracy study: how early can you identify the day's family?
 
 For each minute N (1..390), classifies each session using only its price
-path through minute N — nearest cluster centroid under shape-based distance
-(SBD, the same shift-invariant metric the k-Shape clustering used) — and
-measures accuracy against the full-day cluster labels. At N = 390 accuracy
-is ~100% by construction (k-Shape's convergence condition); the curve shows
-how early the family shape becomes recognizable. Also computes per-cluster
+path through minute N — nearest cluster mean under Euclidean distance on
+z-normalized paths (the same metric HDBSCAN clusters with) — and measures
+accuracy against the HDBSCAN cluster labels. Also computes per-cluster
 per-minute percentile bands.
 
 Outputs a JSON fixture consumed by the thesis UI clustering study page:
@@ -27,8 +25,7 @@ import re
 from pathlib import Path
 
 import numpy as np
-
-from price_clusters import normalize_paths, sbd
+from price_clusters import normalize_paths, zscore_batch
 
 
 def classification_accuracy_by_minute(
@@ -37,7 +34,7 @@ def classification_accuracy_by_minute(
     k: int,
     check_minutes: list[int],
 ) -> list[dict]:
-    """For each check minute, classify by SBD to truncated-path centroids."""
+    """For each check minute, classify by nearest z-normalized cluster mean."""
     n = len(paths)
     results: list[dict] = []
 
@@ -45,14 +42,8 @@ def classification_accuracy_by_minute(
         if minute_n < 5 or minute_n > 390:
             continue
         truncated = paths[:, :minute_n]
-        z_truncated = np.array(
-            [
-                (p - np.mean(p)) / (np.std(p) if np.std(p) > 1e-10 else 1.0)
-                for p in truncated
-            ]
-        )
+        z_truncated = zscore_batch(truncated)
 
-        # Per-cluster centroids on the truncated paths
         centroids = np.zeros((k, minute_n))
         for j in range(k):
             members = np.where(labels == j)[0]
@@ -60,11 +51,16 @@ def classification_accuracy_by_minute(
                 continue
             centroids[j] = np.mean(z_truncated[members], axis=0)
 
-        # Nearest-centroid classification under SBD (shift-invariant)
-        predictions = np.zeros(n, dtype=int)
-        for i in range(n):
-            distances = [sbd(z_truncated[i], centroids[j]) for j in range(k)]
-            predictions[i] = int(np.argmin(distances))
+        # Vectorized nearest-centroid classification
+        # z_truncated: (n, minute_n), centroids: (k, minute_n)
+        # distances: (n, k)
+        distances = np.sqrt(
+            np.mean(
+                (z_truncated[:, np.newaxis, :] - centroids[np.newaxis, :, :]) ** 2,
+                axis=2,
+            )
+        )
+        predictions = np.argmin(distances, axis=1)
 
         accuracy = float(np.mean(predictions == labels))
         results.append(
@@ -83,25 +79,23 @@ def cluster_percentile_bands(
 ) -> list[dict]:
     """Per-cluster per-minute percentile bands around the centroid."""
     clusters: list[dict] = []
-    for j in range(k):
-        members = np.where(labels == j)[0]
+    unique = sorted(set(labels) - {-1})
+    for cluster_id in unique:
+        members = np.where(labels == cluster_id)[0]
         if len(members) == 0:
             continue
         member_paths = paths[members]
         centroid = np.mean(member_paths, axis=0)
-        p25 = np.percentile(member_paths, 25, axis=0)
-        p75 = np.percentile(member_paths, 75, axis=0)
-        p10 = np.percentile(member_paths, 10, axis=0)
-        p90 = np.percentile(member_paths, 90, axis=0)
+        percentiles = {}
+        for pct in (10, 25, 75, 90):
+            values = np.percentile(member_paths, pct, axis=0)
+            percentiles[f"p{pct}"] = [round(float(v), 4) for v in values]
         clusters.append(
             {
-                "cluster": j,
+                "cluster": cluster_id,
                 "count": int(len(members)),
                 "centroid": [round(float(v), 4) for v in centroid],
-                "p25": [round(float(v), 4) for v in p25],
-                "p75": [round(float(v), 4) for v in p75],
-                "p10": [round(float(v), 4) for v in p10],
-                "p90": [round(float(v), 4) for v in p90],
+                **percentiles,
             }
         )
     clusters.sort(key=lambda c: -c["count"])
@@ -161,7 +155,10 @@ def main(argv: list[str] | None = None) -> int:
     labeled = np.where(labels >= 0)[0]
     paths_labeled = paths[labeled]
     labels_labeled = labels[labeled]
-    print(f"labeled {len(labeled)}/{len(paths)} paths across {k} clusters", flush=True)
+    print(
+        f"labeled {len(labeled)}/{len(paths)} paths across {k} clusters",
+        flush=True,
+    )
 
     check_minutes = list(range(args.step_minutes, 391, args.step_minutes))
     accuracy = classification_accuracy_by_minute(
@@ -181,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
             "clusters": k,
             "checkMinutes": check_minutes,
             "randomBaseline": round(1.0 / k, 4),
-            "metric": "shape-based distance (SBD, shift-invariant)",
+            "metric": "euclidean on z-normalized paths",
         },
         "accuracyByMinute": accuracy,
         "iqrBands": iqr_bands,
@@ -195,13 +192,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"wrote {args.out}", flush=True)
 
+    baseline = 1.0 / k
     print(
-        f"\nClassification accuracy by minute (SBD, random baseline = {1.0 / k:.1%}):",
+        f"\nClassification accuracy by minute (random baseline = {baseline:.1%}):",
         flush=True,
     )
     for entry in accuracy:
-        headroom = 1.0 - entry["randomBaseline"]
-        filled = entry["accuracy"] - entry["randomBaseline"]
+        headroom = 1.0 - baseline
+        filled = entry["accuracy"] - baseline
         bar = "#" * max(0, int(filled / headroom * 40)) if headroom > 0 else ""
         print(
             f"  minute {entry['minute']:>3}: {entry['accuracy']:>6.1%} {bar}",
