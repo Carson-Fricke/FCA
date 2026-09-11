@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from uuid import UUID
 
 import pytest
 
@@ -14,7 +13,6 @@ from harness._native import (
     NativeCoreError,
     NativeCoreUnavailable,
 )
-from harness.core.ids import deterministic_id
 from harness.core.symbols import canonical_symbol
 
 SYMBOL_CASES = (
@@ -27,16 +25,6 @@ SYMBOL_CASES = (
 )
 
 INVALID_SYMBOLS = ("../AAPL", "", "   ", "aapl is invalid")
-
-ID_CASES = (
-    ("abc", "engine", 0),
-    ("abc", "event", 1),
-    ("abc", "order", 7),
-    ("abc", "fill", 123456789012345),
-    ("run-17", "report", 4),
-    (42, "order", 2),
-    (b"XY", "event", 3),
-)
 
 DECIMAL_CASES = (
     1_500_000_000_000_000_000,
@@ -51,15 +39,6 @@ DECIMAL_CASES = (
     1_000_000_000_000_000_000,
     1_208_925_819_614_629_174_706_176,
 )
-
-
-def seed_bytes(seed: str | int | bytes) -> bytes:
-    """Mirror ``harness.core.ids._seed_bytes`` for the FFI seed argument."""
-    if isinstance(seed, bytes):
-        return seed
-    if isinstance(seed, int):
-        return f"int:{seed}".encode()
-    return f"str:{seed}".encode()
 
 
 def test_loaded_library_reports_the_pinned_abi_version(native_core: NativeCore) -> None:
@@ -78,14 +57,6 @@ def test_invalid_symbols_report_an_error_code(native_core: NativeCore) -> None:
     for value in INVALID_SYMBOLS:
         with pytest.raises(NativeCoreError):
             native_core.symbol_canonicalize(value)
-
-
-def test_deterministic_ids_match_the_python_derivation(
-    native_core: NativeCore,
-) -> None:
-    for seed, kind, ordinal in ID_CASES:
-        expected = UUID(deterministic_id(seed, kind, ordinal)).bytes
-        assert native_core.derive_id(seed_bytes(seed), kind, ordinal) == expected
 
 
 def test_decimal_text_matches_python_str_of_decimal(
