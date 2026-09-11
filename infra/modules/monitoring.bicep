@@ -157,6 +157,10 @@ resource traderRestartAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = 
     condition: {
       allOf: [
         {
+          field: 'category'
+          equals: 'Administrative'
+        }
+        {
           field: 'resourceType'
           equals: 'Microsoft.App/containerApps'
         }
