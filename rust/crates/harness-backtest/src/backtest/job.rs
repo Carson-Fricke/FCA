@@ -281,10 +281,22 @@ pub fn run_job_with(
     let artifact_path = write_artifact(&directory, &configuration.run_id, &result)?;
     let ledger = build_ledger(configuration, &result);
     let metrics_path = write_metrics(&directory, &result, &ledger)?;
-    let report_path = write_report(&directory, &configuration.run_id, configuration.seed, &ledger)?;
+    let report_path = write_report(
+        &directory,
+        &configuration.run_id,
+        configuration.seed,
+        &ledger,
+    )?;
     let artifact_dir = directory.join("artifacts");
     let recorder = record_artifacts(&artifact_dir, configuration, &result, &ledger)?;
-    Ok(summarize(&result, artifact_path, metrics_path, report_path, artifact_dir, recorder))
+    Ok(summarize(
+        &result,
+        artifact_path,
+        metrics_path,
+        report_path,
+        artifact_dir,
+        recorder,
+    ))
 }
 
 fn write_artifact(
@@ -298,7 +310,8 @@ fn write_artifact(
     // The run identifier is embedded in the manifest, so the written document
     // is self-describing and independent of the directory name.
     debug_assert_eq!(result.manifest.run_id, run_id);
-    std::fs::write(&path, payload).map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
+    std::fs::write(&path, payload)
+        .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
     Ok(path)
 }
 
@@ -347,7 +360,9 @@ fn build_ledger(configuration: &BacktestConfig, result: &BacktestResult) -> JobL
         let price = parse_dec(&fill.price);
         let fee = parse_dec(&fill.fee);
         let notional = quantity.checked_mul(price).unwrap_or(Decimal18::ZERO);
-        let position = positions.entry(fill.symbol.clone()).or_insert(Decimal18::ZERO);
+        let position = positions
+            .entry(fill.symbol.clone())
+            .or_insert(Decimal18::ZERO);
         match fill.side {
             OrderSide::Buy => {
                 cash = cash
@@ -383,10 +398,7 @@ fn build_ledger(configuration: &BacktestConfig, result: &BacktestResult) -> JobL
             cash,
             equity: equity_value,
             market_value,
-            position_count: positions
-                .values()
-                .filter(|held| !held.is_zero())
-                .count() as u32,
+            position_count: positions.values().filter(|held| !held.is_zero()).count() as u32,
             fill_count,
         });
         fills.push(FillRow {
@@ -451,19 +463,28 @@ fn metrics_json(result: &BacktestResult, ledger: &JobLedger) -> JsonValue {
                         None => JsonValue::Null,
                     },
                 ),
-                ("max_drawdown", JsonValue::String(metrics.max_drawdown.to_string())),
+                (
+                    "max_drawdown",
+                    JsonValue::String(metrics.max_drawdown.to_string()),
+                ),
                 (
                     "drawdown_duration_ns",
                     JsonValue::Int(metrics.drawdown.duration_ns),
                 ),
-                ("drawdown_recovered", JsonValue::Bool(metrics.drawdown.recovered)),
+                (
+                    "drawdown_recovered",
+                    JsonValue::Bool(metrics.drawdown.recovered),
+                ),
             ]),
         ),
         (
             "execution",
             JsonValue::object([
                 ("fill_count", JsonValue::UInt(execution.fill_count as u64)),
-                ("fees_total", JsonValue::String(execution.fees_total.to_string())),
+                (
+                    "fees_total",
+                    JsonValue::String(execution.fees_total.to_string()),
+                ),
                 (
                     "slippage_total",
                     JsonValue::String(execution.slippage_total.to_string()),
@@ -473,7 +494,10 @@ fn metrics_json(result: &BacktestResult, ledger: &JobLedger) -> JsonValue {
                     JsonValue::object([
                         ("total", JsonValue::UInt(execution.outcomes.total as u64)),
                         ("filled", JsonValue::UInt(execution.outcomes.filled as u64)),
-                        ("rejected", JsonValue::UInt(execution.outcomes.rejected as u64)),
+                        (
+                            "rejected",
+                            JsonValue::UInt(execution.outcomes.rejected as u64),
+                        ),
                         (
                             "cancelled",
                             JsonValue::UInt(execution.outcomes.cancelled as u64),
@@ -492,9 +516,12 @@ fn write_metrics(
     ledger: &JobLedger,
 ) -> Result<PathBuf, BacktestJobError> {
     let path = directory.join("metrics.json");
-    let mut payload = metrics_json(result, ledger).to_canonical_string().into_bytes();
+    let mut payload = metrics_json(result, ledger)
+        .to_canonical_string()
+        .into_bytes();
     payload.push(b'\n');
-    std::fs::write(&path, payload).map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
+    std::fs::write(&path, payload)
+        .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
     Ok(path)
 }
 
@@ -525,7 +552,8 @@ fn record_artifacts(
         .with_seed(configuration.seed as i64)
         .with_account_id("backtest")
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
-    let mut recorder = RunRecorder::new(config).map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+    let mut recorder =
+        RunRecorder::new(config).map_err(|error| BacktestJobError::Engine(error.to_string()))?;
     let mut action_ids: BTreeMap<String, String> = BTreeMap::new();
     for (index, order) in result.orders.iter().enumerate() {
         let action_id = recorder

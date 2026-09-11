@@ -134,11 +134,7 @@ impl ObserveOnlyBrokerSink {
     }
 
     /// Record one order intent without transmitting anything.
-    pub fn submit(
-        &mut self,
-        order: &SingleLegOrder,
-        strategy_id: Option<&str>,
-    ) -> BrokerIntent {
+    pub fn submit(&mut self, order: &SingleLegOrder, strategy_id: Option<&str>) -> BrokerIntent {
         let intent = BrokerIntent {
             sequence: self.intents.len() as u64 + 1,
             order_id: order.order_id.clone(),
@@ -298,7 +294,10 @@ impl ShadowReport {
             (
                 "session",
                 JsonValue::object([
-                    ("dispatched_count", JsonValue::UInt(self.session.dispatched_count)),
+                    (
+                        "dispatched_count",
+                        JsonValue::UInt(self.session.dispatched_count),
+                    ),
                     (
                         "market_event_count",
                         JsonValue::UInt(self.session.market_event_count),
@@ -326,12 +325,7 @@ impl ShadowReport {
             ),
             (
                 "comparisons",
-                JsonValue::Array(
-                    self.comparisons
-                        .iter()
-                        .map(comparison_json)
-                        .collect(),
-                ),
+                JsonValue::Array(self.comparisons.iter().map(comparison_json).collect()),
             ),
             (
                 "live_only_prints",
@@ -429,7 +423,10 @@ pub fn build_report(
     for print in live_prints {
         prints_by_order.insert(print.order_id.as_str(), print);
     }
-    let intent_orders: Vec<&str> = intents.iter().map(|intent| intent.order_id.as_str()).collect();
+    let intent_orders: Vec<&str> = intents
+        .iter()
+        .map(|intent| intent.order_id.as_str())
+        .collect();
     let comparisons: Vec<IntentComparison> = intents
         .iter()
         .map(|intent| {

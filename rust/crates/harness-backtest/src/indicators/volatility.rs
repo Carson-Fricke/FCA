@@ -109,7 +109,10 @@ impl IndicatorKernel for AtrKernel {
                 }
             }
             Some(avg_range) => {
-                self.avg_range = Some(add(avg_range, divide(subtract(true_range, avg_range), divisor)));
+                self.avg_range = Some(add(
+                    avg_range,
+                    divide(subtract(true_range, avg_range), divisor),
+                ));
             }
         }
     }
@@ -201,10 +204,7 @@ impl IndicatorKernel for RealizedVolKernel {
         }
         let divisor = Decimal18::from_i64(self.count);
         let mean = divide(self.sum, divisor);
-        let variance = subtract(
-            divide(self.sum_squares, divisor),
-            multiply(mean, mean),
-        );
+        let variance = subtract(divide(self.sum_squares, divisor), multiply(mean, mean));
         Some(sqrt(variance))
     }
 }

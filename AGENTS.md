@@ -36,6 +36,14 @@
   facades, entrypoints, dependency direction, or deployment shape.
 - Treat architecture-documentation updates as integration-owned unless a wave
   explicitly assigns that file.
+- Discover with CLEO before reading files. Every agent, including the
+  coordinator, starts exploration from CLEO — `cleo find`/`cleo focus` for
+  tasks, `cleo memory find`/`decision-find` for prior knowledge, and `cleo
+  graph search`/`deps`/`impact` for code — to identify exactly which files and
+  symbols matter before opening them. Run the CLEO lookups and the file reads
+  in the same batch when the relevant paths are already known. Treat CLEO
+  results as pointers, not ground truth: read the cited files to confirm
+  current behavior.
 - Orient before exploring. Spawned subagents start from a `cleo focus <taskId>`
   orientation pack plus a BRAIN/nexus JIT budget of at most three lookups,
   instead of open-ended grep/glob/read sweeps. `cleo focus` replaces repeated
@@ -53,6 +61,12 @@
   one `cleo verify <id> --all` invocation. Iterative per-gate verify attempts
   are an anti-pattern; each failed gate forces evidence recapture and
   staleness re-verification.
+- NEVER complete multiple tasks with individual `cleo complete` invocations.
+  When a wave has more than one task to close, bulk-complete it in one
+  transaction with `scripts/cleo-bulk-complete.ps1 -ManifestPath <manifest.json>`
+  (one `sqlite3` process, one commit). Reserve single `cleo complete` for a lone
+  task. Per-task completion costs O(N x process startup) and is a known
+  anti-pattern.
 - At every wave edit freeze, run `cleo graph sync --incremental` and `cleo
   nexus refresh-bridge` (integration-owned) before integration verification so
   nexus impact and context lookups reflect the wave's changes.

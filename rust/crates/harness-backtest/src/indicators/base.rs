@@ -575,7 +575,10 @@ mod tests {
         let day = 19_723 * DAY_NS;
         assert_eq!(session_start_ns(day, MIDNIGHT_UTC_NS), day);
         assert_eq!(session_start_ns(day + DAY_NS - 1, MIDNIGHT_UTC_NS), day);
-        assert_eq!(session_start_ns(day + DAY_NS, MIDNIGHT_UTC_NS), day + DAY_NS);
+        assert_eq!(
+            session_start_ns(day + DAY_NS, MIDNIGHT_UTC_NS),
+            day + DAY_NS
+        );
         // An anchor at noon keeps an 11:00 event in the previous session.
         let noon = DAY_NS / 2;
         assert_eq!(session_start_ns(day + noon - 1, noon), day - DAY_NS + noon);
@@ -584,17 +587,15 @@ mod tests {
 
     #[test]
     fn machine_emits_one_sample_per_non_empty_bucket() {
-        let mut machine = IndicatorMachine::with_kernel(
-            Accumulator::new(1),
-            "spy",
-            DEFAULT_BUCKET_NS,
-            None,
-        )
-        .expect("machine");
+        let mut machine =
+            IndicatorMachine::with_kernel(Accumulator::new(1), "spy", DEFAULT_BUCKET_NS, None)
+                .expect("machine");
         machine.on_tick(&trade(0, 0, 10)).expect("tick");
         machine.on_tick(&trade(1, 1, 20)).expect("tick");
         // A gap bucket with no driver event emits nothing.
-        machine.on_tick(&trade(2 * DEFAULT_BUCKET_NS, 2, 30)).expect("tick");
+        machine
+            .on_tick(&trade(2 * DEFAULT_BUCKET_NS, 2, 30))
+            .expect("tick");
         machine.flush();
         let samples = machine.samples().to_vec();
         assert_eq!(samples.len(), 2);
@@ -606,13 +607,9 @@ mod tests {
 
     #[test]
     fn machine_flush_closes_the_trailing_bucket() {
-        let mut machine = IndicatorMachine::with_kernel(
-            Accumulator::new(1),
-            "spy",
-            DEFAULT_BUCKET_NS,
-            None,
-        )
-        .expect("machine");
+        let mut machine =
+            IndicatorMachine::with_kernel(Accumulator::new(1), "spy", DEFAULT_BUCKET_NS, None)
+                .expect("machine");
         machine.on_tick(&trade(500, 0, 10)).expect("tick");
         machine.flush();
         assert_eq!(machine.samples().len(), 1);

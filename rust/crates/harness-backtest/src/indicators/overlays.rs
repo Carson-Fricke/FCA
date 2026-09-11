@@ -196,8 +196,8 @@ impl IndicatorMachine<MidSmaKernel> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::base::{Tick, TickIndicator, TickKind};
+    use super::*;
 
     fn trade(sequence: u64, price: i64) -> Tick {
         Tick {

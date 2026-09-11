@@ -286,11 +286,9 @@ fn resolved_duration(
     name: &str,
 ) -> Result<Option<i64>, IndicatorError> {
     match resolved.get(name) {
-        Some(ParamValue::Duration(text)) => parse_duration_ns(text)
-            .map(Some)
-            .map_err(|message| {
-                IndicatorError::Configuration(format!("parameter {name:?} {message}"))
-            }),
+        Some(ParamValue::Duration(text)) => parse_duration_ns(text).map(Some).map_err(|message| {
+            IndicatorError::Configuration(format!("parameter {name:?} {message}"))
+        }),
         Some(_) => Err(IndicatorError::Configuration(format!(
             "parameter {name:?} must be a duration string"
         ))),
@@ -302,9 +300,8 @@ fn require_duration(
     resolved: &BTreeMap<String, ParamValue>,
     name: &str,
 ) -> Result<i64, IndicatorError> {
-    resolved_duration(resolved, name)?.ok_or_else(|| {
-        IndicatorError::Configuration(format!("parameter {name:?} is required"))
-    })
+    resolved_duration(resolved, name)?
+        .ok_or_else(|| IndicatorError::Configuration(format!("parameter {name:?} is required")))
 }
 
 fn is_valid_name(name: &str) -> bool {
@@ -572,12 +569,8 @@ mod tests {
 
     #[test]
     fn create_builds_volatility_and_volume_builtins() {
-        let configured = create_indicator(
-            "atr",
-            &params(&[("period", ParamValue::Int(2))]),
-            "spy",
-        )
-        .expect("atr");
+        let configured = create_indicator("atr", &params(&[("period", ParamValue::Int(2))]), "spy")
+            .expect("atr");
         assert_eq!(configured.indicator.name(), "atr");
         assert_eq!(configured.symbol, "SPY");
 

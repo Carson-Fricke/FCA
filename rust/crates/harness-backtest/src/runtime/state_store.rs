@@ -181,12 +181,16 @@ fn decimal_eq(left: &str, right: &str) -> bool {
 }
 
 /// Freeze the runtime options into the snapshot's canonical option map.
-fn options_to_json(options: &PaperOptions) -> BTreeMap<String, JsonValue> {    BTreeMap::from([
+fn options_to_json(options: &PaperOptions) -> BTreeMap<String, JsonValue> {
+    BTreeMap::from([
         (
             "run_id".to_string(),
             JsonValue::String(options.run_id.clone()),
         ),
-        ("initial_cash".to_string(), decimal_tag(&options.initial_cash)),
+        (
+            "initial_cash".to_string(),
+            decimal_tag(&options.initial_cash),
+        ),
         (
             "fill_model".to_string(),
             JsonValue::string(options.fill_model.value()),
@@ -1353,10 +1357,7 @@ impl RuntimeStateStore {
             .collect())
     }
 
-    fn validate_snapshot_run(
-        &self,
-        snapshot: &RuntimeSnapshot,
-    ) -> Result<(), StateStoreError> {
+    fn validate_snapshot_run(&self, snapshot: &RuntimeSnapshot) -> Result<(), StateStoreError> {
         if snapshot.run_id != self.run_id {
             return Err(StateStoreError::Restore(format!(
                 "snapshot run {:?} does not match store run {:?}",
@@ -1823,15 +1824,7 @@ mod tests {
         let mut store = RuntimeStateStore::new("paper-run");
         store.add_store(Box::new(InMemorySnapshotStore::new()));
         let snapshot = store
-            .capture(
-                &shell,
-                &options,
-                &ids,
-                SnapshotTrigger::Stop,
-                3,
-                None,
-                &[],
-            )
+            .capture(&shell, &options, &ids, SnapshotTrigger::Stop, 3, None, &[])
             .expect("capture");
         let payload = snapshot.payload_bytes();
         assert_eq!(snapshot.risk.rule_ids, vec!["max_position".to_string()]);
@@ -1841,7 +1834,9 @@ mod tests {
         assert_eq!(loaded.payload_bytes(), payload);
         assert_eq!(loaded.snapshot_id(), snapshot.snapshot_id());
 
-        let restored = store.restore_shell(&loaded, options.clone()).expect("restore");
+        let restored = store
+            .restore_shell(&loaded, options.clone())
+            .expect("restore");
         assert_eq!(restored.books()[0].cash, shell.books()[0].cash);
         assert_eq!(restored.result().fills.len(), shell.result().fills.len());
         assert_eq!(restored.order_count("momentum"), 1);
@@ -1869,15 +1864,7 @@ mod tests {
         let ids = vec!["momentum".to_string()];
         let store = RuntimeStateStore::new("paper-run");
         let snapshot = store
-            .capture(
-                &shell,
-                &options,
-                &ids,
-                SnapshotTrigger::Stop,
-                0,
-                None,
-                &[],
-            )
+            .capture(&shell, &options, &ids, SnapshotTrigger::Stop, 0, None, &[])
             .expect("capture");
         let mut other = PaperRuntimeShell::new(PaperOptions::new("paper-run"), vec![]);
         assert!(matches!(

@@ -166,10 +166,21 @@ impl PaperBook {
     ///
     /// Returns a message when the fill was already booked.
     pub fn apply_fill(&mut self, fill: &FillState) -> Result<(), String> {
-        if self.fills.iter().any(|existing| existing.fill_id == fill.fill_id) {
-            return Err(format!("book {} already accounts fill {}", self.book_id, fill.fill_id));
+        if self
+            .fills
+            .iter()
+            .any(|existing| existing.fill_id == fill.fill_id)
+        {
+            return Err(format!(
+                "book {} already accounts fill {}",
+                self.book_id, fill.fill_id
+            ));
         }
-        if let Some(marker) = self.markers.iter_mut().find(|(symbol, _)| *symbol == fill.symbol) {
+        if let Some(marker) = self
+            .markers
+            .iter_mut()
+            .find(|(symbol, _)| *symbol == fill.symbol)
+        {
             marker.1 = fill.price.clone();
         } else {
             self.markers.push((fill.symbol.clone(), fill.price.clone()));
@@ -484,12 +495,15 @@ mod tests {
     #[test]
     fn book_applies_fills_and_tracks_marks() {
         let mut book = PaperBook::new("alpha", "100000");
-        book.apply_fill(&fill("f1", "SPY", "buy", "2", "100")).expect("fill");
+        book.apply_fill(&fill("f1", "SPY", "buy", "2", "100"))
+            .expect("fill");
         assert_eq!(book.fills.len(), 1);
         assert_eq!(book.fill_ids(), vec!["f1".to_string()]);
         assert_eq!(book.markers, vec![("SPY".to_string(), "100".to_string())]);
         assert_eq!(book.cash, "99800.000000000000000000");
-        assert!(book.apply_fill(&fill("f1", "SPY", "buy", "2", "100")).is_err());
+        assert!(book
+            .apply_fill(&fill("f1", "SPY", "buy", "2", "100"))
+            .is_err());
     }
 
     #[test]

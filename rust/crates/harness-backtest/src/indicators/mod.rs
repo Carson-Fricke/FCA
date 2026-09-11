@@ -14,21 +14,20 @@ pub mod volume;
 
 pub use base::{
     add, bucket_start_ns, divide, hundred, multiply, session_start_ns, sqrt, subtract,
-    IndicatorError, IndicatorKernel, IndicatorMachine, IndicatorSample, OrderGuard,
-    RollingWindow, Tick, TickDriver, TickIndicator, TickKind, DAY_NS, DEFAULT_BUCKET_NS,
-    MIDNIGHT_UTC_NS,
+    IndicatorError, IndicatorKernel, IndicatorMachine, IndicatorSample, OrderGuard, RollingWindow,
+    Tick, TickDriver, TickIndicator, TickKind, DAY_NS, DEFAULT_BUCKET_NS, MIDNIGHT_UTC_NS,
 };
 pub use momentum::{RelativeStrengthIndex, RsiKernel};
 pub use overlays::{
-    EmaKernel, ExponentialMovingAverage, MidSimpleMovingAverage, MidSmaKernel,
-    SimpleMovingAverage, SmaKernel,
+    EmaKernel, ExponentialMovingAverage, MidSimpleMovingAverage, MidSmaKernel, SimpleMovingAverage,
+    SmaKernel,
 };
 pub use registry::{
     create_indicator, default_registry, indicator_names, parse_duration_ns, ConfiguredIndicator,
     IndicatorKind, IndicatorParam, IndicatorParamKind, IndicatorRegistry, IndicatorSpec,
     ParamValue,
 };
-pub use volatility::{AtrKernel, AverageTrueRange, RealizedVolatility, RealizedVolKernel};
+pub use volatility::{AtrKernel, AverageTrueRange, RealizedVolKernel, RealizedVolatility};
 pub use volume::{
     DollarVolume, DollarVolumeKernel, ObvKernel, OnBalanceVolume, VolumeWeightedAveragePrice,
     VwapKernel,

@@ -17,8 +17,8 @@ pub use go_live::{
     clean_streak, evaluate, GateCriteria, GateDecision, GateState, PaperSessionEvidence,
 };
 pub use paper::{
-    PaperBook, PaperOptions, PaperRuntimeShell, PaperSessionPolicy, PaperSessionResult,
-    PaperShell, PaperShellRestore, VenueWatermarks,
+    PaperBook, PaperOptions, PaperRuntimeShell, PaperSessionPolicy, PaperSessionResult, PaperShell,
+    PaperShellRestore, VenueWatermarks,
 };
 pub use reconciler::{
     reconcile_cash, reconcile_positions, ExpectedPosition, PositionDelta, ReconcileDecision,

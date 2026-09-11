@@ -187,6 +187,20 @@ subagents doing focused task work.
 ## Completion And Evidence
 
 - Use `cleo complete`, not `cleo update --status done`.
+- NEVER complete multiple tasks with separate `cleo complete` invocations. When
+  a wave (or any set of tasks) has more than one task to close, bulk-complete it
+  in a single SQLite transaction with
+  `scripts/cleo-bulk-complete.ps1 -ManifestPath <manifest.json>` (one `sqlite3`
+  call, one commit, ADR-051 `verification_json` evidence preserved). Reserve
+  single `cleo complete` for a lone task. A per-task loop costs O(N x ~25 s
+  process startup) plus a lingering handle per call and is a known
+  anti-pattern; the bulk script closes the same set in seconds.
+- Bulk-completion manifest shape:
+  `{ "testRunPath": ".cleo/test-runs/<file>.json", "tasks": [ { "id": "T251",
+  "commit": "<sha>", "files": ["rust/..."] } ] }`. `files` is optional and is
+  derived from `git show --name-only` when omitted. Back up `.cleo/cleo.db`
+  first, constrain updates by task ID and non-terminal status (the script does),
+  and run the Validation Checklist once after the batch.
 - Completion requires acceptance-criterion evidence bindings. Verification gates alone may not satisfy old free-text acceptance rows.
 - `cleo verify --all` enforces gate-specific evidence. `testsPassed` requires recognized test evidence and `qaPassed` requires a recognized tool or PR; an unknown project type may have no resolvable default test command.
 - Structured `test-run:` evidence uses Jest-style summary keys in this CLEO version: `numTotalTests`, `numPassedTests`, `numFailedTests`, `numPendingTests`, and `numTodoTests`. A generic `totalTests` field is ignored.
@@ -269,7 +283,12 @@ subagents doing focused task work.
 - During the 2026-08-31 reconciliation, completing initialization task `T002` auto-closed `T001` because it was then the only saga child. The saga was reopened before the service epics were added.
 - The auto-close set `pipeline_stage=contribution`, and new descendants inherited that terminal stage. The public update API is forward-only and could not move it backward.
 - The stale metadata was normalized in `.cleo/cleo.db`: pending saga and epics use `research`, pending implementation tasks use `implementation`, `T001.completed_at` is null, and root verification was reset.
-- Do not repeat direct SQLite mutation for normal CLEO work. It was a one-time repair for a CLI-generated state that the public CLI could not reverse. If a similar case occurs, back up first, constrain updates by ID and status, then run all validation checks below.
+- Do not repeat ad-hoc direct SQLite mutation for normal CLEO work; it was a
+  one-time repair for a CLI-generated state that the public CLI could not
+  reverse. The single sanctioned exception is the reviewed bulk-completion
+  bridge `scripts/cleo-bulk-complete.ps1`, which performs one transactional
+  `UPDATE` per task to avoid O(N) `cleo complete` process startups. Back up the
+  database first and constrain updates by ID and non-terminal status.
 - `cleo update <done-parent> --status pending` can reopen status but does not clear `completed_at`, verification, or a terminal `pipeline_stage`. Once reopened this way, `cleo restore task` refuses to operate because the task is already pending.
 - Although help lists `contribution` as resettable, `cleo lifecycle reset <id> contribution` rejects that stage in this version. Resetting lifecycle state also does not change `tasks_tasks.pipeline_stage`.
 
@@ -283,7 +302,7 @@ subagents doing focused task work.
 - Validate the export with `node .github/scripts/validate-cleo-export.mjs` and `cleo import-tasks .cleo-export.json --dry-run --on-conflict skip --on-missing-dep fail`.
 - Do not run `cleo push` while its isolated checkpoint remote points to the application repository's `master`. The histories are unrelated, the canonical database is excluded anyway, and a force push could replace application history. Use normal Git plus `.cleo-export.json`, or configure a genuinely separate CLEO remote or branch.
 - Project Git tracks `.cleo/rcasd/**`. Task creation can generate RCASD research stubs that appear as untracked files; inspect and include them when committing the task decomposition.
-- Do not manually edit `.cleo/cleo.db` unless repairing an unrepresentable CLI state as described above.
+- Do not manually edit `.cleo/cleo.db` unless repairing an unrepresentable CLI state as described above, or running the sanctioned bulk-completion bridge `scripts/cleo-bulk-complete.ps1`.
 
 ## Validation Checklist
 
