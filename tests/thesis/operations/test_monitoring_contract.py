@@ -158,7 +158,11 @@ def test_activity_alert_targets_trader_management_operations() -> None:
     body = next(iter(activity_rules.values()))
 
     assert "'Microsoft.App/containerApps'" in body
-    assert "containsAny" in body
+    # Activity log alert conditions require exactly one alertable category and
+    # cannot filter on a resource-name substring (resourceUri is not alertable),
+    # so the rule is scoped by category + resource type + operation anyOf.
+    assert "Administrative" in body
+    assert "anyOf" in body
     assert "Microsoft.App/containerApps/revisions/restart/action" in body
     assert "traderActionGroup" in body
 
