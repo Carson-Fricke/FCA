@@ -552,6 +552,49 @@ export interface WorkspaceStateData {
 	consentAudit: ConsentAuditEntry[];
 }
 
+// ---------- Hypothesis validation (thesis.validation HTTP surface, /v1/workspaces/{ws}/validation) ----------
+
+export type ValidationStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+export type ValidationVerdict = 'supported' | 'refuted' | 'inconclusive' | 'pending';
+
+/**
+ * One evidence atom cited by a validation. `run_id` routes to the producing
+ * backtest/run detail; `artifact` names the object path inside that run.
+ */
+export interface ValidationEvidenceItem {
+	id: string;
+	title: string;
+	reference: string;
+	kind: 'backtest' | 'artifact' | 'knowledge' | 'experiment' | 'upload';
+	run_id: string | null;
+	artifact: string | null;
+}
+
+/** The declarative contract a validation workflow is executed against. */
+export interface ValidationContract {
+	schema_version: number;
+	hypothesis: string;
+	metric: string | null;
+	threshold: number | null;
+	direction: 'increase' | 'decrease' | 'two_sided' | null;
+	evidence_requirements: string[];
+}
+
+/** A hypothesis-validation workflow record with its verdict and evidence. */
+export interface ValidationRecord {
+	id: string;
+	workspace_id: string;
+	status: ValidationStatus;
+	claim: string;
+	/** Present when the workflow persisted its contract; otherwise render the claim. */
+	contract?: ValidationContract | null;
+	verdict: ValidationVerdict;
+	evidence: ValidationEvidenceItem[];
+	created_at: string;
+	updated_at: string | null;
+}
+
 /** Selectable data backend: bundled fixtures, same-origin local, or remote. */
 export type BackendKind = 'fixtures' | 'local' | 'azure';
 

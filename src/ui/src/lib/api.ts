@@ -39,6 +39,7 @@ import type {
 	StatusSurface,
 	Strategy,
 	StrategyStatus,
+	ValidationRecord,
 	WidgetDefinition,
 	WorkflowExecutionRecord,
 	WorkspaceSnapshot,
@@ -828,6 +829,146 @@ export function launchBacktest(
 	return apiFetch<BacktestLaunchResult>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/launch`,
 		{ method: 'POST', body: JSON.stringify(body) }
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Hypothesis validation (thesis.validation HTTP surface, `/v1/workspaces/{ws}/validation`).
+// ---------------------------------------------------------------------------
+
+/**
+ * In-memory validation records per workspace. Fixture mode seeds one
+ * deterministic completed sample so the detail surface renders a contract,
+ * verdict, and evidence before any launch, then appends launched records.
+ */
+const validationStore: Record<string, ValidationRecord[]> = {};
+
+function sampleValidation(workspaceId: string): ValidationRecord {
+	return {
+		id: 'val-sample-1',
+		workspace_id: workspaceId,
+		status: 'completed',
+		claim: 'Momentum signals persist over a 20-day horizon',
+		contract: {
+			schema_version: 1,
+			hypothesis: 'Ranking by trailing 20-day return yields a positive forward 5-day spread',
+			metric: 'sharpe',
+			threshold: 1.0,
+			direction: 'increase',
+			evidence_requirements: [
+				'backtest with a declared in/out-of-sample split',
+				'per-regime performance metrics'
+			]
+		},
+		verdict: 'supported',
+		evidence: [
+			{
+				id: 'ev-run',
+				title: 'Momentum Breakout v3.2 — declared split',
+				reference: 'backtests/bt-204',
+				kind: 'backtest',
+				run_id: 'bt-204',
+				artifact: null
+			},
+			{
+				id: 'ev-artifact',
+				title: 'Metrics artifact',
+				reference: 'backtests/run-1/artifacts/metrics.json',
+				kind: 'artifact',
+				run_id: 'bt-204',
+				artifact: 'backtests/run-1/artifacts/metrics.json'
+			},
+			{
+				id: 'ev-note',
+				title: 'Regime persistence note',
+				reference: 'knowledge/regime-persistence.md',
+				kind: 'knowledge',
+				run_id: null,
+				artifact: null
+			}
+		],
+		created_at: '2026-09-08T18:04:00Z',
+		updated_at: null
+	};
+}
+
+/** Deterministic fixture record for a freshly launched claim. */
+function createdValidation(workspaceId: string, claim: string, id: string): ValidationRecord {
+	return {
+		id,
+		workspace_id: workspaceId,
+		status: 'completed',
+		claim,
+		contract: {
+			schema_version: 1,
+			hypothesis: claim,
+			metric: 'sharpe',
+			threshold: 1.0,
+			direction: 'increase',
+			evidence_requirements: ['backtest with a declared in/out-of-sample split']
+		},
+		verdict: 'inconclusive',
+		evidence: [
+			{
+				id: `${id}-ev-run`,
+				title: 'Momentum Breakout v3.2 — declared split',
+				reference: 'backtests/bt-204',
+				kind: 'backtest',
+				run_id: 'bt-204',
+				artifact: null
+			}
+		],
+		created_at: '2026-09-11T00:00:00Z',
+		updated_at: null
+	};
+}
+
+function validationRecords(workspaceId: string): ValidationRecord[] {
+	if (!validationStore[workspaceId]) {
+		validationStore[workspaceId] = [sampleValidation(workspaceId)];
+	}
+	return validationStore[workspaceId];
+}
+
+/** List the workspace's hypothesis validations. */
+export function listValidations(workspaceId: string): Promise<ValidationRecord[]> {
+	if (fixtureMode) return wait(5).then(() => plain(validationRecords(workspaceId)));
+	return apiFetch<{ items: ValidationRecord[] }>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/validation`
+	).then((r) => r.items);
+}
+
+/** Fetch one validation with its contract, verdict, and evidence. */
+export function getValidation(workspaceId: string, validationId: string): Promise<ValidationRecord> {
+	if (fixtureMode) {
+		return wait(5).then(() => {
+			const found = validationRecords(workspaceId).find((v) => v.id === validationId);
+			if (!found) throw new Error(`unknown validation ${validationId}`);
+			return plain(found);
+		});
+	}
+	return apiFetch<ValidationRecord>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/validation/${encodeURIComponent(validationId)}`
+	);
+}
+
+/**
+ * Launch a hypothesis-validation workflow for a claim through
+ * `POST /v1/workspaces/{ws}/validation`. Fixture mode resolves a
+ * deterministic completed sample shaped exactly like the API document.
+ */
+export function launchValidation(workspaceId: string, claim: string): Promise<ValidationRecord> {
+	const trimmed = claim.trim();
+	if (fixtureMode) {
+		return wait(15).then(() => {
+			const created = createdValidation(workspaceId, trimmed, `val-local-${store.nextId++}`);
+			validationRecords(workspaceId).unshift(created);
+			return plain(created);
+		});
+	}
+	return apiFetch<ValidationRecord>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/validation`,
+		{ method: 'POST', body: JSON.stringify({ claim: trimmed }) }
 	);
 }
 

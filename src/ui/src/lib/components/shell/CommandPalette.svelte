@@ -20,6 +20,7 @@
 		{ id: 'conversations', label: 'Conversations' },
 		{ id: 'strategies', label: 'Strategies' },
 		{ id: 'backtests', label: 'Backtests' },
+		{ id: 'validation', label: 'Validation' },
 		{ id: 'deployments', label: 'Deployments' },
 		{ id: 'dashboards', label: 'Dashboards' },
 		{ id: 'screener', label: 'Screener' },

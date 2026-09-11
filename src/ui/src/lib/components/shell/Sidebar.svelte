@@ -31,6 +31,7 @@
 		{ id: 'conversations', label: 'Conversations', icon: '❍', count: 'chats' },
 		{ id: 'strategies', label: 'Strategies', icon: '❮', count: 'strategies' },
 		{ id: 'backtests', label: 'Backtests', icon: '⛃', count: 'backtests' },
+		{ id: 'validation', label: 'Validation', icon: '✓' },
 		{ id: 'deployments', label: 'Deployments', icon: '➤', count: 'deployments' },
 		{ id: 'dashboards', label: 'Dashboards', icon: '▤', count: 'dashboards' },
 		{ id: 'screener', label: 'Screener', icon: '⌕', count: 'screeners' },

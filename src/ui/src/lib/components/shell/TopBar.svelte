@@ -35,6 +35,7 @@
 		conversations: 'Conversations',
 		strategies: 'Strategies',
 		backtests: 'Backtests',
+		validation: 'Validation',
 		deployments: 'Deployments',
 		dashboards: 'Dashboards',
 		screener: 'Screener',
