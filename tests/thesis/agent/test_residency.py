@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -18,10 +19,17 @@ from thesis.agent.residency import (
     AgentResidency,
     AgentSession,
     OperationAuditRecord,
+    OperationKind,
     ResidencyError,
     resume,
 )
-from thesis.agent.router import ModelProfile, ModelRouter, PolicyBundle, RolePolicy
+from thesis.agent.router import (
+    ModelProfile,
+    ModelRouter,
+    PolicyBundle,
+    Role,
+    RolePolicy,
+)
 from thesis.agent.skills import SkillRegistry, ThesisSkill, content_hash
 from thesis.chat.contracts import ChatThread
 from thesis.chat.service import ChatService
@@ -48,7 +56,7 @@ class TickingClock:
         return current
 
 
-def _ids() -> Iterator[str]:
+def _ids() -> Callable[[], str]:
     return iter(("s-1", "1", "2", "3", "4", "5", "6", "7", "8")).__next__
 
 
@@ -112,7 +120,7 @@ def _router() -> ModelRouter:
         )
         for role in ("primary", "coding")
     }
-    policies = {
+    policies: dict[Role, RolePolicy] = {
         role: RolePolicy(
             role=role,
             version="1.0.0",
@@ -177,7 +185,7 @@ def test_binding_freezes_the_workspace_identity() -> None:
     assert residency.session.last_active_at == NOW
 
     with pytest.raises(ResidencyError, match="frozen at construction"):
-        residency.workspace_id = "beta-lab"  # type: ignore[misc]
+        residency.__setattr__("workspace_id", "beta-lab")
     with pytest.raises(ResidencyError, match="frozen at construction"):
         del residency.workspace_id  # type: ignore[attr-defined]
 
@@ -461,7 +469,7 @@ def test_corrupt_audit_inputs_are_rejected_by_the_store_boundary() -> None:
     with pytest.raises(ResidencyError, match="unsupported operation kind"):
         residency.record_audit(
             operation_id="op-9",
-            operation="close_investigation",  # type: ignore[arg-type]
+            operation=cast("OperationKind", "close_investigation"),
             status="recorded",
             inputs_digest="0" * 64,
             created_at=NOW,
