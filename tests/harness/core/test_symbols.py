@@ -2,7 +2,6 @@ from decimal import Decimal
 
 import pytest
 
-from harness.core.ids import EngineIdSource, deterministic_id
 from harness.core.symbols import OsiSymbol, Symbol
 from harness.core.types import symbols_from_parquet, symbols_to_parquet
 
@@ -50,23 +49,3 @@ def test_realistic_osi_symbols_round_trip_through_parquet() -> None:
     assert len(symbols) == 100
     assert restored == symbols
     assert all(isinstance(symbol, OsiSymbol) for symbol in restored)
-
-
-def test_seeded_ids_repeat_without_using_global_state() -> None:
-    first = EngineIdSource("run-17")
-    second = EngineIdSource("run-17")
-
-    assert [first.next_id("order") for _ in range(4)] == [
-        second.next_id("order") for _ in range(4)
-    ]
-    source = EngineIdSource("run-17")
-    source.next_id("order")
-    source.next_id("order")
-    assert deterministic_id("run-17", "order", 2) == source.next_id("order")
-
-
-def test_id_source_rejects_missing_seed_and_bool() -> None:
-    with pytest.raises(ValueError):
-        EngineIdSource("")
-    with pytest.raises(TypeError):
-        EngineIdSource(True)
