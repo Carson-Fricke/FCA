@@ -19,8 +19,8 @@ use super::ids::{EngineIdSource, IdError};
 use super::manifest::{
     file_digest, manifest_rows, run_fingerprint, ManifestRowsInput, RunManifest,
 };
-use super::schemas::{Artifact, STREAM_ARTIFACTS};
 use super::parquet::ParquetArtifactWriter;
+use super::schemas::{Artifact, STREAM_ARTIFACTS};
 use super::writer::{build_row, Row, RowSink, Value, WriterError};
 
 /// Recorder construction or streaming failure.
