@@ -1,55 +1,32 @@
 //! Price-overlay indicators computed incrementally from tick events.
 
-use std::collections::VecDeque;
-
 use harness_num::Decimal18;
 
 use super::base::{
-    add, divide, multiply, subtract, IndicatorError, OrderGuard, Tick, TickDriver, TickIndicator,
-    TickKind,
+    add, divide, multiply, subtract, IndicatorError, IndicatorKernel, IndicatorMachine,
+    RollingWindow, TickDriver, DEFAULT_BUCKET_NS, MIDNIGHT_UTC_NS,
 };
 
 /// Rolling mean of the last `period` trade prices.
 #[derive(Clone, Debug)]
-pub struct SimpleMovingAverage {
-    period: i64,
-    window: VecDeque<Decimal18>,
-    total: Decimal18,
-    guard: OrderGuard,
+pub struct SmaKernel {
+    window: RollingWindow,
 }
 
-impl SimpleMovingAverage {
-    /// Build an SMA with a positive period.
+impl SmaKernel {
+    /// Build a simple moving average kernel with a positive period.
     ///
     /// # Errors
     ///
     /// Returns [`IndicatorError::Configuration`] for a non-positive period.
     pub fn new(period: i64) -> Result<Self, IndicatorError> {
-        if period < 1 {
-            return Err(IndicatorError::Configuration(
-                "period must be a positive integer".to_string(),
-            ));
-        }
         Ok(Self {
-            period,
-            window: VecDeque::new(),
-            total: Decimal18::ZERO,
-            guard: OrderGuard::default(),
+            window: RollingWindow::new(period)?,
         })
-    }
-
-    fn push(&mut self, value: Decimal18) {
-        self.window.push_back(value);
-        self.total = add(self.total, value);
-        if self.window.len() as i64 > self.period {
-            if let Some(oldest) = self.window.pop_front() {
-                self.total = subtract(self.total, oldest);
-            }
-        }
     }
 }
 
-impl TickIndicator for SimpleMovingAverage {
+impl IndicatorKernel for SmaKernel {
     fn name(&self) -> &'static str {
         "sma"
     }
@@ -58,34 +35,26 @@ impl TickIndicator for SimpleMovingAverage {
         &[TickDriver::Trade]
     }
 
-    fn on_tick(&mut self, tick: &Tick) -> Result<(), IndicatorError> {
-        self.guard.accept(tick.timestamp_ns, tick.sequence)?;
-        if let TickKind::Trade { price, .. } = &tick.kind {
-            self.push(*price);
-        }
-        Ok(())
+    fn on_trade(&mut self, price: Decimal18, _quantity: Decimal18, _timestamp_ns: i64) {
+        self.window.push(price);
     }
 
     fn value(&self) -> Option<Decimal18> {
-        if (self.window.len() as i64) < self.period {
-            return None;
-        }
-        Some(divide(self.total, Decimal18::from_i64(self.period)))
+        self.window.mean()
     }
 }
 
 /// Recursive EMA over trade prices, seeded on the first trade.
 #[derive(Clone, Debug)]
-pub struct ExponentialMovingAverage {
+pub struct EmaKernel {
     span: i64,
     alpha: Decimal18,
     count: i64,
     ema: Option<Decimal18>,
-    guard: OrderGuard,
 }
 
-impl ExponentialMovingAverage {
-    /// Build an EMA with a positive span.
+impl EmaKernel {
+    /// Build an EMA kernel with a positive span.
     ///
     /// # Errors
     ///
@@ -101,12 +70,11 @@ impl ExponentialMovingAverage {
             alpha: divide(Decimal18::from_i64(2), Decimal18::from_i64(span + 1)),
             count: 0,
             ema: None,
-            guard: OrderGuard::default(),
         })
     }
 }
 
-impl TickIndicator for ExponentialMovingAverage {
+impl IndicatorKernel for EmaKernel {
     fn name(&self) -> &'static str {
         "ema"
     }
@@ -115,16 +83,12 @@ impl TickIndicator for ExponentialMovingAverage {
         &[TickDriver::Trade]
     }
 
-    fn on_tick(&mut self, tick: &Tick) -> Result<(), IndicatorError> {
-        self.guard.accept(tick.timestamp_ns, tick.sequence)?;
-        if let TickKind::Trade { price, .. } = &tick.kind {
-            self.count += 1;
-            self.ema = Some(match self.ema {
-                None => *price,
-                Some(previous) => add(previous, multiply(self.alpha, subtract(*price, previous))),
-            });
-        }
-        Ok(())
+    fn on_trade(&mut self, price: Decimal18, _quantity: Decimal18, _timestamp_ns: i64) {
+        self.count += 1;
+        self.ema = Some(match self.ema {
+            None => price,
+            Some(previous) => add(previous, multiply(self.alpha, subtract(price, previous))),
+        });
     }
 
     fn value(&self) -> Option<Decimal18> {
@@ -137,35 +101,24 @@ impl TickIndicator for ExponentialMovingAverage {
 
 /// Rolling mean of the last `period` quote mid-prices.
 #[derive(Clone, Debug)]
-pub struct MidSimpleMovingAverage {
-    period: i64,
-    window: VecDeque<Decimal18>,
-    total: Decimal18,
-    guard: OrderGuard,
+pub struct MidSmaKernel {
+    window: RollingWindow,
 }
 
-impl MidSimpleMovingAverage {
-    /// Build a mid-price SMA with a positive period.
+impl MidSmaKernel {
+    /// Build a mid-price SMA kernel with a positive period.
     ///
     /// # Errors
     ///
     /// Returns [`IndicatorError::Configuration`] for a non-positive period.
     pub fn new(period: i64) -> Result<Self, IndicatorError> {
-        if period < 1 {
-            return Err(IndicatorError::Configuration(
-                "period must be a positive integer".to_string(),
-            ));
-        }
         Ok(Self {
-            period,
-            window: VecDeque::new(),
-            total: Decimal18::ZERO,
-            guard: OrderGuard::default(),
+            window: RollingWindow::new(period)?,
         })
     }
 }
 
-impl TickIndicator for MidSimpleMovingAverage {
+impl IndicatorKernel for MidSmaKernel {
     fn name(&self) -> &'static str {
         "mid_sma"
     }
@@ -174,32 +127,77 @@ impl TickIndicator for MidSimpleMovingAverage {
         &[TickDriver::Quote]
     }
 
-    fn on_tick(&mut self, tick: &Tick) -> Result<(), IndicatorError> {
-        self.guard.accept(tick.timestamp_ns, tick.sequence)?;
-        if let TickKind::Quote { bid, ask } = &tick.kind {
-            let mid = divide(add(*bid, *ask), Decimal18::from_i64(2));
-            self.window.push_back(mid);
-            self.total = add(self.total, mid);
-            if self.window.len() as i64 > self.period {
-                if let Some(oldest) = self.window.pop_front() {
-                    self.total = subtract(self.total, oldest);
-                }
-            }
-        }
-        Ok(())
+    fn on_quote(&mut self, bid: Decimal18, ask: Decimal18, _timestamp_ns: i64) {
+        let mid = divide(add(bid, ask), Decimal18::from_i64(2));
+        self.window.push(mid);
     }
 
     fn value(&self) -> Option<Decimal18> {
-        if (self.window.len() as i64) < self.period {
-            return None;
-        }
-        Some(divide(self.total, Decimal18::from_i64(self.period)))
+        self.window.mean()
+    }
+}
+
+/// Rolling mean of the last `period` trade prices.
+pub type SimpleMovingAverage = IndicatorMachine<SmaKernel>;
+
+impl IndicatorMachine<SmaKernel> {
+    /// Build a symbol-less SMA for direct arithmetic use.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndicatorError::Configuration`] for a non-positive period.
+    pub fn new(period: i64) -> Result<Self, IndicatorError> {
+        Self::with_kernel(
+            SmaKernel::new(period)?,
+            String::new(),
+            DEFAULT_BUCKET_NS,
+            Some(MIDNIGHT_UTC_NS),
+        )
+    }
+}
+
+/// Recursive EMA over trade prices, seeded on the first trade.
+pub type ExponentialMovingAverage = IndicatorMachine<EmaKernel>;
+
+impl IndicatorMachine<EmaKernel> {
+    /// Build a symbol-less EMA for direct arithmetic use.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndicatorError::Configuration`] for a non-positive span.
+    pub fn new(span: i64) -> Result<Self, IndicatorError> {
+        Self::with_kernel(
+            EmaKernel::new(span)?,
+            String::new(),
+            DEFAULT_BUCKET_NS,
+            Some(MIDNIGHT_UTC_NS),
+        )
+    }
+}
+
+/// Rolling mean of the last `period` quote mid-prices.
+pub type MidSimpleMovingAverage = IndicatorMachine<MidSmaKernel>;
+
+impl IndicatorMachine<MidSmaKernel> {
+    /// Build a symbol-less mid-price SMA for direct arithmetic use.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndicatorError::Configuration`] for a non-positive period.
+    pub fn new(period: i64) -> Result<Self, IndicatorError> {
+        Self::with_kernel(
+            MidSmaKernel::new(period)?,
+            String::new(),
+            DEFAULT_BUCKET_NS,
+            Some(MIDNIGHT_UTC_NS),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::base::{Tick, TickIndicator, TickKind};
 
     fn trade(sequence: u64, price: i64) -> Tick {
         Tick {

@@ -330,6 +330,10 @@ pub struct BacktestResult {
     pub order_count: u64,
     /// Fills produced.
     pub fill_count: u64,
+    /// Approved orders in dispatch order.
+    pub orders: Vec<super::engine::OrderIntent>,
+    /// Fills produced in dispatch order.
+    pub fills: Vec<super::engine::Fill>,
     /// Risk decisions recorded.
     pub risk_decision_count: u64,
     /// Halted strategies.

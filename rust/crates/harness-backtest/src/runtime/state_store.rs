@@ -15,7 +15,12 @@
 
 use std::collections::BTreeMap;
 
+use harness_num::Decimal18;
+
 use crate::canonical_json::JsonValue;
+use crate::runtime::paper::{
+    PaperOptions, PaperRuntimeShell, PaperShell, PaperShellRestore, VenueWatermarks,
+};
 use crate::sha256::{digest_hex, Sha256};
 
 /// Snapshot format version.
@@ -166,6 +171,47 @@ pub fn decimal_text(value: &str) -> String {
 #[must_use]
 pub fn decimal_tag(value: &str) -> JsonValue {
     JsonValue::object([("$decimal", JsonValue::String(decimal_text(value)))])
+}
+
+/// Compare two string-exact decimals by numeric value.
+fn decimal_eq(left: &str, right: &str) -> bool {
+    let left = left.parse::<Decimal18>().unwrap_or(Decimal18::ZERO);
+    let right = right.parse::<Decimal18>().unwrap_or(Decimal18::ZERO);
+    left == right
+}
+
+/// Freeze the runtime options into the snapshot's canonical option map.
+fn options_to_json(options: &PaperOptions) -> BTreeMap<String, JsonValue> {    BTreeMap::from([
+        (
+            "run_id".to_string(),
+            JsonValue::String(options.run_id.clone()),
+        ),
+        ("initial_cash".to_string(), decimal_tag(&options.initial_cash)),
+        (
+            "fill_model".to_string(),
+            JsonValue::string(options.fill_model.value()),
+        ),
+        (
+            "fee_precision".to_string(),
+            JsonValue::String(options.fee_precision.clone()),
+        ),
+        (
+            "abort_policy".to_string(),
+            JsonValue::string(options.abort_policy.value()),
+        ),
+        (
+            "strategy_halt_policy".to_string(),
+            JsonValue::string(options.strategy_halt_policy.value()),
+        ),
+        (
+            "teardown_policy".to_string(),
+            JsonValue::string(options.teardown_policy.value()),
+        ),
+        (
+            "session_policy".to_string(),
+            JsonValue::string(options.session_policy.value()),
+        ),
+    ])
 }
 
 fn as_object(value: &JsonValue) -> Result<&BTreeMap<String, JsonValue>, StateStoreError> {
@@ -1017,6 +1063,309 @@ impl RuntimeStateStore {
         Err(errors.remove(0))
     }
 
+    /// Capture the full restorable state of one paper shell into a snapshot.
+    ///
+    /// Everything is read through the shell's public supervision surface, and
+    /// no wall-clock value enters the snapshot. When `order_owners` is `None`
+    /// the attribution is derived from the captured books.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError::Integrity`] when the shell or options belong
+    /// to another run, when `strategy_ids` is empty, or when a book references
+    /// a fill the session history does not contain.
+    #[allow(clippy::too_many_arguments)]
+    pub fn capture(
+        &self,
+        shell: &dyn PaperShell,
+        options: &PaperOptions,
+        strategy_ids: &[String],
+        trigger: SnapshotTrigger,
+        sequence: u64,
+        order_owners: Option<&BTreeMap<String, String>>,
+        random_states: &[RandomState],
+    ) -> Result<RuntimeSnapshot, StateStoreError> {
+        if shell.run_id() != self.run_id {
+            return Err(StateStoreError::Integrity(format!(
+                "shell run {:?} does not match store run {:?}",
+                shell.run_id(),
+                self.run_id
+            )));
+        }
+        if options.run_id != self.run_id {
+            return Err(StateStoreError::Integrity(format!(
+                "options run {:?} does not match store run {:?}",
+                options.run_id, self.run_id
+            )));
+        }
+        let mut ids: Vec<String> = Vec::new();
+        for instance_id in strategy_ids {
+            if !ids.contains(instance_id) {
+                ids.push(instance_id.clone());
+            }
+        }
+        if ids.is_empty() {
+            return Err(StateStoreError::Integrity(
+                "strategy_ids must not be empty".to_string(),
+            ));
+        }
+        let result = shell.result();
+        let fills_by_id: BTreeMap<&str, &FillState> = result
+            .fills
+            .iter()
+            .map(|fill| (fill.fill_id.as_str(), fill))
+            .collect();
+        let mut books: Vec<BookState> = Vec::new();
+        for book in shell.books() {
+            for fill_id in book.fill_ids() {
+                if !fills_by_id.contains_key(fill_id.as_str()) {
+                    return Err(StateStoreError::Integrity(format!(
+                        "book {:?} references fill {fill_id:?} that the session fill \
+                         history does not contain",
+                        book.book_id
+                    )));
+                }
+            }
+            books.push(BookState {
+                book_id: book.book_id.clone(),
+                initial_cash: book.initial_cash.clone(),
+                cash: book.cash.clone(),
+                fill_ids: book.fill_ids(),
+                fills: book.fills.clone(),
+                markers: book.markers.clone(),
+            });
+        }
+        let mut order_counts: BTreeMap<String, u64> = BTreeMap::new();
+        let mut daily_losses: BTreeMap<String, String> = BTreeMap::new();
+        for instance_id in &ids {
+            order_counts.insert(instance_id.clone(), shell.order_count(instance_id));
+            daily_losses.insert(instance_id.clone(), shell.daily_loss(instance_id));
+        }
+        let risk = RiskState {
+            on_reject: shell.on_reject().to_string(),
+            rule_ids: shell.rule_ids().to_vec(),
+            daily_losses,
+        };
+        let order_owners = match order_owners {
+            Some(owners) => owners.clone(),
+            None => {
+                let mut owners: BTreeMap<String, String> = BTreeMap::new();
+                for book_state in &books {
+                    for fill in &book_state.fills {
+                        owners
+                            .entry(fill.order_id.clone())
+                            .or_insert_with(|| book_state.book_id.clone());
+                    }
+                }
+                owners
+            }
+        };
+        let strategy_state: Vec<StrategyState> = shell
+            .strategy_state_export()
+            .into_iter()
+            .map(|(instance_id, values)| StrategyState {
+                instance_id,
+                values: match values {
+                    JsonValue::Object(entries) => entries,
+                    _ => BTreeMap::new(),
+                },
+            })
+            .collect();
+        let watermarks = shell.venue_watermarks();
+        Ok(RuntimeSnapshot {
+            format_version: FORMAT_VERSION,
+            run_id: self.run_id.clone(),
+            trigger,
+            sequence,
+            dispatched_count: result.dispatched_count,
+            market_event_count: result.market_event_count,
+            options: options_to_json(options),
+            books,
+            prices: shell.prices().clone(),
+            order_counts,
+            order_owners,
+            strategy_state,
+            random_states: random_states.to_vec(),
+            risk,
+            venue: Some(VenueState {
+                id_ordinal: watermarks.id_ordinal,
+                event_sequence: watermarks.event_sequence,
+            }),
+        })
+    }
+
+    /// Rebuild a fresh paper shell whose supervision state matches a snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError::Restore`] when the snapshot belongs to
+    /// another run or its books disagree with the options.
+    pub fn restore_shell(
+        &self,
+        snapshot: &RuntimeSnapshot,
+        options: PaperOptions,
+    ) -> Result<PaperRuntimeShell, StateStoreError> {
+        self.validate_snapshot_run(snapshot)?;
+        if options.run_id != self.run_id {
+            return Err(StateStoreError::Restore(format!(
+                "options run {:?} does not match store run {:?}",
+                options.run_id, self.run_id
+            )));
+        }
+        let books: Vec<(String, String)> = snapshot
+            .books
+            .iter()
+            .map(|book| (book.book_id.clone(), book.initial_cash.clone()))
+            .collect();
+        let mut shell = PaperRuntimeShell::new(options, books);
+        self.restore_into_shell(snapshot, &mut shell)?;
+        Ok(shell)
+    }
+
+    /// Replay captured state into one existing shell's public surface.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError::Restore`] when a book is missing, its initial
+    /// cash disagrees, or replaying its fills does not reproduce the captured
+    /// cash exactly.
+    pub fn restore_into_shell(
+        &self,
+        snapshot: &RuntimeSnapshot,
+        shell: &mut dyn PaperShellRestore,
+    ) -> Result<(), StateStoreError> {
+        self.validate_snapshot_run(snapshot)?;
+        let mut marks: BTreeMap<String, String> = BTreeMap::new();
+        for book_state in &snapshot.books {
+            let Some(book) = shell.shell_book_mut(&book_state.book_id) else {
+                return Err(StateStoreError::Restore(format!(
+                    "shell has no book {:?}",
+                    book_state.book_id
+                )));
+            };
+            if !decimal_eq(&book.initial_cash, &book_state.initial_cash) {
+                return Err(StateStoreError::Restore(format!(
+                    "book {:?} initial cash {:?} does not match the captured {:?}",
+                    book_state.book_id, book.initial_cash, book_state.initial_cash
+                )));
+            }
+            for fill in &book_state.fills {
+                book.apply_fill(fill).map_err(StateStoreError::Restore)?;
+            }
+            if !decimal_eq(&book.cash, &book_state.cash) {
+                return Err(StateStoreError::Restore(format!(
+                    "replayed book {:?} cash {:?} does not match the captured {:?}",
+                    book_state.book_id, book.cash, book_state.cash
+                )));
+            }
+            for (symbol, price) in &book_state.markers {
+                match marks.get(symbol) {
+                    Some(previous) if previous != price => {
+                        return Err(StateStoreError::Restore(format!(
+                            "captured books disagree on the mark for {symbol:?}"
+                        )));
+                    }
+                    Some(_) => {}
+                    None => {
+                        marks.insert(symbol.clone(), price.clone());
+                    }
+                }
+            }
+        }
+        let mut session_fills: Vec<FillState> = Vec::new();
+        for book_state in &snapshot.books {
+            session_fills.extend(book_state.fills.iter().cloned());
+        }
+        session_fills.sort_by_key(|fill| fill.sequence);
+        if !session_fills.is_empty() {
+            shell.restore_fills(&session_fills);
+        }
+        shell.restore_session_counts(snapshot.dispatched_count, snapshot.market_event_count);
+        shell.restore_risk(&snapshot.risk.on_reject, &snapshot.risk.rule_ids);
+        shell.restore_daily_losses(&snapshot.risk.daily_losses);
+        shell.restore_prices(marks);
+        for (instance_id, count) in &snapshot.order_counts {
+            for _ in 0..*count {
+                shell.count_order(instance_id);
+            }
+        }
+        for (order_id, instance_id) in &snapshot.order_owners {
+            shell.own_order(order_id, instance_id);
+        }
+        let state: BTreeMap<String, JsonValue> = snapshot
+            .strategy_state
+            .iter()
+            .map(|record| {
+                (
+                    record.instance_id.clone(),
+                    JsonValue::Object(record.values.clone()),
+                )
+            })
+            .collect();
+        shell.restore_strategy_state(state);
+        let mut id_ordinal = 0u64;
+        let mut event_sequence = -1i64;
+        if let Some(venue) = snapshot.venue {
+            id_ordinal = venue.id_ordinal;
+            event_sequence = venue.event_sequence;
+        }
+        for book_state in &snapshot.books {
+            for fill in &book_state.fills {
+                event_sequence = event_sequence.max(fill.sequence as i64);
+            }
+        }
+        shell.restore_venue_watermarks(VenueWatermarks {
+            id_ordinal,
+            event_sequence,
+        });
+        Ok(())
+    }
+
+    /// Rebuild each captured random source record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError::Restore`] when the snapshot belongs to
+    /// another run.
+    pub fn restore_randoms(
+        &self,
+        snapshot: &RuntimeSnapshot,
+    ) -> Result<Vec<RandomState>, StateStoreError> {
+        self.validate_snapshot_run(snapshot)?;
+        Ok(snapshot.random_states.clone())
+    }
+
+    /// Rebuild each strategy's frozen state values from a snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateStoreError::Restore`] when the snapshot belongs to
+    /// another run.
+    pub fn restore_strategy_state(
+        &self,
+        snapshot: &RuntimeSnapshot,
+    ) -> Result<BTreeMap<String, BTreeMap<String, JsonValue>>, StateStoreError> {
+        self.validate_snapshot_run(snapshot)?;
+        Ok(snapshot
+            .strategy_state
+            .iter()
+            .map(|record| (record.instance_id.clone(), record.values.clone()))
+            .collect())
+    }
+
+    fn validate_snapshot_run(
+        &self,
+        snapshot: &RuntimeSnapshot,
+    ) -> Result<(), StateStoreError> {
+        if snapshot.run_id != self.run_id {
+            return Err(StateStoreError::Restore(format!(
+                "snapshot run {:?} does not match store run {:?}",
+                snapshot.run_id, self.run_id
+            )));
+        }
+        Ok(())
+    }
+
     fn load_from(
         &self,
         store: &dyn SnapshotObjectStore,
@@ -1422,5 +1771,137 @@ mod tests {
         let key = payload_key("paper-run", &snapshot.snapshot_id());
         store.stores[0].replace(&key, b"tampered");
         assert!(matches!(store.load(), Err(StateStoreError::Integrity(_))));
+    }
+
+    use crate::runtime::paper::{
+        PaperOptions, PaperRuntimeShell, PaperShell, PaperShellRestore, VenueWatermarks,
+    };
+
+    fn paper_shell() -> PaperRuntimeShell {
+        let mut shell = PaperRuntimeShell::new(
+            PaperOptions::new("paper-run"),
+            vec![("alpha".to_string(), "1000000".to_string())],
+        )
+        .with_risk("reject_order", vec!["max_position".to_string()]);
+        shell.session_mut().dispatched_count = 10;
+        shell.session_mut().market_event_count = 24;
+        shell
+            .apply_fill(
+                "alpha",
+                FillState {
+                    event_id: "e1".to_string(),
+                    timestamp: "2024-01-02T14:30:00.000000Z".to_string(),
+                    sequence: 5,
+                    fill_id: "fill-1".to_string(),
+                    order_id: "order-1".to_string(),
+                    symbol: "SPY".to_string(),
+                    side: "buy".to_string(),
+                    quantity: "2".to_string(),
+                    price: "100.00".to_string(),
+                    fee: "0.01".to_string(),
+                    liquidity: Some("taker".to_string()),
+                },
+            )
+            .expect("fill");
+        shell.count_order("momentum");
+        shell.attribute_order("order-1", "alpha");
+        shell.set_price("SPY", "100.00");
+        shell.set_daily_loss("momentum", "0");
+        shell.set_strategy_value("momentum", "warm", JsonValue::Bool(true));
+        shell.set_venue(VenueWatermarks {
+            id_ordinal: 4,
+            event_sequence: 9,
+        });
+        shell
+    }
+
+    #[test]
+    fn capture_save_load_restore_round_trips_byte_identically() {
+        let shell = paper_shell();
+        let options = PaperOptions::new("paper-run");
+        let ids = vec!["momentum".to_string()];
+        let mut store = RuntimeStateStore::new("paper-run");
+        store.add_store(Box::new(InMemorySnapshotStore::new()));
+        let snapshot = store
+            .capture(
+                &shell,
+                &options,
+                &ids,
+                SnapshotTrigger::Stop,
+                3,
+                None,
+                &[],
+            )
+            .expect("capture");
+        let payload = snapshot.payload_bytes();
+        assert_eq!(snapshot.risk.rule_ids, vec!["max_position".to_string()]);
+        assert_eq!(snapshot.order_owners["order-1"], "alpha");
+        store.save(&snapshot).expect("save");
+        let loaded = store.load().expect("load");
+        assert_eq!(loaded.payload_bytes(), payload);
+        assert_eq!(loaded.snapshot_id(), snapshot.snapshot_id());
+
+        let restored = store.restore_shell(&loaded, options.clone()).expect("restore");
+        assert_eq!(restored.books()[0].cash, shell.books()[0].cash);
+        assert_eq!(restored.result().fills.len(), shell.result().fills.len());
+        assert_eq!(restored.order_count("momentum"), 1);
+        assert_eq!(restored.venue_watermarks().event_sequence, 9);
+
+        let recaptured = store
+            .capture(
+                &restored,
+                &options,
+                &ids,
+                SnapshotTrigger::Stop,
+                3,
+                None,
+                &[],
+            )
+            .expect("recapture");
+        assert_eq!(recaptured.payload_bytes(), payload);
+        assert_eq!(recaptured.snapshot_id(), snapshot.snapshot_id());
+    }
+
+    #[test]
+    fn restore_rejects_a_missing_book() {
+        let shell = paper_shell();
+        let options = PaperOptions::new("paper-run");
+        let ids = vec!["momentum".to_string()];
+        let store = RuntimeStateStore::new("paper-run");
+        let snapshot = store
+            .capture(
+                &shell,
+                &options,
+                &ids,
+                SnapshotTrigger::Stop,
+                0,
+                None,
+                &[],
+            )
+            .expect("capture");
+        let mut other = PaperRuntimeShell::new(PaperOptions::new("paper-run"), vec![]);
+        assert!(matches!(
+            store.restore_into_shell(&snapshot, &mut other),
+            Err(StateStoreError::Restore(_))
+        ));
+    }
+
+    #[test]
+    fn capture_rejects_a_foreign_run() {
+        let shell = paper_shell();
+        let options = PaperOptions::new("paper-run");
+        let store = RuntimeStateStore::new("other-run");
+        assert!(matches!(
+            store.capture(
+                &shell,
+                &options,
+                &["momentum".to_string()],
+                SnapshotTrigger::Stop,
+                0,
+                None,
+                &[],
+            ),
+            Err(StateStoreError::Integrity(_))
+        ));
     }
 }

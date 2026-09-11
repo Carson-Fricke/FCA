@@ -171,6 +171,8 @@ pub fn run_engine(
     let mut fill_count = 0u64;
     let mut dispatched: Vec<JsonValue> = Vec::new();
     let mut fills: Vec<JsonValue> = Vec::new();
+    let mut approved_orders: Vec<OrderIntent> = Vec::new();
+    let mut produced_fills: Vec<Fill> = Vec::new();
     for event in &fixture.events {
         market_event_count += 1;
         let mut intents = Vec::new();
@@ -181,9 +183,11 @@ pub fn run_engine(
                 RiskOutcome::Rejected(_) => {}
                 RiskOutcome::Approved => {
                     order_count += 1;
+                    approved_orders.push(intent.clone());
                     for fill in execution.fills(&intent, event) {
                         fill_count += 1;
                         fills.push(fill_to_json(&fill));
+                        produced_fills.push(fill);
                     }
                 }
             }
@@ -210,6 +214,8 @@ pub fn run_engine(
         stopped_strategies: Vec::new(),
         teardown_errors,
         lookahead_violations: Vec::new(),
+        orders: approved_orders,
+        fills: produced_fills,
     })
 }
 
