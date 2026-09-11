@@ -13,6 +13,7 @@ pub mod options_matching;
 pub mod plugin;
 pub mod scripted;
 pub mod sim;
+pub mod transport;
 
 pub use alpaca::{
     AlpacaBroker, AlpacaClientOrderIdSource, AlpacaCommandReceipt, AlpacaExecutionInbox,
@@ -20,10 +21,13 @@ pub use alpaca::{
 };
 pub use alpaca_crypto::{
     is_crypto_pair, AlpacaCryptoFeeSchedule, AlpacaCryptoVenue, CryptoFeeLedgerEntry,
+    CryptoOrderState,
 };
 pub use alpaca_options::{
-    AlpacaOptionsCapabilityMatrix, CapabilityRejection, UnsupportedFeatureReason, VenueCapability,
-    VenueCapabilitySupport,
+    AlpacaCapabilityMatrix, AlpacaOptionsBroker, AlpacaOptionsCapabilityMatrix,
+    AlpacaOptionsExecutionInbox, AlpacaOptionsOrderBinding, AlpacaOptionsOrderDirectory,
+    CapabilityRejection, UnsupportedFeatureReason, VenueCapability, VenueCapabilitySupport,
+    CAPABILITY_MATRIX_PATH, CAPABILITY_MATRIX_VERSION,
 };
 pub use base::ExecutionVenue;
 pub use options_matching::OptionsMatchingEngine;
@@ -32,3 +36,8 @@ pub use scripted::{
     ScriptedStep, ScriptedVenue, UnexpectedVenueCall, VenueCall, VenueOperation, VenueOutcome,
 };
 pub use sim::{SimOrderState, SimulatedVenue};
+pub use transport::{
+    BrokerFrameStream, Clock, ReqwestBrokerTransport, RetryConfig, RetryingBrokerTransport,
+    ScriptedFrameStream, SleepFn, SystemClock, TungsteniteFrameStream, ALPACA_LIVE_BASE_URL,
+    ALPACA_PAPER_BASE_URL, ALPACA_STREAM_URL, RETRYABLE_STATUS_CODES,
+};
