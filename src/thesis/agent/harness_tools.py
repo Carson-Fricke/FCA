@@ -29,7 +29,7 @@ from typing import Literal, Protocol
 
 import httpx
 
-from thesis.agent.skills import ThesisSkill
+from thesis.agent.skills import SkillRef, SkillRegistry, ThesisSkill
 from thesis.integrations.mcp import (
     TOOL_GET_BACKTEST_STATUS,
     TOOL_GET_RUN,
@@ -75,7 +75,7 @@ HARNESS_MCP_SKILL_INSTRUCTIONS = (
 )
 
 FailureKind = Literal[
-    "auth", "transport", "protocol", "tool", "harness", "unknown_tool"
+    "auth", "transport", "protocol", "tool", "harness", "denied", "unknown_tool"
 ]
 
 
@@ -379,6 +379,30 @@ def harness_mcp_skill(
     )
 
 
+def harness_mcp_skill_ref(
+    version: str = HARNESS_MCP_SKILL_VERSION,
+) -> SkillRef:
+    """Return the pinned ``harness-mcp`` skill reference used by role policies."""
+    return SkillRef(HARNESS_MCP_SKILL_ID, version)
+
+
+def register_harness_mcp_skill(
+    registry: SkillRegistry,
+    *,
+    version: str = HARNESS_MCP_SKILL_VERSION,
+) -> ThesisSkill:
+    """Register the harness MCP skill into ``registry`` and return it.
+
+    Registration is idempotent for the default definition, so a composition
+    root can safely register the skill before building the
+    :class:`~thesis.agent.router.ModelRouter` and callers may still inject the
+    same registry.
+    """
+    skill = harness_mcp_skill(version)
+    registry.register(skill)
+    return skill
+
+
 def open_harness_tool_provider(
     topology: HarnessMcpTopology | None = None,
     *,
@@ -480,5 +504,7 @@ __all__ = [
     "RunBacktestArgs",
     "RunSweepArgs",
     "harness_mcp_skill",
+    "harness_mcp_skill_ref",
     "open_harness_tool_provider",
+    "register_harness_mcp_skill",
 ]

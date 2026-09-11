@@ -23,6 +23,11 @@ import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 
+from thesis.agent.harness_tools import (
+    HarnessToolProvider,
+    HarnessToolResult,
+    register_harness_mcp_skill,
+)
 from thesis.agent.router import (
     ModelProfile,
     ModelProvider,
@@ -32,6 +37,7 @@ from thesis.agent.router import (
     RolePolicy,
 )
 from thesis.agent.skills import SkillRegistry
+from thesis.agent.tool_dispatch import HarnessToolCall, HarnessToolDispatcher
 from thesis.artifacts.importer import ArtifactImporter
 from thesis.chat.service import ChatService
 from thesis.integrations.harness import HarnessClientPort, ThesisHarnessClient
@@ -86,12 +92,16 @@ def build_model_router(
     The caller owns every registry: role policies select a model profile and
     skill references, model profiles name a provider and deployment, providers
     implement the invocation boundary, and the skill registry resolves the
-    selected skill versions.  When ``invocation_id_factory`` is omitted the
-    router generates its own portable invocation identifiers.
+    selected skill versions.  The harness MCP skill is always registered into
+    ``skills`` so a role policy that selects ``harness-mcp`` resolves its tool
+    surface.  When ``invocation_id_factory`` is omitted the router generates
+    its own portable invocation identifiers.
     """
 
     def _default_invocation_id() -> str:
         return _new_id("invocation")
+
+    register_harness_mcp_skill(skills)
 
     return ModelRouter(
         role_policies=role_policies,
@@ -135,6 +145,7 @@ def build_workflow_runtime(
     skills: SkillRegistry,
     harness: ThesisHarnessClient | HarnessClientPort | None = None,
     runner: BacktestRunner | None = None,
+    harness_tools: HarnessToolProvider | None = None,
     bundle: PolicyBundle | None = None,
     bundle_hashes: Mapping[str, str] | None = None,
     backtest_mode: BacktestMode = "local",
@@ -147,7 +158,10 @@ def build_workflow_runtime(
 
     A :class:`HarnessBacktestRunner` is built over the injected harness client
     unless an explicit ``runner`` is supplied, so tests can replace the harness
-    with a fake while exercising the same runtime surface.
+    with a fake while exercising the same runtime surface.  When a
+    :class:`~thesis.agent.harness_tools.HarnessToolProvider` is supplied, the
+    runtime also exposes a policy-scoped
+    :class:`~thesis.agent.tool_dispatch.HarnessToolDispatcher`.
     """
 
     def _invocation_id() -> str:
@@ -173,7 +187,11 @@ def build_workflow_runtime(
         else _harness_runner(harness, mode=backtest_mode, metadata=metadata)
     )
     return WorkflowRuntime(
-        router=router, runner=resolved_runner, clock=clock, id_factory=id_factory
+        router=router,
+        runner=resolved_runner,
+        harness_tools=harness_tools,
+        clock=clock,
+        id_factory=id_factory,
     )
 
 
@@ -193,6 +211,7 @@ class WorkflowRuntime:
         *,
         router: ModelRouter,
         runner: BacktestRunner,
+        harness_tools: HarnessToolProvider | None = None,
         clock: Callable[[], datetime] = _utc_now,
         id_factory: Callable[[str], str] = _new_id,
     ) -> None:
@@ -200,8 +219,18 @@ class WorkflowRuntime:
             raise WorkflowRuntimeError("router must be a ModelRouter")
         if not callable(getattr(runner, "run", None)):
             raise WorkflowRuntimeError("runner must implement the BacktestRunner port")
+        if harness_tools is not None and not isinstance(
+            harness_tools, HarnessToolProvider
+        ):
+            raise WorkflowRuntimeError("harness_tools must be a HarnessToolProvider")
         self._router = router
         self._runner = runner
+        self._harness_tools = harness_tools
+        self._tool_dispatcher = (
+            None
+            if harness_tools is None
+            else HarnessToolDispatcher(router, harness_tools)
+        )
         self._clock = clock
         self._id_factory = id_factory
 
@@ -214,6 +243,29 @@ class WorkflowRuntime:
     def runner(self) -> BacktestRunner:
         """Return the composed backtest runner port."""
         return self._runner
+
+    @property
+    def harness_tools(self) -> HarnessToolProvider | None:
+        """Return the composed harness MCP tool provider, when configured."""
+        return self._harness_tools
+
+    @property
+    def tool_dispatcher(self) -> HarnessToolDispatcher | None:
+        """Return the policy-scoped harness tool dispatcher, when configured."""
+        return self._tool_dispatcher
+
+    def dispatch_tool(
+        self,
+        role: Role | str,
+        call: HarnessToolCall | str,
+        arguments: Mapping[str, object] | None = None,
+    ) -> HarnessToolResult:
+        """Dispatch a model tool request through the harness MCP provider."""
+        if self._tool_dispatcher is None:
+            raise WorkflowRuntimeError(
+                "provide a harness tool provider to dispatch tool calls"
+            )
+        return self._tool_dispatcher.dispatch(role, call, arguments)
 
     def build_hypothesis_validation(
         self,

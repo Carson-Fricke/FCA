@@ -12,11 +12,13 @@ workflow (`thesis.workflows`, T160), the hypothesis validation workflow with
 verdict evidence (T161), bounded autonomous discovery with budget guards and
 candidate accounting (T162, plus `thesis.agent.search_policy`), the RCA and
 strategy revision loop with revision lineage (`thesis.workflows.rca`,
-`thesis.research`, T163), and the statistical-discipline substrate
+`thesis.research`, T163), the statistical-discipline substrate
 (`thesis.experiments`: pre-registered experiment contracts, dependency-interval
 audits, hash-chained attempt and influence ledgers, evidence grades with
-explicit downgrade semantics — T164). The backend process boundary
-(`thesis` entrypoint, `Dockerfile.thesis`) is implemented (T178).
+explicit downgrade semantics — T164), and the harness MCP tool gateway
+(`thesis.integrations.mcp`, `thesis.agent.harness_tools`, T281). The backend
+process boundary (`thesis` entrypoint, `Dockerfile.thesis`) is implemented
+(T178).
 
 FCA Thesis is a workspace-scoped chat agent for generating, implementing,
 testing, evaluating, and improving stock, option, and crypto hypotheses and
@@ -488,6 +490,43 @@ Global and workspace budgets constrain model tokens, web calls, lake data,
 backtest count and concurrency, wall time, compute, repository growth, strategy
 classes, and deployment eligibility. Autonomous discovery may choose any
 supported market, horizon, and strategy direction only within those bounds.
+
+#### Harness MCP Tool Gateway (implemented)
+
+The quant-harness tool family is implemented as an MCP (JSON-RPC 2.0) tool
+gateway rather than a planned capability. The harness publishes its backtest,
+sweep, run-query, artifact, and supervised-trader operations through MCP; Thesis
+consumes them through `thesis.integrations.mcp` and `thesis.agent.harness_tools`.
+The client discovers the catalog with `tools/list` and executes it with
+`tools/call`, so a launch can only route through a tool the harness actually
+publishes.
+
+The gateway covers all four Thesis/harness topology combinations through one
+selectable transport:
+
+| Thesis | Harness | Transport |
+| --- | --- | --- |
+| local | local | In-process MCP handler for a single-process runtime, else a `StdioMcpTransport` that spawns `harness mcp` and exchanges newline-delimited JSON-RPC over stdio. |
+| remote | local | `StdioMcpTransport`; valid only when the Thesis process can reach a local `harness` executable, so operators co-locate the processes or inject an in-process handler. |
+| local | remote | `RemoteHttpMcpTransport` posting JSON-RPC to `POST /mcp` with a bearer credential. |
+| remote | remote | `RemoteHttpMcpTransport` posting JSON-RPC to `POST /mcp` with a bearer credential. |
+
+A remote harness endpoint (`HARNESS_MCP_URL`) wins over a local command
+(`HARNESS_MCP_COMMAND`); `THESIS_LOCATION` names where Thesis runs and
+`HARNESS_API_BEARER_TOKEN` supplies the remote credential. The bearer token is
+sent only as an `Authorization` header and is excluded from every
+representation. `thesis.agent.harness_tools` wraps the client in a
+`HarnessToolProvider` that adds typed arguments, structured results, and
+agent-visible failures, and the `harness-mcp` skill is registered into the
+`SkillRegistry` used to build the model router so role policies resolve the
+bundle and permit `HARNESS_TOOL_NAMES`. A `HarnessToolDispatcher` enforces the
+resolved `allowedTools` before routing a model tool request to the provider.
+
+Backtest launches route through the MCP `run_backtest` tool via a
+`HarnessMcpBoundary` whose capabilities derive from the discovered catalog. The
+local composition prefers the MCP boundary and falls back to the direct
+`LocalHarnessProcess` process boundary when the MCP server cannot be started;
+a remote harness never silently falls back to local execution.
 
 ## Research Workflows
 
@@ -1076,7 +1115,7 @@ chain-of-thought.
 | Workflow registry | Versioned custom-phase workflows, required artifacts, subagent roles, and gates. |
 | Agent runtime | Prompt assembly, model routing, context boundaries, subagents, skills, and budgets. |
 | CLEO coordinator | Workspace plan projection and queued single-writer mutations. |
-| Tool gateway | Least-privilege lake, harness, sandbox, web, Git, knowledge, protected-test, and activation-request tools. |
+| Tool gateway | Least-privilege lake, harness, sandbox, web, Git, knowledge, protected-test, and activation-request tools. The harness family is implemented as the MCP tool gateway described under Agent Runtime; the remaining families are roadmap work. |
 | Experiment service | Contracts, strategy lineages, observed/declared attempt ledger, and a read-only mirror of protected eligibility/exposure. |
 | Evidence service | Claims, grades, modifiers, citations, limitations, and report assembly. |
 | Knowledge service | Global Markdown corpus, hybrid search, links, citations, and workspace trust overlays. |
