@@ -56,6 +56,8 @@ export interface ExecutionStreamOptions {
 	fetchImpl?: typeof fetch;
 	reconnectDelayMs?: number;
 	bearerToken?: string | null;
+	/** Override the stream path (used by chat-scoped streams). */
+	streamPath?: (workspaceId: string, id: string) => string;
 }
 
 export type FrameHandler = (frame: SseFrame) => void;
@@ -141,7 +143,9 @@ export class ExecutionEventStream {
 	}
 
 	async start(onFrame: FrameHandler): Promise<void> {
-		const url = streamUrl(this.options.baseUrl, this.options.workspaceId, this.options.executionId);
+		const url = this.options.streamPath
+			? this.options.streamPath(this.options.workspaceId, this.options.executionId)
+			: streamUrl(this.options.baseUrl, this.options.workspaceId, this.options.executionId);
 		while (!this.closed) {
 			try {
 				const headers: Record<string, string> = { Accept: 'text/event-stream' };
@@ -223,6 +227,49 @@ function ephemeralKey(frame: SseFrame): string | null {
 export function streamUrl(baseUrl: string, workspaceId: string, executionId: string): string {
 	const base = baseUrl.replace(/\/+$/, '');
 	return `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}/events/stream`;
+}
+
+export function chatStreamUrl(baseUrl: string, workspaceId: string, chatId: string): string {
+	const base = baseUrl.replace(/\/+$/, '');
+	return `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/events/stream`;
+}
+
+export interface ChatStreamOptions {
+	baseUrl: string;
+	workspaceId: string;
+	chatId: string;
+	cursorStore?: CursorStore;
+	fetchImpl?: typeof fetch;
+	reconnectDelayMs?: number;
+	bearerToken?: string | null;
+}
+
+/** SSE subscription to one chat's streamed assistant reply. */
+export class ChatEventStream extends ExecutionEventStream {
+	constructor(options: ChatStreamOptions) {
+		const { chatId, ...rest } = options;
+		super({
+			...rest,
+			executionId: chatId,
+			streamPath: (workspaceId, id) => chatStreamUrl(options.baseUrl, workspaceId, id)
+		});
+	}
+}
+
+export interface ProviderDelta {
+	messageId?: string;
+	messageIdFinal?: string;
+	role?: string;
+	text?: string;
+	start?: boolean;
+	done?: boolean;
+	error?: string;
+}
+
+/** Decode an ephemeral provider-delta frame into its delta payload. */
+export function providerDeltaOf(frame: SseFrame): ProviderDelta | null {
+	if (frame.event !== PROVIDER_DELTA_EVENT_KIND) return null;
+	return (frame.data['delta'] as ProviderDelta | undefined) ?? null;
 }
 
 /** Decode a durable execution event frame into its record. */

@@ -71,7 +71,7 @@
 						{#each openChats as chat (chat.chat_id)}
 							<li>
 								<a
-									href="/w/{workspaceId}/chats?chat={chat.chat_id}"
+									href="/w/{workspaceId}/conversations?chat={chat.chat_id}"
 									class="block rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 hover:border-accent/30"
 								>
 									<p class="truncate text-sm text-slate-800">{chat.title}</p>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import BackendSettingsDialog from '$lib/components/shell/BackendSettingsDialog.svelte';
 	import CommandPalette from '$lib/components/shell/CommandPalette.svelte';
 	import CopilotPanel from '$lib/components/shell/CopilotPanel.svelte';
 	import CreateWorkspaceDialog from '$lib/components/shell/CreateWorkspaceDialog.svelte';
@@ -8,7 +9,7 @@
 	import TopBar from '$lib/components/shell/TopBar.svelte';
 import ToastStack from '$lib/components/common/ToastStack.svelte';
 import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
-import { createWorkspace, listStrategies, listWidgets } from '$lib/api';
+import { createWorkspace, isLocalHosting, listStrategies, listWidgets } from '$lib/api';
 import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 	import type { Strategy, WidgetDefinition } from '$lib/types';
 	import type { LayoutData } from './$types';
@@ -19,11 +20,12 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 	const pageLabel = $derived(
 		page.url.pathname.replace(new RegExp(`^/w/${workspaceId}/?`), '').split('/')[0] || 'overview'
 	);
-	const isChats = $derived(pageLabel === 'chats');
+	const isChats = $derived(pageLabel === 'conversations');
 	const copilotVisible = $derived(!isChats && ui.copilotOpen);
 
 	let paletteOpen = $state(false);
 	let createOpen = $state(false);
+	let settingsOpen = $state(false);
 	let strategies = $state<Strategy[]>([]);
 	let widgets = $state<WidgetDefinition[]>([]);
 
@@ -52,6 +54,7 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 		if (event.key === 'Escape') {
 			paletteOpen = false;
 			createOpen = false;
+			settingsOpen = false;
 		}
 	}
 
@@ -59,8 +62,8 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 		goto(`/w/${id}/overview`);
 	}
 
-	function switchToChats(): void {
-		goto(`/w/${workspaceId}/chats`);
+	function switchToConversations(): void {
+		goto(`/w/${workspaceId}/conversations`);
 	}
 </script>
 
@@ -77,6 +80,8 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 		onSearch={() => (paletteOpen = true)}
 		onSwitch={switchWorkspace}
 		onCreateWorkspace={() => (createOpen = true)}
+		onSettings={() => (settingsOpen = true)}
+		canConfigureBackend={isLocalHosting}
 	/>
 
 	<div class="flex min-w-0 flex-1 flex-col">
@@ -99,7 +104,7 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 			<CopilotPanel
 				{workspaceId}
 				workspaceName={data.snapshot.overview.workspace.name}
-				onExpand={switchToChats}
+				onExpand={switchToConversations}
 			/>
 		</div>
 	{/if}
@@ -128,6 +133,10 @@ import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 			}
 		}}
 	/>
+{/if}
+
+{#if settingsOpen}
+	<BackendSettingsDialog onClose={() => (settingsOpen = false)} />
 {/if}
 
 <DataModeBadge />

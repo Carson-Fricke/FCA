@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from thesis.chat import ChatService
+from thesis.chat import ChatMessage, ChatService
 
 WORKSPACE = "workspace-a"
 
@@ -319,6 +319,51 @@ def test_messages_require_known_chat(client: TestClient) -> None:
         json={"actor_id": "operator", "body": "Missing chat."},
     )
     assert response.status_code == 404
+
+
+def test_chat_execution_route_returns_latest_or_null(
+    client: TestClient, launch: Any
+) -> None:
+    headers = {"Authorization": "Bearer thesis-test-token"}
+    chat = client.post(
+        f"/v1/workspaces/{WORKSPACE}/chats",
+        headers=headers,
+        json={"title": "Research", "owner_actor_id": "operator"},
+    ).json()
+    route = f"/v1/workspaces/{WORKSPACE}/chats/{chat['chat_id']}/execution"
+
+    assert client.get(route, headers=headers).json() is None
+
+    execution = launch(chat["chat_id"])
+    latest = client.get(route, headers=headers)
+    assert latest.status_code == 200
+    assert latest.json()["execution_id"] == execution.execution_id
+    assert latest.json()["chat_id"] == chat["chat_id"]
+
+
+def test_delete_chat_removes_thread_and_cascades(
+    client: TestClient, service: ChatService
+) -> None:
+    headers = {"Authorization": "Bearer thesis-test-token"}
+    chat = client.post(
+        f"/v1/workspaces/{WORKSPACE}/chats",
+        headers=headers,
+        json={"title": "Research", "owner_actor_id": "operator"},
+    ).json()
+    route = f"/v1/workspaces/{WORKSPACE}/chats/{chat['chat_id']}"
+    client.post(
+        f"{route}/messages",
+        headers=headers,
+        json={"actor_id": "operator", "body": "Delete me."},
+    )
+
+    deleted = client.delete(route, headers=headers)
+    assert deleted.status_code == 204
+    assert client.get(route, headers=headers).status_code == 404
+    assert service.persistence.list(ChatMessage, WORKSPACE) == ()
+
+    listing = client.get(f"/v1/workspaces/{WORKSPACE}/chats", headers=headers).json()
+    assert listing["items"] == []
 
 
 def test_chat_routes_require_bearer_token(make_client, service: ChatService) -> None:

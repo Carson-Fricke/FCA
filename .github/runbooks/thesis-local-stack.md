@@ -56,6 +56,13 @@ The provider preflight probes `POST /chat/completions` with `max_tokens: 1`.
 Outcomes: key missing or rejected -> `authentication_unavailable`; network
 failure -> `provider_unreachable`; otherwise `ready`.
 
+The local Thesis composition (`scripts/local/thesis_local_api.py`) wires this
+provider into streamed conversation replies: when `OPENROUTER_API_KEY` is
+present, a new user message streams an assistant reply over
+`GET /v1/workspaces/{ws}/chats/{chat}/events/stream`; without it, chat stays a
+durable message surface with no reply. `THESIS_MODEL` overrides the model
+(default `openai/gpt-4o-mini`).
+
 ### Azure AI Foundry (preflight)
 
 Foundry needs no key in the environment; it authenticates with an Entra
@@ -142,29 +149,35 @@ Notes on the composition:
 - Screener data context: with no `market_port` configured the screener
   surface answers 503 by design (fail closed when no data source is
   configured). Chat/SSE and the workspace data routes do not depend on it.
+- The local runner `scripts/local/thesis_local_api.py` connects to the harness
+  MCP server (`harness mcp`, stdio JSON-RPC 2.0) by default and routes
+  backtest launches through its `run_backtest` tool; set `THESIS_HARNESS_MCP=0`
+  to use the direct `harness backtest-job` process boundary instead. If the MCP
+  server cannot start, the composition logs a warning and falls back
+  automatically.
 
 ### Terminal 3 — UI dev server (port 5173)
 
 ```powershell
 Set-Location src/ui
 npm install
-$env:PUBLIC_THESIS_API_BASE = 'http://127.0.0.1:8000'
 Set-MaskedEnv PUBLIC_THESIS_API_BEARER_TOKEN
 npm run dev
 ```
 
-`src/ui/src/lib/api.ts` reads `PUBLIC_THESIS_API_BASE` and
-`PUBLIC_THESIS_API_BEARER_TOKEN` at dev-server start; with a non-empty base
-the UI boots in real-fetch mode (fixture mode is the default without one).
-These are build-time variables: set them before `npm run dev`.
+`vite.config.js` sets `envPrefix` to include `PUBLIC_` (SvelteKit's
+`PUBLIC_` prefix does not cover Vite's `import.meta.env`, so the variables
+would otherwise never reach `src/ui/src/lib/api.ts`), and proxies `/v1`,
+`/health`, and `/healthz` to the Thesis API same-origin
+(`THESIS_API_PROXY_TARGET`, default `http://127.0.0.1:8000`). The browser
+therefore makes no cross-origin request and no CORS layer is needed.
 
-Browser cross-origin note: the UI origin (`http://localhost:5173`) differs
-from the API origin (`http://127.0.0.1:8000`), and the Thesis API publishes no
-CORS layer yet (browser hardening is deferred to the authenticated/TLS
-deployment mode, see `.github/architecture/fca-thesis.md`). If the browser
-blocks the fetches, use the fixture-mode escape hatch (section 5) or put the
-dev server behind a same-origin proxy; the verification script in section 4
-proves the API chain end to end without a browser.
+Select the backend inside the UI: **Settings** in the sidebar footer opens the
+backend selector — **Fixtures**, **Local**, or **Azure**. Local uses the
+same-origin proxy above; Azure uses a configured remote base URL (its bearer
+still comes from `PUBLIC_THESIS_API_BASE` / `PUBLIC_THESIS_API_BEARER_TOKEN` at
+build time). The selector is only shown when the UI is served from
+`localhost`/`127.0.0.1`, and switching backends reloads the page.
 
 ## 4. Verify
 
@@ -255,14 +268,13 @@ stage passed.
   `--config-path` (default `config/harness/backtest.yaml`) exists. A failing
   `harness backtest-job --config config/harness/backtest.yaml` run reports
   its own exit code in the launch acknowledgement.
-- **UI shows fixture data instead of API data.** Real mode requires
-  `PUBLIC_THESIS_API_BASE` at dev-server start; a persisted in-browser
-  override (`localStorage['thesis.fixtures'] = 'true'`) or
-  `PUBLIC_THESIS_UI_FIXTURES='true'` forces fixtures regardless. Restore real
-  mode by removing the override (`localStorage.removeItem('thesis.fixtures')`)
-  and restarting the dev server. Fixture mode is the sanctioned escape hatch
-  while the API CORS layer is pending (see the browser cross-origin note in
-  section 3).
+- **UI shows fixture data instead of API data.** Open **Settings** in the
+  sidebar footer and choose Local or Azure; the choice persists in
+  `localStorage['thesis.backend']` and reloads the page. A `/health` or
+  `/v1/auth/check` failure does not silently switch backends.
+  `PUBLIC_THESIS_UI_FIXTURES='true'` forces fixtures for a build. Local
+  requires the Terminal 3 dev proxy; Azure requires a remote
+  `PUBLIC_THESIS_API_BASE` at build time.
 - **Provider preflight failures.** OpenRouter `authentication_unavailable`
   means `OPENROUTER_API_KEY` is missing or rejected (401/403);
   `provider_unreachable` is network/DNS. Foundry `authentication_unavailable`

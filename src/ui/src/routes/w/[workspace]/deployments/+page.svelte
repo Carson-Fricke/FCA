@@ -41,7 +41,7 @@
 		const refs = deployments.map((d) => d.request_ref).filter((r): r is string => Boolean(r));
 		for (const ref of refs) {
 			if (risk[ref]) continue;
-			getRiskDecisions(ref).then((surface) => {
+			getRiskDecisions(workspaceId, ref).then((surface) => {
 				risk = { ...risk, [ref]: surface };
 			});
 		}

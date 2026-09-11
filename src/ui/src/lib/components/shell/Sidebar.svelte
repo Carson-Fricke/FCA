@@ -11,7 +11,9 @@
 		widgets,
 		onSearch,
 		onSwitch,
-		onCreateWorkspace
+		onCreateWorkspace,
+		onSettings,
+		canConfigureBackend
 	}: {
 		snapshot: WorkspaceSnapshot;
 		workspaceId: string;
@@ -20,11 +22,13 @@
 		onSearch: () => void;
 		onSwitch: (id: string) => void;
 		onCreateWorkspace: () => void;
+		onSettings: () => void;
+		canConfigureBackend: boolean;
 	} = $props();
 
 	const NAV: { id: string; label: string; icon: string; count?: keyof WorkspaceSnapshot['counts'] }[] = [
 		{ id: 'overview', label: 'Overview', icon: '◎' },
-		{ id: 'chats', label: 'Conversations', icon: '❍', count: 'chats' },
+		{ id: 'conversations', label: 'Conversations', icon: '❍', count: 'chats' },
 		{ id: 'strategies', label: 'Strategies', icon: '❮', count: 'strategies' },
 		{ id: 'backtests', label: 'Backtests', icon: '⛃', count: 'backtests' },
 		{ id: 'deployments', label: 'Deployments', icon: '➤', count: 'deployments' },
@@ -158,12 +162,17 @@
 				<span class="block truncate text-xs font-medium text-slate-700">Alex Morgan</span>
 				<span class="block truncate text-[10px] text-slate-500">Personal account</span>
 			</span>
-			<a
-				href="/w/{workspaceId}/workspace-state"
-				class="rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-slate-700"
-			>
-				Settings
-			</a>
+			{#if canConfigureBackend}
+				<button
+					type="button"
+					class="rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-slate-700"
+					onclick={onSettings}
+					title="Choose the active backend"
+					data-testid="settings-trigger"
+				>
+					Settings
+				</button>
+			{/if}
 		</div>
 	</div>
 </aside>

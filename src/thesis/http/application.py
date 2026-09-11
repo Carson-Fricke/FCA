@@ -26,13 +26,17 @@ from jwt import PyJWK, PyJWKClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from thesis.chat import ChatService
+from thesis.chat.responder import ChatReplyService
+from thesis.chat.streaming import InMemoryChatStreamBroker
 from thesis.http.backtests import create_backtest_router
 from thesis.http.chat import create_chat_router
 from thesis.http.dashboards import create_dashboard_router
 from thesis.http.deployments import create_deployment_router
+from thesis.http.knowledge import create_knowledge_router
 from thesis.http.screeners import create_screeners_router
 from thesis.http.screening import create_screener_router
 from thesis.http.state import create_workspace_state_router
+from thesis.http.strategies import create_strategy_router
 from thesis.http.streaming import (
     ProviderDeltaSource,
     StreamSleeper,
@@ -214,6 +218,8 @@ def create_app(
     *,
     bearer_token: str | None = None,
     chat_service: ChatService | None = None,
+    chat_stream_broker: InMemoryChatStreamBroker | None = None,
+    chat_reply_service: ChatReplyService | None = None,
     entra_tenant_id: str | None = None,
     entra_audience: str | None = None,
     entra_role: str = "Thesis.Access",
@@ -262,6 +268,10 @@ def create_app(
     )
     if chat_service is not None:
         application.state.chat_service = chat_service
+    if chat_stream_broker is not None:
+        application.state.chat_stream_broker = chat_stream_broker
+    if chat_reply_service is not None:
+        application.state.chat_reply_service = chat_reply_service
     if workspace_data is not None:
         application.state.workspace_service = workspace_data.workspaces
         application.state.backtest_service = workspace_data.backtests
@@ -269,6 +279,7 @@ def create_app(
         application.state.dashboard_service = workspace_data.dashboards
         application.state.screener_data_service = workspace_data.screeners
         application.state.workspace_state_service = workspace_data.state
+        application.state.strategy_service = workspace_data.strategies
         if workspace_data.harness is not None:
             application.state.harness_boundary = workspace_data.harness
     if screener_service is not None:
@@ -362,7 +373,15 @@ def create_app(
         dependencies=[Depends(authenticator)],
     )
     application.include_router(
+        create_strategy_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
         create_screener_router(),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_knowledge_router(),
         dependencies=[Depends(authenticator)],
     )
     return application

@@ -514,8 +514,11 @@ export interface WorkspaceStateData {
 	consentAudit: ConsentAuditEntry[];
 }
 
+/** Selectable data backend: bundled fixtures, same-origin local, or remote. */
+export type BackendKind = 'fixtures' | 'local' | 'azure';
+
 export interface Capabilities {
-	backend: 'thesis-api' | 'fixtures';
+	backend: BackendKind;
 	chatMessages: boolean;
 	executionStream: boolean;
 	portfolio: StatusSurface<true>;

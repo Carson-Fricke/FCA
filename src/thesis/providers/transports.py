@@ -1,0 +1,115 @@
+"""Concrete local transports for model providers (network lives here).
+
+Providers own no network client: they call an injected transport.  These are
+the workstation/local adapters that satisfy those ports with ``httpx`` and the
+process environment, keeping credentials out of provider and agent code.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Iterator, Mapping, Sequence
+from typing import TYPE_CHECKING
+
+import httpx
+
+from thesis.providers.invocations import ChatMessage as ProviderChatMessage
+from thesis.providers.openrouter import OpenRouterProvider
+
+if TYPE_CHECKING:  # avoid importing chat types at module load
+    from thesis.chat.contracts import ChatMessage
+
+#: Default system instruction for a chat reply.
+DEFAULT_SYSTEM_PROMPT = (
+    "You are FCA Thesis, a concise, workspace-scoped quantitative research "
+    "assistant. Answer the operator's latest message directly."
+)
+_CHAT_ROLES = frozenset(("user", "assistant", "system", "tool"))
+
+
+class HttpOpenRouterTransport:
+    """OpenRouter transport over ``httpx``; the only module that opens sockets."""
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout: float = 60.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise ValueError("base_url must be a non-empty string")
+        self._base_url = base_url.rstrip("/")
+        self._client = client if client is not None else httpx.Client(timeout=timeout)
+
+    def post(
+        self,
+        path: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+    ) -> tuple[int, str]:
+        response = self._client.post(
+            f"{self._base_url}{path}",
+            headers=dict(headers),
+            json=dict(payload),
+        )
+        return response.status_code, response.text
+
+
+class EnvironmentApiKeySource:
+    """Read a provider API key from the process environment."""
+
+    def __init__(self, variable: str = "OPENROUTER_API_KEY") -> None:
+        self._variable = variable
+
+    def key(self) -> str:
+        return os.environ.get(self._variable, "")
+
+
+def openrouter_reply_provider(
+    provider: OpenRouterProvider,
+    *,
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    chunk_size: int = 24,
+) -> ReplyProvider:
+    """Adapt an :class:`OpenRouterProvider` into a streamed chat reply provider.
+
+    The provider completes the request and the text is emitted in deterministic
+    chunks so the SSE transport streams progressively to the client.
+    """
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be a positive integer")
+
+    def stream(history: Sequence[ChatMessage]) -> Iterator[str]:
+        messages: list[ProviderChatMessage] = []
+        if system_prompt:
+            messages.append(ProviderChatMessage(role="system", content=system_prompt))
+        for message in history:
+            role = (
+                message.role.value
+                if hasattr(message.role, "value")
+                else str(message.role)
+            )
+            body = message.body.strip()
+            if role in _CHAT_ROLES and body:
+                messages.append(ProviderChatMessage(role=role, content=body))
+        if not messages:
+            return
+        completion = provider.complete(messages=messages)
+        text = completion.content
+        for index in range(0, len(text), chunk_size):
+            yield text[index : index + chunk_size]
+
+    return stream
+
+
+if TYPE_CHECKING:
+    from thesis.chat.responder import ReplyProvider
+
+
+__all__ = [
+    "DEFAULT_SYSTEM_PROMPT",
+    "EnvironmentApiKeySource",
+    "HttpOpenRouterTransport",
+    "openrouter_reply_provider",
+]

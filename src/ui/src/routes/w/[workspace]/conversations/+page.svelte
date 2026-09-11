@@ -4,21 +4,31 @@
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
 	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
 	import CleoPlanPanel from '$lib/components/chat/CleoPlanPanel.svelte';
+	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
 	import WorkflowTimeline from '$lib/components/chat/WorkflowTimeline.svelte';
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import {
 		confirmConsent,
+		conversationTitleFrom,
+		createChat,
+		deleteChat,
 		getConsentProposal,
 		getExecution,
 		getWorkspaceState,
 		listChats,
 		listMessages,
-		listStrategies,
 		postMessage,
 		replayExecutionEvents
 	} from '$lib/api';
 	import { fixtureMode } from '$lib/api';
-	import { ExecutionEventStream, LocalCursorStore, executionEventOf } from '$lib/sse';
+	import {
+		ChatEventStream,
+		ExecutionEventStream,
+		LocalCursorStore,
+		chatMessageOf,
+		executionEventOf,
+		providerDeltaOf
+	} from '$lib/sse';
 	import { notify } from '$lib/workspace.svelte';
 	import type {
 		ChatMessage,
@@ -26,7 +36,6 @@
 		ConsentProposal,
 		EvidenceItem,
 		ExecutionEvent,
-		Strategy,
 		SteeringPercolationTarget,
 		WorkflowExecutionRecord,
 		WorkspaceStateData
@@ -46,10 +55,16 @@
 	let proposal = $state<ConsentProposal | null>(null);
 	let consentBusy = $state(false);
 	let stateData = $state<WorkspaceStateData | null>(null);
-	let strategies = $state<Strategy[]>([]);
 	let busy = $state(false);
+	/** A new conversation is a draft until its first message is sent. */
+	let drafting = $state(false);
+	/** The conversation queued for modal delete confirmation. */
+	let deleteTarget = $state<ChatThread | null>(null);
 	let cursorStore = new LocalCursorStore();
 	let stream: ExecutionEventStream | null = null;
+	let chatStream: ChatEventStream | null = null;
+	let streamingId = $state<string | null>(null);
+	let streamingText = $state('');
 
 	const activeChat = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
 	const activeExecutionId = $derived(execution?.execution_id ?? null);
@@ -67,9 +82,6 @@
 					? requested
 					: (items[0]?.chat_id ?? null);
 			}
-		});
-		listStrategies(workspaceId).then((items) => {
-			if (!cancelled) strategies = items;
 		});
 		getWorkspaceState(workspaceId).then((ws) => {
 			if (!cancelled) stateData = ws;
@@ -90,16 +102,18 @@
 			messages = [];
 			execution = null;
 			events = [];
+			stopChatStream();
 			return;
 		}
 		let cancelled = false;
 		const requested = page.url.searchParams.get('chat');
 		if (requested !== id) {
-			replaceState(`/w/${workspaceId}/chats?chat=${id}`, {});
+			replaceState(`/w/${workspaceId}/conversations?chat=${id}`, {});
 		}
 		listMessages(workspaceId, id).then((items) => {
 			if (!cancelled) messages = items;
 		});
+		startChatStream(id);
 		getExecution(workspaceId, id).then((exec) => {
 			if (cancelled) return;
 			execution = exec;
@@ -114,8 +128,45 @@
 		});
 		return () => {
 			cancelled = true;
+			stopChatStream();
 		};
 	});
+
+	function startChatStream(id: string): void {
+		stopChatStream();
+		if (fixtureMode) {
+			// Fixture mode renders seeded replies; the SSE client is real code
+			// and runs against the API in real-fetch mode.
+			return;
+		}
+		chatStream = new ChatEventStream({ baseUrl: '', workspaceId, chatId: id, cursorStore });
+		void chatStream.start((frame) => {
+			const delta = providerDeltaOf(frame);
+			if (delta) {
+				if (delta.start) {
+					streamingId = delta.messageId ?? null;
+					streamingText = '';
+				}
+				if (delta.text) streamingText += delta.text;
+				if (delta.done) {
+					streamingId = null;
+					streamingText = '';
+				}
+				return;
+			}
+			const message = chatMessageOf(frame);
+			if (message && !messages.some((m) => m.message_id === message.message_id)) {
+				messages = [...messages, message];
+			}
+		});
+	}
+
+	function stopChatStream(): void {
+		chatStream?.stop();
+		chatStream = null;
+		streamingId = null;
+		streamingText = '';
+	}
 
 	function startStream(executionId: string): void {
 		stopStream();
@@ -143,18 +194,75 @@
 		stream = null;
 	}
 
+	/** Start a draft conversation; it persists only when the first message is sent. */
+	function newConversation(): void {
+		stopStream();
+		drafting = true;
+		deleteTarget = null;
+		chatId = null;
+		messages = [];
+		execution = null;
+		events = [];
+		replaceState(`/w/${workspaceId}/conversations`, {});
+	}
+
+	async function removeConversation(id: string): Promise<void> {
+		try {
+			await deleteChat(workspaceId, id);
+			chats = chats.filter((chat) => chat.chat_id !== id);
+			if (chatId === id) {
+				stopStream();
+				chatId = chats[0]?.chat_id ?? null;
+				messages = [];
+				execution = null;
+				events = [];
+				if (!chatId) drafting = false;
+				replaceState(
+					chatId
+						? `/w/${workspaceId}/conversations?chat=${chatId}`
+						: `/w/${workspaceId}/conversations`,
+					{}
+				);
+			}
+			notify('Conversation deleted');
+		} catch (error) {
+			notify(error instanceof Error ? error.message : 'Delete failed', true);
+		}
+	}
+
+	async function confirmDelete(): Promise<void> {
+		const target = deleteTarget;
+		if (!target) return;
+		deleteTarget = null;
+		await removeConversation(target.chat_id);
+	}
+
 	async function send(input: {
 		body: string;
 		attachmentIds: string[];
 		steeringIntent: string | null;
 	}): Promise<void> {
-		if (!chatId) return;
 		busy = true;
 		try {
-			const result = await postMessage(workspaceId, chatId, input);
+			let id = chatId;
+			let created: ChatThread | null = null;
+			if (!id) {
+				created = await createChat(workspaceId, {
+					title: conversationTitleFrom(input.body)
+				});
+				id = created.chat_id;
+			}
+			// Post before selecting so the new thread is durable when the
+			// selection effect reloads the message list.
+			const result = await postMessage(workspaceId, id, input);
 			messages = [...messages, result.message];
 			if (result.percolated.length) {
 				percolations = { ...percolations, [result.message.message_id]: result.percolated };
+			}
+			if (created) {
+				chats = [created, ...chats];
+				chatId = created.chat_id;
+				drafting = false;
 			}
 			if (input.steeringIntent && activeExecutionId) {
 				notify('Steering acknowledged — durable percolation recorded');
@@ -212,17 +320,31 @@
 			<span class="rounded-full bg-surface-800 px-1.5 font-mono text-[10px] text-slate-500">
 				{chats.length}
 			</span>
+			<button
+				type="button"
+				class="ml-auto rounded-md border border-transparent p-1 text-slate-600 transition hover:border-surface-600 hover:text-accent"
+				onclick={newConversation}
+				title="New conversation"
+				aria-label="New conversation"
+				data-testid="new-conversation"
+			>
+				<span aria-hidden="true">＋</span>
+			</button>
 		</div>
 		<ul class="min-h-0 flex-1 space-y-1 overflow-y-auto p-2" data-testid="conversation-list">
 			{#each chats as chat (chat.chat_id)}
-				<li>
+				<li class="group relative">
 					<button
 						type="button"
-						class="w-full rounded-lg px-3 py-2 text-left transition
+						class="w-full rounded-lg px-3 py-2 pr-9 text-left transition
 							{chat.chat_id === chatId
 							? 'border border-accent/40 bg-accent/10'
 							: 'border border-transparent hover:bg-surface-800/60'}"
-						onclick={() => (chatId = chat.chat_id)}
+						onclick={() => {
+							chatId = chat.chat_id;
+							drafting = false;
+							deleteTarget = null;
+						}}
 						data-testid="conversation-item"
 						data-chat={chat.chat_id}
 					>
@@ -232,6 +354,31 @@
 						<p class="text-[11px] text-slate-500">
 							{chat.kind === 'investigation' ? 'investigation' : 'chat'} · {chat.updated_at?.slice(0, 10) ?? chat.created_at.slice(0, 10)}
 						</p>
+					</button>
+					<button
+						type="button"
+						class="absolute top-2 right-2 hidden rounded p-1 text-slate-500 transition group-hover:block hover:text-loss"
+						title="Delete conversation"
+						aria-label="Delete conversation"
+						onclick={() => (deleteTarget = chat)}
+						data-testid="conversation-delete"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.8"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							class="h-3.5 w-3.5"
+							aria-hidden="true"
+						>
+							<path d="M3 6h18" />
+							<path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+							<path d="M18.5 6l-1 13a2 2 0 0 1-2 1.9h-7A2 2 0 0 1 6.5 19l-1-13" />
+							<path d="M10 11v6M14 11v6" />
+						</svg>
 					</button>
 				</li>
 			{:else}
@@ -274,6 +421,17 @@
 					}}
 					{consentBusy}
 				/>
+				{#if streamingId || streamingText}
+					<div
+						class="mt-3 rounded-lg border border-accent/30 bg-surface-900 p-3"
+						data-testid="streaming-reply"
+					>
+						<p class="mb-1 text-[10px] font-semibold text-accent">thesis-agent</p>
+						<p class="whitespace-pre-wrap text-sm text-slate-700">
+							{streamingText}<span class="animate-pulse text-accent">▍</span>
+						</p>
+					</div>
+				{/if}
 			</div>
 
 			<div class="border-t border-surface-700 p-3">
@@ -282,8 +440,10 @@
 		{:else}
 			<div class="flex flex-1 items-center justify-center p-6">
 				<EmptyState
-					title="No conversation selected"
-					hint="Start a chat from the copilot or ask the agent to draft a strategy."
+					title={drafting ? 'New conversation' : 'No conversation selected'}
+					hint={drafting
+						? 'Send a message to start this conversation.'
+						: 'Start a chat from the copilot or ask the agent to draft a strategy.'}
 				/>
 			</div>
 		{/if}
@@ -306,3 +466,11 @@
 		{/if}
 	</aside>
 </div>
+
+{#if deleteTarget}
+	<ConversationDeleteDialog
+		title={deleteTarget.title}
+		onConfirm={confirmDelete}
+		onClose={() => (deleteTarget = null)}
+	/>
+{/if}

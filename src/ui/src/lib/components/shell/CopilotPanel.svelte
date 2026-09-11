@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
 	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
-	import { listChats, listMessages, postMessage } from '$lib/api';
+	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
+	import { conversationTitleFrom, createChat, deleteChat, listChats, listMessages, postMessage } from '$lib/api';
 	import type { ChatMessage, ChatThread, SteeringPercolationTarget } from '$lib/types';
 
 	/**
@@ -23,6 +23,8 @@
 	let messages = $state<ChatMessage[]>([]);
 	let busy = $state(false);
 	let historyOpen = $state(false);
+	/** The conversation queued for modal delete confirmation. */
+	let deleteTarget = $state<ChatThread | null>(null);
 	let percolations = $state<Record<string, SteeringPercolationTarget[]>>({});
 
 	const activeThread = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
@@ -54,10 +56,32 @@
 		};
 	});
 
+	/** Start a draft conversation; it persists only when the first message is sent. */
 	function newConversation(): void {
 		chatId = null;
 		messages = [];
 		historyOpen = false;
+		deleteTarget = null;
+	}
+
+	async function removeConversation(id: string): Promise<void> {
+		try {
+			await deleteChat(workspaceId, id);
+			chats = chats.filter((thread) => thread.chat_id !== id);
+			if (chatId === id) {
+				chatId = chats[0]?.chat_id ?? null;
+				messages = [];
+			}
+		} catch {
+			// surfaced by toast in the full conversations view; copilot stays quiet
+		}
+	}
+
+	async function confirmDelete(): Promise<void> {
+		const target = deleteTarget;
+		if (!target) return;
+		deleteTarget = null;
+		await removeConversation(target.chat_id);
 	}
 
 	async function send(input: {
@@ -65,28 +89,33 @@
 		attachmentIds: string[];
 		steeringIntent: string | null;
 	}): Promise<void> {
-		if (chatId) {
-			busy = true;
-			try {
-				const result = await postMessage(workspaceId, chatId, input);
-				messages = [...messages, result.message];
-				if (result.percolated.length) {
-					percolations = {
-						...percolations,
-						[result.message.message_id]: result.percolated
-					};
-				}
-			} catch {
-				// surfaced by toast in the full chat view; copilot stays quiet
-			} finally {
-				busy = false;
+		busy = true;
+		try {
+			let id = chatId;
+			let created: ChatThread | null = null;
+			if (!id) {
+				created = await createChat(workspaceId, {
+					title: conversationTitleFrom(input.body)
+				});
+				id = created.chat_id;
 			}
-			return;
+			const result = await postMessage(workspaceId, id, input);
+			if (created) {
+				chats = [created, ...chats];
+				chatId = created.chat_id;
+			}
+			messages = [...messages, result.message];
+			if (result.percolated.length) {
+				percolations = {
+					...percolations,
+					[result.message.message_id]: result.percolated
+				};
+			}
+		} catch {
+			// surfaced by toast in the full chat view; copilot stays quiet
+		} finally {
+			busy = false;
 		}
-		// No conversation selected: route to the full conversations view where
-		// a new thread can be started (the copilot attaches to an existing
-		// conversation by design).
-		await goto(`/w/${workspaceId}/conversations`);
 	}
 </script>
 
@@ -157,23 +186,51 @@
 			</div>
 			<div class="min-h-0 flex-1 space-y-2 overflow-y-auto">
 				{#each chats as thread (thread.chat_id)}
-					<button
-						type="button"
-						class="w-full rounded-lg border border-surface-700 bg-surface-950 p-3 text-left transition hover:border-accent/40 hover:bg-surface-800 {thread.chat_id ===
-						chatId
-							? 'border-accent/50'
-							: ''}"
-						onclick={() => {
-							chatId = thread.chat_id;
-							historyOpen = false;
-						}}
-						data-testid="copilot-history-item"
-					>
-						<p class="truncate text-xs font-semibold text-slate-800">{thread.title}</p>
-						{#if workspaceName}
-							<p class="mt-1 text-[10px] text-slate-500">Scoped to {workspaceName}</p>
-						{/if}
-					</button>
+					<div class="group relative">
+						<button
+							type="button"
+							class="w-full rounded-lg border border-surface-700 bg-surface-950 p-3 pr-9 text-left transition hover:border-accent/40 hover:bg-surface-800 {thread.chat_id ===
+							chatId
+								? 'border-accent/50'
+								: ''}"
+							onclick={() => {
+								chatId = thread.chat_id;
+								historyOpen = false;
+								deleteTarget = null;
+							}}
+							data-testid="copilot-history-item"
+						>
+							<p class="truncate text-xs font-semibold text-slate-800">{thread.title}</p>
+							{#if workspaceName}
+								<p class="mt-1 text-[10px] text-slate-500">Scoped to {workspaceName}</p>
+							{/if}
+						</button>
+						<button
+							type="button"
+							class="absolute top-2 right-2 hidden rounded p-1 text-slate-500 transition group-hover:block hover:text-loss"
+							title="Delete conversation"
+							aria-label="Delete conversation"
+							onclick={() => (deleteTarget = thread)}
+							data-testid="copilot-history-delete"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.8"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								class="h-3.5 w-3.5"
+								aria-hidden="true"
+							>
+								<path d="M3 6h18" />
+								<path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+								<path d="M18.5 6l-1 13a2 2 0 0 1-2 1.9h-7A2 2 0 0 1 6.5 19l-1-13" />
+								<path d="M10 11v6M14 11v6" />
+							</svg>
+						</button>
+					</div>
 				{:else}
 					<p class="px-1 py-4 text-center text-xs text-slate-500">
 						No conversations yet. Send a message to start one.
@@ -195,3 +252,11 @@
 
 	<ChatComposer onSubmit={send} activeExecutionId={null} {busy} />
 </aside>
+
+{#if deleteTarget}
+	<ConversationDeleteDialog
+		title={deleteTarget.title}
+		onConfirm={confirmDelete}
+		onClose={() => (deleteTarget = null)}
+	/>
+{/if}

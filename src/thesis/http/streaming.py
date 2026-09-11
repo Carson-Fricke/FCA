@@ -25,11 +25,16 @@ import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import StreamingResponse
 
 from thesis.chat import ChatMessage
 from thesis.chat.service import ChatService
+from thesis.chat.streaming import (
+    CHAT_MESSAGE,
+    PROVIDER_DELTA,
+    InMemoryChatStreamBroker,
+)
 from thesis.execution.events import ExecutionEvent
 from thesis.http.chat import _service_error, get_chat_service
 
@@ -159,6 +164,45 @@ async def _execution_event_stream(
         await wait(poll_interval_seconds)
 
 
+async def _chat_event_stream(
+    broker: InMemoryChatStreamBroker,
+    *,
+    workspace_id: str,
+    chat_id: str,
+    after_cursor: int,
+    poll_interval_seconds: float,
+    wait: StreamSleeper,
+    max_poll_cycles: int | None,
+):
+    """Yield chat-stream SSE frames, tailing the broker until the bound."""
+    cursor = after_cursor
+    cycles = 0
+    while True:
+        for frame in broker.read(workspace_id, chat_id, after_cursor=cursor):
+            cursor = frame.cursor
+            if frame.event == CHAT_MESSAGE:
+                yield format_sse_event(
+                    event=CHAT_MESSAGE_EVENT_KIND,
+                    data={
+                        "kind": CHAT_MESSAGE_EVENT_KIND,
+                        "message": frame.data.get("message"),
+                    },
+                )
+            elif frame.event == PROVIDER_DELTA:
+                yield format_sse_event(
+                    event=PROVIDER_DELTA_EVENT_KIND,
+                    data={
+                        "kind": PROVIDER_DELTA_EVENT_KIND,
+                        "chatId": chat_id,
+                        "delta": dict(frame.data),
+                    },
+                )
+        cycles += 1
+        if max_poll_cycles is not None and cycles >= max_poll_cycles:
+            return
+        await wait(poll_interval_seconds)
+
+
 def create_streaming_router(
     *,
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
@@ -204,6 +248,43 @@ def create_streaming_router(
                     provider_deltas and provider_delta_source is not None
                 ),
                 provider_delta_source=provider_delta_source,
+                poll_interval_seconds=poll_interval_seconds,
+                wait=wait,
+                max_poll_cycles=max_poll_cycles,
+            ),
+            media_type=TEXT_EVENT_STREAM_MEDIA_TYPE,
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @router.get("/chats/{chat_id}/events/stream")
+    async def stream_chat_events(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        request: Request,
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+        after_cursor: Annotated[int, Query(ge=0)] = 0,
+        last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+    ) -> StreamingResponse:
+        """Stream assistant reply deltas and messages for one chat over SSE."""
+        try:
+            chat_service.get_chat(workspace_id, chat_id)
+        except Exception as error:
+            raise _service_error(error) from error
+        broker = getattr(request.app.state, "chat_stream_broker", None)
+        if not isinstance(broker, InMemoryChatStreamBroker):
+            broker = InMemoryChatStreamBroker()
+            request.app.state.chat_stream_broker = broker
+        resume = _resume_cursor(last_event_id, after_cursor)
+        return StreamingResponse(
+            _chat_event_stream(
+                broker,
+                workspace_id=workspace_id,
+                chat_id=chat_id,
+                after_cursor=resume,
                 poll_interval_seconds=poll_interval_seconds,
                 wait=wait,
                 max_poll_cycles=max_poll_cycles,

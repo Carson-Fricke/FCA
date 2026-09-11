@@ -32,7 +32,7 @@
 
 	const pageLabels: Record<string, string> = {
 		overview: 'Overview',
-		chats: 'Conversations',
+		conversations: 'Conversations',
 		strategies: 'Strategies',
 		backtests: 'Backtests',
 		deployments: 'Deployments',

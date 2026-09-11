@@ -24,8 +24,10 @@ from thesis.http.backtests import (
 )
 from thesis.http.dashboards import DashboardDataService
 from thesis.http.deployments import DeploymentDataService, InMemoryDeploymentStore
+from thesis.http.knowledge import KnowledgeSearchService
 from thesis.http.screeners import InMemoryScreenerStore, ScreenerDataService
 from thesis.http.state import InMemoryWorkspaceStateStore, WorkspaceStateService
+from thesis.http.strategies import StrategyDataService
 from thesis.http.workspaces import (
     WorkspaceCatalogStore,
     WorkspaceDataBundle,
@@ -38,6 +40,8 @@ from thesis.integrations.harness_activation import (
     LocalHarnessProcess,
 )
 from thesis.integrations.runtime_status import RuntimeStatusClient
+from thesis.knowledge.index import PageRecord, build_index
+from thesis.knowledge.search import HashingEmbedder, KnowledgeSearch
 from thesis.screening.engine import MarketBar, UniverseEntry
 
 BEARER_TOKEN = "thesis-test-token"
@@ -299,6 +303,7 @@ def make_bundle(
             strategy_matcher=lambda symbol: {"SPY": "str-1"}.get(symbol),
         ),
         state=WorkspaceStateService(InMemoryWorkspaceStateStore()),
+        strategies=StrategyDataService(),
         harness=harness,
     )
 
@@ -765,6 +770,77 @@ def test_workspace_state_round_trip_and_404() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Strategies and knowledge search
+# ---------------------------------------------------------------------------
+
+
+_KNOWLEDGE_PAGE = PageRecord(
+    page_id="momentum-101",
+    path="methods/momentum-101.md",
+    revision="rev-1",
+    version=1,
+    title="Momentum 101",
+    body="momentum factor construction and decay",
+    created=date(2026, 1, 1),
+    retrieved=date(2026, 1, 2),
+    source_url="https://example.com/momentum",
+    source_content_hash="a" * 64,
+)
+
+
+def test_strategies_route_lists_registered_summaries() -> None:
+    bundle = make_bundle()
+    bundle.strategies.add_strategy(WORKSPACE, {"id": "str-1", "name": "Momentum"})
+    client = make_client(bundle)
+
+    response = client.get(f"/v1/workspaces/{WORKSPACE}/strategies", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.json() == {"items": [{"id": "str-1", "name": "Momentum"}]}
+
+
+def test_local_bundle_counts_registered_strategies() -> None:
+    bundle = build_local_workspace_data(clock=clock)
+    workspace = bundle.workspaces.create_workspace("Local")
+    workspace_id = str(workspace["id"])
+    bundle.strategies.add_strategy(workspace_id, {"id": "str-1"})
+
+    snapshot = bundle.workspaces.snapshot(workspace_id)
+    counts = snapshot["counts"]
+    assert isinstance(counts, dict)
+    assert counts["strategies"] == 1
+
+
+def test_knowledge_search_route_is_empty_without_index() -> None:
+    client = make_client(make_bundle())
+
+    response = client.get("/v1/knowledge/search?q=momentum", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+
+
+def test_knowledge_search_maps_hits_from_the_index() -> None:
+    embedder = HashingEmbedder()
+    index = build_index([_KNOWLEDGE_PAGE], embedder, "rev-1")
+    app = create_app(bearer_token=BEARER_TOKEN)
+    app.state.knowledge_search_service = KnowledgeSearchService(
+        KnowledgeSearch(index, embedder)
+    )
+    client = TestClient(app)
+
+    response = client.get("/v1/knowledge/search?q=momentum", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {
+            "title": "Momentum 101",
+            "path": "methods/momentum-101.md",
+            "revision": "rev-1",
+            "trust_tier": "external",
+            "excerpt": "",
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Auth boundary
 # ---------------------------------------------------------------------------
 
@@ -778,8 +854,10 @@ def test_workspace_state_round_trip_and_404() -> None:
         ("post", f"/v1/workspaces/{WORKSPACE}/backtests/launch"),
         ("get", f"/v1/workspaces/{WORKSPACE}/deployments/portfolio"),
         ("get", f"/v1/workspaces/{WORKSPACE}/dashboards/widgets"),
+        ("get", f"/v1/workspaces/{WORKSPACE}/strategies"),
         ("get", f"/v1/workspaces/{WORKSPACE}/screeners"),
         ("get", f"/v1/workspaces/{WORKSPACE}/state"),
+        ("get", "/v1/knowledge/search?q=x"),
     ],
 )
 def test_data_routes_require_bearer_token(method: str, path: str) -> None:

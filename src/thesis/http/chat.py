@@ -9,7 +9,15 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 from thesis.chat import (
@@ -188,6 +196,31 @@ def create_chat_router() -> APIRouter:
         except Exception as error:
             raise _service_error(error) from error
 
+    @router.get("/chats/{chat_id}/execution")
+    async def get_chat_execution(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    ) -> dict[str, object] | None:
+        """Return the chat's most recent workflow execution, or null.
+
+        The UI hydrates a chat's execution timeline from this route; a chat
+        with no launched workflow answers null rather than 404 so the absence
+        is not logged as an error.
+        """
+        try:
+            chat_service.get_chat(workspace_id, chat_id)
+            matches = [
+                execution
+                for execution in chat_service.list_executions(workspace_id)
+                if execution.chat_id == chat_id
+            ]
+        except Exception as error:
+            raise _service_error(error) from error
+        if not matches:
+            return None
+        return max(matches, key=lambda execution: execution.created_at).as_dict()
+
     @router.post("/chats/{chat_id}/archive")
     async def archive_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -200,11 +233,24 @@ def create_chat_router() -> APIRouter:
             raise _service_error(error) from error
         return chat.as_dict()
 
+    @router.delete("/chats/{chat_id}", status_code=204)
+    async def delete_chat(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    ) -> None:
+        try:
+            chat_service.delete_chat(workspace_id, chat_id)
+        except Exception as error:
+            raise _service_error(error) from error
+
     @router.post("/chats/{chat_id}/messages")
     async def create_message(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateMessageRequest,
+        background_tasks: BackgroundTasks,
+        http_request: Request,
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         """Post a chat message and percolate steering when fields are present.
@@ -251,6 +297,9 @@ def create_chat_router() -> APIRouter:
         except Exception as error:
             raise _service_error(error) from error
         if not steering:
+            reply_service = getattr(http_request.app.state, "chat_reply_service", None)
+            if reply_service is not None and request.role is MessageRole.USER:
+                background_tasks.add_task(reply_service.respond, workspace_id, chat_id)
             return message.as_dict()
         result = percolation.message.as_dict()
         result["steering"] = {

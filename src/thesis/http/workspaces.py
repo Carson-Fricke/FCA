@@ -43,6 +43,7 @@ from thesis.http.state import (
     WorkspaceStateService,
     WorkspaceStateStore,
 )
+from thesis.http.strategies import StrategyDataService
 from thesis.integrations.harness_activation import (
     HarnessApiTransport,
     HarnessBoundary,
@@ -373,6 +374,7 @@ class WorkspaceDataBundle:
     dashboards: DashboardDataService
     screeners: ScreenerDataService
     state: WorkspaceStateService
+    strategies: StrategyDataService
     harness: HarnessBoundary | None = None
 
 
@@ -382,6 +384,7 @@ def build_local_workspace_data(
     harness_runner: HarnessProcessRunner | None = None,
     harness_transport: HarnessApiTransport | None = None,
     harness_base_url: str = "http://127.0.0.1:8777",
+    harness_boundary: HarnessBoundary | None = None,
     chat_service: ChatService | None = None,
     market_port: ScreenerMarketPort | None = None,
     clock: Callable[[], datetime] | None = None,
@@ -399,7 +402,11 @@ def build_local_workspace_data(
     resolved_clock = clock if clock is not None else _utc_now
     ids = id_factory if id_factory is not None else _counting_id_factory()
     harness = (
-        LocalHarnessProcess(harness_runner) if harness_runner is not None else None
+        harness_boundary
+        if harness_boundary is not None
+        else LocalHarnessProcess(harness_runner)
+        if harness_runner is not None
+        else None
     )
     status_client = RuntimeStatusClient(
         harness_base_url,
@@ -419,6 +426,7 @@ def build_local_workspace_data(
         else InMemoryWorkspaceStateStore()
     )
     screener_store = InMemoryScreenerStore()
+    strategies = StrategyDataService()
 
     backtests = BacktestDataService(
         harness=harness, clock=resolved_clock, id_factory=ids
@@ -453,7 +461,7 @@ def build_local_workspace_data(
             "dashboards": lambda workspace_id: len(widget_store.list(workspace_id)),
             "screeners": lambda workspace_id: len(screener_store.list(workspace_id)),
             "chats": lambda workspace_id: len(open_chats(workspace_id)),
-            "strategies": lambda _workspace_id: 0,
+            "strategies": lambda workspace_id: len(strategies.store.list(workspace_id)),
         },
         open_chats_provider=open_chats,
     )
@@ -464,6 +472,7 @@ def build_local_workspace_data(
         dashboards=dashboards,
         screeners=screeners,
         state=WorkspaceStateService(state_store),
+        strategies=strategies,
         harness=harness,
     )
 

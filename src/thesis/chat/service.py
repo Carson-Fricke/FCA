@@ -74,6 +74,10 @@ class ChatPersistence(Protocol):
         self, record_type: type[RecordT], workspace_id: str
     ) -> tuple[RecordT, ...]: ...
 
+    def delete(
+        self, record_type: type[RecordT], workspace_id: str, record_id: str
+    ) -> None: ...
+
 
 class InMemoryChatPersistence:
     """Small deterministic persistence adapter suitable for local runtime tests."""
@@ -117,6 +121,11 @@ class InMemoryChatPersistence:
             if stored_workspace == workspace_id
         )
         return cast(tuple[RecordT, ...], tuple(sorted(values, key=_record_id)))
+
+    def delete(
+        self, record_type: type[RecordT], workspace_id: str, record_id: str
+    ) -> None:
+        self._records[record_type].pop((workspace_id, record_id), None)
 
 
 def _record_id(record: Record) -> str:
@@ -225,6 +234,33 @@ class ChatService:
         return self._save(
             replace_record(chat, state=ChatState.ARCHIVED, updated_at=self._now())
         )
+
+    def delete_chat(self, workspace_id: str, chat_id: str) -> None:
+        """Remove a chat and the records it owns.
+
+        Deletion cascades to the chat's messages and attachments and to any
+        workflow executions and tool jobs launched from it, so the workspace
+        retains no orphaned references to the conversation.
+        """
+        self.get_chat(workspace_id, chat_id)
+        for message in self._list(ChatMessage, workspace_id):
+            if message.chat_id == chat_id:
+                self._delete(ChatMessage, workspace_id, message.message_id)
+        for attachment in self._list(Attachment, workspace_id):
+            if attachment.chat_id == chat_id:
+                self._delete(Attachment, workspace_id, attachment.attachment_id)
+        executions = [
+            execution
+            for execution in self._list(WorkflowExecution, workspace_id)
+            if execution.chat_id == chat_id
+        ]
+        execution_ids = {execution.execution_id for execution in executions}
+        for job in self._list(ToolJob, workspace_id):
+            if job.execution_id in execution_ids:
+                self._delete(ToolJob, workspace_id, job.tool_job_id)
+        for execution in executions:
+            self._delete(WorkflowExecution, workspace_id, execution.execution_id)
+        self._delete(ChatThread, workspace_id, chat_id)
 
     def create_investigation(
         self,
@@ -419,10 +455,17 @@ class ChatService:
 
     def list_messages(self, workspace_id: str, chat_id: str) -> tuple[ChatMessage, ...]:
         self.get_chat(workspace_id, chat_id)
-        return tuple(
+        messages = [
             message
             for message in self._list(ChatMessage, workspace_id)
             if message.chat_id == chat_id
+        ]
+        # Conversation order is chronological; the message id only breaks ties
+        # for records sharing one clock tick.
+        return tuple(
+            sorted(
+                messages, key=lambda message: (message.created_at, message.message_id)
+            )
         )
 
     def list_attachments(
@@ -1268,6 +1311,11 @@ class ChatService:
         self, record_type: type[RecordT], workspace_id: str
     ) -> tuple[RecordT, ...]:
         return self._persistence.list(record_type, workspace_id)
+
+    def _delete(
+        self, record_type: type[RecordT], workspace_id: str, record_id: str
+    ) -> None:
+        self._persistence.delete(record_type, workspace_id, record_id)
 
     def _existing_many(
         self,

@@ -19,6 +19,7 @@
 import { browser } from '$app/environment';
 import { fixtures } from './fixtures';
 import type {
+	BackendKind,
 	BacktestDetail,
 	BacktestSummaryRow,
 	Capabilities,
@@ -101,51 +102,204 @@ export interface ScreenerRunInput extends ScreenerSaveInput {
 	as_of: string;
 }
 
-const base: string = (import.meta.env.PUBLIC_THESIS_API_BASE as string | undefined) ?? '';
+const buildBase: string = (
+	(import.meta.env.PUBLIC_THESIS_API_BASE as string | undefined) ?? ''
+).trim();
 const forceFixtures = (import.meta.env.PUBLIC_THESIS_UI_FIXTURES as string | undefined) === 'true';
 const bearerToken: string | null =
 	(import.meta.env.PUBLIC_THESIS_API_BEARER_TOKEN as string | undefined) ?? null;
 
-/** True when a real Thesis API base URL is configured at build time. */
-export const canUseRealApi: boolean = base.trim() !== '';
-
-/**
- * Runtime fixture override persisted across reloads (localStorage
- * `thesis.fixtures`). It only takes effect client-side: 'true' forces
- * fixture mode even when a base URL is configured, 'false' restores the
- * default choice, and an absent value keeps the build-time default.
- */
-function storedFixtureOverride(): string | null {
-	// Node 26 exposes a non-functional localStorage without
-	// --localstorage-file; guard the read so module import never throws.
+/** Guarded localStorage read: Node exposes a non-functional localStorage. */
+function storedValue(key: string): string | null {
 	try {
 		if (!browser || typeof localStorage === 'undefined') return null;
-		return localStorage.getItem('thesis.fixtures');
+		return localStorage.getItem(key);
 	} catch {
 		return null;
 	}
 }
 
-/** True when the UI renders from fixtures instead of the Thesis API. */
-export const fixtureMode: boolean =
-	storedFixtureOverride() === 'true'
-		? true
-		: storedFixtureOverride() === 'false'
-			? canUseRealApi
-			: forceFixtures || !canUseRealApi;
+/** Whether a hostname names the operator's own loopback interface. */
+function isLoopbackHost(host: string): boolean {
+	const bare = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+	const normalized = bare.toLowerCase();
+	return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+}
 
-/** The API base URL in real mode ('' in fixture mode). */
-export const apiBaseUrl: string = fixtureMode ? '' : base.replace(/\/+$/, '');
+/** Whether a base URL points at the operator's own loopback interface. */
+export function isLoopbackBase(url: string): boolean {
+	const trimmed = url.trim();
+	if (!trimmed) return false;
+	try {
+		return isLoopbackHost(new URL(trimmed).hostname);
+	} catch {
+		return false;
+	}
+}
 
-/** Persist the runtime data-mode choice and reload so every caller sees it. */
-export function setFixtureMode(enabled: boolean): void {
+/** A remote base is an absolute http(s) URL that is not loopback. */
+function isRemoteBase(url: string): boolean {
+	const trimmed = url.trim();
+	return /^https?:\/\//i.test(trimmed) && !isLoopbackBase(trimmed);
+}
+
+/** True when this UI is served from the operator's own machine. */
+export const isLocalHosting: boolean = browser ? isLoopbackHost(location.hostname) : false;
+
+function stripSlash(url: string): string {
+	return url.replace(/\/+$/, '');
+}
+
+const storedRemoteBase = (storedValue('thesis.azure_base') ?? '').trim();
+
+/**
+ * A loopback base is the *local* Thesis API, never Azure — even when it
+ * arrives through the generic build-time `PUBLIC_THESIS_API_BASE`, or through a
+ * stale `thesis.azure_base` value. Only a non-loopback absolute URL is remote.
+ */
+const localConfiguredBase: string = stripSlash(
+	isLoopbackBase(storedRemoteBase)
+		? storedRemoteBase
+		: isLoopbackBase(buildBase)
+			? buildBase
+			: ''
+);
+
+/** The configured remote (Azure) API base; empty when none is configured. */
+export const azureBaseUrl: string =
+	stripSlash(isRemoteBase(storedRemoteBase) ? storedRemoteBase : '') ||
+	stripSlash(isRemoteBase(buildBase) ? buildBase : '');
+
+/** True when a remote (Azure) Thesis API base URL is configured. */
+export const canUseRemoteApi: boolean = azureBaseUrl !== '';
+
+const _storedBackend = storedValue('thesis.backend');
+
+/** Honor a stored choice only when it is still valid for this build. */
+function _storedKind(candidate: string | null): BackendKind | null {
+	if (candidate === 'fixtures' || candidate === 'local') return candidate;
+	if (candidate === 'azure' && canUseRemoteApi) return 'azure';
+	return null;
+}
+
+/**
+ * Resolve the active backend: an explicit stored choice wins, then a
+ * loopback base (local), then a remote base (Azure), else fixtures. A base
+ * configured for the build is Azure only when it is not loopback.
+ */
+export const backendKind: BackendKind =
+	_storedKind(_storedBackend) ??
+	(forceFixtures
+		? 'fixtures'
+		: localConfiguredBase
+			? 'local'
+			: canUseRemoteApi
+				? 'azure'
+				: 'fixtures');
+
+/** True when the UI renders from bundled fixtures instead of a backend. */
+export const fixtureMode: boolean = backendKind === 'fixtures';
+
+/** True when any non-fixture backend is active. */
+export const canUseRealApi: boolean = backendKind !== 'fixtures';
+
+/**
+ * The API base URL. `fixtures` resolves to '' (no fetching); `local` uses the
+ * configured loopback base or '' for same-origin (dev proxy); `azure` uses the
+ * configured remote base.
+ */
+export const apiBaseUrl: string =
+	backendKind === 'azure'
+		? azureBaseUrl
+		: backendKind === 'local'
+			? localConfiguredBase
+			: '';
+
+/** Human-readable label for a backend choice. */
+export function backendLabel(kind: BackendKind = backendKind): string {
+	return kind === 'fixtures' ? 'fixture data' : kind === 'local' ? 'local backend' : 'azure api';
+}
+
+/** True when a backend can be selected from the running UI. */
+export function backendOptions(): {
+	kind: BackendKind;
+	label: string;
+	detail: string;
+	available: boolean;
+	base: string;
+}[] {
+	return [
+		{
+			kind: 'fixtures',
+			label: 'Fixtures',
+			detail: 'Bundled sample data. No backend, fully offline.',
+			available: true,
+			base: ''
+		},
+		{
+			kind: 'local',
+			label: 'Local',
+			detail: localConfiguredBase
+				? 'Local Thesis API configured for this build.'
+				: 'Local Thesis API, same-origin via the dev proxy.',
+			available: isLocalHosting,
+			base: localConfiguredBase
+		},
+		{
+			kind: 'azure',
+			label: 'Azure',
+			detail: canUseRemoteApi
+				? 'Remote Thesis API configured for this build.'
+				: 'Enter a remote Thesis API base URL below.',
+			available: true,
+			base: azureBaseUrl
+		}
+	];
+}
+
+/**
+ * Persist a backend choice and reload so every module re-resolves the base.
+ * `azureBase` updates the stored remote URL when provided.
+ */
+export function setBackend(kind: BackendKind, azureBase?: string): void {
 	if (!browser) return;
-	localStorage.setItem('thesis.fixtures', enabled ? 'true' : 'false');
+	localStorage.setItem('thesis.backend', kind);
+	if (azureBase !== undefined) {
+		const trimmed = azureBase.trim();
+		if (trimmed) localStorage.setItem('thesis.azure_base', trimmed);
+		else localStorage.removeItem('thesis.azure_base');
+	}
 	location.reload();
+}
+
+/** Backward-compatible fixture toggle used by the error and workspace pages. */
+export function setFixtureMode(enabled: boolean): void {
+	setBackend(
+		enabled ? 'fixtures' : isLocalHosting ? 'local' : canUseRemoteApi ? 'azure' : 'local'
+	);
 }
 
 export const uiEnvironment: string =
 	(import.meta.env.PUBLIC_THESIS_UI_ENV as string | undefined) ?? 'dev';
+
+/**
+ * Single-operator actor id. Session-derived identity is not wired into the UI
+ * yet, so every mutation attributes to this local operator, matching the
+ * fixture records. The Thesis API requires an `actor_id` on messages and an
+ * `owner_actor_id` on threads.
+ */
+export const localActorId = 'user-alex';
+
+/** Non-2xx response from the Thesis API; carries the HTTP status. */
+export class ThesisApiError extends Error {
+	constructor(
+		readonly status: number,
+		readonly path: string
+	) {
+		super(`Thesis API ${status} on ${path}`);
+		this.name = 'ThesisApiError';
+	}
+}
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 	const headers = new Headers(init?.headers);
@@ -153,9 +307,27 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 	if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
 	const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers });
 	if (!response.ok) {
-		throw new Error(`Thesis API ${response.status} on ${path}`);
+		throw new ThesisApiError(response.status, path);
 	}
-	return (await response.json()) as T;
+	if (response.status === 204) return undefined as T;
+	const text = await response.text();
+	return (text ? JSON.parse(text) : undefined) as T;
+}
+
+/**
+ * Fetch that resolves to `fallback` on a 404. Used for optional resources
+ * (a chat's execution, a workspace-state document that has not been
+ * persisted) and for the activation-consent surface, which the local
+ * composition does not serve yet. Any other failure still throws so real
+ * backend or configuration errors are not masked.
+ */
+async function apiFetchOptional<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
+	try {
+		return await apiFetch<T>(path, init);
+	} catch (error) {
+		if (error instanceof ThesisApiError && error.status === 404) return fallback;
+		throw error;
+	}
 }
 
 /** Clone plain JSON-safe data without tripping over Svelte reactive proxies. */
@@ -259,9 +431,19 @@ export function getSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
 			throw new Error(`unknown workspace ${workspaceId}`);
 		});
 	}
-	return apiFetch<WorkspaceSnapshot>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/snapshot`
-	);
+	return Promise.all([
+		apiFetch<{
+			overview: WorkspaceSnapshot['overview'];
+			counts: WorkspaceSnapshot['counts'];
+		}>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/snapshot`),
+		listWorkspaces()
+	]).then(([snapshot, workspaces]) => ({
+		// The workspace routes return the overview and counts; the catalog is
+		// fetched separately so the shell's workspace switcher has its list.
+		workspaces,
+		overview: snapshot.overview,
+		counts: snapshot.counts
+	}));
 }
 
 export function listChats(workspaceId: string): Promise<ChatThread[]> {
@@ -274,6 +456,72 @@ export function listChats(workspaceId: string): Promise<ChatThread[]> {
 	return apiFetch<{ items: ChatThread[] }>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats`
 	).then((r) => r.items);
+}
+
+export interface CreateChatInput {
+	title?: string;
+	ownerActorId?: string;
+}
+
+/** Derive a conversation title from the first message body. */
+export function conversationTitleFrom(body: string): string {
+	const firstLine = body.trim().split('\n', 1)[0]?.trim() ?? '';
+	if (!firstLine) return 'New conversation';
+	return firstLine.length > 60 ? `${firstLine.slice(0, 57)}…` : firstLine;
+}
+
+/**
+ * Create a workspace conversation. The Thesis API persists the thread and
+ * returns it; fixture mode appends an in-memory thread so the create flow is
+ * exercised end to end without a backend.
+ */
+export function createChat(
+	workspaceId: string,
+	input: CreateChatInput = {}
+): Promise<ChatThread> {
+	const title = input.title?.trim() || 'New conversation';
+	const owner = input.ownerActorId ?? localActorId;
+	if (fixtureMode) {
+		return wait(10).then(() => {
+			const created: ChatThread = {
+				chat_id: `chat-local-${store.nextId++}`,
+				workspace_id: workspaceId,
+				title,
+				state: 'active',
+				kind: 'chat',
+				owner_actor_id: owner,
+				created_at: new Date().toISOString(),
+				updated_at: null,
+				investigation_ids: [],
+				strategy_ids: []
+			};
+			const doc = fixtures.chats[workspaceId] ?? { items: [] };
+			doc.items.unshift(plain(created));
+			fixtures.chats[workspaceId] = doc;
+			store.messages[created.chat_id] = [];
+			return created;
+		});
+	}
+	return apiFetch<ChatThread>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats`, {
+		method: 'POST',
+		body: JSON.stringify({ title, owner_actor_id: owner })
+	});
+}
+
+export function deleteChat(workspaceId: string, chatId: string): Promise<void> {
+	if (fixtureMode) {
+		return wait(10).then(() => {
+			const doc = fixtures.chats[workspaceId];
+			if (doc) {
+				doc.items = doc.items.filter((chat) => chat.chat_id !== chatId);
+			}
+			delete store.messages[chatId];
+		});
+	}
+	return apiFetch<void>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}`,
+		{ method: 'DELETE' }
+	);
 }
 
 export function listMessages(workspaceId: string, chatId: string): Promise<ChatMessage[]> {
@@ -335,18 +583,35 @@ export function postMessage(
 			return { message, percolated };
 		});
 	}
-	return apiFetch<PostMessageResult>(
+	return apiFetch<ChatMessage & { steering?: RawSteering }>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/messages`,
 		{
 			method: 'POST',
 			body: JSON.stringify({
+				actor_id: localActorId,
 				body: input.body,
 				attachment_ids: input.attachmentIds ?? [],
 				steering_intent: input.steeringIntent ?? null,
 				targets_execution_id: input.targetsExecutionId ?? null
 			})
 		}
-	);
+	).then((raw) => ({
+		message: raw,
+		// The API returns the persisted message directly and, for a steering
+		// message, nests the percolation under `steering`; normalize it to the
+		// `PostMessageResult` shape the components consume.
+		percolated: (raw.steering?.percolatedTo ?? []).map((target) => ({
+			execution_id: target.executionId,
+			intent_epoch: target.intentEpoch,
+			steering_intent: raw.steering?.intent ?? null
+		}))
+	}));
+}
+
+interface RawSteering {
+	intent: string | null;
+	targetsExecutionId: string | null;
+	percolatedTo: { executionId: string; intentEpoch: number }[];
 }
 
 function activeExecutionId(chatId: string): string {
@@ -365,8 +630,9 @@ export function getExecution(
 			return plain(doc);
 		});
 	}
-	return apiFetch<WorkflowExecutionRecord | null>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/execution`
+	return apiFetchOptional<WorkflowExecutionRecord | null>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/execution`,
+		null
 	);
 }
 
@@ -452,7 +718,7 @@ export function listOrders(workspaceId: string): Promise<OrderRecord[]> {
 		});
 	}
 	return apiFetch<{ items: OrderRecord[] }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/orders`
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/deployments/orders`
 	).then((r) => r.items);
 }
 
@@ -465,10 +731,15 @@ export function getPortfolio(workspaceId: string): Promise<StatusSurface<Portfol
 			return plain(doc);
 		});
 	}
-	return apiFetch<StatusSurface<PortfolioSummary>>('/v1/runtime/portfolio');
+	return apiFetch<StatusSurface<PortfolioSummary>>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/deployments/portfolio`
+	);
 }
 
-export function getRiskDecisions(requestRef: string): Promise<StatusSurface<RiskDecisionRecord[]>> {
+export function getRiskDecisions(
+	workspaceId: string,
+	requestRef: string
+): Promise<StatusSurface<RiskDecisionRecord[]>> {
 	if (fixtureMode) {
 		return wait(5).then(() => {
 			const doc =
@@ -478,7 +749,7 @@ export function getRiskDecisions(requestRef: string): Promise<StatusSurface<Risk
 		});
 	}
 	return apiFetch<StatusSurface<RiskDecisionRecord[]>>(
-		`/v1/runtime/risk-decisions/${encodeURIComponent(requestRef)}`
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/deployments/risk-decisions?request_ref=${encodeURIComponent(requestRef)}`
 	);
 }
 
@@ -490,7 +761,7 @@ export function listWidgets(workspaceId: string): Promise<WidgetDefinition[]> {
 		});
 	}
 	return apiFetch<{ items: WidgetDefinition[] }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/widgets`
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/dashboards/widgets`
 	).then((r) => r.items);
 }
 
@@ -502,7 +773,7 @@ export function removeWidget(workspaceId: string, widgetId: string): Promise<voi
 		});
 	}
 	return apiFetch<void>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/widgets/${encodeURIComponent(widgetId)}`,
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/dashboards/widgets/${encodeURIComponent(widgetId)}`,
 		{ method: 'DELETE' }
 	);
 }
@@ -652,16 +923,16 @@ export function getScreenerResult(
 	);
 }
 
-export function getWorkspaceState(workspaceId: string): Promise<WorkspaceStateData> {
+export function getWorkspaceState(workspaceId: string): Promise<WorkspaceStateData | null> {
 	if (fixtureMode) {
 		return wait(5).then(() => {
 			const doc = fixtures.workspaceState[workspaceId];
-			if (!doc) throw new Error(`unknown workspace ${workspaceId}`);
-			return plain(doc);
+			return doc ? plain(doc) : null;
 		});
 	}
-	return apiFetch<WorkspaceStateData>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/state`
+	return apiFetchOptional<WorkspaceStateData | null>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/state`,
+		null
 	);
 }
 
@@ -678,12 +949,13 @@ export function searchKnowledge(query: string): Promise<KnowledgeHit[]> {
 	).then((r) => r.items);
 }
 
-export function getConsentProposal(workspaceId: string): Promise<ConsentProposal> {
+export function getConsentProposal(workspaceId: string): Promise<ConsentProposal | null> {
 	if (fixtureMode) {
 		return wait(5).then(() => plain(fixtures.consentProposal.proposal));
 	}
-	return apiFetch<ConsentProposal>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/activation/consent/proposal`
+	return apiFetchOptional<ConsentProposal | null>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/activation/consent/proposal`,
+		null
 	);
 }
 
@@ -728,7 +1000,7 @@ export async function checkAuth(): Promise<boolean> {
 export function getCapabilities(): Promise<Capabilities> {
 	const available: StatusSurface<true> = { state: 'available', value: true, reason: null };
 	return wait(5).then(() => ({
-		backend: fixtureMode ? 'fixtures' : 'thesis-api',
+		backend: backendKind,
 		chatMessages: true,
 		executionStream: true,
 		portfolio: available,

@@ -17,7 +17,7 @@
 
 	const PAGES = [
 		{ id: 'overview', label: 'Overview' },
-		{ id: 'chats', label: 'Conversations' },
+		{ id: 'conversations', label: 'Conversations' },
 		{ id: 'strategies', label: 'Strategies' },
 		{ id: 'backtests', label: 'Backtests' },
 		{ id: 'deployments', label: 'Deployments' },
@@ -110,9 +110,9 @@
 			<button
 				type="button"
 				class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-surface-800"
-				onclick={() => go(`/w/${workspaceId}/chats`)}
+				onclick={() => go(`/w/${workspaceId}/conversations`)}
 			>
-				<span aria-hidden="true">＋</span>New chat
+				<span aria-hidden="true">＋</span>New conversation
 			</button>
 			<button
 				type="button"

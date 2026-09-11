@@ -23,26 +23,39 @@ from thesis.chat.contracts import (
     WorkspaceRecord,
     replace_record,
 )
+from thesis.chat.responder import ChatReplyService, ReplyProvider
 from thesis.chat.service import ChatPersistence, ChatService, InMemoryChatPersistence
+from thesis.chat.streaming import (
+    CHAT_MESSAGE,
+    PROVIDER_DELTA,
+    ChatStreamFrame,
+    InMemoryChatStreamBroker,
+)
 
 __all__ = [
     "Attachment",
     "AttachmentState",
+    "CHAT_MESSAGE",
     "ChatContractError",
     "ChatMessage",
     "ChatPersistence",
+    "ChatReplyService",
     "ChatService",
     "ChatState",
+    "ChatStreamFrame",
     "ChatThread",
     "CrossWorkspaceLinkError",
     "InMemoryChatPersistence",
+    "InMemoryChatStreamBroker",
     "InvalidLifecycleTransition",
     "Investigation",
     "InvestigationState",
     "MessageRole",
     "MessageState",
+    "PROVIDER_DELTA",
     "RecordLinks",
     "RecordNotFound",
+    "ReplyProvider",
     "ToolJob",
     "ToolJobState",
     "WorkflowDefinition",
