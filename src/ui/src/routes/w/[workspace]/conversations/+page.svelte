@@ -2,6 +2,7 @@
 	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
+	import ChatStarters from '$lib/components/chat/ChatStarters.svelte';
 	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
 	import CleoPlanPanel from '$lib/components/chat/CleoPlanPanel.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
@@ -395,13 +396,20 @@
 				<WorkflowTimeline events={events} />
 			</div>
 		{:else}
-			<div class="flex flex-1 items-center justify-center p-6">
+			<div class="flex flex-1 flex-col items-center justify-center gap-4 p-6">
 				<EmptyState
 					title={drafting ? 'New conversation' : 'No conversation selected'}
 					hint={drafting
-						? 'Send a message to start this conversation.'
+						? 'Pick a starter below or send your own message.'
 						: 'Start a chat from the copilot or ask the agent to draft a strategy.'}
 				/>
+				<div class="w-full max-w-md">
+					<ChatStarters
+						onSelect={(prompt) =>
+							send({ body: prompt, attachmentIds: [], steeringIntent: null })}
+						disabled={busy}
+					/>
+				</div>
 			</div>
 		{/if}
 

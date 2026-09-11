@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
+	import ChatStarters from '$lib/components/chat/ChatStarters.svelte';
 	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
 	import StreamingReply from '$lib/components/chat/StreamingReply.svelte';
@@ -275,6 +276,16 @@
 	{/if}
 
 	<div class="min-h-0 flex-1 overflow-y-auto p-3">
+		{#if !messages.length && !chatStream.active}
+			<div class="mb-3">
+				<p class="mb-2 text-xs text-slate-500">Start with a suggestion, or ask anything.</p>
+				<ChatStarters
+					onSelect={(prompt) =>
+						send({ body: prompt, attachmentIds: [], steeringIntent: null })}
+					disabled={busy}
+				/>
+			</div>
+		{/if}
 		<ChatTranscript
 			{messages}
 			{percolations}
