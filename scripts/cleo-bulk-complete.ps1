@@ -1,4 +1,4 @@
-﻿# Bulk CLEO task completion - one SQLite transaction for N tasks.
+# Bulk CLEO task completion - one SQLite transaction for N tasks.
 #
 # WHY THIS EXISTS
 # `cleo complete <id>` starts a Node process per task (~20-25s each, plus a
@@ -15,7 +15,7 @@
 # {
 #   "testRunPath": "C:/.../.cleo/test-runs/rust-workspace.json",   # optional
 #   "tasks": [
-#     { "id": "T251", "commit": "<full-or-short-sha>", "files": ["src/harness/rust/..."] }
+#     { "id": "T251", "commit": "<full-or-short-sha>", "files": ["src/harness/..."] }
 #   ]
 # }
 # `files` is optional; when omitted it is derived from `git show --name-only`.

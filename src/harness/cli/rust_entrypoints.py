@@ -13,8 +13,8 @@ deferred in ``rust-interface-migration.md``.
 Binary discovery order:
 
 1. ``HARNESS_RUST_BINARY_DIR`` when set.
-2. ``src/harness/rust/target/release`` under the repository root.
-3. ``src/harness/rust/target/debug`` under the repository root.
+2. ``src/harness/target/release`` under the repository root.
+3. ``src/harness/target/debug`` under the repository root.
 """
 
 from __future__ import annotations
@@ -44,8 +44,8 @@ def _candidate_dirs() -> tuple[Path, ...]:
     if configured:
         dirs.append(Path(configured))
     repository_root = Path(__file__).resolve().parents[3]
-    dirs.append(repository_root / "src" / "harness" / "rust" / "target" / "release")
-    dirs.append(repository_root / "src" / "harness" / "rust" / "target" / "debug")
+    dirs.append(repository_root / "src" / "harness" / "target" / "release")
+    dirs.append(repository_root / "src" / "harness" / "target" / "debug")
     return tuple(dirs)
 
 
@@ -79,7 +79,7 @@ def run_entrypoint(name: str, argv: Sequence[str] | None = None) -> int:
     if binary is None:
         print(
             f"{name}: the Rust {name} binary is not built; run "
-            "`cargo build --workspace` in src/harness/rust",
+            "`cargo build --workspace` in src/harness",
             file=sys.stderr,
         )
         return 2

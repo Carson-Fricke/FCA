@@ -1,0 +1,12 @@
+[package]
+name = "num"
+version = "0.1.0"
+edition = "2021"
+description = "Numeric kernels for the quant-harness Rust engine (staged port)."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
