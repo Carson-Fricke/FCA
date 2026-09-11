@@ -161,14 +161,16 @@ impl FeeSchedule {
         let components = match asset_class {
             "option" => {
                 let quantity = fill.quantity;
-                let commission = self
-                    .option
-                    .rounding
-                    .apply(quantity.checked_mul(self.option.commission_per_contract).unwrap_or(quantity));
-                let fee = self
-                    .option
-                    .rounding
-                    .apply(quantity.checked_mul(self.option.fee_per_contract).unwrap_or(quantity));
+                let commission = self.option.rounding.apply(
+                    quantity
+                        .checked_mul(self.option.commission_per_contract)
+                        .unwrap_or(quantity),
+                );
+                let fee = self.option.rounding.apply(
+                    quantity
+                        .checked_mul(self.option.fee_per_contract)
+                        .unwrap_or(quantity),
+                );
                 vec![
                     FeeComponent {
                         fee_id: "contract-commission".to_string(),

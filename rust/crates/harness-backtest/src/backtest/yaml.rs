@@ -187,7 +187,9 @@ fn split_mapping_entry(text: &str) -> Result<(String, String), YamlError> {
             }
         }
     }
-    Err(YamlError(format!("expected a YAML mapping entry: {text:?}")))
+    Err(YamlError(format!(
+        "expected a YAML mapping entry: {text:?}"
+    )))
 }
 
 fn split_flow_values(text: &str) -> Result<Vec<String>, YamlError> {
@@ -361,7 +363,11 @@ fn clean_lines(text: &str) -> Result<Vec<YamlLine>, YamlError> {
     Ok(lines)
 }
 
-fn parse_block(lines: &[YamlLine], index: usize, indent: usize) -> Result<(YamlValue, usize), YamlError> {
+fn parse_block(
+    lines: &[YamlLine],
+    index: usize,
+    indent: usize,
+) -> Result<(YamlValue, usize), YamlError> {
     if index >= lines.len() || lines[index].indent != indent {
         return Err(YamlError("invalid YAML indentation".to_string()));
     }
@@ -445,7 +451,9 @@ pub fn load_yaml(text: &str) -> Result<YamlValue, YamlError> {
         )));
     }
     if !matches!(parsed, YamlValue::Mapping(_)) {
-        return Err(YamlError("configuration root must be a mapping".to_string()));
+        return Err(YamlError(
+            "configuration root must be a mapping".to_string(),
+        ));
     }
     Ok(parsed)
 }
@@ -480,7 +488,11 @@ mod tests {
     #[test]
     fn strips_comments_and_rejects_duplicates() {
         assert_eq!(
-            load_yaml("a: 1 # comment\n").expect("ok").as_mapping().unwrap()["a"].as_int(),
+            load_yaml("a: 1 # comment\n")
+                .expect("ok")
+                .as_mapping()
+                .unwrap()["a"]
+                .as_int(),
             Some(1)
         );
         assert!(load_yaml("a: 1\na: 2\n").is_err());

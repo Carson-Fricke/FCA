@@ -160,49 +160,55 @@ impl PyStrategyRuntime {
         let symbols = start.symbols.clone();
         let now_ns = start.start_ns;
 
-        let built: Result<BuiltRuntime, HostError> =
-            Python::attach(|py| {
-                install_search_paths(py, &search_paths)?;
-                install_harness_data_shim(py)?;
-                let universe = Py::new(
-                    py,
-                    PyUniverse {
-                        symbols: symbols.clone(),
-                    },
-                )?;
-                let clock = Py::new(py, PyClock { now_ns: Cell::new(now_ns) })?;
-                let orders = Py::new(
-                    py,
-                    PyOrders {
-                        pending: RefCell::new(Vec::new()),
-                        owned: RefCell::new(BTreeSet::new()),
-                    },
-                )?;
-                let context = Py::new(
-                    py,
-                    PyEngineContext {
-                        universe,
-                        clock: clock.clone_ref(py),
-                        orders: orders.clone_ref(py),
-                    },
-                )?;
-                let module_obj = py.import(module.as_str())?;
-                let class_obj = module_obj.getattr(class.as_str())?;
-                let kwargs = PyDict::new(py);
-                for (name, value) in &parameters {
-                    kwargs.set_item(name, crate::python::json_loads(py, &value.to_string())?)?;
+        let built: Result<BuiltRuntime, HostError> = Python::attach(|py| {
+            install_search_paths(py, &search_paths)?;
+            install_harness_data_shim(py)?;
+            let universe = Py::new(
+                py,
+                PyUniverse {
+                    symbols: symbols.clone(),
+                },
+            )?;
+            let clock = Py::new(
+                py,
+                PyClock {
+                    now_ns: Cell::new(now_ns),
+                },
+            )?;
+            let orders = Py::new(
+                py,
+                PyOrders {
+                    pending: RefCell::new(Vec::new()),
+                    owned: RefCell::new(BTreeSet::new()),
+                },
+            )?;
+            let context = Py::new(
+                py,
+                PyEngineContext {
+                    universe,
+                    clock: clock.clone_ref(py),
+                    orders: orders.clone_ref(py),
+                },
+            )?;
+            let module_obj = py.import(module.as_str())?;
+            let class_obj = module_obj.getattr(class.as_str())?;
+            let kwargs = PyDict::new(py);
+            for (name, value) in &parameters {
+                kwargs.set_item(name, crate::python::json_loads(py, &value.to_string())?)?;
+            }
+            let instance = match class_obj.call((), Some(&kwargs)) {
+                Ok(instance) => instance,
+                Err(first_error) => {
+                    let fallback = PyDict::new(py);
+                    fallback.set_item("parameters", &kwargs)?;
+                    class_obj
+                        .call((), Some(&fallback))
+                        .map_err(|_| first_error)?
                 }
-                let instance = match class_obj.call((), Some(&kwargs)) {
-                    Ok(instance) => instance,
-                    Err(first_error) => {
-                        let fallback = PyDict::new(py);
-                        fallback.set_item("parameters", &kwargs)?;
-                        class_obj.call((), Some(&fallback)).map_err(|_| first_error)?
-                    }
-                };
-                instance.call_method1("on_start", (context.bind(py),))?;
-                Ok((instance.unbind(), context, clock, orders))
-            });
+            };
+            instance.call_method1("on_start", (context.bind(py),))?;
+            Ok((instance.unbind(), context, clock, orders))
+        });
         let (strategy, context, clock, orders) = built.map_err(host_to_backtest)?;
         self.strategy = Some(strategy);
         self.context = Some(context);
@@ -243,9 +249,7 @@ impl StrategyRuntime for PyStrategyRuntime {
                 EngineMarket::Trade { .. } => "on_trade",
             };
             let py_event = market_to_python(py, event)?;
-            strategy
-                .bind(py)
-                .call_method1(callback, (py_event,))?;
+            strategy.bind(py).call_method1(callback, (py_event,))?;
             let _ = context;
             let mut pending = orders.bind(py).borrow().take_pending();
             for order in &mut pending {
@@ -464,12 +468,7 @@ fn json_to_serde(value: &harness_backtest::canonical_json::JsonValue) -> serde_j
 /// Returns [`HostError`] when a strategy implementation path is malformed.
 pub fn build_strategy_instances(
     configuration: &harness_backtest::backtest::config::BacktestConfig,
-) -> Result<
-    Vec<
-        harness_backtest::backtest::engine_core::StrategyInstance,
-    >,
-    HostError,
-> {
+) -> Result<Vec<harness_backtest::backtest::engine_core::StrategyInstance>, HostError> {
     let mut instances = Vec::new();
     for configured in &configuration.strategy_instances {
         let runtime = PyStrategyRuntime::new(

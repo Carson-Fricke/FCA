@@ -70,8 +70,14 @@ fn main() {
                         masked_expected.len(),
                         masked_actual.len()
                     );
-                    println!("golden {:?}", String::from_utf8_lossy(&ge[..ge.len().min(win)]));
-                    println!("actual {:?}", String::from_utf8_lossy(&ae[..ae.len().min(win)]));
+                    println!(
+                        "golden {:?}",
+                        String::from_utf8_lossy(&ge[..ge.len().min(win)])
+                    );
+                    println!(
+                        "actual {:?}",
+                        String::from_utf8_lossy(&ae[..ae.len().min(win)])
+                    );
                 }
             }
         }

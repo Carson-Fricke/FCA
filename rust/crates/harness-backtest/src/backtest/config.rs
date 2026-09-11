@@ -288,8 +288,20 @@ impl BacktestConfig {
             ("schema_version", JsonValue::UInt(self.schema_version)),
             ("shell", JsonValue::String(self.shell.clone())),
             ("run_id", JsonValue::String(self.run_id.clone())),
-            ("start", JsonValue::object([("$datetime", JsonValue::string(utc_timestamp(self.start_ns, true)))])),
-            ("end", JsonValue::object([("$datetime", JsonValue::string(utc_timestamp(self.end_ns, true)))])),
+            (
+                "start",
+                JsonValue::object([(
+                    "$datetime",
+                    JsonValue::string(utc_timestamp(self.start_ns, true)),
+                )]),
+            ),
+            (
+                "end",
+                JsonValue::object([(
+                    "$datetime",
+                    JsonValue::string(utc_timestamp(self.end_ns, true)),
+                )]),
+            ),
             ("clock", JsonValue::String(self.clock.clone())),
             (
                 "event_ordering",
@@ -347,18 +359,12 @@ impl BacktestConfig {
                                 .iter()
                                 .map(|rule| {
                                     JsonValue::object([
-                                        (
-                                            "rule_id",
-                                            JsonValue::String(rule.rule_id.clone()),
-                                        ),
+                                        ("rule_id", JsonValue::String(rule.rule_id.clone())),
                                         (
                                             "implementation",
                                             JsonValue::String(rule.implementation.clone()),
                                         ),
-                                        (
-                                            "parameters",
-                                            JsonValue::Object(rule.parameters.clone()),
-                                        ),
+                                        ("parameters", JsonValue::Object(rule.parameters.clone())),
                                     ])
                                 })
                                 .collect(),
@@ -383,10 +389,7 @@ impl BacktestConfig {
                                 .iter()
                                 .map(|rule| {
                                     JsonValue::object([
-                                        (
-                                            "fee_id",
-                                            JsonValue::String(rule.fee_id.clone()),
-                                        ),
+                                        ("fee_id", JsonValue::String(rule.fee_id.clone())),
                                         ("basis", JsonValue::string(rule.basis.value())),
                                         ("rate", decimal_json(rule.rate)),
                                         ("minimum", decimal_json(rule.minimum)),
@@ -408,8 +411,7 @@ impl BacktestConfig {
     ///
     /// Returns [`BacktestError::Configuration`] on any malformed document.
     pub fn from_yaml(text: &str) -> Result<Self, BacktestError> {
-        let value = yaml::load_yaml(text)
-            .map_err(|error| BacktestError::Configuration(error.0))?;
+        let value = yaml::load_yaml(text).map_err(|error| BacktestError::Configuration(error.0))?;
         Self::from_yaml_value(&value)
     }
 
@@ -419,9 +421,9 @@ impl BacktestConfig {
     ///
     /// Returns [`BacktestError::Configuration`] on any malformed document.
     pub fn from_yaml_value(value: &YamlValue) -> Result<Self, BacktestError> {
-        let root = value
-            .as_mapping()
-            .ok_or_else(|| BacktestError::Configuration("configuration root must be a mapping".to_string()))?;
+        let root = value.as_mapping().ok_or_else(|| {
+            BacktestError::Configuration("configuration root must be a mapping".to_string())
+        })?;
         let shell = string_field(root, "shell")?;
         if shell != "backtest" {
             return Err(BacktestError::Configuration(format!(
@@ -429,10 +431,9 @@ impl BacktestConfig {
             )));
         }
         let run_id = string_field(root, "run_id")?;
-        let start_ns = datetime_field(root, "start")
-            .unwrap_or(crate::backtest::job::DEFAULT_START_NS);
-        let end_ns = datetime_field(root, "end")
-            .unwrap_or(crate::backtest::job::DEFAULT_END_NS);
+        let start_ns =
+            datetime_field(root, "start").unwrap_or(crate::backtest::job::DEFAULT_START_NS);
+        let end_ns = datetime_field(root, "end").unwrap_or(crate::backtest::job::DEFAULT_END_NS);
         let seed = int_field(root, "seed").unwrap_or(0);
         if seed < 0 {
             return Err(BacktestError::Configuration(
@@ -510,10 +511,7 @@ fn strategy_instance_json(instance: &StrategyInstanceConfig) -> JsonValue {
                     .collect(),
             ),
         ),
-        (
-            "parameters",
-            JsonValue::Object(instance.parameters.clone()),
-        ),
+        ("parameters", JsonValue::Object(instance.parameters.clone())),
     ])
 }
 
@@ -545,7 +543,10 @@ fn deployment_json(deployment: &DeploymentConfig) -> JsonValue {
             "resources",
             JsonValue::object([
                 ("cpu_cores", decimal_json(deployment.resources.cpu_cores)),
-                ("memory_mib", JsonValue::Int(deployment.resources.memory_mib)),
+                (
+                    "memory_mib",
+                    JsonValue::Int(deployment.resources.memory_mib),
+                ),
             ]),
         ),
     ])
@@ -794,9 +795,7 @@ fn yaml_to_json(value: &YamlValue) -> JsonValue {
         YamlValue::Int(value) => JsonValue::Int(*value),
         YamlValue::Decimal(value) => decimal_json(*value),
         YamlValue::String(value) => JsonValue::String(value.clone()),
-        YamlValue::Sequence(items) => {
-            JsonValue::Array(items.iter().map(yaml_to_json).collect())
-        }
+        YamlValue::Sequence(items) => JsonValue::Array(items.iter().map(yaml_to_json).collect()),
         YamlValue::Mapping(entries) => JsonValue::Object(
             entries
                 .iter()
@@ -828,10 +827,7 @@ fn decimal_field(
         .ok_or_else(|| BacktestError::Configuration(format!("missing decimal field {key:?}")))
 }
 
-fn datetime_field(
-    mapping: &BTreeMap<String, YamlValue>,
-    key: &str,
-) -> Option<i64> {
+fn datetime_field(mapping: &BTreeMap<String, YamlValue>, key: &str) -> Option<i64> {
     let text = mapping.get(key).and_then(YamlValue::as_str)?;
     crate::backtest::job::parse_timestamp_ns(text)
 }
@@ -840,8 +836,7 @@ fn datetime_field(
 mod tests {
     use super::*;
 
-    const CANONICAL_HASH: &str =
-        "9076d70fa89c3624ce292824665f45f5c6e5afa74837f92084ee7d1bd629adf5";
+    const CANONICAL_HASH: &str = "9076d70fa89c3624ce292824665f45f5c6e5afa74837f92084ee7d1bd629adf5";
 
     fn repo_config_path() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -862,10 +857,7 @@ mod tests {
 
     #[test]
     fn normalized_decimal_matches_python_format() {
-        assert_eq!(
-            normalized_fixed("100000.00".parse().unwrap()),
-            "100000"
-        );
+        assert_eq!(normalized_fixed("100000.00".parse().unwrap()), "100000");
         assert_eq!(normalized_fixed("1.0".parse().unwrap()), "1");
         assert_eq!(normalized_fixed("0.005".parse().unwrap()), "0.005");
         assert_eq!(normalized_fixed("0.01".parse().unwrap()), "0.01");

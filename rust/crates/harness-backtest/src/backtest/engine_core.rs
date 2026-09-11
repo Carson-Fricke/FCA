@@ -632,9 +632,7 @@ fn simple_touch_price(order: &EngineOrder, market: &EngineMarket) -> Option<PyDe
                 None
             }
         }
-        EngineMarket::Quote {
-            bid, ask, ..
-        } => {
+        EngineMarket::Quote { bid, ask, .. } => {
             if order.side == "buy" {
                 let price = *ask;
                 if order.order_type == "market" || order.order_type == "stop" {
@@ -763,12 +761,10 @@ pub fn resolve_risk_rules(
 fn parameter_decimal(value: &JsonValue) -> Option<PyDecimal> {
     match value {
         JsonValue::String(text) => text.parse().ok(),
-        JsonValue::Object(entries) => entries
-            .get("$decimal")
-            .and_then(|inner| match inner {
-                JsonValue::String(text) => text.parse().ok(),
-                _ => None,
-            }),
+        JsonValue::Object(entries) => entries.get("$decimal").and_then(|inner| match inner {
+            JsonValue::String(text) => text.parse().ok(),
+            _ => None,
+        }),
         JsonValue::Int(value) => Some(PyDecimal::from_i128(i128::from(*value))),
         _ => None,
     }
@@ -1053,9 +1049,7 @@ fn fees_json(assessments: &[FeeAssessment], totals: &FeeAggregation) -> JsonValu
                                                 ),
                                                 (
                                                     "amount",
-                                                    JsonValue::String(
-                                                        component.amount.to_string(),
-                                                    ),
+                                                    JsonValue::String(component.amount.to_string()),
                                                 ),
                                             ])
                                         })
@@ -1094,7 +1088,10 @@ fn risk_json(decision: &RiskDecision) -> JsonValue {
     JsonValue::object([
         ("action", JsonValue::String(decision.action.clone())),
         ("order_id", JsonValue::String(decision.order_id.clone())),
-        ("strategy_id", JsonValue::String(decision.strategy_id.clone())),
+        (
+            "strategy_id",
+            JsonValue::String(decision.strategy_id.clone()),
+        ),
         (
             "reason",
             match &decision.reason {
@@ -1206,10 +1203,7 @@ fn evaluate_rule(
                     Some("max_order_notional missing price".to_string()),
                 );
             };
-            let notional = order
-                .quantity
-                .checked_mul(price)
-                .unwrap_or(PyDecimal::ZERO);
+            let notional = order.quantity.checked_mul(price).unwrap_or(PyDecimal::ZERO);
             if notional.cmp_value(rule.limit) != Ordering::Greater {
                 ("allow".to_string(), None)
             } else {
@@ -1432,8 +1426,12 @@ fn dispatch_event(
                 price: fill.price,
                 liquidity: Some(&fill.liquidity),
             };
-            let assessment =
-                schedule.calculate(&fee_fill, &configuration.run_id, &strategy_id, &options.asset_class);
+            let assessment = schedule.calculate(
+                &fee_fill,
+                &configuration.run_id,
+                &strategy_id,
+                &options.asset_class,
+            );
             let booked = EngineFill {
                 fee: assessment.total(),
                 ..fill.clone()
@@ -1493,8 +1491,7 @@ fn process_order(
     let mut reason = None;
     let mut action = "allow".to_string();
     for rule in rules {
-        let (rule_action, rule_reason) =
-            evaluate_rule(rule, order, prices, current_quantity);
+        let (rule_action, rule_reason) = evaluate_rule(rule, order, prices, current_quantity);
         audits.push(RiskAudit {
             sequence: audits.len() as u64,
             pass_number: 1,
@@ -1577,12 +1574,13 @@ pub fn build_default_manifest(
     let fee_identity = JsonValue::object([
         ("fees", fees),
         ("precision", JsonValue::string("0.0001")),
-        ("schedule_id", JsonValue::String("harness-config".to_string())),
+        (
+            "schedule_id",
+            JsonValue::String("harness-config".to_string()),
+        ),
     ]);
-    let risk_identity = JsonValue::object([
-        ("pipeline", risk),
-        ("rules", JsonValue::Array(rule_ids)),
-    ]);
+    let risk_identity =
+        JsonValue::object([("pipeline", risk), ("rules", JsonValue::Array(rule_ids))]);
     crate::backtest::manifest::build_manifest(
         configuration,
         fixture,

@@ -34,8 +34,7 @@ struct PositionLedger {
     realized_pnl: PyDecimal,
 }
 
-impl PositionLedger {
-}
+impl PositionLedger {}
 
 /// Immutable valuation of one strategy virtual book.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,8 +106,11 @@ impl PositionSnapshot {
     /// Unrealized PnL as the remainder after realized PnL, when marked.
     #[must_use]
     pub fn unrealized_pnl(&self) -> Option<PyDecimal> {
-        self.total_pnl()
-            .map(|total| total.checked_sub(self.realized_pnl).unwrap_or(PyDecimal::ZERO))
+        self.total_pnl().map(|total| {
+            total
+                .checked_sub(self.realized_pnl)
+                .unwrap_or(PyDecimal::ZERO)
+        })
     }
 }
 
@@ -118,9 +120,7 @@ impl BookSnapshot {
     pub fn realized_pnl(&self) -> PyDecimal {
         let mut total = PyDecimal::ZERO;
         for position in &self.positions {
-            total = total
-                .checked_add(position.realized_pnl)
-                .unwrap_or(total);
+            total = total.checked_add(position.realized_pnl).unwrap_or(total);
         }
         total
     }
@@ -147,19 +147,22 @@ impl BookSnapshot {
     #[must_use]
     pub fn unrealized_pnl(&self) -> Option<PyDecimal> {
         self.equity()
-            .map(|equity| equity.checked_sub(self.initial_cash).unwrap_or(PyDecimal::ZERO))
-            .and_then(|total_pnl| {
-                total_pnl
-                    .checked_sub(self.realized_pnl())
-                    .ok()
+            .map(|equity| {
+                equity
+                    .checked_sub(self.initial_cash)
+                    .unwrap_or(PyDecimal::ZERO)
             })
+            .and_then(|total_pnl| total_pnl.checked_sub(self.realized_pnl()).ok())
     }
 
     /// Total PnL as the marked change in equity.
     #[must_use]
     pub fn total_pnl(&self) -> Option<PyDecimal> {
-        self.equity()
-            .map(|equity| equity.checked_sub(self.initial_cash).unwrap_or(PyDecimal::ZERO))
+        self.equity().map(|equity| {
+            equity
+                .checked_sub(self.initial_cash)
+                .unwrap_or(PyDecimal::ZERO)
+        })
     }
 }
 
@@ -233,12 +236,7 @@ impl VirtualBook {
             fill.quantity.negated()
         };
         let current = self.positions.get(&fill.symbol).cloned();
-        let (
-            quantity,
-            mut cost_basis,
-            mut cash_flow,
-            mut realized_pnl,
-        ) = match &current {
+        let (quantity, mut cost_basis, mut cash_flow, mut realized_pnl) = match &current {
             Some(ledger) => (
                 ledger.quantity,
                 ledger.cost_basis,
@@ -254,7 +252,10 @@ impl VirtualBook {
         };
         let next_quantity = quantity.checked_add(signed_quantity).unwrap_or(quantity);
 
-        if quantity.is_zero() || quantity.checked_mul(signed_quantity).is_ok_and(|v| v.is_positive())
+        if quantity.is_zero()
+            || quantity
+                .checked_mul(signed_quantity)
+                .is_ok_and(|v| v.is_positive())
         {
             let addition = signed_quantity
                 .checked_mul(fill.price)
@@ -388,9 +389,7 @@ impl PortfolioSnapshot {
     pub fn realized_pnl(&self) -> PyDecimal {
         let mut total = PyDecimal::ZERO;
         for position in &self.positions {
-            total = total
-                .checked_add(position.realized_pnl)
-                .unwrap_or(total);
+            total = total.checked_add(position.realized_pnl).unwrap_or(total);
         }
         total
     }
@@ -416,8 +415,11 @@ impl PortfolioSnapshot {
     /// Total PnL as the marked change in aggregate equity.
     #[must_use]
     pub fn total_pnl(&self) -> Option<PyDecimal> {
-        self.equity()
-            .map(|equity| equity.checked_sub(self.initial_cash).unwrap_or(PyDecimal::ZERO))
+        self.equity().map(|equity| {
+            equity
+                .checked_sub(self.initial_cash)
+                .unwrap_or(PyDecimal::ZERO)
+        })
     }
 
     /// Unrealized PnL when every open leg is marked.
@@ -493,7 +495,9 @@ impl PortfolioHub {
         let mut cash = PyDecimal::ZERO;
         let mut fill_count = 0usize;
         for book in &books {
-            initial_cash = initial_cash.checked_add(book.initial_cash).unwrap_or(initial_cash);
+            initial_cash = initial_cash
+                .checked_add(book.initial_cash)
+                .unwrap_or(initial_cash);
             cash = cash.checked_add(book.cash).unwrap_or(cash);
             fill_count += book.fill_count;
         }
@@ -540,18 +544,20 @@ fn aggregate_position(symbol: &str, positions: &[PositionSnapshot]) -> Aggregate
             .checked_add(position.realized_pnl)
             .unwrap_or(realized_pnl);
     }
-    let average_cost = if !quantity.is_zero() && (long_quantity.is_zero() || short_quantity.is_zero())
-    {
-        cost_basis.checked_div(quantity).ok()
-    } else {
-        None
-    };
+    let average_cost =
+        if !quantity.is_zero() && (long_quantity.is_zero() || short_quantity.is_zero()) {
+            cost_basis.checked_div(quantity).ok()
+        } else {
+            None
+        };
     let mut marks: Vec<PyDecimal> = Vec::new();
     let mut saw_none = false;
     for position in positions.iter().filter(|p| !p.quantity.is_zero()) {
         match position.mark_price {
             Some(mark) => {
-                if !marks.iter().any(|existing| existing.cmp_value(mark) == std::cmp::Ordering::Equal)
+                if !marks
+                    .iter()
+                    .any(|existing| existing.cmp_value(mark) == std::cmp::Ordering::Equal)
                 {
                     marks.push(mark);
                 }
@@ -568,8 +574,7 @@ fn aggregate_position(symbol: &str, positions: &[PositionSnapshot]) -> Aggregate
     for position in positions {
         match position.market_value() {
             Some(value) => {
-                market_value = market_value
-                    .map(|total| total.checked_add(value).unwrap_or(total));
+                market_value = market_value.map(|total| total.checked_add(value).unwrap_or(total));
             }
             None => {
                 market_value = None;
@@ -635,7 +640,13 @@ pub fn portfolio_json(snapshot: &PortfolioSnapshot) -> JsonValue {
         ("total_pnl", decimal_or_none(snapshot.total_pnl())),
         (
             "positions",
-            JsonValue::Array(snapshot.positions.iter().map(aggregate_position_json).collect()),
+            JsonValue::Array(
+                snapshot
+                    .positions
+                    .iter()
+                    .map(aggregate_position_json)
+                    .collect(),
+            ),
         ),
         (
             "books",
@@ -656,8 +667,14 @@ fn aggregate_position_json(position: &AggregatePosition) -> JsonValue {
             "short_quantity",
             JsonValue::String(position.short_quantity.to_string()),
         ),
-        ("cost_basis", JsonValue::String(position.cost_basis.to_string())),
-        ("cash_flow", JsonValue::String(position.cash_flow.to_string())),
+        (
+            "cost_basis",
+            JsonValue::String(position.cost_basis.to_string()),
+        ),
+        (
+            "cash_flow",
+            JsonValue::String(position.cash_flow.to_string()),
+        ),
         ("average_cost", decimal_or_none(position.average_cost)),
         (
             "realized_pnl",
@@ -694,8 +711,14 @@ fn book_position_json(position: &PositionSnapshot) -> JsonValue {
     JsonValue::object([
         ("symbol", JsonValue::String(position.symbol.clone())),
         ("quantity", JsonValue::String(position.quantity.to_string())),
-        ("cost_basis", JsonValue::String(position.cost_basis.to_string())),
-        ("cash_flow", JsonValue::String(position.cash_flow.to_string())),
+        (
+            "cost_basis",
+            JsonValue::String(position.cost_basis.to_string()),
+        ),
+        (
+            "cash_flow",
+            JsonValue::String(position.cash_flow.to_string()),
+        ),
         (
             "average_cost",
             decimal_or_none(Some(position.average_cost())),
