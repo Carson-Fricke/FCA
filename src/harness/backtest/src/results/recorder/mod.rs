@@ -2,13 +2,17 @@
 //!
 //! A [`RunRecorder`] turns one deterministic run into referentially linked
 //! artifacts. The staged Rust port preserves the Python field order, schema
-//! metadata, identifier derivation, and manifest digest framing, while the
-//! [`RowSink`] seam leaves room for the Arrow/Parquet writer to land later.
+//! metadata, identifier derivation, and manifest digest framing, and writes each
+//! artifact through the [`RowSink`] seam. The production sink is
+//! [`ParquetArtifactWriter`], which encodes real Arrow/Parquet objects; the
+//! canonical JSON [`CanonicalArtifactWriter`] remains for schema-faithful
+//! reference output and tests.
 
 pub mod artifacts;
 pub mod config;
 pub mod ids;
 pub mod manifest;
+pub mod parquet;
 pub mod run;
 pub mod schemas;
 pub mod writer;
@@ -23,6 +27,7 @@ pub use manifest::{
     digest_bytes, file_digest, manifest_rows, run_fingerprint, truth_text, ManifestRowsInput,
     RunManifest,
 };
+pub use parquet::ParquetArtifactWriter;
 pub use run::{
     ActionRecord, EquityRecord, EventRecord, ExecutionReportRecord, FillRecord,
     PositionTransitionRecord, RecorderError, RunRecorder,

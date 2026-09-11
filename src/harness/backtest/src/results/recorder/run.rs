@@ -20,7 +20,8 @@ use super::manifest::{
     file_digest, manifest_rows, run_fingerprint, ManifestRowsInput, RunManifest,
 };
 use super::schemas::{Artifact, STREAM_ARTIFACTS};
-use super::writer::{build_row, CanonicalArtifactWriter, Row, RowSink, Value, WriterError};
+use super::parquet::ParquetArtifactWriter;
+use super::writer::{build_row, Row, RowSink, Value, WriterError};
 
 /// Recorder construction or streaming failure.
 #[derive(Debug)]
@@ -263,7 +264,7 @@ pub struct RunRecorder {
     sequence: u64,
     closed: bool,
     manifest: Option<RunManifest>,
-    writers: BTreeMap<Artifact, CanonicalArtifactWriter>,
+    writers: BTreeMap<Artifact, ParquetArtifactWriter>,
 }
 
 impl RunRecorder {
@@ -283,7 +284,7 @@ impl RunRecorder {
         for artifact in STREAM_ARTIFACTS {
             writers.insert(
                 artifact,
-                CanonicalArtifactWriter::new(
+                ParquetArtifactWriter::new(
                     artifact_path(&directory, artifact),
                     artifact,
                     batch_size,
@@ -754,7 +755,7 @@ impl RunRecorder {
         row_counts.insert(Artifact::Manifest.value().to_string(), rows.len() as u64);
         let manifest_path = artifact_path(&self.config.directory, Artifact::Manifest);
         let mut writer =
-            CanonicalArtifactWriter::new(manifest_path, Artifact::Manifest, rows.len().max(1));
+            ParquetArtifactWriter::new(manifest_path, Artifact::Manifest, rows.len().max(1));
         for (key, value) in &rows {
             let row = build_row(
                 Artifact::Manifest,

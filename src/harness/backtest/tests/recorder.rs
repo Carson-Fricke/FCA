@@ -254,6 +254,42 @@ fn fixed_clock_supplies_timestamps() {
 }
 
 #[test]
+fn recorded_artifacts_are_arrow_readable_parquet() {
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    let directory = temp_dir("parquet");
+    let (mut recorder, _) = scripted_run(&directory);
+    let manifest = recorder.close().expect("close");
+    for artifact in Artifact::ALL {
+        let path = manifest.path(artifact);
+        let bytes = std::fs::read(&path).expect("read artifact");
+        assert_eq!(&bytes[..4], b"PAR1", "{artifact:?} is not Parquet");
+        assert_eq!(
+            &bytes[bytes.len() - 4..],
+            b"PAR1",
+            "{artifact:?} has no Parquet footer"
+        );
+        let builder =
+            ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&path).expect("open"))
+                .unwrap_or_else(|error| panic!("{artifact:?} not Arrow-readable: {error}"));
+        let expected: Vec<&str> = artifact.fields().iter().map(|field| field.name).collect();
+        let actual: Vec<&str> = builder
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect();
+        assert_eq!(actual, expected, "{artifact:?} schema");
+        assert_eq!(
+            builder.metadata().file_metadata().num_rows() as u64,
+            manifest.row_counts[artifact.value()],
+            "{artifact:?} row count"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
 fn deterministic_ids_match_the_python_source() {
     let mut source = EngineIdSource::new(Seed::Text("recorder-seed".to_string())).expect("seed");
     assert_eq!(

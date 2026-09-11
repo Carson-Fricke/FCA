@@ -10,7 +10,7 @@
 //! the optional output directory and runs one job against a configuration
 //! path. The integration crate adapts it behind its own command surface.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use num::Decimal18;
@@ -19,7 +19,7 @@ use marketdata::{Date, LocalLakeReader};
 
 use crate::backtest::config::BacktestConfig;
 use crate::backtest::engine::{
-    run_backtest, ApproveAll, BacktestOptions, ExecutionModel, ImmediateFill, OrderSide, RiskModel,
+    run_backtest, ApproveAll, BacktestOptions, ExecutionModel, ImmediateFill, RiskModel,
     StrategyRuntime, TradeBuyStrategy,
 };
 use crate::backtest::engine_core::{
@@ -358,8 +358,22 @@ pub fn run_job_with(
     );
     std::fs::create_dir_all(&directory).map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let artifact_path = write_artifact(&directory, &configuration.run_id, &result)?;
-    let ledger = build_ledger(configuration, &result);
-    let metrics_path = write_metrics(&directory, &result, &ledger)?;
+    let fills = ledger_fills_from_result(&result);
+    let orders = ledger_orders_from_result(&result);
+    let ledger = build_ledger(configuration, &fills, &orders);
+    let counts = JobCounts {
+        market_events: result.market_event_count,
+        dispatched: result.dispatched_count,
+        orders: result.order_count,
+        fills: result.fill_count,
+    };
+    let metrics_path = write_metrics(
+        &directory,
+        &configuration.run_id,
+        result.status.value(),
+        &counts,
+        &ledger,
+    )?;
     let report_path = write_report(
         &directory,
         &configuration.run_id,
@@ -367,7 +381,7 @@ pub fn run_job_with(
         &ledger,
     )?;
     let artifact_dir = directory.join("artifacts");
-    let recorder = record_artifacts(&artifact_dir, configuration, &result, &ledger)?;
+    let recorder = record_artifacts(&artifact_dir, configuration, &orders, &fills, &ledger)?;
     Ok(summarize(
         &result,
         artifact_path,
@@ -451,7 +465,50 @@ pub fn run_native_job_with_data_dir(
     payload.push(b'\n');
     std::fs::write(&artifact_path, payload)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
+    write_native_results(&directory, configuration, &outcome)?;
     Ok((outcome, artifact_path))
+}
+
+/// Write the complete result set for one native engine run.
+///
+/// In addition to the canonical `backtest.json` the caller has already written,
+/// this emits `metrics.json`, the offline `report.html`, and the recorder's
+/// linked Parquet artifact trail (including the `equity` time series).
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError::Artifact`] or [`BacktestJobError::Engine`] when an
+/// artifact cannot be written.
+fn write_native_results(
+    directory: &Path,
+    configuration: &BacktestConfig,
+    outcome: &BacktestOutcome,
+) -> Result<(), BacktestJobError> {
+    let fills = ledger_fills_from_outcome(outcome);
+    let orders = ledger_orders_from_outcome(outcome);
+    let ledger = build_ledger(configuration, &fills, &orders);
+    let counts = JobCounts {
+        market_events: outcome.market_event_count,
+        dispatched: outcome.dispatched_count,
+        orders: outcome.order_count,
+        fills: outcome.fills.len() as u64,
+    };
+    write_metrics(
+        directory,
+        &outcome.manifest.run_id,
+        outcome.status.value(),
+        &counts,
+        &ledger,
+    )?;
+    write_report(
+        directory,
+        &outcome.manifest.run_id,
+        configuration.seed,
+        &ledger,
+    )?;
+    let artifact_dir = directory.join("artifacts");
+    record_artifacts(&artifact_dir, configuration, &orders, &fills, &ledger)?;
+    Ok(())
 }
 
 /// Full-precision scale options for materialized lake data.
@@ -598,6 +655,14 @@ struct LedgerRow {
     fill_count: u64,
 }
 
+/// Counts rendered in the `metrics.json` `counts` object.
+struct JobCounts {
+    market_events: u64,
+    dispatched: u64,
+    orders: u64,
+    fills: u64,
+}
+
 /// The deterministic metrics the job derives from the engine's fills.
 struct JobLedger {
     equity: Vec<EquityPoint>,
@@ -606,11 +671,100 @@ struct JobLedger {
     orders: Vec<OrderRow>,
 }
 
+/// One normalized fill shared by the injected and native engine paths.
+struct LedgerFill {
+    fill_id: String,
+    order_id: String,
+    symbol: String,
+    side: String,
+    quantity: String,
+    price: String,
+    fee: String,
+    timestamp_ns: i64,
+    sequence: u64,
+}
+
+/// One normalized order shared by the injected and native engine paths.
+struct LedgerOrder {
+    order_id: String,
+    symbol: String,
+    side: String,
+    quantity: String,
+}
+
 fn parse_dec(value: &str) -> Decimal18 {
     value.parse::<Decimal18>().unwrap_or(Decimal18::ZERO)
 }
 
-fn build_ledger(configuration: &BacktestConfig, result: &BacktestResult) -> JobLedger {
+fn ledger_fills_from_result(result: &BacktestResult) -> Vec<LedgerFill> {
+    result
+        .fills
+        .iter()
+        .map(|fill| LedgerFill {
+            fill_id: fill.fill_id.clone(),
+            order_id: fill.order_id.clone(),
+            symbol: fill.symbol.clone(),
+            side: fill.side.value().to_string(),
+            quantity: fill.quantity.clone(),
+            price: fill.price.clone(),
+            fee: fill.fee.clone(),
+            timestamp_ns: fill.timestamp_ns,
+            sequence: fill.sequence,
+        })
+        .collect()
+}
+
+fn ledger_orders_from_result(result: &BacktestResult) -> Vec<LedgerOrder> {
+    result
+        .orders
+        .iter()
+        .map(|order| LedgerOrder {
+            order_id: order.order_id.clone(),
+            symbol: order.symbol.clone(),
+            side: order.side.value().to_string(),
+            quantity: order.quantity.clone(),
+        })
+        .collect()
+}
+
+fn ledger_fills_from_outcome(outcome: &BacktestOutcome) -> Vec<LedgerFill> {
+    outcome
+        .fills
+        .iter()
+        .map(|fill| LedgerFill {
+            fill_id: fill.fill_id.clone(),
+            order_id: fill.order_id.clone(),
+            symbol: fill.symbol.clone(),
+            side: fill.side.clone(),
+            quantity: fill.quantity.to_string(),
+            price: fill.price.to_string(),
+            fee: fill.fee.to_string(),
+            timestamp_ns: fill.timestamp_ns,
+            sequence: fill.sequence,
+        })
+        .collect()
+}
+
+fn ledger_orders_from_outcome(outcome: &BacktestOutcome) -> Vec<LedgerOrder> {
+    let mut seen = BTreeSet::new();
+    outcome
+        .fills
+        .iter()
+        .filter(|fill| seen.insert(fill.order_id.clone()))
+        .map(|fill| LedgerOrder {
+            order_id: fill.order_id.clone(),
+            symbol: fill.symbol.clone(),
+            side: fill.side.clone(),
+            quantity: fill.quantity.to_string(),
+        })
+        .collect()
+}
+
+fn build_ledger(
+    configuration: &BacktestConfig,
+    fills: &[LedgerFill],
+    orders: &[LedgerOrder],
+) -> JobLedger {
     let mut cash = parse_dec(&configuration.initial_cash);
     let mut positions: BTreeMap<String, Decimal18> = BTreeMap::new();
     let mut marks: BTreeMap<String, Decimal18> = BTreeMap::new();
@@ -626,8 +780,8 @@ fn build_ledger(configuration: &BacktestConfig, result: &BacktestResult) -> JobL
         position_count: 0,
         fill_count: 0,
     }];
-    let mut fills = Vec::new();
-    for (index, fill) in result.fills.iter().enumerate() {
+    let mut ledger_fills = Vec::new();
+    for (index, fill) in fills.iter().enumerate() {
         let fill_count = index as u64 + 1;
         let quantity = parse_dec(&fill.quantity);
         let price = parse_dec(&fill.price);
@@ -636,21 +790,18 @@ fn build_ledger(configuration: &BacktestConfig, result: &BacktestResult) -> JobL
         let position = positions
             .entry(fill.symbol.clone())
             .or_insert(Decimal18::ZERO);
-        match fill.side {
-            OrderSide::Buy => {
-                cash = cash
-                    .checked_sub(notional)
-                    .and_then(|value| value.checked_sub(fee))
-                    .unwrap_or(cash);
-                *position = position.checked_add(quantity).unwrap_or(*position);
-            }
-            OrderSide::Sell => {
-                cash = cash
-                    .checked_add(notional)
-                    .and_then(|value| value.checked_sub(fee))
-                    .unwrap_or(cash);
-                *position = position.checked_sub(quantity).unwrap_or(*position);
-            }
+        if fill.side == "buy" {
+            cash = cash
+                .checked_sub(notional)
+                .and_then(|value| value.checked_sub(fee))
+                .unwrap_or(cash);
+            *position = position.checked_add(quantity).unwrap_or(*position);
+        } else {
+            cash = cash
+                .checked_add(notional)
+                .and_then(|value| value.checked_sub(fee))
+                .unwrap_or(cash);
+            *position = position.checked_sub(quantity).unwrap_or(*position);
         }
         marks.insert(fill.symbol.clone(), price);
         let mut market_value = Decimal18::ZERO;
@@ -674,7 +825,7 @@ fn build_ledger(configuration: &BacktestConfig, result: &BacktestResult) -> JobL
             position_count: positions.values().filter(|held| !held.is_zero()).count() as u32,
             fill_count,
         });
-        fills.push(FillRow {
+        ledger_fills.push(FillRow {
             fill_id: fill.fill_id.clone(),
             order_id: fill.order_id.clone(),
             strategy_id: String::new(),
@@ -685,8 +836,7 @@ fn build_ledger(configuration: &BacktestConfig, result: &BacktestResult) -> JobL
             latency_ns: None,
         });
     }
-    let orders = result
-        .orders
+    let ledger_orders = orders
         .iter()
         .map(|order| OrderRow {
             order_id: order.order_id.clone(),
@@ -697,8 +847,8 @@ fn build_ledger(configuration: &BacktestConfig, result: &BacktestResult) -> JobL
     JobLedger {
         equity,
         rows,
-        fills,
-        orders,
+        fills: ledger_fills,
+        orders: ledger_orders,
     }
 }
 
@@ -709,19 +859,19 @@ fn decimal_opt(value: Option<Decimal18>) -> JsonValue {
     }
 }
 
-fn metrics_json(result: &BacktestResult, ledger: &JobLedger) -> JsonValue {
+fn metrics_json(run_id: &str, status: &str, counts: &JobCounts, ledger: &JobLedger) -> JsonValue {
     let metrics = equity_curve_metrics(&ledger.equity);
     let execution = execution_stats(&ledger.fills, &ledger.orders);
     JsonValue::object([
-        ("run_id", JsonValue::String(result.manifest.run_id.clone())),
-        ("status", JsonValue::string(result.status.value())),
+        ("run_id", JsonValue::String(run_id.to_string())),
+        ("status", JsonValue::string(status)),
         (
             "counts",
             JsonValue::object([
-                ("market_events", JsonValue::UInt(result.market_event_count)),
-                ("dispatched", JsonValue::UInt(result.dispatched_count)),
-                ("orders", JsonValue::UInt(result.order_count)),
-                ("fills", JsonValue::UInt(result.fill_count)),
+                ("market_events", JsonValue::UInt(counts.market_events)),
+                ("dispatched", JsonValue::UInt(counts.dispatched)),
+                ("orders", JsonValue::UInt(counts.orders)),
+                ("fills", JsonValue::UInt(counts.fills)),
             ]),
         ),
         (
@@ -785,11 +935,13 @@ fn metrics_json(result: &BacktestResult, ledger: &JobLedger) -> JsonValue {
 
 fn write_metrics(
     directory: &Path,
-    result: &BacktestResult,
+    run_id: &str,
+    status: &str,
+    counts: &JobCounts,
     ledger: &JobLedger,
 ) -> Result<PathBuf, BacktestJobError> {
     let path = directory.join("metrics.json");
-    let mut payload = metrics_json(result, ledger)
+    let mut payload = metrics_json(run_id, status, counts, ledger)
         .to_canonical_string()
         .into_bytes();
     payload.push(b'\n');
@@ -817,7 +969,8 @@ fn write_report(
 fn record_artifacts(
     directory: &Path,
     configuration: &BacktestConfig,
-    result: &BacktestResult,
+    orders: &[LedgerOrder],
+    fills: &[LedgerFill],
     ledger: &JobLedger,
 ) -> Result<RunManifest, BacktestJobError> {
     let config = RecorderConfig::new(&configuration.run_id, directory)
@@ -828,12 +981,12 @@ fn record_artifacts(
     let mut recorder =
         RunRecorder::new(config).map_err(|error| BacktestJobError::Engine(error.to_string()))?;
     let mut action_ids: BTreeMap<String, String> = BTreeMap::new();
-    for (index, order) in result.orders.iter().enumerate() {
+    for (index, order) in orders.iter().enumerate() {
         let action_id = recorder
             .record_action(&ActionRecord {
                 kind: Some(ActionKind::Submit),
                 symbol: Some(order.symbol.clone()),
-                side: Some(order.side.value().to_string()),
+                side: Some(order.side.clone()),
                 quantity: Some(order.quantity.clone()),
                 order_id: Some(order.order_id.clone()),
                 at_ns: Some(configuration.start_ns + index as i64),
@@ -842,7 +995,7 @@ fn record_artifacts(
             .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
         action_ids.insert(order.order_id.clone(), action_id);
     }
-    for fill in &result.fills {
+    for fill in fills {
         recorder
             .record_fill(&FillRecord {
                 fill_id: fill.fill_id.clone(),
@@ -855,7 +1008,7 @@ fn record_artifacts(
                 position_transition_id: None,
                 equity_snapshot_id: None,
                 symbol: fill.symbol.clone(),
-                side: fill.side.value().to_string(),
+                side: fill.side.clone(),
                 quantity: fill.quantity.clone(),
                 price: fill.price.clone(),
                 fee: fill.fee.clone(),
