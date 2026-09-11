@@ -1,5 +1,11 @@
 <script lang="ts">
-	/** Inline streaming assistant bubble shown while a reply is generating. */
+	import TypingDots from '$lib/components/common/TypingDots.svelte';
+
+	/**
+	 * Inline streaming assistant message. It uses the transcript's assistant
+	 * styling (no card outline) and shows a typing indicator until the first
+	 * token arrives, then the accumulating reply text.
+	 */
 	let {
 		active,
 		text,
@@ -8,10 +14,17 @@
 </script>
 
 {#if active}
-	<div class="mt-3 rounded-lg border border-accent/30 bg-surface-900 p-3" data-testid={testId}>
-		<p class="mb-1 text-[10px] font-semibold text-accent">thesis-agent</p>
-		<p class="whitespace-pre-wrap text-sm text-slate-700">
-			{text}<span class="animate-pulse text-accent">▍</span>
-		</p>
-	</div>
+	<article class="flex justify-start" data-testid={testId} data-role="assistant">
+		<div class="w-full p-1">
+			<header class="mb-1 flex items-center gap-2 text-[10px] tracking-wider">
+				<span class="text-slate-500 uppercase">assistant</span>
+				<span class="font-mono text-slate-500">thesis-agent</span>
+			</header>
+			{#if text}
+				<p class="text-sm whitespace-pre-wrap text-slate-800">{text}</p>
+			{:else}
+				<p class="py-0.5"><TypingDots /></p>
+			{/if}
+		</div>
+	</article>
 {/if}

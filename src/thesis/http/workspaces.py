@@ -475,7 +475,7 @@ def build_local_workspace_data(
         else InMemoryWorkspaceStateStore()
     )
     screener_store = InMemoryScreenerStore()
-    strategies = StrategyDataService()
+    strategies = StrategyDataService(clock=resolved_clock, id_factory=ids)
 
     backtests = BacktestDataService(
         harness=harness, clock=resolved_clock, id_factory=ids

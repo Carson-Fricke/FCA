@@ -303,7 +303,7 @@ def make_bundle(
             strategy_matcher=lambda symbol: {"SPY": "str-1"}.get(symbol),
         ),
         state=WorkspaceStateService(InMemoryWorkspaceStateStore()),
-        strategies=StrategyDataService(),
+        strategies=StrategyDataService(clock=clock, id_factory=counting_ids()),
         harness=harness,
     )
 
@@ -796,6 +796,34 @@ def test_strategies_route_lists_registered_summaries() -> None:
     response = client.get(f"/v1/workspaces/{WORKSPACE}/strategies", headers=HEADERS)
     assert response.status_code == 200
     assert response.json() == {"items": [{"id": "str-1", "name": "Momentum"}]}
+
+
+def test_create_strategy_persists_a_draft_with_an_initial_version() -> None:
+    client = make_client(make_bundle())
+
+    created = client.post(
+        f"/v1/workspaces/{WORKSPACE}/strategies",
+        headers=HEADERS,
+        json={"name": "Momentum breakout", "symbol": "aapl"},
+    )
+
+    assert created.status_code == 201
+    body = created.json()
+    assert body["id"] == "str-001"
+    assert body["symbol"] == "aapl"
+    assert body["status"] == "draft"
+    assert body["versions"] == [
+        {
+            "version": "0.1.0",
+            "created_at": FIXED_CREATED_AT,
+            "parent_version": None,
+            "note": "Created",
+        }
+    ]
+    listed = client.get(
+        f"/v1/workspaces/{WORKSPACE}/strategies", headers=HEADERS
+    ).json()
+    assert [row["id"] for row in listed["items"]] == ["str-001"]
 
 
 def test_local_bundle_counts_registered_strategies() -> None:

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
+	import CreateStrategyDialog from '$lib/components/strategies/CreateStrategyDialog.svelte';
 	import { money, pct, signedPct } from '$lib/format';
-	import { listStrategies } from '$lib/api';
+	import { createStrategy, listStrategies } from '$lib/api';
+	import { notify } from '$lib/workspace.svelte';
 	import type { Strategy, StrategyStatus } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -12,6 +14,7 @@
 	let strategies = $state<Strategy[]>([]);
 	let view = $state<'grid' | 'list'>('grid');
 	let statusFilter = $state<'all' | StrategyStatus>('all');
+	let createOpen = $state(false);
 
 	$effect(() => {
 		let cancelled = false;
@@ -74,6 +77,8 @@
 			<button
 				type="button"
 				class="rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25"
+				onclick={() => (createOpen = true)}
+				data-testid="new-strategy"
 			>
 				＋ New strategy
 			</button>
@@ -147,3 +152,22 @@
 		</div>
 	{/if}
 </div>
+
+{#if createOpen}
+	<CreateStrategyDialog
+		onClose={() => (createOpen = false)}
+		onCreate={async (input) => {
+			createOpen = false;
+			try {
+				const created = await createStrategy(workspaceId, input);
+				strategies = [created, ...strategies];
+				notify(`Strategy “${created.name}” created`);
+			} catch (error) {
+				notify(
+					`Strategy creation failed: ${error instanceof Error ? error.message : error}`,
+					true
+				);
+			}
+		}}
+	/>
+{/if}

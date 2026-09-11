@@ -217,10 +217,10 @@ function ephemeralKey(frame: SseFrame): string | null {
 		const message = frame.data['message'] as ChatMessage | undefined;
 		return message?.message_id ?? null;
 	}
-	if (frame.event === PROVIDER_DELTA_EVENT_KIND) {
-		const delta = frame.data['delta'] as { messageId?: string } | undefined;
-		return delta?.messageId ?? null;
-	}
+	// Provider deltas are an ordered token stream: every chunk, including the
+	// `start` and `done` markers, must reach the client, so they are never
+	// deduplicated. A replayed `start` frame resets the visible text before the
+	// chunks re-append on reconnect.
 	return null;
 }
 

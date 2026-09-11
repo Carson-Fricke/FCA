@@ -35,6 +35,7 @@ import type {
 	RiskDecisionRecord,
 	StatusSurface,
 	Strategy,
+	StrategyStatus,
 	WidgetDefinition,
 	WorkflowExecutionRecord,
 	WorkspaceSnapshot,
@@ -671,6 +672,57 @@ export function listStrategies(workspaceId: string): Promise<Strategy[]> {
 
 export function getStrategy(workspaceId: string, strategyId: string): Promise<Strategy | null> {
 	return listStrategies(workspaceId).then((items) => items.find((s) => s.id === strategyId) ?? null);
+}
+
+export interface CreateStrategyInput {
+	name: string;
+	symbol: string;
+	description?: string;
+	status?: StrategyStatus;
+}
+
+export function createStrategy(
+	workspaceId: string,
+	input: CreateStrategyInput
+): Promise<Strategy> {
+	const status = input.status ?? 'draft';
+	const description = input.description ?? '';
+	if (fixtureMode) {
+		return wait(15).then(() => {
+			const now = new Date().toISOString();
+			const created: Strategy = {
+				id: `str-local-${store.nextId++}`,
+				workspace_id: workspaceId,
+				name: input.name,
+				symbol: input.symbol.toUpperCase(),
+				status,
+				description,
+				pnl: 0,
+				return_pct: 0,
+				win_rate: 0,
+				capital: 0,
+				code: '',
+				versions: [{ version: '0.1.0', created_at: now, parent_version: null, note: 'Created' }],
+				created_at: now
+			};
+			const doc = fixtures.strategies[workspaceId] ?? { items: [] };
+			doc.items.unshift(plain(created));
+			fixtures.strategies[workspaceId] = doc;
+			return created;
+		});
+	}
+	return apiFetch<Strategy>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/strategies`,
+		{
+			method: 'POST',
+			body: JSON.stringify({
+				name: input.name,
+				symbol: input.symbol,
+				description,
+				status
+			})
+		}
+	);
 }
 
 export function listBacktests(workspaceId: string): Promise<BacktestSummaryRow[]> {

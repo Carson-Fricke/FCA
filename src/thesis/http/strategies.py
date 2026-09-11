@@ -7,9 +7,20 @@ the service from app state, like the other workspace data routers.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, Path, Request
+from pydantic import BaseModel, ConfigDict, Field
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _iso_z(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class StrategyStore(Protocol):
@@ -42,15 +53,40 @@ class InMemoryStrategyStore:
         return dict(stored)
 
 
-class StrategyDataService:
-    """Read surface over the workspace strategy store."""
+class CreateStrategyRequest(BaseModel):
+    """Request boundary for a new strategy registry entry."""
 
-    def __init__(self, store: StrategyStore | None = None) -> None:
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=256)
+    symbol: str = Field(min_length=1, max_length=32)
+    description: str = Field(default="", max_length=1_024)
+    status: str = Field(default="draft", pattern="^(live|paper|paused|draft)$")
+
+
+class StrategyDataService:
+    """Read/write surface over the workspace strategy store."""
+
+    def __init__(
+        self,
+        store: StrategyStore | None = None,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        id_factory: Callable[[str], str] | None = None,
+    ) -> None:
         self._store = store if store is not None else InMemoryStrategyStore()
+        self._clock = clock if clock is not None else _utc_now
+        self._id_factory = id_factory
 
     @property
     def store(self) -> StrategyStore:
         return self._store
+
+    def _next_id(self) -> str:
+        if self._id_factory is None:
+            stamp = _iso_z(self._clock()).replace("-", "").replace(":", "")
+            return f"str-{stamp}"
+        return self._id_factory("str")
 
     def list_strategies(self, workspace_id: str) -> tuple[dict[str, object], ...]:
         return self._store.list(workspace_id)
@@ -58,6 +94,41 @@ class StrategyDataService:
     def add_strategy(
         self, workspace_id: str, strategy: dict[str, object]
     ) -> dict[str, object]:
+        return self._store.add(workspace_id, strategy)
+
+    def create_strategy(
+        self,
+        workspace_id: str,
+        *,
+        name: str,
+        symbol: str,
+        description: str = "",
+        status: str = "draft",
+    ) -> dict[str, object]:
+        """Create a draft strategy registry entry with an initial version."""
+        now = _iso_z(self._clock())
+        strategy: dict[str, object] = {
+            "id": self._next_id(),
+            "workspace_id": workspace_id,
+            "name": name,
+            "symbol": symbol,
+            "status": status,
+            "description": description,
+            "pnl": 0.0,
+            "return_pct": 0.0,
+            "win_rate": 0.0,
+            "capital": 0.0,
+            "code": "",
+            "versions": [
+                {
+                    "version": "0.1.0",
+                    "created_at": now,
+                    "parent_version": None,
+                    "note": "Created",
+                }
+            ],
+            "created_at": now,
+        }
         return self._store.add(workspace_id, strategy)
 
 
@@ -83,10 +154,25 @@ def create_strategy_router() -> APIRouter:
     ) -> dict[str, object]:
         return {"items": list(service.list_strategies(workspace_id))}
 
+    @router.post("/strategies", status_code=201)
+    async def create_strategy(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        request: CreateStrategyRequest,
+        service: Annotated[StrategyDataService, Depends(get_strategy_service)],
+    ) -> dict[str, object]:
+        return service.create_strategy(
+            workspace_id,
+            name=request.name,
+            symbol=request.symbol,
+            description=request.description,
+            status=request.status,
+        )
+
     return router
 
 
 __all__ = [
+    "CreateStrategyRequest",
     "InMemoryStrategyStore",
     "StrategyDataService",
     "StrategyStore",
