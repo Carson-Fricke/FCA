@@ -9,8 +9,9 @@ are fixed and no network or real harness process is involved.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -72,7 +73,7 @@ class FakeHarnessRunner:
     def __init__(self) -> None:
         self.argvs: list[tuple[str, ...]] = []
 
-    def __call__(self, argv: tuple[str, ...]) -> ProcessResult:
+    def __call__(self, argv: Sequence[str]) -> ProcessResult:
         self.argvs.append(tuple(argv))
         return ProcessResult(returncode=0, stdout='{"state": "queued"}', stderr="")
 
@@ -309,7 +310,7 @@ def make_bundle(
 
 
 def make_client(
-    bundle: WorkspaceDataBundle, *, chat_service: object = None
+    bundle: WorkspaceDataBundle, *, chat_service: ChatService | None = None
 ) -> TestClient:
     return TestClient(
         create_app(
@@ -672,7 +673,9 @@ def test_screener_run_delegates_to_engine_and_persists_study() -> None:
 
     artifact_path = body["artifact_path"]
     assert artifact_path.startswith("screeners/studies/liquid-large-caps-")
-    stored = bundle.screeners.store.load_artifact(artifact_path)
+    stored = cast(InMemoryScreenerStore, bundle.screeners.store).load_artifact(
+        artifact_path
+    )
     assert stored is not None
     assert b'"definition_name":"Liquid large caps"' in stored
 

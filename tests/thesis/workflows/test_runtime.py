@@ -5,6 +5,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -460,4 +461,4 @@ def test_workflow_runtime_rejects_runner_without_run_port() -> None:
         skills=SkillRegistry(),
     )
     with pytest.raises(WorkflowRuntimeError, match="BacktestRunner port"):
-        WorkflowRuntime(router=router, runner=object())  # type: ignore[arg-type]
+        WorkflowRuntime(router=router, runner=cast("BacktestRunner", object()))

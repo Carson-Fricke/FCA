@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from datetime import date
+from typing import Any, cast
 
 import pytest
 
 from thesis.screening import (
     MarketBar,
+    ScreenerContext,
     ScreenerDefinition,
     ScreenerError,
     ScreenerPortError,
@@ -62,9 +65,16 @@ def _context(
         bars[symbol] = tuple(series)
     return ScreenContext(
         symbols=symbols,
-        universe=lambda _symbol: universe,
-        market_data=lambda symbol, window: bars.get(symbol, ()),
+        universe=lambda _symbol: cast("Sequence[Mapping[str, object]]", universe),
+        market_data=lambda symbol, window: cast(
+            "Sequence[Mapping[str, object]]", bars.get(symbol, ())
+        ),
     )
+
+
+def _screener_context(**kwargs: Any) -> ScreenerContext:
+    """Present the fake market data through the engine's port protocol."""
+    return cast(ScreenerContext, _context(**kwargs))
 
 
 def _definition(**overrides):
@@ -88,7 +98,7 @@ def _definition(**overrides):
 def test_screen_excludes_bars_after_the_as_of_date() -> None:
     # AAA carries a post-as-of bar with an enormous dollar volume; if the
     # engine ever saw it, AAA would outrank BBB despite equal in-window data.
-    context = _context(
+    context = _screener_context(
         post_as_of_bar=True,
         dollar_volumes=(5_000_000.0, 5_000_000.0, 2_000_000.0),
     )
@@ -100,7 +110,7 @@ def test_screen_excludes_bars_after_the_as_of_date() -> None:
 
 
 def test_screen_returns_deterministic_ranking_with_symbol_tiebreak() -> None:
-    context = _context(dollar_volumes=(5_000_000.0, 5_000_000.0, 10_000_000.0))
+    context = _screener_context(dollar_volumes=(5_000_000.0, 5_000_000.0, 10_000_000.0))
     result = run_screener(_definition(), context, as_of=AS_OF)
 
     assert [hit.symbol for hit in result.hits] == ["CCC", "AAA", "BBB"]
@@ -112,7 +122,7 @@ def test_screen_returns_deterministic_ranking_with_symbol_tiebreak() -> None:
 
 def test_screen_carries_provenance() -> None:
     definition = _definition()
-    result = run_screener(definition, _context(), as_of=AS_OF)
+    result = run_screener(definition, _screener_context(), as_of=AS_OF)
 
     assert result.universe_revision == UNIVERSE_REVISION
     assert result.definition_hash == definition.definition_hash
@@ -258,7 +268,7 @@ def test_program_boundary_blocks_open_and_import_escape_hatches() -> None:
 
 def test_saved_study_round_trips_with_provenance() -> None:
     definition = _definition()
-    result = run_screener(definition, _context(), as_of=AS_OF)
+    result = run_screener(definition, _screener_context(), as_of=AS_OF)
     study = SavedStudy(
         name="liquid-200-september",
         definition=definition,
@@ -279,7 +289,7 @@ def test_saved_study_round_trips_with_provenance() -> None:
 
 def test_study_rejects_a_tampered_payload() -> None:
     definition = _definition()
-    result = run_screener(definition, _context(), as_of=AS_OF)
+    result = run_screener(definition, _screener_context(), as_of=AS_OF)
     study = SavedStudy(
         name="liquid-200",
         definition=definition,
@@ -296,7 +306,7 @@ def test_study_rejects_a_tampered_payload() -> None:
 
 def test_study_rejects_mismatched_definition_hashes() -> None:
     definition = _definition()
-    result = run_screener(definition, _context(), as_of=AS_OF)
+    result = run_screener(definition, _screener_context(), as_of=AS_OF)
     other = _definition(lookback_days=40)
     with pytest.raises(ScreenerError, match="different definition hashes"):
         SavedStudy(

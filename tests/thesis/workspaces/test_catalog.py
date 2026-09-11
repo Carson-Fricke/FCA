@@ -47,8 +47,9 @@ def test_workspaces_survive_a_fresh_catalog(tmp_path: Path) -> None:
     listed = reopened.list()
 
     assert [row["id"] for row in listed] == ["alpha-lab"]
-    assert reopened.get("alpha-lab") is not None
-    assert reopened.get("alpha-lab")["name"] == "Alpha Lab"  # type: ignore[index]
+    entry = reopened.get("alpha-lab")
+    assert entry is not None
+    assert entry["name"] == "Alpha Lab"
 
 
 def test_activity_is_persisted(tmp_path: Path) -> None:

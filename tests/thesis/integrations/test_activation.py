@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 import pytest
 
 from thesis.integrations.harness import ProcessResult
 from thesis.integrations.harness_activation import (
+    ActivationAction,
     ActivationAdapter,
+    ActivationEnvironment,
     ActivationOutcome,
     CapabilityUnavailableError,
     HarnessActivationError,
@@ -280,9 +283,16 @@ def test_activation_requests_reject_undefined_contract_values() -> None:
     with pytest.raises(ValueError, match="bundle_ref"):
         HarnessActivationRequest("", BACKTEST_CONFIG, "backtest")
     with pytest.raises(ValueError, match="action"):
-        HarnessActivationRequest(BUNDLE_REF, BACKTEST_CONFIG, "sweep")
+        HarnessActivationRequest(
+            BUNDLE_REF, BACKTEST_CONFIG, cast("ActivationAction", "sweep")
+        )
     with pytest.raises(ValueError, match="environment"):
-        HarnessActivationRequest(BUNDLE_REF, BACKTEST_CONFIG, "trader", "staging")
+        HarnessActivationRequest(
+            BUNDLE_REF,
+            BACKTEST_CONFIG,
+            "trader",
+            cast("ActivationEnvironment", "staging"),
+        )
     with pytest.raises(ValueError, match="HTTPS"):
         RemoteHarnessApi("http://harness.test", FakeTransport())
     with pytest.raises(ValueError, match="base_url"):
@@ -529,7 +539,7 @@ def test_status_clients_reject_credential_and_protocol_violations() -> None:
         )
 
 
-def _inert_instances() -> dict[type, object]:
+def _inert_instances() -> dict[type[Any], object]:
     return {
         RuntimeStatus: RuntimeStatus(
             "run-17", "succeeded", "2026-09-08T15:04:05Z", "2026-09-08T15:06:09Z"

@@ -58,7 +58,7 @@ class FakeTransport:
         route = self._routes.get((method, path))
         if route is None:
             raise run_local_stack.TransportError(f"no fake route for {method} {path}")
-        status, body = route(token) if callable(route) else route
+        status, body = route if isinstance(route, tuple) else route(token)
         return run_local_stack.HttpResponse(status_code=status, body=body)
 
 
