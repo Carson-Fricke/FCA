@@ -28,6 +28,15 @@ from harness.testing.indicator_parity import (
     assert_indicator_parity,
     run_indicator_parity,
 )
+from harness.testing.options_fixture import (
+    OptionsMarket,
+    SettlementKind,
+    sps_catalog,
+    sps_contract,
+    sps_market,
+    sps_quote,
+    sps_round,
+)
 from harness.testing.rust_oracle import (
     DEFAULT_PROGRAM,
     RUST_GOLDEN_ROOT,
@@ -69,6 +78,7 @@ __all__ = [
     "IndicatorRequest",
     "ManifestComparison",
     "ParityMode",
+    "OptionsMarket",
     "RUST_GOLDEN_ROOT",
     "RustOracleConfigurationError",
     "RustOracleError",
@@ -76,6 +86,7 @@ __all__ = [
     "RustOracleProgram",
     "RustOracleRun",
     "RustOracleUnavailable",
+    "SettlementKind",
     "assert_golden_is_current",
     "assert_indicator_parity",
     "assert_manifest_equal",
@@ -90,5 +101,10 @@ __all__ = [
     "reference_run",
     "run_indicator_parity",
     "run_rust_program",
+    "sps_catalog",
+    "sps_contract",
+    "sps_market",
+    "sps_quote",
+    "sps_round",
     "write_golden",
 ]
