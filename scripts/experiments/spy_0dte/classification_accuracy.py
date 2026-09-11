@@ -35,7 +35,6 @@ def classification_accuracy_by_minute(
     check_minutes: list[int],
 ) -> list[dict]:
     """For each check minute, classify by nearest z-normalized cluster mean."""
-    n = len(paths)
     results: list[dict] = []
 
     for minute_n in check_minutes:

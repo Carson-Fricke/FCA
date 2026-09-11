@@ -127,9 +127,7 @@ def int_mul_div(lhs: int, rhs: int, divisor: int, mode: str) -> int | None:
     if divisor == 0:
         return None
     negative = ((lhs < 0) != (rhs < 0)) != (divisor < 0)
-    magnitude = rounded_quotient(
-        abs(lhs) * abs(rhs), abs(divisor), negative, mode
-    )
+    magnitude = rounded_quotient(abs(lhs) * abs(rhs), abs(divisor), negative, mode)
     value = sign_of(negative, magnitude)
     return value if in_range(value) else None
 
@@ -216,7 +214,7 @@ DIV_ROUND_CASES = (
     (7, 2),
     (-7, 2),
     (10**18, 3),
-    (-10**18, 3),
+    (-(10**18), 3),
     (10**18, -3),
 )
 
@@ -244,16 +242,16 @@ def render_round_cases() -> list[str]:
                     decimal_binary("div", lhs, rhs),
                 )
             lines.append(
-                "    RoundCase { op: \"div\", "
-                f"a: {lhs}, b: {rhs}, mode: \"{mode}\", "
+                '    RoundCase { op: "div", '
+                f'a: {lhs}, b: {rhs}, mode: "{mode}", '
                 f"expected: {rust_option(expected)} }},"
             )
         for unscaled in ROUND_TO_VALUES:
             for places in ROUND_TO_PLACES:
                 expected = int_round_to(unscaled, places, mode)
                 lines.append(
-                    "    RoundCase { op: \"round_to\", "
-                    f"a: {unscaled}, b: {places}, mode: \"{mode}\", "
+                    '    RoundCase { op: "round_to", '
+                    f'a: {unscaled}, b: {places}, mode: "{mode}", '
                     f"expected: {rust_option(expected)} }},"
                 )
     lines.append("];")
@@ -290,7 +288,7 @@ def render_mul_div_cases() -> list[str]:
                 check(f"mul_div({lhs},{rhs},{divisor})", expected, reference)
             lines.append(
                 "    MulDivCase { "
-                f"a: {lhs}, b: {rhs}, c: {divisor}, mode: \"{mode}\", "
+                f'a: {lhs}, b: {rhs}, c: {divisor}, mode: "{mode}", '
                 f"expected: {rust_option(expected)} }},"
             )
     lines.append("];")
@@ -319,10 +317,7 @@ def render_text_cases() -> list[str]:
         with localcontext() as ctx:
             ctx.prec = PRECISION
             text = str(to_decimal(unscaled))
-        lines.append(
-            "    TextCase { "
-            f"unscaled: {unscaled}, text: \"{text}\" }},"
-        )
+        lines.append(f'    TextCase {{ unscaled: {unscaled}, text: "{text}" }},')
     lines.append("];")
     return lines
 
@@ -387,8 +382,7 @@ def render_parse_cases() -> list[str]:
         expected = parse_reference(text)
         escaped = text.replace("\\", "\\\\").replace('"', '\\"')
         lines.append(
-            "    ParseCase { "
-            f'text: "{escaped}", unscaled: {rust_option(expected)} }},'
+            f'    ParseCase {{ text: "{escaped}", unscaled: {rust_option(expected)} }},'
         )
     lines.append("];")
     return lines
@@ -416,7 +410,7 @@ def render_int_cases() -> list[str]:
             expected = int_to_integer(unscaled, mode)
             lines.append(
                 "    IntCase { "
-                f"unscaled: {unscaled}, mode: \"{mode}\", integer: {expected} }},"
+                f'unscaled: {unscaled}, mode: "{mode}", integer: {expected} }},'
             )
     lines.append("];")
     return lines

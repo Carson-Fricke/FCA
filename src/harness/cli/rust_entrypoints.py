@@ -29,7 +29,13 @@ from pathlib import Path
 RUST_BINARY_DIR_VARIABLE = "HARNESS_RUST_BINARY_DIR"
 
 #: The harness process entrypoints served by Rust binaries.
-ENTRYPOINT_BINARIES: tuple[str, ...] = ("harness", "api", "mcp", "backtest-job", "trader")
+ENTRYPOINT_BINARIES: tuple[str, ...] = (
+    "harness",
+    "api",
+    "mcp",
+    "backtest-job",
+    "trader",
+)
 
 
 def _candidate_dirs() -> tuple[Path, ...]:

@@ -4,43 +4,41 @@
 
 ## Status
 
-The quant-harness engine core and the process interfaces are ported to the Rust
+The quant-harness engine core and the process interfaces are native Rust in the
 workspace under `src/harness/rust/`. The engine core — clock, event bus, replay,
-matching/fills, fees, portfolio, risk, results, and the backtest runtime — is
-native Rust. User-authored strategies, indicators, and screener programs remain
-Python: the Rust engine drives them through the PyO3 plugin host in
-`harness-host`. Strategies and indicators keep authoring against
-`src/harness/strategy/**` and `src/harness/indicators/**`, and the example
-strategies under `strategies/` are unchanged.
+matching/fills, fees, portfolio, risk, results, sweeps, and the backtest runtime
+— is Rust, and the Python engine that used to mirror it has been deleted.
+
+User-authored strategies, indicators, and screener programs remain Python. The
+Rust engine drives them through the PyO3 plugin host in `harness-host`; the
+host owns the strategy context natively (clock, universe, books, orders, state,
+seeded random, emissions, and logging) and duck-types it to the documented
+`harness.strategy.contracts.StrategyContext` protocol, so strategies run
+unmodified without importing an engine. Strategies and indicators keep
+authoring against `src/harness/strategy/**`, `src/harness/indicators/**`, and
+the example strategies under `strategies/`.
 
 The native `backtest-job` runs the Rust engine end to end over the configured
 `strategy_instances` and is parity-proven byte-for-byte against the Python
-reference under the agreed definition (see below). The Zig native core was
-retired in T253; `harness-native` builds the native library the Python ctypes
-loader consumes.
+reference under the agreed definition (see below).
 
-## Ported entrypoints
+## Entrypoints
 
-| Process | Rust binary | Rust crate | Status |
+Every harness console script is a thin shim that execs the matching Rust
+binary. The shims live in `src/harness/cli/` and resolve binaries through
+`harness.cli.rust_entrypoints`.
+
+| Console script | Rust binary | Rust crate | Status |
 | --- | --- | --- | --- |
-| `api` | `api` | `src/harness/rust/crates/harness-api` | flipped (axum HTTP boundary, bearer auth, provenance) |
-| `mcp` | `mcp` | `src/harness/rust/crates/harness-mcp` | flipped (JSON-RPC dispatch, tool catalog, stdio transport) |
-| `harness` | `harness` | `src/harness/rust/crates/harness-api` | facade flipped for `api`, `mcp`, and `backtest-job`; `harness trader` stays on Python |
-| `backtest-job` | `backtest-job` | `src/harness/rust/crates/harness-api` | flipped (native engine, parity-proven) |
-| `trader` | `trader` | `src/harness/rust/crates/harness-live` | deferred; the Rust binary is a deterministic core demo, not the configured supervision runner |
+| `harness` | `harness` | `harness-api` | flipped; facade dispatches `api`, `mcp`, and `backtest-job` |
+| `api` | `api` | `harness-api` | flipped (axum HTTP boundary, bearer auth, provenance) |
+| `backtest-job` | `backtest-job` | `harness-api` | flipped (native engine, parity-proven) |
+| `trader` | `trader` | `harness-live` | deferred; see below |
+| `harness mcp` | `harness` | `harness-api` | flipped (JSON-RPC dispatch, tool catalog, stdio transport) |
 
-Configuration is ported behavior-identically in
-`src/harness/rust/crates/harness-config` (loader, strict models, canonical
-hashing) and the strategy host surface in
-`src/harness/rust/crates/harness-host` (PyO3 strategy/indicator/screener
-hosts).
-
-## Flip flag
-
-Set `HARNESS_USE_RUST_ENTRYPOINTS` to `1`, `true`, `yes`, or `on` to make the
-Python console scripts for the ported entrypoints exec the Rust binaries. The
-`harness` facade flips only its ported process groups, so bare `harness` and
-`harness --help` still render the Python help.
+Configuration is ported behavior-identically in `harness-config` (loader,
+strict models, canonical hashing) and the strategy host surface in
+`harness-host` (PyO3 strategy/indicator/screener hosts).
 
 Binary discovery, in order:
 
@@ -48,13 +46,22 @@ Binary discovery, in order:
 2. `src/harness/rust/target/release`.
 3. `src/harness/rust/target/debug`.
 
-The flip is fail-safe: a disabled flag, an unported entrypoint, an unsupported
-invocation, or a missing binary returns control to the Python implementation.
-The dispatcher lives in `src/harness/cli/rust_entrypoints.py`.
-`PORTED_ENTRYPOINTS` holds the verified set (`api`, `mcp`, `backtest-job`);
-`DEFERRED_ENTRYPOINTS` records `trader` and why it stays on Python.
-`backtest-job --data-dir` (the local-Parquet fixture) is also kept on Python
-until the native engine wires a lake reader.
+A shim exits with code 2 and an actionable message when the binary has not been
+built; it never falls back to a deleted Python implementation.
+
+### Deferred: `trader`
+
+The Rust `trader` binary composes the deterministic live core (risk pipeline,
+OMS, simulated venue, and portfolio accounting) but does not yet load
+configuration or supervise a paper/shadow session. The configured supervision
+runner — config loading, session resolution, feed supervision, the boot
+reconciler, kill-switch polling, and state snapshots — is not ported, so the
+process is deferred and the Rust binary runs the deterministic live-core
+session demo. The Python supervision runtime (`harness.runtime`,
+`harness.oms`, `harness.fills`, `harness.portfolio`, `harness.risk`,
+`harness.venues`, and the live data feeds) was deleted with the rest of the
+Python engine; restoring full trader function requires porting the supervision
+runner first.
 
 ## Parity definition
 
@@ -64,25 +71,30 @@ The golden comparison in
 `src/harness/rust/crates/harness-backtest/tests/parity.rs` masks that one field
 in both payloads and newline-normalizes them before comparing.
 
-## Remaining before deleting the Python engine
+## Python surface retained
 
-No engine module under `src/harness` has been removed yet, because active
-Python code still imports the engine and the parity oracle depends on it:
+The Python engine was deleted. What remains under `src/harness` is the plugin
+surface and the market-data views the surviving products consume:
 
-* The retained Python strategy plugin surface is not yet decoupled from the
-  engine. `harness.strategy.context` imports `harness.data`,
-  `harness.portfolio`, `harness.venues`, and `harness.core`, so loading a user
-  strategy on the Python path pulls in the engine the Rust host otherwise
-  replaces. The protocol-only-imports refactor is a filed follow-up;
-  `tests/harness/strategy/test_import_boundary.py` records the target state as
-  an expected failure.
-* `trader` has no Rust supervision runner, so the Python live runtime, OMS,
-  fills, venues, portfolio, and risk modules it composes are still used.
-* `harness.runtime.backtest` and the Python strategy context remain the oracle
-  the golden parity fixtures were generated from.
-* Active Python products (`thesis`, the sweeps/http/mcp surfaces) import the
-  engine and results modules directly.
+* `harness.configuration` and `harness.core` — strict configuration and the
+  decimal-safe records, symbols, clocks, and event bus.
+* `harness.strategy` — the protocol-only plugin contract (`StrategyContext`),
+  the callback contract, the sandbox lint, and the reference fixture. The
+  engine-bound context and binding were deleted; the native Rust context
+  replaces them.
+* `harness.indicators` and `harness.screening` — user indicator and screener
+  kernels and their process-isolated sandbox.
+* `harness.data` — the point-in-time views and option filters retained for the
+  plugin surface and the thesis product: bars, history, listing events, the
+  option contract universe (`DteFilter`, `StrikeFilter`, `MoneynessFilter`),
+  the SecurityMaster view, and the composite universe view.
+* `harness.testing` — canonical artifact support, the Rust-core parity oracle,
+  and the cross-mode indicator parity oracle.
+* `harness.cli` — the console-script shims into the Rust binaries.
 
-Under the decommission gate only modules with zero importers are deletable;
-T279 removed the `harness.risk.engine` and `harness.risk.rules` compatibility
-shims on that basis.
+Deleted engine modules: `harness.runtime`, `harness.oms`, `harness.fills`,
+`harness.portfolio`, `harness.risk`, `harness.venues`, `harness.results`,
+`harness.sweeps`, `harness.http`, `harness.mcp`, `harness.quant`,
+`harness.signal`, `harness.strategy.context`, `harness.strategy.binding`, the
+live/replay ingestion modules under `harness.data`, and the Python tests that
+covered only those modules.

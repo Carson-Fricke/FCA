@@ -22,11 +22,8 @@ dependencies = [
     "pyarrow>=17",
     "pydantic-settings>=2.5",
     "pyjwt[crypto]>=2.9",
-    "scikit-learn>=1.9.0",
-    "tenacity>=9.0",
     "typer>=0.16",
     "uvicorn>=0.30",
-    "websockets>=14.0",
 ]
 
 [project.optional-dependencies]

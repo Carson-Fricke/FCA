@@ -138,11 +138,6 @@ jobs:
           uv run --extra dev pytest -p no:cacheprovider
           tests/determinism/test_rust_oracle.py
 
-      - name: Native-core determinism oracle
-        run: >-
-          uv run --extra dev pytest -p no:cacheprovider
-          tests/determinism/test_parity_oracle.py
-
   bicep:
     name: Bicep validation
     runs-on: ubuntu-latest
