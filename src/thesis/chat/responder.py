@@ -30,6 +30,13 @@ def _stream_id() -> str:
     return f"stream-{uuid.uuid4().hex}"
 
 
+def _sanitize(text: str) -> str:
+    """Keep printable characters plus newlines/tabs; drop other control chars."""
+    return "".join(
+        character for character in text if ord(character) >= 32 or character in "\n\t"
+    ).strip()
+
+
 @dataclass(slots=True)
 class ChatReplyService:
     """Generate and stream one assistant reply per user message."""
@@ -82,7 +89,7 @@ class ChatReplyService:
                 {"messageId": stream_id, "error": str(error), "done": True},
             )
             return None
-        body = "".join(chunks).strip()
+        body = _sanitize("".join(chunks))
         if not body:
             self.broker.publish(
                 workspace_id,
@@ -91,13 +98,24 @@ class ChatReplyService:
                 {"messageId": stream_id, "done": True},
             )
             return None
-        message = self.chat_service.create_message(
-            workspace_id,
-            chat_id,
-            actor_id=self.actor_id,
-            body=body,
-            role=MessageRole.ASSISTANT,
-        )
+        try:
+            message = self.chat_service.create_message(
+                workspace_id,
+                chat_id,
+                actor_id=self.actor_id,
+                body=body,
+                role=MessageRole.ASSISTANT,
+            )
+        except Exception as error:
+            # A reply must never be dropped silently: surface the failure on the
+            # stream instead of letting the persistence error escape.
+            self.broker.publish(
+                workspace_id,
+                chat_id,
+                PROVIDER_DELTA,
+                {"messageId": stream_id, "error": str(error), "done": True},
+            )
+            return None
         self.broker.publish(
             workspace_id,
             chat_id,

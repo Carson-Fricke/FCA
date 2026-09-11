@@ -68,3 +68,37 @@ def test_reply_failure_streams_error_and_persists_nothing() -> None:
     assert any(frame.data.get("error") == "provider down" for frame in frames)
     stored = service.list_messages(WORKSPACE, chat.chat_id)
     assert [message.role for message in stored] == [MessageRole.USER]
+
+
+def test_reply_persists_multiline_text() -> None:
+    service = ChatService()
+    broker = InMemoryChatStreamBroker()
+    chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
+    service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="Hi")
+    reply = ChatReplyService(
+        chat_service=service,
+        broker=broker,
+        provider=_reply_provider("Line one\n\nLine two — done ✓"),
+    )
+
+    message = reply.respond(WORKSPACE, chat.chat_id)
+
+    assert message is not None
+    assert message.body == "Line one\n\nLine two — done ✓"
+
+
+def test_reply_sanitizes_control_characters() -> None:
+    service = ChatService()
+    broker = InMemoryChatStreamBroker()
+    chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
+    service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="Hi")
+    reply = ChatReplyService(
+        chat_service=service,
+        broker=broker,
+        provider=_reply_provider("ok\x1b[31mred\x00"),
+    )
+
+    message = reply.respond(WORKSPACE, chat.chat_id)
+
+    assert message is not None
+    assert message.body == "ok[31mred"

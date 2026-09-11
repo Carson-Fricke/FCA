@@ -119,6 +119,22 @@ def _validate_text(value: str, name: str, *, max_length: int) -> None:
         raise ChatContractError(f"{name} contains unsupported characters")
 
 
+def _validate_body(value: str, name: str, *, max_length: int) -> str:
+    """Validate a free-text message body, which may span multiple lines.
+
+    Message bodies are multi-line by nature, so newlines, carriage returns,
+    and tabs are permitted; every other control character is rejected. Line
+    endings are normalized to ``\\n``.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ChatContractError(f"{name} must be non-empty")
+    if len(value) > max_length or any(
+        ord(character) < 32 and character not in "\n\t\r" for character in value
+    ):
+        raise ChatContractError(f"{name} contains unsupported characters")
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _validate_timestamp(value: datetime, name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ChatContractError(f"{name} must be timezone-aware")
@@ -293,7 +309,9 @@ class ChatMessage(WorkspaceRecord):
         _validate_id(self.message_id, "message_id")
         _validate_id(self.chat_id, "chat_id")
         _validate_id(self.actor_id, "actor_id")
-        _validate_text(self.body, "body", max_length=32_768)
+        object.__setattr__(
+            self, "body", _validate_body(self.body, "body", max_length=32_768)
+        )
         if self.intent_epoch < 0:
             raise ChatContractError("intent_epoch must not be negative")
         object.__setattr__(
