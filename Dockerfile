@@ -13,7 +13,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY src/harness/ ./src/harness/
+COPY src/harness/ ./
 
 RUN cargo test --locked --workspace \
     && cargo build --locked --release -p native \
@@ -74,9 +74,7 @@ COPY --from=builder /opt/venv /opt/venv
 # The Rust native core shared library consumed by the ctypes loader.
 COPY --from=rust /build/src/harness/target/release/libnative.so /opt/rust/libnative.so
 # The Rust harness process binaries. The Python console scripts are thin shims
-# that exec these binaries; discovery uses HARNESS_RUST_BINARY_DIR. The
-# `trader` binary is the deferred live-core session demo (the configured
-# supervision runner is not yet ported).
+# that exec these binaries; discovery uses HARNESS_RUST_BINARY_DIR.
 COPY --from=rust \
     /build/src/harness/target/release/harness \
     /build/src/harness/target/release/api \

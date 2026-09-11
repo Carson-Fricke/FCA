@@ -1,4 +1,4 @@
-# Rust Interface Migration
+﻿# Rust Interface Migration
 
 <!-- markdownlint-disable MD013 -->
 
@@ -33,7 +33,7 @@ binary. The shims live in `src/harness/cli/` and resolve binaries through
 | `harness` | `harness` | `api` | flipped; facade dispatches `api`, `mcp`, and `backtest-job` |
 | `api` | `api` | `api` | flipped (axum HTTP boundary, bearer auth, provenance) |
 | `backtest-job` | `backtest-job` | `api` | flipped (native engine, parity-proven) |
-| `trader` | `trader` | `live` | deferred; see below |
+| `trader` | `trader` | `live` | flipped (native supervision runner: config, sessions, feed supervision, reconciler, kill-switch, snapshots) |
 | `harness mcp` | `harness` | `api` | flipped (JSON-RPC dispatch, tool catalog, stdio transport) |
 
 Configuration is ported behavior-identically in `config` (loader,
@@ -49,19 +49,9 @@ Binary discovery, in order:
 A shim exits with code 2 and an actionable message when the binary has not been
 built; it never falls back to a deleted Python implementation.
 
-### Deferred: `trader`
+### Backtest lake data (--data-dir)
 
-The Rust `trader` binary composes the deterministic live core (risk pipeline,
-OMS, simulated venue, and portfolio accounting) but does not yet load
-configuration or supervise a paper/shadow session. The configured supervision
-runner — config loading, session resolution, feed supervision, the boot
-reconciler, kill-switch polling, and state snapshots — is not ported, so the
-process is deferred and the Rust binary runs the deterministic live-core
-session demo. The Python supervision runtime (`harness.runtime`,
-`harness.oms`, `harness.fills`, `harness.portfolio`, `harness.risk`,
-`harness.venues`, and the live data feeds) was deleted with the rest of the
-Python engine; restoring full trader function requires porting the supervision
-runner first.
+`backtest-job --data-dir <dir>` reads a local Hive-partitioned Parquet lake through `marketdata::LocalLakeReader` and drives the native engine over the real data instead of the synthetic fixture. The canonical parity test is unchanged.
 
 ## Parity definition
 
