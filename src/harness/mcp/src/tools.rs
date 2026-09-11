@@ -14,6 +14,7 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::{json, Map, Value};
 
 use crate::auth::{BearerTokenSource, BEARER_TOKEN_VARIABLE};
+use crate::store::{run_prefix, JobRepository, RunStore};
 
 /// Tool name for the backtest runner.
 pub const TOOL_RUN_BACKTEST: &str = "run_backtest";
@@ -226,6 +227,16 @@ pub trait SweepSubmitter: Send + Sync {
     fn submit(&self, spec_path: &str) -> Result<Value, String>;
 }
 
+/// Injected local backtest surface for one configuration document path.
+pub trait BacktestSubmitter: Send + Sync {
+    /// Run one backtest and return its run summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a reason string when the backtest cannot be completed.
+    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
+}
+
 /// Loads and validates one configuration document as a JSON payload.
 pub trait ConfigurationLoader: Send + Sync {
     /// Load one configuration path into the JSON launch body.
@@ -277,6 +288,12 @@ pub struct HarnessToolsContext {
     pub runner: Option<Arc<dyn ProcessRunner>>,
     /// Local sweep submitter.
     pub sweep_submitter: Option<Arc<dyn SweepSubmitter>>,
+    /// Local backtest submitter.
+    pub backtest_submitter: Option<Arc<dyn BacktestSubmitter>>,
+    /// Durable local results store, queried in `local` mode.
+    pub run_store: Option<Arc<dyn RunStore>>,
+    /// Durable local job repository, queried in `local` mode.
+    pub job_repository: Option<Arc<dyn JobRepository>>,
     /// Configuration loader for remote launches.
     pub configuration_loader: Arc<dyn ConfigurationLoader>,
 }
@@ -294,6 +311,9 @@ impl HarnessToolsContext {
             remote_transport: None,
             runner: None,
             sweep_submitter: None,
+            backtest_submitter: None,
+            run_store: None,
+            job_repository: None,
             configuration_loader: Arc::new(JsonFileConfigurationLoader),
         }
     }
@@ -333,9 +353,13 @@ impl HarnessToolsContext {
                 }
             }
             Boundary::Local => {
-                if self.runner.is_none() {
+                if self.runner.is_none()
+                    && self.backtest_submitter.is_none()
+                    && self.run_store.is_none()
+                    && self.job_repository.is_none()
+                {
                     return Err(ContextError(
-                        "local execution requires a callable ProcessRunner".to_string(),
+                        "local execution requires a results store or a process runner".to_string(),
                     ));
                 }
             }
@@ -480,6 +504,26 @@ impl HarnessTools {
         if self.context.mode == Boundary::Remote {
             return self.launch_remote_backtest(&config_path);
         }
+        if let Some(submitter) = &self.context.backtest_submitter {
+            let workspace = match arguments.get("workspace") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(workspace)) if !workspace.trim().is_empty() => {
+                    Some(workspace.clone())
+                }
+                Some(_) => {
+                    return Err(ToolExecutionError::new(
+                        "workspace must be a non-empty string",
+                    ))
+                }
+            };
+            return submitter
+                .submit(&config_path, workspace.as_deref())
+                .map_err(|_| {
+                    ToolExecutionError::new(
+                        "the local backtest runner could not complete the backtest",
+                    )
+                });
+        }
         let mut tail = vec![
             "backtest-job".to_string(),
             "--config".to_string(),
@@ -515,6 +559,9 @@ impl HarnessTools {
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
         let job_id = identifier_argument(arguments, "job_id")?;
+        if self.context.mode == Boundary::Local {
+            return self.local_job_status(&job_id);
+        }
         let url = self.remote_url(&format!(
             "{JOB_STATUS_ROUTE}/{}",
             utf8_percent_encode(&job_id, PATH_SEGMENT)
@@ -529,6 +576,9 @@ impl HarnessTools {
     /// Returns [`ToolExecutionError`] when the remote call fails.
     pub fn get_run(&self, arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
         let run_id = identifier_argument(arguments, "run_id")?;
+        if self.context.mode == Boundary::Local {
+            return self.local_run(&run_id);
+        }
         let url = self.remote_url(&format!(
             "{RUN_ROUTE}/{}",
             utf8_percent_encode(&run_id, PATH_SEGMENT)
@@ -546,6 +596,9 @@ impl HarnessTools {
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
         let run_id = identifier_argument(arguments, "run_id")?;
+        if self.context.mode == Boundary::Local {
+            return self.local_artifacts(&run_id);
+        }
         let url = self.remote_url(&format!(
             "{RUN_ROUTE}/{}/artifacts",
             utf8_percent_encode(&run_id, PATH_SEGMENT)
@@ -570,6 +623,58 @@ impl HarnessTools {
         submitter.submit(&spec_path).map_err(|_| {
             ToolExecutionError::new("the local sweep runner could not complete the sweep")
         })
+    }
+
+    fn local_job_status(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
+        let repository = self.context.job_repository.as_ref().ok_or_else(|| {
+            ToolExecutionError::new(
+                "local backtest jobs require a durable job repository in this MCP server",
+            )
+        })?;
+        match repository.get(job_id) {
+            Some(record) => serde_json::to_value(&record)
+                .map_err(|error| ToolExecutionError::new(error.to_string())),
+            None => Err(ToolExecutionError::new(format!(
+                "backtest job '{job_id}' does not exist"
+            ))),
+        }
+    }
+
+    fn local_run(&self, run_id: &str) -> Result<Value, ToolExecutionError> {
+        let store = self.context.run_store.as_ref().ok_or_else(|| {
+            ToolExecutionError::new("local runs require a durable results store in this MCP server")
+        })?;
+        match store.get(run_id) {
+            Some(record) => serde_json::to_value(&record)
+                .map_err(|error| ToolExecutionError::new(error.to_string())),
+            None => Err(ToolExecutionError::new(format!(
+                "backtest run '{run_id}' does not exist"
+            ))),
+        }
+    }
+
+    fn local_artifacts(&self, run_id: &str) -> Result<Value, ToolExecutionError> {
+        let store = self.context.run_store.as_ref().ok_or_else(|| {
+            ToolExecutionError::new("local runs require a durable results store in this MCP server")
+        })?;
+        let stored = store.fetch(run_id).ok_or_else(|| {
+            ToolExecutionError::new(format!("backtest run '{run_id}' does not exist"))
+        })?;
+        let prefix = run_prefix(&stored.record.run_id)
+            .map_err(|error| ToolExecutionError::new(error.to_string()))?;
+        let artifacts: Vec<Value> = stored
+            .artifacts
+            .iter()
+            .map(|(name, payload)| {
+                json!({
+                    "name": name,
+                    "size": payload.len() as u64,
+                    "object_path": format!("{prefix}/{name}"),
+                    "sas_url": Value::Null,
+                })
+            })
+            .collect();
+        Ok(json!({"run_id": stored.record.run_id, "artifacts": artifacts}))
     }
 
     fn invoke_process(&self, tail: &[String], process: &str) -> Result<Value, ToolExecutionError> {
