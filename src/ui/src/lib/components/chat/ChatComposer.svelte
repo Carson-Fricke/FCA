@@ -46,7 +46,11 @@
 				: 'Message the workspace agent…'}
 			bind:value={body}
 			onkeydown={(e) => {
-				if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
+				// Enter sends; Shift+Enter inserts a newline. Never send mid-IME.
+				if (e.key !== 'Enter' || e.isComposing) return;
+				if (e.shiftKey) return;
+				e.preventDefault();
+				send();
 			}}
 		></textarea>
 		<button
