@@ -1,9 +1,14 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import MetricCard from '$lib/components/common/MetricCard.svelte';
-	import { launchBacktest, listBacktests } from '$lib/api';
+	import {
+		getHarnessStatus,
+		launchBacktest,
+		listBacktests,
+		pollHarnessJob
+	} from '$lib/api';
 	import { shortDate } from '$lib/format';
-	import type { BacktestSummaryRow } from '$lib/types';
+	import type { BacktestSummaryRow, HarnessStatus } from '$lib/types';
 	import { notify } from '$lib/workspace.svelte';
 	import type { PageData } from './$types';
 
@@ -12,6 +17,7 @@
 	const workspaceId = $derived(data.workspaceId);
 
 	let backtests = $state<BacktestSummaryRow[]>([]);
+	let harness = $state<HarnessStatus | null>(null);
 	let strategyFilter = $state('all');
 	let onlySplit = $state(false);
 	let launching = $state(false);
@@ -20,6 +26,11 @@
 		let cancelled = false;
 		listBacktests(workspaceId).then((items) => {
 			if (!cancelled) backtests = items;
+		});
+		// Connection status is advisory: an unreachable harness still reports
+		// its topology so the badge can explain why launches will fail.
+		getHarnessStatus().then((status) => {
+			if (!cancelled) harness = status;
 		});
 		return () => {
 			cancelled = true;
@@ -33,8 +44,9 @@
 
 	/**
 	 * Launch a backtest with the UI defaults and refresh the run history. The
-	 * harness reports an accepted outcome; the list reflects whatever the API
-	 * persisted, never a client-fabricated row.
+	 * canonical jobs route fronts the harness MCP `run_backtest` tool; when it
+	 * returns a job id the UI polls until the job reaches a terminal state. The
+	 * list reflects whatever the API persisted, never a client-fabricated row.
 	 */
 	async function runBacktest(): Promise<void> {
 		if (launching) return;
@@ -45,9 +57,11 @@
 				configPath: 'config/harness/backtest.yaml',
 				environment: 'paper'
 			});
+			const settled = outcome.job_id ? await pollHarnessJob(outcome.job_id) : null;
 			await refresh();
+			const state = settled?.state ?? outcome.state ?? 'accepted';
 			notify(
-				`Backtest launched (${outcome.state ?? 'accepted'}${outcome.job_id ? ` · ${outcome.job_id}` : ''})`
+				`Backtest launched (${state}${outcome.job_id ? ` · ${outcome.job_id}` : ''})`
 			);
 		} catch (error) {
 			notify(
@@ -84,6 +98,22 @@
 			<h1 class="text-xl font-semibold text-slate-800">Backtests</h1>
 			<p class="text-sm text-slate-500">Run history and declared-split results.</p>
 		</div>
+		{#if harness}
+			<div
+				data-testid="harness-status"
+				data-reachable={harness.reachable}
+				class="flex items-center gap-2 rounded-lg border border-surface-600 bg-surface-900 px-2.5 py-1.5 text-xs"
+				title={harness.error ?? undefined}
+			>
+				<span
+					class="h-2 w-2 rounded-full {harness.reachable ? 'bg-profit' : 'bg-loss'}"
+				></span>
+				<span class="font-mono text-slate-600">
+					harness {harness.mode} · {harness.reachable ? 'reachable' : 'unreachable'}
+				</span>
+				<span class="text-slate-500">{harness.tools.length} tools</span>
+			</div>
+		{/if}
 		<button
 			type="button"
 			data-testid="run-backtest"

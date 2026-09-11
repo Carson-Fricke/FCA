@@ -379,6 +379,78 @@ export interface BacktestLaunchResult {
 	request_payload: Record<string, unknown>;
 }
 
+// ---------- Harness MCP surface (thesis.http.harness) ----------
+
+/** Where Thesis or the harness runs; drives the transport selection. */
+export type HarnessLocation = 'local' | 'remote';
+
+/** One published harness MCP tool. */
+export interface HarnessToolDescriptor {
+	name: string;
+	description: string;
+}
+
+/**
+ * Topology and connection status from `GET /v1/harness/status`. An unreachable
+ * harness still answers 200 with `reachable: false` and an `error` string.
+ */
+export interface HarnessStatus {
+	mode: HarnessLocation;
+	thesis_location: HarnessLocation;
+	harness_location: HarnessLocation;
+	reachable: boolean;
+	server: Record<string, unknown>;
+	tools: HarnessToolDescriptor[];
+	health: Record<string, unknown> | null;
+	error: string | null;
+}
+
+/** Canonical launch result from `POST /v1/backtests/jobs`. */
+export interface HarnessJobResult {
+	action: string;
+	config_path: string;
+	workspace: string | null;
+	boundary: HarnessLocation | null;
+	job_id: string | null;
+	state: string | null;
+	exit_code: number | null;
+	location: string | null;
+	result: Record<string, unknown>;
+}
+
+/** One harness job row from `GET /v1/backtests/jobs/{id}`. */
+export interface HarnessJobStatus {
+	job_id: string;
+	state: string;
+	created_at?: string | null;
+	updated_at?: string | null;
+	error_message?: string | null;
+	[key: string]: unknown;
+}
+
+/** One stored run row from `GET /v1/backtests/runs/{id}`. */
+export interface HarnessRunRecord {
+	run_id: string;
+	status?: string;
+	strategy_id?: string;
+	[key: string]: unknown;
+}
+
+/** Manifest-imported artifact on the canonical `sha256`/`sizeBytes`/`uri` shape. */
+export interface HarnessArtifact {
+	name: string;
+	uri: string;
+	sha256: string;
+	sizeBytes: number;
+	sasUrl: string | null;
+}
+
+/** The artifact manifest from `GET /v1/backtests/runs/{id}/artifacts`. */
+export interface HarnessArtifactManifest {
+	run_id: string;
+	artifacts: HarnessArtifact[];
+}
+
 export interface DeploymentCard {
 	id: string;
 	workspace_id: string;
