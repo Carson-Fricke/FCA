@@ -96,6 +96,17 @@ pub fn default_search_paths() -> Vec<PathBuf> {
             paths.push(site_packages);
         }
     }
+    if let Ok(python) = std::env::var("PYO3_PYTHON") {
+        let interpreter = Path::new(&python);
+        if let Some(scripts) = interpreter.parent() {
+            if let Some(venv) = scripts.parent() {
+                let site_packages = venv.join("Lib").join("site-packages");
+                if site_packages.is_dir() {
+                    paths.push(site_packages);
+                }
+            }
+        }
+    }
     paths
 }
 

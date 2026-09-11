@@ -20,6 +20,7 @@
 //! acquisition per call (or per batch), so hot loops do not pay a per-event
 //! GIL acquisition.
 
+pub mod backtest;
 pub mod binding;
 #[cfg(feature = "pyo3-bridge")]
 pub mod bridge;

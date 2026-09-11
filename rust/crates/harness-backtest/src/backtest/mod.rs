@@ -10,12 +10,14 @@
 
 pub mod config;
 pub mod engine;
+pub mod engine_core;
 pub mod errors;
 pub mod fees;
 pub mod fills;
 pub mod fixture;
 pub mod job;
 pub mod manifest;
+pub mod portfolio;
 pub mod preflight;
 pub mod rng;
 pub mod yaml;
