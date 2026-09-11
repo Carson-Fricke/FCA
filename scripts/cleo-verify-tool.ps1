@@ -1,6 +1,6 @@
 # Polyglot tool dispatcher for CLEO evidence gates (ADR-051 / ADR-061).
 #
-# FCA is Python-first with an in-progress Rust engine under src/harness/rust/.
+# FCA is Python-first with an in-progress Rust engine under src/harness/.
 # CLEO's tool-resolver keys on a single primaryType, so canonical tools would
 # only ever resolve to one language. This dispatcher picks the toolchain(s) that
 # the current task actually touched and runs the matching canonical tool.
@@ -48,12 +48,12 @@ function Get-ChangedPaths {
 }
 
 $changed = Get-ChangedPaths
-$rustTouched = @($changed | Where-Object { $_ -like 'src/harness/rust/*' }).Count -gt 0
+$rustTouched = @($changed | Where-Object { $_ -like 'src/harness/*' }).Count -gt 0
 $pyTouched = @($changed | Where-Object {
-        ($_ -like 'src/*' -and $_ -notlike 'src/harness/rust/*') -or $_ -like 'tests/*' -or $_ -like 'strategies/*' -or $_ -like '*.py' -or $_ -like 'pyproject.toml'
+        ($_ -like 'src/*' -and $_ -notlike 'src/harness/*') -or $_ -like 'tests/*' -or $_ -like 'strategies/*' -or $_ -like '*.py' -or $_ -like 'pyproject.toml'
     }).Count -gt 0
 
-$haveRust = Test-Path -LiteralPath (Join-Path $root 'src\harness\rust\Cargo.toml')
+$haveRust = Test-Path -LiteralPath (Join-Path $root 'src\harness\Cargo.toml')
 $havePy = Test-Path -LiteralPath (Join-Path $root 'pyproject.toml')
 
 # No diff detected (e.g. verify run on the integration branch after merge):
@@ -70,10 +70,10 @@ $exit = 0
 
 if ($runRust) {
     switch ($Tool) {
-        'test' { & cargo test --manifest-path src/harness/rust/Cargo.toml --workspace }
-        'build' { & cargo build --manifest-path src/harness/rust/Cargo.toml --workspace }
-        'lint' { & cargo clippy --manifest-path src/harness/rust/Cargo.toml --workspace --all-targets -- -D warnings }
-        'typecheck' { & cargo check --manifest-path src/harness/rust/Cargo.toml --workspace }
+        'test' { & cargo test --manifest-path src/harness/Cargo.toml --workspace }
+        'build' { & cargo build --manifest-path src/harness/Cargo.toml --workspace }
+        'lint' { & cargo clippy --manifest-path src/harness/Cargo.toml --workspace --all-targets -- -D warnings }
+        'typecheck' { & cargo check --manifest-path src/harness/Cargo.toml --workspace }
         'audit' { & cargo audit }
         'security-scan' { & cargo audit }
     }

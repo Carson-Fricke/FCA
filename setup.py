@@ -2,7 +2,7 @@
 
 Package metadata and the pure-Python package layout live in ``pyproject.toml``;
 this file exists only to attach the PyO3 extension module ``harness._rust``
-built from ``src/harness/rust/crates/harness-py`` via ``setuptools-rust``.
+built from ``src/harness/py`` via ``setuptools-rust``.
 Editable installs and wheel builds therefore compile the bridge in place, while
 the legacy ctypes loader in ``harness._native`` is untouched.
 """
@@ -16,7 +16,7 @@ setup(
     rust_extensions=[
         RustExtension(
             "harness._rust",
-            path="src/harness/rust/crates/harness-py/Cargo.toml",
+            path="src/harness/py/Cargo.toml",
             binding=Binding.PyO3,
             features=["extension-module"],
         )

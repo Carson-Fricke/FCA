@@ -8,7 +8,7 @@
 !config/**
 !strategies/
 !strategies/**
-src/harness/rust/target/
+src/harness/target/
 **/__pycache__/
 **/*.py[cod]
 **/*.egg-info/

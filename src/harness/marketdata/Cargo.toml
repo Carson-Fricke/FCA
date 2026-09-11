@@ -1,0 +1,29 @@
+[package]
+name = "marketdata"
+version = "0.1.0"
+edition = "2021"
+description = "Historical and live market-data layer for the quant-harness Rust engine (staged port)."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+num = { path = "../num" }
+arrow-array = "59"
+arrow-buffer = "59"
+arrow-schema = "59"
+async-trait = "0.1"
+bytes = "1"
+futures-util = "0.3"
+hex = "0.4"
+parquet = { version = "59", features = ["arrow"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "net"] }
+tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "net"] }

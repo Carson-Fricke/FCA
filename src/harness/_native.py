@@ -1,6 +1,6 @@
 """Loader for the native harness core shared library.
 
-The native core (``src/harness/rust/crates/harness-native``, built by Cargo)
+The native core (``src/harness/native``, built by Cargo)
 exports a small, versioned C ABI. This module is the only supported way for
 Python code to reach it. Loading is strict: if the library is missing, unloadable, or was
 built against a different ABI version, :func:`load_native_core` raises
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Final
 
 #: ABI version this loader is pinned to. Must match ``types::ABI_VERSION`` in
-#: ``src/harness/rust/crates/harness-native/src/types.rs``. Bump both together.
+#: ``src/harness/native/src/types.rs``. Bump both together.
 NATIVE_ABI_VERSION: Final = 2
 
 #: Pinned fixed-point decimal scale of the native core. Matches the
@@ -40,8 +40,8 @@ _ERROR_NAMES: Final[dict[int, str]] = {
 }
 
 _BUILD_HINT: Final = (
-    "Run `cargo build -p harness-native` from the `src/harness/rust/` workspace to "
-    "build the native core (outputs under `src/harness/rust/target/`), then retry."
+    "Run `cargo build -p native` from the `src/harness/` workspace to "
+    "build the native core (outputs under `src/harness/target/`), then retry."
 )
 
 
@@ -64,10 +64,10 @@ def _error_name(code: int) -> str:
 def _library_names() -> tuple[str, ...]:
     """Return the platform-specific shared-library file names."""
     if sys.platform == "win32":
-        return ("harness_native.dll", "libharness_native.dll")
+        return ("native.dll", "libnative.dll")
     if sys.platform == "darwin":
-        return ("libharness_native.dylib",)
-    return ("libharness_native.so",)
+        return ("libnative.dylib",)
+    return ("libnative.so",)
 
 
 def candidate_paths() -> tuple[Path, ...]:
@@ -75,16 +75,16 @@ def candidate_paths() -> tuple[Path, ...]:
 
     ``HARNESS_NATIVE_LIBRARY`` may point at one explicit shared-library file
     and takes precedence. Otherwise the loader looks in the Cargo target
-    directories of the repository checkout: ``src/harness/rust/target/release``
-    then ``src/harness/rust/target/debug``. There is no Zig fallback.
+    directories of the repository checkout: ``src/harness/target/release``
+    then ``src/harness/target/debug``. There is no Zig fallback.
     """
     override = os.environ.get("HARNESS_NATIVE_LIBRARY")
     if override:
         return (Path(override),)
     repository_root = Path(__file__).resolve().parents[2]
     directories = (
-        repository_root / "src" / "harness" / "rust" / "target" / "release",
-        repository_root / "src" / "harness" / "rust" / "target" / "debug",
+        repository_root / "src" / "harness" / "target" / "release",
+        repository_root / "src" / "harness" / "target" / "debug",
     )
     return tuple(
         directory / name for directory in directories for name in _library_names()
@@ -112,7 +112,7 @@ class NativeCore:
     """Bound, validated handle on the native core C ABI."""
 
     def __init__(self, library: ctypes.CDLL) -> None:
-        self._abi_version_fn = _bind(library, "harness_native_abi_version")
+        self._abi_version_fn = _bind(library, "native_abi_version")
         self._abi_version_fn.restype = ctypes.c_uint32
         self._abi_version_fn.argtypes = []
         reported = int(self._abi_version_fn())

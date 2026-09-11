@@ -62,16 +62,16 @@ def test_default_candidates_search_the_rust_target() -> None:
     assert candidates
     if sys.platform == "win32":
         assert any(
-            "rust" in path.parts
+            "harness" in path.parts
             and "target" in path.parts
-            and path.name == "harness_native.dll"
+            and path.name == "native.dll"
             for path in candidates
         )
     else:
         assert any(
-            "rust" in path.parts
+            "harness" in path.parts
             and "target" in path.parts
-            and "libharness_native" in path.name
+            and "libnative" in path.name
             for path in candidates
         )
     assert all(str(path).startswith(str(monkey_root)) for path in candidates)

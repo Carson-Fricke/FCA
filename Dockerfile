@@ -4,21 +4,21 @@ FROM rust:bookworm AS rust
 
 # The Rust workspace is the quant-harness engine and its process interfaces.
 # This stage compiles and tests it, then produces the loadable shared library
-# (harness-native) that the runtime image carries under /opt/rust and the
+# (native) that the runtime image carries under /opt/rust and the
 # harness entrypoint binaries the Python console-script shims exec. The Python
 # builder stage reuses the same toolchain to compile the PyO3 extension.
-WORKDIR /build/src/harness/rust
+WORKDIR /build/src/harness
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY src/harness/rust/ ./src/harness/rust/
+COPY src/harness/ ./src/harness/
 
 RUN cargo test --locked --workspace \
-    && cargo build --locked --release -p harness-native \
-    && cargo build --locked --release -p harness-api --bins \
-    && cargo build --locked --release -p harness-live --bin trader
+    && cargo build --locked --release -p native \
+    && cargo build --locked --release -p api --bins \
+    && cargo build --locked --release -p live --bin trader
 
 FROM python:3.12-slim AS builder
 
@@ -28,7 +28,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 # `harness._rust` is a PyO3 extension compiled by setuptools-rust while the
 # project installs, so the builder needs the Rust toolchain, a C linker, and
-# the project's `setup.py`/`rust/` sources. The toolchain is copied from the
+# the project's `setup.py` and `src/harness/` sources. The toolchain is copied from the
 # Rust stage to keep one pinned version across the image.
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
@@ -72,17 +72,17 @@ RUN groupadd --gid 10001 lake \
 
 COPY --from=builder /opt/venv /opt/venv
 # The Rust native core shared library consumed by the ctypes loader.
-COPY --from=rust /build/src/harness/rust/target/release/libharness_native.so /opt/rust/libharness_native.so
+COPY --from=rust /build/src/harness/target/release/libnative.so /opt/rust/libnative.so
 # The Rust harness process binaries. The Python console scripts are thin shims
 # that exec these binaries; discovery uses HARNESS_RUST_BINARY_DIR. The
 # `trader` binary is the deferred live-core session demo (the configured
 # supervision runner is not yet ported).
 COPY --from=rust \
-    /build/src/harness/rust/target/release/harness \
-    /build/src/harness/rust/target/release/api \
-    /build/src/harness/rust/target/release/backtest-job \
-    /build/src/harness/rust/target/release/mcp \
-    /build/src/harness/rust/target/release/trader \
+    /build/src/harness/target/release/harness \
+    /build/src/harness/target/release/api \
+    /build/src/harness/target/release/backtest-job \
+    /build/src/harness/target/release/mcp \
+    /build/src/harness/target/release/trader \
     /opt/rust/bin/
 COPY config/ /app/config/
 

@@ -5,12 +5,12 @@
 ## Status
 
 The quant-harness engine core and the process interfaces are native Rust in the
-workspace under `src/harness/rust/`. The engine core — clock, event bus, replay,
+workspace under `src/harness/`. The engine core — clock, event bus, replay,
 matching/fills, fees, portfolio, risk, results, sweeps, and the backtest runtime
 — is Rust, and the Python engine that used to mirror it has been deleted.
 
 User-authored strategies, indicators, and screener programs remain Python. The
-Rust engine drives them through the PyO3 plugin host in `harness-host`; the
+Rust engine drives them through the PyO3 plugin host in `host`; the
 host owns the strategy context natively (clock, universe, books, orders, state,
 seeded random, emissions, and logging) and duck-types it to the documented
 `harness.strategy.contracts.StrategyContext` protocol, so strategies run
@@ -30,21 +30,21 @@ binary. The shims live in `src/harness/cli/` and resolve binaries through
 
 | Console script | Rust binary | Rust crate | Status |
 | --- | --- | --- | --- |
-| `harness` | `harness` | `harness-api` | flipped; facade dispatches `api`, `mcp`, and `backtest-job` |
-| `api` | `api` | `harness-api` | flipped (axum HTTP boundary, bearer auth, provenance) |
-| `backtest-job` | `backtest-job` | `harness-api` | flipped (native engine, parity-proven) |
-| `trader` | `trader` | `harness-live` | deferred; see below |
-| `harness mcp` | `harness` | `harness-api` | flipped (JSON-RPC dispatch, tool catalog, stdio transport) |
+| `harness` | `harness` | `api` | flipped; facade dispatches `api`, `mcp`, and `backtest-job` |
+| `api` | `api` | `api` | flipped (axum HTTP boundary, bearer auth, provenance) |
+| `backtest-job` | `backtest-job` | `api` | flipped (native engine, parity-proven) |
+| `trader` | `trader` | `live` | deferred; see below |
+| `harness mcp` | `harness` | `api` | flipped (JSON-RPC dispatch, tool catalog, stdio transport) |
 
-Configuration is ported behavior-identically in `harness-config` (loader,
+Configuration is ported behavior-identically in `config` (loader,
 strict models, canonical hashing) and the strategy host surface in
-`harness-host` (PyO3 strategy/indicator/screener hosts).
+`host` (PyO3 strategy/indicator/screener hosts).
 
 Binary discovery, in order:
 
 1. `HARNESS_RUST_BINARY_DIR`.
-2. `src/harness/rust/target/release`.
-3. `src/harness/rust/target/debug`.
+2. `src/harness/target/release`.
+3. `src/harness/target/debug`.
 
 A shim exits with code 2 and an actionable message when the binary has not been
 built; it never falls back to a deleted Python implementation.
@@ -68,7 +68,7 @@ runner first.
 Data-bearing artifacts are byte-identical across the two stacks except
 `manifest.code_fingerprint`, which hashes each engine's own source by design.
 The golden comparison in
-`src/harness/rust/crates/harness-backtest/tests/parity.rs` masks that one field
+`src/harness/backtest/tests/parity.rs` masks that one field
 in both payloads and newline-normalizes them before comparing.
 
 ## Python surface retained
