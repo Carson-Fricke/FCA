@@ -36,6 +36,10 @@ CLIENT_NAME = "thesis-mcp-client"
 CLIENT_VERSION = "0.1.0"
 
 TOOL_RUN_BACKTEST = "run_backtest"
+TOOL_GET_BACKTEST_STATUS = "get_backtest_status"
+TOOL_GET_RUN = "get_run"
+TOOL_LIST_ARTIFACTS = "list_artifacts"
+TOOL_RUN_SWEEP = "run_sweep"
 TOOL_LAUNCH_TRADER = "launch_trader"
 
 
@@ -279,6 +283,22 @@ class HarnessMcpClient:
         """Call the ``launch_trader`` tool."""
         return self.call_tool(TOOL_LAUNCH_TRADER, {"config_path": config_path})
 
+    def get_backtest_status(self, *, job_id: str) -> McpToolResult:
+        """Call the ``get_backtest_status`` tool."""
+        return self.call_tool(TOOL_GET_BACKTEST_STATUS, {"job_id": job_id})
+
+    def get_run(self, *, run_id: str) -> McpToolResult:
+        """Call the ``get_run`` tool."""
+        return self.call_tool(TOOL_GET_RUN, {"run_id": run_id})
+
+    def list_artifacts(self, *, run_id: str) -> McpToolResult:
+        """Call the ``list_artifacts`` tool."""
+        return self.call_tool(TOOL_LIST_ARTIFACTS, {"run_id": run_id})
+
+    def run_sweep(self, *, spec_path: str) -> McpToolResult:
+        """Call the ``run_sweep`` tool."""
+        return self.call_tool(TOOL_RUN_SWEEP, {"spec_path": spec_path})
+
     def close(self) -> None:
         """Close the underlying transport."""
         self._transport.close()
@@ -408,8 +428,12 @@ __all__ = [
     "CLIENT_NAME",
     "CLIENT_VERSION",
     "PROTOCOL_VERSION",
+    "TOOL_GET_BACKTEST_STATUS",
+    "TOOL_GET_RUN",
     "TOOL_LAUNCH_TRADER",
+    "TOOL_LIST_ARTIFACTS",
     "TOOL_RUN_BACKTEST",
+    "TOOL_RUN_SWEEP",
     "HarnessMcpBoundary",
     "HarnessMcpClient",
     "HarnessMcpError",

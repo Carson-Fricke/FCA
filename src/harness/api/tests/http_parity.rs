@@ -16,7 +16,8 @@ use api::http::launcher::{
 };
 use api::http::state::AppConfig;
 use api::http::store::{
-    InMemoryJobRepository, InMemoryRunStore, RunCatalogRecord, RunStatus, RunStore, SasIssuer,
+    artifact_digest, InMemoryJobRepository, InMemoryRunStore, RunCatalogRecord, RunStatus, RunStore,
+    SasIssuer,
 };
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
@@ -372,7 +373,7 @@ async fn get_run_returns_the_catalog_row_or_404() {
 }
 
 #[tokio::test]
-async fn list_artifacts_reports_names_sizes_and_object_paths() {
+async fn list_artifacts_reports_the_reproducibility_manifest_shape() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
     seed(
         test.store.as_ref(),
@@ -394,12 +395,12 @@ async fn list_artifacts_reports_names_sizes_and_object_paths() {
     let artifacts = &json_body(&body)["artifacts"];
     assert_eq!(artifacts[0]["name"], "actions.parquet");
     assert_eq!(artifacts[1]["name"], "fills.parquet");
-    assert_eq!(artifacts[0]["size"], b"actions-bytes".len() as u64);
-    assert_eq!(
-        artifacts[0]["object_path"],
-        "backtests/run-1/actions.parquet"
-    );
+    assert_eq!(artifacts[0]["sizeBytes"], b"actions-bytes".len() as u64);
+    assert_eq!(artifacts[0]["uri"], "backtests/run-1/actions.parquet");
+    assert_eq!(artifacts[0]["sha256"], artifact_digest(b"actions-bytes"));
     assert_eq!(artifacts[0]["sas_url"], Value::Null);
+    assert!(artifacts[0].get("object_path").is_none());
+    assert!(artifacts[0].get("size").is_none());
 }
 
 #[tokio::test]

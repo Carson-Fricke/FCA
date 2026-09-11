@@ -32,25 +32,32 @@ pub struct RunListResponse {
     pub runs: Vec<RunCatalogRecord>,
 }
 
-/// One stored run artifact with optional read-only SAS access.
+/// One stored run artifact in the Thesis reproducibility-manifest shape.
+///
+/// The manifest entry is consumed both by Thesis's
+/// `thesis.artifacts.importer.HarnessManifest` (which requires `name`, `uri`,
+/// `sha256`, and `sizeBytes`) and by the harness status surface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ArtifactSummary {
     /// Artifact name relative to the run prefix.
     pub name: String,
+    /// Full object path (`backtests/{run_id}/{name}`) as a confined URI.
+    pub uri: String,
+    /// SHA-256 hex digest of the artifact payload.
+    pub sha256: String,
     /// Payload size in bytes.
-    pub size: u64,
-    /// Full object path (`backtests/{run_id}/{name}`).
-    pub object_path: String,
+    #[serde(rename = "sizeBytes")]
+    pub size_bytes: u64,
     /// Optional read-only SAS URL.
     pub sas_url: Option<String>,
 }
 
-/// The artifacts stored below one run's blob prefix.
+/// The artifact manifest stored below one run's blob prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ArtifactListResponse {
     /// Run identifier.
     pub run_id: String,
-    /// Artifact summaries.
+    /// Artifact manifest entries.
     pub artifacts: Vec<ArtifactSummary>,
 }
 
