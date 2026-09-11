@@ -61,6 +61,11 @@
   one `cleo verify <id> --all` invocation. Iterative per-gate verify attempts
   are an anti-pattern; each failed gate forces evidence recapture and
   staleness re-verification.
+- NEVER co-locate Rust tests inside a `src/**/*.rs` file. Every `#[cfg(test)]`
+  test module lives under the package's own `tests/` directory — a peer of
+  `src/` and `Cargo.toml` inside that crate. Do not add `#[cfg(test)] mod tests`
+  to a source file. See `.github/instructions/rust.instructions.md` for the
+  integration-vs-unit placement rule.
 - NEVER complete multiple tasks with individual `cleo complete` invocations.
   When a wave has more than one task to close, bulk-complete it in one
   transaction with `scripts/cleo-bulk-complete.ps1 -ManifestPath <manifest.json>`
