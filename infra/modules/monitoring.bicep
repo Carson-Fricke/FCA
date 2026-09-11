@@ -37,6 +37,9 @@ param alertWindowIso string = 'PT15M'
 @description('Tags applied to every monitoring resource.')
 param tags object = {}
 
+@description('Deploy the two Container App console log-query alerts. Enable only once the target workspace has received Container Apps console logs: Azure validates the query at creation time and rejects it while the ContainerAppConsoleLogs_CL table does not yet exist.')
+param enableTraderQueryAlerts bool = false
+
 var actionGroupName = '${namePrefix}-trader-alerts'
 var faultAlertName = '${namePrefix}-trader-faults'
 var haltAlertName = '${namePrefix}-trader-halts'
@@ -75,7 +78,7 @@ resource traderActionGroup 'Microsoft.Insights/actionGroups@2022-06-01' = {
   }
 }
 
-resource traderFaultAlert 'Microsoft.Insights/scheduledQueryRules@2021-08-01' = {
+resource traderFaultAlert 'Microsoft.Insights/scheduledQueryRules@2021-08-01' = if (enableTraderQueryAlerts) {
   name: faultAlertName
   location: resourceGroup().location
   tags: tags
@@ -108,7 +111,7 @@ resource traderFaultAlert 'Microsoft.Insights/scheduledQueryRules@2021-08-01' = 
   }
 }
 
-resource traderHaltAlert 'Microsoft.Insights/scheduledQueryRules@2021-08-01' = {
+resource traderHaltAlert 'Microsoft.Insights/scheduledQueryRules@2021-08-01' = if (enableTraderQueryAlerts) {
   name: haltAlertName
   location: resourceGroup().location
   tags: tags
@@ -179,7 +182,9 @@ resource traderRestartAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = 
     }
     actions: {
       actionGroups: [
-        traderActionGroup
+        {
+          actionGroupId: traderActionGroup.id
+        }
       ]
     }
   }
@@ -187,8 +192,8 @@ resource traderRestartAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = 
 
 output actionGroupId string = traderActionGroup.id
 output alertResourceIds array = [
-  traderFaultAlert.id
-  traderHaltAlert.id
+  enableTraderQueryAlerts ? traderFaultAlert.id : ''
+  enableTraderQueryAlerts ? traderHaltAlert.id : ''
   traderRestartAlert.id
 ]
 
