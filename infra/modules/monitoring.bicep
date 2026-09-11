@@ -42,13 +42,14 @@ var faultAlertName = '${namePrefix}-trader-faults'
 var haltAlertName = '${namePrefix}-trader-halts'
 var restartAlertName = '${namePrefix}-trader-restarts'
 
-// The supervision strings are the exact detail prefixes the supervision
-// kernel writes (TraderExitCode fault taxonomy in
-// src/harness/cli/supervisor.py). Console matches fire only for text the
-// trader process prints today; the remaining strings arm the same rules for
-// the supervision console emit path without a rule change. See
-// .github/runbooks/go-live.md for the per-alert drill steps and the
-// automatable-today versus manual boundary.
+// The supervision strings are the exact detail prefixes the trader supervision
+// kernel is expected to write once the supervision runner is ported into the
+// Rust `live` crate (the Python supervision runtime was deleted with the
+// engine; see .github/architecture/rust-interface-migration.md). Console
+// matches fire only for text the trader process prints today; the remaining
+// strings arm the same rules for the supervision console emit path without a
+// rule change. See .github/runbooks/go-live.md for the per-alert drill steps and
+// the automatable-today versus manual boundary.
 var traderAppFilter = 'ContainerAppName_s startswith \'${namePrefix}-\' and ContainerAppName_s endswith \'-trader\''
 
 var faultQuery = 'ContainerAppConsoleLogs_CL | where ${traderAppFilter} | where Log_s has_any (\'restartable fault\', \'market-wait exceeded\', \'trader feed boundary fault\', \'Traceback\') | project TimeGenerated, ContainerAppName_s, RevisionName_s, Log_s'
