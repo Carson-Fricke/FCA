@@ -5,17 +5,28 @@
 //! directories and the exact lake column order. Each flush atomically replaces
 //! one complete part object, so a crash leaves all earlier parts readable.
 //!
-//! The Python recorder serializes each part with PyArrow. This port keeps the
-//! deterministic row model and part layout and encodes rows with a stable,
-//! self-describing binary frame instead of Parquet so the crate stays free of
-//! an Arrow dependency; the row shapes and column order match the lake schema.
+//! The Python recorder serializes each part with PyArrow. This port builds the
+//! identical lake Arrow schemas (timestamp ns UTC, decimal128(38, 18), uint
+//! sizes/ids, string fields, and the `conditions` list) and writes them with
+//! the Parquet 2.6 writer and zstd compression, so each flushed object is a
+//! real, readable lake part.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use arrow_array::{
+    ArrayRef, Decimal128Array, Int64Array, ListArray, RecordBatch, StringArray,
+    TimestampNanosecondArray, UInt32Array, UInt64Array,
+};
+use arrow_buffer::{OffsetBuffer, ScalarBuffer};
+use arrow_schema::{DataType as ArrowDataType, Field, Schema, TimeUnit};
 use harness_num::Decimal18;
+use parquet::arrow::ArrowWriter;
+use parquet::basic::Compression;
+use parquet::file::properties::{WriterProperties, WriterVersion};
 
 use crate::clock::Clock;
 use crate::error::DataError;
@@ -344,10 +355,16 @@ pub fn event_row(event: &MarketEvent, asset_class: AssetClass) -> Result<Recorde
             let mut row = vec![
                 ("timestamp".to_string(), timestamp),
                 ("symbol".to_string(), symbol),
-                ("bid_exchange".to_string(), Some(String::new())),
+                (
+                    "bid_exchange".to_string(),
+                    Some(quote.venue.clone().unwrap_or_default()),
+                ),
                 ("bid_price".to_string(), Some(quote.bid_price.to_string())),
                 ("bid_size".to_string(), Some(integer_size(quote.bid_size)?)),
-                ("ask_exchange".to_string(), Some(String::new())),
+                (
+                    "ask_exchange".to_string(),
+                    Some(quote.venue.clone().unwrap_or_default()),
+                ),
                 ("ask_price".to_string(), Some(quote.ask_price.to_string())),
                 ("ask_size".to_string(), Some(integer_size(quote.ask_size)?)),
             ];
@@ -362,10 +379,10 @@ pub fn event_row(event: &MarketEvent, asset_class: AssetClass) -> Result<Recorde
         (MarketEvent::Quote(quote), AssetClass::Crypto) => Ok(vec![
             ("timestamp".to_string(), timestamp),
             ("symbol".to_string(), symbol),
-            ("bid_exchange".to_string(), None),
+            ("bid_exchange".to_string(), quote.venue.clone()),
             ("bid_price".to_string(), Some(quote.bid_price.to_string())),
             ("bid_size".to_string(), Some(quote.bid_size.to_string())),
-            ("ask_exchange".to_string(), None),
+            ("ask_exchange".to_string(), quote.venue.clone()),
             ("ask_price".to_string(), Some(quote.ask_price.to_string())),
             ("ask_size".to_string(), Some(quote.ask_size.to_string())),
         ]),
@@ -376,7 +393,10 @@ pub fn event_row(event: &MarketEvent, asset_class: AssetClass) -> Result<Recorde
                 "trade_id".to_string(),
                 integer_id(trade.trade_id.as_deref(), "trade_id", true)?,
             ),
-            ("exchange".to_string(), Some(String::new())),
+            (
+                "exchange".to_string(),
+                Some(trade.venue.clone().unwrap_or_default()),
+            ),
             ("price".to_string(), Some(trade.price.to_string())),
             ("size".to_string(), Some(integer_size(trade.quantity)?)),
             ("conditions".to_string(), Some("[]".to_string())),
@@ -386,7 +406,10 @@ pub fn event_row(event: &MarketEvent, asset_class: AssetClass) -> Result<Recorde
         (MarketEvent::Trade(trade), AssetClass::Option) => Ok(vec![
             ("timestamp".to_string(), timestamp),
             ("symbol".to_string(), symbol),
-            ("exchange".to_string(), Some(String::new())),
+            (
+                "exchange".to_string(),
+                Some(trade.venue.clone().unwrap_or_default()),
+            ),
             ("price".to_string(), Some(trade.price.to_string())),
             ("size".to_string(), Some(integer_size(trade.quantity)?)),
             ("condition".to_string(), Some(String::new())),
@@ -398,7 +421,7 @@ pub fn event_row(event: &MarketEvent, asset_class: AssetClass) -> Result<Recorde
                 "trade_id".to_string(),
                 integer_id(trade.trade_id.as_deref(), "trade_id", false)?,
             ),
-            ("exchange".to_string(), None),
+            ("exchange".to_string(), trade.venue.clone()),
             ("price".to_string(), Some(trade.price.to_string())),
             ("size".to_string(), Some(trade.quantity.to_string())),
             ("taker_side".to_string(), None),
@@ -409,29 +432,381 @@ pub fn event_row(event: &MarketEvent, asset_class: AssetClass) -> Result<Recorde
     }
 }
 
-fn encode_rows(rows: &[RecordedRow]) -> Vec<u8> {
-    let mut payload = Vec::new();
-    payload.extend_from_slice(b"fca-live-part-v1\0");
-    payload.extend_from_slice(&(rows.len() as u64).to_be_bytes());
-    for row in rows {
-        payload.extend_from_slice(&(row.len() as u64).to_be_bytes());
-        for (name, value) in row {
-            push_bytes(&mut payload, name.as_bytes());
-            match value {
-                None => payload.push(0),
-                Some(value) => {
-                    payload.push(1);
-                    push_bytes(&mut payload, value.as_bytes());
-                }
-            }
-        }
-    }
-    payload
+/// One typed lake cell in schema order, ready for Arrow encoding.
+#[derive(Clone, Debug)]
+enum Cell {
+    Timestamp(DateTime),
+    Text(Option<String>),
+    U32(u32),
+    U64(u64),
+    I64(i64),
+    Decimal(Decimal18),
+    EmptyList,
 }
 
-fn push_bytes(payload: &mut Vec<u8>, bytes: &[u8]) {
-    payload.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
-    payload.extend_from_slice(bytes);
+fn integer_size_u32(value: Decimal18) -> Result<u32, DataError> {
+    let whole = value.to_i64(harness_num::RoundingMode::Truncate)?;
+    if Decimal18::from_i64(whole) != value {
+        return Err(DataError::value("size must be an integral lake size"));
+    }
+    if whole <= 0 || whole > i64::from(u32::MAX) {
+        return Err(DataError::value("size exceeds the lake uint32 size range"));
+    }
+    Ok(whole as u32)
+}
+
+fn integer_id_u64(
+    value: Option<&str>,
+    field: &str,
+    required: bool,
+) -> Result<Option<u64>, DataError> {
+    match value {
+        None => {
+            if required {
+                Err(DataError::value(format!(
+                    "{field} is required by the lake schema"
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+        Some(text) => {
+            let parsed: u64 = text
+                .parse()
+                .map_err(|_| DataError::value(format!("{field} must be an integer identifier")))?;
+            Ok(Some(parsed))
+        }
+    }
+}
+
+fn integer_id_i64(
+    value: Option<&str>,
+    field: &str,
+    required: bool,
+) -> Result<Option<i64>, DataError> {
+    match value {
+        None => {
+            if required {
+                Err(DataError::value(format!(
+                    "{field} is required by the lake schema"
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+        Some(text) => {
+            let parsed: i64 = text
+                .parse()
+                .map_err(|_| DataError::value(format!("{field} must be an integer identifier")))?;
+            if parsed < 0 {
+                return Err(DataError::value(format!(
+                    "{field} exceeds the lake identifier range"
+                )));
+            }
+            Ok(Some(parsed))
+        }
+    }
+}
+
+/// Build the typed lake row for one market event in exact schema order.
+fn event_row_typed(
+    event: &MarketEvent,
+    asset_class: AssetClass,
+) -> Result<Vec<(String, Cell)>, DataError> {
+    let timestamp = Cell::Timestamp(event.timestamp());
+    let symbol = Cell::Text(Some(event.symbol().to_string()));
+    let column = |name: &str, cell: Cell| (name.to_string(), cell);
+    match (event, asset_class) {
+        (MarketEvent::Quote(quote), AssetClass::Equity | AssetClass::Option) => {
+            let mut row = vec![
+                column("timestamp", timestamp),
+                column("symbol", symbol),
+                column(
+                    "bid_exchange",
+                    Cell::Text(Some(quote.venue.clone().unwrap_or_default())),
+                ),
+                column("bid_price", Cell::Decimal(quote.bid_price)),
+                column("bid_size", Cell::U32(integer_size_u32(quote.bid_size)?)),
+                column(
+                    "ask_exchange",
+                    Cell::Text(Some(quote.venue.clone().unwrap_or_default())),
+                ),
+                column("ask_price", Cell::Decimal(quote.ask_price)),
+                column("ask_size", Cell::U32(integer_size_u32(quote.ask_size)?)),
+            ];
+            if asset_class == AssetClass::Option {
+                row.push(column("condition", Cell::Text(Some(String::new()))));
+            } else {
+                row.push(column("conditions", Cell::EmptyList));
+                row.push(column("tape", Cell::Text(Some(String::new()))));
+            }
+            Ok(row)
+        }
+        (MarketEvent::Quote(quote), AssetClass::Crypto) => Ok(vec![
+            column("timestamp", timestamp),
+            column("symbol", symbol),
+            column("bid_exchange", Cell::Text(quote.venue.clone())),
+            column("bid_price", Cell::Decimal(quote.bid_price)),
+            column("bid_size", Cell::Decimal(quote.bid_size)),
+            column("ask_exchange", Cell::Text(quote.venue.clone())),
+            column("ask_price", Cell::Decimal(quote.ask_price)),
+            column("ask_size", Cell::Decimal(quote.ask_size)),
+        ]),
+        (MarketEvent::Trade(trade), AssetClass::Equity) => Ok(vec![
+            column("timestamp", timestamp),
+            column("symbol", symbol),
+            column(
+                "trade_id",
+                Cell::U64(
+                    integer_id_u64(trade.trade_id.as_deref(), "trade_id", true)?
+                        .unwrap_or_default(),
+                ),
+            ),
+            column(
+                "exchange",
+                Cell::Text(Some(trade.venue.clone().unwrap_or_default())),
+            ),
+            column("price", Cell::Decimal(trade.price)),
+            column("size", Cell::U32(integer_size_u32(trade.quantity)?)),
+            column("conditions", Cell::EmptyList),
+            column("tape", Cell::Text(Some(String::new()))),
+            column("update", Cell::Text(None)),
+        ]),
+        (MarketEvent::Trade(trade), AssetClass::Option) => Ok(vec![
+            column("timestamp", timestamp),
+            column("symbol", symbol),
+            column(
+                "exchange",
+                Cell::Text(Some(trade.venue.clone().unwrap_or_default())),
+            ),
+            column("price", Cell::Decimal(trade.price)),
+            column("size", Cell::U32(integer_size_u32(trade.quantity)?)),
+            column("condition", Cell::Text(Some(String::new()))),
+        ]),
+        (MarketEvent::Trade(trade), AssetClass::Crypto) => Ok(vec![
+            column("timestamp", timestamp),
+            column("symbol", symbol),
+            column(
+                "trade_id",
+                Cell::I64(
+                    integer_id_i64(trade.trade_id.as_deref(), "trade_id", false)?
+                        .unwrap_or_default(),
+                ),
+            ),
+            column("exchange", Cell::Text(trade.venue.clone())),
+            column("price", Cell::Decimal(trade.price)),
+            column("size", Cell::Decimal(trade.quantity)),
+            column("taker_side", Cell::Text(None)),
+        ]),
+        (_, AssetClass::Reference) => Err(DataError::value(
+            "reference asset class is not recorded by the live recorder",
+        )),
+    }
+}
+
+fn arrow_field(name: &str, data_type: ArrowDataType, nullable: bool) -> Field {
+    Field::new(name, data_type, nullable)
+}
+
+fn arrow_schema(asset_class: AssetClass, data_type: DataType) -> Result<Schema, DataError> {
+    let timestamp = || ArrowDataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()));
+    let price = || ArrowDataType::Decimal128(38, 18);
+    let quantity = || ArrowDataType::Decimal128(38, 18);
+    let conditions =
+        || ArrowDataType::List(Arc::new(Field::new("item", ArrowDataType::Utf8, false)));
+    let fields = match (asset_class, data_type) {
+        (AssetClass::Equity, DataType::Trade) => vec![
+            arrow_field("timestamp", timestamp(), false),
+            arrow_field("symbol", ArrowDataType::Utf8, false),
+            arrow_field("trade_id", ArrowDataType::UInt64, false),
+            arrow_field("exchange", ArrowDataType::Utf8, false),
+            arrow_field("price", price(), false),
+            arrow_field("size", ArrowDataType::UInt32, false),
+            arrow_field("conditions", conditions(), false),
+            arrow_field("tape", ArrowDataType::Utf8, false),
+            arrow_field("update", ArrowDataType::Utf8, true),
+        ],
+        (AssetClass::Equity, DataType::Quote) => vec![
+            arrow_field("timestamp", timestamp(), false),
+            arrow_field("symbol", ArrowDataType::Utf8, false),
+            arrow_field("bid_exchange", ArrowDataType::Utf8, false),
+            arrow_field("bid_price", price(), false),
+            arrow_field("bid_size", ArrowDataType::UInt32, false),
+            arrow_field("ask_exchange", ArrowDataType::Utf8, false),
+            arrow_field("ask_price", price(), false),
+            arrow_field("ask_size", ArrowDataType::UInt32, false),
+            arrow_field("conditions", conditions(), false),
+            arrow_field("tape", ArrowDataType::Utf8, false),
+        ],
+        (AssetClass::Option, DataType::Trade) => vec![
+            arrow_field("timestamp", timestamp(), false),
+            arrow_field("symbol", ArrowDataType::Utf8, false),
+            arrow_field("exchange", ArrowDataType::Utf8, false),
+            arrow_field("price", price(), false),
+            arrow_field("size", ArrowDataType::UInt32, false),
+            arrow_field("condition", ArrowDataType::Utf8, false),
+        ],
+        (AssetClass::Option, DataType::Quote) => vec![
+            arrow_field("timestamp", timestamp(), false),
+            arrow_field("symbol", ArrowDataType::Utf8, false),
+            arrow_field("bid_exchange", ArrowDataType::Utf8, false),
+            arrow_field("bid_price", price(), false),
+            arrow_field("bid_size", ArrowDataType::UInt32, false),
+            arrow_field("ask_exchange", ArrowDataType::Utf8, false),
+            arrow_field("ask_price", price(), false),
+            arrow_field("ask_size", ArrowDataType::UInt32, false),
+            arrow_field("condition", ArrowDataType::Utf8, false),
+        ],
+        (AssetClass::Crypto, DataType::Trade) => vec![
+            arrow_field("timestamp", timestamp(), false),
+            arrow_field("symbol", ArrowDataType::Utf8, false),
+            arrow_field("trade_id", ArrowDataType::Int64, true),
+            arrow_field("exchange", ArrowDataType::Utf8, true),
+            arrow_field("price", price(), false),
+            arrow_field("size", quantity(), false),
+            arrow_field("taker_side", ArrowDataType::Utf8, true),
+        ],
+        (AssetClass::Crypto, DataType::Quote) => vec![
+            arrow_field("timestamp", timestamp(), false),
+            arrow_field("symbol", ArrowDataType::Utf8, false),
+            arrow_field("bid_exchange", ArrowDataType::Utf8, true),
+            arrow_field("bid_price", price(), false),
+            arrow_field("bid_size", quantity(), false),
+            arrow_field("ask_exchange", ArrowDataType::Utf8, true),
+            arrow_field("ask_price", price(), false),
+            arrow_field("ask_size", quantity(), false),
+        ],
+        _ => return Err(DataError::value("unsupported lake schema")),
+    };
+    let name = format!("{}.{}", asset_class.value(), data_type.value());
+    let metadata = HashMap::from([
+        ("lake.schema".to_string(), name),
+        ("lake.schema.version".to_string(), "1".to_string()),
+    ]);
+    Ok(Schema::new_with_metadata(fields, metadata))
+}
+
+fn build_array(
+    field: &Field,
+    rows: &[Vec<(String, Cell)>],
+    column: usize,
+) -> Result<ArrayRef, DataError> {
+    let cell = |row: &Vec<(String, Cell)>| row[column].1.clone();
+    match field.data_type() {
+        ArrowDataType::Timestamp(TimeUnit::Nanosecond, timezone) => {
+            let values: Vec<Option<i64>> = rows
+                .iter()
+                .map(|row| match cell(row) {
+                    Cell::Timestamp(moment) => Some(moment.to_nanos()),
+                    _ => None,
+                })
+                .collect();
+            let array = TimestampNanosecondArray::from(values);
+            let array = match timezone {
+                Some(timezone) => array.with_timezone(timezone.clone()),
+                None => array,
+            };
+            Ok(Arc::new(array))
+        }
+        ArrowDataType::Utf8 => {
+            let values: Vec<Option<String>> = rows
+                .iter()
+                .map(|row| match cell(row) {
+                    Cell::Text(value) => value,
+                    _ => None,
+                })
+                .collect();
+            Ok(Arc::new(StringArray::from(values)))
+        }
+        ArrowDataType::UInt32 => {
+            let values: Vec<Option<u32>> = rows
+                .iter()
+                .map(|row| match cell(row) {
+                    Cell::U32(value) => Some(value),
+                    _ => None,
+                })
+                .collect();
+            Ok(Arc::new(UInt32Array::from(values)))
+        }
+        ArrowDataType::UInt64 => {
+            let values: Vec<Option<u64>> = rows
+                .iter()
+                .map(|row| match cell(row) {
+                    Cell::U64(value) => Some(value),
+                    _ => None,
+                })
+                .collect();
+            Ok(Arc::new(UInt64Array::from(values)))
+        }
+        ArrowDataType::Int64 => {
+            let values: Vec<Option<i64>> = rows
+                .iter()
+                .map(|row| match cell(row) {
+                    Cell::I64(value) => Some(value),
+                    _ => None,
+                })
+                .collect();
+            Ok(Arc::new(Int64Array::from(values)))
+        }
+        ArrowDataType::Decimal128(precision, scale) => {
+            let values: Vec<Option<i128>> = rows
+                .iter()
+                .map(|row| match cell(row) {
+                    Cell::Decimal(value) => Some(value.unscaled()),
+                    _ => None,
+                })
+                .collect();
+            let array = Decimal128Array::from(values)
+                .with_precision_and_scale(*precision, *scale)
+                .map_err(|error| DataError::value(format!("decimal array: {error}")))?;
+            Ok(Arc::new(array))
+        }
+        ArrowDataType::List(_) => {
+            let offsets = OffsetBuffer::new(ScalarBuffer::from(vec![0i32; rows.len() + 1]));
+            let values = StringArray::from(Vec::<String>::new());
+            let item = Arc::new(Field::new("item", ArrowDataType::Utf8, false));
+            Ok(Arc::new(ListArray::new(
+                item,
+                offsets,
+                Arc::new(values),
+                None,
+            )))
+        }
+        other => Err(DataError::value(format!(
+            "unsupported parquet cell type {other:?}"
+        ))),
+    }
+}
+
+/// Encode typed rows into one complete Parquet object with the lake schema.
+fn encode_parquet_rows(
+    asset_class: AssetClass,
+    data_type: DataType,
+    rows: &[Vec<(String, Cell)>],
+) -> Result<Vec<u8>, DataError> {
+    let schema = Arc::new(arrow_schema(asset_class, data_type)?);
+    let mut arrays: Vec<ArrayRef> = Vec::with_capacity(schema.fields().len());
+    for (index, field) in schema.fields().iter().enumerate() {
+        arrays.push(build_array(field, rows, index)?);
+    }
+    let batch = RecordBatch::try_new(Arc::clone(&schema), arrays)
+        .map_err(|error| DataError::value(format!("record batch: {error}")))?;
+    let properties = WriterProperties::builder()
+        .set_compression(Compression::ZSTD(Default::default()))
+        .set_writer_version(WriterVersion::PARQUET_2_0)
+        .build();
+    let mut buffer = Vec::new();
+    {
+        let mut writer = ArrowWriter::try_new(&mut buffer, Arc::clone(&schema), Some(properties))
+            .map_err(|error| DataError::value(format!("parquet writer: {error}")))?;
+        writer
+            .write(&batch)
+            .map_err(|error| DataError::value(format!("parquet write: {error}")))?;
+        writer
+            .close()
+            .map_err(|error| DataError::value(format!("parquet close: {error}")))?;
+    }
+    Ok(buffer)
 }
 
 fn default_resolver(asset_class: AssetClass) -> Box<dyn SessionResolver> {
@@ -448,7 +823,7 @@ struct PartitionWriter {
     data_type: DataType,
     deployment: String,
     part: u64,
-    pending: Vec<RecordedRow>,
+    pending: Vec<Vec<(String, Cell)>>,
     rows: usize,
     session_date: Date,
     store: std::rc::Rc<dyn LiveObjectStore>,
@@ -456,7 +831,7 @@ struct PartitionWriter {
 }
 
 impl PartitionWriter {
-    fn append(&mut self, row: RecordedRow) -> Result<(), DataError> {
+    fn append(&mut self, row: Vec<(String, Cell)>) -> Result<(), DataError> {
         self.pending.push(row);
         Ok(())
     }
@@ -465,7 +840,7 @@ impl PartitionWriter {
         if self.pending.is_empty() {
             return Ok(());
         }
-        let payload = encode_rows(&self.pending);
+        let payload = encode_parquet_rows(self.asset_class, self.data_type, &self.pending)?;
         let path = live_part_path(
             &self.deployment,
             self.session_date,
@@ -628,7 +1003,7 @@ impl LiveRecorder {
         if rotate {
             self.rotate(&partition, session);
         }
-        let row = event_row(event, self.asset_class)?;
+        let row = event_row_typed(event, self.asset_class)?;
         if let Some(writer) = self.writers.get_mut(&partition) {
             if writer.pending.len() >= self.config.batch_size {
                 writer.flush()?;
@@ -738,6 +1113,29 @@ mod tests {
         let payload = store
             .read("live/prod/date=2024-01-05/asset_class=equity/data_type=trade/AAPL.part-000000.parquet")
             .unwrap();
-        assert!(payload.starts_with(b"fca-live-part-v1\0"));
+        assert_eq!(&payload[..4], b"PAR1");
+        assert_eq!(&payload[payload.len() - 4..], b"PAR1");
+        let file = crate::lake::FileQueryFile {
+            asset_class: AssetClass::Equity,
+            data_type: DataType::Trade,
+            symbol: "AAPL".to_string(),
+            session_date: Date::from_ymd(2024, 1, 5).unwrap(),
+            object_path: "date=2024-01-05/asset_class=equity/data_type=trade/AAPL.parquet"
+                .to_string(),
+            read_url: "file://local".to_string(),
+            byte_size: payload.len() as u64,
+            row_count: 1,
+        };
+        let events = crate::replay::events_from_parquet(&file, &payload).unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            MarketEvent::Trade(trade) => {
+                assert_eq!(trade.symbol, "AAPL");
+                assert_eq!(trade.price, Decimal18::from_str("10.5").unwrap());
+                assert_eq!(trade.quantity, Decimal18::from_str("100").unwrap());
+                assert_eq!(trade.trade_id.as_deref(), Some("1"));
+            }
+            _ => panic!("expected trade"),
+        }
     }
 }
