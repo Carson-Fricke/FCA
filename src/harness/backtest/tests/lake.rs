@@ -5,8 +5,8 @@
 //! strategy, and asserts the run consumed the real lake events rather than the
 //! synthetic benchmark. It also asserts the native path emits the complete
 //! result set — `metrics.json`, the offline `report.html`, and the recorder's
-//! Arrow-readable `equity.parquet` time series. It opens no sockets and reads no
-//! wall clock.
+//! Arrow-readable `equity.parquet` time series — and that two runs over the same
+//! lake replay byte-identically. It opens no sockets and reads no wall clock.
 
 use std::path::{Path, PathBuf};
 
@@ -195,6 +195,38 @@ fn runs_the_job_against_a_local_parquet_lake() {
     assert!(names.contains(&"equity"), "{names:?}");
     assert!(builder.metadata().file_metadata().num_rows() >= 2);
 
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn lake_backtest_replays_deterministically() {
+    let directory = temp_dir("replay");
+    let lake = directory.join("lake");
+    let first = directory.join("first");
+    let second = directory.join("second");
+    let (first_outcome, first_path) = run_lake_job(&lake, &first);
+    let (second_outcome, second_path) = run_lake_job(&lake, &second);
+
+    assert_eq!(first_outcome.dispatch_hash, second_outcome.dispatch_hash);
+    assert_eq!(
+        first_outcome.artifact_digest(),
+        second_outcome.artifact_digest()
+    );
+    assert_eq!(
+        std::fs::read(&first_path).expect("first artifact"),
+        std::fs::read(&second_path).expect("second artifact")
+    );
+    for name in ["metrics.json", "report.html"] {
+        assert_eq!(
+            std::fs::read(first.join(name)).expect("first artifact"),
+            std::fs::read(second.join(name)).expect("second artifact"),
+            "{name} differs"
+        );
+    }
+    assert_eq!(
+        std::fs::read(first.join("artifacts").join("equity.parquet")).expect("first equity"),
+        std::fs::read(second.join("artifacts").join("equity.parquet")).expect("second equity")
+    );
     let _ = std::fs::remove_dir_all(&directory);
 }
 
