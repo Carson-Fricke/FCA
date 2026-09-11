@@ -38,6 +38,7 @@ def test_missing_binary_falls_back_to_python(
 ) -> None:
     monkeypatch.setenv(rust_entrypoints.RUST_ENTRYPOINTS_FLAG, "1")
     monkeypatch.setenv(rust_entrypoints.RUST_BINARY_DIR_VARIABLE, str(tmp_path))
+    monkeypatch.setattr(rust_entrypoints, "_candidate_dirs", lambda: (tmp_path,))
     assert rust_entrypoints.rust_binary("api") is None
     assert rust_entrypoints.exec_rust_entrypoint("api", []) is None
 
@@ -47,6 +48,7 @@ def test_available_binary_is_detected(
 ) -> None:
     monkeypatch.setenv(rust_entrypoints.RUST_ENTRYPOINTS_FLAG, "1")
     monkeypatch.setenv(rust_entrypoints.RUST_BINARY_DIR_VARIABLE, str(tmp_path))
+    monkeypatch.setattr(rust_entrypoints, "_candidate_dirs", lambda: (tmp_path,))
     name = "api.exe" if os.name == "nt" else "api"
     (tmp_path / name).write_text("", encoding="utf-8")
     assert rust_entrypoints.rust_binary("api") == tmp_path / name
