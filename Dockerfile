@@ -2,22 +2,21 @@ FROM ghcr.io/astral-sh/uv:0.12.6 AS uv
 
 FROM rust:bookworm AS rust
 
-# The Rust workspace is the quant-harness engine and its process interfaces.
-# This stage compiles and tests it, then produces the loadable shared library
-# (native) that the runtime image carries under /opt/rust and the
-# harness entrypoint binaries the Python console-script shims exec. The Python
-# builder stage reuses the same toolchain to compile the PyO3 extension.
-WORKDIR /build/src/harness
+# The process binaries embed CPython through PyO3 to drive user-authored Python
+# strategies, so they must be compiled against the SAME interpreter the runtime
+# ships (python:3.12-slim), not bookworm's default 3.11. Pull the 3.12 toolchain
+# from the runtime base image and point PyO3 at it.
+COPY --from=python:3.12-slim /usr/local /usr/local
+ENV PYO3_PYTHON=/usr/local/bin/python3.12
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+# The Rust workspace is the quant-harness engine and its process interfaces.
+# This stage compiles the loadable shared library (native) the runtime image
+# carries under /opt/rust and the harness entrypoint binaries the Python
+# console-script shims exec. Tests run in CI; this stage only builds artifacts.
+WORKDIR /build/src/harness
 
 COPY src/harness/ ./
 
-# Compile the workspace and the process binaries. Tests run in CI (and need the
-# Python strategy-host environment plus the repository `config/` tree, neither
-# of which is in this build stage), so this stage only builds artifacts.
 RUN cargo build --locked --release -p native \
     && cargo build --locked --release -p api --bins \
     && cargo build --locked --release -p live --bin trader
@@ -63,6 +62,7 @@ RUN test -x /opt/venv/bin/lake \
 FROM python:3.12-slim AS runtime
 
 ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH="/opt/venv/lib/python3.12/site-packages" \
     LAKE_CONFIG_ROOT=/app \
     HARNESS_RUST_BINARY_DIR=/opt/rust/bin \
     PYTHONDONTWRITEBYTECODE=1 \
