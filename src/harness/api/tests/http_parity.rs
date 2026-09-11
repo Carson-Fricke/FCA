@@ -16,8 +16,8 @@ use api::http::launcher::{
 };
 use api::http::state::AppConfig;
 use api::http::store::{
-    artifact_digest, InMemoryJobRepository, InMemoryRunStore, RunCatalogRecord, RunStatus, RunStore,
-    SasIssuer,
+    artifact_digest, InMemoryJobRepository, InMemoryRunStore, RunCatalogRecord, RunStatus,
+    RunStore, SasIssuer,
 };
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
@@ -105,6 +105,7 @@ fn build(
         sas_issuer: sas,
         clock,
         configuration_parser: Arc::new(StrictJsonConfigurationParser),
+        mcp_server: None,
     };
     TestApp {
         router: create_app(config).expect("app"),
@@ -697,6 +698,7 @@ async fn injected_launcher_keeps_asynchronous_job_semantics() {
         sas_issuer: None,
         clock,
         configuration_parser: Arc::new(StrictJsonConfigurationParser),
+        mcp_server: None,
     };
     let router = create_app(config).expect("app");
 

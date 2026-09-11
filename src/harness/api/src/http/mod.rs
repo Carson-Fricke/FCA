@@ -12,6 +12,7 @@ pub mod cli;
 pub mod clock;
 pub mod configuration;
 pub mod launcher;
+pub mod mcp;
 pub mod models;
 pub mod native;
 pub mod routes;
@@ -19,7 +20,7 @@ pub mod server;
 pub mod state;
 pub mod store;
 
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{middleware, Router};
 
 use auth::AuthError;
@@ -41,6 +42,8 @@ pub fn create_app(config: AppConfig) -> Result<Router, AuthError> {
     let protected = routes::runs_router()
         .merge(routes::launch_router())
         .route("/v1/auth/check", get(routes::auth_check))
+        .route("/mcp", post(mcp::mcp_post))
+        .route("/mcp/health", get(mcp::mcp_health))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_bearer,

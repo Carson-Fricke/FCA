@@ -3,11 +3,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use mcp::server::McpServer;
+
 use super::clock::{Clock, SystemClock};
 use super::configuration::{ConfigurationParser, StrictJsonConfigurationParser};
 use super::launcher::{
     BacktestLauncher, BacktestRunner, InProcessLauncher, UnportedBacktestRunner,
 };
+use super::mcp::compose_local_server;
 use super::native::NativeBacktestRunner;
 use super::store::{
     FileSystemJobRepository, FileSystemRunStore, InMemoryJobRepository, InMemoryRunStore,
@@ -47,6 +50,8 @@ pub struct AppState {
     pub clock: Arc<dyn Clock>,
     /// Submitted-configuration parser.
     pub configuration_parser: Arc<dyn ConfigurationParser>,
+    /// Remote MCP server exposed at `POST /mcp`, when composed.
+    pub mcp_server: Option<Arc<McpServer>>,
 }
 
 /// Composition inputs for [`super::create_app`].
@@ -65,6 +70,8 @@ pub struct AppConfig {
     pub clock: Arc<dyn Clock>,
     /// Submitted-configuration parser.
     pub configuration_parser: Arc<dyn ConfigurationParser>,
+    /// Remote MCP server exposed at `POST /mcp`, when composed.
+    pub mcp_server: Option<Arc<McpServer>>,
 }
 
 impl AppConfig {
@@ -92,6 +99,7 @@ impl AppConfig {
             sas_issuer: None,
             clock,
             configuration_parser: Arc::new(StrictJsonConfigurationParser),
+            mcp_server: None,
         }
     }
 
@@ -125,6 +133,7 @@ impl AppConfig {
             sas_issuer: None,
             clock,
             configuration_parser: Arc::new(StrictJsonConfigurationParser),
+            mcp_server: None,
         }
     }
 
@@ -135,6 +144,10 @@ impl AppConfig {
     }
 
     pub(crate) fn into_state(self, bearer_token: Option<String>) -> AppState {
+        let mcp_server = match self.mcp_server {
+            Some(server) => Some(server),
+            None => compose_local_server(self.run_store.clone(), self.job_repository.clone()).ok(),
+        };
         AppState {
             bearer_token,
             run_store: self.run_store,
@@ -143,6 +156,7 @@ impl AppConfig {
             sas_issuer: self.sas_issuer,
             clock: self.clock,
             configuration_parser: self.configuration_parser,
+            mcp_server,
         }
     }
 }
