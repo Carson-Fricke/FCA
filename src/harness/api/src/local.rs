@@ -44,30 +44,24 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
             .map_err(|error| error.to_string())?;
         let run_id = configuration.run_id.clone();
         let started = Utc::now();
-        self.jobs
-            .upsert(mcp::store::JobRecord::new(
-                &run_id,
-                JobState::Running,
-                started,
-                started,
-            ));
-        let output_dir = workspace
-            .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::temp_dir().join("harness-mcp-backtests").join(&run_id));
-        let run = host::backtest::run_backtest_config(
-            &configuration,
-            Some(output_dir.as_path()),
-            None,
-        );
+        self.jobs.upsert(mcp::store::JobRecord::new(
+            &run_id,
+            JobState::Running,
+            started,
+            started,
+        ));
+        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join("harness-mcp-backtests")
+                .join(&run_id)
+        });
+        let run =
+            host::backtest::run_backtest_config(&configuration, Some(output_dir.as_path()), None);
         let (outcome, artifact_path) = match run {
             Ok(result) => result,
             Err(error) => {
-                let mut job = mcp::store::JobRecord::new(
-                    &run_id,
-                    JobState::Failed,
-                    started,
-                    Utc::now(),
-                );
+                let mut job =
+                    mcp::store::JobRecord::new(&run_id, JobState::Failed, started, Utc::now());
                 job.error_message = Some(error.to_string());
                 self.jobs.upsert(job);
                 return Err(error.to_string());
@@ -203,10 +197,7 @@ fn parse_sweep_spec(document: &Value) -> Result<(SweepSpec, BacktestConfig), Str
         let values = values
             .as_array()
             .ok_or_else(|| format!("sweep parameter '{name}' must be an array"))?;
-        space.insert(
-            name.clone(),
-            values.iter().map(to_canonical_json).collect(),
-        );
+        space.insert(name.clone(), values.iter().map(to_canonical_json).collect());
     }
     let spec = match mode {
         SweepMode::Grid => SweepSpec::grid(base.clone(), instance_id, space),
@@ -236,10 +227,7 @@ fn to_canonical_json(value: &Value) -> JsonValue {
             } else if let Some(unsigned) = number.as_u64() {
                 JsonValue::UInt(unsigned)
             } else {
-                JsonValue::object([(
-                    "$decimal",
-                    JsonValue::String(number.to_string()),
-                )])
+                JsonValue::object([("$decimal", JsonValue::String(number.to_string()))])
             }
         }
         Value::String(text) => JsonValue::String(text.clone()),
@@ -416,67 +404,5 @@ impl SweepJobLauncher for NativeSweepLauncher {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use mcp::store::{FileSystemJobRepository, FileSystemRunStore};
-
-    fn repo_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("..")
-    }
-
-    #[test]
-    fn canonical_conversion_tags_floats_as_decimals() {
-        assert_eq!(to_canonical_json(&json!(4)), JsonValue::Int(4));
-        assert_eq!(
-            to_canonical_json(&json!("0.05")),
-            JsonValue::String("0.05".to_string())
-        );
-        assert_eq!(
-            normalize_parameter(&to_canonical_json(&json!(0.5))),
-            JsonValue::String("0.5".to_string())
-        );
-    }
-
-    #[test]
-    fn sweep_spec_parses_the_documented_document() {
-        let document = json!({
-            "base_config_path": repo_root().join("config/harness/backtest.yaml").to_string_lossy(),
-            "instance_id": "spy-momentum",
-            "mode": "grid",
-            "space": {"lookback": [4, 8]},
-        });
-        let (spec, _base) = parse_sweep_spec(&document).expect("spec");
-        assert_eq!(spec.expand().len(), 2);
-    }
-
-    #[test]
-    fn sweep_submitter_expands_and_records_a_sweep() {
-        let root = std::env::temp_dir().join(format!(
-            "harness-sweep-submit-{}-{}",
-            std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap_or(0)
-        ));
-        let _ = fs::remove_dir_all(&root);
-        let run_store: Arc<dyn RunStore> = Arc::new(FileSystemRunStore::new(&root));
-        let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
-        let submitter = NativeSweepSubmitter::new(run_store, jobs, &root);
-        let spec_path = root.join("spec.json");
-        fs::create_dir_all(&root).expect("dir");
-        let document = json!({
-            "base_config_path": repo_root().join("config/harness/backtest.yaml").to_string_lossy(),
-            "instance_id": "spy-momentum",
-            "mode": "grid",
-            "space": {"lookback": [4]},
-        });
-        fs::write(&spec_path, serde_json::to_vec(&document).expect("json")).expect("write");
-        let payload = mcp::tools::SweepSubmitter::submit(&submitter, spec_path.to_str().unwrap())
-            .expect("submit");
-        assert_eq!(payload["expanded"], 1);
-        assert_eq!(payload["run_ids"].as_array().map(Vec::len), Some(1));
-        assert!(payload["sweep_id"].as_str().map(str::len) == Some(64));
-        let _ = fs::remove_dir_all(&root);
-    }
-}
+#[path = "../tests/unit/local.rs"]
+mod tests;

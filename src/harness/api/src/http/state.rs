@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use super::clock::{Clock, SystemClock};
 use super::configuration::{ConfigurationParser, StrictJsonConfigurationParser};
-use super::launcher::{BacktestLauncher, BacktestRunner, InProcessLauncher, UnportedBacktestRunner};
+use super::launcher::{
+    BacktestLauncher, BacktestRunner, InProcessLauncher, UnportedBacktestRunner,
+};
 use super::native::NativeBacktestRunner;
 use super::store::{
     FileSystemJobRepository, FileSystemRunStore, InMemoryJobRepository, InMemoryRunStore,
