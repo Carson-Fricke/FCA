@@ -16,17 +16,22 @@ pub mod state_store;
 pub use go_live::{
     clean_streak, evaluate, GateCriteria, GateDecision, GateState, PaperSessionEvidence,
 };
-pub use paper::{PaperOptions, PaperSessionPolicy, PaperSessionResult, PaperShell};
+pub use paper::{
+    PaperBook, PaperOptions, PaperRuntimeShell, PaperSessionPolicy, PaperSessionResult,
+    PaperShell, PaperShellRestore, VenueWatermarks,
+};
 pub use reconciler::{
     reconcile_cash, reconcile_positions, ExpectedPosition, PositionDelta, ReconcileDecision,
     ReconcileSchedule, ReconcileTrigger, ReconciliationDiff, ReconciliationTolerances,
 };
 pub use recovery::{plan_recovery, BootPolicyKind, RecoveryAction, RecoveryFacts, RecoveryPlan};
 pub use shadow::{
-    compare_intents, verdict, BrokerIntent, IntentComparison, LivePrint, ShadowVerdict,
+    build_report, first_would_be_difference, BrokerIntent, IntentComparison, LivePrint,
+    ObserveOnlyBrokerSink, ShadowReport, ShadowVerdict, SingleLegOrder,
 };
 pub use state_store::{
-    decimal_tag, decimal_text, parse_json, BookState, InMemorySnapshotStore, RandomState,
-    RiskState, RuntimeSnapshot, RuntimeStateStore, SnapshotObjectStore, SnapshotSchedule,
-    SnapshotTrigger, StateStoreError, StoredSnapshot, StrategyState, VenueState, FORMAT_VERSION,
+    decimal_tag, decimal_text, parse_json, BookState, FillState, InMemorySnapshotStore,
+    RandomState, RiskState, RuntimeSnapshot, RuntimeStateStore, SnapshotObjectStore,
+    SnapshotSchedule, SnapshotTrigger, StateStoreError, StoredSnapshot, StrategyState, VenueState,
+    FORMAT_VERSION,
 };
