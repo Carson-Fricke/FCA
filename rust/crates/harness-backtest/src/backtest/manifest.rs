@@ -458,8 +458,8 @@ pub fn build_manifest(
         schema_version: configuration.schema_version,
         configuration_hash: configuration_hash(&configuration_to_json(configuration)),
         seed: configuration.seed,
-        start: crate::results::recorder::format_timestamp_ns(configuration.start_ns),
-        end: crate::results::recorder::format_timestamp_ns(configuration.end_ns),
+        start: utc_timestamp(configuration.start_ns),
+        end: utc_timestamp(configuration.end_ns),
         base_currency: configuration.base_currency.clone(),
         initial_cash: configuration.initial_cash.clone(),
         data_snapshot_id: configuration.data_snapshot_id.clone(),
@@ -475,6 +475,17 @@ pub fn build_manifest(
         risk_pipeline_fingerprint: configuration_hash(risk_pipeline_identity),
         strategies: strategy_identities,
     })
+}
+
+/// Format an epoch nanosecond instant as the Python `datetime.isoformat`
+/// timespec-microseconds string for a UTC-aware value (`+00:00`, not `Z`).
+fn utc_timestamp(timestamp_ns: i64) -> String {
+    let mut text = crate::results::recorder::format_timestamp_ns(timestamp_ns);
+    if text.ends_with('Z') {
+        text.pop();
+        text.push_str("+00:00");
+    }
+    text
 }
 
 /// Canonical JSON for the fields of a configuration that feed its hash.

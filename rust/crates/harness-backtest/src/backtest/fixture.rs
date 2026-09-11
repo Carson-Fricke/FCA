@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use harness_num::Decimal18;
+use harness_num::{Decimal18, RoundingMode, SCALE};
 
 use crate::canonical_json::JsonValue;
 use crate::sha256::{digest_hex, Sha256};
@@ -43,6 +43,18 @@ pub struct SyntheticDataOptions {
     pub session_close: (u32, u32),
     /// Reporting venue.
     pub venue: String,
+    /// Fractional digit count carried by `base_price` in the Python reference.
+    ///
+    /// Python `Decimal` values remember the scale of their literals and of each
+    /// arithmetic result, so `str(Decimal("450.00"))` is `"450.00"`, not
+    /// `"450"`. The scale-18 Rust port cannot recover that scale from the value
+    /// alone, so the canonical benchmark records it here for the replay
+    /// fingerprint, which must reproduce the Python `str(Decimal)` bytes.
+    pub base_price_scale: u32,
+    /// Fractional digit count carried by `tick` in the Python reference.
+    pub tick_scale: u32,
+    /// Fractional digit count carried by the quote and trade quantities.
+    pub quantity_scale: u32,
 }
 
 impl Default for SyntheticDataOptions {
@@ -60,6 +72,9 @@ impl Default for SyntheticDataOptions {
             session_open: (13, 30),
             session_close: (20, 0),
             venue: "XNYS".to_string(),
+            base_price_scale: 2,
+            tick_scale: 2,
+            quantity_scale: 0,
         }
     }
 }
@@ -191,6 +206,14 @@ impl MarketEvent {
         }
     }
 
+    /// The event's source-local sequence number.
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        match self {
+            Self::Quote { sequence, .. } | Self::Trade { sequence, .. } => *sequence,
+        }
+    }
+
     /// Canonical JSON for fingerprinting.
     fn to_json(&self) -> JsonValue {
         match self {
@@ -277,6 +300,203 @@ impl ReplayFingerprints {
             digest_hex(payload.as_bytes())
         };
         Self { file, row, data }
+    }
+}
+
+/// `10^exponent` as `u128`; `exponent` is at most [`SCALE`].
+fn pow10(exponent: u32) -> u128 {
+    let mut result = 1u128;
+    let mut step = 0u32;
+    while step < exponent {
+        result *= 10;
+        step += 1;
+    }
+    result
+}
+
+/// The fewest fractional digits that represent `value` exactly.
+fn minimal_scale(value: Decimal18) -> u32 {
+    if value.is_zero() {
+        return 0;
+    }
+    let magnitude = value.unscaled().unsigned_abs();
+    for scale in 0..=SCALE {
+        if magnitude.is_multiple_of(pow10(SCALE - scale)) {
+            return scale;
+        }
+    }
+    SCALE
+}
+
+/// Render `value` with exactly `scale` fractional digits, rounding half-even.
+///
+/// Mirrors Python `str(Decimal)`: the arithmetic scale is explicit, so
+/// `450.00` renders as `"450.00"` rather than the scale-18 `"450.000000000000000000"`.
+fn python_decimal(value: Decimal18, scale: u32) -> String {
+    let rounded = value.round_to(RoundingMode::HalfEven, scale).unwrap_or(value);
+    let negative = rounded.is_negative();
+    let magnitude = rounded.unscaled().unsigned_abs();
+    // `units` is the value scaled up by `10^scale`.
+    let units = magnitude / pow10(SCALE - scale);
+    let whole = units / pow10(scale);
+    let fraction = units % pow10(scale);
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    out.push_str(&whole.to_string());
+    if scale > 0 {
+        out.push('.');
+        let digits = fraction.to_string();
+        for _ in 0..(scale as usize - digits.len()) {
+            out.push('0');
+        }
+        out.push_str(&digits);
+    }
+    out
+}
+
+/// Framed UTF-8 fields, byte-identical to `harness.data.replay._canonical_fields`.
+fn canonical_fields(values: &[String]) -> Vec<u8> {
+    let mut output = Vec::new();
+    for value in values {
+        let payload = value.as_bytes();
+        output.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+        output.extend_from_slice(payload);
+    }
+    output
+}
+
+/// One Python `_update_frame`: a big-endian `u64` length then the payload.
+fn update_frame(hasher: &mut Sha256, payload: &[u8]) {
+    hasher.update(&(payload.len() as u64).to_be_bytes());
+    hasher.update(payload);
+}
+
+/// Format an epoch nanosecond instant as Python `isoformat(timespec="microseconds")`.
+fn timestamp_isoformat_micros(timestamp_ns: i64) -> String {
+    let mut text = crate::results::recorder::format_timestamp_ns(timestamp_ns);
+    if text.ends_with('Z') {
+        text.pop();
+        text.push_str("+00:00");
+    }
+    text
+}
+
+/// One replay event frame, byte-identical to `harness.data.replay`.
+fn event_framed_fields(
+    event: &MarketEvent,
+    options: &SyntheticDataOptions,
+    quote_scale: u32,
+    trade_scale: u32,
+) -> Vec<u8> {
+    match event {
+        MarketEvent::Quote {
+            event_id,
+            timestamp_ns,
+            sequence,
+            symbol,
+            bid,
+            ask,
+            bid_quantity,
+            ask_quantity,
+            venue,
+        } => canonical_fields(&[
+            "quote".to_string(),
+            event_id.clone(),
+            timestamp_isoformat_micros(*timestamp_ns),
+            sequence.to_string(),
+            symbol.clone(),
+            python_decimal(*bid, quote_scale),
+            python_decimal(*bid_quantity, options.quantity_scale),
+            python_decimal(*ask, quote_scale),
+            python_decimal(*ask_quantity, options.quantity_scale),
+            venue.clone(),
+        ]),
+        MarketEvent::Trade {
+            event_id,
+            timestamp_ns,
+            sequence,
+            symbol,
+            price,
+            quantity,
+            venue,
+            trade_id,
+        } => canonical_fields(&[
+            "trade".to_string(),
+            event_id.clone(),
+            timestamp_isoformat_micros(*timestamp_ns),
+            sequence.to_string(),
+            symbol.clone(),
+            python_decimal(*price, trade_scale),
+            python_decimal(*quantity, options.quantity_scale),
+            venue.clone(),
+            trade_id.clone(),
+        ]),
+    }
+}
+
+/// Compute the Python `harness.data.replay` fingerprints for a synthetic run.
+///
+/// The two in-memory streams are the quote stream (source order 0) and the
+/// trade stream (source order 1); the file, row, and data fingerprints then
+/// follow the exact domain-separated framing of the Python replay feed.
+#[must_use]
+pub fn synthetic_fingerprints(
+    events: &[MarketEvent],
+    sessions: &[ExchangeSession],
+    options: &SyntheticDataOptions,
+    symbol: &str,
+) -> ReplayFingerprints {
+    let mid_scale = options.base_price_scale.max(options.tick_scale);
+    let half_spread = options
+        .tick
+        .checked_mul(Decimal18::from_i64(options.spread_ticks))
+        .and_then(|value| value.checked_div(Decimal18::from_i64(2)))
+        .unwrap_or(Decimal18::ZERO);
+    let quote_scale = mid_scale.max(minimal_scale(half_spread));
+    let trade_scale = mid_scale;
+
+    let file = {
+        let mut hasher = Sha256::new();
+        hasher.update(b"fca-lake-replay-files-v1\0");
+        for (order, data_type) in [(0u64, "quote"), (1u64, "trade")] {
+            update_frame(
+                &mut hasher,
+                &canonical_fields(&[
+                    "stream".to_string(),
+                    order.to_string(),
+                    symbol.to_string(),
+                    data_type.to_string(),
+                ]),
+            );
+        }
+        hasher.finalize_hex()
+    };
+
+    let mut row = Sha256::new();
+    let mut data = Sha256::new();
+    data.update(b"fca-lake-replay-data-v1\0");
+    update_frame(&mut data, file.as_bytes());
+    for session in sessions {
+        update_frame(
+            &mut data,
+            &canonical_fields(&[
+                session.date_string(),
+                timestamp_isoformat_micros(session.open_ns),
+                timestamp_isoformat_micros(session.close_ns),
+            ]),
+        );
+    }
+    for event in events {
+        let payload = event_framed_fields(event, options, quote_scale, trade_scale);
+        update_frame(&mut row, &payload);
+        update_frame(&mut data, &payload);
+    }
+    ReplayFingerprints {
+        file,
+        row: row.finalize_hex(),
+        data: data.finalize_hex(),
     }
 }
 
@@ -429,7 +649,7 @@ pub fn synthetic_fixture(
         .to_uppercase();
     let sessions = backtest_sessions(configuration, options);
     let events = synthetic_events(configuration, options, &symbol, &sessions)?;
-    let fingerprints = ReplayFingerprints::of_events(&events);
+    let fingerprints = synthetic_fingerprints(&events, &sessions, options, &symbol);
     Ok(ReplayFixture {
         sessions,
         events,
@@ -524,13 +744,29 @@ fn synthetic_events(
             }
         }
     }
-    let mut events: Vec<MarketEvent> = quotes;
-    events.extend(trades);
-    Ok(events)
+    let mut ordered: Vec<(u8, MarketEvent)> =
+        Vec::with_capacity(quotes.len() + trades.len());
+    for event in quotes {
+        ordered.push((0, event));
+    }
+    for event in trades {
+        ordered.push((1, event));
+    }
+    // Mirrors `harness.data.replay.LakeReplayFeed`: a stable merge by
+    // (timestamp, sequence, class priority, source order). Quotes carry class
+    // priority 0 and trades 1, so a stable sort on the three comparable keys
+    // reproduces the Python heap order.
+    ordered.sort_by(|left, right| {
+        left.1
+            .timestamp_ns()
+            .cmp(&right.1.timestamp_ns())
+            .then_with(|| left.1.sequence().cmp(&right.1.sequence()))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    Ok(ordered.into_iter().map(|(_, event)| event).collect())
 }
 
 /// Days since the Unix epoch for a proleptic Gregorian date.
-#[cfg(test)]
 pub(crate) fn days_from_civil(mut year: i64, month: i64, day: i64) -> i64 {
     if month <= 2 {
         year -= 1;
@@ -578,6 +814,7 @@ pub fn fixture_symbols(fixture: &ReplayFixture) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     fn config() -> BacktestConfig {
         // 2024-01-01T00:00:00Z .. 2024-01-03T00:00:00Z (Mon/Tue sessions).
@@ -619,5 +856,91 @@ mod tests {
         let right = synthetic_fixture(&config(), &SyntheticDataOptions::default()).expect("right");
         assert_eq!(left, right);
         assert_eq!(left.fingerprints, right.fingerprints);
+    }
+
+    #[test]
+    fn synthetic_event_order_matches_python_merge() {
+        let fixture =
+            synthetic_fixture(&config(), &SyntheticDataOptions::default()).expect("fixture");
+        // Python interleaves the quote and trade streams by timestamp.
+        assert!(matches!(fixture.events[0], MarketEvent::Quote { .. }));
+        assert!(matches!(fixture.events[1], MarketEvent::Quote { .. }));
+        assert!(matches!(fixture.events[2], MarketEvent::Trade { .. }));
+        let MarketEvent::Trade { timestamp_ns, .. } = fixture.events[2] else {
+            unreachable!()
+        };
+        // 2024-01-01T14:18:45Z, the first session's first trade.
+        let expected = days_from_civil(2024, 1, 1) * ONE_DAY_NS
+            + 14 * 3_600_000_000_000
+            + 18 * 60_000_000_000
+            + 45 * 1_000_000_000;
+        assert_eq!(timestamp_ns, expected);
+    }
+
+    /// Golden fingerprints produced by the Python reference
+    /// (`harness.data.replay`) for the two-day synthetic fixture.
+    #[test]
+    fn synthetic_fingerprints_match_python_2day_golden() {
+        let fixture =
+            synthetic_fixture(&config(), &SyntheticDataOptions::default()).expect("fixture");
+        assert_eq!(
+            fixture.fingerprints.file,
+            "769536b1681f0658f85cd2d8ddcd13fbe02cf779116b61344159bf5fb4b0d214"
+        );
+        assert_eq!(
+            fixture.fingerprints.row,
+            "9f91f184102f374ff0535dc91a0ab8233dcb08e8bb6cafa6b5020eb0dd41f232"
+        );
+        assert_eq!(
+            fixture.fingerprints.data,
+            "01b16450ec170ef34a6b52af3a887c00ae299f40bd2824d3c07f452e7f81970f"
+        );
+    }
+
+    #[test]
+    fn python_decimal_renders_python_scale() {
+        assert_eq!(python_decimal(Decimal18::from_str("0").unwrap(), 2), "0.00");
+        assert_eq!(
+            python_decimal(Decimal18::from_str("450.00").unwrap(), 2),
+            "450.00"
+        );
+        assert_eq!(
+            python_decimal(Decimal18::from_str("449.955").unwrap(), 3),
+            "449.955"
+        );
+        assert_eq!(python_decimal(Decimal18::from_i64(100), 0), "100");
+    }
+
+    /// The canonical `config/harness/backtest.yaml` window (14 sessions).
+    fn canonical_config() -> BacktestConfig {
+        let start = days_from_civil(2024, 1, 2) * ONE_DAY_NS
+            + 14 * 3_600_000_000_000
+            + 30 * 60_000_000_000;
+        let end = days_from_civil(2024, 1, 19) * ONE_DAY_NS + 21 * 3_600_000_000_000;
+        let mut configuration =
+            BacktestConfig::new("momentum-spy-2024-01", start, end, 1729).expect("config");
+        configuration.symbols = vec!["SPY".to_string()];
+        configuration
+    }
+
+    /// Golden fingerprints produced by the Python reference for the canonical
+    /// `config/harness/backtest.yaml` synthetic fixture.
+    #[test]
+    fn synthetic_fingerprints_match_python_canonical_golden() {
+        let fixture = synthetic_fixture(&canonical_config(), &SyntheticDataOptions::default())
+            .expect("fixture");
+        assert_eq!(fixture.events.len(), 252);
+        assert_eq!(
+            fixture.fingerprints.file,
+            "769536b1681f0658f85cd2d8ddcd13fbe02cf779116b61344159bf5fb4b0d214"
+        );
+        assert_eq!(
+            fixture.fingerprints.row,
+            "7da175c63a4386bfa3e56ccce696f2c4e8f353ff81e97bf427950fcafc3361ec"
+        );
+        assert_eq!(
+            fixture.fingerprints.data,
+            "ec48813dd420956fcacd8d5428f8c2226b922956c5180e171f2e58d22db7c137"
+        );
     }
 }

@@ -179,6 +179,66 @@ pub fn parse_scalar(text: &str, key: &str) -> Option<String> {
     None
 }
 
+/// Read a scalar one indent level below a top-level `section:` block.
+#[must_use]
+pub fn parse_nested_scalar(text: &str, section: &str, key: &str) -> Option<String> {
+    let mut in_section = false;
+    for line in text.lines() {
+        let trimmed = line.trim_end();
+        if trimmed.trim().is_empty() || trimmed.trim_start().starts_with('#') {
+            continue;
+        }
+        let indented = trimmed.len() != trimmed.trim_start().len();
+        if !indented {
+            in_section = trimmed.trim_end() == format!("{section}:");
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let content = trimmed.trim();
+        let rest = content
+            .strip_prefix(&format!("{key}:"))
+            .or_else(|| content.strip_prefix(&format!("\"{key}\":")));
+        if let Some(rest) = rest {
+            let value = rest
+                .trim()
+                .trim_matches(|character| character == '"' || character == '\'');
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Parse an ISO-8601 UTC timestamp into epoch nanoseconds.
+///
+/// Accepts the `YYYY-MM-DDThh:mm:ss[.ffffff]Z` / `+00:00` form the Python
+/// `harness.configuration` loader resolves into a UTC `datetime`.
+#[must_use]
+pub fn parse_timestamp_ns(value: &str) -> Option<i64> {
+    let text = value.trim();
+    let (date, time) = text.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    let month: i64 = date_parts.next()?.parse().ok()?;
+    let day: i64 = date_parts.next()?.parse().ok()?;
+    let time = time.trim_end_matches('Z');
+    let time = time.split_once('+').map_or(time, |(left, _)| left);
+    let mut time_parts = time.split(':');
+    let hour: i64 = time_parts.next()?.parse().ok()?;
+    let minute: i64 = time_parts.next()?.parse().ok()?;
+    let second: i64 = time_parts
+        .next()
+        .and_then(|part| part.split('.').next())
+        .and_then(|part| part.parse().ok())
+        .unwrap_or(0);
+    let days = crate::backtest::fixture::days_from_civil(year, month, day);
+    let seconds = ((days * 24 + hour) * 60 + minute) * 60 + second;
+    Some(seconds * 1_000_000_000)
+}
+
 /// The default synthetic run window: 2024-01-01 to 2024-01-03 UTC.
 const DEFAULT_START_NS: i64 = 19_723 * ONE_DAY_NS;
 const DEFAULT_END_NS: i64 = 19_725 * ONE_DAY_NS;
@@ -193,6 +253,29 @@ pub fn run_backtest_job(
     config_path: &Path,
     output_dir: Option<&Path>,
 ) -> Result<BacktestJobSummary, BacktestJobError> {
+    let configuration = load_backtest_config(config_path)?;
+    let options = BacktestOptions::default();
+    run_job_with(
+        &configuration,
+        &options,
+        output_dir,
+        &mut TradeBuyStrategy::default(),
+        &mut ApproveAll,
+        &mut ImmediateFill,
+    )
+}
+
+/// Load and validate the resolved fields one backtest job reads.
+///
+/// The full Python loader in `harness.configuration` validates the whole schema
+/// graph; this reads the same typed fields the staged runner consumes: the
+/// shell, run window, seed, accounting settings, and data identity.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when the document is missing a `backtest`
+/// shell, carries an invalid window, or cannot be read.
+pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, BacktestJobError> {
     let text = std::fs::read_to_string(config_path)
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
@@ -203,17 +286,29 @@ pub fn run_backtest_job(
     let seed = parse_scalar(&text, "seed")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(7);
-    let mut configuration = BacktestConfig::new(run_id, DEFAULT_START_NS, DEFAULT_END_NS, seed)?;
+    let start_ns = parse_scalar(&text, "start")
+        .as_deref()
+        .and_then(parse_timestamp_ns)
+        .unwrap_or(DEFAULT_START_NS);
+    let end_ns = parse_scalar(&text, "end")
+        .as_deref()
+        .and_then(parse_timestamp_ns)
+        .unwrap_or(DEFAULT_END_NS);
+    let mut configuration = BacktestConfig::new(run_id, start_ns, end_ns, seed)?;
     configuration.shell = "backtest".to_string();
-    let options = BacktestOptions::default();
-    run_job_with(
-        &configuration,
-        &options,
-        output_dir,
-        &mut TradeBuyStrategy::default(),
-        &mut ApproveAll,
-        &mut ImmediateFill,
-    )
+    if let Some(cash) = parse_scalar(&text, "initial_cash") {
+        configuration.initial_cash = cash;
+    }
+    if let Some(currency) = parse_scalar(&text, "base_currency") {
+        configuration.base_currency = currency;
+    }
+    if let Some(snapshot_id) = parse_nested_scalar(&text, "data", "snapshot_id") {
+        configuration.data_snapshot_id = snapshot_id;
+    }
+    if let Some(fingerprint) = parse_nested_scalar(&text, "data", "fingerprint") {
+        configuration.data_fingerprint = fingerprint;
+    }
+    Ok(configuration)
 }
 
 /// The seam the `harness-api` binary calls to run one backtest job.
@@ -670,6 +765,38 @@ mod tests {
             parse_scalar("\"seed\": 42\n", "seed").as_deref(),
             Some("42")
         );
+    }
+
+    #[test]
+    fn parses_nested_section_scalars() {
+        let text = "shell: backtest\ndata:\n  snapshot_id: lake-v1\n  fingerprint: bbbb\n  symbols: [SPY]\nseed: 1\n";
+        assert_eq!(
+            parse_nested_scalar(text, "data", "snapshot_id").as_deref(),
+            Some("lake-v1")
+        );
+        assert_eq!(
+            parse_nested_scalar(text, "data", "fingerprint").as_deref(),
+            Some("bbbb")
+        );
+        assert_eq!(parse_nested_scalar(text, "data", "absent"), None);
+        assert_eq!(parse_nested_scalar(text, "other", "snapshot_id"), None);
+    }
+
+    #[test]
+    fn parses_iso_timestamps_to_epoch_nanoseconds() {
+        assert_eq!(
+            parse_timestamp_ns("2024-01-02T14:30:00Z"),
+            Some(
+                crate::backtest::fixture::days_from_civil(2024, 1, 2) * ONE_DAY_NS
+                    + 14 * 3_600_000_000_000
+                    + 30 * 60_000_000_000
+            )
+        );
+        assert_eq!(
+            parse_timestamp_ns("2024-01-02T14:30:00+00:00"),
+            parse_timestamp_ns("2024-01-02T14:30:00Z")
+        );
+        assert_eq!(parse_timestamp_ns("not-a-date"), None);
     }
 
     #[test]
