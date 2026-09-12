@@ -11,13 +11,14 @@ fail-closed behavior when no token is configured.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from secrets import compare_digest
 from typing import TYPE_CHECKING, Annotated
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -31,9 +32,16 @@ from thesis.agent.harness_tools import (
     open_harness_tool_provider,
 )
 from thesis.agent.reply import reply_provider_for
+from thesis.auth.session import OperatorSessionService
 from thesis.chat import ChatService
 from thesis.chat.responder import ChatReplyService, ToolResultChunk, ToolResultObserver
 from thesis.chat.streaming import InMemoryChatStreamBroker
+from thesis.http.auth import (
+    CsrfTokenGuard,
+    OidcVerifier,
+    SessionCookieAuthenticator,
+    create_auth_router,
+)
 from thesis.http.backtests import create_backtest_router
 from thesis.http.chat import create_chat_router
 from thesis.http.dashboards import create_dashboard_router
@@ -54,6 +62,7 @@ from thesis.http.workspaces import (
     WorkspaceDataBundle,
     create_workspaces_router,
 )
+from thesis.identity.ports import AccountStore, SessionStore
 from thesis.providers.openrouter import OpenRouterProvider
 from thesis.screening.service import ScreenerService
 
@@ -67,6 +76,10 @@ bearer_scheme = HTTPBearer(auto_error=False)
 _V1_ISSUER_TEMPLATE = "https://sts.windows.net/{tenant}/"
 _V2_ISSUER_TEMPLATE = "https://login.microsoftonline.com/{tenant}/v2.0"
 _JWKS_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _unauthorized() -> HTTPException:
@@ -291,6 +304,12 @@ def create_app(
     model_provider: OpenRouterProvider | None = None,
     harness_tool_provider: HarnessToolProvider | None = None,
     harness_client: HarnessMcpClient | None = None,
+    account_store: AccountStore | None = None,
+    auth_verifier: OidcVerifier | None = None,
+    session_service: OperatorSessionService | None = None,
+    session_store: SessionStore | None = None,
+    session_workspace_id: str | None = None,
+    session_clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
@@ -306,13 +325,21 @@ def create_app(
     :func:`thesis.http.workspaces.build_local_workspace_data` — to compose the
     local-mode services.
 
-    Pass ``model_provider`` (with an optional ``harness_tool_provider``) to
+    Pass     ``model_provider`` (with an optional ``harness_tool_provider``) to
     compose the streamed chat reply service without injecting one directly.
     When a harness tool surface is configured the agent replies through the
     harness MCP tool catalog; an unavailable catalog degrades to a plain reply
     at request time, so composition never blocks startup.  A ``harness_client``
     shared with the backtest boundary is adapted into the tool provider without
     opening or initializing a second MCP transport.
+
+    Pass ``account_store`` and ``auth_verifier`` together to register the
+    anonymous OIDC login router.  Adding ``session_service``, ``session_store``,
+    and ``session_workspace_id`` (with an optional ``session_clock``) issues a
+    durable server-side session cookie on login and enables the session
+    logout/revocation endpoints plus CSRF enforcement on the protected routers.
+    The login router is registered on both the root and ``/api`` surfaces
+    without the shared bearer dependency; every other route is unchanged.
     """
     if harness_tool_provider is None and harness_client is not None:
         harness_tool_provider = open_harness_tool_provider(client=harness_client)
@@ -329,6 +356,54 @@ def create_app(
     authenticator = CombinedAuthenticator(
         _configured_token(bearer_token), entra=entra_authenticator
     )
+    if (account_store is None) != (auth_verifier is None):
+        raise ValueError("account_store and auth_verifier must be configured together")
+    session_configured = (
+        session_service is not None
+        or session_store is not None
+        or session_workspace_id is not None
+    )
+    if session_configured:
+        if account_store is None or auth_verifier is None:
+            raise ValueError(
+                "session issuance requires account_store and auth_verifier"
+            )
+        if (
+            session_service is None
+            or session_store is None
+            or session_workspace_id is None
+        ):
+            raise ValueError(
+                "session_service, session_store, and session_workspace_id "
+                "must be configured together"
+            )
+    resolved_session_clock = session_clock or _utc_now
+    csrf_guard: CsrfTokenGuard | None = None
+    primary_authenticator: CombinedAuthenticator | SessionCookieAuthenticator = (
+        authenticator
+    )
+    if session_configured and session_store is not None:
+        csrf_guard = CsrfTokenGuard(
+            session_store=session_store, clock=resolved_session_clock
+        )
+        # Cookie sessions compose with, and never weaken, the bearer/Entra path:
+        # a present cookie is authoritative and fails closed; an absent cookie
+        # delegates unchanged to the existing authenticator.
+        primary_authenticator = SessionCookieAuthenticator(
+            session_store=session_store,
+            fallback=authenticator,
+            clock=resolved_session_clock,
+        )
+    auth_router: APIRouter | None = None
+    if account_store is not None and auth_verifier is not None:
+        auth_router = create_auth_router(
+            account_store,
+            auth_verifier,
+            session_service=session_service,
+            session_store=session_store,
+            workspace_id=session_workspace_id,
+            clock=resolved_session_clock,
+        )
     application = FastAPI(
         title="Thesis API",
         version="0.1.0",
@@ -442,7 +517,7 @@ def create_app(
 
     @application.get(
         "/v1/auth/check",
-        dependencies=[Depends(authenticator)],
+        dependencies=[Depends(primary_authenticator)],
         tags=["auth"],
     )
     async def auth_check() -> dict[str, str]:
@@ -473,9 +548,17 @@ def create_app(
         create_screener_router(),
         create_knowledge_router(),
     )
-    auth_dependency = [Depends(authenticator)]
+    auth_dependency = [Depends(primary_authenticator)]
+    if csrf_guard is not None:
+        auth_dependency.append(Depends(csrf_guard))
     for router in routers:
         application.include_router(router, dependencies=auth_dependency)
+
+    # The auth router establishes its own credential (OIDC) and its session
+    # endpoints carry their own cookie/CSRF dependencies, so it is registered
+    # without the shared bearer dependency on both surfaces.
+    if auth_router is not None:
+        application.include_router(auth_router)
 
     # The Static Web App linked backend forwards the browser's ``/api/*`` path
     # unchanged, so the same routers are also served from a mounted sub-app
@@ -489,6 +572,9 @@ def create_app(
     )
     for router in routers:
         api_application.include_router(router, dependencies=auth_dependency)
+
+    if auth_router is not None:
+        api_application.include_router(auth_router)
 
     @api_application.get("/health", tags=["health"])
     async def api_health() -> dict[str, str]:
