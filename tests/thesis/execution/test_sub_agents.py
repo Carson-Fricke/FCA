@@ -84,6 +84,60 @@ def test_sub_agent_payload_carries_the_full_contract() -> None:
     assert payload["acceptsInput"] is False
 
 
+def _append(
+    store: InMemoryExecutionEventStore,
+    event_type: ExecutionEventType,
+    *,
+    extra: dict[str, object] | None = None,
+) -> ExecutionEvent:
+    return append_sub_agent_event(
+        store,
+        execution_id=EXECUTION,
+        workspace_id=WORKSPACE,
+        event_type=event_type,
+        occurred_at=NOW,
+        sub_agent_id="a",
+        parent_sub_agent_id=None,
+        phase="ideation",
+        role="orchestrator",
+        context=SubAgentContextSpec(),
+        extra=extra,
+    )
+
+
+def test_append_sub_agent_event_rejects_invalid_nested_payloads() -> None:
+    store = InMemoryExecutionEventStore()
+
+    with pytest.raises(SubAgentContractError):
+        _append(store, ExecutionEventType.WORKFLOW_PHASE)
+    with pytest.raises(SubAgentContractError):
+        _append(
+            store,
+            ExecutionEventType.SUB_AGENT_PROGRESS,
+            extra={"text": "missing kind"},
+        )
+    with pytest.raises(SubAgentContractError):
+        _append(
+            store,
+            ExecutionEventType.SUB_AGENT_PROGRESS,
+            extra={"kind": "thinking"},
+        )
+    with pytest.raises(SubAgentContractError):
+        _append(
+            store,
+            ExecutionEventType.SUB_AGENT_OUTPUT,
+            extra={"kind": "artifact"},
+        )
+    with pytest.raises(SubAgentContractError):
+        _append(store, ExecutionEventType.SUB_AGENT_NEEDS_INPUT, extra={})
+    with pytest.raises(SubAgentContractError):
+        _append(
+            store,
+            ExecutionEventType.SUB_AGENT_COMPLETED,
+            extra={"status": "completed"},
+        )
+
+
 def test_append_gate_event_rejects_non_gate_types() -> None:
     store = InMemoryExecutionEventStore()
     with pytest.raises(SubAgentContractError):

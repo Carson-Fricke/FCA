@@ -130,6 +130,45 @@ def sub_agent_payload(
     return payload
 
 
+def _validate_event_extras(
+    event_type: ExecutionEventType, extra: Mapping[str, object] | None
+) -> None:
+    """Enforce the per-kind payload contract for sub-agent events."""
+    if event_type is ExecutionEventType.SUB_AGENT_PROGRESS:
+        kind = None if extra is None else extra.get("kind")
+        if kind not in {"thinking", "tool"}:
+            raise SubAgentContractError(
+                "progress events require kind 'thinking' or 'tool'"
+            )
+        if kind == "thinking":
+            text = None if extra is None else extra.get("text")
+            if not isinstance(text, str) or not text.strip():
+                raise SubAgentContractError(
+                    "thinking progress events require non-empty text"
+                )
+        elif extra is None or not ("toolCall" in extra or "toolResult" in extra):
+            raise SubAgentContractError(
+                "tool progress events require toolCall or toolResult"
+            )
+    elif event_type is ExecutionEventType.SUB_AGENT_OUTPUT:
+        if extra is None or not any(
+            key in extra for key in ("artifact", "toolResult", "outputRef")
+        ):
+            raise SubAgentContractError(
+                "output events require an artifact or tool-result reference"
+            )
+    elif event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT:
+        question = None if extra is None else extra.get("question")
+        if not isinstance(question, str) or not question.strip():
+            raise SubAgentContractError(
+                "needs_input events require a non-empty question"
+            )
+    elif event_type is ExecutionEventType.SUB_AGENT_COMPLETED and (
+        extra is None or not isinstance(extra.get("frozen"), bool)
+    ):
+        raise SubAgentContractError("completed events must record frozen status")
+
+
 def append_sub_agent_event(
     store: ExecutionEventStore,
     *,
@@ -150,6 +189,9 @@ def append_sub_agent_event(
     extra: Mapping[str, object] | None = None,
 ) -> ExecutionEvent:
     """Append one sub-agent event carrying the canonical node payload."""
+    if event_type not in SUB_AGENT_EVENT_TYPES:
+        raise SubAgentContractError("event_type must be a sub_agent.* event")
+    _validate_event_extras(event_type, extra)
     payload = sub_agent_payload(
         sub_agent_id=sub_agent_id,
         parent_sub_agent_id=parent_sub_agent_id,
