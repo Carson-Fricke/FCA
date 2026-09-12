@@ -5,9 +5,11 @@
  *  - fixture mode (default): every request resolves from per-route JSON
  *    fixtures under `src/lib/fixtures/`, so the UI renders fully before
  *    every backend route exists;
- *  - real-fetch mode: the same typed calls hit the Thesis API (bearer
- *    `THESIS_API__BEARER_TOKEN` mode today; the UI holds only a session
- *    credential, never broker or gatekeeper credentials).
+ *  - real-fetch mode: the same typed calls hit the Thesis API through the
+ *    same-origin `/api` base that the Static Web Apps linked backend proxies
+ *    to the internal Container App. The browser carries no shared API
+ *    credential; authentication moves to an API-issued session cookie
+ *    (see ADR-001 and T306/T307).
  *
  * Contracts preserved (see .github/architecture/thesis-ui-design.md):
  *  - POST /v1/workspaces/{ws}/chats/{chat}/messages returns the persisted
@@ -114,15 +116,28 @@ export interface ScreenerRunInput extends ScreenerSaveInput {
 	as_of: string;
 }
 
+/**
+ * The same-origin API prefix the shipped SPA targets. Azure Static Web Apps'
+ * linked backend proxies `/api/*` to the internal Thesis Container App, so the
+ * browser only ever calls its own origin and no API credential is baked into
+ * the bundle. A build may override the base with the non-secret
+ * `PUBLIC_THESIS_API_BASE` (an absolute loopback URL or a relative path).
+ */
+export const SAME_ORIGIN_API_BASE = '/api';
+
 const buildBase: string = (
 	(import.meta.env.PUBLIC_THESIS_API_BASE as string | undefined) ?? ''
 ).trim();
 const forceFixtures = (import.meta.env.PUBLIC_THESIS_UI_FIXTURES as string | undefined) === 'true';
-const bearerToken: string | null =
-	(import.meta.env.PUBLIC_THESIS_API_BEARER_TOKEN as string | undefined) ?? null;
 
-/** Session bearer for raw transports (SSE streams) that bypass apiFetch. */
-export const apiBearerToken: string | null = bearerToken;
+/** Whether a base value is a relative path on the current origin (`/api`). */
+function isRelativeBase(url: string): boolean {
+	const trimmed = url.trim();
+	return trimmed.startsWith('/') && !trimmed.startsWith('//');
+}
+
+/** Whether the build pins a same-origin API path through `PUBLIC_THESIS_API_BASE`. */
+const hasSameOriginOverride: boolean = isRelativeBase(buildBase);
 
 /** Guarded localStorage read: Node exposes a non-functional localStorage. */
 function storedValue(key: string): string | null {
@@ -185,6 +200,14 @@ export const azureBaseUrl: string =
 	stripSlash(isRemoteBase(storedRemoteBase) ? storedRemoteBase : '') ||
 	stripSlash(isRemoteBase(buildBase) ? buildBase : '');
 
+/**
+ * The same-origin API base. Defaults to the linked-backend prefix `/api`; a
+ * relative `PUBLIC_THESIS_API_BASE` (e.g. `/api/v2`) overrides it.
+ */
+const sameOriginBase: string = stripSlash(
+	hasSameOriginOverride ? buildBase : SAME_ORIGIN_API_BASE
+);
+
 /** True when a remote (Azure) Thesis API base URL is configured. */
 export const canUseRemoteApi: boolean = azureBaseUrl !== '';
 
@@ -199,14 +222,15 @@ function _storedKind(candidate: string | null): BackendKind | null {
 
 /**
  * Resolve the active backend: an explicit stored choice wins, then a
- * loopback base (local), then a remote base (Azure), else fixtures. A base
- * configured for the build is Azure only when it is not loopback.
+ * loopback base or a relative same-origin override (local), then a remote
+ * base (Azure), else fixtures. A base configured for the build is Azure only
+ * when it is not loopback.
  */
 export const backendKind: BackendKind =
 	_storedKind(_storedBackend) ??
 	(forceFixtures
 		? 'fixtures'
-		: localConfiguredBase
+		: localConfiguredBase || hasSameOriginOverride
 			? 'local'
 			: canUseRemoteApi
 				? 'azure'
@@ -219,16 +243,12 @@ export const fixtureMode: boolean = backendKind === 'fixtures';
 export const canUseRealApi: boolean = backendKind !== 'fixtures';
 
 /**
- * The API base URL. `fixtures` resolves to '' (no fetching); `local` uses the
- * configured loopback base or '' for same-origin (dev proxy); `azure` uses the
- * configured remote base.
+ * The API base URL. `local` uses a configured loopback base or the
+ * same-origin `/api` prefix; `azure` uses the configured remote base. In
+ * fixture mode no request is issued, so the same-origin base is inert.
  */
 export const apiBaseUrl: string =
-	backendKind === 'azure'
-		? azureBaseUrl
-		: backendKind === 'local'
-			? localConfiguredBase
-			: '';
+	backendKind === 'azure' ? azureBaseUrl : localConfiguredBase || sameOriginBase;
 
 /** Human-readable label for a backend choice. */
 export function backendLabel(kind: BackendKind = backendKind): string {
@@ -256,9 +276,9 @@ export function backendOptions(): {
 			label: 'Local',
 			detail: localConfiguredBase
 				? 'Local Thesis API configured for this build.'
-				: 'Local Thesis API, same-origin via the dev proxy.',
+				: 'Local Thesis API, same-origin through the linked backend.',
 			available: isLocalHosting,
-			base: localConfiguredBase
+			base: localConfiguredBase || sameOriginBase
 		},
 		{
 			kind: 'azure',
@@ -318,7 +338,6 @@ export class ThesisApiError extends Error {
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 	const headers = new Headers(init?.headers);
-	if (bearerToken) headers.set('Authorization', `Bearer ${bearerToken}`);
 	if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
 	const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers });
 	if (!response.ok) {
@@ -1386,9 +1405,9 @@ export async function checkHealth(): Promise<boolean> {
 export async function checkAuth(): Promise<boolean> {
 	if (fixtureMode) return true;
 	try {
-		const response = await fetch(`${apiBaseUrl}/v1/auth/check`, {
-			headers: bearerToken ? { Authorization: `Bearer ${bearerToken}` } : undefined
-		});
+		// Same-origin fetch sends the API-issued session cookie by default;
+		// no shared bearer is attached (cookie auth lands in T306/T307).
+		const response = await fetch(`${apiBaseUrl}/v1/auth/check`);
 		return response.ok;
 	} catch {
 		return false;

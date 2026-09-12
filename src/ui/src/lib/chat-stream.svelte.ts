@@ -1,4 +1,4 @@
-import { apiBaseUrl, apiBearerToken, fixtureMode } from './api';
+import { apiBaseUrl, fixtureMode } from './api';
 import {
 	ChatEventStream,
 	LocalCursorStore,
@@ -63,7 +63,7 @@ export interface ChatStreamOptions {
  * instead, so the visible answer never includes the model's thoughts.
  * Persisted `chat.message` frames are forwarded to `onMessage`. Shared by the
  * conversations page and the copilot pane so the live-update behavior
- * (including the bearer and base URL) exists once.
+ * (including same-origin base URL resolution) exists once.
  */
 export class ChatStreamController {
 	streamingText = $state('');
@@ -100,8 +100,7 @@ export class ChatStreamController {
 			baseUrl: apiBaseUrl,
 			workspaceId: this.#workspaceId(),
 			chatId,
-			cursorStore: this.#cursorStore,
-			bearerToken: apiBearerToken
+			cursorStore: this.#cursorStore
 		});
 		this.#stream = stream;
 		void stream.start((frame) => {

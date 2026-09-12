@@ -82,8 +82,8 @@
 					data-testid="backend-azure-base"
 				/>
 				<span class="mt-1 block text-[11px] text-slate-500">
-					The bearer token still comes from
-					<code>PUBLIC_THESIS_API_BEARER_TOKEN</code> at build time.
+					The same-origin SPA targets <code>/api</code> and never carries a shared
+					API secret; the session will be cookie-based.
 				</span>
 			</label>
 		{/if}

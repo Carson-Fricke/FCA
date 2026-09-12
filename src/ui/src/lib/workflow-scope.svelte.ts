@@ -14,7 +14,6 @@
  */
 import {
 	apiBaseUrl,
-	apiBearerToken,
 	fixtureMode,
 	listExecutionSubAgents,
 	listNodeEvents,
@@ -383,8 +382,7 @@ export class WorkflowScopeController {
 			cursorStore: this.#readonlyCursorStore,
 			cursorKey: `${this.#executionId}:${key}`,
 			subAgentId: node.kind === 'sub_agent' ? node.id : null,
-			includeDescendants: false,
-			bearerToken: apiBearerToken
+			includeDescendants: false
 		});
 		this.#subscriptions.set(key, stream);
 		void stream.start((frame) => {

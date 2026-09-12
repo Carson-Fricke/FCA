@@ -24,7 +24,7 @@
 		postMessage,
 		replayExecutionEvents
 	} from '$lib/api';
-	import { apiBaseUrl, apiBearerToken, fixtureMode } from '$lib/api';
+	import { apiBaseUrl, fixtureMode } from '$lib/api';
 	import { ExecutionEventStream, LocalCursorStore, executionEventOf } from '$lib/sse';
 	import { ChatStreamController, appendMessage } from '$lib/chat-stream.svelte';
 	import { derivePhases } from '$lib/subagent';
@@ -195,8 +195,7 @@
 			baseUrl: apiBaseUrl,
 			workspaceId,
 			executionId,
-			cursorStore,
-			bearerToken: apiBearerToken
+			cursorStore
 		});
 		void stream.start((frame) => {
 			const event = executionEventOf(frame);

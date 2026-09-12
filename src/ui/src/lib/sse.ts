@@ -55,7 +55,6 @@ export interface ExecutionStreamOptions {
 	cursorStore?: CursorStore;
 	fetchImpl?: typeof fetch;
 	reconnectDelayMs?: number;
-	bearerToken?: string | null;
 	/** Override the stream path (used by chat-scoped streams). */
 	streamPath?: (workspaceId: string, id: string) => string;
 	/** Subscribe to one sub-agent node instead of the root execution. */
@@ -160,7 +159,6 @@ export class ExecutionEventStream {
 		while (!this.closed) {
 			try {
 				const headers: Record<string, string> = { Accept: 'text/event-stream' };
-				if (this.options.bearerToken) headers.Authorization = `Bearer ${this.options.bearerToken}`;
 				if (this.cursor > 0) headers['Last-Event-ID'] = String(this.cursor);
 				const response = await this.fetchImpl(url, { headers });
 				if (this.closed) return;
@@ -280,7 +278,6 @@ export interface ChatStreamOptions {
 	cursorStore?: CursorStore;
 	fetchImpl?: typeof fetch;
 	reconnectDelayMs?: number;
-	bearerToken?: string | null;
 }
 
 /** SSE subscription to one chat's streamed assistant reply. */
