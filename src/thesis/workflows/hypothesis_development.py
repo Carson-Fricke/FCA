@@ -61,7 +61,9 @@ from thesis.agent.context import assemble_context
 from thesis.agent.router import InvocationResult, ModelRouter, Role
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.contracts import (
+    MessageRole,
     RecordNotFound,
+    TranscriptItemKind,
     WorkflowDefinition,
     WorkflowExecution,
     WorkflowExecutionState,
@@ -73,6 +75,13 @@ from thesis.execution.events import (
     EventReplay,
     ExecutionEvent,
     ExecutionEventType,
+)
+from thesis.execution.sub_agents import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    SubAgentContextSpec,
+    append_gate_event,
+    append_sub_agent_event,
 )
 from thesis.experiments.ledger import AttemptKind, AttemptLedger, AttemptRecord
 from thesis.persistence.journal import ArtifactRef, CommandJournal, content_hash
@@ -229,6 +238,35 @@ _ACTIVE_PHASES = (
     _STRATEGY_DESIGN,
     _OPTIMIZATION,
 )
+
+#: Role family and human label for each phase's top-level orchestrator.
+_PHASE_ORCHESTRATORS: Mapping[HypothesisDevelopmentPhase, tuple[str, str]] = {
+    _IDEATION: ("research", "Thesis research ideation orchestrator"),
+    _HYPOTHESIS: ("research", "Thesis research hypothesis orchestrator"),
+    _FALSIFICATION_PLAN: (
+        "research",
+        "Thesis research falsification planner orchestrator",
+    ),
+    _FALSIFICATION_TRIALS: (
+        "research",
+        "Thesis research falsification trials orchestrator",
+    ),
+    _RCA: ("critique", "Thesis critique root-cause orchestrator"),
+    _VERDICT: ("research", "Thesis research verdict orchestrator"),
+    _STRATEGY_DESIGN: ("coding", "Thesis coding strategy-design orchestrator"),
+    _OPTIMIZATION: ("coding", "Thesis coding optimization orchestrator"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _ActiveSubAgent:
+    """The currently open top-level orchestrator for one execution."""
+
+    sub_agent_id: str
+    phase: HypothesisDevelopmentPhase
+    role: str
+    context: SubAgentContextSpec
+
 
 _TRANSITIONS: Mapping[
     HypothesisDevelopmentPhase, frozenset[HypothesisDevelopmentPhase]
@@ -1193,6 +1231,8 @@ class HypothesisDevelopmentWorkflow:
         coding_role: Role = "coding",
         experiment_id: str | None = None,
         max_rca_cycles: int = DEFAULT_MAX_RCA_CYCLES,
+        knowledge_cutoff: datetime | None = None,
+        subagent_mcp_tools: Mapping[str, tuple[str, ...]] | None = None,
     ) -> None:
         self._chat = chat
         self._router = router
@@ -1223,6 +1263,16 @@ class HypothesisDevelopmentWorkflow:
         if not isinstance(max_rca_cycles, int) or max_rca_cycles < 0:
             raise WorkflowError("max_rca_cycles must be a non-negative integer")
         self._max_rca_cycles = max_rca_cycles
+        if knowledge_cutoff is not None and (
+            knowledge_cutoff.tzinfo is None or knowledge_cutoff.utcoffset() is None
+        ):
+            raise WorkflowError("knowledge_cutoff must be timezone-aware")
+        self._knowledge_cutoff = knowledge_cutoff
+        self._subagent_mcp_tools: dict[str, tuple[str, ...]] = {
+            family: tuple(tools)
+            for family, tools in dict(subagent_mcp_tools or {}).items()
+        }
+        self._active_orchestrators: dict[str, _ActiveSubAgent] = {}
 
     @property
     def definition(self) -> WorkflowDefinition:
@@ -1251,6 +1301,23 @@ class HypothesisDevelopmentWorkflow:
             actor_id=actor_id,
             body=ideas,
             investigation_id=investigation_id,
+        )
+        self._chat.create_message(
+            workspace_id,
+            chat_id,
+            actor_id=actor_id,
+            body=self.definition.title,
+            role=MessageRole.SYSTEM,
+            kind=TranscriptItemKind.WORKFLOW,
+            data={
+                "currentPhase": execution.phase,
+                "executionId": execution.execution_id,
+                "status": execution.state.value,
+                "title": self.definition.title,
+                "version": execution.workflow_version,
+                "workflowId": execution.workflow_id,
+            },
+            execution_id=execution.execution_id,
         )
         return HypothesisDevelopmentRequest(
             workspace_id=workspace_id,
@@ -1348,6 +1415,7 @@ class HypothesisDevelopmentWorkflow:
                 _FALSIFICATION_PLAN,
                 "falsifiability gate satisfied",
                 lambda: check_falsifiability(document.front_matter),
+                gate="falsifiability",
             )
             plan = self._plan(request, state)
             state = replace(state, plan=plan)
@@ -1367,6 +1435,7 @@ class HypothesisDevelopmentWorkflow:
                 _FALSIFICATION_TRIALS,
                 "falsification plan gate satisfied",
                 lambda: check_falsification_plan(plan, document.front_matter),
+                gate="falsification_plan",
             )
             state = self._run_trials(request, state)
             if self._needs_rca(state):
@@ -1390,6 +1459,7 @@ class HypothesisDevelopmentWorkflow:
                 _VERDICT,
                 "evidence bound to every planned falsifier",
                 lambda: check_evidence_bound(state.plan, state.trials),
+                gate="evidence_bound",
             )
             verdict = self._evaluate_verdict(state)
             state = self._project_hypothesis(request, state, status=verdict.outcome)
@@ -1403,6 +1473,9 @@ class HypothesisDevelopmentWorkflow:
             )
             gate = check_verdict_advances(verdict)
             if gate is not None:
+                self._emit_gate_blocked(
+                    request, _VERDICT, _STRATEGY_DESIGN, "verdict", gate
+                )
                 state = self._transition(
                     request,
                     state,
@@ -1425,6 +1498,7 @@ class HypothesisDevelopmentWorkflow:
                 lambda: check_strategy_design(
                     state.strategy_bundle, state.exit_criteria, document.front_matter
                 ),
+                gate="strategy_design",
             )
             state = self._optimize(request, state)
             journal_id = self._journal_entry(request, state)
@@ -1438,7 +1512,7 @@ class HypothesisDevelopmentWorkflow:
             state = self._transition(request, state, _COMPLETED, "outcome recorded")
         except _Fenced as fence:
             state = self._pause(
-                fence.state if fence.state is not None else state, fence
+                request, fence.state if fence.state is not None else state, fence
             )
             self._emit_phase(request, state.phase, {"state": state.phase.value})
         except _PhaseFailure as failure:
@@ -1607,22 +1681,82 @@ class HypothesisDevelopmentWorkflow:
         diagnoses = list(state.rca)
         for trial in problem_trials:
             falsifier = falsifiers.get(trial.falsifier_id)
+            parent = self._active_orchestrators.get(request.execution_id)
+            parent_sub_agent_id = None if parent is None else parent.sub_agent_id
+            agent_role = f"Thesis {self._critique_role} falsification RCA"
+            task = (
+                "Diagnose the failed falsifier trial "
+                f"{trial.test_id!r} for observable "
+                f"{(None if falsifier is None else falsifier.observable)!r} "
+                f"on run {trial.run_id!r} (state {trial.run_state!r})."
+            )
             context = self._subagents.create(
-                role=f"Thesis {self._critique_role} falsification RCA",
+                role=agent_role,
                 workspace_scope=request.workspace_id,
-                task=(
-                    "Diagnose the failed falsifier trial "
-                    f"{trial.test_id!r} for observable "
-                    f"{(None if falsifier is None else falsifier.observable)!r} "
-                    f"on run {trial.run_id!r} (state {trial.run_state!r})."
-                ),
+                task=task,
+            )
+            agent_context = SubAgentContextSpec(knowledge_cutoff=self._knowledge_cutoff)
+            self._append_sub_agent(
+                request,
+                ExecutionEventType.SUB_AGENT_SPAWNED,
+                sub_agent_id=context.context_id,
+                parent_sub_agent_id=parent_sub_agent_id,
+                phase=_RCA,
+                role=agent_role,
+                context=agent_context,
+            )
+            self._append_sub_agent(
+                request,
+                ExecutionEventType.SUB_AGENT_PROGRESS,
+                sub_agent_id=context.context_id,
+                parent_sub_agent_id=parent_sub_agent_id,
+                phase=_RCA,
+                role=agent_role,
+                context=agent_context,
+                extra={"kind": "thinking", "text": task},
             )
             invocation = self._router.invoke(self._critique_role, context.prompt)
             diagnosis = self._rca_composer.compose(invocation)
             if diagnosis.falsifier_id != trial.falsifier_id:
+                self._append_sub_agent(
+                    request,
+                    ExecutionEventType.SUB_AGENT_FAILED,
+                    sub_agent_id=context.context_id,
+                    parent_sub_agent_id=parent_sub_agent_id,
+                    phase=_RCA,
+                    role=agent_role,
+                    context=agent_context,
+                    extra={"status": STATUS_FAILED},
+                )
                 raise FalsificationComposeError(
                     "rca diagnosis falsifier id does not match the trial"
                 )
+            self._append_sub_agent(
+                request,
+                ExecutionEventType.SUB_AGENT_OUTPUT,
+                sub_agent_id=context.context_id,
+                parent_sub_agent_id=parent_sub_agent_id,
+                phase=_RCA,
+                role=agent_role,
+                context=agent_context,
+                extra={
+                    "artifact": {
+                        "content": diagnosis.as_dict(),
+                        "type": "rca_diagnosis",
+                    },
+                    "kind": "artifact",
+                },
+            )
+            self._append_sub_agent(
+                request,
+                ExecutionEventType.SUB_AGENT_COMPLETED,
+                sub_agent_id=context.context_id,
+                parent_sub_agent_id=parent_sub_agent_id,
+                phase=_RCA,
+                role=agent_role,
+                context=agent_context,
+                extra={"frozen": True, "status": STATUS_COMPLETED},
+            )
             diagnoses.append(diagnosis)
             self._append_attempt(
                 request,
@@ -1895,6 +2029,170 @@ class HypothesisDevelopmentWorkflow:
             payload["verdict"] = state.verdict.outcome
         return payload
 
+    # -- sub-agent orchestration -------------------------------------------
+
+    def _resolve_role(self, family: str) -> Role:
+        if family == "critique":
+            return self._critique_role
+        if family == "coding":
+            return self._coding_role
+        return self._research_role
+
+    def _append_sub_agent(
+        self,
+        request: HypothesisDevelopmentRequest,
+        event_type: ExecutionEventType,
+        *,
+        sub_agent_id: str,
+        parent_sub_agent_id: str | None,
+        phase: HypothesisDevelopmentPhase | str,
+        role: str,
+        context: SubAgentContextSpec,
+        accepts_input: bool = False,
+        extra: Mapping[str, object] | None = None,
+    ) -> None:
+        append_sub_agent_event(
+            self._chat.event_store,
+            execution_id=request.execution_id,
+            workspace_id=request.workspace_id,
+            event_type=event_type,
+            occurred_at=self._clock(),
+            sub_agent_id=sub_agent_id,
+            parent_sub_agent_id=parent_sub_agent_id,
+            phase=(
+                phase.value if isinstance(phase, HypothesisDevelopmentPhase) else phase
+            ),
+            role=role,
+            context=context,
+            accepts_input=accepts_input,
+            intent_epoch=request.intent_epoch,
+            extra=extra,
+        )
+
+    def _spawn_orchestrator(
+        self,
+        request: HypothesisDevelopmentRequest,
+        phase: HypothesisDevelopmentPhase,
+    ) -> None:
+        family, label = _PHASE_ORCHESTRATORS[phase]
+        tools = self._subagent_mcp_tools.get(family, ())
+        context = SubAgentContextSpec(
+            knowledge_cutoff=None, mcp_enabled=bool(tools), mcp_tools=tools
+        )
+        sub_agent_id = self._id_factory("subagent")
+        self._append_sub_agent(
+            request,
+            ExecutionEventType.SUB_AGENT_SPAWNED,
+            sub_agent_id=sub_agent_id,
+            parent_sub_agent_id=None,
+            phase=phase,
+            role=label,
+            context=context,
+        )
+        self._active_orchestrators[request.execution_id] = _ActiveSubAgent(
+            sub_agent_id=sub_agent_id,
+            phase=phase,
+            role=label,
+            context=context,
+        )
+
+    def _finish_orchestrator(
+        self,
+        request: HypothesisDevelopmentRequest,
+        *,
+        status: str,
+        detail: str | None = None,
+    ) -> None:
+        active = self._active_orchestrators.pop(request.execution_id, None)
+        if active is None:
+            return
+        extra: dict[str, object] = {"frozen": True, "status": status}
+        if detail is not None:
+            extra["detail"] = detail
+        event_type = (
+            ExecutionEventType.SUB_AGENT_COMPLETED
+            if status == STATUS_COMPLETED
+            else ExecutionEventType.SUB_AGENT_FAILED
+        )
+        self._append_sub_agent(
+            request,
+            event_type,
+            sub_agent_id=active.sub_agent_id,
+            parent_sub_agent_id=None,
+            phase=active.phase,
+            role=active.role,
+            context=active.context,
+            accepts_input=False,
+            extra=extra,
+        )
+
+    def _on_phase_entered(
+        self,
+        request: HypothesisDevelopmentRequest,
+        state: HypothesisDevelopmentState,
+    ) -> None:
+        self._finish_orchestrator(request, status=STATUS_COMPLETED)
+        if state.phase in _ACTIVE_PHASES:
+            self._spawn_orchestrator(request, state.phase)
+
+    def _emit_gate_blocked(
+        self,
+        request: HypothesisDevelopmentRequest,
+        from_phase: HypothesisDevelopmentPhase,
+        to_phase: HypothesisDevelopmentPhase,
+        gate: str,
+        reason: str,
+    ) -> None:
+        active = self._active_orchestrators.get(request.execution_id)
+        append_gate_event(
+            self._chat.event_store,
+            execution_id=request.execution_id,
+            workspace_id=request.workspace_id,
+            event_type=ExecutionEventType.WORKFLOW_GATE_BLOCKED,
+            occurred_at=self._clock(),
+            from_phase=from_phase.value,
+            to_phase=to_phase.value,
+            gate=gate,
+            reason=reason,
+            sub_agent_id=None if active is None else active.sub_agent_id,
+            intent_epoch=request.intent_epoch,
+        )
+        if active is not None:
+            self._append_sub_agent(
+                request,
+                ExecutionEventType.SUB_AGENT_NEEDS_INPUT,
+                sub_agent_id=active.sub_agent_id,
+                parent_sub_agent_id=None,
+                phase=active.phase,
+                role=active.role,
+                context=active.context,
+                accepts_input=True,
+                extra={"gate": gate, "question": reason},
+            )
+
+    def _emit_gate_resolved(
+        self,
+        request: HypothesisDevelopmentRequest,
+        from_phase: HypothesisDevelopmentPhase,
+        to_phase: HypothesisDevelopmentPhase,
+        gate: str,
+        reason: str,
+    ) -> None:
+        active = self._active_orchestrators.get(request.execution_id)
+        append_gate_event(
+            self._chat.event_store,
+            execution_id=request.execution_id,
+            workspace_id=request.workspace_id,
+            event_type=ExecutionEventType.WORKFLOW_GATE_RESOLVED,
+            occurred_at=self._clock(),
+            from_phase=from_phase.value,
+            to_phase=to_phase.value,
+            gate=gate,
+            reason=reason,
+            sub_agent_id=None if active is None else active.sub_agent_id,
+            intent_epoch=request.intent_epoch,
+        )
+
     # -- state helpers ------------------------------------------------------
 
     def _transition(
@@ -1906,6 +2204,7 @@ class HypothesisDevelopmentWorkflow:
     ) -> HypothesisDevelopmentState:
         advanced = self._advance(state, target, reason)
         self._emit_phase(request, target, {"reason": reason})
+        self._on_phase_entered(request, advanced)
         return advanced
 
     def _transition_gated(
@@ -1915,13 +2214,18 @@ class HypothesisDevelopmentWorkflow:
         target: HypothesisDevelopmentPhase,
         reason: str,
         check: Callable[[], str | None],
+        *,
+        gate: str | None = None,
     ) -> HypothesisDevelopmentState:
         failure = check()
+        gate_name = gate or f"{state.phase.value}->{target.value}"
         if failure is not None:
+            self._emit_gate_blocked(request, state.phase, target, gate_name, failure)
             raise _Fenced(
                 f"gate blocked {state.phase.value} -> {target.value}: {failure}",
                 state,
             )
+        self._emit_gate_resolved(request, state.phase, target, gate_name, reason)
         return self._transition(request, state, target, reason)
 
     def _advance(
@@ -1965,7 +2269,10 @@ class HypothesisDevelopmentWorkflow:
         )
 
     def _pause(
-        self, state: HypothesisDevelopmentState, fence: _Fenced
+        self,
+        request: HypothesisDevelopmentRequest,
+        state: HypothesisDevelopmentState,
+        fence: _Fenced,
     ) -> HypothesisDevelopmentState:
         detail = str(fence)
         if state.phase in {_COMPLETED, _FAILED}:
@@ -1982,6 +2289,7 @@ class HypothesisDevelopmentWorkflow:
         state: HypothesisDevelopmentState,
         error: Exception,
     ) -> HypothesisDevelopmentState:
+        self._finish_orchestrator(request, status=STATUS_FAILED, detail=str(error))
         self._finish_execution(
             request,
             WorkflowExecutionState.FAILED,

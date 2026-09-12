@@ -45,6 +45,7 @@ from thesis.http.streaming import (
     StreamSleeper,
     create_streaming_router,
 )
+from thesis.http.sub_agents import create_sub_agent_router
 from thesis.http.validation import create_validation_router
 from thesis.http.workspaces import (
     WorkspaceDataBundle,
@@ -437,6 +438,14 @@ def create_app(
             poll_interval_seconds=stream_poll_interval_seconds,
             sleeper=stream_sleeper,
             provider_delta_source=provider_delta_source,
+            max_poll_cycles=stream_max_poll_cycles,
+        ),
+        dependencies=[Depends(authenticator)],
+    )
+    application.include_router(
+        create_sub_agent_router(
+            poll_interval_seconds=stream_poll_interval_seconds,
+            sleeper=stream_sleeper,
             max_poll_cycles=stream_max_poll_cycles,
         ),
         dependencies=[Depends(authenticator)],

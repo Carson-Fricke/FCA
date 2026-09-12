@@ -20,7 +20,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
-from thesis.chat.contracts import ChatMessage, MessageRole
+from thesis.chat.contracts import ChatMessage, MessageRole, TranscriptItemKind
 from thesis.chat.service import ChatService
 from thesis.chat.streaming import CHAT_MESSAGE, PROVIDER_DELTA, InMemoryChatStreamBroker
 
@@ -502,6 +502,7 @@ class ChatReplyService:
                         body=chunk.summary or f"{chunk.tool} result",
                         role=MessageRole.TOOL,
                         tool_result=_tool_result_data(chunk),
+                        kind=TranscriptItemKind.TOOL,
                     )
                     self.broker.publish(
                         workspace_id,

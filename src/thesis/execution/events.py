@@ -38,6 +38,14 @@ class ExecutionEventType(StrEnum):
     TOOL_STARTED = "tool.started"
     TOOL_RESULT = "tool.result"
     TOOL_FAILED = "tool.failed"
+    SUB_AGENT_SPAWNED = "sub_agent.spawned"
+    SUB_AGENT_PROGRESS = "sub_agent.progress"
+    SUB_AGENT_OUTPUT = "sub_agent.output"
+    SUB_AGENT_NEEDS_INPUT = "sub_agent.needs_input"
+    SUB_AGENT_COMPLETED = "sub_agent.completed"
+    SUB_AGENT_FAILED = "sub_agent.failed"
+    WORKFLOW_GATE_BLOCKED = "workflow.gate.blocked"
+    WORKFLOW_GATE_RESOLVED = "workflow.gate.resolved"
 
 
 @dataclass(frozen=True, slots=True)

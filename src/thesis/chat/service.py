@@ -24,6 +24,7 @@ from thesis.chat.contracts import (
     RecordNotFound,
     ToolJob,
     ToolJobState,
+    TranscriptItemKind,
     WorkflowDefinition,
     WorkflowExecution,
     WorkflowExecutionState,
@@ -360,6 +361,8 @@ class ChatService:
         investigation_ids: tuple[str, ...] = (),
         execution_id: str | None = None,
         intent_epoch: int = 0,
+        kind: TranscriptItemKind = TranscriptItemKind.MESSAGE,
+        data: Mapping[str, object] | None = None,
     ) -> ChatMessage:
         """Persist an accepted message and verify every workspace link.
 
@@ -367,6 +370,9 @@ class ChatService:
         alongside, but never inside, the answer ``body``.  ``tool_result`` is
         the structured harness-tool outcome carried by a ``tool``-role message
         so the conversation retains an ordered, renderable record of the call.
+        ``kind``/``data`` let one conversation item discriminate between
+        message, tool, workflow anchor, sub-agent, gate, and artifact payloads
+        while every existing message keeps the ``message`` default.
         """
         chat = self.get_chat(workspace_id, chat_id)
         if chat.state is ChatState.ARCHIVED:
@@ -403,6 +409,8 @@ class ChatService:
             body=body,
             reasoning=reasoning,
             tool_result=tool_result,
+            kind=kind,
+            data=data,
             attachment_ids=tuple(
                 attachment.attachment_id for attachment in attachments
             ),
@@ -450,6 +458,8 @@ class ChatService:
         investigation_ids: tuple[str, ...] = (),
         execution_id: str | None = None,
         intent_epoch: int = 0,
+        kind: TranscriptItemKind = TranscriptItemKind.MESSAGE,
+        data: Mapping[str, object] | None = None,
     ) -> ChatMessage:
         """UI-friendly alias for :meth:`create_message`."""
         return self.create_message(
@@ -464,6 +474,8 @@ class ChatService:
             investigation_ids=investigation_ids,
             execution_id=execution_id,
             intent_epoch=intent_epoch,
+            kind=kind,
+            data=data,
         )
 
     def get_message(self, workspace_id: str, message_id: str) -> ChatMessage:

@@ -28,9 +28,10 @@ from thesis.agent.router import (
 )
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContext, SubagentContextFactory
-from thesis.chat.contracts import WorkflowExecutionState
+from thesis.chat.contracts import TranscriptItemKind, WorkflowExecutionState
 from thesis.chat.service import ChatService
 from thesis.execution.events import ExecutionEventType
+from thesis.execution.sub_agents import SubAgentTree
 from thesis.experiments.ledger import AttemptLedger
 from thesis.persistence import CommandJournal
 from thesis.research.hypothesis import (
@@ -713,3 +714,201 @@ def test_phase_skills_register_and_wire_role_policies() -> None:
         RolePolicy(role="primary", version="1.0.0", model_profile="primary-profile")
     )
     assert primary.skills == ()
+
+
+def _events_by_type(
+    kit: _Kit, execution_id: str, event_type: ExecutionEventType
+) -> list[Any]:
+    events = kit.workflow.observe(WORKSPACE, execution_id).events
+    return [event for event in events if event.event_type is event_type]
+
+
+def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    kit.workflow.run(request)
+
+    spawned = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_SPAWNED
+    )
+    top_level = [
+        event for event in spawned if event.payload["parentSubAgentId"] is None
+    ]
+    assert [event.payload["phase"] for event in top_level] == [
+        "ideation",
+        "hypothesis",
+        "falsification_plan",
+        "falsification_trials",
+        "verdict",
+        "strategy_design",
+        "optimization",
+    ]
+    for event in top_level:
+        assert event.payload["subAgentId"]
+        assert event.payload["acceptsInput"] is False
+        context = cast("dict[str, Any]", event.payload["context"])
+        assert context["isolated"] is True
+        assert context["knowledge_cutoff"] is None
+        assert context["mcp"] == {"enabled": False, "tools": []}
+    completed = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_COMPLETED
+    )
+    assert {event.payload["subAgentId"] for event in completed} == {
+        event.payload["subAgentId"] for event in top_level
+    }
+
+
+def test_nested_rca_sub_agent_links_to_its_phase_orchestrator(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[
+            _hypothesis_envelope(),
+            _plan_envelope(),
+            {
+                "falsifierId": "f1",
+                "failureClass": "harness",
+                "rationale": "The trial run aborted before recording metrics.",
+                "confidence": 0.7,
+                "followUps": ["Re-run the unchanged probe on a clean worker."],
+            },
+            _design_envelope(),
+        ],
+        results=[
+            ("aborted", None),
+            ("completed", {"sharpe": 1.5}),
+            ("completed", {"sharpe": 1.2}),
+        ],
+    )
+    request = _request(kit)
+
+    kit.workflow.run(request)
+
+    events = kit.workflow.observe(WORKSPACE, request.execution_id).events
+    spawned = {
+        event.payload["subAgentId"]: event
+        for event in events
+        if event.event_type is ExecutionEventType.SUB_AGENT_SPAWNED
+    }
+    nested = [
+        event
+        for event in spawned.values()
+        if event.payload["parentSubAgentId"] is not None
+    ]
+    assert len(nested) == 1
+    child = nested[0]
+    assert child.payload["phase"] == "rca"
+    parent_id = child.payload["parentSubAgentId"]
+    assert isinstance(parent_id, str)
+    parent = spawned[parent_id]
+    assert parent.payload["phase"] == "rca"
+    assert parent.payload["parentSubAgentId"] is None
+    assert kit.factory.created[0].context_id == child.payload["subAgentId"]
+    child_events = [
+        event
+        for event in events
+        if event.payload.get("subAgentId") == child.payload["subAgentId"]
+    ]
+    assert {event.event_type for event in child_events} == {
+        ExecutionEventType.SUB_AGENT_SPAWNED,
+        ExecutionEventType.SUB_AGENT_PROGRESS,
+        ExecutionEventType.SUB_AGENT_OUTPUT,
+        ExecutionEventType.SUB_AGENT_COMPLETED,
+    }
+    output = next(
+        event
+        for event in child_events
+        if event.event_type is ExecutionEventType.SUB_AGENT_OUTPUT
+    )
+    artifact = cast("dict[str, Any]", output.payload["artifact"])
+    assert artifact["type"] == "rca_diagnosis"
+    progress = next(
+        event
+        for event in child_events
+        if event.event_type is ExecutionEventType.SUB_AGENT_PROGRESS
+    )
+    assert progress.payload["kind"] == "thinking"
+    assert progress.payload["text"]
+
+
+def test_satisfied_gates_emit_resolved_events(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    kit.workflow.run(request)
+
+    resolved = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.WORKFLOW_GATE_RESOLVED
+    )
+    assert [event.payload["gate"] for event in resolved] == [
+        "falsifiability",
+        "falsification_plan",
+        "evidence_bound",
+        "strategy_design",
+    ]
+    assert (
+        _events_by_type(
+            kit, request.execution_id, ExecutionEventType.WORKFLOW_GATE_BLOCKED
+        )
+        == []
+    )
+
+
+def test_blocked_gate_marks_orchestrator_as_needing_input(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(falsifiers=[])],
+        results=[],
+    )
+    request = _request(kit)
+
+    kit.workflow.run(request)
+
+    blocked = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.WORKFLOW_GATE_BLOCKED
+    )
+    assert len(blocked) == 1
+    assert blocked[0].payload["gate"] == "falsifiability"
+    needs_input = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+    )
+    assert len(needs_input) == 1
+    assert needs_input[0].payload["acceptsInput"] is True
+    assert needs_input[0].payload["question"]
+    tree = SubAgentTree.from_events(
+        request.execution_id,
+        kit.workflow.observe(WORKSPACE, request.execution_id).events,
+    )
+    orchestrator = tree.get(cast(str, needs_input[0].payload["subAgentId"]))
+    assert orchestrator is not None
+    assert orchestrator.accepts_input is True
+    assert orchestrator.status == "needs_input"
+
+
+def test_launch_appends_a_workflow_anchor_transcript_item(tmp_path: Path) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+    request = _request(kit)
+
+    messages = kit.chat.list_messages(WORKSPACE, request.chat_id)
+    anchors = [
+        message for message in messages if message.kind is TranscriptItemKind.WORKFLOW
+    ]
+    assert len(anchors) == 1
+    anchor = anchors[0]
+    assert anchor.role.value == "system"
+    assert anchor.execution_id == request.execution_id
+    assert anchor.data is not None
+    assert anchor.data["executionId"] == request.execution_id
+    assert anchor.data["workflowId"] == "hypothesis-development"
+    assert anchor.data["version"] == "1.0.0"
+    assert anchor.data["title"] == "Hypothesis development"
+    assert anchor.data["status"] == "queued"
+    assert anchor.data["currentPhase"] == "requested"
