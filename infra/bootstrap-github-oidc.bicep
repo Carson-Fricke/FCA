@@ -78,7 +78,12 @@ resource roleBasedAccessControlAdministratorRole 'Microsoft.Authorization/roleDe
   name: 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
 }
 
-var githubDeployerRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {${identities.outputs.runtimeIdentity.principalId}})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {${identities.outputs.runtimeIdentity.principalId}}))'
+// The condition bounds role-assignment writes/deletes to the five allow-listed
+// data-plane role definitions. The principal is intentionally NOT restricted:
+// the deploy creates additional workload identities (the quant-harness and
+// Thesis user-assigned identities) whose principal IDs are unknown at bootstrap
+// time, and those identities legitimately receive these data roles.
+var githubDeployerRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6}))'
 
 resource githubDeployerContributorAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(resourceGroup().id, githubDeployerIdentityName, contributorRole.id)
@@ -94,7 +99,7 @@ resource githubDeployerRbacAccess 'Microsoft.Authorization/roleAssignments@2022-
   properties: {
     condition: githubDeployerRbacCondition
     conditionVersion: '2.0'
-    description: 'Permit the GitHub deployer to manage only the market-lake runtime identity data-role assignments.'
+    description: 'Permit the GitHub deployer to manage only the allow-listed market-lake data-role assignments (Storage Blob/Queue/Table, AcrPull, Key Vault Secrets User) for any workload principal.'
     principalId: identities.outputs.githubDeployerIdentity.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: roleBasedAccessControlAdministratorRole.id
