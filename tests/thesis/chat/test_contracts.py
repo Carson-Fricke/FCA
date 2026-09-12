@@ -8,7 +8,9 @@ from thesis.chat import (
     AttachmentState,
     ChatService,
     CrossWorkspaceLinkError,
+    InMemoryChatPersistence,
     InvalidLifecycleTransition,
+    MessageRole,
     MessageState,
     ToolJobState,
     WorkflowDefinition,
@@ -107,6 +109,54 @@ def test_message_and_attachment_lifecycle_commands_are_explicit() -> None:
     assert completed.state is MessageState.COMPLETED
     with pytest.raises(InvalidLifecycleTransition):
         service.start_message("workspace-a", message.message_id)
+
+
+def test_message_reasoning_round_trips_and_serializes_without_touching_body() -> None:
+    store = InMemoryChatPersistence()
+    service = ChatService(persistence=store, clock=lambda: NOW)
+    chat = service.create_chat(
+        "workspace-a", title="Research", owner_actor_id="operator"
+    )
+    message = service.create_message(
+        "workspace-a",
+        chat.chat_id,
+        actor_id="thesis-agent",
+        body="The signal survives costs.",
+        role=MessageRole.ASSISTANT,
+        reasoning="First weigh the fee drag, then the turnover.",
+    )
+
+    assert message.reasoning == "First weigh the fee drag, then the turnover."
+    assert "First weigh" not in message.body
+    portable = message.as_dict()
+    assert portable["body"] == "The signal survives costs."
+    assert portable["reasoning"] == "First weigh the fee drag, then the turnover."
+
+    reloaded = ChatService(persistence=store, clock=lambda: NOW)
+    stored = reloaded.get_message("workspace-a", message.message_id)
+    assert stored.reasoning == message.reasoning
+    assert stored.body == message.body
+
+
+def test_message_reasoning_defaults_to_none_and_collapses_blank() -> None:
+    service = _service()
+    chat = service.create_chat(
+        "workspace-a", title="Research", owner_actor_id="operator"
+    )
+    plain = service.create_message(
+        "workspace-a", chat.chat_id, actor_id="operator", body="Hi"
+    )
+    blank = service.create_message(
+        "workspace-a",
+        chat.chat_id,
+        actor_id="operator",
+        body="Hi again",
+        reasoning="   ",
+    )
+
+    assert plain.reasoning is None
+    assert blank.reasoning is None
+    assert plain.as_dict()["reasoning"] is None
 
 
 def test_workflow_commands_emit_ordered_replayable_events_with_actor_scope() -> None:

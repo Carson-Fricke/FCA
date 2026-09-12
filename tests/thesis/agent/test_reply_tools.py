@@ -10,7 +10,7 @@ forces a text answer, and an unusable catalog degrades to a plain reply.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,6 +26,7 @@ from thesis.agent.reply import (
     reply_provider_for,
 )
 from thesis.chat.contracts import ChatMessage, MessageRole
+from thesis.chat.responder import ReplyChunk
 from thesis.integrations.mcp import HarnessMcpTopology
 from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
 from thesis.providers.transports import (
@@ -201,6 +202,15 @@ def _history(*bodies: str) -> tuple[ChatMessage, ...]:
     )
 
 
+def _answer_text(chunks: Iterable[str | ReplyChunk]) -> str:
+    """Join only the answer channel, excluding any reasoning fragments."""
+    return "".join(
+        chunk.text if isinstance(chunk, ReplyChunk) else chunk
+        for chunk in chunks
+        if not isinstance(chunk, ReplyChunk) or chunk.kind == "text"
+    )
+
+
 def test_tool_loop_dispatches_and_threads_structured_results() -> None:
     handler = _HarnessHandler()
     tools = _tools(handler)
@@ -212,7 +222,7 @@ def test_tool_loop_dispatches_and_threads_structured_results() -> None:
     )
     stream = harness_agent_reply_provider(_provider(transport), tools, chunk_size=5)
 
-    reply = "".join(stream(_history("run a backtest")))
+    reply = _answer_text(stream(_history("run a backtest")))
 
     assert reply == "Backtest launched."
     first = transport.calls[0][2]
@@ -236,7 +246,7 @@ def test_tool_prompt_forbids_reasoning_and_pins_operator_language() -> None:
     transport = _QueueTransport([_text_body("Hola.")])
     stream = harness_agent_reply_provider(_provider(transport), _tools(handler))
 
-    "".join(stream(_history("hola")))
+    _answer_text(stream(_history("hola")))
 
     system = transport.calls[0][2]["messages"][0]["content"]
     assert system == HARNESS_TOOL_SYSTEM_PROMPT
@@ -256,7 +266,7 @@ def test_tool_failure_is_threaded_as_tool_message_not_raised() -> None:
     )
     stream = harness_agent_reply_provider(_provider(transport), _tools(handler))
 
-    reply = "".join(stream(_history("get run run-1")))
+    reply = _answer_text(stream(_history("get run run-1")))
 
     assert reply == "The run query failed."
     tool_message = next(
@@ -277,7 +287,7 @@ def test_malformed_tool_arguments_become_a_tool_message() -> None:
     )
     stream = harness_agent_reply_provider(_provider(transport), _tools(handler))
 
-    reply = "".join(stream(_history("go")))
+    reply = _answer_text(stream(_history("go")))
 
     assert reply == "Recovered."
     tool_message = next(
@@ -299,7 +309,7 @@ def test_iteration_cap_forces_final_answer_without_tools() -> None:
         _provider(transport), _tools(handler), max_tool_iterations=2
     )
 
-    reply = "".join(stream(_history("keep querying")))
+    reply = _answer_text(stream(_history("keep querying")))
 
     assert reply == "Final answer."
     assert len(transport.calls) == 3
@@ -315,10 +325,72 @@ def test_unusable_catalog_falls_back_to_plain_reply() -> None:
     transport = _QueueTransport([_text_body("Plain answer.")])
     stream = harness_agent_reply_provider(_provider(transport), tools)
 
-    reply = "".join(stream(_history("hi")))
+    reply = _answer_text(stream(_history("hi")))
 
     assert reply == "Plain answer."
     assert "tools" not in transport.calls[0][2]
+
+
+def test_tool_loop_concatenates_reasoning_before_the_answer() -> None:
+    handler = _HarnessHandler()
+    tools = _tools(handler)
+    first = json.dumps(
+        {
+            "model": "test/model",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "reasoning": "plan;",
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_run",
+                                    "arguments": '{"run_id": "run-1"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+    )
+    second = json.dumps(
+        {
+            "model": "test/model",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Done.",
+                        "reasoning_content": "check;",
+                    },
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+    )
+    transport = _QueueTransport([first, second])
+    stream = harness_agent_reply_provider(_provider(transport), tools)
+
+    chunks = list(stream(_history("go")))
+
+    kinds = [
+        "reasoning" if isinstance(chunk, ReplyChunk) else "text" for chunk in chunks
+    ]
+    assert kinds == ["reasoning", "text"]
+    reasoning = "".join(chunk.text for chunk in chunks if isinstance(chunk, ReplyChunk))
+    answer = "".join(chunk for chunk in chunks if isinstance(chunk, str))
+    assert reasoning == "plan;check;"
+    assert answer == "Done."
+    assert "plan;" not in answer
 
 
 def test_reply_provider_for_selects_tool_aware_or_plain_provider() -> None:
@@ -331,13 +403,13 @@ def test_reply_provider_for_selects_tool_aware_or_plain_provider() -> None:
     )
     with_tools = reply_provider_for(_provider(tool_transport), _tools(handler))
 
-    assert "".join(with_tools(_history("query"))) == "Tool answer."
+    assert _answer_text(with_tools(_history("query"))) == "Tool answer."
     assert "tools" in tool_transport.calls[0][2]
 
     plain_transport = _QueueTransport([_text_body("Plain answer.")])
     without_tools = reply_provider_for(_provider(plain_transport), None)
 
-    assert "".join(without_tools(_history("hello"))) == "Plain answer."
+    assert _answer_text(without_tools(_history("hello"))) == "Plain answer."
     assert "tools" not in plain_transport.calls[0][2]
     assert (
         plain_transport.calls[0][2]["messages"][0]["content"] == DEFAULT_SYSTEM_PROMPT

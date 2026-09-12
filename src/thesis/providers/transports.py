@@ -18,6 +18,7 @@ from thesis.providers.openrouter import OpenRouterProvider
 
 if TYPE_CHECKING:  # avoid importing chat types at module load
     from thesis.chat.contracts import ChatMessage
+    from thesis.chat.responder import ReplyChunk, ReplyProvider
 
 #: Default system instruction for a chat reply.
 DEFAULT_SYSTEM_PROMPT = (
@@ -88,13 +89,17 @@ def openrouter_reply_provider(
 ) -> ReplyProvider:
     """Adapt an :class:`OpenRouterProvider` into a streamed chat reply provider.
 
-    The provider completes the request and the text is emitted in deterministic
-    chunks so the SSE transport streams progressively to the client.
+    The provider completes the request and any chain-of-thought is emitted
+    first as reasoning chunks, followed by the answer text in deterministic
+    chunks, so the SSE transport can keep the two channels separate while
+    streaming progressively to the client.
     """
     if chunk_size < 1:
         raise ValueError("chunk_size must be a positive integer")
 
-    def stream(history: Sequence[ChatMessage]) -> Iterator[str]:
+    def stream(history: Sequence[ChatMessage]) -> Iterator[str | ReplyChunk]:
+        from thesis.chat.responder import ReplyChunk
+
         messages: list[ProviderChatMessage] = []
         if system_prompt:
             messages.append(ProviderChatMessage(role="system", content=system_prompt))
@@ -110,15 +115,16 @@ def openrouter_reply_provider(
         if not messages:
             return
         completion = provider.complete(messages=messages)
+        for index in range(0, len(completion.reasoning), chunk_size):
+            yield ReplyChunk(
+                text=completion.reasoning[index : index + chunk_size],
+                kind="reasoning",
+            )
         text = completion.content
         for index in range(0, len(text), chunk_size):
             yield text[index : index + chunk_size]
 
     return stream
-
-
-if TYPE_CHECKING:
-    from thesis.chat.responder import ReplyProvider
 
 
 __all__ = [

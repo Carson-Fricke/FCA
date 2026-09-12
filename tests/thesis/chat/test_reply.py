@@ -13,6 +13,7 @@ from thesis.chat import (
     InMemoryChatStreamBroker,
 )
 from thesis.chat.contracts import MessageRole
+from thesis.chat.responder import ReplyChunk
 
 WORKSPACE = "workspace-a"
 
@@ -21,6 +22,15 @@ def _reply_provider(*chunks: str):
     def stream(history: Sequence[ChatMessage]) -> Iterator[str]:
         del history
         yield from chunks
+
+    return stream
+
+
+def _reasoning_provider(reasoning: str, answer: str):
+    def stream(history: Sequence[ChatMessage]) -> Iterator[str | ReplyChunk]:
+        del history
+        yield ReplyChunk(text=reasoning, kind="reasoning")
+        yield answer
 
     return stream
 
@@ -102,3 +112,36 @@ def test_reply_sanitizes_control_characters() -> None:
 
     assert message is not None
     assert message.body == "ok[31mred"
+
+
+def test_reply_streams_reasoning_before_answer_on_a_separate_channel() -> None:
+    service = ChatService()
+    broker = InMemoryChatStreamBroker()
+    chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
+    service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="Hi")
+    reply = ChatReplyService(
+        chat_service=service,
+        broker=broker,
+        provider=_reasoning_provider("Weigh the options.", "Answer text."),
+    )
+
+    message = reply.respond(WORKSPACE, chat.chat_id)
+
+    assert message is not None
+    assert message.body == "Answer text."
+    assert message.reasoning == "Weigh the options."
+    deltas = [
+        frame
+        for frame in broker.read(WORKSPACE, chat.chat_id)
+        if frame.event == PROVIDER_DELTA and frame.data.get("text")
+    ]
+    kinds = [frame.data.get("kind") for frame in deltas]
+    assert kinds == ["reasoning", None]
+    assert deltas[0].data["text"] == "Weigh the options."
+    assert deltas[1].data["text"] == "Answer text."
+    frames = broker.read(WORKSPACE, chat.chat_id)
+    chat_frame = next(frame for frame in frames if frame.event == CHAT_MESSAGE)
+    persisted = chat_frame.data["message"]
+    assert isinstance(persisted, dict)
+    assert persisted["body"] == "Answer text."
+    assert persisted["reasoning"] == "Weigh the options."

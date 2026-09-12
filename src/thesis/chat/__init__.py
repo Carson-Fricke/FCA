@@ -23,7 +23,7 @@ from thesis.chat.contracts import (
     WorkspaceRecord,
     replace_record,
 )
-from thesis.chat.responder import ChatReplyService, ReplyProvider
+from thesis.chat.responder import ChatReplyService, ReplyChunk, ReplyProvider
 from thesis.chat.service import ChatPersistence, ChatService, InMemoryChatPersistence
 from thesis.chat.streaming import (
     CHAT_MESSAGE,
@@ -55,6 +55,7 @@ __all__ = [
     "PROVIDER_DELTA",
     "RecordLinks",
     "RecordNotFound",
+    "ReplyChunk",
     "ReplyProvider",
     "ToolJob",
     "ToolJobState",

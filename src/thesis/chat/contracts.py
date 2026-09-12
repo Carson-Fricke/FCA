@@ -135,6 +135,22 @@ def _validate_body(value: str, name: str, *, max_length: int) -> str:
     return value.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _normalise_reasoning(value: str | None) -> str | None:
+    """Normalize an optional reasoning channel, treating blanks as absent.
+
+    Reasoning is a free-text, multi-line side channel that is never part of
+    the message ``body``.  Empty or whitespace-only values collapse to ``None``
+    so older records and non-reasoning messages stay byte-identical.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ChatContractError("reasoning must be text")
+    if not value.strip():
+        return None
+    return _validate_body(value, "reasoning", max_length=32_768)
+
+
 def _validate_timestamp(value: datetime, name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ChatContractError(f"{name} must be timezone-aware")
@@ -298,6 +314,7 @@ class ChatMessage(WorkspaceRecord):
     actor_id: str
     role: MessageRole
     body: str
+    reasoning: str | None = None
     state: MessageState = MessageState.ACCEPTED
     attachment_ids: tuple[str, ...] = ()
     investigation_ids: tuple[str, ...] = ()
@@ -312,6 +329,7 @@ class ChatMessage(WorkspaceRecord):
         object.__setattr__(
             self, "body", _validate_body(self.body, "body", max_length=32_768)
         )
+        object.__setattr__(self, "reasoning", _normalise_reasoning(self.reasoning))
         if self.intent_epoch < 0:
             raise ChatContractError("intent_epoch must not be negative")
         object.__setattr__(

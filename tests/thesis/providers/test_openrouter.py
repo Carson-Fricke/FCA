@@ -328,7 +328,7 @@ def _tool_call_message(
     )
 
 
-def test_complete_sends_tools_and_parses_tool_calls_ignoring_reasoning() -> None:
+def test_complete_parses_tool_calls_with_reasoning_on_a_separate_channel() -> None:
     body = _tool_call_message(
         tool_calls=[
             {
@@ -362,6 +362,8 @@ def test_complete_sends_tools_and_parses_tool_calls_ignoring_reasoning() -> None
 
     assert transport.calls[0][2]["tools"] == tools
     assert completion.content == ""
+    assert completion.reasoning == "SECRET-CHAIN-OF-THOUGHT"
+    assert "SECRET" not in completion.content
     assert completion.tool_calls == (
         ToolCall(
             id="call-1",
@@ -369,8 +371,31 @@ def test_complete_sends_tools_and_parses_tool_calls_ignoring_reasoning() -> None
             arguments='{"config_path": "cfg.yaml"}',
         ),
     )
-    assert "SECRET" not in repr(completion)
-    assert "SECRET" not in str(completion)
+
+
+def test_complete_reads_reasoning_content_when_reasoning_absent() -> None:
+    body = _tool_call_message(
+        content="answer text", extra={"reasoning_content": "SECRET-REASONING"}
+    )
+    provider = OpenRouterProvider(_profile(), FakeKeySource(), FakeTransport(body=body))
+
+    completion = provider.complete(messages=_messages())
+
+    assert completion.content == "answer text"
+    assert completion.reasoning == "SECRET-REASONING"
+
+
+def test_complete_ignores_non_string_reasoning_without_failing() -> None:
+    body = _tool_call_message(
+        content="answer text",
+        extra={"reasoning": ["not", "text"], "reasoning_content": 7},
+    )
+    provider = OpenRouterProvider(_profile(), FakeKeySource(), FakeTransport(body=body))
+
+    completion = provider.complete(messages=_messages())
+
+    assert completion.content == "answer text"
+    assert completion.reasoning == ""
 
 
 def test_complete_omits_tools_when_none_are_supplied() -> None:
