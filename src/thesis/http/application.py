@@ -205,6 +205,15 @@ def _configured_token(bearer_token: str | None) -> str | None:
     return token
 
 
+def _environment_value(name: str) -> str | None:
+    """Return a stripped non-empty environment value, or ``None``."""
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 def _backtest_tool_observer(
     coordinator: BacktestRunCoordinator,
 ) -> ToolResultObserver:
@@ -494,10 +503,47 @@ def create_app(
     return application
 
 
+def serving_app_from_environment() -> FastAPI:
+    """Compose the ASGI app ``thesis serve`` binds from the environment.
+
+    Authentication is mandatory and fail-closed: the app is composed with a
+    static bearer token (``THESIS_API__BEARER_TOKEN``), Entra JWT validation
+    (``THESIS_API__ENTRA_TENANT_ID`` and ``THESIS_API__ENTRA_AUDIENCE``), or
+    both.  A missing or half-configured authentication boundary raises a
+    clear :class:`ValueError` instead of binding an unauthenticated server.
+
+    The remaining routers share the :func:`create_app` defaults: the chat and
+    streaming surfaces answer with an in-memory service, and the workspace
+    DATA routes fail closed with 503 until a data bundle is composed by a
+    later runtime task.
+    """
+    bearer_token = _environment_value("THESIS_API__BEARER_TOKEN")
+    tenant_id = _environment_value("THESIS_API__ENTRA_TENANT_ID")
+    audience = _environment_value("THESIS_API__ENTRA_AUDIENCE")
+    role = _environment_value("THESIS_API__ENTRA_ROLE") or "Thesis.Access"
+    if (tenant_id is None) != (audience is None):
+        raise ValueError(
+            "THESIS_API__ENTRA_TENANT_ID and THESIS_API__ENTRA_AUDIENCE "
+            "must be configured together"
+        )
+    if bearer_token is None and tenant_id is None:
+        raise ValueError(
+            "authentication is not configured; set THESIS_API__BEARER_TOKEN "
+            "or both THESIS_API__ENTRA_TENANT_ID and THESIS_API__ENTRA_AUDIENCE"
+        )
+    return create_app(
+        bearer_token=bearer_token,
+        entra_tenant_id=tenant_id,
+        entra_audience=audience,
+        entra_role=role,
+    )
+
+
 __all__ = [
     "CombinedAuthenticator",
     "EntraJwtAuthenticator",
     "authenticate_bearer",
     "bearer_scheme",
     "create_app",
+    "serving_app_from_environment",
 ]

@@ -133,8 +133,8 @@ uv run backtest-job --config config/harness/backtest.yaml
 
 ### Terminal 2 — Thesis API (port 8000)
 
-The `thesis serve` process boundary is scaffolded; until it composes the
-application itself, run the canonical local composition in
+The `thesis serve` command now composes the ASGI application itself. For local
+development, run the canonical local composition in
 `scripts/local/thesis_local_api.py`. It wires the T231 workspace data services
 (`build_local_workspace_data`) and the T211 chat/SSE routers, delegates
 backtest launch to the real local harness process, and (when

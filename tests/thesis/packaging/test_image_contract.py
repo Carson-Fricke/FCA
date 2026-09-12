@@ -8,12 +8,14 @@ image build happens in the CI image-publication workflow, not in these tests.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from typer.testing import CliRunner
 
 from harness.configuration import load_yaml_mapping
@@ -113,23 +115,147 @@ def test_module_entrypoint_help() -> None:
     assert result.stderr == ""
 
 
-def test_uncomposed_api_process_fails_explicitly() -> None:
+_AUTH_ENVIRONMENT = (
+    "THESIS_API__BEARER_TOKEN",
+    "THESIS_API__ENTRA_TENANT_ID",
+    "THESIS_API__ENTRA_AUDIENCE",
+    "THESIS_API__ENTRA_ROLE",
+    "THESIS_SERVE_HOST",
+    "THESIS_SERVE_PORT",
+)
+
+
+def _clear_serve_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in _AUTH_ENVIRONMENT:
+        monkeypatch.delenv(name, raising=False)
+
+
+def _capture_uvicorn_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+    captured: dict[str, object] = {}
+
+    def fake_run(application: object, **kwargs: object) -> None:
+        captured["application"] = application
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli.uvicorn, "run", fake_run)
+    return captured
+
+
+def test_serve_starts_uvicorn_with_the_composed_asgi_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_serve_environment(monkeypatch)
+    monkeypatch.setenv("THESIS_API__BEARER_TOKEN", "serving-token")
+    captured = _capture_uvicorn_run(monkeypatch)
+
+    result = runner.invoke(cli.app, ["serve"])
+
+    assert result.exit_code == 0, result.output
+    application = captured["application"]
+    assert isinstance(application, FastAPI)
+    paths = set(application.openapi()["paths"])
+    assert "/health" in paths
+    assert "/v1/auth/check" in paths
+    assert any(path.endswith("/events/stream") for path in paths)
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 8000
+
+
+def test_serve_honors_the_non_secret_binding_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_serve_environment(monkeypatch)
+    monkeypatch.setenv("THESIS_API__BEARER_TOKEN", "serving-token")
+    monkeypatch.setenv("THESIS_SERVE_HOST", "0.0.0.0")
+    monkeypatch.setenv("THESIS_SERVE_PORT", "9001")
+    captured = _capture_uvicorn_run(monkeypatch)
+
+    result = runner.invoke(cli.app, ["serve"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["host"] == "0.0.0.0"
+    assert captured["port"] == 9001
+
+
+def test_serve_fails_closed_without_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_serve_environment(monkeypatch)
+    monkeypatch.setattr(
+        cli.uvicorn,
+        "run",
+        lambda *args, **kwargs: pytest.fail("uvicorn must not run without auth"),
+    )
+
     result = runner.invoke(cli.app, ["serve"])
 
     assert result.exit_code == 2
-    assert "scaffolded but not implemented yet" in result.stderr
+    assert "authentication is not configured" in result.stderr
 
 
-def test_module_entrypoint_fails_explicitly_when_serving() -> None:
+def test_serve_rejects_half_configured_entra_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_serve_environment(monkeypatch)
+    monkeypatch.setenv("THESIS_API__ENTRA_TENANT_ID", "tenant")
+    monkeypatch.setattr(
+        cli.uvicorn,
+        "run",
+        lambda *args, **kwargs: pytest.fail("uvicorn must not run without auth"),
+    )
+
+    result = runner.invoke(cli.app, ["serve"])
+
+    assert result.exit_code == 2
+    assert "must be configured together" in result.stderr
+
+
+def test_serve_accepts_entra_authentication_without_a_bearer_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_serve_environment(monkeypatch)
+    monkeypatch.setenv("THESIS_API__ENTRA_TENANT_ID", "tenant")
+    monkeypatch.setenv("THESIS_API__ENTRA_AUDIENCE", "audience")
+    captured = _capture_uvicorn_run(monkeypatch)
+
+    result = runner.invoke(cli.app, ["serve"])
+
+    assert result.exit_code == 0, result.output
+    assert isinstance(captured["application"], FastAPI)
+
+
+def test_serve_rejects_an_invalid_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_serve_environment(monkeypatch)
+    monkeypatch.setenv("THESIS_API__BEARER_TOKEN", "serving-token")
+    monkeypatch.setenv("THESIS_SERVE_PORT", "not-a-port")
+    monkeypatch.setattr(
+        cli.uvicorn,
+        "run",
+        lambda *args, **kwargs: pytest.fail("uvicorn must not run on bad config"),
+    )
+
+    result = runner.invoke(cli.app, ["serve"])
+
+    assert result.exit_code == 2
+    assert "THESIS_SERVE_PORT" in result.stderr
+
+
+def test_module_entrypoint_fails_closed_without_authentication() -> None:
+    environment = {
+        key: value for key, value in os.environ.items() if key not in _AUTH_ENVIRONMENT
+    }
     result = subprocess.run(
         [sys.executable, "-m", "thesis", "serve"],
         check=False,
         capture_output=True,
         text=True,
+        env=environment,
     )
 
     assert result.returncode == 2
-    assert "scaffolded but not implemented yet" in result.stderr
+    assert "authentication is not configured" in result.stderr
 
 
 def test_compose_reports_startup_capabilities_and_configuration() -> None:

@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import uvicorn
 
 from harness.configuration import load_yaml_mapping
+from thesis.http.application import serving_app_from_environment
 from thesis.workspaces import load_workspace_manifest
 
 BACKEND_CAPABILITIES: tuple[str, ...] = (
@@ -28,6 +30,9 @@ BACKEND_CAPABILITIES: tuple[str, ...] = (
     "strategies",
     "workspaces",
 )
+
+_DEFAULT_SERVE_HOST = "127.0.0.1"
+_DEFAULT_SERVE_PORT = 8000
 
 _SECRET_KEY_PATTERN = re.compile(
     r"(?:^|_)(?:access[_-]?key|api[_-]?key|api[_-]?secret|bearer|"
@@ -54,13 +59,66 @@ def show_help(context: typer.Context) -> None:
 
 
 @app.command()
-def serve() -> None:
-    """Serve the Thesis API process when its application is composed."""
-    typer.echo(
-        "The Thesis API process is scaffolded but not implemented yet.",
-        err=True,
+def serve(
+    host: Annotated[
+        str | None,
+        typer.Option(
+            "--host",
+            help="Bind host; defaults to THESIS_SERVE_HOST or 127.0.0.1.",
+        ),
+    ] = None,
+    port: Annotated[
+        int | None,
+        typer.Option(
+            "--port",
+            help="Bind port; defaults to THESIS_SERVE_PORT or 8000.",
+        ),
+    ] = None,
+) -> None:
+    """Serve the Thesis API process over HTTP."""
+    try:
+        bind_host, bind_port = serve_binding(host=host, port=port)
+        application = serving_app_from_environment()
+    except ValueError as error:
+        typer.echo(f"thesis serve cannot start: {error}", err=True)
+        raise typer.Exit(code=2) from None
+    uvicorn.run(
+        application,
+        host=bind_host,
+        port=bind_port,
+        log_level="info",
     )
-    raise typer.Exit(code=2)
+
+
+def serve_binding(
+    *, host: str | None = None, port: int | None = None
+) -> tuple[str, int]:
+    """Resolve the non-secret serve bind address from options or environment.
+
+    The host falls back to ``THESIS_SERVE_HOST`` and then to loopback, while
+    the port falls back to ``THESIS_SERVE_PORT`` and then to 8000.  An
+    unparseable or out-of-range port fails closed with a clear error.
+    """
+    resolved_host = host if host is not None else os.environ.get("THESIS_SERVE_HOST")
+    resolved_host = resolved_host.strip() if resolved_host is not None else ""
+    if not resolved_host:
+        resolved_host = _DEFAULT_SERVE_HOST
+
+    resolved_port = port
+    if resolved_port is None:
+        raw_port = os.environ.get("THESIS_SERVE_PORT")
+        if raw_port is None or not raw_port.strip():
+            resolved_port = _DEFAULT_SERVE_PORT
+        else:
+            try:
+                resolved_port = int(raw_port.strip())
+            except ValueError as error:
+                raise ValueError(
+                    f"THESIS_SERVE_PORT must be an integer, got {raw_port!r}"
+                ) from error
+    if not 1 <= resolved_port <= 65535:
+        raise ValueError(f"serve port must be between 1 and 65535, got {resolved_port}")
+    return resolved_host, resolved_port
 
 
 @app.command()

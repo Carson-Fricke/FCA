@@ -29,7 +29,7 @@ on:
         description: >-
           Whether the Thesis API process is expected to serve /health. True
           makes degraded health fail the smoke; false reports it as an
-          expected warning while the thesis serve runtime is a scaffold.
+          expected warning until the workspace data services are composed.
         required: false
         type: boolean
         default: false
@@ -417,9 +417,9 @@ jobs:
     # The smoke is non-destructive: it is read-only except for the temporary
     # one-replica Thesis API scale used by the private ingress health probe,
     # which is restored through an exit trap (mirroring quant-smoke). While
-    # the thesis serve process is a scaffold, degraded health is reported as
-    # a warning; EXPECT_THESIS_SERVING=true turns it into a failure once the
-    # runtime is implemented.
+    # the workspace data services are being composed, degraded health is
+    # reported as a warning; EXPECT_THESIS_SERVING=true turns it into a
+    # failure once the runtime is complete.
     environment:
       name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
     permissions:
@@ -618,7 +618,7 @@ jobs:
           if [[ -z "$strict_serving" ]]; then
             strict_serving="false"
           fi
-          scaffold_note="The thesis serve process is a scaffold, so degraded health is expected until the Thesis API runtime is implemented."
+          scaffold_note="The Thesis API workspace data services may still fail closed, so degraded health is reported as a warning until they are composed."
 
           if [[ "${THESIS_ENABLE_EXTERNAL_INGRESS,,}" == "true" ]]; then
             health_status="$(curl \

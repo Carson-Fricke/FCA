@@ -8,9 +8,9 @@ targetScope = 'resourceGroup'
 // /health probes, KEDA scale-to-zero, and diagnostics into the existing
 // shared Log Analytics workspace. The Thesis image is built from
 // Dockerfile.thesis with ENTRYPOINT "thesis", so the revision runs
-// `thesis serve`. The serve process is currently a scaffold; deployment
-// keeps the app degraded until the runtime lands, mirroring the harness
-// trader posture.
+// `thesis serve`, which composes the real ASGI application. The serve host
+// binds all interfaces inside the container so Container Apps ingress and the
+// /health probes reach it.
 //
 // The managed identity is a parameter, not a new identity: the composition
 // (infra/main.bicep) owns identity creation and wiring so the Thesis
@@ -154,6 +154,16 @@ var thesisBaseEnvironment = [
   {
     name: 'AZURE_CLIENT_ID'
     value: thesisIdentityClientId
+  }
+  // The serve host must bind all interfaces inside the container; the
+  // loopback default is only for local use and would fail ingress probes.
+  {
+    name: 'THESIS_SERVE_HOST'
+    value: '0.0.0.0'
+  }
+  {
+    name: 'THESIS_SERVE_PORT'
+    value: '${thesisContainerPort}'
   }
   {
     name: 'THESIS_STORAGE_ACCOUNT_NAME'
