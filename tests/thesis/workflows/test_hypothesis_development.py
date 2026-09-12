@@ -19,6 +19,7 @@ from thesis.agent.hypothesis_skills import (
     with_hypothesis_development_skills,
 )
 from thesis.agent.router import (
+    InvocationResult,
     ModelProfile,
     ModelResponse,
     ModelRouter,
@@ -52,9 +53,11 @@ from thesis.workflows.hypothesis_development import (
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
     VERDICT_REFUTED,
     VERDICT_SUPPORTED,
+    FalsificationComposeError,
     HypothesisDevelopmentPhase,
     HypothesisDevelopmentWorkflow,
     InvalidPhaseTransition,
+    _json_document,
     check_evidence_bound,
     check_falsifiability,
     check_falsification_plan,
@@ -178,7 +181,7 @@ def _design_envelope(
 class FakeProvider:
     """Deterministic fake provider returning queued JSON envelopes."""
 
-    def __init__(self, *payloads: dict[str, object]) -> None:
+    def __init__(self, *payloads: dict[str, object] | str) -> None:
         self._payloads = list(payloads)
         self.prompts: list[str] = []
 
@@ -193,7 +196,9 @@ class FakeProvider:
         self.prompts.append(prompt.rendered)
         if not self._payloads:
             raise AssertionError("model invoked more times than expected")
-        return ModelResponse(output=json.dumps(self._payloads.pop(0)))
+        payload = self._payloads.pop(0)
+        output = payload if isinstance(payload, str) else json.dumps(payload)
+        return ModelResponse(output=output)
 
 
 class FakeRunner:
@@ -268,7 +273,7 @@ class _Kit:
 def _kit(
     tmp_path: Path,
     *,
-    payloads: list[dict[str, object]],
+    payloads: list[dict[str, object] | str],
     results: list[tuple[str, object | None]],
     exit_criteria: list[dict[str, object]] | None = None,
 ) -> _Kit:
@@ -947,3 +952,89 @@ def test_launch_appends_a_workflow_anchor_transcript_item(tmp_path: Path) -> Non
     assert anchor.data["title"] == "Hypothesis development"
     assert anchor.data["status"] == "queued"
     assert anchor.data["currentPhase"] == "requested"
+
+
+class _StubInvocation:
+    """Minimal invocation stand-in exposing only the composer input surface."""
+
+    def __init__(self, output: str) -> None:
+        self.response = ModelResponse(output=output)
+
+
+def _fenced(envelope: dict[str, object]) -> str:
+    return f"```json\n{json.dumps(envelope)}\n```"
+
+
+def test_fenced_hypothesis_output_advances_the_pipeline(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[
+            _fenced(_hypothesis_envelope()),
+            _plan_envelope(),
+            _design_envelope(),
+        ],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    outcome = kit.workflow.run(request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
+    assert (
+        "Respond with a single JSON object and nothing else" in kit.provider.prompts[0]
+    )
+
+
+def test_prose_wrapped_hypothesis_output_advances_the_pipeline(tmp_path: Path) -> None:
+    prose = (
+        "Sure, here is the hypothesis:\n"
+        f"{json.dumps(_hypothesis_envelope())}\n"
+        "Let me know if you need changes."
+    )
+    kit = _kit(
+        tmp_path,
+        payloads=[prose, _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    outcome = kit.workflow.run(request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        json.dumps(_hypothesis_envelope()),
+        _fenced(_hypothesis_envelope()),
+        "```\n" + json.dumps(_hypothesis_envelope()) + "\n```",
+        f"prose before {json.dumps(_hypothesis_envelope())} prose after",
+    ],
+)
+def test_json_document_extracts_tolerant_hypothesis_output(output: str) -> None:
+    invocation = cast("InvocationResult", _StubInvocation(output))
+
+    document = _json_document(invocation, "hypothesis")
+
+    assert document["claim"] == _hypothesis_envelope()["claim"]
+
+
+def test_json_document_rejects_non_json_output() -> None:
+    invocation = cast("InvocationResult", _StubInvocation("no structure here"))
+
+    with pytest.raises(FalsificationComposeError, match="not valid JSON"):
+        _json_document(invocation, "hypothesis")
+
+
+def test_non_json_hypothesis_output_fails_the_ideation_phase(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=["The model refused to produce structured output."],
+        results=[],
+    )
+    request = _request(kit)
+
+    outcome = kit.workflow.run(request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.FAILED

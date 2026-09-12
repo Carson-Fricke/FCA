@@ -42,15 +42,26 @@ class FakeWorkflow:
         actor_id: str,
         ideas: str,
         investigation_id: str | None = None,
+        trigger_message_id: str | None = None,
     ) -> HypothesisDevelopmentRequest:
-        execution = self._chat.launch_workflow(
-            workspace_id,
-            chat_id,
-            workflow=HYPOTHESIS_DEVELOPMENT_WORKFLOW,
-            actor_id=actor_id,
-            body=ideas,
-            investigation_id=investigation_id,
-        )
+        if trigger_message_id is None:
+            execution = self._chat.launch_workflow(
+                workspace_id,
+                chat_id,
+                workflow=HYPOTHESIS_DEVELOPMENT_WORKFLOW,
+                actor_id=actor_id,
+                body=ideas,
+                investigation_id=investigation_id,
+            )
+        else:
+            execution = self._chat.launch_workflow(
+                workspace_id,
+                chat_id,
+                workflow=HYPOTHESIS_DEVELOPMENT_WORKFLOW,
+                actor_id=actor_id,
+                message_id=trigger_message_id,
+                investigation_id=investigation_id,
+            )
         self._chat.create_message(
             workspace_id,
             chat_id,
@@ -145,6 +156,36 @@ def test_chat_message_launches_hypothesis_development() -> None:
     assert frames[0].event == PROVIDER_DELTA
     assert frames[-2].event == CHAT_MESSAGE
     assert frames[-1].data["messageIdFinal"] == message.message_id
+
+
+@pytest.mark.parametrize("envelope", [False, True])
+def test_trigger_binds_to_the_operator_message(envelope: bool) -> None:
+    chat = ChatService()
+    broker = InMemoryChatStreamBroker()
+    runtime = FakeDevelopmentRuntime()
+    reply = ChatReplyService(
+        chat_service=chat,
+        broker=broker,
+        provider=lambda history: iter(()),
+        development_runtime=runtime,
+    )
+    chat_id = chat.create_chat(
+        WORKSPACE, title="Research", owner_actor_id="operator"
+    ).chat_id
+    body = _trigger() if envelope else PLAIN_IDEAS
+    operator = chat.create_message(WORKSPACE, chat_id, actor_id="operator", body=body)
+
+    reply.respond(WORKSPACE, chat_id)
+
+    messages = chat.list_messages(WORKSPACE, chat_id)
+    user_messages = [item for item in messages if item.role is MessageRole.USER]
+    assert len(user_messages) == 1
+    assert user_messages[0].message_id == operator.message_id
+    assert user_messages[0].body == body
+    anchors = [item for item in messages if item.kind is TranscriptItemKind.WORKFLOW]
+    assert len(anchors) == 1
+    assert len(runtime.requests) == 1
+    assert runtime.requests[0].trigger_message_id == operator.message_id
 
 
 def test_development_trigger_fails_closed_without_a_runtime() -> None:

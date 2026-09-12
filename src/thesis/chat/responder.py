@@ -121,6 +121,7 @@ class LaunchableDevelopmentWorkflow(Protocol):
         actor_id: str,
         ideas: str,
         investigation_id: str | None = None,
+        trigger_message_id: str | None = None,
     ) -> HypothesisDevelopmentRequest:
         """Persist the chat trigger and return the runnable request."""
 
@@ -134,6 +135,7 @@ def launch_hypothesis_development(
     actor_id: str,
     ideas: str,
     investigation_id: str | None = None,
+    trigger_message_id: str | None = None,
 ) -> tuple[HypothesisDevelopmentRequest, HypothesisDevelopmentOutcome]:
     """Launch and fully execute one falsification-first hypothesis pipeline.
 
@@ -149,6 +151,7 @@ def launch_hypothesis_development(
         actor_id=actor_id,
         ideas=ideas,
         investigation_id=investigation_id,
+        trigger_message_id=trigger_message_id,
     )
     outcome = runtime.execute_hypothesis_development(request, chat=chat)
     return request, outcome
@@ -425,11 +428,21 @@ class ChatReplyService:
         if trigger_ideas is None:
             trigger_ideas = _research_ideas(history[-1])
         if trigger_ideas is not None:
-            return self._respond_with_development(workspace_id, chat_id, trigger_ideas)
+            return self._respond_with_development(
+                workspace_id,
+                chat_id,
+                trigger_ideas,
+                trigger_message_id=history[-1].message_id,
+            )
         return self._respond_with_provider(workspace_id, chat_id, history)
 
     def _respond_with_development(
-        self, workspace_id: str, chat_id: str, ideas: str
+        self,
+        workspace_id: str,
+        chat_id: str,
+        ideas: str,
+        *,
+        trigger_message_id: str | None = None,
     ) -> ChatMessage | None:
         """Launch and execute the hypothesis pipeline, then persist its verdict."""
         stream_id = self.id_factory()
@@ -451,6 +464,7 @@ class ChatReplyService:
                 chat_id=chat_id,
                 actor_id=self.actor_id,
                 ideas=ideas,
+                trigger_message_id=trigger_message_id,
             )
             body = (
                 _sanitize(_development_summary(outcome))
