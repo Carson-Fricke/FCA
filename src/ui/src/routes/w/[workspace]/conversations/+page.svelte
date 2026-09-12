@@ -7,6 +7,8 @@
 	import CleoPlanPanel from '$lib/components/chat/CleoPlanPanel.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
 	import StreamingReply from '$lib/components/chat/StreamingReply.svelte';
+	import WorkflowCard from '$lib/components/chat/WorkflowCard.svelte';
+	import WorkflowScope from '$lib/components/chat/WorkflowScope.svelte';
 	import WorkflowTimeline from '$lib/components/chat/WorkflowTimeline.svelte';
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import {
@@ -25,6 +27,8 @@
 	import { apiBaseUrl, apiBearerToken, fixtureMode } from '$lib/api';
 	import { ExecutionEventStream, LocalCursorStore, executionEventOf } from '$lib/sse';
 	import { ChatStreamController, appendMessage } from '$lib/chat-stream.svelte';
+	import { derivePhases } from '$lib/subagent';
+	import { WorkflowScopeController } from '$lib/workflow-scope.svelte';
 	import { notify } from '$lib/workspace.svelte';
 	import type {
 		ChatMessage,
@@ -34,6 +38,7 @@
 		ExecutionEvent,
 		SteeringPercolationTarget,
 		WorkflowExecutionRecord,
+		WorkflowPhase,
 		WorkspaceStateData
 	} from '$lib/types';
 	import type { PageData } from './$types';
@@ -65,10 +70,58 @@
 		}
 	});
 
+	/** In-pane nested sub-agent scope, hosted in the conversation pane. */
+	const scopeController = new WorkflowScopeController(page.params.workspace ?? '', 'conversation');
+	let attachedExecutionId = $state('');
+
 	const activeChat = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
 	const activeExecutionId = $derived(execution?.execution_id ?? null);
 	const cleoPlan = $derived(stateData?.cleo ?? null);
 	const evidence = $derived(stateData?.evidence ?? []);
+	/** True once the operator entered a workflow/orchestrator/sub-agent. */
+	const scoped = $derived(scopeController.scope.segments.length > 1);
+	const phases = $derived.by((): WorkflowPhase[] => {
+		const derived = derivePhases(scopeController.rootEvents);
+		if (derived.length || !execution?.phase) return derived;
+		return [{ name: execution.phase, status: 'active' }];
+	});
+
+	// Attach the scope controller to the active execution so entering a sub-agent
+	// and restoring a persisted scope both work in-pane.
+	$effect(() => {
+		const exec = execution;
+		if (!exec) {
+			scopeController.detach();
+			attachedExecutionId = '';
+			return;
+		}
+		if (exec.execution_id === attachedExecutionId) return;
+		attachedExecutionId = exec.execution_id;
+		scopeController.attach(exec.execution_id, exec, {
+			chatId: exec.chat_id,
+			rootLabel: activeChat?.title ?? 'Conversation',
+			scope: page.url.searchParams.get('scope'),
+			hash: page.url.hash
+		});
+	});
+
+	$effect(() => {
+		return () => scopeController.detach();
+	});
+
+	/** Enter the current phase orchestrator from the workflow card. */
+	function enterPhase(phase: string, options: { readOnly: boolean }): void {
+		scopeController.enterWorkflow();
+		scopeController.enterOrchestrator(phase, options.readOnly);
+	}
+
+	/** Reflect the in-pane scope path in the conversation URL. */
+	function syncScope(scope: string): void {
+		const url = new URL(page.url);
+		if (scope) url.searchParams.set('scope', scope);
+		else url.searchParams.delete('scope');
+		replaceState(url, {});
+	}
 
 	$effect(() => {
 		let cancelled = false;
@@ -374,24 +427,55 @@
 			</header>
 
 			<div class="min-h-0 flex-1 overflow-y-auto p-4" data-testid="transcript-scroll">
-				<ChatTranscript
-					{messages}
-					{workspaceId}
-					{percolations}
-					{proposal}
-					onConfirmConsent={confirmProposal}
-					onRejectConsent={() => {
-						proposal = null;
-						notify('Consent proposal rejected');
-					}}
-					{consentBusy}
-				/>
-				<StreamingReply
-					active={chatStream.active}
-					text={chatStream.streamingText}
-					reasoning={chatStream.streamingReasoning}
-					testId="streaming-reply"
-				/>
+				{#if scoped}
+					<WorkflowScope
+						controller={scopeController}
+						{workspaceId}
+						{execution}
+						{phases}
+						rootLabel={activeChat?.title ?? 'Conversation'}
+						fullPageHref={activeExecutionId
+							? `/w/${workspaceId}/workflows/${activeExecutionId}`
+							: null}
+						autoAttach={false}
+						onScopeChange={syncScope}
+					/>
+				{:else}
+					<ChatTranscript
+						{messages}
+						{workspaceId}
+						{percolations}
+						{proposal}
+						onConfirmConsent={confirmProposal}
+						onRejectConsent={() => {
+							proposal = null;
+							notify('Consent proposal rejected');
+						}}
+						{consentBusy}
+					/>
+					<StreamingReply
+						active={chatStream.active}
+						text={chatStream.streamingText}
+						reasoning={chatStream.streamingReasoning}
+						testId="streaming-reply"
+					/>
+					{#if execution}
+						<div class="mt-3">
+							<WorkflowCard
+								{execution}
+								{phases}
+								status={execution.state}
+								summary={execution.phase
+									? `Current phase ${execution.phase}`
+									: 'Awaiting phase transitions'}
+								fullPageHref={activeExecutionId
+									? `/w/${workspaceId}/workflows/${activeExecutionId}`
+									: null}
+								onEnterPhase={enterPhase}
+							/>
+						</div>
+					{/if}
+				{/if}
 			</div>
 
 			<div class="border-t border-surface-700 p-3">

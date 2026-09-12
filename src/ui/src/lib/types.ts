@@ -174,11 +174,19 @@ export type ExecutionEventType =
 	| 'workflow.cancelled'
 	| 'workflow.completed'
 	| 'workflow.failed'
+	| 'workflow.gate.blocked'
+	| 'workflow.gate.resolved'
 	| 'message.accepted'
 	| 'tool.submitted'
 	| 'tool.started'
 	| 'tool.result'
-	| 'tool.failed';
+	| 'tool.failed'
+	| 'sub_agent.spawned'
+	| 'sub_agent.progress'
+	| 'sub_agent.output'
+	| 'sub_agent.needs_input'
+	| 'sub_agent.completed'
+	| 'sub_agent.failed';
 
 /** Durable execution event; `as_dict()` camelCase serialization. */
 export interface ExecutionEvent {
@@ -208,6 +216,89 @@ export interface WorkflowExecutionRecord {
 	intent_epoch: number;
 	steering_message_ids: string[];
 	created_at: string;
+}
+
+// ---------- Nested sub-agents, gates, and transcript items ----------
+
+/**
+ * Discriminator for chat transcript items. Every renderable entry carries a
+ * `kind` plus a `data` payload so the transcript can route to the right card
+ * without inspecting message bodies.
+ */
+export type TranscriptItemKind = 'message' | 'tool' | 'workflow' | 'sub_agent' | 'gate' | 'artifact';
+
+export interface TranscriptItem {
+	id: string;
+	kind: TranscriptItemKind;
+	data: Record<string, unknown>;
+}
+
+export type SubAgentStatus =
+	| 'spawned'
+	| 'running'
+	| 'progress'
+	| 'needs_input'
+	| 'completed'
+	| 'failed';
+
+/** Sandbox context attached to one sub-agent spawn. */
+export interface SubAgentMcpContext {
+	enabled: boolean;
+	tools: string[];
+}
+
+export interface SubAgentContext {
+	/** True when the sub-agent runs in a fresh, isolated context window. */
+	isolated: boolean;
+	/** Knowledge cutoff label for the isolated context, when declared. */
+	knowledge_cutoff: string | null;
+	mcp: SubAgentMcpContext;
+}
+
+/** One node in the nested sub-agent execution tree. */
+export interface SubAgentNode {
+	subAgentId: string;
+	parentSubAgentId: string | null;
+	phase: string;
+	role: string;
+	status: SubAgentStatus;
+	context: SubAgentContext;
+	/** Whether this node accepts operator input (`POST {node}/messages`). */
+	acceptsInput: boolean;
+}
+
+export type GateStatus = 'blocked' | 'resolved';
+
+/** The three operator resolutions a workflow gate accepts. */
+export type GateResolutionKind = 'disagreement' | 'approve_plan' | 'verdict';
+
+export interface GateResolution {
+	kind: GateResolutionKind;
+	note?: string | null;
+	verdict?: string | null;
+	resolvedAt?: string | null;
+}
+
+/** One workflow gate: verbatim reason plus its optional resolution. */
+export interface WorkflowGate {
+	gateId: string;
+	executionId: string;
+	phase: string;
+	status: GateStatus;
+	reason: string;
+	resolution?: GateResolution | null;
+}
+
+/** A phase in the compact workflow stepper. */
+export interface WorkflowPhase {
+	name: string;
+	status: 'done' | 'active' | 'pending';
+}
+
+/** Reference to an execution node: the root execution or one sub-agent. */
+export interface ExecutionNodeRef {
+	kind: 'execution' | 'sub_agent';
+	id: string;
 }
 
 // ---------- Ephemeral tool results (tool.result SSE event) ----------

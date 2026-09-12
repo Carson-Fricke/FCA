@@ -58,6 +58,12 @@ export interface ExecutionStreamOptions {
 	bearerToken?: string | null;
 	/** Override the stream path (used by chat-scoped streams). */
 	streamPath?: (workspaceId: string, id: string) => string;
+	/** Subscribe to one sub-agent node instead of the root execution. */
+	subAgentId?: string | null;
+	/** Include descendant nodes' events (default: own events only). */
+	includeDescendants?: boolean;
+	/** Cursor persistence key; defaults to the execution id. */
+	cursorKey?: string;
 }
 
 export type FrameHandler = (frame: SseFrame) => void;
@@ -118,12 +124,14 @@ export class ExecutionEventStream {
 	private cursor: number;
 	private activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 	private readonly seenMessages = new Set<string>();
+	private readonly cursorKey: string;
 
 	constructor(private readonly options: ExecutionStreamOptions) {
 		this.cursorStore = options.cursorStore ?? new LocalCursorStore();
 		this.fetchImpl = options.fetchImpl ?? fetch;
 		this.reconnectDelayMs = options.reconnectDelayMs ?? 1000;
-		this.cursor = this.cursorStore.get(options.executionId);
+		this.cursorKey = options.cursorKey ?? options.executionId;
+		this.cursor = this.cursorStore.get(this.cursorKey);
 	}
 
 	/** Current durable cursor (persisted per execution subscription). */
@@ -145,7 +153,10 @@ export class ExecutionEventStream {
 	async start(onFrame: FrameHandler): Promise<void> {
 		const url = this.options.streamPath
 			? this.options.streamPath(this.options.workspaceId, this.options.executionId)
-			: streamUrl(this.options.baseUrl, this.options.workspaceId, this.options.executionId);
+			: nodeStreamUrl(this.options.baseUrl, this.options.workspaceId, this.options.executionId, {
+					subAgentId: this.options.subAgentId,
+					includeDescendants: this.options.includeDescendants
+				});
 		while (!this.closed) {
 			try {
 				const headers: Record<string, string> = { Accept: 'text/event-stream' };
@@ -193,7 +204,7 @@ export class ExecutionEventStream {
 			const cursor = Number(frame.id);
 			if (Number.isInteger(cursor) && cursor >= 0) {
 				this.cursor = cursor;
-				this.cursorStore.set(this.options.executionId, cursor);
+				this.cursorStore.set(this.cursorKey, cursor);
 			}
 			onFrame(frame);
 			return;
@@ -227,6 +238,34 @@ function ephemeralKey(frame: SseFrame): string | null {
 export function streamUrl(baseUrl: string, workspaceId: string, executionId: string): string {
 	const base = baseUrl.replace(/\/+$/, '');
 	return `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}/events/stream`;
+}
+
+export interface NodeStreamOptions {
+	/** Subscribe to this sub-agent node instead of the root execution. */
+	subAgentId?: string | null;
+	/** Include descendant nodes' events (default: own events only). */
+	includeDescendants?: boolean;
+}
+
+/**
+ * URL for the execution or sub-agent node event stream. The root execution
+ * stream is `/executions/{exec}/events/stream`; a sub-agent node is
+ * `/executions/{exec}/sub_agents/{a}/events/stream`. `include_descendants`
+ * is only appended when true, so the own-events default keeps the base URL
+ * stable.
+ */
+export function nodeStreamUrl(
+	baseUrl: string,
+	workspaceId: string,
+	executionId: string,
+	options: NodeStreamOptions = {}
+): string {
+	const base = baseUrl.replace(/\/+$/, '');
+	const node = options.subAgentId
+		? `/sub_agents/${encodeURIComponent(options.subAgentId)}`
+		: '';
+	const query = options.includeDescendants ? '?include_descendants=true' : '';
+	return `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}${node}/events/stream${query}`;
 }
 
 export function chatStreamUrl(baseUrl: string, workspaceId: string, chatId: string): string {
