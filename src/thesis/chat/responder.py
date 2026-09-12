@@ -25,6 +25,10 @@ from thesis.chat.service import ChatService
 from thesis.chat.streaming import CHAT_MESSAGE, PROVIDER_DELTA, InMemoryChatStreamBroker
 
 if TYPE_CHECKING:
+    from thesis.workflows.hypothesis_development import (
+        HypothesisDevelopmentOutcome,
+        HypothesisDevelopmentRequest,
+    )
     from thesis.workflows.hypothesis_validation import (
         HypothesisValidationOutcome,
         HypothesisValidationRequest,
@@ -83,6 +87,9 @@ _HISTORY_ROLES = frozenset(
 
 #: The explicit structured trigger that requests a hypothesis-validation run.
 _VALIDATION_WORKFLOW_TRIGGER = "hypothesis-validation"
+
+#: The explicit structured trigger that requests a hypothesis-development run.
+_DEVELOPMENT_WORKFLOW_TRIGGER = "hypothesis-development"
 
 
 class LaunchableWorkflow(Protocol):
@@ -152,6 +159,67 @@ def launch_hypothesis_validation(
     return request, outcome
 
 
+class DevelopmentRuntime(Protocol):
+    """The narrow runtime surface for the hypothesis-development pipeline."""
+
+    def build_hypothesis_development(
+        self, *, chat: ChatService
+    ) -> LaunchableDevelopmentWorkflow:
+        """Compose the hypothesis-development workflow over the runtime ports."""
+
+    def execute_hypothesis_development(
+        self,
+        request: HypothesisDevelopmentRequest,
+        *,
+        chat: ChatService,
+    ) -> HypothesisDevelopmentOutcome:
+        """Run one launched hypothesis-development request to completion."""
+
+
+class LaunchableDevelopmentWorkflow(Protocol):
+    """The launch surface of the hypothesis-development workflow."""
+
+    def launch(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        *,
+        actor_id: str,
+        ideas: str,
+        investigation_id: str | None = None,
+    ) -> HypothesisDevelopmentRequest:
+        """Persist the chat trigger and return the runnable request."""
+
+
+def launch_hypothesis_development(
+    runtime: DevelopmentRuntime,
+    chat: ChatService,
+    *,
+    workspace_id: str,
+    chat_id: str,
+    actor_id: str,
+    ideas: str,
+    investigation_id: str | None = None,
+) -> tuple[HypothesisDevelopmentRequest, HypothesisDevelopmentOutcome]:
+    """Launch and fully execute one falsification-first hypothesis pipeline.
+
+    The launch goes through the composed workflow (and therefore through
+    :meth:`~thesis.chat.service.ChatService.launch_workflow`), and the run is
+    executed through the same injected runtime.  Callers own error handling: a
+    misconfigured runtime or an unhandled provider failure propagates.
+    """
+    workflow = runtime.build_hypothesis_development(chat=chat)
+    request = workflow.launch(
+        workspace_id,
+        chat_id,
+        actor_id=actor_id,
+        ideas=ideas,
+        investigation_id=investigation_id,
+    )
+    outcome = runtime.execute_hypothesis_development(request, chat=chat)
+    return request, outcome
+
+
 def _validation_trigger(message: ChatMessage) -> str | None:
     """Return the claim when a message is an explicit validation trigger.
 
@@ -179,6 +247,32 @@ def _validation_trigger(message: ChatMessage) -> str | None:
     return claim.strip()
 
 
+def _development_trigger(message: ChatMessage) -> str | None:
+    """Return the ideas when a message is an explicit development trigger.
+
+    Only a user message carrying the exact structured JSON envelope
+    ``{"workflow": "hypothesis-development", "ideas": "<ideas>"}`` triggers the
+    falsification-first pipeline.  There is no natural-language inference.
+    """
+    if message.role is not MessageRole.USER:
+        return None
+    text = message.body.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(document, dict):
+        return None
+    if document.get("workflow") != _DEVELOPMENT_WORKFLOW_TRIGGER:
+        return None
+    ideas = document.get("ideas")
+    if not isinstance(ideas, str) or not ideas.strip():
+        return None
+    return ideas.strip()
+
+
 def _validation_summary(outcome: HypothesisValidationOutcome) -> str:
     """Return the assistant summary for one finished validation run."""
     verdict = outcome.verdict
@@ -190,6 +284,21 @@ def _validation_summary(outcome: HypothesisValidationOutcome) -> str:
     return (
         f"Hypothesis validation {outcome.execution_id} finished "
         f"({outcome.phase.value}); verdict: {verdict.outcome}. {verdict.reason}"
+    )
+
+
+def _development_summary(outcome: HypothesisDevelopmentOutcome) -> str:
+    """Return the assistant summary for one finished hypothesis pipeline."""
+    verdict = outcome.verdict
+    if verdict is None:
+        return (
+            f"Hypothesis development {outcome.execution_id} finished "
+            f"({outcome.phase.value}); no falsification verdict was recorded."
+        )
+    return (
+        f"Hypothesis development {outcome.execution_id} finished "
+        f"({outcome.phase.value}); falsification verdict: {verdict.outcome}. "
+        f"{verdict.reason}"
     )
 
 
@@ -236,6 +345,7 @@ class ChatReplyService:
     max_history: int = 40
     id_factory: Callable[[], str] = field(default=_stream_id)
     workflow_runtime: ValidationRuntime | None = None
+    development_runtime: DevelopmentRuntime | None = None
 
     def respond(self, workspace_id: str, chat_id: str) -> ChatMessage | None:
         """Stream and persist the assistant reply; return the durable message.
@@ -254,6 +364,9 @@ class ChatReplyService:
         trigger_claim = _validation_trigger(history[-1])
         if trigger_claim is not None:
             return self._respond_with_validation(workspace_id, chat_id, trigger_claim)
+        trigger_ideas = _development_trigger(history[-1])
+        if trigger_ideas is not None:
+            return self._respond_with_development(workspace_id, chat_id, trigger_ideas)
         return self._respond_with_provider(workspace_id, chat_id, history)
 
     def _respond_with_validation(
@@ -281,6 +394,60 @@ class ChatReplyService:
                 claim=claim,
             )
             body = _sanitize(_validation_summary(outcome)) or "Validation finished."
+            message = self.chat_service.create_message(
+                workspace_id,
+                chat_id,
+                actor_id=self.actor_id,
+                body=body,
+                role=MessageRole.ASSISTANT,
+                execution_id=outcome.execution_id,
+            )
+        except Exception as error:  # fail closed at the task boundary
+            self._error_delta(workspace_id, chat_id, stream_id, str(error))
+            return None
+        self.broker.publish(
+            workspace_id, chat_id, CHAT_MESSAGE, {"message": message.as_dict()}
+        )
+        self.broker.publish(
+            workspace_id,
+            chat_id,
+            PROVIDER_DELTA,
+            {
+                "messageId": stream_id,
+                "messageIdFinal": message.message_id,
+                "done": True,
+            },
+        )
+        return message
+
+    def _respond_with_development(
+        self, workspace_id: str, chat_id: str, ideas: str
+    ) -> ChatMessage | None:
+        """Launch and execute the hypothesis pipeline, then persist its verdict."""
+        stream_id = self.id_factory()
+        self._start_delta(workspace_id, chat_id, stream_id)
+        runtime = self.development_runtime
+        if runtime is None:
+            self._error_delta(
+                workspace_id,
+                chat_id,
+                stream_id,
+                "workflow runtime is not configured",
+            )
+            return None
+        try:
+            _, outcome = launch_hypothesis_development(
+                runtime,
+                self.chat_service,
+                workspace_id=workspace_id,
+                chat_id=chat_id,
+                actor_id=self.actor_id,
+                ideas=ideas,
+            )
+            body = (
+                _sanitize(_development_summary(outcome))
+                or "Hypothesis development finished."
+            )
             message = self.chat_service.create_message(
                 workspace_id,
                 chat_id,
@@ -427,10 +594,13 @@ class ChatReplyService:
 
 __all__ = [
     "ChatReplyService",
+    "DevelopmentRuntime",
+    "LaunchableDevelopmentWorkflow",
     "LaunchableWorkflow",
     "ReplyChunk",
     "ReplyProvider",
     "ToolResultChunk",
     "ValidationRuntime",
+    "launch_hypothesis_development",
     "launch_hypothesis_validation",
 ]

@@ -306,6 +306,7 @@ def create_app(
             broker=resolved_broker,
             provider=reply_provider_for(model_provider, harness_tool_provider),
             workflow_runtime=workflow_runtime,
+            development_runtime=workflow_runtime,
         )
     if workspace_data is not None:
         application.state.workspace_service = workspace_data.workspaces
