@@ -15,8 +15,11 @@ strategy revision loop with revision lineage (`thesis.workflows.rca`,
 `thesis.research`, T163), the statistical-discipline substrate
 (`thesis.experiments`: pre-registered experiment contracts, dependency-interval
 audits, hash-chained attempt and influence ledgers, evidence grades with
-explicit downgrade semantics — T164), and the harness MCP tool gateway
-(`thesis.integrations.mcp`, `thesis.agent.harness_tools`, T281). The backend
+explicit downgrade semantics — T164), the harness MCP tool gateway
+(`thesis.integrations.mcp`, `thesis.agent.harness_tools`, T281), and the
+falsification-first hypothesis-development workflow
+(`thesis.workflows.hypothesis_development`, `thesis.research.hypothesis`,
+`thesis.agent.hypothesis_skills`). The backend
 process boundary (`thesis` entrypoint, `Dockerfile.thesis`) is implemented
 (T178). Local and Azure security, recovery, and repository-integrity hardening
 is implemented by `thesis.operations`, with the operator procedures in
@@ -563,6 +566,58 @@ and backtest attribution use diagnostic rather than causal language.
 
 A failed hypothesis is a valid result. Thesis must not automatically mutate a
 claim into a different claim merely to produce a positive conclusion.
+
+### Falsification-First Hypothesis Development
+
+This workflow captures the falsification-first research pipeline: a user
+brings an informal theory or trade setup, and the agent forms a *falsifiable*
+hypothesis that states explicitly why it disagrees with current market pricing,
+makes a real effort to destroy it before designing a strategy, and only then
+moves into strategy design and optimization. A strategy is a falsification
+instrument: its declared exit criteria are falsifier re-checks and PnL is only
+a guardrail.
+
+The workflow phases and their enforced gates are:
+
+1. `requested` -- the chat request is accepted.
+2. `ideation` -- the agent turns the informal ideas into a candidate
+   falsifiable hypothesis.
+3. `hypothesis` -- the hypothesis is projected into a workspace artifact under
+   `hypotheses/<slug>.md`. **Gate (falsifiability):** the front matter must
+   carry a non-empty disagreement with market pricing and at least one
+   falsifier with `{observable, condition, threshold, test}`. No edge or no
+   falsifier cannot advance; if the market prices the claim fairly, there is no
+   trade.
+4. `falsification_plan` -- the agent plans the destructive tests. **Gate:** at
+   least one falsifier test and at least one negative/placebo control.
+5. `falsification_trials` -- the planned trials run through the harness and
+   each records a bound run digest and metric.
+6. `rca` -- failed trials are diagnosed by fresh, knowledge-cutoff subagents
+   (no inherited transcript) before the trials are retried; the phase loops
+   back to `falsification_trials`.
+7. `verdict` -- the deterministic verdict is `refuted` when any falsifier
+   fires, `supported` when none fires and every falsifier has evidence, and
+   `inconclusive` otherwise. **Gate:** only a not-falsified
+   (`supported`/`inconclusive`) verdict may advance to `strategy_design`;
+   `refuted` returns to `hypothesis`.
+8. `strategy_design` -- the agent implements the surviving hypothesis.
+   **Gate:** the strategy must pass sandbox validation and declare exit
+   criteria phrased as re-checks of the delivered falsifiers.
+9. `optimization` -- the validated strategy is optimized within the declared
+   falsifier bounds.
+10. `completed`, plus `paused` (a failed gate or steering pauses with a
+    recorded reason) and `failed`.
+
+The hypothesis artifact is a workspace Markdown document whose small,
+strictly validated YAML front matter (rendered in the deterministic JSON
+subset of YAML 1.2) carries `schema_version`, `hypothesis_id`, `status`,
+`claim`, `disagreement`, `risk_factor`, `horizon`, `universe`, `falsifiers[]`,
+`sizing`, and `links`. The artifact is a projection: the agent owns the prose
+fields, while the workflow and the hash-chained experiment ledger own `status`
+and `links`, and `links.runs`/`links.evidence` are populated from executed
+backtests rather than hand-edited. The workflow emits a durable
+`workflow.phase` execution event for every transition so the UI execution
+timeline renders the pipeline.
 
 ### Strategy Development And Improvement
 
