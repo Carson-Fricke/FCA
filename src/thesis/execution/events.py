@@ -26,6 +26,7 @@ class ActorScope(StrEnum):
 class ExecutionEventType(StrEnum):
     WORKFLOW_LAUNCHED = "workflow.launched"
     WORKFLOW_STARTED = "workflow.started"
+    WORKFLOW_PHASE = "workflow.phase"
     WORKFLOW_PAUSED = "workflow.paused"
     WORKFLOW_STEERED = "workflow.steered"
     WORKFLOW_STOPPED = "workflow.stopped"
