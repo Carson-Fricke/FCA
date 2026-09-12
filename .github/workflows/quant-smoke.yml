@@ -169,7 +169,10 @@ jobs:
           assert_pinned_reference "The backtest job" "$backtest_image"
 
           if [[ -n "$IMAGE_DIGEST" ]]; then
-            expected_runtime_image="${acr_login_server}/${GITHUB_REPOSITORY_NAME,,}@${IMAGE_DIGEST}"
+            # The shared runtime image is mirrored into the private ACR as
+            # `<repo>-harness`; the expected reference must match that import.
+            mirror_repository="${GITHUB_REPOSITORY_NAME,,}-harness"
+            expected_runtime_image="${acr_login_server}/${mirror_repository}@${IMAGE_DIGEST}"
             if [[ "$quant_api_image" != "$expected_runtime_image" ]]; then
               echo "::error::The quant API does not use the published immutable image reference"
               exit 1

@@ -296,7 +296,10 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].loginServer | [0]" \
             --output tsv)"
-          expected_runtime_image="${acr_login_server}/${GITHUB_REPOSITORY_NAME,,}@${IMAGE_DIGEST}"
+          # The shared runtime image is mirrored into the private ACR as
+          # `<repo>-harness`; the expected reference must match that import.
+          mirror_repository="${GITHUB_REPOSITORY_NAME,,}-harness"
+          expected_runtime_image="${acr_login_server}/${mirror_repository}@${IMAGE_DIGEST}"
 
           api_image="$(az containerapp show \
             --name "$api_app_name" \
