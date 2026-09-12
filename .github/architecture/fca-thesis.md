@@ -69,8 +69,9 @@ valid consent and satisfies policy.
   reidentified.
 - Exposing hidden model chain-of-thought as an audit mechanism. Thesis records
   decisions, evidence, tool events, and concise rationales instead.
-- Supporting multiple human users, organizations, or public multi-tenancy in
-  the first release.
+- Supporting organizations or public multi-tenancy. Invite-only named users are
+  approved for the public release (`docs/adr/adr-001-invite-only-public-multi-user-access-for-thesis.md`);
+  open signup and organization/multi-tenant collaboration remain non-goals.
 - Automatically publishing agent findings into the global knowledge base in
   the first release.
 
@@ -1152,9 +1153,10 @@ or broker credentials.
 
 ## UI Experience
 
-The first release is for one authenticated local operator. The data model still
-uses explicit workspace ownership so future authorization does not require
-collapsing existing boundaries.
+The local release is for one authenticated operator. The data model already uses
+explicit workspace ownership, and the public release extends it to invite-only
+named users with per-request workspace authorization and a seeded owner account
+(`docs/adr/adr-001-invite-only-public-multi-user-access-for-thesis.md`).
 
 The Thesis UI should provide the chat-first workspace experience described here,
 but its visual design and detailed interaction design are intentionally deferred
@@ -1404,7 +1406,9 @@ create workspace
 - Enable live activation only after paper/shadow qualification, rollback,
   recovery, backup/restore, security, audit, and operator controls pass their
   explicit gates.
-- Add multi-user authorization only as a separately designed milestone.
+- Deliver invite-only named-user authorization as the designed public milestone
+  (`docs/adr/adr-001-invite-only-public-multi-user-access-for-thesis.md`);
+  organizations and public multi-tenancy remain out of scope.
 
 ## Dependencies On Existing FCA Plans
 
@@ -1446,8 +1450,9 @@ The following decisions should be resolved before their owning phase begins:
 - The exact workflow-specific required subagent phases and independence rules.
 - Knowledge ingestion sources, curation roles, and later agent-finding proposal
   process.
-- Multi-user ownership, collaboration, and approval roles after the local
-  single-operator release.
+- Organization/multi-tenant collaboration and approval roles. Invite-only named
+  users are decided
+  (`docs/adr/adr-001-invite-only-public-multi-user-access-for-thesis.md`).
 
 ## Success Criteria
 
