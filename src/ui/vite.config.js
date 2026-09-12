@@ -8,6 +8,13 @@ import { defineConfig } from 'vite';
 // cross-origin request (the Thesis API publishes no CORS layer yet).
 const thesisApiTarget = process.env.THESIS_API_PROXY_TARGET ?? 'http://127.0.0.1:8000';
 
+// The SPA deliberately carries no credential (no bearer in the bundle). The
+// same-origin proxy is the credential boundary: it injects the Thesis API
+// bearer server-side, mirroring how the Azure Static Web App linked backend
+// fronts the API in production.
+const thesisApiToken = (process.env.THESIS_API__BEARER_TOKEN ?? '').trim();
+const authHeaders = thesisApiToken ? { Authorization: `Bearer ${thesisApiToken}` } : {};
+
 export default defineConfig({
 	envPrefix: ['VITE_', 'PUBLIC_'],
 	plugins: [tailwindcss(), sveltekit()],
@@ -19,11 +26,12 @@ export default defineConfig({
 			'/api': {
 				target: thesisApiTarget,
 				changeOrigin: true,
+				headers: authHeaders,
 				rewrite: (path) => path.replace(/^\/api/, '')
 			},
-			'/v1': { target: thesisApiTarget, changeOrigin: true },
-			'/health': { target: thesisApiTarget, changeOrigin: true },
-			'/healthz': { target: thesisApiTarget, changeOrigin: true }
+			'/v1': { target: thesisApiTarget, changeOrigin: true, headers: authHeaders },
+			'/health': { target: thesisApiTarget, changeOrigin: true, headers: authHeaders },
+			'/healthz': { target: thesisApiTarget, changeOrigin: true, headers: authHeaders }
 		}
 	}
 });
