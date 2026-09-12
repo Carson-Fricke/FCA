@@ -200,7 +200,10 @@ jobs:
             exit 1
           fi
 
-          mirror_repository="${GITHUB_REPOSITORY_NAME,,}"
+          # The shared runtime image is the quant-harness engine and its process
+          # interfaces; the private ACR mirror repository is named `<repo>-harness`
+          # to distinguish it from the additive `<repo>-thesis` image.
+          mirror_repository="${GITHUB_REPOSITORY_NAME,,}-harness"
           ghcr_source="${GITHUB_OWNER,,}/${GITHUB_REPOSITORY_NAME,,}@${IMAGE_DIGEST}"
           az acr import \
             --name "$acr_name" \

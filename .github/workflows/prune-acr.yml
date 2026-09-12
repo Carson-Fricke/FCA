@@ -10,14 +10,16 @@ on:
       image-digest:
         description: >-
           Optional sha256 digest (sha256:<64 hex>) of the image just deployed.
-          It is retained regardless of its position in the manifest survey.
+          It is retained regardless of its position in the manifest survey and
+          applies to the shared `-harness` repository.
         required: false
         type: string
         default: ''
       repository-name:
         description: >-
-          ACR repository name inside the private registry. Empty derives the
-          lowercased GitHub repository name, matching the deploy import.
+          Optional single ACR repository override. Empty prunes the paired
+          `<repo>-harness` and `<repo>-thesis` repositories with their own
+          reference sets.
         required: false
         type: string
         default: ''
@@ -32,8 +34,8 @@ on:
         default: ''
       repository-name:
         description: >-
-          ACR repository name inside the private registry. Empty derives the
-          lowercased GitHub repository name, matching the deploy import.
+          Optional single ACR repository override. Empty prunes the paired
+          `<repo>-harness` and `<repo>-thesis` repositories.
         required: false
         type: string
         default: ''
@@ -125,20 +127,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The deploy import names the ACR repository after the lowercased
-          # GitHub repository name (deploy-main.yml: az acr import --image
-          # "${mirror_repository}:${GITHUB_SHA}"), so the empty input derives
-          # exactly that name.
-          repository_name="${REPOSITORY_NAME_INPUT,,}"
-          if [[ -z "$repository_name" ]]; then
-            repository_name="${GITHUB_REPOSITORY##*/}"
-            repository_name="${repository_name,,}"
-          fi
-          if [[ ! "$repository_name" =~ ^[a-z0-9][a-z0-9._/-]*$ ]]; then
-            echo "::error::The ACR repository name '$repository_name' is not a valid repository name"
-            exit 1
-          fi
-
           acr_name="$(az acr list \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].name | [0]" \
@@ -153,169 +141,230 @@ jobs:
             --query loginServer \
             --output tsv)"
 
-          tmp="$(mktemp -d)"
-          : > "$tmp/references.raw"
-
-          # Only digest references pointing at this service repository in this
-          # registry are surveyed. Any other image reference belongs to a
-          # non-service repository this workflow must never touch.
-          extract_digest() {
-            local image="$1"
-            local prefix="${acr_login_server}/${repository_name}@"
-            case "$image" in
-              "$prefix"sha256:*)
-                printf '%s\n' "${image#"${prefix}"}" >> "$tmp/references.raw"
-                ;;
-            esac
-          }
-
-          # A revision protects its image while it is active or still receives
-          # traffic (a rollback candidate); inactive zero-traffic revisions do
-          # not pin anything.
-          read_revision_references() {
-            local app_name="$1"
-            local revisions
-            if ! revisions="$(az containerapp revision list \
-              --name "$app_name" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --output json \
-              2>/dev/null)"; then
-              echo "::warning::Could not read revisions of $app_name; its referenced digests were not surveyed"
-              return 0
-            fi
-            jq --raw-output \
-              '.[]
-                | select((.properties.active == true) or ((.properties.trafficWeight // 0) > 0))
-                | .properties.template.containers[]
-                | .image' \
-              <<<"$revisions" \
-              | while IFS= read -r image; do
-                  if [[ -n "$image" ]]; then
-                    extract_digest "$image"
-                  fi
-                done
-          }
-
           normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
           normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
-          app_names=(
+          # The deploy workflows name the private ACR repositories after the
+          # lowercased GitHub repository plus a role suffix: the shared runtime
+          # image is `<repo>-harness` (deploy-main.yml: az acr import --image
+          # "${mirror_repository}:${GITHUB_SHA}") and the additive image is
+          # `<repo>-thesis` (deploy-thesis.yml).
+          github_repo_lc="${GITHUB_REPOSITORY##*/}"
+          github_repo_lc="${github_repo_lc,,}"
+
+          harness_repository="${github_repo_lc}-harness"
+          thesis_repository="${github_repo_lc}-thesis"
+
+          harness_app_names=(
             "${normalized_prefix}-${normalized_environment}-api"
             "${normalized_prefix}-${normalized_environment}-quant-api"
             "${normalized_prefix}-${normalized_environment}-rth-trader"
           )
           if [[ "${ENABLE_CRYPTO_TRADER,,}" == "true" ]]; then
-            app_names+=("${normalized_prefix}-${normalized_environment}-crypto-trader")
+            harness_app_names+=("${normalized_prefix}-${normalized_environment}-crypto-trader")
           fi
-          for app_name in "${app_names[@]}"; do
-            read_revision_references "$app_name"
-          done
+          harness_job_names=(
+            "${normalized_prefix}-${normalized_environment}-ingest"
+            "${normalized_prefix}-${normalized_environment}-backtest"
+          )
+          thesis_app_names=(
+            "${normalized_prefix}-${normalized_environment}-thesis-api"
+          )
 
-          # Container Apps jobs have no revisions; their template image is the
-          # live reference, so it protects its digest the same way.
-          for job_name in "${normalized_prefix}-${normalized_environment}-ingest" \
-            "${normalized_prefix}-${normalized_environment}-backtest"; do
-            if job_images="$(az containerapp job show \
-              --name "$job_name" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query "properties.template.containers[].image" \
-              --output tsv \
-              2>/dev/null)"; then
-              while IFS= read -r image; do
-                if [[ -n "$image" ]]; then
-                  extract_digest "$image"
-                fi
-              done <<<"$job_images"
-            else
-              echo "::warning::Could not read job $job_name; its referenced digest was not surveyed"
+          if [[ -n "$REPOSITORY_NAME_INPUT" ]]; then
+            repository_list=("${REPOSITORY_NAME_INPUT,,}")
+            override_single_repo=1
+          else
+            repository_list=("$harness_repository" "$thesis_repository")
+            override_single_repo=0
+          fi
+
+          validate_repository_name() {
+            local name="$1"
+            if [[ ! "$name" =~ ^[a-z0-9][a-z0-9._/-]*$ ]]; then
+              echo "::error::The ACR repository name '$name' is not a valid repository name"
+              exit 1
             fi
-          done
+          }
 
-          az acr manifest list-metadata \
-            --registry "$acr_name" \
-            --name "$repository_name" \
-            --only-show-errors \
-            --output json > "$tmp/manifests.json"
+          # Only digest references pointing at this service repository in this
+          # registry are surveyed. Any other image reference belongs to a
+          # non-service repository this workflow must never touch.
+          survey_references() {
+            local tmp="$1"
+            local prefix="${acr_login_server}/${repository_name}@"
+            : > "$tmp/references.raw"
 
-          node -e '
-            const fs = require("fs");
-            const tmp = process.argv[1];
-            const manifests = JSON.parse(fs.readFileSync(tmp + "/manifests.json", "utf8"));
-            const references = new Set(
-              fs.readFileSync(tmp + "/references.raw", "utf8").split("\n").filter(Boolean)
-            );
-            const keepNewest = Number(process.env.KEEP_NEWEST);
-            const deployedDigest = process.env.IMAGE_DIGEST || "";
-            const rows = manifests
-              .map((m) => ({
-                digest: m.digest,
-                created: Date.parse(m.timestamp ?? m.createdTime ?? m.createTime ?? ""),
-                tags: Array.isArray(m.tags) ? m.tags : [],
-              }))
-              .filter((r) => Boolean(r.digest));
-            if (rows.length > 0 &&
-                rows.some((r) => !/^sha256:[0-9a-f]{64}$/.test(r.digest) || Number.isNaN(r.created))) {
-              console.error("::error::The manifest listing returned an entry without a digest or parseable creation time; aborting rather than guessing");
-              process.exit(1);
+            extract_digest() {
+              local image="$1"
+              case "$image" in
+                "$prefix"sha256:*)
+                  printf '%s\n' "${image#"${prefix}"}" >> "$tmp/references.raw"
+                  ;;
+              esac
             }
-            rows.sort((a, b) => b.created - a.created);
-            const keep = new Set();
-            rows.slice(0, keepNewest).forEach((r) => keep.add(r.digest));
-            if (deployedDigest) keep.add(deployedDigest);
-            references.forEach((d) => keep.add(d));
-            rows
-              .filter((r) => r.tags.some((t) => !/^[0-9a-f]{40}$/.test(t)))
-              .forEach((r) => keep.add(r.digest));
-            const candidates = rows.filter((r) => !keep.has(r.digest));
-            // Oldest candidates go first so a large backlog drains over
-            // multiple bounded runs; nothing in the keep set is ever sliced.
-            candidates.sort((a, b) => a.created - b.created);
-            const cap = Number(process.env.MAX_DELETIONS);
-            const remaining = Math.max(0, candidates.length - cap);
-            const deletions = candidates.slice(0, cap).map((r) => r.digest);
-            const keptCount = rows.filter((r) => keep.has(r.digest)).length;
-            if (deployedDigest) {
-              const rank = rows.findIndex((r) => r.digest === deployedDigest);
-              if (rank >= keepNewest) {
-                console.log(`::warning::The deployed digest ranked ${rank + 1} in the survey; the listing order may not be newest-first (it is retained explicitly regardless)`);
-              }
+
+            # A revision protects its image while it is active or still receives
+            # traffic (a rollback candidate); inactive zero-traffic revisions do
+            # not pin anything.
+            read_revision_references() {
+              local app_name="$1"
+              local revisions
+              if ! revisions="$(az containerapp revision list \
+                --name "$app_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --output json \
+                2>/dev/null)"; then
+                echo "::warning::Could not read revisions of $app_name; its referenced digests were not surveyed"
+                return 0
+              fi
+              jq --raw-output \
+                '.[]
+                  | select((.properties.active == true) or ((.properties.trafficWeight // 0) > 0))
+                  | .properties.template.containers[]
+                  | .image' \
+                <<<"$revisions" \
+                | while IFS= read -r image; do
+                    if [[ -n "$image" ]]; then
+                      extract_digest "$image"
+                    fi
+                  done
             }
-            fs.writeFileSync(tmp + "/delete-digests.json", JSON.stringify(deletions));
-            fs.writeFileSync(tmp + "/stats.json", JSON.stringify({ total: rows.length, kept: keptCount, deleting: deletions.length, remaining: remaining }));
-          ' "$tmp"
 
-          total="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).total)")"
-          kept="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).kept)")"
-          delete_count="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).deleting)")"
-          remaining="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).remaining)")"
-          echo "Surveyed ${total} mirrored manifest(s) in ${repository_name}; keeping ${kept}; deleting ${delete_count}"
-          if (( total >= SURVEY_WINDOW )); then
-            echo "::warning::The survey hit the ${SURVEY_WINDOW}-manifest service page cap; older manifests beyond it remain for later runs"
-          fi
-          if (( remaining > 0 )); then
-            echo "::notice::${remaining} unretained manifest(s) remain beyond this run's ${MAX_DELETIONS}-deletion cap; the next run deletes the oldest first"
-          fi
+            for app_name in "${active_app_names[@]}"; do
+              read_revision_references "$app_name"
+            done
 
-          deleted=0
-          for digest in $(node -e "JSON.parse(require('fs').readFileSync('$tmp/delete-digests.json','utf8')).forEach((d)=>console.log(d))"); do
-            if az acr repository delete \
-              --name "$acr_name" \
-              --image "${repository_name}@${digest}" \
-              --yes \
+            # Container Apps jobs have no revisions; their template image is the
+            # live reference, so it protects its digest the same way.
+            for job_name in "${active_job_names[@]}"; do
+              if job_images="$(az containerapp job show \
+                --name "$job_name" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --query "properties.template.containers[].image" \
+                --output tsv \
+                2>/dev/null)"; then
+                while IFS= read -r image; do
+                  if [[ -n "$image" ]]; then
+                    extract_digest "$image"
+                  fi
+                done <<<"$job_images"
+              else
+                echo "::warning::Could not read job $job_name; its referenced digest was not surveyed"
+              fi
+            done
+          }
+
+          for repository_name in "${repository_list[@]}"; do
+            validate_repository_name "$repository_name"
+
+            if (( override_single_repo == 1 )); then
+              active_app_names=("${harness_app_names[@]}" "${thesis_app_names[@]}")
+              active_job_names=("${harness_job_names[@]}")
+              repo_deployed_digest="$IMAGE_DIGEST"
+            elif [[ "$repository_name" == "$harness_repository" ]]; then
+              active_app_names=("${harness_app_names[@]}")
+              active_job_names=("${harness_job_names[@]}")
+              repo_deployed_digest="$IMAGE_DIGEST"
+            else
+              active_app_names=("${thesis_app_names[@]}")
+              active_job_names=()
+              repo_deployed_digest=""
+            fi
+
+            tmp="$(mktemp -d)"
+            survey_references "$tmp"
+
+            if ! az acr manifest list-metadata \
+              --registry "$acr_name" \
+              --name "$repository_name" \
               --only-show-errors \
-              --output none; then
-              deleted=$((deleted + 1))
-            else
-              echo "::warning::Failed to delete manifest ${digest} (continuing)"
+              --output json > "$tmp/manifests.json" 2>/dev/null; then
+              echo "::notice::Repository '${repository_name}' is absent in ${acr_name}; nothing to prune"
+              rm -rf "$tmp"
+              continue
             fi
-          done
 
-          echo "::notice::ACR prune complete: surveyed ${total} mirrored manifest(s) in ${repository_name}; deleted ${deleted}/${delete_count}; newest ${KEEP_NEWEST}, revision-referenced, tagged, and deployed digests retained"
-          {
-            echo "### ACR image retention"
-            echo "- Registry: \\`$acr_name\\` ($acr_login_server)"
-            echo "- Repository: \\`$repository_name\\`"
-            echo "- Surveyed: \\`$total\\` mirrored manifest(s)"
-            echo "- Kept: \\`$kept\\` (newest ${KEEP_NEWEST} + revision references + tagged + deployed)"
-            echo "- Deleted: \\`$deleted\\` of \\`$delete_count\\` candidates"
-          } >> "$GITHUB_STEP_SUMMARY"
-          rm -rf "$tmp"
+            REPO_DEPLOYED_DIGEST="$repo_deployed_digest" node -e '
+              const fs = require("fs");
+              const tmp = process.argv[1];
+              const manifests = JSON.parse(fs.readFileSync(tmp + "/manifests.json", "utf8"));
+              const references = new Set(
+                fs.readFileSync(tmp + "/references.raw", "utf8").split("\n").filter(Boolean)
+              );
+              const keepNewest = Number(process.env.KEEP_NEWEST);
+              const deployedDigest = process.env.REPO_DEPLOYED_DIGEST || "";
+              const rows = manifests
+                .map((m) => ({
+                  digest: m.digest,
+                  created: Date.parse(m.timestamp ?? m.createdTime ?? m.createTime ?? ""),
+                  tags: Array.isArray(m.tags) ? m.tags : [],
+                }))
+                .filter((r) => Boolean(r.digest));
+              if (rows.length > 0 &&
+                  rows.some((r) => !/^sha256:[0-9a-f]{64}$/.test(r.digest) || Number.isNaN(r.created))) {
+                console.error("::error::The manifest listing returned an entry without a digest or parseable creation time; aborting rather than guessing");
+                process.exit(1);
+              }
+              rows.sort((a, b) => b.created - a.created);
+              const keep = new Set();
+              rows.slice(0, keepNewest).forEach((r) => keep.add(r.digest));
+              if (deployedDigest) keep.add(deployedDigest);
+              references.forEach((d) => keep.add(d));
+              rows
+                .filter((r) => r.tags.some((t) => !/^[0-9a-f]{40}$/.test(t)))
+                .forEach((r) => keep.add(r.digest));
+              const candidates = rows.filter((r) => !keep.has(r.digest));
+              // Oldest candidates go first so a large backlog drains over
+              // multiple bounded runs; nothing in the keep set is ever sliced.
+              candidates.sort((a, b) => a.created - b.created);
+              const cap = Number(process.env.MAX_DELETIONS);
+              const remaining = Math.max(0, candidates.length - cap);
+              const deletions = candidates.slice(0, cap).map((r) => r.digest);
+              const keptCount = rows.filter((r) => keep.has(r.digest)).length;
+              if (deployedDigest) {
+                const rank = rows.findIndex((r) => r.digest === deployedDigest);
+                if (rank >= keepNewest) {
+                  console.log(`::warning::The deployed digest ranked ${rank + 1} in the survey; the listing order may not be newest-first (it is retained explicitly regardless)`);
+                }
+              }
+              fs.writeFileSync(tmp + "/delete-digests.json", JSON.stringify(deletions));
+              fs.writeFileSync(tmp + "/stats.json", JSON.stringify({ total: rows.length, kept: keptCount, deleting: deletions.length, remaining: remaining }));
+            ' "$tmp"
+
+            total="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).total)")"
+            kept="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).kept)")"
+            delete_count="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).deleting)")"
+            remaining="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$tmp/stats.json','utf8')).remaining)")"
+            echo "Surveyed ${total} mirrored manifest(s) in ${repository_name}; keeping ${kept}; deleting ${delete_count}"
+            if (( total >= SURVEY_WINDOW )); then
+              echo "::warning::The survey hit the ${SURVEY_WINDOW}-manifest service page cap; older manifests beyond it remain for later runs"
+            fi
+            if (( remaining > 0 )); then
+              echo "::notice::${remaining} unretained manifest(s) remain beyond this run's ${MAX_DELETIONS}-deletion cap; the next run deletes the oldest first"
+            fi
+
+            deleted=0
+            for digest in $(node -e "JSON.parse(require('fs').readFileSync('$tmp/delete-digests.json','utf8')).forEach((d)=>console.log(d))"); do
+              if az acr repository delete \
+                --name "$acr_name" \
+                --image "${repository_name}@${digest}" \
+                --yes \
+                --only-show-errors \
+                --output none; then
+                deleted=$((deleted + 1))
+              else
+                echo "::warning::Failed to delete manifest ${digest} (continuing)"
+              fi
+            done
+
+            echo "::notice::ACR prune complete: surveyed ${total} mirrored manifest(s) in ${repository_name}; deleted ${deleted}/${delete_count}; newest ${KEEP_NEWEST}, revision-referenced, tagged, and deployed digests retained"
+            {
+              echo "### ACR image retention"
+              echo "- Registry: \\`$acr_name\\` ($acr_login_server)"
+              echo "- Repository: \\`$repository_name\\`"
+              echo "- Surveyed: \\`$total\\` mirrored manifest(s)"
+              echo "- Kept: \\`$kept\\` (newest ${KEEP_NEWEST} + revision references + tagged + deployed)"
+              echo "- Deleted: \\`$deleted\\` of \\`$delete_count\\` candidates"
+            } >> "$GITHUB_STEP_SUMMARY"
+            rm -rf "$tmp"
+          done
