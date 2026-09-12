@@ -148,7 +148,10 @@ jobs:
           fi
 
           image_reference="${acr_login_server}/${repository}@${digest}"
-          if [[ "$image_reference" != "$tag@$digest" ]]; then
+          # The digest-pinned reference composes from repo + digest (no tag);
+          # mirroring deploy-main.yml's `*@$IMAGE_DIGEST` validation. A prior
+          # check compared this against `tag@digest`, which can never be equal.
+          if [[ "$image_reference" != *@${digest} ]]; then
             echo "::error::The pushed Thesis image tag and digest do not compose into the expected reference"
             exit 1
           fi
