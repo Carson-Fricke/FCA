@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Mapping
 
 import uvicorn
 
@@ -192,7 +193,12 @@ class _BoundaryBacktestRunner:
         import os
         import tempfile
 
-        document = dict(request.bundle.harness_configuration)
+        raw_configuration = request.bundle.harness_configuration
+        document: dict[str, object] = (
+            {str(key): value for key, value in raw_configuration.items()}
+            if isinstance(raw_configuration, Mapping)
+            else {}
+        )
         document.setdefault("run_id", request.run_id)
         descriptor, path = tempfile.mkstemp(prefix="thesis-backtest-", suffix=".json")
         try:
