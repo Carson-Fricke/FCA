@@ -1,6 +1,7 @@
 """Wiring coverage for the workflow runtime on the chat reply service.
 
-The structured chat trigger can only execute when the workflow runtime reaches
+The structured chat trigger and the plain-language research predicate can only
+execute when the workflow runtime reaches
 :class:`~thesis.chat.responder.ChatReplyService`.  These tests prove
 ``create_app`` attaches it both to the reply service it composes from a
 ``model_provider`` and to an explicitly injected reply service, while leaving
@@ -57,7 +58,7 @@ def test_create_app_attaches_runtime_to_composed_reply_service() -> None:
         workflow_runtime=cast(WorkflowRuntime, runtime),
     )
 
-    assert app.state.chat_reply_service.workflow_runtime is runtime
+    assert app.state.chat_reply_service.development_runtime is runtime
 
 
 def test_create_app_attaches_runtime_to_injected_reply_service() -> None:
@@ -78,11 +79,11 @@ def test_create_app_attaches_runtime_to_injected_reply_service() -> None:
     )
 
     assert app.state.chat_reply_service is reply
-    assert reply.workflow_runtime is runtime
+    assert reply.development_runtime is runtime
 
 
 def test_create_app_without_runtime_leaves_reply_service_unconfigured() -> None:
     app = create_app(bearer_token=TOKEN, model_provider=_model_provider())
 
-    assert app.state.chat_reply_service.workflow_runtime is None
+    assert app.state.chat_reply_service.development_runtime is None
     assert TestClient(app).get("/health").json() == {"status": "ok"}

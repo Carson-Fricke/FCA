@@ -26,7 +26,13 @@ DEFAULT_SYSTEM_PROMPT = (
     "assistant. Answer the operator's latest message directly, in the same "
     "language as that message (default English), and reply with the answer "
     "only: never emit internal reasoning, analysis, planning, or "
-    "chain-of-thought."
+    "chain-of-thought. The workspace is fixed by the active conversation: "
+    "never ask the operator for a workspace name. When the operator shares a "
+    "theory, edge, or research idea, the falsification-first "
+    "hypothesis-development pipeline launches automatically and performs the "
+    "hypothesis decomposition itself: never ask the operator to split a theory "
+    "into sub-hypotheses, and never ask setup or clarification questions "
+    "before research."
 )
 
 #: System instruction for a reply that may call the quant-harness MCP tools.

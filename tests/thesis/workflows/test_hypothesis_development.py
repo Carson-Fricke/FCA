@@ -46,6 +46,8 @@ from thesis.workflows.backtests import BacktestRunRequest, BacktestRunResult
 from thesis.workflows.hypothesis_development import (
     HYPOTHESIS_DEVELOPMENT_PHASES,
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
+    VERDICT_REFUTED,
+    VERDICT_SUPPORTED,
     HypothesisDevelopmentPhase,
     HypothesisDevelopmentWorkflow,
     InvalidPhaseTransition,
@@ -55,10 +57,6 @@ from thesis.workflows.hypothesis_development import (
     check_strategy_design,
     check_verdict_advances,
     transition_phase,
-)
-from thesis.workflows.hypothesis_validation import (
-    VERDICT_REFUTED,
-    VERDICT_SUPPORTED,
 )
 
 WORKSPACE = "workspace-demo"

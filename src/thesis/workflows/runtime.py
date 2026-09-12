@@ -6,7 +6,7 @@ policies, model profiles, and a :class:`~thesis.agent.skills.SkillRegistry`,
 and builds a :class:`~thesis.workflows.backtests.HarnessBacktestRunner` over
 the published :class:`~thesis.integrations.harness.ThesisHarnessClient`
 boundary.  The resulting :class:`WorkflowRuntime` holder constructs and
-executes the hypothesis-validation and strategy-development workflows against
+executes the hypothesis-development and strategy-development workflows against
 those composed ports.
 
 Composition stays entirely behind injected boundaries: callers provide the
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from thesis.agent.harness_tools import (
     HarnessToolProvider,
@@ -63,14 +63,6 @@ from thesis.workflows.hypothesis_development import (
 )
 from thesis.workflows.hypothesis_development import (
     HypothesisComposer as DevelopmentHypothesisComposer,
-)
-from thesis.workflows.hypothesis_validation import (
-    DEFAULT_LOOKBACK,
-    DataReadinessProbe,
-    HypothesisComposer,
-    HypothesisValidationOutcome,
-    HypothesisValidationRequest,
-    HypothesisValidationWorkflow,
 )
 from thesis.workflows.strategy_development import (
     StrategyComposer,
@@ -221,7 +213,7 @@ class WorkflowRuntime:
 
     The runtime owns the composed :class:`ModelRouter` and
     :class:`BacktestRunner`.  Each builder pairs them with an injected
-    :class:`ChatService` (plus the workflow-specific validator, composer, probe,
+    :class:`ChatService` (plus the workflow-specific validator, composer,
     journal, and importer ports) and returns a runnable workflow.  The matching
     ``execute_*`` helpers run an already-launched request through a freshly
     composed workflow.
@@ -292,32 +284,6 @@ class WorkflowRuntime:
             )
         return self._tool_dispatcher.dispatch(role, call, arguments)
 
-    def build_hypothesis_validation(
-        self,
-        *,
-        chat: ChatService,
-        composer: HypothesisComposer | None = None,
-        probe: DataReadinessProbe | None = None,
-        journal: CommandJournal | None = None,
-        role: Role = "research",
-        experiment_id: str | None = None,
-        lookback: timedelta = DEFAULT_LOOKBACK,
-    ) -> HypothesisValidationWorkflow:
-        """Compose the hypothesis-validation workflow over the runtime ports."""
-        return HypothesisValidationWorkflow(
-            chat=chat,
-            router=self._router,
-            runner=self._runner,
-            composer=composer,
-            probe=probe,
-            journal=journal,
-            clock=self._clock,
-            id_factory=self._id_factory,
-            role=role,
-            experiment_id=experiment_id,
-            lookback=lookback,
-        )
-
     def build_strategy_development(
         self,
         *,
@@ -343,30 +309,6 @@ class WorkflowRuntime:
             role=role,
             experiment_id=experiment_id,
         )
-
-    def execute_hypothesis_validation(
-        self,
-        request: HypothesisValidationRequest,
-        *,
-        chat: ChatService,
-        composer: HypothesisComposer | None = None,
-        probe: DataReadinessProbe | None = None,
-        journal: CommandJournal | None = None,
-        role: Role = "research",
-        experiment_id: str | None = None,
-        lookback: timedelta = DEFAULT_LOOKBACK,
-    ) -> HypothesisValidationOutcome:
-        """Run one launched hypothesis-validation request to completion."""
-        workflow = self.build_hypothesis_validation(
-            chat=chat,
-            composer=composer,
-            probe=probe,
-            journal=journal,
-            role=role,
-            experiment_id=experiment_id,
-            lookback=lookback,
-        )
-        return workflow.run(request)
 
     def execute_strategy_development(
         self,

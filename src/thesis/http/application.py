@@ -46,7 +46,6 @@ from thesis.http.streaming import (
     create_streaming_router,
 )
 from thesis.http.sub_agents import create_sub_agent_router
-from thesis.http.validation import create_validation_router
 from thesis.http.workspaces import (
     WorkspaceDataBundle,
     create_workspaces_router,
@@ -338,8 +337,11 @@ def create_app(
         application.state.chat_stream_broker = chat_stream_broker
     if chat_reply_service is not None:
         application.state.chat_reply_service = chat_reply_service
-        if workflow_runtime is not None and chat_reply_service.workflow_runtime is None:
-            chat_reply_service.workflow_runtime = workflow_runtime
+        if (
+            workflow_runtime is not None
+            and chat_reply_service.development_runtime is None
+        ):
+            chat_reply_service.development_runtime = workflow_runtime
         if (
             tool_result_observer is not None
             and chat_reply_service.tool_result_observer is None
@@ -358,7 +360,6 @@ def create_app(
             chat_service=resolved_chat_service,
             broker=resolved_broker,
             provider=reply_provider_for(model_provider, harness_tool_provider),
-            workflow_runtime=workflow_runtime,
             development_runtime=workflow_runtime,
             tool_result_observer=tool_result_observer,
         )
@@ -488,10 +489,6 @@ def create_app(
     )
     application.include_router(
         create_knowledge_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
-        create_validation_router(),
         dependencies=[Depends(authenticator)],
     )
     return application

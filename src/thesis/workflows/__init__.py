@@ -1,5 +1,5 @@
 """Orchestrated Thesis workflows: strategy development, hypothesis
-validation, discovery, and RCA revision loops."""
+development, discovery, and RCA revision loops."""
 
 from thesis.workflows.backtests import (
     BacktestMode,
@@ -30,6 +30,9 @@ from thesis.workflows.evidence import (
 from thesis.workflows.hypothesis_development import (
     HYPOTHESIS_DEVELOPMENT_PHASES,
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
+    VERDICT_INCONCLUSIVE,
+    VERDICT_REFUTED,
+    VERDICT_SUPPORTED,
     ExitCriterion,
     FalsificationPlan,
     FalsificationPlanDraft,
@@ -52,20 +55,6 @@ from thesis.workflows.hypothesis_development import (
     RcaDiagnosis,
     StrategyContent,
     StrategyDesignDraft,
-)
-from thesis.workflows.hypothesis_validation import (
-    HYPOTHESIS_VALIDATION_PHASES,
-    HYPOTHESIS_VALIDATION_WORKFLOW,
-    VERDICT_INCONCLUSIVE,
-    VERDICT_REFUTED,
-    VERDICT_SUPPORTED,
-    HypothesisEvidenceReport,
-    HypothesisSpecification,
-    HypothesisValidationPhase,
-    HypothesisValidationState,
-    HypothesisValidationWorkflow,
-    HypothesisVerdict,
-    JsonHypothesisComposer,
 )
 from thesis.workflows.local import (
     McpBacktestRunner,
@@ -114,8 +103,6 @@ __all__ = [
     "HISTORICAL_PHASE_LABEL",
     "HYPOTHESIS_DEVELOPMENT_PHASES",
     "HYPOTHESIS_DEVELOPMENT_WORKFLOW",
-    "HYPOTHESIS_VALIDATION_PHASES",
-    "HYPOTHESIS_VALIDATION_WORKFLOW",
     "HypothesisDevelopmentOutcome",
     "HypothesisDevelopmentPhase",
     "HypothesisDevelopmentRequest",
@@ -150,14 +137,7 @@ __all__ = [
     "FailureClass",
     "HarnessBacktestRunner",
     "HarnessError",
-    "HypothesisEvidenceReport",
-    "HypothesisSpecification",
-    "HypothesisValidationPhase",
-    "HypothesisValidationState",
-    "HypothesisValidationWorkflow",
-    "HypothesisVerdict",
     "InvalidPhaseTransition",
-    "JsonHypothesisComposer",
     "JsonStrategyComposer",
     "McpBacktestRunner",
     "PhaseTransition",
