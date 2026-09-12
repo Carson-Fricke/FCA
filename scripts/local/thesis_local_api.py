@@ -117,8 +117,16 @@ def _mcp_disabled() -> bool:
     )
 
 
+def _is_local_url(topology: HarnessMcpTopology) -> bool:
+    """Return True when the MCP URL points at the loopback harness API."""
+    url = topology.harness_url or ""
+    return "127.0.0.1" in url or "localhost" in url
+
+
 def _mcp_mode(topology: HarnessMcpTopology) -> str:
     """Return a short label for the selected MCP transport."""
+    if _is_local_url(topology):
+        return "local-http"
     if topology.harness_location == "remote":
         return "remote-http"
     return "local-stdio"
@@ -127,14 +135,17 @@ def _mcp_mode(topology: HarnessMcpTopology) -> str:
 def _harness_composition() -> tuple[HarnessBoundary | None, HarnessToolProvider | None]:
     """Open exactly one harness MCP client and derive both consumers from it.
 
-    A single topology-aware client (local stdio MCP or remote ``/mcp`` HTTP) is
-    initialized once with a bounded retry.  The backtest boundary and the chat
-    tool provider are then derived from that same client, so local and remote
-    harnesses expose one identical tool catalog and ``call_tool`` surface.  When
-    MCP is disabled or stays unreachable after retries, the composition falls
-    back to the direct local process boundary (local harness only) and a
+    Local and remote harnesses both use the harness HTTP ``/mcp`` endpoint: the
+    local stack points at the local harness API (default
+    ``http://127.0.0.1:8001``) and remote points at the deployed service, so
+    there is one MCP mechanism and no Windows stdio subprocess path.  A single
+    topology-aware client is initialized once with a bounded retry, and the
+    backtest boundary and chat tool provider are derived from that same client.
+    When MCP is disabled or stays unreachable after retries, the composition
+    falls back to the direct local process boundary (loopback only) and a
     tool-free chat; the error is logged only after retries are exhausted.
     """
+    os.environ.setdefault("HARNESS_MCP_URL", HARNESS_BASE_URL)
     topology = harness_mcp_topology_from_env()
     if _mcp_disabled():
         return LocalHarnessProcess(_real_subprocess_runner), None
@@ -146,7 +157,7 @@ def _harness_composition() -> tuple[HarnessBoundary | None, HarnessToolProvider 
             f"without tools: {error}",
             file=sys.stderr,
         )
-        if topology.harness_location == "local":
+        if _is_local_url(topology) or topology.harness_location == "local":
             return LocalHarnessProcess(_real_subprocess_runner), None
         return None, None
     provider = open_harness_tool_provider(client=composition.client)
