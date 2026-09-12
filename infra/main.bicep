@@ -150,6 +150,21 @@ param thesisMinReplicas int = 0
 @maxValue(4)
 param thesisMaxReplicas int = 2
 
+// The public Thesis SPA host is additive and off by default, so a
+// Thesis-enabled deployment that predates adr-001 remains byte-for-byte
+// unchanged. The Static Web App is composed only when both deployThesis and
+// deployThesisStaticWebApp are true. The linked backend and custom-domain
+// binding are owned by a later task (T301).
+@description('Whether to deploy the public Thesis SvelteKit Static Web App. False leaves the Thesis composition unchanged and keeps only the internal API.')
+param deployThesisStaticWebApp bool = false
+
+@description('Globally unique name of the Thesis Static Web App. Empty derives a deterministic name from the project prefix and resource group so no operator input is required.')
+@maxLength(60)
+param thesisStaticWebAppName string = ''
+
+@description('Operator-owned custom hostname for the public Thesis site. Empty keeps the platform-generated Static Web App hostname; a non-empty value is carried to T301, which binds the hostname and managed certificate.')
+param thesisStaticWebAppCustomDomain string = ''
+
 var normalizedPrefix = toLower(resourceNamePrefix)
 var normalizedEnvironment = toLower(environmentName)
 var namePrefix = '${normalizedPrefix}-${normalizedEnvironment}'
@@ -171,6 +186,10 @@ var cryptoTraderAppName = '${namePrefix}-crypto-trader'
 var backtestJobName = '${namePrefix}-backtest'
 var thesisIdentityName = '${namePrefix}-thesis'
 var thesisApiAppName = '${namePrefix}-thesis-api'
+// Static Web App names are globally unique, so the derived fallback mixes the
+// resource group id through deterministicSuffix instead of relying on the
+// prefix alone. An explicit thesisStaticWebAppName always wins.
+var thesisStaticWebAppResourceName = empty(thesisStaticWebAppName) ? '${shortNamePrefix}-thesis-web-${take(deterministicSuffix, 6)}' : thesisStaticWebAppName
 // A dedicated persistence account for Thesis workspaces: 'thesis' plus the
 // same deterministic suffix keeps the name distinct from the lake account.
 var thesisWorkspacesStorageAccountName = 'thesis${take(deterministicSuffix, 18)}'
@@ -369,6 +388,16 @@ module thesisApi './modules/thesis.bicep' = if (deployThesis) {
   }
 }
 
+module thesisStaticWebApp './modules/static-web-app.bicep' = if (deployThesis && deployThesisStaticWebApp) {
+  name: 'thesis-static-web-app'
+  params: {
+    staticWebAppName: thesisStaticWebAppResourceName
+    location: location
+    tags: tags
+    customDomainName: thesisStaticWebAppCustomDomain
+  }
+}
+
 @description('Non-secret summary of the composed market-lake and quant-harness resources, identity wiring, and additive cost controls.')
 output deploymentSummary object = {
   environment: environmentName
@@ -414,6 +443,8 @@ output deploymentSummary object = {
     identity: deployThesis ? thesisApi.outputs.thesisIdentity : null
     workspaces: deployThesis ? thesisWorkspaces.outputs.isolation : null
     costEnvelope: deployThesis ? thesisApi.outputs.costEnvelope : null
+    staticWebAppEnabled: deployThesis && deployThesisStaticWebApp
+    staticWebApp: (deployThesis && deployThesisStaticWebApp) ? thesisStaticWebApp.outputs.staticWebApp : null
     image: {
       reference: thesisImageReference
       pinnedByDigest: contains(thesisImageReference, '@sha256:')

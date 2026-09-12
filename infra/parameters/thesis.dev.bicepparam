@@ -52,6 +52,15 @@ param thesisContainerCpu = '0.25'
 param thesisContainerMemory = '0.5Gi'
 param thesisMinReplicas = 0
 param thesisMaxReplicas = 2
+// The public SvelteKit SPA host is enabled in dev. The linked backend and
+// custom-domain binding are added by a later task (T301).
+param deployThesisStaticWebApp = true
+// Empty derives a deterministic globally unique Static Web App name from the
+// resource group, so no operator input is required.
+param thesisStaticWebAppName = ''
+// Empty keeps the generated azurestaticapps.net hostname until T301 binds an
+// operator-owned custom domain.
+param thesisStaticWebAppCustomDomain = ''
 // Seed registry matching config/thesis/workspace.yaml; the runbook seeds the
 // matching workspaces table row after deployment.
 param thesisWorkspaceRegistry = [
