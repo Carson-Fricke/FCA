@@ -31,6 +31,7 @@ import type {
 	ConsentProposal,
 	DeploymentCard,
 	ExecutionEvent,
+	ExecutionNodeRef,
 	HarnessArtifactManifest,
 	HarnessJobResult,
 	HarnessJobStatus,
@@ -45,6 +46,7 @@ import type {
 	StatusSurface,
 	Strategy,
 	StrategyStatus,
+	SubAgentNode,
 	ValidationRecord,
 	WidgetDefinition,
 	WorkflowExecutionRecord,
@@ -666,6 +668,130 @@ export function replayExecutionEvents(
 	return apiFetch<{ items: ExecutionEvent[] }>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}/events?after_cursor=${afterCursor}`
 	).then((r) => r.items);
+}
+
+// ---------------------------------------------------------------------------
+// Nested sub-agent nodes: REST tree, node events, and node messages.
+//
+// Contract (backend in parallel): a workspace execution exposes its
+// sub-agents at `…/executions/{exec}/sub_agents`, nested under their parent
+// at `…/sub_agents/{a}/sub_agents`. Node events are read at
+// `{node}/events?after_cursor=&include_descendants=` (own by default) and
+// streamed at `{node}/events/stream`. Messages post to `{node}/messages`,
+// and only when the node declares `accepts_input`.
+// ---------------------------------------------------------------------------
+
+/** The base path for an execution or one of its sub-agent nodes. */
+export function executionNodeBase(
+	workspaceId: string,
+	executionId: string,
+	node?: ExecutionNodeRef | null
+): string {
+	const exec = `/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}`;
+	if (!node || node.kind === 'execution') return exec;
+	return `${exec}/sub_agents/${encodeURIComponent(node.id)}`;
+}
+
+/**
+ * List one execution node's direct sub-agents. Omit `parentSubAgentId` for
+ * the root execution's children; provide it to read a nested node's children.
+ */
+export function listExecutionSubAgents(
+	workspaceId: string,
+	executionId: string,
+	options: { parentSubAgentId?: string | null } = {}
+): Promise<SubAgentNode[]> {
+	const parent = options.parentSubAgentId
+		? ({ kind: 'sub_agent', id: options.parentSubAgentId } as ExecutionNodeRef)
+		: null;
+	if (fixtureMode) return wait(5).then(() => []);
+	return apiFetch<{ items: SubAgentNode[] }>(
+		`${executionNodeBase(workspaceId, executionId, parent)}/sub_agents`
+	).then((r) => r.items);
+}
+
+/** Read one page of an execution node's durable events. */
+export function listNodeEvents(
+	workspaceId: string,
+	executionId: string,
+	node: ExecutionNodeRef,
+	options: { afterCursor?: number; includeDescendants?: boolean } = {}
+): Promise<ExecutionEvent[]> {
+	const afterCursor = options.afterCursor ?? 0;
+	const descendants = options.includeDescendants ? '&include_descendants=true' : '';
+	const path = `${executionNodeBase(workspaceId, executionId, node)}/events?after_cursor=${afterCursor}${descendants}`;
+	if (fixtureMode) {
+		return wait(5).then(() => {
+			const doc = fixtures.executionEvents[executionId];
+			const items = doc ? doc.items : [];
+			return plain(items).filter((e) => e.cursor > afterCursor);
+		});
+	}
+	return apiFetch<{ items: ExecutionEvent[] }>(path).then((r) => r.items);
+}
+
+export interface PostNodeMessageInput {
+	body: string;
+	actorId?: string;
+	/** Structured payload for gate resolutions and other control messages. */
+	metadata?: Record<string, unknown>;
+}
+
+/**
+ * Post a message to an execution node. The caller must only invoke this when
+ * the node's `acceptsInput` is true; the backend rejects input to a node that
+ * does not accept it.
+ */
+export function postNodeMessage(
+	workspaceId: string,
+	executionId: string,
+	node: ExecutionNodeRef,
+	input: PostNodeMessageInput
+): Promise<ChatMessage> {
+	const path = `${executionNodeBase(workspaceId, executionId, node)}/messages`;
+	if (fixtureMode) {
+		return wait(10).then(() => ({
+			message_id: `msg-node-${store.nextId++}`,
+			chat_id: '',
+			workspace_id: workspaceId,
+			actor_id: input.actorId ?? localActorId,
+			role: 'user',
+			body: input.body,
+			state: 'accepted',
+			attachment_ids: [],
+			created_at: new Date().toISOString(),
+			updated_at: null,
+			execution_id: executionId,
+			intent_epoch: 0
+		}));
+	}
+	return apiFetch<ChatMessage>(path, {
+		method: 'POST',
+		body: JSON.stringify({
+			actor_id: input.actorId ?? localActorId,
+			body: input.body,
+			metadata: input.metadata ?? {}
+		})
+	});
+}
+
+/** Fetch one workflow execution record by its execution id. */
+export function getWorkflowExecution(
+	workspaceId: string,
+	executionId: string
+): Promise<WorkflowExecutionRecord | null> {
+	if (fixtureMode) {
+		return wait(5).then(() => {
+			const found = Object.values(fixtures.executions).find(
+				(record) => record.execution_id === executionId
+			);
+			return found ? plain(found) : null;
+		});
+	}
+	return apiFetchOptional<WorkflowExecutionRecord | null>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}`,
+		null
+	);
 }
 
 export function listStrategies(workspaceId: string): Promise<Strategy[]> {
