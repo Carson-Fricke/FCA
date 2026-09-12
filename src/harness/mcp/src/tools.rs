@@ -2,7 +2,7 @@
 //!
 //! The registry mirrors the Python `harness.mcp.tools` surface exactly:
 //! `run_backtest`, `get_backtest_status`, `get_run`, `list_artifacts`,
-//! `run_sweep`, and the capability-gated `launch_trader`. Every boundary is
+//! `read_artifact`, `run_sweep`, and the capability-gated `launch_trader`. Every boundary is
 //! injected; the server composes no subprocess or HTTP client itself, and
 //! serialized settings never contain a token value.
 
@@ -24,6 +24,8 @@ pub const TOOL_BACKTEST_STATUS: &str = "get_backtest_status";
 pub const TOOL_GET_RUN: &str = "get_run";
 /// Tool name for artifact listing.
 pub const TOOL_LIST_ARTIFACTS: &str = "list_artifacts";
+/// Tool name for artifact content reads.
+pub const TOOL_READ_ARTIFACT: &str = "read_artifact";
 /// Tool name for the local sweep runner.
 pub const TOOL_RUN_SWEEP: &str = "run_sweep";
 /// Tool name for the capability-gated trader launch.
@@ -606,6 +608,28 @@ impl HarnessTools {
         self.remote_get(&url, &format!("backtest run '{run_id}' does not exist"))
     }
 
+    /// Read one stored run artifact's contents as text or hex-encoded bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolExecutionError`] when the run or artifact does not exist,
+    /// or when a remote read is requested on a transport that cannot return raw
+    /// artifact bytes.
+    pub fn read_artifact(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
+        let run_id = identifier_argument(arguments, "run_id")?;
+        let name = text_argument(arguments, "name")?;
+        if self.context.mode == Boundary::Local {
+            return self.local_artifact(&run_id, &name);
+        }
+        Err(ToolExecutionError::new(
+            "remote artifact reads require the artifact HTTP route; the configured remote \
+             transport returns decoded JSON only",
+        ))
+    }
+
     /// Expand and submit one sweep through the injected local runner.
     ///
     /// # Errors
@@ -677,6 +701,35 @@ impl HarnessTools {
             })
             .collect();
         Ok(json!({"run_id": stored.record.run_id, "artifacts": artifacts}))
+    }
+
+    fn local_artifact(&self, run_id: &str, name: &str) -> Result<Value, ToolExecutionError> {
+        let store = self.context.run_store.as_ref().ok_or_else(|| {
+            ToolExecutionError::new("local runs require a durable results store in this MCP server")
+        })?;
+        let stored = store.fetch(run_id).ok_or_else(|| {
+            ToolExecutionError::new(format!("backtest run '{run_id}' does not exist"))
+        })?;
+        let payload = stored.artifacts.get(name).ok_or_else(|| {
+            ToolExecutionError::new(format!(
+                "artifact '{name}' does not exist for run '{run_id}'"
+            ))
+        })?;
+        let document = match std::str::from_utf8(payload) {
+            Ok(content) => json!({
+                "run_id": run_id,
+                "name": name,
+                "encoding": "utf-8",
+                "content": content,
+            }),
+            Err(_) => json!({
+                "run_id": run_id,
+                "name": name,
+                "encoding": "hex",
+                "content": hex::encode(payload),
+            }),
+        };
+        Ok(document)
     }
 
     fn invoke_process(&self, tail: &[String], process: &str) -> Result<Value, ToolExecutionError> {
@@ -960,6 +1013,27 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             }),
             "artifacts",
             move |arguments| list_handler.list_artifacts(arguments),
+        ));
+        let read_handler = tools.clone();
+        candidates.push(Tool::new(
+            TOOL_READ_ARTIFACT,
+            "Read one stored run artifact's contents as utf-8 text or hex-encoded bytes \
+             {run_id, name, encoding, content}.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["run_id", "name"],
+                "properties": {
+                    "run_id": {"type": "string", "minLength": 1},
+                    "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Artifact name relative to the run, e.g. metrics.json or artifacts/equity.parquet."
+                    }
+                }
+            }),
+            "artifacts",
+            move |arguments| read_handler.read_artifact(arguments),
         ));
     }
     if capabilities.sweeps {

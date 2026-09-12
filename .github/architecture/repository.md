@@ -262,8 +262,10 @@ Git publication; `thesis.auth` binds operator sessions to workspaces;
 workflow boundary; `thesis.agent` owns policy-driven model context and
 provenance; `thesis.integrations` owns lake and harness adapters;
 `thesis.strategies` owns content-addressed strategy bundles; `thesis.artifacts`
-owns reproducibility-critical result imports; and `thesis.providers` keeps model
-credentials behind backend-only protocols.
+owns reproducibility-critical result imports; `thesis.backtests` imports
+completed harness runs into workspace backtest records (equity, trades, stats)
+linked to the originating chat and workflow execution; and `thesis.providers`
+keeps model credentials behind backend-only protocols.
 Workspace identity remains `.thesis/workspace.yaml`; publication state is
 written separately to `.thesis/publication.json`.
 

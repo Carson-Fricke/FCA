@@ -376,6 +376,7 @@
 			<div class="min-h-0 flex-1 overflow-y-auto p-4" data-testid="transcript-scroll">
 				<ChatTranscript
 					{messages}
+					{workspaceId}
 					{percolations}
 					{proposal}
 					onConfirmConsent={confirmProposal}

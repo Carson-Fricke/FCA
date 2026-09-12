@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from secrets import compare_digest
 from typing import TYPE_CHECKING, Annotated
 
@@ -25,10 +25,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWK, PyJWKClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from thesis.agent.harness_tools import HarnessToolProvider
+from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.agent.reply import reply_provider_for
 from thesis.chat import ChatService
-from thesis.chat.responder import ChatReplyService
+from thesis.chat.responder import ChatReplyService, ToolResultChunk, ToolResultObserver
 from thesis.chat.streaming import InMemoryChatStreamBroker
 from thesis.http.backtests import create_backtest_router
 from thesis.http.chat import create_chat_router
@@ -54,6 +54,7 @@ from thesis.providers.openrouter import OpenRouterProvider
 from thesis.screening.service import ScreenerService
 
 if TYPE_CHECKING:
+    from thesis.backtests import BacktestRunCoordinator
     from thesis.workflows.runtime import WorkflowRuntime
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -204,6 +205,39 @@ def _configured_token(bearer_token: str | None) -> str | None:
     return token
 
 
+def _backtest_tool_observer(
+    coordinator: BacktestRunCoordinator,
+) -> ToolResultObserver:
+    """Build the tool-result observer that imports finished harness runs."""
+
+    def observe(
+        workspace_id: str,
+        chat_id: str,
+        execution_id: str | None,
+        chunk: ToolResultChunk,
+    ) -> ToolResultChunk:
+        if chunk.tool not in ("run_backtest", "get_run") or not chunk.ok:
+            return chunk
+        result = HarnessToolResult(
+            tool=chunk.tool,
+            ok=chunk.ok,
+            structured=dict(chunk.structured),
+            text=chunk.text,
+            failure=None,
+        )
+        enrichment = coordinator.handle_tool_result(
+            workspace_id,
+            result,
+            chat_id=chat_id,
+            execution_id=execution_id,
+        )
+        if not enrichment:
+            return chunk
+        return replace(chunk, structured={**dict(chunk.structured), **enrichment})
+
+    return observe
+
+
 def _error_response(
     status_code: int,
     code: str,
@@ -284,6 +318,19 @@ def create_app(
             422: {"description": "validation error"},
         },
     )
+    backtest_coordinator: BacktestRunCoordinator | None = None
+    if harness_tool_provider is not None and workspace_data is not None:
+        from thesis.backtests import BacktestRunCoordinator
+
+        backtest_coordinator = BacktestRunCoordinator(
+            workspace_data.backtests, harness_tool_provider
+        )
+        application.state.backtest_run_coordinator = backtest_coordinator
+    tool_result_observer = (
+        _backtest_tool_observer(backtest_coordinator)
+        if backtest_coordinator is not None
+        else None
+    )
     if chat_service is not None:
         application.state.chat_service = chat_service
     if chat_stream_broker is not None:
@@ -292,6 +339,11 @@ def create_app(
         application.state.chat_reply_service = chat_reply_service
         if workflow_runtime is not None and chat_reply_service.workflow_runtime is None:
             chat_reply_service.workflow_runtime = workflow_runtime
+        if (
+            tool_result_observer is not None
+            and chat_reply_service.tool_result_observer is None
+        ):
+            chat_reply_service.tool_result_observer = tool_result_observer
     if chat_reply_service is None and model_provider is not None:
         resolved_chat_service = chat_service
         if resolved_chat_service is None:
@@ -307,6 +359,7 @@ def create_app(
             provider=reply_provider_for(model_provider, harness_tool_provider),
             workflow_runtime=workflow_runtime,
             development_runtime=workflow_runtime,
+            tool_result_observer=tool_result_observer,
         )
     if workspace_data is not None:
         application.state.workspace_service = workspace_data.workspaces

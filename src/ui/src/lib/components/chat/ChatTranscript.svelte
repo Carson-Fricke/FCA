@@ -20,6 +20,7 @@
 	 */
 	let {
 		messages,
+		workspaceId,
 		percolations = {},
 		proposal = null,
 		onConfirmConsent,
@@ -41,7 +42,7 @@
 			>
 				<div class="w-full">
 					{#if message.tool_result}
-						<ToolResultCard result={message.tool_result} />
+						<ToolResultCard result={message.tool_result} {workspaceId} />
 					{:else}
 						<p class="text-sm whitespace-pre-wrap text-slate-800">{message.body}</p>
 					{/if}

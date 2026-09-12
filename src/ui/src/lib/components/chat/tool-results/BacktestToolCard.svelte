@@ -1,22 +1,152 @@
 <script lang="ts">
-	import type { ToolResult } from '$lib/types';
+	import BacktestReport from '$lib/components/backtest-view/BacktestReport.svelte';
+	import { getBacktest, materializeBacktestRun } from '$lib/api';
+	import type { BacktestDetail, ToolResult } from '$lib/types';
 	import { formatValue, isRecord, readNumber, readRecord, readString } from './safe';
 
-	let { result }: { result: ToolResult } = $props();
+	let { result, workspaceId }: { result: ToolResult; workspaceId: string } = $props();
 
 	const data = $derived(isRecord(result.structured) ? result.structured : {});
 	const boundary = $derived(readString(data, 'boundary'));
 	const runId = $derived(readString(data, 'run_id'));
 	const jobId = $derived(readString(data, 'job_id'));
-	const state = $derived(readString(data, 'state'));
+	const runState = $derived(readString(data, 'state'));
 	const status = $derived(readString(data, 'status'));
 	const location = $derived(readString(data, 'location'));
 	const exitCode = $derived(readNumber(data, 'exit_code'));
 	const metrics = $derived(readRecord(data, 'metrics'));
 	const metricRows = $derived(Object.entries(metrics));
+	const backtestId = $derived(readString(data, 'backtest_id'));
+	const chatId = $derived(readString(data, 'chat_id'));
+	const executionId = $derived(readString(data, 'execution_id'));
 
-	const identifier = $derived(runId ?? jobId ?? status ?? state);
-	const statusText = $derived(state ?? status);
+	const identifier = $derived(runId ?? jobId ?? status ?? runState);
+	const statusText = $derived(runState ?? status);
+	const normalizedState = $derived((runState ?? status ?? '').toLowerCase());
+	const isActive = $derived(normalizedState === 'running' || normalizedState === 'queued');
+	const isFailed = $derived(
+		normalizedState === 'failed' || normalizedState === 'error' || normalizedState === 'cancelled'
+	);
+
+	let detail = $state<BacktestDetail | null>(null);
+	let loading = $state(false);
+	let loadError = $state('');
+
+	const MATERIALIZE_MAX_ATTEMPTS = 40;
+	const MATERIALIZE_INTERVAL_MS = 3000;
+
+	$effect(() => {
+		const ws = workspaceId;
+		const id = backtestId;
+		const run = runId;
+		const chat = chatId;
+		const execution = executionId;
+		if (!ws || (!id && !run)) {
+			detail = null;
+			loading = false;
+			loadError = '';
+			return;
+		}
+		let cancelled = false;
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		let attempts = 0;
+		loading = true;
+		loadError = '';
+		detail = null;
+
+		async function loadById(backtestIdValue: string): Promise<void> {
+			const next = await getBacktest(ws, backtestIdValue);
+			if (cancelled) return;
+			detail = next;
+			loading = false;
+		}
+
+		async function resolve(): Promise<void> {
+			try {
+				if (id) {
+					await loadById(id);
+					return;
+				}
+				const card = await materializeBacktestRun(ws, run as string, {
+					chatId: chat,
+					executionId: execution
+				});
+				if (cancelled) return;
+				if (card.status === 'complete') {
+					if (card.backtest_id) {
+						await loadById(card.backtest_id);
+					} else if (card.backtest) {
+						detail = card.backtest;
+						loading = false;
+					} else {
+						loading = false;
+					}
+					return;
+				}
+				if (card.status === 'failed') {
+					loadError = card.error ?? 'Backtest failed before a report was produced.';
+					loading = false;
+					return;
+				}
+				attempts += 1;
+				if (attempts >= MATERIALIZE_MAX_ATTEMPTS) {
+					loadError = 'Backtest is still running. Reopen the conversation to refresh.';
+					loading = false;
+					return;
+				}
+				timer = setTimeout(() => void resolve(), MATERIALIZE_INTERVAL_MS);
+			} catch (error: unknown) {
+				if (cancelled) return;
+				loadError = error instanceof Error ? error.message : 'Failed to load backtest';
+				loading = false;
+			}
+		}
+
+		void resolve();
+		return () => {
+			cancelled = true;
+			if (timer) clearTimeout(timer);
+		};
+	});
+
+	/**
+	 * BacktestReport reads camelCase keys. The backend may publish snake_case,
+	 * so carry every original key through and add the camelCase aliases the
+	 * report understands.
+	 */
+	function normalizeStats(stats: Record<string, number>): Record<string, number> {
+		const out: Record<string, number> = { ...stats };
+		const aliases: Record<string, string> = {
+			max_drawdown: 'maxDrawdown',
+			win_rate: 'hitRate',
+			total_return: 'totalReturn',
+			total_pnl: 'totalPnl',
+			profit_factor: 'profitFactor',
+			trade_count: 'tradeCount',
+			win_count: 'winCount',
+			loss_count: 'lossCount'
+		};
+		for (const [snake, camel] of Object.entries(aliases)) {
+			if (stats[snake] !== undefined && out[camel] === undefined) out[camel] = stats[snake];
+		}
+		return out;
+	}
+
+	const report = $derived.by(() => {
+		const current = detail;
+		if (!current) return null;
+		return {
+			title: current.name,
+			equity: current.equity ?? [],
+			trades: current.trades ?? [],
+			stats: normalizeStats(current.stats ?? {}),
+			instruments: []
+		};
+	});
+
+	const failureMessage = $derived(
+		result.failure?.message || result.summary || 'Backtest failed before a report was produced.'
+	);
 </script>
 
 <div class="space-y-2" data-testid="backtest-tool-card">
@@ -43,5 +173,46 @@
 				{/each}
 			</div>
 		</div>
+	{/if}
+
+	{#if backtestId || runId}
+		{#if loading}
+			<p
+				class="flex items-center gap-2 text-xs text-slate-500"
+				data-testid="backtest-tool-loading"
+			>
+				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden="true"></span>
+				{isActive ? (statusText ?? 'running') : 'loading report…'}
+			</p>
+		{:else if loadError}
+			<p
+				class="rounded border border-loss/30 bg-loss/10 px-2 py-1 text-xs text-loss"
+				data-testid="backtest-tool-error"
+			>
+				{loadError}
+			</p>
+		{:else if report}
+			<div
+				class="overflow-hidden rounded-lg border border-surface-700 bg-surface-900/40 p-2"
+				data-testid="backtest-tool-report"
+			>
+				<BacktestReport report={report} height={260} previewHeight={140} defaultExpanded={false} />
+			</div>
+		{/if}
+	{:else if isActive}
+		<p
+			class="flex items-center gap-2 text-xs text-slate-500"
+			data-testid="backtest-tool-running"
+		>
+			<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" aria-hidden="true"></span>
+			{statusText ?? 'running'}
+		</p>
+	{:else if isFailed}
+		<p
+			class="rounded border border-loss/30 bg-loss/10 px-2 py-1 text-xs text-loss"
+			data-testid="backtest-tool-failed"
+		>
+			{failureMessage}
+		</p>
 	{/if}
 </div>

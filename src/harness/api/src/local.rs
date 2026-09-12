@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
 use backtest::backtest::config::BacktestConfig;
@@ -55,49 +55,168 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
                 .join("harness-mcp-backtests")
                 .join(&run_id)
         });
-        let run =
-            host::backtest::run_backtest_config(&configuration, Some(output_dir.as_path()), None);
-        let (outcome, artifact_path) = match run {
-            Ok(result) => result,
-            Err(error) => {
-                let mut job =
-                    mcp::store::JobRecord::new(&run_id, JobState::Failed, started, Utc::now());
-                job.error_message = Some(error.to_string());
-                self.jobs.upsert(job);
-                return Err(error.to_string());
-            }
-        };
-        let mut record = RunCatalogRecord::new(
-            &run_id,
-            run_status(outcome.completed()),
-            strategy_id(&configuration),
-        );
-        record.configuration_digest = Some(configuration.configuration_hash());
-        let mut artifacts = BTreeMap::new();
-        artifacts.insert(
-            "backtest.json".to_string(),
-            outcome.artifact_json().into_bytes(),
-        );
-        self.run_store
-            .put(record, artifacts)
-            .map_err(|error| error.to_string())?;
-        let mut job = mcp::store::JobRecord::new(
-            &run_id,
-            job_state(outcome.completed()),
-            started,
-            Utc::now(),
-        );
-        job.error_message = outcome.reason.clone();
-        self.jobs.upsert(job);
+        let run_store = self.run_store.clone();
+        let jobs = self.jobs.clone();
+        let config_path = config_path.to_string();
+        let background_run_id = run_id.clone();
+        let _handle = std::thread::spawn(move || {
+            run_background_backtest(
+                run_store,
+                jobs,
+                background_run_id,
+                config_path,
+                output_dir,
+                started,
+            );
+        });
         Ok(json!({
             "boundary": "local",
             "run_id": run_id,
-            "status": outcome.status.value(),
-            "manifest_hash": outcome.manifest.manifest_hash(),
-            "artifact_digest": outcome.artifact_digest(),
-            "fills": outcome.fills.len(),
-            "artifact_path": artifact_path.display().to_string(),
+            "state": "running",
         }))
+    }
+}
+
+/// Run one backtest on a detached worker and persist its complete result set.
+///
+/// Every file the native engine writes under `output_dir` is registered with the
+/// run store keyed by its `/`-separated relative path, so `list_artifacts` and
+/// `read_artifact` observe `backtest.json`, `metrics.json`, `report.html`, and
+/// the recorded Parquet trail rather than only the canonical manifest.
+fn run_background_backtest(
+    run_store: Arc<dyn RunStore>,
+    jobs: Arc<dyn JobRepository>,
+    run_id: String,
+    config_path: String,
+    output_dir: PathBuf,
+    started: DateTime<Utc>,
+) {
+    let configuration = match backtest::backtest::job::load_backtest_config(Path::new(&config_path))
+    {
+        Ok(configuration) => configuration,
+        Err(error) => {
+            let message = error.to_string();
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert(
+                "error.json".to_string(),
+                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+            );
+            let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "");
+            let _ = run_store.put(record, artifacts);
+            fail_job(&jobs, &run_id, started, message);
+            return;
+        }
+    };
+    match host::backtest::run_backtest_config(&configuration, Some(output_dir.as_path()), None) {
+        Ok((outcome, _artifact_path)) => {
+            let mut artifacts = BTreeMap::new();
+            collect_artifacts(&output_dir, &output_dir, &mut artifacts);
+            if artifacts.is_empty() {
+                artifacts.insert(
+                    "backtest.json".to_string(),
+                    outcome.artifact_json().into_bytes(),
+                );
+            }
+            let mut record = RunCatalogRecord::new(
+                &run_id,
+                run_status(outcome.completed()),
+                strategy_id(&configuration),
+            );
+            record.configuration_digest = Some(configuration.configuration_hash());
+            record.metrics = headline_metrics(&artifacts, &configuration);
+            if let Err(error) = run_store.put(record, artifacts) {
+                fail_job(&jobs, &run_id, started, error.to_string());
+                return;
+            }
+            let mut job = mcp::store::JobRecord::new(
+                &run_id,
+                job_state(outcome.completed()),
+                started,
+                Utc::now(),
+            );
+            job.error_message = outcome.reason.clone();
+            jobs.upsert(job);
+        }
+        Err(error) => {
+            let message = error.to_string();
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert(
+                "error.json".to_string(),
+                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+            );
+            let mut record =
+                RunCatalogRecord::new(&run_id, RunStatus::Failed, strategy_id(&configuration));
+            record.configuration_digest = Some(configuration.configuration_hash());
+            let _ = run_store.put(record, artifacts);
+            fail_job(&jobs, &run_id, started, message);
+        }
+    }
+}
+
+fn fail_job(jobs: &Arc<dyn JobRepository>, run_id: &str, started: DateTime<Utc>, message: String) {
+    let mut job = mcp::store::JobRecord::new(run_id, JobState::Failed, started, Utc::now());
+    job.error_message = Some(message);
+    jobs.upsert(job);
+}
+
+/// Read every file under `directory` into `output` keyed by relative path.
+fn collect_artifacts(base: &Path, directory: &Path, output: &mut BTreeMap<String, Vec<u8>>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect();
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            collect_artifacts(base, &path, output);
+        } else if let Ok(payload) = fs::read(&path) {
+            if let Ok(relative) = path.strip_prefix(base) {
+                output.insert(relative.to_string_lossy().replace('\\', "/"), payload);
+            }
+        }
+    }
+}
+
+/// Extract the headline `metrics.json` fields into the catalog row.
+fn headline_metrics(
+    artifacts: &BTreeMap<String, Vec<u8>>,
+    configuration: &BacktestConfig,
+) -> BTreeMap<String, String> {
+    let mut metrics = BTreeMap::new();
+    metrics.insert("strategy_id".to_string(), strategy_id(configuration));
+    let Some(payload) = artifacts.get("metrics.json") else {
+        return metrics;
+    };
+    let Ok(document) = serde_json::from_slice::<Value>(payload) else {
+        return metrics;
+    };
+    let equity = document.get("equity");
+    let execution = document.get("execution");
+    for (key, section) in [
+        ("total_return", equity),
+        ("max_drawdown", equity),
+        ("cagr", equity),
+        ("fill_count", execution),
+        ("fees_total", execution),
+    ] {
+        if let Some(value) = section.and_then(|section| section.get(key)) {
+            if let Some(text) = scalar_string(value) {
+                metrics.insert(key.to_string(), text);
+            }
+        }
+    }
+    metrics
+}
+
+fn scalar_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
     }
 }
 

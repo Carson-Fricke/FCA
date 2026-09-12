@@ -2,7 +2,7 @@
 	import type { ToolResult } from '$lib/types';
 	import { isRecord, readArray, readNumber, readString } from './safe';
 
-	let { result }: { result: ToolResult } = $props();
+	let { result }: { result: ToolResult; workspaceId: string } = $props();
 
 	const data = $derived(isRecord(result.structured) ? result.structured : {});
 	const sweepId = $derived(readString(data, 'sweep_id'));

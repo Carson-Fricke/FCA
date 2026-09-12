@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Protocol
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from thesis.artifacts.importer import (
@@ -68,6 +68,9 @@ class BacktestRecord:
     status: str = "completed"
     bundle_ref: str | None = None
     config_path: str | None = None
+    run_id: str | None = None
+    chat_id: str | None = None
+    execution_id: str | None = None
 
     @property
     def split_declared(self) -> bool:
@@ -90,6 +93,9 @@ class BacktestRecord:
             "trades": self.trades,
             "split_declared": self.split is not None,
             "created_at": self.created_at,
+            "run_id": self.run_id,
+            "chat_id": self.chat_id,
+            "execution_id": self.execution_id,
         }
 
     def _stats_document(self) -> dict[str, object]:
@@ -118,6 +124,9 @@ class BacktestRecord:
             "status": self.status,
             "bundle_ref": self.bundle_ref,
             "config_path": self.config_path,
+            "run_id": self.run_id,
+            "chat_id": self.chat_id,
+            "execution_id": self.execution_id,
         }
 
     def _default_stats(self) -> dict[str, float]:
@@ -490,6 +499,36 @@ def create_backtest_router() -> APIRouter:
         service: Annotated[BacktestDataService, Depends(get_backtest_service)],
     ) -> dict[str, object]:
         return {"items": list(service.list_backtests(workspace_id))}
+
+    @router.get("/backtests/runs/{run_id}")
+    async def materialize_backtest_run(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        run_id: Annotated[str, Path(min_length=1, max_length=128)],
+        request: Request,
+        chat_id: Annotated[str | None, Query(max_length=128)] = None,
+        execution_id: Annotated[str | None, Query(max_length=128)] = None,
+    ) -> dict[str, object]:
+        """Materialize one harness run into workspace card data.
+
+        The UI calls this once the harness MCP tool returns a run id.  The
+        harness boundary (local or remote) is owned here, so the same call
+        yields the report for local and Azure execution.
+        """
+        coordinator = getattr(request.app.state, "backtest_run_coordinator", None)
+        if coordinator is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "backtest_coordinator_unavailable",
+                    "message": "the backtest run coordinator is not composed",
+                },
+            )
+        try:
+            return coordinator.materialize(
+                workspace_id, run_id, chat_id=chat_id, execution_id=execution_id
+            )
+        except Exception as error:
+            raise _service_error(error) from error
 
     @router.get("/backtests/{backtest_id}")
     async def get_backtest(

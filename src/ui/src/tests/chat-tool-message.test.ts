@@ -52,7 +52,12 @@ describe('ChatTranscript tool-result placement', () => {
 		];
 
 		const { container } = render(ChatTranscript, {
-			props: { messages, onConfirmConsent: vi.fn(), onRejectConsent: vi.fn() }
+			props: {
+				messages,
+				workspaceId: 'w1',
+				onConfirmConsent: vi.fn(),
+				onRejectConsent: vi.fn()
+			}
 		});
 		await tick();
 

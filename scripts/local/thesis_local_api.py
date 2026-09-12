@@ -292,6 +292,7 @@ chat_stream_broker = InMemoryChatStreamBroker()
 # a durable message surface with no reply, rather than failing every send.
 reply_service = None
 workflow_runtime = None
+harness_tools = None
 if os.environ.get("OPENROUTER_API_KEY"):
     model_name = os.environ.get("THESIS_MODEL", "openai/gpt-4o-mini")
     provider_profile = OpenRouterProfile(
@@ -320,6 +321,7 @@ app = create_app(
     chat_stream_broker=chat_stream_broker,
     chat_reply_service=reply_service,
     workflow_runtime=workflow_runtime,
+    harness_tool_provider=harness_tools,
 )
 app.add_middleware(
     CORSMiddleware,

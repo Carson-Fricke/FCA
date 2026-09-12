@@ -2,7 +2,7 @@
 	import type { ToolResult } from '$lib/types';
 	import { isRecord, prettyJson } from './safe';
 
-	let { result }: { result: ToolResult } = $props();
+	let { result }: { result: ToolResult; workspaceId: string } = $props();
 
 	const structured = $derived(isRecord(result.structured) ? result.structured : {});
 	const structuredJson = $derived(prettyJson(structured));

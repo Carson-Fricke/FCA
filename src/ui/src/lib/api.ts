@@ -23,6 +23,7 @@ import type {
 	BackendKind,
 	BacktestDetail,
 	BacktestLaunchResult,
+	BacktestRunCard,
 	BacktestSummaryRow,
 	Capabilities,
 	ChatMessage,
@@ -802,6 +803,34 @@ export function getBacktest(workspaceId: string, backtestId: string): Promise<Ba
 	return apiFetch<BacktestDetail>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/${encodeURIComponent(backtestId)}`
 	);
+}
+
+/**
+ * Materialize one harness run into workspace card data.
+ *
+ * Called once the harness MCP tool returns a run id. Thesis owns the harness
+ * boundary, so the same call yields the report for local and Azure execution.
+ */
+export function materializeBacktestRun(
+	workspaceId: string,
+	runId: string,
+	options: { chatId?: string | null; executionId?: string | null } = {}
+): Promise<BacktestRunCard> {
+	const params = new URLSearchParams();
+	if (options.chatId) params.set('chat_id', options.chatId);
+	if (options.executionId) params.set('execution_id', options.executionId);
+	const query = params.toString();
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/runs/${encodeURIComponent(runId)}${query ? `?${query}` : ''}`;
+	if (fixtureMode) {
+		return wait(10).then(() => ({
+			status: 'complete' as const,
+			run_id: runId,
+			state: 'completed',
+			backtest_id: null,
+			backtest: null
+		}));
+	}
+	return apiFetch<BacktestRunCard>(path);
 }
 
 /**

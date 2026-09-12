@@ -76,6 +76,7 @@ TOOL_RUN_BACKTEST = "run_backtest"
 TOOL_GET_BACKTEST_STATUS = "get_backtest_status"
 TOOL_GET_RUN = "get_run"
 TOOL_LIST_ARTIFACTS = "list_artifacts"
+TOOL_READ_ARTIFACT = "read_artifact"
 TOOL_RUN_SWEEP = "run_sweep"
 TOOL_LAUNCH_TRADER = "launch_trader"
 
@@ -480,6 +481,10 @@ class HarnessMcpClient:
     def list_artifacts(self, *, run_id: str) -> McpToolResult:
         """Call the ``list_artifacts`` tool."""
         return self.call_tool(TOOL_LIST_ARTIFACTS, {"run_id": run_id})
+
+    def read_artifact(self, *, run_id: str, name: str) -> McpToolResult:
+        """Call the ``read_artifact`` tool."""
+        return self.call_tool(TOOL_READ_ARTIFACT, {"run_id": run_id, "name": name})
 
     def run_sweep(self, *, spec_path: str) -> McpToolResult:
         """Call the ``run_sweep`` tool."""
@@ -887,6 +892,7 @@ __all__ = [
     "TOOL_GET_RUN",
     "TOOL_LAUNCH_TRADER",
     "TOOL_LIST_ARTIFACTS",
+    "TOOL_READ_ARTIFACT",
     "TOOL_RUN_BACKTEST",
     "TOOL_RUN_SWEEP",
     "EnvironmentHarnessTokenSource",

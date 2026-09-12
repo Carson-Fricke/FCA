@@ -230,6 +230,16 @@ export interface ToolResult {
 	failure: ToolResultFailure | null;
 }
 
+/** Response from the Thesis backtest-run materialization endpoint. */
+export interface BacktestRunCard {
+	status: 'pending' | 'complete' | 'failed';
+	run_id: string;
+	state?: string | null;
+	backtest_id?: string | null;
+	backtest?: BacktestDetail | null;
+	error?: string | null;
+}
+
 // ---------- Workspace product records ----------
 
 export type StrategyStatus = 'live' | 'paper' | 'paused' | 'draft';
@@ -339,6 +349,9 @@ export interface BacktestSummaryRow {
 	trades: number;
 	split_declared: boolean;
 	created_at: string;
+	run_id?: string | null;
+	chat_id?: string | null;
+	execution_id?: string | null;
 }
 
 export interface BacktestDetail {
@@ -370,6 +383,9 @@ export interface BacktestDetail {
 	 * name/size/digest from this list and never fabricates entries.
 	 */
 	artifacts?: ArtifactEntry[];
+	run_id?: string | null;
+	chat_id?: string | null;
+	execution_id?: string | null;
 }
 
 /**

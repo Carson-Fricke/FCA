@@ -145,7 +145,7 @@
 </script>
 
 <aside
-	class="flex w-80 shrink-0 flex-col border-l border-surface-700 bg-surface-900"
+	class="flex h-full w-full min-w-0 flex-col bg-surface-900"
 	data-testid="copilot-panel"
 >
 	<div class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
@@ -204,7 +204,7 @@
 
 	{#if historyOpen}
 		<div
-			class="absolute top-14 right-0 bottom-0 z-30 flex w-80 flex-col border-l border-surface-700 bg-surface-900 p-3 shadow-[var(--shadow-elevated)]"
+			class="absolute top-14 right-0 bottom-0 z-30 flex w-full flex-col border-l border-surface-700 bg-surface-900 p-3 shadow-[var(--shadow-elevated)]"
 			data-testid="copilot-history-overlay"
 		>
 			<div class="mb-2 flex items-center justify-between">
@@ -288,6 +288,7 @@
 		{/if}
 		<ChatTranscript
 			{messages}
+			{workspaceId}
 			{percolations}
 			proposal={null}
 			onConfirmConsent={undefined}

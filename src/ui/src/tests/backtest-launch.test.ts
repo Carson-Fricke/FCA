@@ -56,7 +56,10 @@ const rows: BacktestSummaryRow[] = [
 		win_rate: 0.58,
 		trades: 48,
 		split_declared: true,
-		created_at: '2026-09-08T18:04:00Z'
+		created_at: '2026-09-08T18:04:00Z',
+		run_id: 'run-1',
+		chat_id: 'chat-9',
+		execution_id: 'exec-9'
 	}
 ];
 
@@ -207,6 +210,18 @@ describe('Backtests launch action (T292)', () => {
 			config_path: 'config/harness/backtest.yaml',
 			environment: 'paper'
 		});
+	});
+});
+
+describe('Backtest origin links', () => {
+	it('links a run back to the chat that started it', async () => {
+		mocks.listBacktests.mockResolvedValueOnce(rows);
+		render(BacktestsPage, { props: { data: listPageData } });
+
+		await waitFor(() => expect(screen.getByTestId('backtest-origin-chat')).toBeInTheDocument());
+		const link = screen.getByTestId('backtest-origin-chat');
+		expect(link).toHaveAttribute('href', '/w/alpha-lab/conversations?chat=chat-9');
+		expect(screen.getByTestId('backtest-origin')).toHaveTextContent('exec-9');
 	});
 });
 

@@ -35,6 +35,7 @@ from thesis.integrations.mcp import (
     TOOL_GET_RUN,
     TOOL_LAUNCH_TRADER,
     TOOL_LIST_ARTIFACTS,
+    TOOL_READ_ARTIFACT,
     TOOL_RUN_BACKTEST,
     TOOL_RUN_SWEEP,
     HarnessMcpAuthError,
@@ -56,6 +57,7 @@ HARNESS_TOOL_NAMES: tuple[str, ...] = (
     TOOL_GET_BACKTEST_STATUS,
     TOOL_GET_RUN,
     TOOL_LIST_ARTIFACTS,
+    TOOL_READ_ARTIFACT,
     TOOL_RUN_SWEEP,
     TOOL_LAUNCH_TRADER,
 )
@@ -68,7 +70,8 @@ HARNESS_MCP_SKILL_INSTRUCTIONS = (
     "Use the quant-harness MCP tools for deterministic research execution. "
     "run_backtest and run_sweep launch backtest and sweep jobs; "
     "get_backtest_status and get_run report job and run state; "
-    "list_artifacts enumerates a run's immutable outputs; and launch_trader "
+    "list_artifacts enumerates a run's immutable outputs and read_artifact "
+    "reads one artifact's text or hex-encoded bytes; and launch_trader "
     "starts a supervised trader session. Pass typed arguments, rely on the "
     "structured result content as evidence, and surface any returned failure "
     "instead of assuming success."
@@ -242,6 +245,22 @@ class ListArtifactsArgs:
 
 
 @dataclass(frozen=True, slots=True)
+class ReadArtifactArgs:
+    """Typed arguments for ``read_artifact``."""
+
+    run_id: str
+    name: str
+
+    def __post_init__(self) -> None:
+        _required_text(self.run_id, "run_id")
+        _required_text(self.name, "name")
+
+    def to_arguments(self) -> dict[str, object]:
+        """Return the MCP ``tools/call`` arguments for this request."""
+        return {"run_id": self.run_id, "name": self.name}
+
+
+@dataclass(frozen=True, slots=True)
 class RunSweepArgs:
     """Typed arguments for ``run_sweep``."""
 
@@ -353,6 +372,10 @@ class HarnessToolProvider:
     def list_artifacts(self, args: ListArtifactsArgs) -> HarnessToolResult:
         """Call ``list_artifacts`` with typed arguments."""
         return self.call_tool(TOOL_LIST_ARTIFACTS, args.to_arguments())
+
+    def read_artifact(self, args: ReadArtifactArgs) -> HarnessToolResult:
+        """Call ``read_artifact`` with typed arguments."""
+        return self.call_tool(TOOL_READ_ARTIFACT, args.to_arguments())
 
     def run_sweep(self, args: RunSweepArgs) -> HarnessToolResult:
         """Call ``run_sweep`` with typed arguments."""
@@ -501,6 +524,7 @@ __all__ = [
     "InProcessMcpHandler",
     "LaunchTraderArgs",
     "ListArtifactsArgs",
+    "ReadArtifactArgs",
     "RunBacktestArgs",
     "RunSweepArgs",
     "harness_mcp_skill",

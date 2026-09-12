@@ -2,7 +2,7 @@
 	import type { ToolResult } from '$lib/types';
 	import { toolResultComponent } from './tool-results/registry';
 
-	let { result }: { result: ToolResult } = $props();
+	let { result, workspaceId }: { result: ToolResult; workspaceId: string } = $props();
 
 	const Card = $derived(toolResultComponent(result.tool));
 </script>
@@ -27,5 +27,5 @@
 		{/if}
 	</header>
 
-	<Card {result} />
+	<Card {result} {workspaceId} />
 </div>

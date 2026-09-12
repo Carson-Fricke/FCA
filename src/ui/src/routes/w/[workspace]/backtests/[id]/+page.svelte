@@ -61,6 +61,19 @@
 			</span>
 		</header>
 
+		{#if backtest.chat_id}
+			<a
+				href="/w/{workspaceId}/conversations?chat={backtest.chat_id}"
+				class="inline-flex items-center gap-1.5 text-xs text-accent hover:underline"
+				data-testid="backtest-started-in-chat"
+				title={backtest.execution_id
+					? `execution ${backtest.execution_id}`
+					: 'Open the chat that started this run'}
+			>
+				← Started in chat
+			</a>
+		{/if}
+
 		<SplitEquityView {backtest} />
 
 		{#if backtest.artifacts?.length}

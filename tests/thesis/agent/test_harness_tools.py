@@ -22,6 +22,7 @@ from thesis.agent.harness_tools import (
     HarnessToolProvider,
     LaunchTraderArgs,
     ListArtifactsArgs,
+    ReadArtifactArgs,
     RunBacktestArgs,
     RunSweepArgs,
     harness_mcp_skill,
@@ -209,6 +210,7 @@ def test_local_in_process_provider_discovers_and_calls_every_typed_tool() -> Non
         provider.get_backtest_status(GetBacktestStatusArgs(job_id="job-1")),
         provider.get_run(GetRunArgs(run_id="run-1")),
         provider.list_artifacts(ListArtifactsArgs(run_id="run-1")),
+        provider.read_artifact(ReadArtifactArgs(run_id="run-1", name="metrics.json")),
         provider.run_sweep(RunSweepArgs(spec_path="cfg/sweep.yaml")),
         provider.launch_trader(LaunchTraderArgs(config_path="cfg/trader.yaml")),
     )

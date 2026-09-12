@@ -106,6 +106,7 @@ describe('ChatTranscript persisted reasoning', () => {
 		render(ChatTranscript, {
 			props: {
 				messages: [withReasoning, withoutReasoning],
+				workspaceId: 'w1',
 				onConfirmConsent: undefined,
 				onRejectConsent: undefined
 			}

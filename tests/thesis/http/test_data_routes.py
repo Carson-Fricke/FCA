@@ -438,6 +438,9 @@ def test_backtest_list_and_detail_match_fixture_fields() -> None:
         "trades": 96,
         "split_declared": False,
         "created_at": "2026-07-15T09:45:00Z",
+        "run_id": None,
+        "chat_id": None,
+        "execution_id": None,
     }
 
     detail = client.get(f"/v1/workspaces/{WORKSPACE}/backtests/bt-101", headers=HEADERS)

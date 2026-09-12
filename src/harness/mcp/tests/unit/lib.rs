@@ -10,7 +10,7 @@ use super::server::{
 use super::tools::{
     Boundary, ConfigurationLoader, ContextError, HarnessToolsContext, ProcessOutcome,
     ProcessRunner, RemoteResponse, RemoteTransport, SweepSubmitter, TOOL_BACKTEST_STATUS,
-    TOOL_GET_RUN, TOOL_LIST_ARTIFACTS, TOOL_RUN_BACKTEST, TOOL_RUN_SWEEP,
+    TOOL_GET_RUN, TOOL_LIST_ARTIFACTS, TOOL_READ_ARTIFACT, TOOL_RUN_BACKTEST, TOOL_RUN_SWEEP,
 };
 use super::transport::{decode_message, serve_stdio};
 use super::{create_server, InProcessTransport};
@@ -178,6 +178,7 @@ fn ping_and_tools_list_work() {
             TOOL_BACKTEST_STATUS,
             TOOL_GET_RUN,
             TOOL_LIST_ARTIFACTS,
+            TOOL_READ_ARTIFACT,
             TOOL_RUN_SWEEP
         ]
     );

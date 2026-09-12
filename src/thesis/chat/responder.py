@@ -69,6 +69,14 @@ class ToolResultChunk:
     failure: Mapping[str, object] | None = None
 
 
+#: Observes one tool result before it is persisted and may enrich it.
+#:
+#: The observer receives the originating ``workspace_id``, ``chat_id``, and
+#: optional ``execution_id`` plus the :class:`ToolResultChunk`; returning a
+#: replacement chunk merges its data into the persisted tool message.
+ToolResultObserver = Callable[[str, str, str | None, ToolResultChunk], ToolResultChunk]
+
+
 #: A reply provider maps a conversation to an iterator of reply chunks.
 #:
 #: Answer text may be yielded either as a bare ``str`` or as a
@@ -346,6 +354,7 @@ class ChatReplyService:
     id_factory: Callable[[], str] = field(default=_stream_id)
     workflow_runtime: ValidationRuntime | None = None
     development_runtime: DevelopmentRuntime | None = None
+    tool_result_observer: ToolResultObserver | None = None
 
     def respond(self, workspace_id: str, chat_id: str) -> ChatMessage | None:
         """Stream and persist the assistant reply; return the durable message.
@@ -485,6 +494,7 @@ class ChatReplyService:
         try:
             for chunk in self.provider(history):
                 if isinstance(chunk, ToolResultChunk):
+                    chunk = self._observe_tool_result(workspace_id, chat_id, chunk)
                     tool_message = self.chat_service.create_message(
                         workspace_id,
                         chat_id,
@@ -573,6 +583,23 @@ class ChatReplyService:
         )
         return message
 
+    def _observe_tool_result(
+        self, workspace_id: str, chat_id: str, chunk: ToolResultChunk
+    ) -> ToolResultChunk:
+        """Run the optional observer, returning an enriched chunk or the original.
+
+        An observer fault must never break the reply, so any exception or
+        unexpected return value collapses to the unmodified chunk.
+        """
+        observer = self.tool_result_observer
+        if observer is None:
+            return chunk
+        try:
+            observed = observer(workspace_id, chat_id, None, chunk)
+        except Exception:  # observer failures are non-fatal to the reply
+            return chunk
+        return observed if isinstance(observed, ToolResultChunk) else chunk
+
     def _start_delta(self, workspace_id: str, chat_id: str, stream_id: str) -> None:
         self.broker.publish(
             workspace_id,
@@ -600,6 +627,7 @@ __all__ = [
     "ReplyChunk",
     "ReplyProvider",
     "ToolResultChunk",
+    "ToolResultObserver",
     "ValidationRuntime",
     "launch_hypothesis_development",
     "launch_hypothesis_validation",

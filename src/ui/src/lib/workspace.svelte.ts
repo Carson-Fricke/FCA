@@ -23,13 +23,33 @@ function persistPins(pins: Record<string, string[]>): void {
 	localStorage.setItem('thesis.pinnedWidgets', JSON.stringify(pins));
 }
 
+/** Minimum copilot pane width in pixels; dragging below this minimizes it. */
+export const COPILOT_MIN_WIDTH = 280;
+/** Maximum copilot pane width as a fraction of the viewport. */
+export const COPILOT_MAX_FRACTION = 0.7;
+
+function readCopilotWidth(): number {
+	if (typeof localStorage === 'undefined') return 320;
+	const raw = Number(localStorage.getItem('thesis.copilotWidth'));
+	return Number.isFinite(raw) && raw >= COPILOT_MIN_WIDTH ? Math.round(raw) : 320;
+}
+
 export const ui = $state({
 	/** Workspaces the user pinned widgets in: { workspaceId: [widgetId] } */
 	pinnedWidgets: readPins() as Record<string, string[]>,
 	toasts: [] as Toast[],
 	copilotOpen: true,
+	/** Persisted copilot pane width in pixels. */
+	copilotWidth: readCopilotWidth(),
 	lastWorkspace: (typeof localStorage !== 'undefined' ? localStorage.getItem('thesis.workspace') : null) ?? ''
 });
+
+export function setCopilotWidth(width: number): void {
+	ui.copilotWidth = Math.max(COPILOT_MIN_WIDTH, Math.round(width));
+	if (typeof localStorage !== 'undefined') {
+		localStorage.setItem('thesis.copilotWidth', String(ui.copilotWidth));
+	}
+}
 
 export function pinnedWidgets(workspaceId: string): string[] {
 	return ui.pinnedWidgets[workspaceId] ?? [];

@@ -9,6 +9,7 @@ import ArtifactsToolCard from './ArtifactsToolCard.svelte';
 
 export interface ToolResultCardProps {
 	result: ToolResult;
+	workspaceId: string;
 }
 
 export const TOOL_RESULT_RENDERERS: Record<string, Component<ToolResultCardProps>> = {

@@ -162,6 +162,7 @@
 						<th class="px-4 py-2 text-right">Sharpe</th>
 						<th class="px-4 py-2 text-right">Max DD</th>
 						<th class="px-4 py-2 text-center">Split</th>
+						<th class="px-4 py-2">Origin</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -186,6 +187,30 @@
 									<span class="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] text-accent">declared</span>
 								{:else}
 									<span class="rounded-full border border-surface-600 px-2 py-0.5 text-[10px] text-slate-500">not declared</span>
+								{/if}
+							</td>
+							<td class="px-4 py-2" data-testid="backtest-origin">
+								{#if backtest.chat_id}
+									<a
+										href="/w/{workspaceId}/conversations?chat={backtest.chat_id}"
+										class="text-accent hover:underline"
+										title="Open the chat that started this run{backtest.execution_id
+											? ` · execution ${backtest.execution_id}`
+											: ''}"
+										data-testid="backtest-origin-chat"
+									>
+										chat
+									</a>
+								{/if}
+								{#if backtest.execution_id}
+									<span
+										class="ml-2 text-slate-500"
+										title="execution {backtest.execution_id}"
+									>
+										{backtest.execution_id.slice(0, 8)}…
+									</span>
+								{:else if !backtest.chat_id}
+									<span class="text-slate-600">—</span>
 								{/if}
 							</td>
 						</tr>

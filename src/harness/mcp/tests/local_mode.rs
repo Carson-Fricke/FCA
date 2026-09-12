@@ -14,8 +14,8 @@ use mcp::store::{
 };
 use mcp::tools::{
     BacktestSubmitter, Boundary, HarnessToolsContext, ProcessOutcome, ProcessRunner,
-    SweepSubmitter, TOOL_BACKTEST_STATUS, TOOL_GET_RUN, TOOL_LIST_ARTIFACTS, TOOL_RUN_BACKTEST,
-    TOOL_RUN_SWEEP,
+    SweepSubmitter, TOOL_BACKTEST_STATUS, TOOL_GET_RUN, TOOL_LIST_ARTIFACTS, TOOL_READ_ARTIFACT,
+    TOOL_RUN_BACKTEST, TOOL_RUN_SWEEP,
 };
 use mcp::{create_server, McpServer};
 use serde_json::{json, Value};
@@ -56,6 +56,91 @@ impl SweepSubmitter for FixedSweepSubmitter {
             "run_ids": ["r1", "r2"],
         }))
     }
+}
+
+/// Async test double mirroring `NativeBacktestSubmitter`: returns immediately in
+/// `running` state and finishes the run on a detached worker.
+struct AsyncBacktestSubmitter {
+    run_store: Arc<InMemoryRunStore>,
+    jobs: Arc<InMemoryJobRepository>,
+}
+
+impl AsyncBacktestSubmitter {
+    fn new(run_store: Arc<InMemoryRunStore>, jobs: Arc<InMemoryJobRepository>) -> Self {
+        Self { run_store, jobs }
+    }
+}
+
+impl BacktestSubmitter for AsyncBacktestSubmitter {
+    fn submit(&self, _config_path: &str, _workspace: Option<&str>) -> Result<Value, String> {
+        let run_id = "run-async".to_string();
+        let started = chrono::Utc::now();
+        self.jobs
+            .upsert(JobRecord::new(&run_id, JobState::Running, started, started));
+        let run_store = self.run_store.clone();
+        let jobs = self.jobs.clone();
+        let background_run_id = run_id.clone();
+        std::thread::spawn(move || {
+            let mut record =
+                RunCatalogRecord::new(&background_run_id, RunStatus::Complete, "spy-momentum");
+            record.metrics = BTreeMap::from([
+                ("strategy_id".to_string(), "spy-momentum".to_string()),
+                ("total_return".to_string(), "0.25".to_string()),
+                ("max_drawdown".to_string(), "0.05".to_string()),
+                ("cagr".to_string(), "1.5000000000".to_string()),
+                ("fill_count".to_string(), "3".to_string()),
+                ("fees_total".to_string(), "0.03".to_string()),
+            ]);
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert(
+                "backtest.json".to_string(),
+                br#"{"run_id":"run-async"}"#.to_vec(),
+            );
+            artifacts.insert(
+                "metrics.json".to_string(),
+                br#"{"equity":{"total_return":"0.25"}}"#.to_vec(),
+            );
+            artifacts.insert("report.html".to_string(), b"<html>report</html>".to_vec());
+            artifacts.insert(
+                "artifacts/equity.parquet".to_string(),
+                vec![0xff, 0x00, 0x01, 0x02],
+            );
+            let _ = run_store.put(record, artifacts);
+            jobs.upsert(JobRecord::new(
+                &background_run_id,
+                JobState::Succeeded,
+                started,
+                chrono::Utc::now(),
+            ));
+        });
+        Ok(json!({
+            "boundary": "local",
+            "run_id": run_id,
+            "state": "running",
+        }))
+    }
+}
+
+fn async_local_server(store: Arc<InMemoryRunStore>, jobs: Arc<InMemoryJobRepository>) -> McpServer {
+    let submitter = Arc::new(AsyncBacktestSubmitter::new(store.clone(), jobs.clone()));
+    let mut context =
+        HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
+    context.run_store = Some(store);
+    context.job_repository = Some(jobs);
+    context.backtest_submitter = Some(submitter);
+    create_server(context.validate().expect("context")).expect("server")
+}
+
+fn wait_for_terminal(jobs: &InMemoryJobRepository, job_id: &str) -> JobState {
+    for _ in 0..500 {
+        if let Some(record) = jobs.get(job_id) {
+            if matches!(record.state, JobState::Succeeded | JobState::Failed) {
+                return record.state;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("job '{job_id}' did not reach a terminal state");
 }
 
 fn local_server(store: Arc<InMemoryRunStore>, jobs: Arc<InMemoryJobRepository>) -> McpServer {
@@ -151,5 +236,112 @@ fn local_missing_records_are_is_error() {
     let jobs = Arc::new(InMemoryJobRepository::new());
     let server = local_server(store, jobs);
     let response = call(&server, TOOL_GET_RUN, json!({"run_id": "missing"}));
+    assert_eq!(response["result"]["isError"], true);
+}
+
+#[test]
+fn local_async_run_backtest_completes_in_the_background() {
+    let store = Arc::new(InMemoryRunStore::new());
+    let jobs = Arc::new(InMemoryJobRepository::new());
+    let server = async_local_server(store, jobs.clone());
+
+    let response = call(
+        &server,
+        TOOL_RUN_BACKTEST,
+        json!({"config_path": "bt.yaml"}),
+    );
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(response["result"]["structuredContent"]["boundary"], "local");
+    assert_eq!(response["result"]["structuredContent"]["state"], "running");
+    assert_eq!(
+        response["result"]["structuredContent"]["run_id"],
+        "run-async"
+    );
+
+    assert_eq!(wait_for_terminal(&jobs, "run-async"), JobState::Succeeded);
+
+    let status = call(
+        &server,
+        TOOL_BACKTEST_STATUS,
+        json!({"job_id": "run-async"}),
+    );
+    assert_eq!(status["result"]["isError"], false);
+    assert_eq!(status["result"]["structuredContent"]["state"], "succeeded");
+
+    let run = call(&server, TOOL_GET_RUN, json!({"run_id": "run-async"}));
+    assert_eq!(run["result"]["structuredContent"]["status"], "complete");
+    let metrics = &run["result"]["structuredContent"]["metrics"];
+    assert_eq!(metrics["strategy_id"], "spy-momentum");
+    assert_eq!(metrics["total_return"], "0.25");
+    assert_eq!(metrics["max_drawdown"], "0.05");
+    assert_eq!(metrics["cagr"], "1.5000000000");
+    assert_eq!(metrics["fill_count"], "3");
+    assert_eq!(metrics["fees_total"], "0.03");
+
+    let artifacts = call(&server, TOOL_LIST_ARTIFACTS, json!({"run_id": "run-async"}));
+    let names: Vec<&str> = artifacts["result"]["structuredContent"]["artifacts"]
+        .as_array()
+        .expect("artifact array")
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect();
+    assert!(names.contains(&"backtest.json"));
+    assert!(names.contains(&"metrics.json"));
+    assert!(names.contains(&"report.html"));
+    assert!(names.contains(&"artifacts/equity.parquet"));
+}
+
+#[test]
+fn local_read_artifact_returns_utf8_for_text_and_hex_for_bytes() {
+    let store = Arc::new(InMemoryRunStore::new());
+    let jobs = Arc::new(InMemoryJobRepository::new());
+    let server = async_local_server(store, jobs.clone());
+    call(
+        &server,
+        TOOL_RUN_BACKTEST,
+        json!({"config_path": "bt.yaml"}),
+    );
+    assert_eq!(wait_for_terminal(&jobs, "run-async"), JobState::Succeeded);
+
+    let text = call(
+        &server,
+        TOOL_READ_ARTIFACT,
+        json!({"run_id": "run-async", "name": "metrics.json"}),
+    );
+    assert_eq!(text["result"]["isError"], false);
+    assert_eq!(text["result"]["structuredContent"]["encoding"], "utf-8");
+    assert_eq!(
+        text["result"]["structuredContent"]["content"],
+        r#"{"equity":{"total_return":"0.25"}}"#
+    );
+
+    let bytes = call(
+        &server,
+        TOOL_READ_ARTIFACT,
+        json!({"run_id": "run-async", "name": "artifacts/equity.parquet"}),
+    );
+    assert_eq!(bytes["result"]["isError"], false);
+    assert_eq!(bytes["result"]["structuredContent"]["encoding"], "hex");
+    assert_eq!(bytes["result"]["structuredContent"]["content"], "ff000102");
+}
+
+#[test]
+fn local_read_artifact_reports_missing_artifacts() {
+    let store = Arc::new(InMemoryRunStore::new());
+    let jobs = Arc::new(InMemoryJobRepository::new());
+    let mut artifacts = BTreeMap::new();
+    artifacts.insert("backtest.json".to_string(), b"{}".to_vec());
+    store
+        .put(
+            RunCatalogRecord::new("run-1", RunStatus::Complete, "momentum"),
+            artifacts,
+        )
+        .expect("seed");
+    let server = local_server(store, jobs);
+    let response = call(
+        &server,
+        TOOL_READ_ARTIFACT,
+        json!({"run_id": "run-1", "name": "missing.json"}),
+    );
     assert_eq!(response["result"]["isError"], true);
 }

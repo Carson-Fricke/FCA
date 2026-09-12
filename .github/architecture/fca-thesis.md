@@ -537,6 +537,26 @@ local composition prefers the MCP boundary and falls back to the direct
 `LocalHarnessProcess` process boundary when the MCP server cannot be started;
 a remote harness never silently falls back to local execution.
 
+The local harness submitter is asynchronous like the remote one: `run_backtest`
+returns a `run_id` with `state: running` immediately and completes on a worker,
+so the caller follows `get_backtest_status` to a terminal state, then `get_run`
+and `list_artifacts`. A run's result set (`backtest.json`, `metrics.json`,
+`report.html`, and the recorded Parquet trail such as `artifacts/equity.parquet`)
+is registered in the durable run store, and `read_artifact` returns any artifact's
+bytes (UTF-8 or hex) through the same boundary in both local and remote modes.
+Artifact bytes are read through the harness boundary when available and
+otherwise via the artifact's published SAS/object URL, so one importer serves
+local and Azure runs. A materialization route
+(`GET /v1/workspaces/{ws}/backtests/runs/{run_id}`) lets the UI fetch the card
+data once the tool returns, so neither side blocks on a long poll.
+`thesis.backtests` coordinates this lifecycle: on a terminal success it imports
+the run into the workspace backtest store as a `BacktestRecord` carrying the
+equity curve, FIFO-paired trades, and stats, linked to the originating
+`chat_id` and `execution_id`. The chat tool loop attaches the resulting
+`backtest_id` to the tool message so the UI renders the report inline where the
+run happened, and the backtests page surfaces the run with a link back to its
+chat and workflow.
+
 ## Research Workflows
 
 Workflow definitions are versioned, have custom phases, specify required
