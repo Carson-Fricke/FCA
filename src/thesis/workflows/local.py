@@ -22,9 +22,11 @@ from thesis.agent.harness_tools import (
     HARNESS_TOOL_NAMES,
     HarnessToolProvider,
     HarnessToolResult,
+    open_harness_tool_provider,
 )
 from thesis.agent.router import ModelProfile, ModelProvider, Role, RolePolicy
 from thesis.agent.skills import SkillRegistry
+from thesis.integrations.mcp import HarnessMcpClient
 from thesis.workflows.backtests import (
     BacktestMode,
     BacktestRunError,
@@ -93,6 +95,7 @@ def build_local_workflow_runtime(
     model_provider: ModelProvider,
     model: str,
     harness_tools: HarnessToolProvider | None = None,
+    harness_client: HarnessMcpClient | None = None,
     runner: BacktestRunner | None = None,
     backtest_mode: BacktestMode = "local",
     metadata: Mapping[str, object] | None = None,
@@ -100,11 +103,15 @@ def build_local_workflow_runtime(
     """Compose the local workflow runtime over one OpenRouter model profile.
 
     Every role resolves to the same ``local-openrouter`` profile and the
-    published harness tool catalog.  The backtest port is the injected
-    ``runner`` when supplied, otherwise a :class:`McpBacktestRunner` over
-    ``harness_tools``; providing neither raises
+    published harness tool catalog.  A ``harness_client`` shared with the
+    backtest boundary is adapted into a :class:`HarnessToolProvider` without
+    opening or initializing a second MCP transport.  The backtest port is the
+    injected ``runner`` when supplied, otherwise a :class:`McpBacktestRunner`
+    over ``harness_tools``; providing neither raises
     :class:`~thesis.workflows.runtime.WorkflowRuntimeError`.
     """
+    if harness_tools is None and harness_client is not None:
+        harness_tools = open_harness_tool_provider(client=harness_client)
     if runner is not None:
         resolved_runner: BacktestRunner = runner
     elif harness_tools is not None:

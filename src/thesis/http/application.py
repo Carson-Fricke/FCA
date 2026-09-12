@@ -25,7 +25,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWK, PyJWKClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
+from thesis.agent.harness_tools import (
+    HarnessToolProvider,
+    HarnessToolResult,
+    open_harness_tool_provider,
+)
 from thesis.agent.reply import reply_provider_for
 from thesis.chat import ChatService
 from thesis.chat.responder import ChatReplyService, ToolResultChunk, ToolResultObserver
@@ -55,6 +59,7 @@ from thesis.screening.service import ScreenerService
 
 if TYPE_CHECKING:
     from thesis.backtests import BacktestRunCoordinator
+    from thesis.integrations.mcp import HarnessMcpClient
     from thesis.workflows.runtime import WorkflowRuntime
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -276,6 +281,7 @@ def create_app(
     harness_data_service: HarnessDataService | None = None,
     model_provider: OpenRouterProvider | None = None,
     harness_tool_provider: HarnessToolProvider | None = None,
+    harness_client: HarnessMcpClient | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
@@ -295,8 +301,12 @@ def create_app(
     compose the streamed chat reply service without injecting one directly.
     When a harness tool surface is configured the agent replies through the
     harness MCP tool catalog; an unavailable catalog degrades to a plain reply
-    at request time, so composition never blocks startup.
+    at request time, so composition never blocks startup.  A ``harness_client``
+    shared with the backtest boundary is adapted into the tool provider without
+    opening or initializing a second MCP transport.
     """
+    if harness_tool_provider is None and harness_client is not None:
+        harness_tool_provider = open_harness_tool_provider(client=harness_client)
     entra_authenticator = (
         EntraJwtAuthenticator(
             tenant_id=entra_tenant_id,
