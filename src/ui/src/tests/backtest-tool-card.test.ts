@@ -141,4 +141,25 @@ describe('BacktestToolCard rich report', () => {
 
 		expect(screen.getByTestId('backtest-tool-failed')).toHaveTextContent('harness exploded');
 	});
+
+	it('shows the harness error for a failed launch with no structured state', () => {
+		render(BacktestToolCard, {
+			props: {
+				result: {
+					...toolResult({}),
+					ok: false,
+					summary: 'run_backtest failed',
+					failure: {
+						kind: 'tool',
+						message: "the local backtest runner could not complete the backtest: could not read backtest config 'examples/backtest.yaml'"
+					}
+				},
+				workspaceId: 'alpha-lab'
+			}
+		});
+
+		expect(screen.getByTestId('backtest-tool-failed')).toHaveTextContent(
+			"could not read backtest config 'examples/backtest.yaml'"
+		);
+	});
 });

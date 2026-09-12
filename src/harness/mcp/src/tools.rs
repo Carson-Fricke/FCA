@@ -520,10 +520,10 @@ impl HarnessTools {
             };
             return submitter
                 .submit(&config_path, workspace.as_deref())
-                .map_err(|_| {
-                    ToolExecutionError::new(
-                        "the local backtest runner could not complete the backtest",
-                    )
+                .map_err(|error| {
+                    ToolExecutionError::new(format!(
+                        "the local backtest runner could not complete the backtest: {error}"
+                    ))
                 });
         }
         let mut tail = vec![
@@ -644,8 +644,10 @@ impl HarnessTools {
                  sweeps run through the local sweeps runner only",
             ));
         };
-        submitter.submit(&spec_path).map_err(|_| {
-            ToolExecutionError::new("the local sweep runner could not complete the sweep")
+        submitter.submit(&spec_path).map_err(|error| {
+            ToolExecutionError::new(format!(
+                "the local sweep runner could not complete the sweep: {error}"
+            ))
         })
     }
 
@@ -947,7 +949,9 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
         candidates.push(Tool::new(
             TOOL_RUN_BACKTEST,
             "Run one deterministic backtest: a local 'harness backtest-job' process, \
-             or a bearer-authenticated POST to the remote harness API returning {job_id, state}.",
+             or a bearer-authenticated POST to the remote harness API returning {job_id, state}. \
+             config_path must reference an existing, readable configuration document; \
+             do not guess paths.",
             json!({
                 "type": "object",
                 "additionalProperties": false,

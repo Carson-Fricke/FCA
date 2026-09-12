@@ -58,6 +58,16 @@ impl SweepSubmitter for FixedSweepSubmitter {
     }
 }
 
+struct FailingBacktestSubmitter;
+
+impl BacktestSubmitter for FailingBacktestSubmitter {
+    fn submit(&self, _config_path: &str, _workspace: Option<&str>) -> Result<Value, String> {
+        Err("could not read backtest config 'examples/backtest.yaml': \
+             No such file or directory"
+            .to_string())
+    }
+}
+
 /// Async test double mirroring `NativeBacktestSubmitter`: returns immediately in
 /// `running` state and finishes the run on a detached worker.
 struct AsyncBacktestSubmitter {
@@ -213,6 +223,28 @@ fn local_run_backtest_uses_the_composed_submitter() {
     assert_eq!(
         response["result"]["structuredContent"]["boundary"],
         "local-submit"
+    );
+}
+
+#[test]
+fn local_run_backtest_surfaces_the_submitter_error() {
+    let mut context =
+        HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
+    context.runner = Some(Arc::new(EchoRunner));
+    context.backtest_submitter = Some(Arc::new(FailingBacktestSubmitter));
+    let server = create_server(context.validate().expect("context")).expect("server");
+    let response = call(
+        &server,
+        TOOL_RUN_BACKTEST,
+        json!({"config_path": "examples/backtest.yaml"}),
+    );
+    assert_eq!(response["result"]["isError"], true);
+    let text = response["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("could not read backtest config 'examples/backtest.yaml'"),
+        "unexpected error text: {text}"
     );
 }
 

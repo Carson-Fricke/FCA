@@ -37,7 +37,11 @@ HARNESS_TOOL_SYSTEM_PROMPT = (
     "and get_run report state, list_artifacts enumerates outputs, and "
     "launch_trader starts a supervised session. Call a tool only when the "
     "operator's request needs it, pass typed arguments, and summarize the "
-    "structured results as evidence."
+    "structured results as evidence. For run_backtest and run_sweep, use the "
+    "exact config or spec path the operator provides; never guess or invent a "
+    "path, and if none is given, ask for it before calling the tool. When a "
+    "tool call fails, report the returned error message verbatim instead of "
+    "paraphrasing it."
 )
 _CHAT_ROLES = frozenset(("user", "assistant", "system", "tool"))
 

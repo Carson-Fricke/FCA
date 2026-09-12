@@ -25,7 +25,10 @@
 	const normalizedState = $derived((runState ?? status ?? '').toLowerCase());
 	const isActive = $derived(normalizedState === 'running' || normalizedState === 'queued');
 	const isFailed = $derived(
-		normalizedState === 'failed' || normalizedState === 'error' || normalizedState === 'cancelled'
+		!result.ok ||
+			normalizedState === 'failed' ||
+			normalizedState === 'error' ||
+			normalizedState === 'cancelled'
 	);
 
 	let detail = $state<BacktestDetail | null>(null);
@@ -159,7 +162,7 @@
 		{#if location}<dt class="text-slate-500">location</dt><dd class="text-slate-800">{location}</dd>{/if}
 	</dl>
 
-	{#if !boundary && !identifier && exitCode === null}
+	{#if !boundary && !identifier && exitCode === null && !isFailed}
 		<p class="text-xs text-slate-500">{result.summary || 'No structured details reported.'}</p>
 	{/if}
 
