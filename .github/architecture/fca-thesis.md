@@ -18,7 +18,9 @@ audits, hash-chained attempt and influence ledgers, evidence grades with
 explicit downgrade semantics — T164), and the harness MCP tool gateway
 (`thesis.integrations.mcp`, `thesis.agent.harness_tools`, T281). The backend
 process boundary (`thesis` entrypoint, `Dockerfile.thesis`) is implemented
-(T178).
+(T178). Local and Azure security, recovery, and repository-integrity hardening
+is implemented by `thesis.operations`, with the operator procedures in
+`.github/runbooks/thesis.md` (T175).
 
 FCA Thesis is a workspace-scoped chat agent for generating, implementing,
 testing, evaluating, and improving stock, option, and crypto hypotheses and
@@ -1122,6 +1124,7 @@ chain-of-thought.
 | Model registry | Exact model identity, role eligibility, cutoff evidence, and per-session verification. |
 | Protected-test client | Immutable submission and policy-approved aliased result retrieval. |
 | Consent service | Scoped grant creation, expiration, revocation, and gatekeeper requests. |
+| Operations hardening | Mode-independent workspace/event/artifact/consent/audit boundary checks, documented recovery for checkpoint incompatibility, queue interruption, Git publication interruption, and partial tool completion, and repository size, backup, restore, and retention enforcement. |
 
 Protected-test mapping and transformation should run in a separately authorized
 service/process, even if its first implementation is deployed from this

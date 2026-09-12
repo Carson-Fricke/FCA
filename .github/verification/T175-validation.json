@@ -1,0 +1,39 @@
+{
+  "taskId": "T175",
+  "numTotalTests": 1942,
+  "numPassedTests": 1940,
+  "numFailedTests": 0,
+  "numPendingTests": 2,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "thesis-operations-security-recovery-integrity",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/operations -q",
+      "result": "76 passed, 2 skipped (pre-existing pyyaml skips in the integration-owned contract tests): 32 new tests covering cross-workspace access (event stream, artifact source, Azure entity key substitution), prompt injection (untrusted-data precedence and instruction-like flagging), secret exfiltration (payload scan, manifest secret rejection, provider credential redaction), confused deputy (role tool policy denial), stale worker (late result retained and stale epoch fenced), repository budget/retention, and provider-auth offline fallback; plus runbook documentation-contract assertions"
+    },
+    {
+      "name": "thesis-package-facade",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider tests/thesis/test_package.py -q",
+      "result": "thesis.operations is registered in the capability facade and exposes a non-empty __all__"
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider -q",
+      "result": "1940 passed, 2 skipped at wave freeze"
+    },
+    {
+      "name": "lint-format-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev ty check",
+      "result": "ruff check all passed; 556 files already formatted; ty check all passed"
+    }
+  ],
+  "limitations": [
+    "Recovery planning is read-only and delegates to the existing queue, checkpoint, and publication primitives; it does not itself mutate durable state",
+    "Repository size measurement and backup/restore operate on a local path with an injectable size port; Azure-backed measurement reuses the same contract",
+    "Realistic option/tick Git performance measurement and live-activation gates remain Phase 6 roadmap items outside T175"
+  ]
+}

@@ -18,6 +18,7 @@ def test_thesis_capability_facades_import() -> None:
         "execution",
         "http",
         "integrations",
+        "operations",
         "persistence",
         "providers",
         "strategies",
