@@ -27,15 +27,22 @@ sys.path.insert(0, "src")
 
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
+from thesis.agent.harness_tools import (  # noqa: E402
+    HarnessToolProvider,
+    open_harness_tool_provider,
+)
+from thesis.agent.reply import reply_provider_for  # noqa: E402
 from thesis.chat.responder import ChatReplyService  # noqa: E402
 from thesis.chat.service import ChatService  # noqa: E402
 from thesis.chat.streaming import InMemoryChatStreamBroker  # noqa: E402
 from thesis.http.application import create_app  # noqa: E402
 from thesis.http.workspaces import build_local_workspace_data  # noqa: E402
+from thesis.integrations.harness import ProcessResult  # noqa: E402
+from thesis.integrations.harness_activation import LocalHarnessProcess  # noqa: E402
 from thesis.integrations.mcp import (  # noqa: E402
-    HarnessMcpBoundary,
-    HarnessMcpClient,
-    StdioMcpTransport,
+    HarnessMcpError,
+    harness_mcp_topology_from_env,
+    open_local_harness_boundary,
 )
 from thesis.providers.openrouter import (  # noqa: E402
     OpenRouterProfile,
@@ -44,7 +51,6 @@ from thesis.providers.openrouter import (  # noqa: E402
 from thesis.providers.transports import (  # noqa: E402
     EnvironmentApiKeySource,
     HttpOpenRouterTransport,
-    openrouter_reply_provider,
 )
 
 
@@ -73,24 +79,63 @@ def _real_subprocess_runner(argv):
         text=True,
         shell=False,
     )
-    return completed.returncode, completed.stdout, completed.stderr
+    return ProcessResult(completed.returncode, completed.stdout, completed.stderr)
 
 
-def _harness_mcp_boundary() -> HarnessMcpBoundary | None:
-    """Connect Thesis to the harness MCP stdio server, or fall back to direct."""
-    if os.environ.get("THESIS_HARNESS_MCP", "1").strip().lower() in (
+def _mcp_disabled() -> bool:
+    return os.environ.get("THESIS_HARNESS_MCP", "1").strip().lower() in (
         "0",
         "false",
         "no",
-    ):
-        return None
+    )
+
+
+def _harness_boundary():
+    """Open the topology-aware harness boundary, falling back to direct local.
+
+    The MCP boundary is preferred for both backtest launches and tool calls;
+    when the MCP server cannot start and the harness is local, the direct
+    ``harness backtest-job`` process boundary is used instead.  A remote harness
+    never silently falls back, and a failure never blocks startup.
+    """
+    topology = harness_mcp_topology_from_env()
+    if _mcp_disabled():
+        return LocalHarnessProcess(_real_subprocess_runner)
     try:
-        return HarnessMcpBoundary.connect(
-            HarnessMcpClient(StdioMcpTransport(("harness", "mcp")))
+        return open_local_harness_boundary(
+            topology=topology, process_runner=_real_subprocess_runner
         )
     except Exception as error:  # boundary is optional; never block startup
         print(
-            f"harness MCP unavailable, using the direct process boundary: {error}",
+            f"harness MCP boundary unavailable, using the direct process "
+            f"boundary: {error}",
+            file=sys.stderr,
+        )
+        if topology.harness_location == "local":
+            return LocalHarnessProcess(_real_subprocess_runner)
+        return None
+
+
+def _harness_tool_provider() -> HarnessToolProvider | None:
+    """Open the harness MCP tool catalog for the chat agent, or fall back.
+
+    The provider is resolved from the same deployment topology as the boundary
+    so the agent works against a local or remote harness.  A missing ``harness``
+    executable, an unreachable remote endpoint, or an unusable catalog only
+    disables tool calling: the chat agent still replies without tools and never
+    reports that it cannot see the harness MCP server.
+    """
+    if _mcp_disabled():
+        return None
+    try:
+        provider = open_harness_tool_provider(harness_mcp_topology_from_env())
+        provider.client.initialize()
+        provider.list_tools()
+        return provider
+    except (HarnessMcpError, OSError) as error:
+        print(
+            f"harness MCP tool catalog unavailable; chat replies without tools: "
+            f"{error}",
             file=sys.stderr,
         )
         return None
@@ -98,8 +143,7 @@ def _harness_mcp_boundary() -> HarnessMcpBoundary | None:
 
 workspace_data = build_local_workspace_data(
     workspace_root=WORKSPACE_ROOT,
-    harness_runner=_real_subprocess_runner,
-    harness_boundary=_harness_mcp_boundary(),
+    harness_boundary=_harness_boundary(),
     harness_base_url=HARNESS_BASE_URL,
 )
 
@@ -114,16 +158,15 @@ if os.environ.get("OPENROUTER_API_KEY"):
         profile_id="local-openrouter",
         model=os.environ.get("THESIS_MODEL", "openai/gpt-4o-mini"),
     )
+    model_provider = OpenRouterProvider(
+        provider_profile,
+        EnvironmentApiKeySource(),
+        HttpOpenRouterTransport(provider_profile.base_url),
+    )
     reply_service = ChatReplyService(
         chat_service=chat_service,
         broker=chat_stream_broker,
-        provider=openrouter_reply_provider(
-            OpenRouterProvider(
-                provider_profile,
-                EnvironmentApiKeySource(),
-                HttpOpenRouterTransport(provider_profile.base_url),
-            )
-        ),
+        provider=reply_provider_for(model_provider, _harness_tool_provider()),
     )
 
 app = create_app(

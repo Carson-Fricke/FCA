@@ -22,7 +22,21 @@ if TYPE_CHECKING:  # avoid importing chat types at module load
 #: Default system instruction for a chat reply.
 DEFAULT_SYSTEM_PROMPT = (
     "You are FCA Thesis, a concise, workspace-scoped quantitative research "
-    "assistant. Answer the operator's latest message directly."
+    "assistant. Answer the operator's latest message directly, in the same "
+    "language as that message (default English), and reply with the answer "
+    "only: never emit internal reasoning, analysis, planning, or "
+    "chain-of-thought."
+)
+
+#: System instruction for a reply that may call the quant-harness MCP tools.
+HARNESS_TOOL_SYSTEM_PROMPT = (
+    DEFAULT_SYSTEM_PROMPT
+    + " You can call the quant-harness tools for deterministic research "
+    "execution: run_backtest and run_sweep launch jobs, get_backtest_status "
+    "and get_run report state, list_artifacts enumerates outputs, and "
+    "launch_trader starts a supervised session. Call a tool only when the "
+    "operator's request needs it, pass typed arguments, and summarize the "
+    "structured results as evidence."
 )
 _CHAT_ROLES = frozenset(("user", "assistant", "system", "tool"))
 
@@ -109,6 +123,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_SYSTEM_PROMPT",
+    "HARNESS_TOOL_SYSTEM_PROMPT",
     "EnvironmentApiKeySource",
     "HttpOpenRouterTransport",
     "openrouter_reply_provider",

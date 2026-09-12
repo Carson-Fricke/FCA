@@ -115,14 +115,25 @@ class OpenRouterProvider:
         )
 
     def complete(
-        self, *, messages: Sequence[ChatMessage], role: Role = "primary"
+        self,
+        *,
+        messages: Sequence[ChatMessage],
+        role: Role = "primary",
+        tools: Sequence[Mapping[str, object]] | None = None,
     ) -> ModelCompletion:
-        """Run one chat completion; fail closed on network or rejection."""
+        """Run one chat completion; fail closed on network or rejection.
+
+        ``tools`` is an optional OpenAI-style function catalog.  When supplied
+        it is posted verbatim and any ``message.tool_calls`` in the response are
+        parsed into the completion; reasoning fields are never read.
+        """
         key = self._resolve_key()
         payload: dict[str, object] = {
             "model": self._profile.model,
             "messages": list(messages_payload(messages)),
         }
+        if tools:
+            payload["tools"] = [dict(tool) for tool in tools]
         status, body = self._post("/chat/completions", self._headers(key), payload)
         if not 200 <= status < 300:
             raise _rejected(status, body)

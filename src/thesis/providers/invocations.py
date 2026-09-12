@@ -54,16 +54,65 @@ class ProviderRejectedError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class ToolCall:
+    """One model-requested function call in OpenAI ``message.tool_calls`` form.
+
+    ``arguments`` is the raw JSON-encoded string the model emitted; callers
+    decode it at the tool boundary so a malformed payload becomes a tool error
+    instead of a provider failure.
+    """
+
+    id: str
+    name: str
+    arguments: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ValueError("tool call id must be non-empty text")
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("tool call name must be non-empty text")
+        if not isinstance(self.arguments, str):
+            raise ValueError("tool call arguments must be a JSON string")
+
+    def as_wire(self) -> dict[str, object]:
+        """Return the OpenAI wire shape for this call."""
+        return {
+            "id": self.id,
+            "type": "function",
+            "function": {"name": self.name, "arguments": self.arguments},
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ChatMessage:
-    """One chat message sent to a provider; carries no credentials."""
+    """One chat message sent to a provider; carries no credentials.
+
+    ``tool_calls`` is set on an assistant message that requested functions and
+    ``tool_call_id`` on the matching ``tool`` role result.  Assistant messages
+    that only request tools may carry empty content.
+    """
 
     role: str
     content: str
+    tool_calls: tuple[ToolCall, ...] = ()
+    tool_call_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.role not in _CHAT_ROLES:
             raise ValueError(f"unsupported chat message role: {self.role}")
-        if not isinstance(self.content, str) or not self.content.strip():
+        if not isinstance(self.content, str):
+            raise ValueError("chat message content must be text")
+        for call in self.tool_calls:
+            if not isinstance(call, ToolCall):
+                raise ValueError("tool_calls must contain ToolCall values")
+        if self.role == "tool":
+            if not isinstance(self.tool_call_id, str) or not self.tool_call_id.strip():
+                raise ValueError("tool messages require a non-empty tool_call_id")
+        elif self.tool_call_id is not None:
+            raise ValueError("only tool messages may carry a tool_call_id")
+        if self.tool_calls and self.role != "assistant":
+            raise ValueError("only assistant messages may carry tool_calls")
+        if not self.content.strip() and not self.tool_calls:
             raise ValueError("chat message content must be non-empty")
 
 
@@ -77,11 +126,15 @@ class ModelCompletion:
     role: Role
     prompt_tokens: int
     completion_tokens: int
+    tool_calls: tuple[ToolCall, ...] = ()
     schema_version: Literal[1] = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.content, str):
             raise ValueError("completion content must be text")
+        for call in self.tool_calls:
+            if not isinstance(call, ToolCall):
+                raise ValueError("tool_calls must contain ToolCall values")
         for name in ("model", "provider"):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
@@ -115,8 +168,17 @@ def parse_chat_completion(
         raise ProviderRejectedError("provider response did not contain a completion")
     choice = choices[0]
     message = choice.get("message") if isinstance(choice, dict) else None
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, str):
+    if not isinstance(message, dict):
+        raise ProviderRejectedError("provider response did not contain a message")
+    # ``reasoning``/``reasoning_content`` (and any other side channel) are
+    # deliberately never read: they must not surface as assistant text.
+    content = message.get("content")
+    tool_calls = _parse_tool_calls(message.get("tool_calls"))
+    if isinstance(content, str):
+        text = content
+    elif content is None and tool_calls:
+        text = ""
+    else:
         raise ProviderRejectedError("provider response did not contain text content")
     usage = data.get("usage")
     tokens = _usage_tokens(usage if isinstance(usage, dict) else {})
@@ -124,13 +186,44 @@ def parse_chat_completion(
     if not isinstance(model, str) or not model.strip():
         model = fallback_model
     return ModelCompletion(
-        content=content,
+        content=text,
         model=model,
         provider=provider,
         role=role,
         prompt_tokens=tokens[0],
         completion_tokens=tokens[1],
+        tool_calls=tool_calls,
     )
+
+
+def _parse_tool_calls(value: object) -> tuple[ToolCall, ...]:
+    """Parse OpenAI ``message.tool_calls``, failing closed on malformed entries."""
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ProviderRejectedError("provider tool_calls must be a list")
+    calls: list[ToolCall] = []
+    for entry in value:
+        if not isinstance(entry, Mapping):
+            raise ProviderRejectedError("provider tool_call must be an object")
+        call_id = entry.get("id")
+        function = entry.get("function")
+        if not isinstance(call_id, str) or not call_id.strip():
+            raise ProviderRejectedError("provider tool_call is missing an id")
+        if not isinstance(function, Mapping):
+            raise ProviderRejectedError("provider tool_call is missing a function")
+        name = function.get("name")
+        arguments = function.get("arguments", "")
+        if not isinstance(name, str) or not name.strip():
+            raise ProviderRejectedError("provider tool_call is missing a name")
+        if arguments is None:
+            arguments = ""
+        if not isinstance(arguments, str):
+            raise ProviderRejectedError(
+                "provider tool_call arguments must be a JSON string"
+            )
+        calls.append(ToolCall(id=call_id, name=name, arguments=arguments))
+    return tuple(calls)
 
 
 def _usage_tokens(usage: Mapping[str, object]) -> tuple[int, int]:
@@ -318,11 +411,22 @@ def bind_role(
     )
 
 
-def messages_payload(messages: Sequence[ChatMessage]) -> tuple[dict[str, str], ...]:
+def messages_payload(
+    messages: Sequence[ChatMessage],
+) -> tuple[dict[str, object], ...]:
     """Serialize chat messages into the wire-level payload tuple."""
-    return tuple(
-        {"role": message.role, "content": message.content} for message in messages
-    )
+    payload: list[dict[str, object]] = []
+    for message in messages:
+        entry: dict[str, object] = {
+            "role": message.role,
+            "content": message.content,
+        }
+        if message.tool_calls:
+            entry["tool_calls"] = [call.as_wire() for call in message.tool_calls]
+        if message.tool_call_id is not None:
+            entry["tool_call_id"] = message.tool_call_id
+        payload.append(entry)
+    return tuple(payload)
 
 
 __all__ = [
@@ -336,6 +440,7 @@ __all__ = [
     "ProviderUnreachableError",
     "RoleBinding",
     "Role",
+    "ToolCall",
     "bind_role",
     "content_digest",
     "messages_payload",

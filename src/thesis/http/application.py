@@ -25,6 +25,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWK, PyJWKClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from thesis.agent.harness_tools import HarnessToolProvider
+from thesis.agent.reply import reply_provider_for
 from thesis.chat import ChatService
 from thesis.chat.responder import ChatReplyService
 from thesis.chat.streaming import InMemoryChatStreamBroker
@@ -48,6 +50,7 @@ from thesis.http.workspaces import (
     WorkspaceDataBundle,
     create_workspaces_router,
 )
+from thesis.providers.openrouter import OpenRouterProvider
 from thesis.screening.service import ScreenerService
 
 if TYPE_CHECKING:
@@ -237,6 +240,8 @@ def create_app(
     workspace_data: WorkspaceDataBundle | None = None,
     workflow_runtime: WorkflowRuntime | None = None,
     harness_data_service: HarnessDataService | None = None,
+    model_provider: OpenRouterProvider | None = None,
+    harness_tool_provider: HarnessToolProvider | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
@@ -251,6 +256,12 @@ def create_app(
     ``workspace_data`` — typically built by
     :func:`thesis.http.workspaces.build_local_workspace_data` — to compose the
     local-mode services.
+
+    Pass ``model_provider`` (with an optional ``harness_tool_provider``) to
+    compose the streamed chat reply service without injecting one directly.
+    When a harness tool surface is configured the agent replies through the
+    harness MCP tool catalog; an unavailable catalog degrades to a plain reply
+    at request time, so composition never blocks startup.
     """
     entra_authenticator = (
         EntraJwtAuthenticator(
@@ -279,6 +290,20 @@ def create_app(
         application.state.chat_stream_broker = chat_stream_broker
     if chat_reply_service is not None:
         application.state.chat_reply_service = chat_reply_service
+    if chat_reply_service is None and model_provider is not None:
+        resolved_chat_service = chat_service
+        if resolved_chat_service is None:
+            resolved_chat_service = ChatService()
+            application.state.chat_service = resolved_chat_service
+        resolved_broker = chat_stream_broker
+        if resolved_broker is None:
+            resolved_broker = InMemoryChatStreamBroker()
+            application.state.chat_stream_broker = resolved_broker
+        application.state.chat_reply_service = ChatReplyService(
+            chat_service=resolved_chat_service,
+            broker=resolved_broker,
+            provider=reply_provider_for(model_provider, harness_tool_provider),
+        )
     if workspace_data is not None:
         application.state.workspace_service = workspace_data.workspaces
         application.state.backtest_service = workspace_data.backtests

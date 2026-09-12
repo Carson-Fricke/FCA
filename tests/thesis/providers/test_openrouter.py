@@ -14,8 +14,10 @@ from thesis.providers import (
     OpenRouterProvider,
     ProviderRejectedError,
     ProviderUnreachableError,
+    ToolCall,
     bind_role,
     content_digest,
+    messages_payload,
 )
 
 SECRET = "sk-or-secret-must-not-escape"
@@ -302,3 +304,124 @@ def test_openrouter_profile_rejects_non_https_base_urls() -> None:
         )
     with pytest.raises(ValueError, match="portable identifier"):
         OpenRouterProfile(profile_id="openrouter-glm", model="")
+
+
+def _tool_call_message(
+    *,
+    content: object = None,
+    tool_calls: object = None,
+    extra: Mapping[str, object] | None = None,
+) -> str:
+    message: dict[str, object] = {"role": "assistant", "content": content}
+    if tool_calls is not None:
+        message["tool_calls"] = tool_calls
+    if extra:
+        message.update(extra)
+    return json.dumps(
+        {
+            "model": "z-ai/glm-5.3-flash",
+            "choices": [
+                {"index": 0, "message": message, "finish_reason": "tool_calls"}
+            ],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+        }
+    )
+
+
+def test_complete_sends_tools_and_parses_tool_calls_ignoring_reasoning() -> None:
+    body = _tool_call_message(
+        tool_calls=[
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "run_backtest",
+                    "arguments": '{"config_path": "cfg.yaml"}',
+                },
+            }
+        ],
+        extra={
+            "reasoning": "SECRET-CHAIN-OF-THOUGHT",
+            "reasoning_content": "SECRET-REASONING",
+        },
+    )
+    transport = FakeTransport(body=body)
+    provider = OpenRouterProvider(_profile(), FakeKeySource(), transport)
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "run_backtest",
+                "description": "run a backtest",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
+
+    completion = provider.complete(messages=_messages(), tools=tools)
+
+    assert transport.calls[0][2]["tools"] == tools
+    assert completion.content == ""
+    assert completion.tool_calls == (
+        ToolCall(
+            id="call-1",
+            name="run_backtest",
+            arguments='{"config_path": "cfg.yaml"}',
+        ),
+    )
+    assert "SECRET" not in repr(completion)
+    assert "SECRET" not in str(completion)
+
+
+def test_complete_omits_tools_when_none_are_supplied() -> None:
+    transport = FakeTransport()
+
+    OpenRouterProvider(_profile(), FakeKeySource(), transport).complete(
+        messages=_messages()
+    )
+
+    assert "tools" not in transport.calls[0][2]
+
+
+@pytest.mark.parametrize(
+    "tool_call",
+    [
+        {"type": "function", "function": {"name": "x", "arguments": "{}"}},
+        {"id": "call-1", "function": "not-an-object"},
+        {"id": "call-1", "function": {"name": "x", "arguments": {"a": 1}}},
+        {"id": "call-1", "function": {"name": "", "arguments": "{}"}},
+    ],
+)
+def test_malformed_tool_calls_fail_closed(tool_call: object) -> None:
+    body = _tool_call_message(content="", tool_calls=[tool_call])
+    provider = OpenRouterProvider(_profile(), FakeKeySource(), FakeTransport(body=body))
+
+    with pytest.raises(ProviderRejectedError):
+        provider.complete(messages=_messages())
+
+
+def test_null_content_without_tool_calls_fails_closed() -> None:
+    body = _tool_call_message(extra={"reasoning": "only reasoning"})
+    provider = OpenRouterProvider(_profile(), FakeKeySource(), FakeTransport(body=body))
+
+    with pytest.raises(ProviderRejectedError):
+        provider.complete(messages=_messages())
+
+
+def test_tool_messages_serialize_with_call_ids() -> None:
+    assistant = ChatMessage(
+        role="assistant",
+        content="",
+        tool_calls=(ToolCall(id="call-1", name="get_run", arguments="{}"),),
+    )
+    result = ChatMessage(role="tool", content="ok", tool_call_id="call-1")
+
+    wire = messages_payload((assistant, result))
+
+    tool_calls = wire[0]["tool_calls"]
+    assert isinstance(tool_calls, list)
+    assert tool_calls[0]["function"] == {
+        "name": "get_run",
+        "arguments": "{}",
+    }
+    assert wire[1] == {"role": "tool", "content": "ok", "tool_call_id": "call-1"}
