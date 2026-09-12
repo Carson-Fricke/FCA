@@ -1,0 +1,26 @@
+{
+  "taskId": "T136",
+  "numTotalTests": 1956,
+  "numPassedTests": 1956,
+  "numFailedTests": 0,
+  "numPendingTests": 2,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "conditional-trigger-decision",
+      "status": "passed",
+      "command": "review of .github/research/alpaca-delisted-coverage.md, .github/research/alpaca-delisted-coverage.json, src/lake/tools/delisted_probe.py, src/harness/data/security_master.py, config/security_master/",
+      "result": "The T133 sweep's own recommendation is 'GO, provisionally' and states the sweep cannot establish listing identity or lifecycle dates alone; no supplemental source is selected and config/security_master/ is empty, so ingestion is not triggered. The decision, evidence, and re-trigger criteria are recorded in .github/research/supplemental-listings-decision.md, satisfying the conditional AC1."
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider -q",
+      "result": "1956 passed, 2 skipped at wave freeze"
+    }
+  ],
+  "limitations": [
+    "Conditional acceptance items AC2-AC5 (row-count reconciliation, delisting-return settlement, focused importer tests, determinism parity) do not apply: no source was selected and the T133 review step is unfinished",
+    "If re-triggered, the importer belongs lake-side (src/lake/reference/listings_import.py) rather than the harness.data path declared on T136, because listings identity/lifecycle is a lake concern and harness.data.security_master now has a Rust port that must stay in parity"
+  ]
+}

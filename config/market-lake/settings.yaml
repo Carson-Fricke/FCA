@@ -23,6 +23,9 @@ storage:
     enabled: true
     cool_after_days: 14
     cold:
+      # Explicit retrieval-cost decision (T065): Cold stays disabled. Enabling it
+      # would add retrieval and early-deletion charges; see
+      # .github/runbooks/cold-tier-policy.md before changing this value.
       enabled: false
       minimum_age_days: 365
 

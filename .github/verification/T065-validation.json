@@ -1,0 +1,32 @@
+{
+  "taskId": "T065",
+  "numTotalTests": 1956,
+  "numPassedTests": 1956,
+  "numFailedTests": 0,
+  "numPendingTests": 2,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "cold-tier-decision-record",
+      "status": "passed",
+      "command": "manual review of infra/modules/storage.bicep, infra/main.bicep, config/market-lake/settings.yaml, docs/e6.4-cost-projection.md",
+      "result": "Cold is already disabled (enableColdTier=false); the explicit retrieval-cost decision and its re-evaluation trigger are recorded in .github/runbooks/cold-tier-policy.md with the deployment note in repository.md and an inline settings.yaml comment. No Bicep change was required."
+    },
+    {
+      "name": "wave-integration-suite",
+      "status": "passed",
+      "command": "uv run --extra dev pytest -p no:cacheprovider -q",
+      "result": "1956 passed, 2 skipped at wave freeze"
+    },
+    {
+      "name": "lint-format-type-gates",
+      "status": "passed",
+      "command": "uv run --extra dev ruff check . && uv run --extra dev ty check",
+      "result": "clean"
+    }
+  ],
+  "limitations": [
+    "The decision uses list-price retrieval cost, not measured per-tier access telemetry, because no access-pattern dataset exists; this is recorded in the runbook",
+    "coldAfterDays (90) and lifecycle.cold.minimum_age_days (365) remain mutually inconsistent but inert while Cold is disabled; the runbook says so explicitly"
+  ]
+}
