@@ -28,7 +28,11 @@ from thesis.agent.router import (
 )
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContext, SubagentContextFactory
-from thesis.chat.contracts import TranscriptItemKind, WorkflowExecutionState
+from thesis.chat.contracts import (
+    MessageRole,
+    TranscriptItemKind,
+    WorkflowExecutionState,
+)
 from thesis.chat.service import ChatService
 from thesis.execution.events import ExecutionEventType
 from thesis.execution.sub_agents import SubAgentTree
@@ -748,7 +752,8 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
     ]
     for event in top_level:
         assert event.payload["subAgentId"]
-        assert event.payload["acceptsInput"] is False
+        expected_input = event.payload["phase"] == "ideation"
+        assert event.payload["acceptsInput"] is expected_input
         context = cast("dict[str, Any]", event.payload["context"])
         assert context["isolated"] is True
         assert context["knowledge_cutoff"] is None
@@ -759,6 +764,38 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
     assert {event.payload["subAgentId"] for event in completed} == {
         event.payload["subAgentId"] for event in top_level
     }
+
+
+def test_ideation_incorporates_operator_messages_sent_to_the_ideation_node(
+    tmp_path: Path,
+) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+    kit.chat.create_message(
+        WORKSPACE,
+        request.chat_id,
+        actor_id=OWNER,
+        body="Restrict the universe to large-cap technology names.",
+        role=MessageRole.USER,
+        kind=TranscriptItemKind.SUB_AGENT,
+        execution_id=request.execution_id,
+        data={
+            "executionId": request.execution_id,
+            "parentSubAgentId": None,
+            "phase": "ideation",
+            "subAgentId": "subagent-ideation",
+        },
+    )
+
+    kit.workflow.run(request)
+
+    ideation_prompt = kit.provider.prompts[0]
+    assert IDEAS in ideation_prompt
+    assert "Restrict the universe to large-cap technology names." in ideation_prompt
 
 
 def test_nested_rca_sub_agent_links_to_its_phase_orchestrator(tmp_path: Path) -> None:

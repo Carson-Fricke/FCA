@@ -23,6 +23,7 @@ from thesis.chat import ChatService, MessageRole, TranscriptItemKind
 from thesis.chat.contracts import WorkflowExecution
 from thesis.execution.events import ExecutionEventType
 from thesis.execution.sub_agents import (
+    STATUS_NEEDS_INPUT,
     SubAgentContextSpec,
     SubAgentNode,
     SubAgentTree,
@@ -266,6 +267,9 @@ def create_sub_agent_router(
             )
         except Exception as error:
             raise _service_error(error) from error
+        # On-demand nodes keep accepting input for the whole phase; a node that
+        # was answering an explicit request (``needs_input``) flips back off.
+        stays_open = node.accepts_input and node.status != STATUS_NEEDS_INPUT
         append_sub_agent_event(
             chat_service.event_store,
             execution_id=execution_id,
@@ -277,7 +281,7 @@ def create_sub_agent_router(
             phase=node.phase,
             role=node.role,
             context=SubAgentContextSpec(),
-            accepts_input=False,
+            accepts_input=stays_open,
             extra={
                 "inputMessageId": message.message_id,
                 "kind": "thinking",
