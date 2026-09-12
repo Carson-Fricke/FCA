@@ -13,6 +13,14 @@ export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
 		proxy: {
+			// The SPA targets the same-origin `/api` prefix (the Azure Static Web
+			// App linked-backend convention). In dev, proxy `/api/*` to the local
+			// Thesis API and strip the prefix, so dev matches production.
+			'/api': {
+				target: thesisApiTarget,
+				changeOrigin: true,
+				rewrite: (path) => path.replace(/^\/api/, '')
+			},
 			'/v1': { target: thesisApiTarget, changeOrigin: true },
 			'/health': { target: thesisApiTarget, changeOrigin: true },
 			'/healthz': { target: thesisApiTarget, changeOrigin: true }
