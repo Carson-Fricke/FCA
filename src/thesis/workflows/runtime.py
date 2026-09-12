@@ -28,6 +28,7 @@ from thesis.agent.harness_tools import (
     HarnessToolResult,
     register_harness_mcp_skill,
 )
+from thesis.agent.hypothesis_skills import register_hypothesis_development_skills
 from thesis.agent.router import (
     ModelProfile,
     ModelProvider,
@@ -37,16 +38,31 @@ from thesis.agent.router import (
     RolePolicy,
 )
 from thesis.agent.skills import SkillRegistry
+from thesis.agent.subagents import SubagentContextFactory
 from thesis.agent.tool_dispatch import HarnessToolCall, HarnessToolDispatcher
 from thesis.artifacts.importer import ArtifactImporter
 from thesis.chat.service import ChatService
+from thesis.experiments.ledger import AttemptLedger
 from thesis.integrations.harness import HarnessClientPort, ThesisHarnessClient
 from thesis.persistence.journal import CommandJournal
+from thesis.research.hypothesis import HypothesisStore
 from thesis.strategies.validation import StrategySandboxValidator
 from thesis.workflows.backtests import (
     BacktestMode,
     BacktestRunner,
     HarnessBacktestRunner,
+)
+from thesis.workflows.hypothesis_development import (
+    DEFAULT_MAX_RCA_CYCLES,
+    FalsificationPlanner,
+    HypothesisDevelopmentOutcome,
+    HypothesisDevelopmentRequest,
+    HypothesisDevelopmentWorkflow,
+    RcaComposer,
+    StrategyDesigner,
+)
+from thesis.workflows.hypothesis_development import (
+    HypothesisComposer as DevelopmentHypothesisComposer,
 )
 from thesis.workflows.hypothesis_validation import (
     DEFAULT_LOOKBACK,
@@ -102,6 +118,7 @@ def build_model_router(
         return _new_id("invocation")
 
     register_harness_mcp_skill(skills)
+    register_hypothesis_development_skills(skills)
 
     return ModelRouter(
         role_policies=role_policies,
@@ -146,6 +163,8 @@ def build_workflow_runtime(
     harness: ThesisHarnessClient | HarnessClientPort | None = None,
     runner: BacktestRunner | None = None,
     harness_tools: HarnessToolProvider | None = None,
+    strategy_validator: StrategySandboxValidator | None = None,
+    hypothesis_store: HypothesisStore | None = None,
     bundle: PolicyBundle | None = None,
     bundle_hashes: Mapping[str, str] | None = None,
     backtest_mode: BacktestMode = "local",
@@ -190,6 +209,8 @@ def build_workflow_runtime(
         router=router,
         runner=resolved_runner,
         harness_tools=harness_tools,
+        validator=strategy_validator,
+        hypothesis_store=hypothesis_store,
         clock=clock,
         id_factory=id_factory,
     )
@@ -212,6 +233,8 @@ class WorkflowRuntime:
         router: ModelRouter,
         runner: BacktestRunner,
         harness_tools: HarnessToolProvider | None = None,
+        validator: StrategySandboxValidator | None = None,
+        hypothesis_store: HypothesisStore | None = None,
         clock: Callable[[], datetime] = _utc_now,
         id_factory: Callable[[str], str] = _new_id,
     ) -> None:
@@ -226,6 +249,8 @@ class WorkflowRuntime:
         self._router = router
         self._runner = runner
         self._harness_tools = harness_tools
+        self._validator = validator
+        self._hypothesis_store = hypothesis_store
         self._tool_dispatcher = (
             None
             if harness_tools is None
@@ -364,6 +389,97 @@ class WorkflowRuntime:
             journal=journal,
             role=role,
             experiment_id=experiment_id,
+        )
+        return workflow.run(request)
+
+    def build_hypothesis_development(
+        self,
+        *,
+        chat: ChatService,
+        validator: StrategySandboxValidator | None = None,
+        hypothesis_store: HypothesisStore | None = None,
+        composer: DevelopmentHypothesisComposer | None = None,
+        planner: FalsificationPlanner | None = None,
+        rca_composer: RcaComposer | None = None,
+        designer: StrategyDesigner | None = None,
+        ledger: AttemptLedger | None = None,
+        subagent_factory: SubagentContextFactory | None = None,
+        journal: CommandJournal | None = None,
+        research_role: Role = "research",
+        critique_role: Role = "critique",
+        coding_role: Role = "coding",
+        experiment_id: str | None = None,
+        max_rca_cycles: int = DEFAULT_MAX_RCA_CYCLES,
+    ) -> HypothesisDevelopmentWorkflow:
+        """Compose the falsification-first hypothesis-development workflow."""
+        resolved_validator = validator if validator is not None else self._validator
+        if resolved_validator is None:
+            raise WorkflowRuntimeError(
+                "provide a strategy sandbox validator to compose the "
+                "hypothesis-development workflow"
+            )
+        resolved_store = (
+            hypothesis_store if hypothesis_store is not None else self._hypothesis_store
+        )
+        return HypothesisDevelopmentWorkflow(
+            chat=chat,
+            router=self._router,
+            runner=self._runner,
+            validator=resolved_validator,
+            hypothesis_store=resolved_store,
+            composer=composer,
+            planner=planner,
+            rca_composer=rca_composer,
+            designer=designer,
+            ledger=ledger,
+            subagent_factory=subagent_factory,
+            journal=journal,
+            clock=self._clock,
+            id_factory=self._id_factory,
+            research_role=research_role,
+            critique_role=critique_role,
+            coding_role=coding_role,
+            experiment_id=experiment_id,
+            max_rca_cycles=max_rca_cycles,
+        )
+
+    def execute_hypothesis_development(
+        self,
+        request: HypothesisDevelopmentRequest,
+        *,
+        chat: ChatService,
+        validator: StrategySandboxValidator | None = None,
+        hypothesis_store: HypothesisStore | None = None,
+        composer: DevelopmentHypothesisComposer | None = None,
+        planner: FalsificationPlanner | None = None,
+        rca_composer: RcaComposer | None = None,
+        designer: StrategyDesigner | None = None,
+        ledger: AttemptLedger | None = None,
+        subagent_factory: SubagentContextFactory | None = None,
+        journal: CommandJournal | None = None,
+        research_role: Role = "research",
+        critique_role: Role = "critique",
+        coding_role: Role = "coding",
+        experiment_id: str | None = None,
+        max_rca_cycles: int = DEFAULT_MAX_RCA_CYCLES,
+    ) -> HypothesisDevelopmentOutcome:
+        """Run one launched hypothesis-development request to completion."""
+        workflow = self.build_hypothesis_development(
+            chat=chat,
+            validator=validator,
+            hypothesis_store=hypothesis_store,
+            composer=composer,
+            planner=planner,
+            rca_composer=rca_composer,
+            designer=designer,
+            ledger=ledger,
+            subagent_factory=subagent_factory,
+            journal=journal,
+            research_role=research_role,
+            critique_role=critique_role,
+            coding_role=coding_role,
+            experiment_id=experiment_id,
+            max_rca_cycles=max_rca_cycles,
         )
         return workflow.run(request)
 
