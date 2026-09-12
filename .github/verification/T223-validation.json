@@ -1,0 +1,32 @@
+{
+  "taskId": "T223",
+  "numTotalTests": 74,
+  "numPassedTests": 74,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "name": "ui-production-build",
+      "status": "passed",
+      "command": "npm run build (src/ui)",
+      "result": "vite build succeeded and @sveltejs/adapter-static wrote the site to build/"
+    },
+    {
+      "name": "ui-unit-tests",
+      "status": "passed",
+      "command": "npm test (src/ui, vitest run)",
+      "result": "16 test files, 74 tests passed"
+    },
+    {
+      "name": "ui-svelte-check",
+      "status": "passed",
+      "command": "npm run check (src/ui, svelte-check)",
+      "result": "0 errors and 0 warnings"
+    }
+  ],
+  "limitations": [
+    "Workspace list/snapshot/create routes remain a backend follow-up; the UI degrades to an explicit unavailable state with a runtime fixture escape hatch",
+    "Verification was a build/test/typecheck pass over the already-landed commits (58b1650, 44bebeb, c5d7fe5); no T223 source changes were made in this session"
+  ]
+}
