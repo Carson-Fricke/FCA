@@ -20,6 +20,9 @@ on:
       # Dockerfile.thesis copies the whole src/ tree, so any source change
       # (including the Rust workspace under src/harness) is an image input.
       - src/**
+      # The public UI under src/ui is an explicit publish input for the
+      # deploy-ui job even though src/** already covers it for the image build.
+      - src/ui/**
       - config/thesis/**
       - pyproject.toml
       - uv.lock
@@ -187,6 +190,7 @@ jobs:
       THESIS_API_AUDIENCE: ${{ vars.THESIS_API_AUDIENCE }}
       THESIS_CUSTOM_DOMAIN: ${{ vars.THESIS_CUSTOM_DOMAIN }}
       THESIS_CUSTOM_DOMAIN_AUTHORIZED: ${{ vars.THESIS_CUSTOM_DOMAIN_AUTHORIZED }}
+      THESIS_SWA_NAME: ${{ vars.THESIS_SWA_NAME }}
       THESIS_WORKSPACE_REGISTRY: ${{ vars.THESIS_WORKSPACE_REGISTRY || '[{"workspaceId":"equity-momentum","ownerId":"local-operator"}]' }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -348,6 +352,15 @@ jobs:
             thesis_enable_external_ingress="false"
           fi
 
+          # The public SvelteKit Static Web App is created by the composition
+          # only when an operator names it. An empty value preserves the
+          # pre-ADR-001 deployment exactly.
+          thesis_swa_name="${THESIS_SWA_NAME:-}"
+          thesis_swa_configured="false"
+          if [[ -n "$thesis_swa_name" ]]; then
+            thesis_swa_configured="true"
+          fi
+
           deployment_parameters=(
             "location=$AZURE_LOCATION"
             "resourceNamePrefix=$RESOURCE_NAME_PREFIX"
@@ -370,6 +383,8 @@ jobs:
             "thesisApiAudience=$THESIS_API_AUDIENCE"
             "thesisCustomDomain=${THESIS_CUSTOM_DOMAIN}"
             "thesisWorkspaceRegistry=$THESIS_WORKSPACE_REGISTRY"
+            "deployThesisStaticWebApp=$thesis_swa_configured"
+            "thesisStaticWebAppName=$thesis_swa_name"
           )
 
           az deployment group validate \
@@ -817,3 +832,145 @@ jobs:
             echo "- Hostname: \\`$THESIS_CUSTOM_DOMAIN\\`"
             echo "- \\`/health\\` returned \\`$health_status\\` and \\`/v1/auth/check\\` returned \\`$protected_status\\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-ui:
+    name: Build and deploy the Thesis UI
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Additive public host: the SvelteKit application under src/ui is built on
+    # the runner and uploaded to the Thesis Standard Static Web App. The job
+    # is skipped until the public-auth bootstrap (T296) sets THESIS_SWA_NAME,
+    # so a Thesis deployment that predates the public host is unchanged.
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+      THESIS_SWA_NAME: ${{ vars.THESIS_SWA_NAME }}
+
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check whether the public UI host is configured
+        id: ui-config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$THESIS_SWA_NAME" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::THESIS_SWA_NAME is unset; skipping the Thesis UI deployment. Complete the T296 public-auth bootstrap and set THESIS_SWA_NAME on the $DEPLOYMENT_ENVIRONMENT environment to enable it."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate UI deployment inputs
+        if: steps.ui-config.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            AZURE_CLIENT_ID
+            AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID
+            AZURE_RESOURCE_GROUP
+            DEPLOYMENT_ENVIRONMENT
+            THESIS_SWA_NAME
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required UI deployment input $name is empty"
+              exit 1
+            fi
+          done
+
+      - name: Set up Node.js
+        if: steps.ui-config.outputs.configured == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/ui/package-lock.json
+
+      - name: Install UI dependencies
+        if: steps.ui-config.outputs.configured == 'true'
+        working-directory: src/ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Check the UI
+        if: steps.ui-config.outputs.configured == 'true'
+        working-directory: src/ui
+        run: npm run check
+
+      - name: Test the UI
+        if: steps.ui-config.outputs.configured == 'true'
+        working-directory: src/ui
+        run: npm test
+
+      - name: Build the static UI
+        if: steps.ui-config.outputs.configured == 'true'
+        working-directory: src/ui
+        run: npm run build
+
+      - name: Sign in to Azure with OIDC
+        if: steps.ui-config.outputs.configured == 'true'
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve the Static Web App deployment token
+        id: swa-token
+        if: steps.ui-config.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The Static Web App module deliberately does not output the
+          # deployment token (infra/modules/static-web-app.bicep), so CI reads
+          # it at deploy time under the OIDC deployer identity. The value is
+          # masked before it can reach a log and is never committed or stored
+          # as a repository secret.
+          deployment_token="$(az staticwebapp secrets list \
+            --name "$THESIS_SWA_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.apiKey \
+            --output tsv \
+            --only-show-errors)"
+          if [[ -z "$deployment_token" || "$deployment_token" == "None" ]]; then
+            echo "::error::The Static Web App $THESIS_SWA_NAME did not return a deployment token"
+            exit 1
+          fi
+          echo "::add-mask::$deployment_token"
+          printf 'deployment-token=%s\n' "$deployment_token" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the static UI to Azure Static Web Apps
+        if: steps.ui-config.outputs.configured == 'true'
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          action: upload
+          azure_static_web_apps_api_token: ${{ steps.swa-token.outputs.deployment-token }}
+          app_location: src/ui/build
+          api_location: ''
+          output_location: ''
+          skip_app_build: true

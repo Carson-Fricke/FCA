@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/python-bicep-ci.yml"
+      - ".github/workflows/deploy-thesis.yml"
       - "**/*.py"
       - "config/**"
       - "tests/**"
@@ -11,6 +12,7 @@ on:
       - "uv.lock"
       - "setup.py"
       - "src/harness/**"
+      - "src/ui/**"
       - "strategies/**"
       - "Dockerfile"
       - ".dockerignore"
@@ -21,6 +23,7 @@ on:
       - main
     paths:
       - ".github/workflows/python-bicep-ci.yml"
+      - ".github/workflows/deploy-thesis.yml"
       - "**/*.py"
       - "config/**"
       - "tests/**"
@@ -28,6 +31,7 @@ on:
       - "uv.lock"
       - "setup.py"
       - "src/harness/**"
+      - "src/ui/**"
       - "strategies/**"
       - "Dockerfile"
       - ".dockerignore"

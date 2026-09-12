@@ -287,7 +287,7 @@ def test_workflow_yaml_declares_the_thesis_job_chain() -> None:
     assert workflow["name"] == "Deploy thesis environment"
     jobs = workflow["jobs"]
     assert isinstance(jobs, dict)
-    assert set(jobs) == {"build-thesis-image", "deploy", "thesis-smoke"}
+    assert set(jobs) == {"build-thesis-image", "deploy", "deploy-ui", "thesis-smoke"}
 
     # PyYAML 1.1 resolves the unquoted ``on`` key to the boolean True.
     triggers = workflow["on"] if "on" in workflow else workflow[True]
@@ -298,7 +298,7 @@ def test_workflow_yaml_declares_the_thesis_job_chain() -> None:
     assert isinstance(paths, list)
     assert "Dockerfile.thesis" in paths
 
-    for name in ("build-thesis-image", "deploy", "thesis-smoke"):
+    for name in ("build-thesis-image", "deploy", "deploy-ui", "thesis-smoke"):
         job = jobs[name]
         assert isinstance(job, dict)
         permissions = job["permissions"]
