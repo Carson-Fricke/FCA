@@ -39,6 +39,11 @@ from thesis.agent.operations import (
     OperationReceipt,
     WorkspaceOperations,
 )
+from thesis.agent.reply import (
+    DEFAULT_MAX_TOOL_ITERATIONS,
+    harness_agent_reply_provider,
+    reply_provider_for,
+)
 from thesis.agent.residency import (
     AgentId,
     AgentResidency,
@@ -91,6 +96,7 @@ __all__ = [
     "AgentResidency",
     "AgentSession",
     "ContextBoundaryError",
+    "DEFAULT_MAX_TOOL_ITERATIONS",
     "DataKind",
     "EditRecord",
     "GetBacktestStatusArgs",
@@ -149,11 +155,13 @@ __all__ = [
     "assemble_context",
     "content_hash",
     "create_subagent_context",
+    "harness_agent_reply_provider",
     "harness_mcp_skill",
     "harness_mcp_role_policy",
     "harness_mcp_skill_ref",
     "open_harness_tool_provider",
     "register_harness_mcp_skill",
+    "reply_provider_for",
     "resume",
     "with_harness_mcp",
 ]
