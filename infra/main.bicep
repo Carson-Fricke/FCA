@@ -395,6 +395,8 @@ module thesisStaticWebApp './modules/static-web-app.bicep' = if (deployThesis &&
     location: location
     tags: tags
     customDomainName: thesisStaticWebAppCustomDomain
+    thesisApiResourceId: deployThesis ? thesisApi.outputs.backend.resourceId : ''
+    thesisApiRegion: deployThesis ? thesisApi.outputs.backend.region : location
   }
 }
 

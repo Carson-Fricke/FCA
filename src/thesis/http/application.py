@@ -449,67 +449,62 @@ def create_app(
         """Return a minimal protected probe for credential verification."""
         return {"status": "ok"}
 
-    application.include_router(
+    routers = (
         create_chat_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_streaming_router(
             poll_interval_seconds=stream_poll_interval_seconds,
             sleeper=stream_sleeper,
             provider_delta_source=provider_delta_source,
             max_poll_cycles=stream_max_poll_cycles,
         ),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_sub_agent_router(
             poll_interval_seconds=stream_poll_interval_seconds,
             sleeper=stream_sleeper,
             max_poll_cycles=stream_max_poll_cycles,
         ),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_workspaces_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_backtest_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_harness_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_deployment_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_dashboard_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_screeners_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_workspace_state_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_strategy_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_screener_router(),
-        dependencies=[Depends(authenticator)],
-    )
-    application.include_router(
         create_knowledge_router(),
-        dependencies=[Depends(authenticator)],
     )
+    auth_dependency = [Depends(authenticator)]
+    for router in routers:
+        application.include_router(router, dependencies=auth_dependency)
+
+    # The Static Web App linked backend forwards the browser's ``/api/*`` path
+    # unchanged, so the same routers are also served from a mounted sub-app
+    # under ``/api``. Root routes (`/health`, `/v1/*`) stay for direct Container
+    # App probes and the existing clients.
+    api_application = FastAPI(
+        title=f"{application.title} (api prefix)",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+    for router in routers:
+        api_application.include_router(router, dependencies=auth_dependency)
+
+    @api_application.get("/health", tags=["health"])
+    async def api_health() -> dict[str, str]:
+        """Return a probe-safe liveness response on the prefixed API surface."""
+        return {"status": "ok"}
+
+    @api_application.get(
+        "/v1/auth/check",
+        dependencies=auth_dependency,
+        tags=["auth"],
+    )
+    async def api_auth_check() -> dict[str, str]:
+        """Return the protected credential probe on the prefixed API surface."""
+        return {"status": "ok"}
+
+    application.mount("/api", api_application)
     return application
 
 

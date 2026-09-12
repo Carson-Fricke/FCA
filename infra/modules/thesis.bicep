@@ -18,12 +18,16 @@ targetScope = 'resourceGroup'
 // the quant-harness identity, keeping provider, broker, and model secrets
 // out of Thesis scope (fca-thesis.md security invariants).
 //
-// Public hosting on an operator-owned hostname is opt-in: an empty
-// customDomainName parameter preserves the default-FQDN deployment exactly,
-// while a non-empty value adds a hostname binding and a free managed
-// certificate gated on registrar-side DNS validation. The registrar steps
-// stay with the operator (domain-hosting.md runbook); this module never
-// holds a registrar credential or a certificate file.
+// Public hosting on an operator-owned hostname is opt-in and has two mutually
+// exclusive postures. The direct posture sets customDomainName (and requires
+// enableExternalIngress=true) and binds the hostname to this Container App.
+// The Static Web App posture leaves customDomainName empty, keeps ingress
+// internal, and lets static-web-app.bicep own the public hostname and managed
+// certificate; the composition passes this module's `backend` output to that
+// module. The binding is gated on external ingress so a custom hostname can
+// never be requested on internal ingress (Container Apps rejects it). The
+// registrar steps stay with the operator (domain-hosting.md runbook); this
+// module never holds a registrar credential or a certificate file.
 //
 // Additive monthly cost envelope (per the cost-controls.bicep style,
 // Consumption plan list pricing): scale-to-zero by default means $0 idle
@@ -95,7 +99,7 @@ param enableExternalIngress bool = false
 @description('Entra application client ID the Thesis API accepts as token audience. Empty keeps the API on static bearer authentication only.')
 param thesisApiEntraAudience string = ''
 
-@description('Optional public custom hostname for the Thesis site, for example thesis.<operator-domain>. Empty keeps the deployment exactly on the Container Apps default FQDN with no hostname binding and no managed certificate. A non-empty value requires external ingress and operator-created registrar DNS records (see .github/runbooks/domain-hosting.md).')
+@description('Optional public custom hostname for the direct Container App posture, for example thesis.<operator-domain>. Empty keeps the deployment exactly on the Container Apps default FQDN with no hostname binding and no managed certificate. A non-empty value requires enableExternalIngress=true and operator-created registrar DNS records (see .github/runbooks/domain-hosting.md). When the Static Web App is the public origin, leave this empty and set thesisStaticWebAppCustomDomain instead; the two must never claim the same hostname.')
 param customDomainName string = ''
 
 @description('CPU cores per Thesis API replica. Container Apps consumption allows 0.25 to 2.0 in 0.25 increments.')
@@ -233,11 +237,14 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2025-07-01'
 }
 
 // The free managed certificate is requested only for a non-empty custom
-// domain. CNAME domain control validation leaves the certificate pending
-// until the operator's registrar records resolve; see
+// domain on external ingress. CNAME domain control validation leaves the
+// certificate pending until the operator's registrar records resolve; see
 // .github/runbooks/domain-hosting.md for the exact DNS records and az
-// commands. No certificate file is uploaded and no secret is stored.
-resource thesisManagedCertificate 'Microsoft.App/managedEnvironments/managedCertificates@2025-07-01' = if (!empty(customDomainName)) {
+// commands. No certificate file is uploaded and no secret is stored. The
+// external-ingress guard means the Static Web App posture (internal ingress,
+// empty customDomainName) never creates a certificate or a public hostname
+// binding on this Container App.
+resource thesisManagedCertificate 'Microsoft.App/managedEnvironments/managedCertificates@2025-07-01' = if (enableExternalIngress && !empty(customDomainName)) {
   parent: containerAppsEnvironment
   name: thesisCustomCertificateName
   location: location
@@ -279,17 +286,18 @@ resource thesisApiApp 'Microsoft.App/containerApps@2025-07-01' = {
         allowInsecure: false
         targetPort: thesisContainerPort
         transport: 'http'
-        // An empty customDomainName keeps the ingress exactly as deployed
-        // before this parameter existed. A custom hostname binds only to
-        // external ingress and references the managed certificate above;
-        // the certificateId reference orders the certificate before the app.
-        customDomains: empty(customDomainName) ? [] : [
+        // A custom hostname binds only to external ingress and references the
+        // managed certificate above; the certificateId reference orders the
+        // certificate before the app. The Static Web App posture keeps
+        // customDomainName empty and ingress internal, so the SWA is the only
+        // public hostname owner.
+        customDomains: (enableExternalIngress && !empty(customDomainName)) ? [
           {
             name: customDomainName
             bindingType: 'SniEnabled'
             certificateId: thesisManagedCertificate.id
           }
-        ]
+        ] : []
         traffic: [
           {
             latestRevision: true
@@ -399,6 +407,15 @@ output thesisApi object = {
 output thesisIdentity object = {
   resourceId: thesisIdentityResourceId
   clientId: thesisIdentityClientId
+}
+
+@description('Non-secret linked-backend target the composition passes to static-web-app.bicep (resourceId and region). The internal Container App keeps ingress internal; the Static Web App is the public origin that proxies /api/* here. fqdn is the Container Apps internal ingress name and is reported for runbook health checks only.')
+output backend object = {
+  name: thesisApiApp.name
+  resourceId: thesisApiApp.id
+  region: location
+  fqdn: thesisApiApp.properties.configuration.ingress.fqdn
+  ingressExternal: enableExternalIngress
 }
 
 @description('Additive cost envelope reported with the same spirit as cost-controls.bicep runtime guardrails.')

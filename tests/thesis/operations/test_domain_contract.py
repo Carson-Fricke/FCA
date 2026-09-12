@@ -107,8 +107,12 @@ def test_custom_domain_is_optional_and_empty_by_default() -> None:
 
     assert f"param {CUSTOM_DOMAIN_PARAM} string = ''" in text
     assert "@description('Optional public custom hostname" in text
-    # Empty preserves the pre-domain deployment exactly: no hostname binding.
-    assert "customDomains: empty(customDomainName) ? [] : [" in text
+    # Empty preserves the pre-domain deployment exactly: no hostname binding,
+    # and the direct Container App posture is additionally gated on external
+    # ingress because the Static Web App owns the public hostname otherwise.
+    assert (
+        "customDomains: (enableExternalIngress && !empty(customDomainName)) ? [" in text
+    )
     assert "bindingType: 'SniEnabled'" in text
     assert f"name: {CUSTOM_DOMAIN_PARAM}" in text
 
@@ -120,8 +124,9 @@ def test_managed_certificate_is_gated_on_the_custom_domain_parameter() -> None:
         "resource thesisManagedCertificate "
         "'Microsoft.App/managedEnvironments/managedCertificates@" in text
     )
-    # The certificate resource is skipped entirely for the default deployment.
-    assert "= if (!empty(customDomainName)) {" in text
+    # The certificate resource is skipped entirely for the default deployment
+    # and whenever external ingress (the Static Web App posture) is not used.
+    assert "= if (enableExternalIngress && !empty(customDomainName)) {" in text
     assert "subjectName: customDomainName" in text
     assert "domainControlValidation: 'CNAME'" in text
     # The app binding references the certificate resource, so the ARM
