@@ -1,6 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.12.6 AS uv
 
-FROM python:3.12-slim AS rust
+FROM python:3.12-slim AS rust-base
 
 # The process binaries embed CPython through PyO3 to drive user-authored Python
 # strategies, so they must be compiled against the SAME interpreter and glibc
@@ -15,16 +15,35 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl build-essential pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/* \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-       | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path
+       | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
+    && cargo install cargo-chef --locked --version 0.1.78
 
 # The Rust workspace is the quant-harness engine and its process interfaces.
 # This stage compiles the loadable shared library (native) the runtime image
 # carries under /opt/rust and the harness entrypoint binaries the Python
 # console-script shims exec. Tests run in CI; this stage only builds artifacts.
+#
+# `cargo-chef` splits dependency compilation (a stable layer keyed only on the
+# workspace manifests) from the local-crate compilation (keyed on the Rust
+# sources), so a source-only change reuses the dependency layer instead of
+# rebuilding the full workspace. The exported BuildKit cache preserves the
+# dependency layer across runs; see publish-image.yml.
+FROM rust-base AS rust-planner
+
 WORKDIR /build/src/harness
-
 COPY src/harness/ ./
+RUN cargo chef prepare --recipe-path /build/recipe.json
 
+FROM rust-base AS rust
+
+WORKDIR /build/src/harness
+COPY --from=rust-planner /build/recipe.json /build/recipe.json
+# Cook only the dependencies this stage builds. The `py` crate is built
+# separately by setuptools-rust in the builder stage with `extension-module`,
+# so cooking it here would link libpython needlessly.
+RUN cargo chef cook --locked --release --recipe-path /build/recipe.json \
+      -p native -p api -p live
+COPY src/harness/ ./
 RUN cargo build --locked --release -p native \
     && cargo build --locked --release -p api --bins \
     && cargo build --locked --release -p live --bin trader
