@@ -93,7 +93,9 @@ The one-time Bicep bootstrap creates or confirms:
 - Resource-group `Contributor` for the deployer.
 - A resource-group `Role Based Access Control Administrator` assignment whose
   condition permits only `AcrPull`, Storage Blob/Queue/Table data roles, and
-  `Key Vault Secrets User`, and only for that environment's runtime identity.
+  `Key Vault Secrets User`, for any workload principal in the resource group.
+  The scope is the resource group so the grant also covers resources later
+  deployments create, such as the dedicated Thesis workspace storage account.
 
 The deployer must not receive `Owner`. Recurring deployment passes
 `assignGithubDeployerRoles=false`; only the authorized bootstrap owns its
@@ -895,22 +897,26 @@ clock times, and must satisfy the Bicep `minLength` of 9. Current dev values:
 crypto trader disabled, paper credential mode, one RTH replica, 3600-second
 backtest timeout.
 
-When a wave adds role assignments for a new runtime principal, the deployer's
-conditioned RBAC Administrator grants do not cover it and the deployment fails
-with `roleAssignments/write` authorization errors at the storage account and
-Key Vault scopes. The `rebootstrapWhen` rule in `access.bicep` names this
-condition. The authorized maintainer rebootstrap on 2026-09-07 created exactly
-the two scoped conditional Role Based Access Control Administrator assignments
-that `access.bicep` defines with `assignGithubDeployerRoles=true` (storage
-account and Key Vault scopes, principals limited to the runtime and
-quant-runtime identities, roles limited to the data roles that module grants).
-Reproduce it by deploying `main.bicep` once from an Owner identity with
-`assignGithubDeployerRoles=true`, then never again; recurring runs keep the
-flag `false`. Registry `AcrPull` for the quant-runtime identity is not
-templated anywhere: the deployer holds no role-assignment rights at the
-registry scope, so the authorized rebootstrap created that assignment
-manually at the registry scope. Recreate it the same manual way only if the
-registry or the quant-runtime identity is rebuilt.
+When a wave adds role assignments for a new runtime principal or a new
+role-assignment scope (such as the dedicated Thesis workspace storage account),
+the deployer's conditioned RBAC Administrator grant must cover it or the
+deployment fails with `roleAssignments/write` authorization errors at that
+scope. The `rebootstrapWhen` rule in `access.bicep` names this condition. The
+grant is a single resource-group-scoped Role Based Access Control Administrator
+assignment whose condition allows only the allow-listed data roles
+(`AcrPull`, Storage Blob/Queue/Table, and `Key Vault Secrets User`) for any
+workload principal; the resource-group scope is what covers new accounts. Its
+resource name matches the standalone bootstrap, so re-running either
+`bootstrap-github-oidc.bicep` or `main.bicep` with
+`assignGithubDeployerRoles=true` updates the same assignment. Because the
+condition is baked into the deployed role assignment, a code merge alone cannot
+refresh it: an authorized maintainer must deploy `main.bicep` once from an
+Owner identity with `assignGithubDeployerRoles=true`, then never again;
+recurring runs keep the flag `false`. The quant-runtime `AcrPull` assignment is
+still not templated anywhere, but the resource-group scope plus the `AcrPull`
+role in the condition now lets the rebootstrap create it instead of a separate
+manual step. Recreate it the same way only if the registry or the quant-runtime
+identity is rebuilt.
 
 The KEDA cron custom scaler requires `desiredReplicas` metadata and rejects
 unknown metadata keys, so `container-apps.bicep` sets `desiredReplicas` and no

@@ -243,6 +243,7 @@ module access './modules/access.bicep' = {
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
     quantPrincipalId: identities.outputs.quantRuntimeIdentity.principalId
     githubDeployerPrincipalId: identities.outputs.githubDeployerIdentity.principalId
+    githubDeployerIdentityName: githubDeployerIdentityName
     storageAccountResourceId: storage.outputs.storageAccountId
     keyVaultResourceId: keyVault.outputs.keyVaultId
     assignGithubDeployerRoles: assignGithubDeployerRoles

@@ -15,6 +15,10 @@ param quantPrincipalId string
 @maxLength(36)
 param githubDeployerPrincipalId string
 
+@description('Name of the GitHub deployer user-assigned managed identity. Matches the standalone bootstrap so the conditioned Role Based Access Control Administrator assignment resolves to the same resource.')
+@minLength(1)
+param githubDeployerIdentityName string
+
 @description('Full resource ID of the existing storage account in this module deployment resource group. Runtime data roles are scoped only to this account; cross-resource-group IDs are not supported by this resource-group module.')
 @minLength(1)
 param storageAccountResourceId string
@@ -23,7 +27,7 @@ param storageAccountResourceId string
 @minLength(1)
 param keyVaultResourceId string
 
-@description('Whether an authorized caller should perform the one-time GitHub deployer bootstrap. True creates Contributor at this resource group plus conditioned Role Based Access Control Administrator assignments on the storage account and Key Vault. Use false for recurring GitHub deployments because the conditioned deployer cannot create or update its own administrator assignments.')
+@description('Whether an authorized caller should perform the one-time GitHub deployer bootstrap. True creates Contributor at this resource group plus a conditioned Role Based Access Control Administrator assignment at the resource-group scope. Use false for recurring GitHub deployments because the conditioned deployer cannot create or update its own administrator assignments.')
 param assignGithubDeployerRoles bool = false
 
 var storageAccountName = last(split(storageAccountResourceId, '/'))
@@ -67,9 +71,12 @@ resource roleBasedAccessControlAdministratorRole 'Microsoft.Authorization/roleDe
   name: 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
 }
 
-var githubDeployerStorageRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals ${dataRolePrincipalGuids})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals ${dataRolePrincipalGuids}))'
-var githubDeployerKeyVaultRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {4633458b-17de-408a-b874-0445c86b69e6} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals ${dataRolePrincipalGuids})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {4633458b-17de-408a-b874-0445c86b69e6} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals ${dataRolePrincipalGuids}))'
-var dataRolePrincipalGuids = '{${runtimePrincipalId}, ${quantPrincipalId}}'
+// The condition bounds role-assignment writes/deletes to the five allow-listed
+// data-plane role definitions. The principal is intentionally NOT restricted:
+// the deployment creates workload identities (the quant-harness and Thesis
+// user-assigned identities) whose principal IDs are unknown at bootstrap time,
+// and those identities legitimately receive these data roles.
+var githubDeployerRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6}))'
 
 resource runtimeBlobAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: storageAccount
@@ -150,24 +157,18 @@ resource githubDeployerContributorAccess 'Microsoft.Authorization/roleAssignment
   }
 }
 
-resource githubDeployerStorageRbacAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (assignGithubDeployerRoles) {
-  scope: storageAccount
-  name: guid(storageAccount.id, githubDeployerPrincipalId, roleBasedAccessControlAdministratorRole.id)
+// The recurring rebootstrap grants a single resource-group-scoped, conditioned
+// Role Based Access Control Administrator. The scope is the resource group, not
+// one account, so the grant also covers resources the deployment creates later
+// (for example the dedicated Thesis workspace storage account). The resource
+// name matches the standalone bootstrap so a rebootstrap updates that exact
+// assignment rather than adding a second, divergent one.
+resource githubDeployerRbacAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (assignGithubDeployerRoles) {
+  name: guid(resourceGroup().id, githubDeployerIdentityName, roleBasedAccessControlAdministratorRole.id)
   properties: {
-    condition: githubDeployerStorageRbacCondition
+    condition: githubDeployerRbacCondition
     conditionVersion: '2.0'
-    principalId: githubDeployerPrincipalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: roleBasedAccessControlAdministratorRole.id
-  }
-}
-
-resource githubDeployerKeyVaultRbacAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (assignGithubDeployerRoles) {
-  scope: keyVault
-  name: guid(keyVault.id, githubDeployerPrincipalId, roleBasedAccessControlAdministratorRole.id)
-  properties: {
-    condition: githubDeployerKeyVaultRbacCondition
-    conditionVersion: '2.0'
+    description: 'Permit the GitHub deployer to manage only the allow-listed data-role assignments (AcrPull, Storage Blob/Queue/Table, and Key Vault Secrets User) for any workload principal in this resource group.'
     principalId: githubDeployerPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: roleBasedAccessControlAdministratorRole.id
@@ -217,7 +218,7 @@ output quantRoleAssignments object = {
   ]
 }
 
-@description('Deployer bootstrap state. An authorized caller must deploy once with assignments enabled, then recurring GitHub deployments must use false. Contributor manages resource-group resources; conditioned RBAC Administrator can assign only the required data roles to the runtime principal at the exact storage account and Key Vault scopes.')
+@description('Deployer bootstrap state. An authorized caller must deploy once with assignments enabled, then recurring GitHub deployments must use false. Contributor manages resource-group resources; the conditioned RBAC Administrator can assign only the required data roles to any workload principal at the resource-group scope (covering accounts and vaults created by later deployments).')
 output githubDeployerBootstrap object = {
   assignmentsEnabled: assignGithubDeployerRoles
   roles: [
@@ -229,17 +230,11 @@ output githubDeployerBootstrap object = {
     {
       name: 'Role Based Access Control Administrator'
       roleDefinitionId: roleBasedAccessControlAdministratorRole.id
-      scope: storageAccount.id
-      condition: githubDeployerStorageRbacCondition
-    }
-    {
-      name: 'Role Based Access Control Administrator'
-      roleDefinitionId: roleBasedAccessControlAdministratorRole.id
-      scope: keyVault.id
-      condition: githubDeployerKeyVaultRbacCondition
+      scope: resourceGroup().id
+      condition: githubDeployerRbacCondition
     }
   ]
   bootstrapCallerRequires: 'Microsoft.Authorization/roleAssignments/write at the resource-group scope'
   recurringGithubValue: false
-  rebootstrapWhen: 'The runtime or quant-harness principal IDs or the set of roles assigned by this module changes'
+  rebootstrapWhen: 'A wave adds a new role-assignment scope (such as a new storage account) or a new workload principal, or the allow-listed data roles change'
 }
