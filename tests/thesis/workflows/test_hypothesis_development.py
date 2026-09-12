@@ -184,6 +184,7 @@ class FakeProvider:
     def __init__(self, *payloads: dict[str, object] | str) -> None:
         self._payloads = list(payloads)
         self.prompts: list[str] = []
+        self.response_formats: list[object] = []
 
     def invoke(
         self,
@@ -191,9 +192,11 @@ class FakeProvider:
         profile: ModelProfile,
         prompt: PromptContext,
         allowed_tools: tuple[str, ...],
+        response_format: object = None,
     ) -> ModelResponse:
         del profile, allowed_tools
         self.prompts.append(prompt.rendered)
+        self.response_formats.append(response_format)
         if not self._payloads:
             raise AssertionError("model invoked more times than expected")
         payload = self._payloads.pop(0)
@@ -1027,14 +1030,91 @@ def test_json_document_rejects_non_json_output() -> None:
         _json_document(invocation, "hypothesis")
 
 
-def test_non_json_hypothesis_output_fails_the_ideation_phase(tmp_path: Path) -> None:
+def test_non_json_hypothesis_output_repairs_then_pauses_for_input(
+    tmp_path: Path,
+) -> None:
+    bad = "The model refused to produce structured output."
+    kit = _kit(tmp_path, payloads=[bad, bad, bad], results=[])
+    request = _request(kit)
+
+    outcome = kit.workflow.run(request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+    assert outcome.fenced is True
+    assert outcome.detail is not None
+    assert "falsifier" in outcome.detail
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    assert execution.state is WorkflowExecutionState.PAUSED
+
+    events = kit.workflow.observe(WORKSPACE, request.execution_id).events
+    event_types = {event.event_type for event in events}
+    assert ExecutionEventType.WORKFLOW_FAILED not in event_types
+    assert ExecutionEventType.WORKFLOW_PAUSED in event_types
+    needs_input = [
+        event
+        for event in events
+        if event.event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+    ]
+    assert len(needs_input) == 1
+    assert needs_input[0].payload["acceptsInput"] is True
+    assert needs_input[0].payload["question"]
+
+
+def test_non_json_output_reinvokes_the_model_with_error_and_schema(
+    tmp_path: Path,
+) -> None:
+    bad = "not json at all"
+    kit = _kit(tmp_path, payloads=[bad, bad, bad], results=[])
+    request = _request(kit)
+
+    kit.workflow.run(request)
+
+    assert len(kit.provider.prompts) == 3
+    assert "not valid JSON" in kit.provider.prompts[1]
+    assert '"claim"' in kit.provider.prompts[1]
+    assert all(
+        item == {"type": "json_object"} for item in kit.provider.response_formats
+    )
+
+
+def test_optional_hypothesis_fields_default_and_compose(tmp_path: Path) -> None:
+    minimal: dict[str, object] = {
+        "claim": "Five-day momentum in SPY continues over the next five days.",
+        "disagreement": "The market underprices slow information diffusion.",
+        "falsifiers": [
+            {
+                "observable": "sharpe",
+                "condition": "lt",
+                "threshold": 0.0,
+                "test": "Run the probe and require a negative Sharpe.",
+            }
+        ],
+    }
     kit = _kit(
         tmp_path,
-        payloads=["The model refused to produce structured output."],
-        results=[],
+        payloads=[minimal, _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
     )
     request = _request(kit)
 
     outcome = kit.workflow.run(request)
 
-    assert outcome.phase is HypothesisDevelopmentPhase.FAILED
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
+    assert outcome.hypothesis is not None
+    front = outcome.hypothesis.front_matter
+    assert front.horizon == "unspecified"
+    assert front.risk_factor == "unspecified"
+    assert front.universe == ("UNSPECIFIED",)
+    assert front.falsifiers[0].falsifier_id == "f1"
+
+
+def test_launch_is_deterministic_and_never_calls_the_model(tmp_path: Path) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+
+    request = _request(kit)
+
+    assert kit.provider.prompts == []
+    assert kit.provider.response_formats == []
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    assert execution.workflow_id == "hypothesis-development"
+    assert execution.trigger_message_id == request.trigger_message_id

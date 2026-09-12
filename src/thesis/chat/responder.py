@@ -348,18 +348,54 @@ def _research_ideas(message: ChatMessage) -> str | None:
     return None
 
 
+#: Active (non-terminal) hypothesis-development phases, by wire value.
+_ACTIVE_DEVELOPMENT_PHASES = frozenset(
+    {
+        "requested",
+        "ideation",
+        "hypothesis",
+        "falsification_plan",
+        "falsification_trials",
+        "rca",
+        "verdict",
+        "strategy_design",
+        "optimization",
+    }
+)
+
+
 def _development_summary(outcome: HypothesisDevelopmentOutcome) -> str:
-    """Return the assistant summary for one finished hypothesis pipeline."""
+    """Return the assistant summary for one hypothesis-development execution.
+
+    A running or paused execution is reported as started/running or
+    needs-input; only a genuine terminal failure is phrased as a failure, and a
+    model-format compose problem is never described as "finished (failed)"
+    because it pauses the workflow instead.
+    """
+    phase = outcome.phase.value
+    execution_id = outcome.execution_id
+    if phase in _ACTIVE_DEVELOPMENT_PHASES:
+        return (
+            f"Hypothesis development {execution_id} started and is running ({phase})."
+        )
+    if phase == "paused":
+        question = (outcome.detail or "").strip() or "operator input is required"
+        return (
+            f"Hypothesis development {execution_id} is paused and needs input: "
+            f"{question} Answer the workflow's needs-input request to continue."
+        )
+    if phase == "failed":
+        reason = (outcome.detail or "").strip() or "an infrastructure error"
+        return f"Hypothesis development {execution_id} failed: {reason}."
     verdict = outcome.verdict
     if verdict is None:
         return (
-            f"Hypothesis development {outcome.execution_id} finished "
-            f"({outcome.phase.value}); no falsification verdict was recorded."
+            f"Hypothesis development {execution_id} finished ({phase}); "
+            "no falsification verdict was recorded."
         )
     return (
-        f"Hypothesis development {outcome.execution_id} finished "
-        f"({outcome.phase.value}); falsification verdict: {verdict.outcome}. "
-        f"{verdict.reason}"
+        f"Hypothesis development {execution_id} finished ({phase}); "
+        f"falsification verdict: {verdict.outcome}. {verdict.reason}"
     )
 
 

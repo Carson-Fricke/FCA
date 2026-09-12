@@ -408,6 +408,27 @@ def test_complete_omits_tools_when_none_are_supplied() -> None:
     assert "tools" not in transport.calls[0][2]
 
 
+def test_complete_forwards_response_format_when_supplied() -> None:
+    transport = FakeTransport()
+
+    OpenRouterProvider(_profile(), FakeKeySource(), transport).complete(
+        messages=_messages(),
+        response_format={"type": "json_object"},
+    )
+
+    assert transport.calls[0][2]["response_format"] == {"type": "json_object"}
+
+
+def test_complete_omits_response_format_when_not_supplied() -> None:
+    transport = FakeTransport()
+
+    OpenRouterProvider(_profile(), FakeKeySource(), transport).complete(
+        messages=_messages()
+    )
+
+    assert "response_format" not in transport.calls[0][2]
+
+
 @pytest.mark.parametrize(
     "tool_call",
     [
