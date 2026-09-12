@@ -15,8 +15,13 @@ from typing import cast
 import pytest
 
 from thesis.agent.context import PromptContext
-from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
+from thesis.agent.harness_tools import (
+    HARNESS_TOOL_NAMES,
+    HarnessToolProvider,
+    HarnessToolResult,
+)
 from thesis.agent.router import ModelProfile, ModelResponse
+from thesis.integrations.mcp import HarnessMcpClient, InProcessMcpTransport
 from thesis.strategies import StrategyBundle
 from thesis.workflows import (
     BacktestRunRequest,
@@ -103,6 +108,41 @@ def test_build_local_workflow_runtime_requires_runner_or_harness() -> None:
         build_local_workflow_runtime(
             model_provider=FakeModelProvider(), model="test/model"
         )
+
+
+class _CatalogHandler:
+    """In-process MCP handler publishing the harness tool catalog."""
+
+    def handle(self, request: object) -> dict[str, object] | None:
+        if not isinstance(request, Mapping):
+            raise TypeError("request must be a mapping")
+        message = dict(request)
+        if "id" not in message:
+            return None
+        if message.get("method") == "tools/list":
+            result: dict[str, object] = {
+                "tools": [
+                    {"name": name, "description": "", "inputSchema": {"type": "object"}}
+                    for name in HARNESS_TOOL_NAMES
+                ]
+            }
+        else:
+            result = {}
+        return {"jsonrpc": "2.0", "id": message.get("id"), "result": result}
+
+
+def test_build_local_workflow_runtime_adapts_a_shared_client() -> None:
+    client = HarnessMcpClient(InProcessMcpTransport(_CatalogHandler()))
+
+    runtime = build_local_workflow_runtime(
+        model_provider=FakeModelProvider(),
+        model="test/model",
+        harness_client=client,
+    )
+
+    assert runtime.harness_tools is not None
+    assert runtime.harness_tools.client is client
+    assert runtime.runner is not None
 
 
 def test_mcp_backtest_runner_maps_structured_result() -> None:

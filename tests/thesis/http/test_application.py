@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from thesis.agent.harness_tools import (
     HARNESS_TOOL_NAMES,
+    open_harness_mcp_composition,
     open_harness_tool_provider,
 )
 from thesis.http.application import create_app
@@ -182,6 +183,25 @@ def test_create_app_composes_plain_reply_service_without_tools() -> None:
 
     assert "tools" not in transport.calls[0]
     assert system == DEFAULT_SYSTEM_PROMPT
+
+
+def test_create_app_derives_the_tool_provider_from_a_shared_client() -> None:
+    transport = _RecordingTransport(_completion_body("Hi"))
+    composition = open_harness_mcp_composition(
+        HarnessMcpTopology(thesis_location="local", harness_location="local"),
+        in_process_handler=_CatalogHandler(),
+    )
+
+    app = create_app(
+        bearer_token=TOKEN,
+        model_provider=_model_provider(transport),
+        harness_client=composition.client,
+    )
+    system = _compose_reply(app, transport)
+
+    assert "tools" in transport.calls[0]
+    assert system != DEFAULT_SYSTEM_PROMPT
+    assert "harness" in system.lower()
 
 
 def test_retired_validation_routes_are_absent() -> None:

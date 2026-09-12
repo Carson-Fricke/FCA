@@ -30,6 +30,8 @@ import json
 import os
 import shlex
 import subprocess
+import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import count
@@ -69,6 +71,10 @@ MCP_HEALTH_ROUTE = "mcp/health"
 DEFAULT_HARNESS_MCP_COMMAND = ("harness", "mcp")
 #: Default timeout applied to every remote harness MCP HTTP exchange.
 DEFAULT_HTTP_TIMEOUT = 30.0
+#: Default number of initialize/list_tools probe attempts before giving up.
+DEFAULT_PROBE_ATTEMPTS = 3
+#: Default base delay between probe attempts, in seconds.
+DEFAULT_PROBE_BACKOFF_SECONDS = 0.25
 
 McpLocation = Literal["local", "remote"]
 
@@ -390,6 +396,9 @@ class HarnessMcpClient:
             counter = count(1)
             self._next_id = lambda: next(counter)  # noqa: E731
         self._server: Mapping[str, object] = {}
+        self._lock = threading.RLock()
+        self._initialized = False
+        self._closed = False
 
     @property
     def server_info(self) -> Mapping[str, object]:
@@ -397,25 +406,41 @@ class HarnessMcpClient:
         return self._server
 
     @property
+    def initialized(self) -> bool:
+        """Return whether the initialization handshake has completed."""
+        return self._initialized
+
+    @property
     def transport(self) -> McpTransport:
         """Return the transport selected for this client's topology."""
         return self._transport
 
     def initialize(self) -> Mapping[str, object]:
-        """Negotiate the protocol and acknowledge the initialization."""
-        result = self._request(
-            "initialize",
-            {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": CLIENT_NAME, "version": CLIENT_VERSION},
-            },
-        )
-        self._server = dict(result)
-        self._transport.notify(
-            {"jsonrpc": "2.0", "method": "notifications/initialized"}
-        )
-        return result
+        """Negotiate the protocol once and acknowledge the initialization.
+
+        The handshake is idempotent: after one successful exchange this returns
+        the cached server info without another round trip, so a single client
+        can back both the boundary and the tool provider without a duplicate
+        initialize.  Sends are serialized on the transport lock, so a shared
+        client is safe for the boundary runner and the chat tool loop alike.
+        """
+        with self._lock:
+            if self._initialized:
+                return dict(self._server)
+            result = self._request(
+                "initialize",
+                {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": CLIENT_NAME, "version": CLIENT_VERSION},
+                },
+            )
+            self._server = dict(result)
+            self._transport.notify(
+                {"jsonrpc": "2.0", "method": "notifications/initialized"}
+            )
+            self._initialized = True
+            return result
 
     def list_tools(self) -> tuple[McpTool, ...]:
         """Return the server's published tool catalog."""
@@ -492,20 +517,25 @@ class HarnessMcpClient:
         return self.call_tool(TOOL_RUN_SWEEP, {"spec_path": spec_path})
 
     def close(self) -> None:
-        """Close the underlying transport."""
-        self._transport.close()
+        """Close the underlying transport exactly once."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._transport.close()
 
     def _request(
         self, method: str, params: Mapping[str, object]
     ) -> Mapping[str, object]:
-        response = self._transport.exchange(
-            {
-                "jsonrpc": "2.0",
-                "id": self._next_id(),
-                "method": method,
-                "params": dict(params),
-            }
-        )
+        with self._lock:
+            response = self._transport.exchange(
+                {
+                    "jsonrpc": "2.0",
+                    "id": self._next_id(),
+                    "method": method,
+                    "params": dict(params),
+                }
+            )
         error = response.get("error")
         if isinstance(error, Mapping):
             raise HarnessMcpProtocolError(
@@ -536,21 +566,50 @@ class HarnessMcpBoundary:
 
     client: HarnessMcpClient
     _capabilities: HarnessCapabilities
+    tools: tuple[str, ...] = ()
 
     @classmethod
-    def connect(cls, client: HarnessMcpClient) -> HarnessMcpBoundary:
-        """Initialize the client and derive capabilities from its tool catalog."""
-        client.initialize()
-        names = {tool.name for tool in client.list_tools()}
-        return cls(
-            client=client,
-            _capabilities=HarnessCapabilities(
-                backtest=TOOL_RUN_BACKTEST in names,
-                trader=TOOL_LAUNCH_TRADER in names,
-                shadow=False,
-                live=False,
-            ),
-        )
+    def connect(
+        cls,
+        client: HarnessMcpClient,
+        *,
+        attempts: int = DEFAULT_PROBE_ATTEMPTS,
+        backoff_seconds: float = DEFAULT_PROBE_BACKOFF_SECONDS,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> HarnessMcpBoundary:
+        """Initialize the client and derive capabilities from its catalog.
+
+        A flaky first probe is retried up to ``attempts`` times with a short
+        backoff instead of disabling the tool surface on the first failure.
+        ``sleep`` is injectable so tests do not wait on a real clock. The
+        client handshake is idempotent, so a retry after a failed ``tools/list``
+        reuses the successful initialize.
+        """
+        if attempts < 1:
+            raise ValueError("attempts must be a positive integer")
+        if backoff_seconds < 0:
+            raise ValueError("backoff_seconds must be non-negative")
+        last_error: HarnessMcpError | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                client.initialize()
+                names = {tool.name for tool in client.list_tools()}
+                return cls(
+                    client=client,
+                    _capabilities=HarnessCapabilities(
+                        backtest=TOOL_RUN_BACKTEST in names,
+                        trader=TOOL_LAUNCH_TRADER in names,
+                        shadow=False,
+                        live=False,
+                    ),
+                    tools=tuple(sorted(names)),
+                )
+            except HarnessMcpError as error:
+                last_error = error
+                if attempt < attempts:
+                    sleep(backoff_seconds * attempt)
+        assert last_error is not None
+        raise last_error
 
     @property
     def capabilities(self) -> HarnessCapabilities:
@@ -727,12 +786,17 @@ def open_harness_mcp_boundary(
     in_process_handler: _JsonRpcHandler | None = None,
     http_transport: httpx.BaseTransport | None = None,
     stdio_transport: McpTransport | None = None,
+    attempts: int = DEFAULT_PROBE_ATTEMPTS,
+    backoff_seconds: float = DEFAULT_PROBE_BACKOFF_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> HarnessMcpBoundary:
     """Open and connect a harness MCP boundary for ``topology``.
 
     The boundary initializes the JSON-RPC session and derives its declared
     capabilities from the discovered ``tools/list`` catalog, so a launch only
-    routes through a tool the harness actually publishes.
+    routes through a tool the harness actually publishes.  A flaky probe is
+    retried ``attempts`` times with ``backoff_seconds``-scaled delay before the
+    failure propagates; the opened client is closed on failure.
     """
     client = open_harness_mcp_client(
         topology,
@@ -740,7 +804,19 @@ def open_harness_mcp_boundary(
         http_transport=http_transport,
         stdio_transport=stdio_transport,
     )
-    return HarnessMcpBoundary.connect(client)
+    try:
+        return HarnessMcpBoundary.connect(
+            client,
+            attempts=attempts,
+            backoff_seconds=backoff_seconds,
+            sleep=sleep,
+        )
+    except HarnessMcpError:
+        try:
+            client.close()
+        except Exception:
+            pass
+        raise
 
 
 def open_local_harness_boundary(
@@ -752,6 +828,9 @@ def open_local_harness_boundary(
     in_process_handler: _JsonRpcHandler | None = None,
     http_transport: httpx.BaseTransport | None = None,
     stdio_transport: McpTransport | None = None,
+    attempts: int = DEFAULT_PROBE_ATTEMPTS,
+    backoff_seconds: float = DEFAULT_PROBE_BACKOFF_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> HarnessBoundary:
     """Compose the local harness boundary, preferring the MCP tool catalog.
 
@@ -770,6 +849,9 @@ def open_local_harness_boundary(
             in_process_handler=in_process_handler,
             http_transport=http_transport,
             stdio_transport=stdio_transport,
+            attempts=attempts,
+            backoff_seconds=backoff_seconds,
+            sleep=sleep,
         )
     except (HarnessMcpError, OSError):
         if resolved.harness_location != "local" or process_runner is None:
@@ -882,6 +964,8 @@ __all__ = [
     "CLIENT_VERSION",
     "DEFAULT_HARNESS_MCP_COMMAND",
     "DEFAULT_HTTP_TIMEOUT",
+    "DEFAULT_PROBE_ATTEMPTS",
+    "DEFAULT_PROBE_BACKOFF_SECONDS",
     "HARNESS_API_BEARER_TOKEN_VARIABLE",
     "HARNESS_MCP_COMMAND_VARIABLE",
     "HARNESS_MCP_URL_VARIABLE",

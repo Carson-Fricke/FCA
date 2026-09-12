@@ -22,7 +22,8 @@ protocol, and tool failures become agent-visible
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, Protocol
@@ -31,6 +32,8 @@ import httpx
 
 from thesis.agent.skills import SkillRef, SkillRegistry, ThesisSkill
 from thesis.integrations.mcp import (
+    DEFAULT_PROBE_ATTEMPTS,
+    DEFAULT_PROBE_BACKOFF_SECONDS,
     TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_GET_BACKTEST_STATUS,
     TOOL_GET_RUN,
@@ -40,6 +43,7 @@ from thesis.integrations.mcp import (
     TOOL_RUN_BACKTEST,
     TOOL_RUN_SWEEP,
     HarnessMcpAuthError,
+    HarnessMcpBoundary,
     HarnessMcpClient,
     HarnessMcpError,
     HarnessMcpProtocolError,
@@ -49,6 +53,7 @@ from thesis.integrations.mcp import (
     McpToolResult,
     McpTransport,
     harness_mcp_topology_from_env,
+    open_harness_mcp_boundary,
     open_harness_mcp_client,
 )
 
@@ -398,6 +403,29 @@ class HarnessToolProvider:
         self._client.close()
 
 
+@dataclass(frozen=True, slots=True)
+class HarnessMcpComposition:
+    """One shared harness MCP client with the boundary connected over it.
+
+    Both the :class:`~thesis.integrations.mcp.HarnessMcpBoundary` (backtest
+    launches) and :meth:`tool_provider` (the chat tool loop) reuse
+    :attr:`client`, so a local stdio process or a remote ``/mcp`` session is
+    opened and initialized exactly once for the whole composition.
+    """
+
+    client: HarnessMcpClient
+    boundary: HarnessMcpBoundary
+
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """Return the tool names discovered while connecting the boundary."""
+        return self.boundary.tools
+
+    def tool_provider(self) -> HarnessToolProvider:
+        """Return a tool provider that reuses the already-initialized client."""
+        return open_harness_tool_provider(client=self.client)
+
+
 def harness_mcp_skill(
     version: str = HARNESS_MCP_SKILL_VERSION,
 ) -> ThesisSkill:
@@ -437,25 +465,71 @@ def register_harness_mcp_skill(
 def open_harness_tool_provider(
     topology: HarnessMcpTopology | None = None,
     *,
+    client: HarnessMcpClient | None = None,
     in_process_handler: InProcessMcpHandler | None = None,
     http_transport: httpx.BaseTransport | None = None,
     stdio_transport: McpTransport | None = None,
 ) -> HarnessToolProvider:
     """Resolve the deployment topology and open a harness tool provider.
 
-    A ``topology`` argument takes precedence; otherwise the topology is read
-    from the process environment.  ``in_process_handler``, ``http_transport``,
-    and ``stdio_transport`` are test/integration seams passed straight to
-    :func:`open_harness_mcp_client`, so the agent never selects a transport.
+    With ``client`` the provider wraps an already-initialized shared client --
+    for example the one behind a :class:`HarnessMcpBoundary` -- and never opens
+    or initializes a second transport.  Otherwise ``topology`` takes precedence
+    over the process environment, and ``in_process_handler``,
+    ``http_transport``, and ``stdio_transport`` are test/integration seams
+    passed straight to :func:`open_harness_mcp_client`, so the agent never
+    selects a transport.
     """
+    if client is not None:
+        if (
+            topology is not None
+            or in_process_handler is not None
+            or http_transport is not None
+            or stdio_transport is not None
+        ):
+            raise ValueError(
+                "open_harness_tool_provider takes either a client or topology "
+                "seams, not both"
+            )
+        return HarnessToolProvider(client)
     resolved = harness_mcp_topology_from_env() if topology is None else topology
-    client = open_harness_mcp_client(
+    opened = open_harness_mcp_client(
         resolved,
         in_process_handler=in_process_handler,
         http_transport=http_transport,
         stdio_transport=stdio_transport,
     )
-    return HarnessToolProvider(client)
+    return HarnessToolProvider(opened)
+
+
+def open_harness_mcp_composition(
+    topology: HarnessMcpTopology | None = None,
+    *,
+    in_process_handler: InProcessMcpHandler | None = None,
+    http_transport: httpx.BaseTransport | None = None,
+    stdio_transport: McpTransport | None = None,
+    attempts: int = DEFAULT_PROBE_ATTEMPTS,
+    backoff_seconds: float = DEFAULT_PROBE_BACKOFF_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> HarnessMcpComposition:
+    """Open exactly one harness MCP client and connect the boundary over it.
+
+    The topology-aware :func:`open_harness_mcp_client` selects local stdio or
+    the remote ``/mcp`` HTTP transport.  The client is initialized once while
+    connecting the boundary (with a bounded retry for a flaky first probe), and
+    the returned composition shares that same client with its tool provider.
+    """
+    resolved = harness_mcp_topology_from_env() if topology is None else topology
+    boundary = open_harness_mcp_boundary(
+        resolved,
+        in_process_handler=in_process_handler,
+        http_transport=http_transport,
+        stdio_transport=stdio_transport,
+        attempts=attempts,
+        backoff_seconds=backoff_seconds,
+        sleep=sleep,
+    )
+    return HarnessMcpComposition(client=boundary.client, boundary=boundary)
 
 
 def _failure_from_error(
@@ -526,6 +600,7 @@ __all__ = [
     "HarnessToolCatalog",
     "HarnessToolError",
     "HarnessToolFailure",
+    "HarnessMcpComposition",
     "HarnessToolProvider",
     "HarnessToolResult",
     "HarnessToolSpec",
@@ -537,6 +612,7 @@ __all__ = [
     "RunSweepArgs",
     "harness_mcp_skill",
     "harness_mcp_skill_ref",
+    "open_harness_mcp_composition",
     "open_harness_tool_provider",
     "register_harness_mcp_skill",
 ]
