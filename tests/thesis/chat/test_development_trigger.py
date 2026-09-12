@@ -348,3 +348,91 @@ def test_retired_validation_seams_are_removed() -> None:
     assert not hasattr(responder, "ValidationRuntime")
     assert not hasattr(runtime_module.WorkflowRuntime, "build_hypothesis_validation")
     assert not hasattr(runtime_module.WorkflowRuntime, "execute_hypothesis_validation")
+
+
+class PausedDevelopmentRuntime(FakeDevelopmentRuntime):
+    """Runtime returning a paused, needs-input outcome instead of completion."""
+
+    def execute_hypothesis_development(
+        self,
+        request: HypothesisDevelopmentRequest,
+        *,
+        chat: ChatService,
+    ) -> HypothesisDevelopmentOutcome:
+        del chat
+        self.requests.append(request)
+        return HypothesisDevelopmentOutcome(
+            workspace_id=request.workspace_id,
+            execution_id=request.execution_id,
+            phase=HypothesisDevelopmentPhase.PAUSED,
+            fenced=True,
+            transitions=(),
+            detail="state the disagreement/edge and at least one falsifier",
+        )
+
+
+def test_development_summary_reports_running_paused_and_failed() -> None:
+    from thesis.chat.responder import (
+        _ACTIVE_DEVELOPMENT_PHASES,
+        _development_summary,
+    )
+
+    running = HypothesisDevelopmentOutcome(
+        workspace_id=WORKSPACE,
+        execution_id="execution-1",
+        phase=HypothesisDevelopmentPhase.IDEATION,
+        fenced=False,
+        transitions=(),
+    )
+    assert "started" in _development_summary(running)
+    assert "running" in _development_summary(running)
+    assert "ideation" in _ACTIVE_DEVELOPMENT_PHASES
+
+    paused = HypothesisDevelopmentOutcome(
+        workspace_id=WORKSPACE,
+        execution_id="execution-2",
+        phase=HypothesisDevelopmentPhase.PAUSED,
+        fenced=True,
+        transitions=(),
+        detail="state the disagreement/edge and at least one falsifier",
+    )
+    summary = _development_summary(paused)
+    assert "needs input" in summary
+    assert "needs-input" in summary
+    assert "finished (failed)" not in summary
+
+    failed = HypothesisDevelopmentOutcome(
+        workspace_id=WORKSPACE,
+        execution_id="execution-3",
+        phase=HypothesisDevelopmentPhase.FAILED,
+        fenced=True,
+        transitions=(),
+        detail="harness unreachable",
+    )
+    failed_summary = _development_summary(failed)
+    assert "failed" in failed_summary
+    assert "harness unreachable" in failed_summary
+    assert "finished (failed)" not in failed_summary
+
+
+def test_paused_development_message_points_to_needs_input() -> None:
+    chat = ChatService()
+    broker = InMemoryChatStreamBroker()
+    runtime = PausedDevelopmentRuntime()
+    reply = ChatReplyService(
+        chat_service=chat,
+        broker=broker,
+        provider=lambda history: iter(()),
+        development_runtime=runtime,
+    )
+    chat_id = chat.create_chat(
+        WORKSPACE, title="Research", owner_actor_id="operator"
+    ).chat_id
+    chat.create_message(WORKSPACE, chat_id, actor_id="operator", body=_trigger())
+
+    message = reply.respond(WORKSPACE, chat_id)
+
+    assert message is not None
+    assert "needs input" in message.body
+    assert "needs-input" in message.body
+    assert "finished (failed)" not in message.body

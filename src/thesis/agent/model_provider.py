@@ -16,6 +16,8 @@ wraps the fault in :class:`~thesis.agent.router.ModelInvocationError`.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from thesis.agent.context import PromptContext
 from thesis.agent.router import ModelProfile, ModelResponse
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
@@ -46,8 +48,13 @@ class OpenRouterModelProvider:
         profile: ModelProfile,
         prompt: PromptContext,
         allowed_tools: tuple[str, ...],
+        response_format: Mapping[str, object] | None = None,
     ) -> ModelResponse:
-        """Complete one policy-role prompt and return its output content."""
+        """Complete one policy-role prompt and return its output content.
+
+        ``response_format`` is forwarded to the provider so structured phases
+        can demand a JSON object while tolerant extraction still exists.
+        """
         del profile, allowed_tools
         messages: list[ProviderChatMessage] = []
         if self._system_prompt:
@@ -55,7 +62,9 @@ class OpenRouterModelProvider:
                 ProviderChatMessage(role="system", content=self._system_prompt)
             )
         messages.append(ProviderChatMessage(role="user", content=prompt.rendered))
-        completion = self._provider.complete(messages=messages, role="primary")
+        completion = self._provider.complete(
+            messages=messages, role="primary", response_format=response_format
+        )
         output = completion.content or completion.reasoning
         if not output:
             raise ProviderRejectedError("openrouter returned an empty completion")

@@ -55,9 +55,9 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, TypeVar
 
-from thesis.agent.context import assemble_context
+from thesis.agent.context import PromptContext, assemble_context
 from thesis.agent.router import InvocationResult, ModelRouter, Role
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.contracts import (
@@ -133,7 +133,43 @@ _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
 _WORKSPACE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
+#: Composed value returned by a repair-aware composer call.
+_ComposedT = TypeVar("_ComposedT")
+
 DEFAULT_MAX_RCA_CYCLES = 1
+DEFAULT_MAX_COMPOSE_REPAIRS = 2
+
+#: Minimum fields a good-faith model reply must carry; everything else is
+#: defaulted so tolerant extraction never turns a partial answer into a failure.
+_DEFAULT_HORIZON = "unspecified"
+_DEFAULT_RISK_FACTOR = "unspecified"
+_DEFAULT_UNIVERSE: tuple[str, ...] = ("UNSPECIFIED",)
+
+#: Concise JSON shapes echoed back to the model during a compose repair.
+_HYPOTHESIS_SCHEMA = (
+    '{"claim": string, "disagreement": string, "riskFactor": string, '
+    '"horizon": string, "universe": [string], "falsifiers": [{"falsifierId": '
+    'string, "observable": string, "condition": "lt"|"lte"|"gt"|"gte", '
+    '"threshold": number, "test": string}], "sizing": string, "body": string, '
+    '"probe": {"strategyId": string, "version": string, "files": {path: '
+    'string}, "tests": {path: string}, "harnessConfiguration": {}}}'
+)
+_FALSIFICATION_PLAN_SCHEMA = (
+    '{"tests": [{"testId": string, "falsifierId": string, "description": '
+    'string}], "controls": [{"controlId": string, "description": string, '
+    '"expectation": string}]}'
+)
+_RCA_SCHEMA = (
+    '{"falsifierId": string, "failureClass": string, "rationale": string, '
+    '"confidence": number, "followUps": [string]}'
+)
+_STRATEGY_DESIGN_SCHEMA = (
+    '{"strategyId": string, "version": string, "files": {path: string}, '
+    '"tests": {path: string}, "harnessConfiguration": {}, "exitCriteria": '
+    '[{"falsifierId": string, "observable": string, "condition": '
+    '"lt"|"lte"|"gt"|"gte", "threshold": number, "description": string}], '
+    '"limitations": [string]}'
+)
 
 
 class WorkflowError(RuntimeError):
@@ -261,6 +297,31 @@ _PHASE_ORCHESTRATORS: Mapping[HypothesisDevelopmentPhase, tuple[str, str]] = {
     _VERDICT: ("research", "Thesis research verdict orchestrator"),
     _STRATEGY_DESIGN: ("coding", "Thesis coding strategy-design orchestrator"),
     _OPTIMIZATION: ("coding", "Thesis coding optimization orchestrator"),
+}
+
+#: Operator-facing prompts shown when a phase cannot compose valid structured
+#: output even after bounded repairs; the workflow pauses instead of failing.
+_COMPOSE_PAUSE_QUESTIONS: Mapping[HypothesisDevelopmentPhase, str] = {
+    _IDEATION: (
+        "I couldn't build a falsifiable hypothesis from your idea - state the "
+        "disagreement/edge and at least one falsifier and I'll retry."
+    ),
+    _HYPOTHESIS: (
+        "I couldn't build a falsifiable hypothesis from your idea - state the "
+        "disagreement/edge and at least one falsifier and I'll retry."
+    ),
+    _FALSIFICATION_PLAN: (
+        "I couldn't turn the hypothesis into a falsification plan - provide at "
+        "least one falsifier test and one negative/placebo control and I'll retry."
+    ),
+    _RCA: (
+        "I couldn't parse the root-cause diagnosis - restate the failing "
+        "falsifier and its likely cause and I'll retry."
+    ),
+    _STRATEGY_DESIGN: (
+        "I couldn't build a sandbox-valid strategy whose exits re-check the "
+        "falsifiers - revise the strategy and I'll retry."
+    ),
 }
 
 
@@ -932,38 +993,112 @@ def _compose_text(document: Mapping[str, object], key: str, label: str) -> str:
         raise FalsificationComposeError(str(error)) from error
 
 
+def _optional_compose_text(
+    document: Mapping[str, object],
+    key: str,
+    default: str,
+    *,
+    max_length: int,
+) -> str:
+    """Return a trimmed optional field or ``default`` when it is absent/blank."""
+    value = document.get(key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
+    try:
+        return _text(value, key, max_length=max_length)
+    except WorkflowError as error:
+        raise FalsificationComposeError(str(error)) from error
+
+
 class JsonDevelopmentHypothesisComposer:
-    """Parse the canonical JSON hypothesis envelope from model output."""
+    """Parse the canonical JSON hypothesis envelope from model output.
+
+    Composition is deliberately lenient: only ``claim`` and ``disagreement``
+    plus the falsifier core fields are required, and every optional field
+    (``horizon``, ``universe``, ``riskFactor``, ``body``, ``probe``,
+    ``sizing``) falls back to a sensible default so a good-faith reply is
+    accepted.  Whether the hypothesis is *falsifiable* is decided by the
+    falsifiability gate, never by this parser.
+    """
 
     def compose(self, invocation: InvocationResult) -> HypothesisDraft:
         document = _json_document(invocation, "hypothesis")
-        universe = _compose_symbols(document.get("universe"), "universe")
+        claim = _compose_text(document, "claim", "claim")
+        disagreement = _compose_text(document, "disagreement", "disagreement")
+        probe = self._compose_probe(document.get("probe"))
+        universe = _compose_universe(document.get("universe"), probe)
         falsifiers = _compose_falsifiers(document.get("falsifiers"))
-        probe = _compose_strategy(document.get("probe"), "probe")
         sizing = document.get("sizing")
-        if sizing is not None and not (isinstance(sizing, str) and sizing.strip()):
-            raise FalsificationComposeError("sizing must be non-empty text when set")
+        if not (isinstance(sizing, str) and sizing.strip()):
+            sizing = None
         body = document.get("body", "")
+        if body is None:
+            body = ""
         if not isinstance(body, str):
             raise FalsificationComposeError("hypothesis body must be text")
         hypothesis_id = document.get("hypothesisId")
-        if hypothesis_id is not None:
-            try:
-                _identifier(hypothesis_id, "hypothesisId")
-            except WorkflowError as error:
-                raise FalsificationComposeError(str(error)) from error
-        return HypothesisDraft(
-            claim=_compose_text(document, "claim", "claim"),
-            disagreement=_compose_text(document, "disagreement", "disagreement"),
-            risk_factor=_compose_text(document, "riskFactor", "riskFactor"),
-            horizon=_compose_text(document, "horizon", "horizon"),
-            universe=universe,
-            falsifiers=falsifiers,
-            probe=probe,
-            sizing=None if sizing is None else sizing.strip(),
-            body=body,
-            hypothesis_id=None if hypothesis_id is None else str(hypothesis_id),
-        )
+        if hypothesis_id is not None and not (
+            isinstance(hypothesis_id, str) and hypothesis_id.strip()
+        ):
+            hypothesis_id = None
+        try:
+            return HypothesisDraft(
+                claim=claim,
+                disagreement=disagreement,
+                risk_factor=_optional_compose_text(
+                    document, "riskFactor", _DEFAULT_RISK_FACTOR, max_length=256
+                ),
+                horizon=_optional_compose_text(
+                    document, "horizon", _DEFAULT_HORIZON, max_length=256
+                ),
+                universe=universe,
+                falsifiers=falsifiers,
+                probe=probe,
+                sizing=None if sizing is None else sizing.strip(),
+                body=body,
+                hypothesis_id=None if hypothesis_id is None else hypothesis_id.strip(),
+            )
+        except WorkflowError as error:
+            raise FalsificationComposeError(str(error)) from error
+
+    def _compose_probe(self, value: object) -> StrategyContent:
+        if value is None:
+            return _default_probe()
+        return _compose_strategy(value, "probe")
+
+
+def _default_probe() -> StrategyContent:
+    """Return a minimal placeholder probe so a partial reply can compose.
+
+    The probe is the falsification instrument, not the trade itself; when the
+    model omits it the pipeline still has a runnable placeholder and the
+    falsifiability and strategy-design gates decide whether the hypothesis is
+    actually supported.
+    """
+    return StrategyContent(
+        strategy_id="hypothesis-probe",
+        version="1.0.0",
+        source={
+            "strategy.py": "# Placeholder probe; author the real instrument later.\n"
+        },
+        tests={
+            "test_strategy.py": "def test_placeholder() -> None:\n    assert True\n"
+        },
+        harness_configuration={},
+    )
+
+
+def _compose_universe(value: object, probe: StrategyContent) -> tuple[str, ...]:
+    """Return the declared universe, inferring it from the probe when absent."""
+    if value is not None:
+        return _compose_symbols(value, "universe")
+    symbols = probe.harness_configuration.get("symbols")
+    if isinstance(symbols, Sequence) and not isinstance(symbols, str):
+        inferred = [item.strip() for item in symbols if isinstance(item, str)]
+        inferred = [item for item in inferred if item]
+        if inferred:
+            return tuple(dict.fromkeys(inferred))
+    return _DEFAULT_UNIVERSE
 
 
 def _compose_symbols(value: object, label: str) -> tuple[str, ...]:
@@ -980,15 +1115,19 @@ def _compose_symbols(value: object, label: str) -> tuple[str, ...]:
 
 
 def _compose_falsifiers(value: object) -> tuple[HypothesisFalsifier, ...]:
+    if value is None:
+        return ()
     if isinstance(value, str) or not isinstance(value, Sequence):
         raise FalsificationComposeError("falsifiers must be a sequence")
     falsifiers: list[HypothesisFalsifier] = []
-    for item in value:
+    for index, item in enumerate(value):
         if not isinstance(item, Mapping):
             raise FalsificationComposeError("each falsifier must be a JSON object")
         normalized = dict(item)
         if "falsifierId" in normalized and "falsifier_id" not in normalized:
             normalized["falsifier_id"] = normalized.pop("falsifierId")
+        if not normalized.get("falsifier_id"):
+            normalized["falsifier_id"] = f"f{index + 1}"
         try:
             falsifiers.append(HypothesisFalsifier.model_validate(normalized))
         except ValueError as error:
@@ -1064,13 +1203,16 @@ class JsonRcaComposer:
                 raise FalsificationComposeError(
                     "rca followUps must contain non-empty strings"
                 )
-        return RcaDiagnosis(
-            falsifier_id=_compose_text(document, "falsifierId", "falsifierId"),
-            failure_class=_compose_text(document, "failureClass", "failureClass"),
-            rationale=_compose_text(document, "rationale", "rationale"),
-            confidence=float(confidence),
-            follow_ups=tuple(item.strip() for item in follow_ups),
-        )
+        try:
+            return RcaDiagnosis(
+                falsifier_id=_compose_text(document, "falsifierId", "falsifierId"),
+                failure_class=_compose_text(document, "failureClass", "failureClass"),
+                rationale=_compose_text(document, "rationale", "rationale"),
+                confidence=float(confidence),
+                follow_ups=tuple(item.strip() for item in follow_ups),
+            )
+        except WorkflowError as error:
+            raise FalsificationComposeError(str(error)) from error
 
 
 class JsonStrategyDesigner:
@@ -1290,6 +1432,7 @@ class HypothesisDevelopmentWorkflow:
         coding_role: Role = "coding",
         experiment_id: str | None = None,
         max_rca_cycles: int = DEFAULT_MAX_RCA_CYCLES,
+        max_compose_repairs: int = DEFAULT_MAX_COMPOSE_REPAIRS,
         knowledge_cutoff: datetime | None = None,
         subagent_mcp_tools: Mapping[str, tuple[str, ...]] | None = None,
     ) -> None:
@@ -1322,6 +1465,9 @@ class HypothesisDevelopmentWorkflow:
         if not isinstance(max_rca_cycles, int) or max_rca_cycles < 0:
             raise WorkflowError("max_rca_cycles must be a non-negative integer")
         self._max_rca_cycles = max_rca_cycles
+        if not isinstance(max_compose_repairs, int) or max_compose_repairs < 0:
+            raise WorkflowError("max_compose_repairs must be a non-negative integer")
+        self._max_compose_repairs = max_compose_repairs
         if knowledge_cutoff is not None and (
             knowledge_cutoff.tzinfo is None or knowledge_cutoff.utcoffset() is None
         ):
@@ -1592,14 +1738,19 @@ class HypothesisDevelopmentWorkflow:
         except _PhaseFailure as failure:
             state = self._fail(request, failure.state, failure)
             self._emit_phase(request, state.phase, {"state": state.phase.value})
+        except FalsificationComposeError as error:
+            state = self._pause_for_compose(request, state, error)
+            self._emit_phase(request, state.phase, {"state": state.phase.value})
         except (
             BacktestRunError,
-            FalsificationComposeError,
             HarnessError,
             StrategyBundleError,
             StrategyValidationError,
             WorkflowError,
         ) as error:
+            state = self._fail(request, state, error)
+            self._emit_phase(request, state.phase, {"state": state.phase.value})
+        except Exception as error:  # noqa: BLE001 - unexpected infra faults fail closed
             state = self._fail(request, state, error)
             self._emit_phase(request, state.phase, {"state": state.phase.value})
         return self._outcome(state)
@@ -1638,17 +1789,76 @@ class HypothesisDevelopmentWorkflow:
                 messages.append(body)
         return tuple(messages)
 
+    def _prompt_builder(
+        self, *, workspace_scope: str, role: str, context_id: str
+    ) -> Callable[[str], PromptContext]:
+        """Return a function that renders one task into a scoped prompt."""
+
+        def build(task: str) -> PromptContext:
+            return assemble_context(
+                workspace_scope=workspace_scope,
+                task=task,
+                role=role,
+                context_id=context_id,
+            )
+
+        return build
+
+    def _compose_with_repair(
+        self,
+        role: Role,
+        *,
+        base_task: str,
+        prompt_for: Callable[[str], PromptContext],
+        compose: Callable[[InvocationResult], _ComposedT],
+        response_schema: str,
+    ) -> tuple[_ComposedT, InvocationResult]:
+        """Invoke the model and compose, repairing malformed output in place.
+
+        A compose failure never ends the run by itself: the model is re-invoked
+        with the validation error and the required schema, up to
+        ``max_compose_repairs`` times.  When repairs are exhausted the final
+        :class:`FalsificationComposeError` is re-raised so ``run`` can pause for
+        operator input instead of failing.
+        """
+        last_error: FalsificationComposeError | None = None
+        invocation: InvocationResult | None = None
+        for _ in range(self._max_compose_repairs + 1):
+            task = f"{base_task}\n\n{_JSON_ONLY_INSTRUCTION}"
+            if last_error is not None:
+                task = (
+                    f"{base_task}\n\nYour previous reply could not be used: "
+                    f"{last_error}. Reply again with a single JSON object that "
+                    f"matches this schema: {response_schema}\n\n"
+                    f"{_JSON_ONLY_INSTRUCTION}"
+                )
+            invocation = self._router.invoke(
+                role,
+                prompt_for(task),
+                response_format={"type": "json_object"},
+            )
+            try:
+                return compose(invocation), invocation
+            except FalsificationComposeError as error:
+                last_error = error
+        assert invocation is not None and last_error is not None
+        raise last_error
+
     def _ideate(
         self, request: HypothesisDevelopmentRequest
     ) -> tuple[HypothesisDraft, dict[str, object]]:
-        context = assemble_context(
+        prompt_for = self._prompt_builder(
             workspace_scope=request.workspace_id,
-            task=(f"{self._ideation_input(request)}\n\n{_JSON_ONLY_INSTRUCTION}"),
             role=f"Thesis {self._research_role} falsification analyst",
             context_id=request.execution_id,
         )
-        invocation = self._router.invoke(self._research_role, context)
-        draft = self._composer.compose(invocation)
+        draft, invocation = self._compose_with_repair(
+            self._research_role,
+            base_task=self._ideation_input(request),
+            prompt_for=prompt_for,
+            compose=self._composer.compose,
+            response_schema=_HYPOTHESIS_SCHEMA,
+        )
         return draft, invocation.provenance.as_dict()
 
     def _build_hypothesis(
@@ -1675,18 +1885,21 @@ class HypothesisDevelopmentWorkflow:
         document = state.hypothesis
         if document is None:
             raise WorkflowError("falsification planning requires a hypothesis")
-        context = assemble_context(
+        prompt_for = self._prompt_builder(
             workspace_scope=request.workspace_id,
-            task=(
-                "Design falsification trials and negative controls for the "
-                f"hypothesis: {document.front_matter.claim}\n\n"
-                f"{_JSON_ONLY_INSTRUCTION}"
-            ),
             role=f"Thesis {self._research_role} falsification planner",
             context_id=f"{request.execution_id}-plan",
         )
-        invocation = self._router.invoke(self._research_role, context)
-        draft = self._planner.compose(invocation)
+        draft, _ = self._compose_with_repair(
+            self._research_role,
+            base_task=(
+                "Design falsification trials and negative controls for the "
+                f"hypothesis: {document.front_matter.claim}"
+            ),
+            prompt_for=prompt_for,
+            compose=self._planner.compose,
+            response_schema=_FALSIFICATION_PLAN_SCHEMA,
+        )
         falsifiers = {
             falsifier.falsifier_id: falsifier
             for falsifier in document.front_matter.falsifiers
@@ -1795,13 +2008,12 @@ class HypothesisDevelopmentWorkflow:
                 "Diagnose the failed falsifier trial "
                 f"{trial.test_id!r} for observable "
                 f"{(None if falsifier is None else falsifier.observable)!r} "
-                f"on run {trial.run_id!r} (state {trial.run_state!r}).\n\n"
-                f"{_JSON_ONLY_INSTRUCTION}"
+                f"on run {trial.run_id!r} (state {trial.run_state!r})."
             )
             context = self._subagents.create(
                 role=agent_role,
                 workspace_scope=request.workspace_id,
-                task=task,
+                task=f"{task}\n\n{_JSON_ONLY_INSTRUCTION}",
             )
             agent_context = SubAgentContextSpec(knowledge_cutoff=self._knowledge_cutoff)
             self._append_sub_agent(
@@ -1823,9 +2035,33 @@ class HypothesisDevelopmentWorkflow:
                 context=agent_context,
                 extra={"kind": "thinking", "text": task},
             )
-            invocation = self._router.invoke(self._critique_role, context.prompt)
-            diagnosis = self._rca_composer.compose(invocation)
-            if diagnosis.falsifier_id != trial.falsifier_id:
+            prompt_for = self._prompt_builder(
+                workspace_scope=request.workspace_id,
+                role=agent_role,
+                context_id=context.context_id,
+            )
+            expected_falsifier_id = trial.falsifier_id
+
+            def compose_rca(
+                invocation: InvocationResult,
+                _expected_falsifier_id: str = expected_falsifier_id,
+            ) -> RcaDiagnosis:
+                diagnosis = self._rca_composer.compose(invocation)
+                if diagnosis.falsifier_id != _expected_falsifier_id:
+                    raise FalsificationComposeError(
+                        "rca diagnosis falsifier id does not match the trial"
+                    )
+                return diagnosis
+
+            try:
+                diagnosis, _ = self._compose_with_repair(
+                    self._critique_role,
+                    base_task=task,
+                    prompt_for=prompt_for,
+                    compose=compose_rca,
+                    response_schema=_RCA_SCHEMA,
+                )
+            except FalsificationComposeError:
                 self._append_sub_agent(
                     request,
                     ExecutionEventType.SUB_AGENT_FAILED,
@@ -1836,9 +2072,7 @@ class HypothesisDevelopmentWorkflow:
                     context=agent_context,
                     extra={"status": STATUS_FAILED},
                 )
-                raise FalsificationComposeError(
-                    "rca diagnosis falsifier id does not match the trial"
-                )
+                raise
             self._append_sub_agent(
                 request,
                 ExecutionEventType.SUB_AGENT_OUTPUT,
@@ -1922,18 +2156,21 @@ class HypothesisDevelopmentWorkflow:
         document = state.hypothesis
         if document is None:
             raise WorkflowError("strategy design requires a hypothesis")
-        context = assemble_context(
+        prompt_for = self._prompt_builder(
             workspace_scope=request.workspace_id,
-            task=(
-                "Implement a strategy for the surviving hypothesis whose exit "
-                f"criteria are falsifier re-checks: {document.front_matter.claim}"
-                f"\n\n{_JSON_ONLY_INSTRUCTION}"
-            ),
             role=f"Thesis {self._coding_role} strategy author",
             context_id=f"{request.execution_id}-design",
         )
-        invocation = self._router.invoke(self._coding_role, context)
-        draft = self._designer.compose(invocation)
+        draft, _ = self._compose_with_repair(
+            self._coding_role,
+            base_task=(
+                "Implement a strategy for the surviving hypothesis whose exit "
+                f"criteria are falsifier re-checks: {document.front_matter.claim}"
+            ),
+            prompt_for=prompt_for,
+            compose=self._designer.compose,
+            response_schema=_STRATEGY_DESIGN_SCHEMA,
+        )
         bundle = draft.content.bundle()
         validate_strategy_bundle(bundle, self._validator)
         self._append_attempt(
@@ -2378,6 +2615,42 @@ class HypothesisDevelopmentWorkflow:
             )
         )
 
+    def _pause_for_compose(
+        self,
+        request: HypothesisDevelopmentRequest,
+        state: HypothesisDevelopmentState,
+        error: FalsificationComposeError,
+    ) -> HypothesisDevelopmentState:
+        """Pause for operator input when structured output cannot be composed.
+
+        A model-format problem is an operator conversation, not a run failure:
+        the open orchestrator is marked as needing input with a concrete
+        question, and the execution moves to ``paused`` so it can be resumed.
+        """
+        question = _COMPOSE_PAUSE_QUESTIONS.get(
+            state.phase,
+            "I couldn't build valid structured output for this step - restate "
+            "the required fields and I'll retry.",
+        )
+        active = self._active_orchestrators.get(request.execution_id)
+        if active is not None:
+            self._append_sub_agent(
+                request,
+                ExecutionEventType.SUB_AGENT_NEEDS_INPUT,
+                sub_agent_id=active.sub_agent_id,
+                parent_sub_agent_id=None,
+                phase=active.phase,
+                role=active.role,
+                context=active.context,
+                accepts_input=True,
+                extra={
+                    "kind": "compose",
+                    "question": question,
+                    "reason": str(error),
+                },
+            )
+        return self._pause(request, state, _Fenced(f"{question} ({error})", state))
+
     def _pause(
         self,
         request: HypothesisDevelopmentRequest,
@@ -2391,7 +2664,24 @@ class HypothesisDevelopmentWorkflow:
             paused = self._advance(state, _PAUSED, detail)
         except InvalidPhaseTransition:
             return replace(state, detail=detail, fenced=True)
+        self._pause_execution(request)
         return replace(paused, detail=detail, fenced=True)
+
+    def _pause_execution(self, request: HypothesisDevelopmentRequest) -> None:
+        """Move a running execution to ``paused`` without ending it."""
+        try:
+            execution = self._chat.get_execution(
+                request.workspace_id, request.execution_id
+            )
+        except RecordNotFound:
+            return
+        if execution.state is not WorkflowExecutionState.RUNNING:
+            return
+        self._chat.pause_workflow(
+            request.workspace_id,
+            request.execution_id,
+            actor_id=request.requested_by,
+        )
 
     def _fail(
         self,
@@ -2527,6 +2817,7 @@ def _digest(payload: Mapping[str, object]) -> str:
 
 
 __all__ = [
+    "DEFAULT_MAX_COMPOSE_REPAIRS",
     "DEFAULT_MAX_RCA_CYCLES",
     "ExitCriterion",
     "FalsificationComposeError",

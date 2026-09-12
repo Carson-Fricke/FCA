@@ -120,6 +120,7 @@ class OpenRouterProvider:
         messages: Sequence[ChatMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
+        response_format: Mapping[str, object] | None = None,
     ) -> ModelCompletion:
         """Run one chat completion; fail closed on network or rejection.
 
@@ -127,6 +128,11 @@ class OpenRouterProvider:
         it is posted verbatim and any ``message.tool_calls`` in the response are
         parsed into the completion; reasoning fields are parsed into a separate
         ``reasoning`` channel and never become assistant content.
+        ``response_format`` is an optional OpenAI-style output constraint (for
+        example ``{"type": "json_object"}``) posted verbatim so structured
+        phases can request JSON without depending on the model's prose habits.
+        Both options are omitted from the wire payload when not supplied, so
+        existing callers are unaffected.
         """
         key = self._resolve_key()
         payload: dict[str, object] = {
@@ -135,6 +141,8 @@ class OpenRouterProvider:
         }
         if tools:
             payload["tools"] = [dict(tool) for tool in tools]
+        if response_format is not None:
+            payload["response_format"] = dict(response_format)
         status, body = self._post("/chat/completions", self._headers(key), payload)
         if not 200 <= status < 300:
             raise _rejected(status, body)
