@@ -261,6 +261,8 @@ Git publication; `thesis.auth` binds operator sessions to workspaces;
 `thesis.chat`, `thesis.execution`, and `thesis.http` define the UI-facing
 workflow boundary; `thesis.agent` owns policy-driven model context and
 provenance; `thesis.integrations` owns lake and harness adapters;
+`thesis.identity` owns durable accounts, one-time invite links, and
+server-side sessions for the invite-only public release (ADR-001);
 `thesis.strategies` owns content-addressed strategy bundles; `thesis.artifacts`
 owns reproducibility-critical result imports; `thesis.backtests` imports
 completed harness runs into workspace backtest records (equity, trades, stats)

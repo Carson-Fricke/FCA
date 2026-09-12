@@ -17,6 +17,7 @@ def test_thesis_capability_facades_import() -> None:
         "cleo",
         "execution",
         "http",
+        "identity",
         "integrations",
         "operations",
         "persistence",
