@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Literal
 
 import pytest
@@ -16,6 +17,40 @@ from thesis.auth import (
     WorkspaceAuthorizer,
     WorkspaceOwnerLookup,
 )
+from thesis.identity import Session
+from thesis.identity.local import LocalSessionStore
+
+
+class MemorySessionStore:
+    """In-memory test double for the durable identity ``SessionStore`` port."""
+
+    def __init__(self) -> None:
+        self._records: dict[str, Session] = {}
+
+    def get(self, session_id: str) -> Session | None:
+        return self._records.get(session_id)
+
+    def put(self, session: Session) -> Session:
+        self._records[session.id] = session
+        return session
+
+    def revoke(self, session_id: str, *, at: datetime) -> Session | None:
+        record = self._records.get(session_id)
+        if record is None or not record.is_active(at):
+            return None
+        revoked = record.model_copy(update={"revoked_at": at})
+        self._records[session_id] = revoked
+        return revoked
+
+    def delete_expired(self, *, at: datetime) -> int:
+        expired = [
+            session_id
+            for session_id, record in self._records.items()
+            if at >= record.expires_at
+        ]
+        for session_id in expired:
+            del self._records[session_id]
+        return len(expired)
 
 
 def _tokens() -> Iterator[str]:
@@ -34,6 +69,7 @@ def test_local_session_defaults_to_loopback_and_binds_owner_workspace() -> None:
     tokens = _tokens()
     service = OperatorSessionService(
         WorkspaceAuthorizer(_owner_lookup(owners)),
+        session_store=MemorySessionStore(),
         clock=lambda: datetime(2026, 9, 2, tzinfo=UTC),
         token_factory=lambda: next(tokens),
     )
@@ -53,7 +89,7 @@ def test_local_session_defaults_to_loopback_and_binds_owner_workspace() -> None:
             csrf_token=session.csrf_token,
             transport_is_tls=False,
         )
-        is session
+        == session
     )
 
     with pytest.raises(WorkspaceAuthorizationError, match="access denied"):
@@ -70,7 +106,9 @@ def test_workspace_owner_is_checked_when_session_opens_and_reconnects() -> None:
     owners = {"workspace-a": "operator-a"}
     tokens = _tokens()
     service = OperatorSessionService(
-        WorkspaceAuthorizer(_owner_lookup(owners)), token_factory=lambda: next(tokens)
+        WorkspaceAuthorizer(_owner_lookup(owners)),
+        session_store=MemorySessionStore(),
+        token_factory=lambda: next(tokens),
     )
 
     with pytest.raises(WorkspaceAuthorizationError, match="access denied"):
@@ -94,6 +132,7 @@ def test_browser_connection_checks_origin_csrf_expiry_and_revocation() -> None:
     service = OperatorSessionService(
         WorkspaceAuthorizer(_owner_lookup({"workspace-a": "operator-a"})),
         lifetime=timedelta(minutes=5),
+        session_store=MemorySessionStore(),
         clock=lambda: now,
         token_factory=lambda: next(tokens),
     )
@@ -160,6 +199,7 @@ def test_valid_non_loopback_session_requires_authentication_and_tls(
     service = OperatorSessionService(
         WorkspaceAuthorizer(_owner_lookup({"workspace-a": "operator-a"})),
         security,
+        session_store=MemorySessionStore(),
         token_factory=lambda: next(tokens),
     )
     with pytest.raises(SessionSecurityError, match="authenticated"):
@@ -291,3 +331,37 @@ def test_loopback_policy_rejects_remote_or_wildcard_browser_origins() -> None:
         )
     with pytest.raises(SessionConfigurationError, match="exact URLs"):
         BrowserSecurity(allowed_origins=("http://*.example.invalid",))
+
+
+def test_session_survives_a_service_restart(tmp_path: Path) -> None:
+    now = datetime(2026, 9, 2, tzinfo=UTC)
+    owners = {"workspace-a": "operator-a"}
+    store_path = tmp_path / "sessions.json"
+    tokens = _tokens()
+
+    first = OperatorSessionService(
+        WorkspaceAuthorizer(_owner_lookup(owners)),
+        session_store=LocalSessionStore(store_path),
+        clock=lambda: now,
+        token_factory=lambda: next(tokens),
+    )
+    session = first.open_session("operator-a", "workspace-a")
+
+    # A fresh service over the same on-disk store must resolve the session.
+    restarted = OperatorSessionService(
+        WorkspaceAuthorizer(_owner_lookup(owners)),
+        session_store=LocalSessionStore(store_path),
+        clock=lambda: now,
+    )
+    resolved = restarted.authorize_browser_connection(
+        session.session_id,
+        "workspace-a",
+        origin="http://localhost:5173",
+        csrf_token=session.csrf_token,
+        transport_is_tls=False,
+    )
+
+    assert resolved == session
+    assert resolved.operator_id == "operator-a"
+    assert resolved.workspace_id == "workspace-a"
+    assert resolved.csrf_token == session.csrf_token

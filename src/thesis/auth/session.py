@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -10,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 from hmac import compare_digest
 from typing import Literal, Protocol
 from urllib.parse import urlsplit
+
+from thesis.identity import Session, SessionStore
 
 
 class SessionConfigurationError(ValueError):
@@ -181,14 +184,54 @@ def _random_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+#: Durable session ids double as ``thesis.identity`` ``Identifier`` values, so
+#: they share the identifier grammar and length bound.
+_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]*$")
+_MAX_IDENTIFIER_LENGTH = 128
+
+
+def _default_session_store() -> SessionStore:
+    """Return the repository-local durable session store used by default.
+
+    The import is deferred so importing :mod:`thesis.auth` does not pull a
+    storage adapter into the domain import path; the local JSON adapter is
+    composed only when a service is built without an injected store.
+    """
+    from thesis.identity.local import LocalSessionStore
+
+    return LocalSessionStore()
+
+
+def _workspace_from_session_id(session_id: str) -> str:
+    """Return the workspace bound to a durable session id.
+
+    :class:`thesis.identity.models.Session` is keyed by an opaque id and has no
+    workspace column, so the selected workspace travels in the opaque session
+    id as ``"<workspace_id>:<token>"``.  Only the generated token is required
+    to be colon-free, so workspace identifiers may still contain a colon.
+    """
+    workspace_id, separator, token = session_id.rpartition(":")
+    if not separator or not token or not workspace_id:
+        raise SessionSecurityError("operator session denied")
+    return workspace_id
+
+
 class OperatorSessionService:
-    """Issue and verify in-memory, server-side operator sessions."""
+    """Issue and verify durable, server-side operator sessions.
+
+    Sessions are read and written through an injected
+    :class:`thesis.identity.ports.SessionStore`; the service never keeps an
+    in-memory dictionary as its source of truth, so sessions survive a service
+    restart.  Without an explicit store the repository-local JSON store is
+    used, which is the development default.
+    """
 
     def __init__(
         self,
         workspace_access: WorkspaceAccess,
         security: RuntimeSecurity | None = None,
         *,
+        session_store: SessionStore | None = None,
         lifetime: timedelta = timedelta(hours=8),
         clock: Callable[[], datetime] = _utc_now,
         token_factory: Callable[[], str] = _random_token,
@@ -197,10 +240,12 @@ class OperatorSessionService:
             raise ValueError("session lifetime must be positive")
         self._workspace_access = workspace_access
         self._security = RuntimeSecurity() if security is None else security
+        self._session_store: SessionStore = (
+            _default_session_store() if session_store is None else session_store
+        )
         self._lifetime = lifetime
         self._clock = clock
         self._token_factory = token_factory
-        self._sessions: dict[str, OperatorSession] = {}
 
     @property
     def security(self) -> RuntimeSecurity:
@@ -222,11 +267,8 @@ class OperatorSessionService:
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("session clock must return a timezone-aware timestamp")
-        active_tokens = set(self._sessions)
-        active_tokens.update(session.csrf_token for session in self._sessions.values())
-        session_id = self._new_token(active_tokens)
-        active_tokens.add(session_id)
-        csrf_token = self._new_token(active_tokens)
+        session_id, session_token = self._new_session_id(workspace_id)
+        csrf_token = self._new_token({session_token})
         session = OperatorSession(
             session_id=session_id,
             operator_id=operator_id,
@@ -236,7 +278,7 @@ class OperatorSessionService:
             created_at=now.astimezone(UTC),
             expires_at=(now + self._lifetime).astimezone(UTC),
         )
-        self._sessions[session_id] = session
+        self._session_store.put(self._view_to_record(session))
         return session
 
     def authorize_browser_connection(
@@ -255,29 +297,62 @@ class OperatorSessionService:
         if self._security.tls_enabled and not transport_is_tls:
             raise SessionSecurityError("TLS transport required")
 
-        try:
-            session = self._sessions[session_id]
-        except KeyError as error:
-            raise SessionSecurityError("operator session denied") from error
-        if session.is_expired(self._clock()):
-            del self._sessions[session_id]
+        bound_workspace_id = _workspace_from_session_id(session_id)
+        record = self._session_store.get(session_id)
+        if record is None:
             raise SessionSecurityError("operator session denied")
+
+        now = self._clock()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("session clock must return a timezone-aware timestamp")
+        if record.revoked_at is not None:
+            raise SessionSecurityError("operator session denied")
+        if now >= record.expires_at:
+            self._session_store.delete_expired(at=now)
+            raise SessionSecurityError("operator session denied")
+
         if (
             not self._security.is_loopback
-            and authenticated_operator_id != session.operator_id
+            and authenticated_operator_id != record.account_id
         ):
             raise SessionSecurityError("authenticated operator identity required")
         if self._security.browser.csrf_protection and not compare_digest(
-            session.csrf_token, csrf_token
+            record.csrf_secret, csrf_token
         ):
             raise SessionSecurityError("CSRF verification failed")
 
+        session = self._record_to_view(record, bound_workspace_id)
         self._workspace_access.authorize_session(session, workspace_id)
         return session
 
     def revoke_session(self, session_id: str) -> None:
         """Revoke a server-side session without revealing whether it existed."""
-        self._sessions.pop(session_id, None)
+        now = self._clock()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("session clock must return a timezone-aware timestamp")
+        self._session_store.revoke(session_id, at=now)
+
+    def _view_to_record(self, session: OperatorSession) -> Session:
+        """Map the operator view onto the durable identity session record."""
+        return Session(
+            id=session.session_id,
+            account_id=session.operator_id,
+            created_at=session.created_at,
+            expires_at=session.expires_at,
+            csrf_secret=session.csrf_token,
+        )
+
+    def _record_to_view(self, record: Session, workspace_id: str) -> OperatorSession:
+        """Restore the operator view from the durable identity session record."""
+        return OperatorSession(
+            session_id=record.id,
+            operator_id=record.account_id,
+            workspace_id=workspace_id,
+            authentication=self._security.authentication,
+            csrf_token=record.csrf_secret,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+        )
 
     def _new_token(self, existing: set[str]) -> str:
         for _ in range(3):
@@ -285,6 +360,20 @@ class OperatorSessionService:
             if token and token == token.strip() and token not in existing:
                 return token
         raise RuntimeError("session token generator did not produce a unique token")
+
+    def _new_session_id(self, workspace_id: str) -> tuple[str, str]:
+        """Return a durable ``(session_id, token)`` pair for ``workspace_id``."""
+        for _ in range(3):
+            token = self._new_token(set())
+            if ":" in token:
+                continue
+            session_id = f"{workspace_id}:{token}"
+            if (
+                _SESSION_ID_PATTERN.fullmatch(session_id) is not None
+                and len(session_id) <= _MAX_IDENTIFIER_LENGTH
+            ):
+                return session_id, token
+        raise RuntimeError("session token generator did not produce a usable id")
 
 
 __all__ = [
