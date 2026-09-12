@@ -290,6 +290,8 @@ def create_app(
         application.state.chat_stream_broker = chat_stream_broker
     if chat_reply_service is not None:
         application.state.chat_reply_service = chat_reply_service
+        if workflow_runtime is not None and chat_reply_service.workflow_runtime is None:
+            chat_reply_service.workflow_runtime = workflow_runtime
     if chat_reply_service is None and model_provider is not None:
         resolved_chat_service = chat_service
         if resolved_chat_service is None:
@@ -303,6 +305,7 @@ def create_app(
             chat_service=resolved_chat_service,
             broker=resolved_broker,
             provider=reply_provider_for(model_provider, harness_tool_provider),
+            workflow_runtime=workflow_runtime,
         )
     if workspace_data is not None:
         application.state.workspace_service = workspace_data.workspaces

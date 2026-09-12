@@ -424,8 +424,12 @@ surfaces: durable execution machine events (SSE `id` is the replay cursor, so
 reconnects) and, per chat subscription, chat message events as ephemeral
 frames without an `id` that clients deduplicate by message ID. Provider token
 deltas are allowed as a documented ephemeral `provider.delta` event kind
-during model phases; ephemeral events are never replayed from the event
-store.
+during model phases. Each dispatched harness tool call is persisted as an
+ordered `tool`-role chat message carrying the tool name, call id, success flag,
+summary, structured payload, text, and canonical failure mapping, so the
+conversation retains the call at the position it ran; the message streams on
+the same `chat.message` frame as any other message and survives replay.
+Ephemeral events are never replayed from the event store.
 
 ### Model Router
 

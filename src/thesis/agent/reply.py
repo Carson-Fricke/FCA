@@ -32,7 +32,7 @@ from thesis.agent.harness_tools import (
     HarnessToolSpec,
 )
 from thesis.chat.contracts import ChatMessage
-from thesis.chat.responder import ReplyChunk, ReplyProvider
+from thesis.chat.responder import ReplyChunk, ReplyProvider, ToolResultChunk
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
 from thesis.providers.invocations import Role, ToolCall
 from thesis.providers.openrouter import OpenRouterProvider
@@ -126,23 +126,58 @@ def _error_text(call: ToolCall, message: str) -> str:
     )
 
 
-def _dispatch(tool_provider: HarnessToolProvider, call: ToolCall) -> str:
-    """Execute one model tool call, always returning tool-message content."""
+def _error_chunk(call: ToolCall, message: str) -> ToolResultChunk:
+    """Build the ephemeral result chunk for a locally-rejected tool call."""
+    return ToolResultChunk(
+        tool=call.name,
+        call_id=call.id,
+        ok=False,
+        summary=f"{call.name} failed",
+        failure={
+            "kind": "tool",
+            "message": message,
+            "tool": call.name,
+            "statusCode": None,
+            "payload": {},
+        },
+    )
+
+
+def _result_chunk(call: ToolCall, result: HarnessToolResult) -> ToolResultChunk:
+    """Build the ephemeral result chunk for a dispatched harness tool call."""
+    return ToolResultChunk(
+        tool=result.tool,
+        call_id=call.id,
+        ok=result.ok,
+        summary=f"{result.tool} completed" if result.ok else f"{result.tool} failed",
+        structured=dict(result.structured),
+        text=result.text,
+        failure=None if result.failure is None else result.failure.as_dict(),
+    )
+
+
+def _dispatch(
+    tool_provider: HarnessToolProvider, call: ToolCall
+) -> tuple[str, ToolResultChunk]:
+    """Execute one model tool call, returning its message content and result chunk."""
     raw = call.arguments.strip()
     if raw:
         try:
             arguments = json.loads(raw)
         except ValueError:
-            return _error_text(call, "tool arguments were not valid JSON")
+            message = "tool arguments were not valid JSON"
+            return _error_text(call, message), _error_chunk(call, message)
     else:
         arguments = {}
     if not isinstance(arguments, Mapping):
-        return _error_text(call, "tool arguments must be a JSON object")
+        message = "tool arguments must be a JSON object"
+        return _error_text(call, message), _error_chunk(call, message)
     try:
         result = tool_provider.call_tool(call.name, dict(arguments))
     except Exception as error:  # a tool fault must not fail the whole reply
-        return _error_text(call, f"tool call failed: {error}")
-    return _result_text(result)
+        message = f"tool call failed: {error}"
+        return _error_text(call, message), _error_chunk(call, message)
+    return _result_text(result), _result_chunk(call, result)
 
 
 def harness_agent_reply_provider(
@@ -167,7 +202,9 @@ def harness_agent_reply_provider(
     if max_tool_iterations < 1:
         raise ValueError("max_tool_iterations must be a positive integer")
 
-    def stream(history: Sequence[ChatMessage]) -> Iterator[str | ReplyChunk]:
+    def stream(
+        history: Sequence[ChatMessage],
+    ) -> Iterator[str | ReplyChunk | ToolResultChunk]:
         messages = _seed_messages(history, system_prompt)
         if not messages:
             return
@@ -199,13 +236,15 @@ def harness_agent_reply_provider(
                 )
             )
             for call in completion.tool_calls:
+                content, tool_chunk = _dispatch(tool_provider, call)
                 messages.append(
                     ProviderChatMessage(
                         role="tool",
-                        content=_dispatch(tool_provider, call),
+                        content=content,
                         tool_call_id=call.id,
                     )
                 )
+                yield tool_chunk
         # The cap was reached with tools still pending: ask once more without
         # the catalog so the operator always receives a text answer.
         completion = provider.complete(messages=messages, role=role)

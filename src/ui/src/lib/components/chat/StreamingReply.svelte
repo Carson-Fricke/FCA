@@ -1,4 +1,5 @@
 <script lang="ts">
+	import MarkdownBody from './MarkdownBody.svelte';
 	import ThinkingAccordion from './ThinkingAccordion.svelte';
 	import TypingDots from '$lib/components/common/TypingDots.svelte';
 
@@ -27,7 +28,7 @@
 				<ThinkingAccordion text={reasoning} testId="{testId}-thinking" />
 			{/if}
 			{#if text}
-				<p class="text-sm whitespace-pre-wrap text-slate-800">{text}</p>
+				<MarkdownBody text={text} />
 			{:else}
 				<p class="py-0.5"><TypingDots /></p>
 			{/if}

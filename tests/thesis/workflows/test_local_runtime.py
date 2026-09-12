@@ -1,0 +1,162 @@
+"""Coverage for the local workflow-runtime composition.
+
+The local runtime binds a single OpenRouter profile, the harness tool catalog,
+and a backtest runner.  These tests exercise runtime construction with an
+injected fake runner and the MCP runner's mapping from a harness tool result to
+the workflow ``BacktestRunResult``.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from typing import cast
+
+import pytest
+
+from thesis.agent.context import PromptContext
+from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
+from thesis.agent.router import ModelProfile, ModelResponse
+from thesis.strategies import StrategyBundle
+from thesis.workflows import (
+    BacktestRunRequest,
+    BacktestRunResult,
+    McpBacktestRunner,
+    WorkflowRuntime,
+    WorkflowRuntimeError,
+    build_local_workflow_runtime,
+)
+
+
+class FakeModelProvider:
+    """Deterministic fake model provider behind the policy boundary."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def invoke(
+        self,
+        *,
+        profile: ModelProfile,
+        prompt: PromptContext,
+        allowed_tools: tuple[str, ...],
+    ) -> ModelResponse:
+        self.prompts.append(prompt.rendered)
+        return ModelResponse(output="{}")
+
+
+class FakeRunner:
+    """Deterministic fake backtest runner behind the runner port."""
+
+    def __init__(self) -> None:
+        self.requests: list[BacktestRunRequest] = []
+
+    def run(self, request: BacktestRunRequest) -> BacktestRunResult:
+        self.requests.append(request)
+        return BacktestRunResult(job_id="job-1", state="completed", mode="local")
+
+
+class FakeHarnessTools:
+    """Minimal harness tool provider returning one canned structured result."""
+
+    def __init__(self, result: HarnessToolResult) -> None:
+        self._result = result
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def call_tool(
+        self, name: str, arguments: Mapping[str, object] | None = None
+    ) -> HarnessToolResult:
+        self.calls.append((name, dict(arguments or {})))
+        return self._result
+
+
+def _bundle() -> StrategyBundle:
+    return StrategyBundle.create(
+        strategy_id="momentum",
+        version="1.0.0",
+        source={"strategy.py": "class Strategy:\n    pass\n"},
+        tests={"test_strategy.py": "def test_strategy():\n    assert True\n"},
+        harness_configuration={"seed": 7, "symbols": ["SPY"]},
+    )
+
+
+def test_build_local_workflow_runtime_uses_injected_runner() -> None:
+    runner = FakeRunner()
+    provider = FakeModelProvider()
+
+    runtime = build_local_workflow_runtime(
+        model_provider=provider,
+        model="test/model",
+        runner=runner,
+    )
+
+    assert isinstance(runtime, WorkflowRuntime)
+    assert runtime.runner is runner
+    for role in ("primary", "coding", "critique", "research"):
+        decision = runtime.router.resolve(role)
+        assert decision.profile.provider == "openrouter"
+        assert decision.profile.model == "test/model"
+
+
+def test_build_local_workflow_runtime_requires_runner_or_harness() -> None:
+    with pytest.raises(WorkflowRuntimeError, match="runner"):
+        build_local_workflow_runtime(
+            model_provider=FakeModelProvider(), model="test/model"
+        )
+
+
+def test_mcp_backtest_runner_maps_structured_result() -> None:
+    result = HarnessToolResult(
+        tool="run_backtest",
+        ok=True,
+        structured={
+            "run_id": "run-9",
+            "status": "completed",
+            "metrics": {"sharpe": 1.2},
+            "manifest": {"manifestId": "manifest-1"},
+            "result_artifacts": [{"uri": "runs/run-9/fills.csv"}],
+        },
+    )
+    tools = FakeHarnessTools(result)
+    runner = McpBacktestRunner(cast(HarnessToolProvider, tools))
+    request = BacktestRunRequest(
+        run_id="run-fallback",
+        bundle=_bundle(),
+        workflow_execution_id="execution-1",
+        experiment_id="experiment-1",
+    )
+
+    mapped = runner.run(request)
+
+    assert mapped.job_id == "run-9"
+    assert mapped.state == "completed"
+    assert mapped.metrics == {"sharpe": 1.2}
+    assert mapped.manifest == {"manifestId": "manifest-1"}
+    assert mapped.result_artifacts == [{"uri": "runs/run-9/fills.csv"}]
+    assert tools.calls[0][0] == "run_backtest"
+    config_path = tools.calls[0][1]["config_path"]
+    assert isinstance(config_path, str) and config_path
+    with open(config_path, encoding="utf-8") as handle:
+        assert json.load(handle) == {"seed": 7, "symbols": ["SPY"]}
+
+
+def test_mcp_backtest_runner_defaults_state_from_exit_code() -> None:
+    result = HarnessToolResult(
+        tool="run_backtest",
+        ok=True,
+        structured={"job_id": "job-2", "exit_code": 0},
+    )
+    tools = FakeHarnessTools(result)
+    runner = McpBacktestRunner(cast(HarnessToolProvider, tools))
+
+    mapped = runner.run(
+        BacktestRunRequest(
+            run_id="run-fallback",
+            bundle=_bundle(),
+            workflow_execution_id="execution-1",
+            experiment_id="experiment-1",
+        )
+    )
+
+    assert mapped.job_id == "job-2"
+    assert mapped.state == "succeeded"

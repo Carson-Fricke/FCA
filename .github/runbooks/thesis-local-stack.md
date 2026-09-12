@@ -134,47 +134,31 @@ uv run backtest-job --config config/harness/backtest.yaml
 ### Terminal 2 — Thesis API (port 8000)
 
 The `thesis serve` process boundary is scaffolded; until it composes the
-application itself, run the equivalent composition inline. It wires the
-T231 workspace data services (`build_local_workspace_data`) plus the T211
-chat/SSE routers, and delegates backtest launch to the real local
-`harness backtest-job --config <path>` subprocess:
+application itself, run the canonical local composition in
+`scripts/local/thesis_local_api.py`. It wires the T231 workspace data services
+(`build_local_workspace_data`) and the T211 chat/SSE routers, delegates
+backtest launch to the real local harness process, and (when
+`OPENROUTER_API_KEY` is set) composes the workflow runtime so the structured
+hypothesis-validation trigger executes and streams execution events:
 
 ```powershell
-Set-MaskedEnv THESIS_API__BEARER_TOKEN
-@'
-import subprocess
-
-import uvicorn
-
-from thesis.http.application import create_app
-from thesis.http.workspaces import build_local_workspace_data
-from thesis.integrations.harness import ProcessResult
-
-
-def runner(argv):
-    done = subprocess.run(argv, capture_output=True, text=True)
-    return ProcessResult(done.returncode, done.stdout, done.stderr)
-
-
-uvicorn.run(
-    create_app(workspace_data=build_local_workspace_data(harness_runner=runner)),
-    host="127.0.0.1",
-    port=8000,
-)
-'@ | uv run python -
+uv run --env-file .env python scripts/local/thesis_local_api.py
 ```
 
 Notes on the composition:
 
-- The bearer is read from `THESIS_API__BEARER_TOKEN` (double underscore); the
-  application fails closed with 401 when it is unset or blank.
-- Add `workspace_root="<path>"` to `build_local_workspace_data(...)` to
-  persist dashboard widgets and workspace state under `<path>`; omit it for
-  in-memory storage. Workspaces themselves are created through the API (see
-  section 4).
+- The bearer is read from `THESIS_API__BEARER_TOKEN` (double underscore) or the
+  managed `.env`; the application fails closed with 401 when it is unset or blank.
+- `THESIS_WORKSPACE_ROOT` overrides the persisted workspace root; omit it for
+  the default local app-data location. Workspaces themselves are created through
+  the API (see section 4).
 - Screener data context: with no `market_port` configured the screener
   surface answers 503 by design (fail closed when no data source is
   configured). Chat/SSE and the workspace data routes do not depend on it.
+- When `OPENROUTER_API_KEY` is set, each harness tool call the agent makes is
+  persisted as an ordered `tool`-role chat message at the point it ran, and the
+  UI renders it through a tool-name-to-component registry (custom card per
+  tool, generic fallback).
 - The local runner `scripts/local/thesis_local_api.py` connects to the harness
   MCP server (`harness mcp`, stdio JSON-RPC 2.0) by default and routes
   backtest launches through its `run_backtest` tool; set `THESIS_HARNESS_MCP=0`

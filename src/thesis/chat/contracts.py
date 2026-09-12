@@ -315,6 +315,7 @@ class ChatMessage(WorkspaceRecord):
     role: MessageRole
     body: str
     reasoning: str | None = None
+    tool_result: Mapping[str, object] | None = None
     state: MessageState = MessageState.ACCEPTED
     attachment_ids: tuple[str, ...] = ()
     investigation_ids: tuple[str, ...] = ()
@@ -330,6 +331,12 @@ class ChatMessage(WorkspaceRecord):
             self, "body", _validate_body(self.body, "body", max_length=32_768)
         )
         object.__setattr__(self, "reasoning", _normalise_reasoning(self.reasoning))
+        if self.tool_result is not None:
+            if not isinstance(self.tool_result, Mapping):
+                raise ChatContractError("tool_result must be a mapping")
+            object.__setattr__(
+                self, "tool_result", MappingProxyType(dict(self.tool_result))
+            )
         if self.intent_epoch < 0:
             raise ChatContractError("intent_epoch must not be negative")
         object.__setattr__(

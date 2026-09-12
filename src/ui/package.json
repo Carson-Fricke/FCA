@@ -11,6 +11,10 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run"
   },
+  "dependencies": {
+    "dompurify": "^3.2.6",
+    "marked": "^15.0.7"
+  },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.21.0",

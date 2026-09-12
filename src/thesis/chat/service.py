@@ -355,6 +355,7 @@ class ChatService:
         body: str,
         role: MessageRole = MessageRole.USER,
         reasoning: str | None = None,
+        tool_result: Mapping[str, object] | None = None,
         attachment_ids: tuple[str, ...] = (),
         investigation_ids: tuple[str, ...] = (),
         execution_id: str | None = None,
@@ -363,7 +364,9 @@ class ChatService:
         """Persist an accepted message and verify every workspace link.
 
         ``reasoning`` is an optional chain-of-thought side channel persisted
-        alongside, but never inside, the answer ``body``.
+        alongside, but never inside, the answer ``body``.  ``tool_result`` is
+        the structured harness-tool outcome carried by a ``tool``-role message
+        so the conversation retains an ordered, renderable record of the call.
         """
         chat = self.get_chat(workspace_id, chat_id)
         if chat.state is ChatState.ARCHIVED:
@@ -399,6 +402,7 @@ class ChatService:
             role=role,
             body=body,
             reasoning=reasoning,
+            tool_result=tool_result,
             attachment_ids=tuple(
                 attachment.attachment_id for attachment in attachments
             ),
@@ -441,6 +445,7 @@ class ChatService:
         body: str,
         role: MessageRole = MessageRole.USER,
         reasoning: str | None = None,
+        tool_result: Mapping[str, object] | None = None,
         attachment_ids: tuple[str, ...] = (),
         investigation_ids: tuple[str, ...] = (),
         execution_id: str | None = None,
@@ -454,6 +459,7 @@ class ChatService:
             body=body,
             role=role,
             reasoning=reasoning,
+            tool_result=tool_result,
             attachment_ids=attachment_ids,
             investigation_ids=investigation_ids,
             execution_id=execution_id,

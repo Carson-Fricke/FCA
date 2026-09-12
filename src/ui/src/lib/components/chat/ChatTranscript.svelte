@@ -1,6 +1,8 @@
 <script lang="ts">
 	import ConsentCard from './ConsentCard.svelte';
+	import MarkdownBody from './MarkdownBody.svelte';
 	import ThinkingAccordion from './ThinkingAccordion.svelte';
+	import ToolResultCard from './ToolResultCard.svelte';
 	import type {
 		ChatMessage,
 		ConsentConfirmation,
@@ -30,6 +32,22 @@
 
 <div class="space-y-3" data-testid="chat-transcript">
 	{#each messages as message (message.message_id)}
+		{#if message.role === 'tool'}
+			<div
+				class="flex justify-start"
+				data-testid="chat-message"
+				data-role="tool"
+				data-message-id={message.message_id}
+			>
+				<div class="w-full">
+					{#if message.tool_result}
+						<ToolResultCard result={message.tool_result} />
+					{:else}
+						<p class="text-sm whitespace-pre-wrap text-slate-800">{message.body}</p>
+					{/if}
+				</div>
+			</div>
+		{:else}
 		<article
 			class="flex {isUser(message.role) ? 'justify-end' : 'justify-start'}"
 			data-testid="chat-message"
@@ -61,7 +79,11 @@
 						testId="thinking-{message.message_id}"
 					/>
 				{/if}
-				<p class="text-sm whitespace-pre-wrap text-slate-800">{message.body}</p>
+				{#if isUser(message.role)}
+					<p class="text-sm whitespace-pre-wrap text-slate-800">{message.body}</p>
+				{:else}
+					<MarkdownBody text={message.body} />
+				{/if}
 
 				{#if message.attachment_ids.length}
 					<div class="mt-2 flex flex-wrap gap-1.5">
@@ -91,6 +113,7 @@
 				{/if}
 			</div>
 		</article>
+		{/if}
 	{/each}
 
 	{#if proposal && onConfirmConsent}

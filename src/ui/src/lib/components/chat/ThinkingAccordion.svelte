@@ -1,4 +1,6 @@
 <script lang="ts">
+	import MarkdownBody from './MarkdownBody.svelte';
+
 	/**
 	 * Collapsed-by-default disclosure for a model's reasoning trace. Deliberately
 	 * subtle: no card outline, muted italic text, and a chevron that rotates on
@@ -36,12 +38,9 @@
 			<span>Thinking</span>
 		</button>
 		{#if open}
-			<p
-				class="mt-1 pl-4 text-xs text-slate-500 italic whitespace-pre-wrap"
-				data-testid="{testId}-body"
-			>
-				{text}
-			</p>
+			<div class="mt-1 pl-4" data-testid="{testId}-body">
+				<MarkdownBody text={text} class="text-xs text-slate-500 italic" />
+			</div>
 		{/if}
 	</div>
 {/if}

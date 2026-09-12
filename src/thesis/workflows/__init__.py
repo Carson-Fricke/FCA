@@ -41,6 +41,10 @@ from thesis.workflows.hypothesis_validation import (
     HypothesisVerdict,
     JsonHypothesisComposer,
 )
+from thesis.workflows.local import (
+    McpBacktestRunner,
+    build_local_workflow_runtime,
+)
 from thesis.workflows.rca import (
     FailureClass,
     RcaIntakeError,
@@ -104,6 +108,7 @@ __all__ = [
     "InvalidPhaseTransition",
     "JsonHypothesisComposer",
     "JsonStrategyComposer",
+    "McpBacktestRunner",
     "PhaseTransition",
     "RcaIntakeError",
     "RcaLoopPhase",
@@ -124,6 +129,7 @@ __all__ = [
     "WorkflowRuntime",
     "WorkflowRuntimeError",
     "build_evidence_report",
+    "build_local_workflow_runtime",
     "build_model_router",
     "build_workflow_runtime",
     "transition_phase",

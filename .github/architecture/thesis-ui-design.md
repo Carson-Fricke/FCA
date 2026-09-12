@@ -175,7 +175,12 @@ implement the UI and does not modify any backend contract.
   (SSE). Durable execution events carry the replay cursor: the client stores
   the last `id` and reconnects with `Last-Event-ID`. Ephemeral frames (chat
   message events, `provider.delta`) have no `id` and are deduplicated by
-  message ID; they are never replayed after reconnect.
+  message ID (or tool call id); they are never replayed after reconnect.
+  Assistant and reasoning text render as sanitized Markdown. Harness tool
+  outcomes are persisted as ordered `tool`-role chat messages at the position
+  they ran and render through a tool-name-to-component registry with a generic
+  fallback, so any harness MCP tool can supply a custom in-chat card without
+  changing the transcript.
 - **Artifacts:** content-addressed workspace paths; the UI downloads by
   reference and never reassembles or rewrites artifact content.
 - **Authorization:** bearer authentication to the Thesis API

@@ -136,6 +136,8 @@ export interface ChatMessage {
 	intent_epoch: number;
 	/** Model reasoning trace persisted alongside the assistant reply, if any. */
 	reasoning?: string;
+	/** Structured harness-tool outcome carried by a tool-role message. */
+	tool_result?: ToolResult | null;
 }
 
 export interface ChatThread {
@@ -206,6 +208,26 @@ export interface WorkflowExecutionRecord {
 	intent_epoch: number;
 	steering_message_ids: string[];
 	created_at: string;
+}
+
+// ---------- Ephemeral tool results (tool.result SSE event) ----------
+
+export interface ToolResultFailure {
+	kind: string;
+	message: string;
+	tool?: string | null;
+	statusCode?: number | null;
+	payload?: Record<string, unknown>;
+}
+
+export interface ToolResult {
+	tool: string;
+	callId: string | null;
+	ok: boolean;
+	summary: string;
+	structured: Record<string, unknown>;
+	text: string;
+	failure: ToolResultFailure | null;
 }
 
 // ---------- Workspace product records ----------

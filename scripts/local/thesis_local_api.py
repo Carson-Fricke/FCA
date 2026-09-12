@@ -31,6 +31,7 @@ from thesis.agent.harness_tools import (  # noqa: E402
     HarnessToolProvider,
     open_harness_tool_provider,
 )
+from thesis.agent.model_provider import OpenRouterModelProvider  # noqa: E402
 from thesis.agent.reply import reply_provider_for  # noqa: E402
 from thesis.chat.responder import ChatReplyService  # noqa: E402
 from thesis.chat.service import ChatService  # noqa: E402
@@ -52,6 +53,7 @@ from thesis.providers.transports import (  # noqa: E402
     EnvironmentApiKeySource,
     HttpOpenRouterTransport,
 )
+from thesis.workflows.local import build_local_workflow_runtime  # noqa: E402
 
 
 def _workspace_root() -> str:
@@ -153,27 +155,37 @@ chat_stream_broker = InMemoryChatStreamBroker()
 # Wire a live model provider only when a key is present; otherwise chat stays
 # a durable message surface with no reply, rather than failing every send.
 reply_service = None
+workflow_runtime = None
 if os.environ.get("OPENROUTER_API_KEY"):
+    model_name = os.environ.get("THESIS_MODEL", "openai/gpt-4o-mini")
     provider_profile = OpenRouterProfile(
         profile_id="local-openrouter",
-        model=os.environ.get("THESIS_MODEL", "openai/gpt-4o-mini"),
+        model=model_name,
     )
     model_provider = OpenRouterProvider(
         provider_profile,
         EnvironmentApiKeySource(),
         HttpOpenRouterTransport(provider_profile.base_url),
     )
+    harness_tools = _harness_tool_provider()
     reply_service = ChatReplyService(
         chat_service=chat_service,
         broker=chat_stream_broker,
-        provider=reply_provider_for(model_provider, _harness_tool_provider()),
+        provider=reply_provider_for(model_provider, harness_tools),
     )
+    if harness_tools is not None:
+        workflow_runtime = build_local_workflow_runtime(
+            model_provider=OpenRouterModelProvider(model_provider),
+            model=model_name,
+            harness_tools=harness_tools,
+        )
 
 app = create_app(
     chat_service=chat_service,
     workspace_data=workspace_data,
     chat_stream_broker=chat_stream_broker,
     chat_reply_service=reply_service,
+    workflow_runtime=workflow_runtime,
 )
 app.add_middleware(
     CORSMiddleware,

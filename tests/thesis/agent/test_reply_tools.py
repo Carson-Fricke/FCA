@@ -26,7 +26,7 @@ from thesis.agent.reply import (
     reply_provider_for,
 )
 from thesis.chat.contracts import ChatMessage, MessageRole
-from thesis.chat.responder import ReplyChunk
+from thesis.chat.responder import ReplyChunk, ToolResultChunk
 from thesis.integrations.mcp import HarnessMcpTopology
 from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
 from thesis.providers.transports import (
@@ -202,12 +202,13 @@ def _history(*bodies: str) -> tuple[ChatMessage, ...]:
     )
 
 
-def _answer_text(chunks: Iterable[str | ReplyChunk]) -> str:
-    """Join only the answer channel, excluding any reasoning fragments."""
+def _answer_text(chunks: Iterable[str | ReplyChunk | ToolResultChunk]) -> str:
+    """Join only the answer channel, excluding reasoning and tool frames."""
     return "".join(
-        chunk.text if isinstance(chunk, ReplyChunk) else chunk
+        chunk if isinstance(chunk, str) else chunk.text
         for chunk in chunks
-        if not isinstance(chunk, ReplyChunk) or chunk.kind == "text"
+        if isinstance(chunk, str)
+        or (isinstance(chunk, ReplyChunk) and chunk.kind == "text")
     )
 
 
@@ -380,7 +381,11 @@ def test_tool_loop_concatenates_reasoning_before_the_answer() -> None:
     transport = _QueueTransport([first, second])
     stream = harness_agent_reply_provider(_provider(transport), tools)
 
-    chunks = list(stream(_history("go")))
+    chunks = [
+        chunk
+        for chunk in stream(_history("go"))
+        if not isinstance(chunk, ToolResultChunk)
+    ]
 
     kinds = [
         "reasoning" if isinstance(chunk, ReplyChunk) else "text" for chunk in chunks
@@ -426,6 +431,58 @@ def test_provider_construction_validates_loop_settings() -> None:
         harness_agent_reply_provider(provider, tools, chunk_size=0)
     with pytest.raises(ValueError, match="max_tool_iterations"):
         harness_agent_reply_provider(provider, tools, max_tool_iterations=0)
+
+
+def test_tool_loop_yields_result_chunk_for_each_dispatched_call() -> None:
+    handler = _HarnessHandler()
+    tools = _tools(handler)
+    transport = _QueueTransport(
+        [
+            _tool_call_body("run_backtest", {"config_path": "cfg.yaml"}),
+            _text_body("Done."),
+        ]
+    )
+    stream = harness_agent_reply_provider(_provider(transport), tools)
+
+    chunks = [
+        chunk
+        for chunk in stream(_history("run a backtest"))
+        if isinstance(chunk, ToolResultChunk)
+    ]
+
+    assert len(chunks) == 1
+    chunk = chunks[0]
+    assert chunk.tool == "run_backtest"
+    assert chunk.call_id == "call-1"
+    assert chunk.ok is True
+    assert chunk.summary == "run_backtest completed"
+    assert chunk.structured["jobId"] == "job-1"
+    assert chunk.text == "ok"
+    assert chunk.failure is None
+
+
+def test_tool_loop_yields_failed_result_chunk_for_tool_error() -> None:
+    handler = _HarnessHandler(is_error=True)
+    tools = _tools(handler)
+    transport = _QueueTransport(
+        [
+            _tool_call_body("get_run", {"run_id": "run-1"}),
+            _text_body("Done."),
+        ]
+    )
+    stream = harness_agent_reply_provider(_provider(transport), tools)
+
+    chunks = [
+        chunk
+        for chunk in stream(_history("get run run-1"))
+        if isinstance(chunk, ToolResultChunk)
+    ]
+
+    assert len(chunks) == 1
+    assert chunks[0].ok is False
+    assert chunks[0].summary == "get_run failed"
+    assert chunks[0].failure is not None
+    assert chunks[0].failure["kind"] == "tool"
 
 
 def test_local_composition_selects_the_tool_aware_provider() -> None:

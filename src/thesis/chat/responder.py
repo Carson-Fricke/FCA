@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -44,13 +44,38 @@ class ReplyChunk:
     kind: str = "text"
 
 
+@dataclass(frozen=True, slots=True)
+class ToolResultChunk:
+    """One ephemeral tool outcome emitted alongside a streamed reply.
+
+    A tool result is not answer text: it is persisted as its own ordered
+    ``tool``-role chat message carrying the structured outcome, so the
+    conversation retains the call in the exact position it ran.  ``call_id``
+    ties the result to the model's ``tool_calls`` entry when the provider
+    supplied one, and ``failure`` carries the canonical failure mapping for an
+    unsuccessful call.
+    """
+
+    tool: str
+    call_id: str | None
+    ok: bool
+    summary: str
+    structured: Mapping[str, object] = field(default_factory=dict)
+    text: str = ""
+    failure: Mapping[str, object] | None = None
+
+
 #: A reply provider maps a conversation to an iterator of reply chunks.
 #:
 #: Answer text may be yielded either as a bare ``str`` or as a
 #: :class:`ReplyChunk` with ``kind="text"``.  Chain-of-thought is yielded as a
 #: :class:`ReplyChunk` with ``kind="reasoning"`` and is always surfaced on the
-#: separate reasoning channel, never mixed into the answer.
-ReplyProvider = Callable[[Sequence[ChatMessage]], Iterator[str | ReplyChunk]]
+#: separate reasoning channel, never mixed into the answer.  A tool outcome is
+#: yielded as a :class:`ToolResultChunk` and persisted as a ``tool``-role
+#: message at its position in the conversation.
+ReplyProvider = Callable[
+    [Sequence[ChatMessage]], Iterator[str | ReplyChunk | ToolResultChunk]
+]
 
 _HISTORY_ROLES = frozenset(
     (MessageRole.USER, MessageRole.ASSISTANT, MessageRole.SYSTEM)
@@ -179,6 +204,19 @@ def _sanitize(text: str) -> str:
     ).strip()
 
 
+def _tool_result_data(chunk: ToolResultChunk) -> dict[str, object]:
+    """Return the canonical UI payload for one streamed tool outcome."""
+    return {
+        "callId": chunk.call_id,
+        "failure": None if chunk.failure is None else dict(chunk.failure),
+        "ok": chunk.ok,
+        "structured": dict(chunk.structured),
+        "summary": chunk.summary,
+        "text": chunk.text,
+        "tool": chunk.tool,
+    }
+
+
 @dataclass(slots=True)
 class ChatReplyService:
     """Generate and stream one assistant reply per user message.
@@ -279,6 +317,22 @@ class ChatReplyService:
         reasoning_chunks: list[str] = []
         try:
             for chunk in self.provider(history):
+                if isinstance(chunk, ToolResultChunk):
+                    tool_message = self.chat_service.create_message(
+                        workspace_id,
+                        chat_id,
+                        actor_id=self.actor_id,
+                        body=chunk.summary or f"{chunk.tool} result",
+                        role=MessageRole.TOOL,
+                        tool_result=_tool_result_data(chunk),
+                    )
+                    self.broker.publish(
+                        workspace_id,
+                        chat_id,
+                        CHAT_MESSAGE,
+                        {"message": tool_message.as_dict()},
+                    )
+                    continue
                 if isinstance(chunk, ReplyChunk):
                     kind = chunk.kind
                     text = chunk.text
@@ -376,6 +430,7 @@ __all__ = [
     "LaunchableWorkflow",
     "ReplyChunk",
     "ReplyProvider",
+    "ToolResultChunk",
     "ValidationRuntime",
     "launch_hypothesis_validation",
 ]

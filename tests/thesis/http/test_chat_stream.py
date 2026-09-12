@@ -13,6 +13,7 @@ from thesis.chat import (
     ChatService,
     InMemoryChatStreamBroker,
 )
+from thesis.chat.responder import ToolResultChunk
 from thesis.http.application import create_app
 
 TOKEN = "thesis-test-token"
@@ -95,6 +96,44 @@ def test_chat_stream_route_emits_reply_frames() -> None:
     assert response.status_code == 200
     assert "event: provider.delta" in response.text
     assert "event: chat.message" in response.text
+
+
+def test_chat_stream_route_emits_tool_result_frames() -> None:
+    service = ChatService()
+    broker = InMemoryChatStreamBroker()
+
+    def provider(
+        history: Sequence[ChatMessage],
+    ) -> Iterator[str | ToolResultChunk]:
+        del history
+        yield ToolResultChunk(
+            tool="run_backtest",
+            call_id="call-1",
+            ok=True,
+            summary="run_backtest completed",
+            structured={"boundary": "local", "exit_code": 0},
+            text="ok",
+        )
+        yield "Done."
+
+    reply = ChatReplyService(chat_service=service, broker=broker, provider=provider)
+    client = TestClient(_make_app(service, broker, reply))
+    chat = client.post(
+        f"/v1/workspaces/{WORKSPACE}/chats",
+        headers=HEADERS,
+        json={"title": "Research", "owner_actor_id": "operator"},
+    ).json()
+    service.create_message(WORKSPACE, chat["chat_id"], actor_id="operator", body="run")
+    reply.respond(WORKSPACE, chat["chat_id"])
+
+    response = client.get(
+        f"/v1/workspaces/{WORKSPACE}/chats/{chat['chat_id']}/events/stream",
+        headers=HEADERS,
+    )
+    assert response.status_code == 200
+    assert "event: chat.message" in response.text
+    assert '"role":"tool"' in response.text
+    assert '"tool_result":{"callId":"call-1"' in response.text
 
 
 def test_chat_stream_route_requires_known_chat() -> None:
