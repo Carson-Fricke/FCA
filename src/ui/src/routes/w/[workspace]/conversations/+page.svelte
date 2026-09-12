@@ -76,6 +76,11 @@
 
 	const activeChat = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
 	const activeExecutionId = $derived(execution?.execution_id ?? null);
+	/** A persisted/live workflow anchor already renders its own card. */
+	const hasWorkflowAnchor = $derived(messages.some((message) => message.kind === 'workflow'));
+	const executionHref = $derived(
+		activeExecutionId ? `/w/${workspaceId}/workflows/${activeExecutionId}` : null
+	);
 	const cleoPlan = $derived(stateData?.cleo ?? null);
 	const evidence = $derived(stateData?.evidence ?? []);
 	/** True once the operator entered a workflow/orchestrator/sub-agent. */
@@ -162,8 +167,13 @@
 		if (requested !== id) {
 			replaceState(`/w/${workspaceId}/conversations?chat=${id}`, {});
 		}
+		// Reset synchronously and merge the snapshot back in with dedupe, so a
+		// live `chat.message` frame that lands while the list is in flight is
+		// never clobbered by `messages = items`.
+		messages = [];
 		listMessages(workspaceId, id).then((items) => {
-			if (!cancelled) messages = items;
+			if (cancelled) return;
+			for (const item of items) messages = appendMessage(messages, item);
 		});
 		chatStream.start(id);
 		getExecution(workspaceId, id).then((exec) => {
@@ -451,6 +461,10 @@
 							notify('Consent proposal rejected');
 						}}
 						{consentBusy}
+						{execution}
+						{phases}
+						fullPageHref={executionHref}
+						onEnterPhase={enterPhase}
 					/>
 					<StreamingReply
 						active={chatStream.active}
@@ -458,7 +472,7 @@
 						reasoning={chatStream.streamingReasoning}
 						testId="streaming-reply"
 					/>
-					{#if execution}
+					{#if execution && !hasWorkflowAnchor}
 						<div class="mt-3">
 							<WorkflowCard
 								{execution}
@@ -467,9 +481,7 @@
 								summary={execution.phase
 									? `Current phase ${execution.phase}`
 									: 'Awaiting phase transitions'}
-								fullPageHref={activeExecutionId
-									? `/w/${workspaceId}/workflows/${activeExecutionId}`
-									: null}
+								fullPageHref={executionHref}
 								onEnterPhase={enterPhase}
 							/>
 						</div>

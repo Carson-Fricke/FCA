@@ -71,8 +71,12 @@
 			return;
 		}
 		let cancelled = false;
+		// Dedupe the snapshot against any live frames received while the
+		// re-fetch is in flight, so a `chat.message` anchor is never lost.
+		messages = [];
 		listMessages(workspaceId, id).then((items) => {
-			if (!cancelled) messages = items;
+			if (cancelled) return;
+			for (const item of items) messages = appendMessage(messages, item);
 		});
 		chatStream.start(id);
 		return () => {

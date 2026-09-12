@@ -480,7 +480,15 @@ class ChatReplyService:
         *,
         trigger_message_id: str | None = None,
     ) -> ChatMessage | None:
-        """Launch and execute the hypothesis pipeline, then persist its verdict."""
+        """Launch and execute the hypothesis pipeline, then persist its verdict.
+
+        The launch persists the durable ``kind=WORKFLOW``/``role=SYSTEM`` anchor
+        and its execution *before* the long model run.  The anchor is published
+        immediately as a live ``chat.message`` frame so connected panes render
+        the workflow card without a reload; only then does the run execute, and
+        its assistant summary plus a terminal ``done`` delta follow once the run
+        completes, fails, or pauses for operator input.
+        """
         stream_id = self.id_factory()
         self._start_delta(workspace_id, chat_id, stream_id)
         runtime = self.development_runtime
@@ -493,14 +501,24 @@ class ChatReplyService:
             )
             return None
         try:
-            _, outcome = launch_hypothesis_development(
-                runtime,
-                self.chat_service,
-                workspace_id=workspace_id,
-                chat_id=chat_id,
+            workflow = runtime.build_hypothesis_development(chat=self.chat_service)
+            request = workflow.launch(
+                workspace_id,
+                chat_id,
                 actor_id=self.actor_id,
                 ideas=ideas,
                 trigger_message_id=trigger_message_id,
+            )
+            anchor = self._workflow_anchor(workspace_id, chat_id, request.execution_id)
+            if anchor is not None:
+                self.broker.publish(
+                    workspace_id,
+                    chat_id,
+                    CHAT_MESSAGE,
+                    {"message": anchor.as_dict()},
+                )
+            outcome = runtime.execute_hypothesis_development(
+                request, chat=self.chat_service
             )
             body = (
                 _sanitize(_development_summary(outcome))
@@ -531,6 +549,23 @@ class ChatReplyService:
             },
         )
         return message
+
+    def _workflow_anchor(
+        self, workspace_id: str, chat_id: str, execution_id: str
+    ) -> ChatMessage | None:
+        """Return the chat-owned ``kind=WORKFLOW`` anchor for one execution.
+
+        The anchor is persisted by the workflow's ``launch`` and read back here
+        (chronologically last, in case an execution is relaunched) so the live
+        stream frames the same durable message the reload snapshot serves.
+        """
+        for message in reversed(self.chat_service.list_messages(workspace_id, chat_id)):
+            if (
+                message.kind is TranscriptItemKind.WORKFLOW
+                and message.execution_id == execution_id
+            ):
+                return message
+        return None
 
     def _respond_with_provider(
         self, workspace_id: str, chat_id: str, history: Sequence[ChatMessage]

@@ -138,6 +138,10 @@ export interface ChatMessage {
 	reasoning?: string;
 	/** Structured harness-tool outcome carried by a tool-role message. */
 	tool_result?: ToolResult | null;
+	/** Transcript item discriminator; `workflow` anchors render the workflow card. */
+	kind?: TranscriptItemKind;
+	/** Structured payload for the item kind (e.g. workflow anchor metadata). */
+	data?: Record<string, unknown> | null;
 }
 
 export interface ChatThread {

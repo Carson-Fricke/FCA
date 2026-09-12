@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from thesis.chat import ChatMessage, ChatService
+from thesis.chat import ChatMessage, ChatService, MessageRole, TranscriptItemKind
 
 WORKSPACE = "workspace-a"
 
@@ -364,6 +364,43 @@ def test_delete_chat_removes_thread_and_cascades(
 
     listing = client.get(f"/v1/workspaces/{WORKSPACE}/chats", headers=headers).json()
     assert listing["items"] == []
+
+
+def test_messages_endpoint_round_trips_workflow_anchor(
+    client: TestClient, service: ChatService, launch: Any
+) -> None:
+    headers = {"Authorization": "Bearer thesis-test-token"}
+    chat = client.post(
+        f"/v1/workspaces/{WORKSPACE}/chats",
+        headers=headers,
+        json={"title": "Research", "owner_actor_id": "operator"},
+    ).json()
+    execution = launch(chat["chat_id"])
+    anchor = service.create_message(
+        WORKSPACE,
+        chat["chat_id"],
+        actor_id="thesis-workflow",
+        body="Hypothesis development",
+        role=MessageRole.SYSTEM,
+        kind=TranscriptItemKind.WORKFLOW,
+        data={
+            "currentPhase": execution.phase,
+            "executionId": execution.execution_id,
+            "status": execution.state.value,
+            "title": execution.workflow_id,
+        },
+        execution_id=execution.execution_id,
+    )
+
+    items = client.get(
+        f"/v1/workspaces/{WORKSPACE}/chats/{chat['chat_id']}/messages",
+        headers=headers,
+    ).json()["items"]
+    match = next(item for item in items if item["message_id"] == anchor.message_id)
+    assert match["kind"] == "workflow"
+    assert match["role"] == "system"
+    assert match["execution_id"] == execution.execution_id
+    assert match["data"]["executionId"] == execution.execution_id
 
 
 def test_chat_routes_require_bearer_token(make_client, service: ChatService) -> None:
