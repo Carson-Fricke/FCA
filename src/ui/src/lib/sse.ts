@@ -261,6 +261,8 @@ export interface ProviderDelta {
 	messageIdFinal?: string;
 	role?: string;
 	text?: string;
+	/** Chunk channel: `"reasoning"` for a model thought, absent for answer text. */
+	kind?: string;
 	start?: boolean;
 	done?: boolean;
 	error?: string;

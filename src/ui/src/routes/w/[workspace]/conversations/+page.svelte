@@ -388,6 +388,7 @@
 				<StreamingReply
 					active={chatStream.active}
 					text={chatStream.streamingText}
+					reasoning={chatStream.streamingReasoning}
 					testId="streaming-reply"
 				/>
 			</div>

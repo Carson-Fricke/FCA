@@ -1,0 +1,47 @@
+<script lang="ts">
+	/**
+	 * Collapsed-by-default disclosure for a model's reasoning trace. Deliberately
+	 * subtle: no card outline, muted italic text, and a chevron that rotates on
+	 * toggle. The answer text stays the primary content; thoughts are opt-in.
+	 */
+	let {
+		text,
+		testId = 'thinking-accordion'
+	}: { text: string; testId?: string } = $props();
+
+	let open = $state(false);
+</script>
+
+{#if text}
+	<div class="mb-1" data-testid={testId}>
+		<button
+			type="button"
+			class="flex items-center gap-1 text-xs text-slate-500 italic transition-colors hover:text-slate-700"
+			aria-expanded={open}
+			data-testid="{testId}-toggle"
+			onclick={() => (open = !open)}
+		>
+			<svg
+				class="h-3 w-3 transition-transform duration-150 {open ? 'rotate-90' : ''}"
+				viewBox="0 0 12 12"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.5"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<path d="M4.5 2.5 8 6l-3.5 3.5" />
+			</svg>
+			<span>Thinking</span>
+		</button>
+		{#if open}
+			<p
+				class="mt-1 pl-4 text-xs text-slate-500 italic whitespace-pre-wrap"
+				data-testid="{testId}-body"
+			>
+				{text}
+			</p>
+		{/if}
+	</div>
+{/if}
