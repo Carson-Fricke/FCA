@@ -13,6 +13,7 @@ from thesis.chat import (
     MessageRole,
     MessageState,
     ToolJobState,
+    TranscriptItemKind,
     WorkflowDefinition,
 )
 from thesis.execution.events import ActorScope, ExecutionEventType
@@ -236,6 +237,52 @@ def test_late_tool_results_are_retained_and_marked_after_cancel() -> None:
     assert events[-1].event_type is ExecutionEventType.TOOL_RESULT
     assert events[-1].late_result is True
     assert events[-1].correlation_id == "backtest-correlation"
+
+
+def test_transcript_item_kind_and_data_round_trip() -> None:
+    store = InMemoryChatPersistence()
+    service = ChatService(persistence=store, clock=lambda: NOW)
+    chat = service.create_chat(
+        "workspace-a", title="Research", owner_actor_id="operator"
+    )
+    plain = service.create_message(
+        "workspace-a", chat.chat_id, actor_id="operator", body="Hello"
+    )
+    anchor = service.create_message(
+        "workspace-a",
+        chat.chat_id,
+        actor_id="operator",
+        body="Hypothesis development",
+        role=MessageRole.SYSTEM,
+        kind=TranscriptItemKind.WORKFLOW,
+        data={
+            "executionId": "execution-1",
+            "phase": "requested",
+            "nested": {"thresholds": [1, 2]},
+        },
+    )
+
+    assert plain.kind is TranscriptItemKind.MESSAGE
+    assert plain.as_dict()["kind"] == "message"
+    assert plain.as_dict()["data"] is None
+
+    assert anchor.kind is TranscriptItemKind.WORKFLOW
+    portable = anchor.as_dict()
+    assert portable["kind"] == "workflow"
+    assert portable["data"] == {
+        "executionId": "execution-1",
+        "phase": "requested",
+        "nested": {"thresholds": [1, 2]},
+    }
+
+    reloaded = ChatService(persistence=store, clock=lambda: NOW)
+    stored = reloaded.get_message("workspace-a", anchor.message_id)
+    assert stored.kind is TranscriptItemKind.WORKFLOW
+    assert stored.data == {
+        "executionId": "execution-1",
+        "phase": "requested",
+        "nested": {"thresholds": [1, 2]},
+    }
 
 
 def test_event_store_limit_returns_cursor_for_next_reconnect_page() -> None:
