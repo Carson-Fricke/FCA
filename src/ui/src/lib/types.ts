@@ -134,6 +134,8 @@ export interface ChatMessage {
 	updated_at: string | null;
 	execution_id: string | null;
 	intent_epoch: number;
+	/** Model reasoning trace persisted alongside the assistant reply, if any. */
+	reasoning?: string;
 }
 
 export interface ChatThread {

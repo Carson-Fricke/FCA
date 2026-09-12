@@ -296,6 +296,7 @@
 		<StreamingReply
 			active={chatStream.active}
 			text={chatStream.streamingText}
+			reasoning={chatStream.streamingReasoning}
 			testId="copilot-streaming-reply"
 		/>
 	</div>

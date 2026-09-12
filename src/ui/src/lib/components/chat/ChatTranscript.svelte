@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ConsentCard from './ConsentCard.svelte';
+	import ThinkingAccordion from './ThinkingAccordion.svelte';
 	import type {
 		ChatMessage,
 		ConsentConfirmation,
@@ -54,6 +55,12 @@
 					{/if}
 					<time class="font-mono text-slate-500">{message.created_at.slice(11, 19)}</time>
 				</header>
+				{#if message.reasoning}
+					<ThinkingAccordion
+						text={message.reasoning}
+						testId="thinking-{message.message_id}"
+					/>
+				{/if}
 				<p class="text-sm whitespace-pre-wrap text-slate-800">{message.body}</p>
 
 				{#if message.attachment_ids.length}
