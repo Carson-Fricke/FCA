@@ -248,7 +248,8 @@ security posture failure, not a convenience issue.
 ## Static Web App Hostname Binding
 
 This section is the Static Web App posture. It replaces Steps 1-5 for the
-public site; the Container App keeps internal ingress and binds no hostname.
+public site; the Container App uses external ingress (required for the linked
+backend) and binds no hostname, so the Static Web App owns the public site name.
 The identity, email, and Static Web App bootstrap stays in
 `.github/runbooks/thesis-public-auth.md`; this section owns the hosting and TLS
 records so the two runbooks do not drift.
@@ -375,14 +376,10 @@ Two constraints from the Static Web Apps API documentation apply here and are
    Thesis Container App is intended to keep **internal** ingress (ADR-001), so
    the linked backend may simply be unable to reach it. Treat this as an
    **operator check**, not a proven capability:
-   - Confirm the currently supported connectivity mode for an internal
-     Container App backend before relying on `/api/*`. If private reachability
-     is required, it is a separate reviewed change (for example VNet
-     integration or a private endpoint on the Container Apps environment); no
-     such module exists in this repository and T301 does not add one.
-   - Do **not** temporarily enable external ingress on the Container App just
-     to make linking succeed. That reopens the public surface ADR-001 closed
-     and contradicts the posture in `.github/runbooks/thesis-public-auth.md`.
+   - The Thesis API uses **external ingress** because Static Web Apps do not
+     support network-isolated linked backends. This is the decided posture in
+     ADR-001: the API is public but default-deny and workspace-authorized, and
+     the Static Web App remains the only public site hostname.
    - A linked backend returning 502/503 points at connectivity or
      scale-to-zero, not at the public ingress. Confirm the backend path and the
      API health first.

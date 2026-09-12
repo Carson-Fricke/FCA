@@ -190,6 +190,11 @@ var thesisApiAppName = '${namePrefix}-thesis-api'
 // resource group id through deterministicSuffix instead of relying on the
 // prefix alone. An explicit thesisStaticWebAppName always wins.
 var thesisStaticWebAppResourceName = empty(thesisStaticWebAppName) ? '${shortNamePrefix}-thesis-web-${take(deterministicSuffix, 6)}' : thesisStaticWebAppName
+// Static Web Apps do not support network-isolated (internal-ingress) linked
+// backends, so enabling the public SPA requires the Thesis API on external
+// ingress. The API stays default-deny: every /v1 route is authenticated and
+// workspace-authorized. An operator can also enable external ingress directly.
+var thesisIngressExternal = thesisEnableExternalIngress || deployThesisStaticWebApp
 // A dedicated persistence account for Thesis workspaces: 'thesis' plus the
 // same deterministic suffix keeps the name distinct from the lake account.
 var thesisWorkspacesStorageAccountName = 'thesis${take(deterministicSuffix, 18)}'
@@ -378,7 +383,7 @@ module thesisApi './modules/thesis.bicep' = if (deployThesis) {
     thesisWorkspaceRegistryTableName: deployThesis ? thesisWorkspaces.outputs.registryTableName : 'workspaces'
     location: location
     tags: tags
-    enableExternalIngress: thesisEnableExternalIngress
+    enableExternalIngress: thesisIngressExternal
     thesisApiEntraAudience: thesisApiAudience
     customDomainName: thesisCustomDomain
     thesisContainerCpu: thesisContainerCpu

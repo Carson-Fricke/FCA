@@ -69,3 +69,15 @@ in-memory.
   identity outside Azure. Rejected.
 - **Stateless signed-cookie sessions.** Rejected because revocation and
   single-use invite redemption need authoritative server-side state.
+
+## Update 2026-09-12: API reachability
+
+Azure Static Web Apps do not support network-isolated (internal-ingress) linked
+backends. The chosen linked-backend topology therefore requires the Thesis API
+Container App to use **external ingress** (a public FQDN). The API remains
+default-deny: every `/v1` route is authenticated and workspace-authorized, and
+the Static Web App remains the only public site hostname (the Container App
+binds no custom domain). The composition enables external ingress automatically
+whenever the Static Web App is enabled (`deployThesisStaticWebApp`). Rejected
+alternative: Azure Front Door Premium with a Private Link origin to keep the API
+private, at higher cost and complexity.

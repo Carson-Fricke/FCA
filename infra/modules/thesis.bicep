@@ -21,8 +21,9 @@ targetScope = 'resourceGroup'
 // Public hosting on an operator-owned hostname is opt-in and has two mutually
 // exclusive postures. The direct posture sets customDomainName (and requires
 // enableExternalIngress=true) and binds the hostname to this Container App.
-// The Static Web App posture leaves customDomainName empty, keeps ingress
-// internal, and lets static-web-app.bicep own the public hostname and managed
+// The Static Web App posture leaves customDomainName empty, uses external
+// ingress (Static Web Apps do not support network-isolated linked backends),
+// and lets static-web-app.bicep own the public hostname and managed
 // certificate; the composition passes this module's `backend` output to that
 // module. The binding is gated on external ingress so a custom hostname can
 // never be requested on internal ingress (Container Apps rejects it). The
@@ -241,7 +242,7 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2025-07-01'
 // certificate pending until the operator's registrar records resolve; see
 // .github/runbooks/domain-hosting.md for the exact DNS records and az
 // commands. No certificate file is uploaded and no secret is stored. The
-// external-ingress guard means the Static Web App posture (internal ingress,
+// external-ingress guard means the Static Web App posture (external ingress,
 // empty customDomainName) never creates a certificate or a public hostname
 // binding on this Container App.
 resource thesisManagedCertificate 'Microsoft.App/managedEnvironments/managedCertificates@2025-07-01' = if (enableExternalIngress && !empty(customDomainName)) {

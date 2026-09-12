@@ -436,10 +436,13 @@ az staticwebapp secrets list `
 if ($LASTEXITCODE -ne 0) { throw 'Failed to store the Static Web App deployment token' }
 ```
 
-Link the internal Thesis Container App backend so the browser sees one origin.
-The SPA calls the API under the `/api/*` route; the linked backend proxies to
-the Container App. The Container App keeps internal ingress with
-`allowInsecure=false` and does not bind a public custom hostname.
+Link the Thesis Container App backend so the browser sees one origin. The SPA
+calls the API under the `/api/*` route; the linked backend proxies to the
+Container App. Static Web Apps do not support network-isolated linked backends,
+so the Container App uses external ingress (the composition enables it whenever
+`deployThesisStaticWebApp` is true). The API stays default-deny - every `/v1`
+route is authenticated and workspace-authorized - and the Container App binds no
+public custom hostname because the Static Web App owns the site hostname.
 
 ```powershell
 $thesisApiAppName = 'fca-ml-dev-thesis-api'   # composition-derived name
@@ -458,13 +461,11 @@ az staticwebapp backends link `
   --output none
 ```
 
-> **Operator check - internal backend connectivity.** Static Web Apps linked
-> backends to a Container App with **internal** ingress may require the
-> environment's private reachability or a public backend endpoint, depending on
-> the current platform support. Confirm the supported connectivity mode before
-> switching the Container App to internal ingress, and record the chosen
-> posture. Do not temporarily enable external ingress on the Container App just
-> to make linking succeed; that reopens the surface ADR-001 closed.
+> **Posture (decided).** Static Web Apps do not support network-isolated
+> backends, so the Thesis API uses external ingress for the public SPA. This is
+> intentional: the API is public but default-deny (401) with per-request
+> workspace authorization, and the Static Web App remains the only public site
+> hostname. Do not additionally bind a custom hostname on the Container App.
 
 Also clear any existing public Container App hostname binding when SWA takes
 over the site hostname. `.github/runbooks/domain-hosting.md` binds a custom
@@ -747,8 +748,9 @@ Re-test both layers after any user-flow or identity-provider change.
    then align the API configuration and the Bicep `thesisApiEntraAudience`.
 4. **SWA validation record name.** Use the exact name Azure returns; do not
    copy the Container Apps `asuid` record from `domain-hosting.md`.
-5. **SWA-to-internal-Container-App linked backend.** Confirm the supported
-   connectivity posture for internal ingress and record it.
+5. **SWA-to-Container-App linked backend.** The API uses external ingress
+   because Static Web Apps do not support network-isolated backends; confirm the
+   linked backend resolves and the API stays default-deny.
 6. **Mailer credential path.** Confirm the final Key Vault secret name against
    the deployment task, or the managed-identity alternative and its role grant.
 7. **Owner email handling.** Keep `THESIS_OWNER_EMAIL` out of Git and task
