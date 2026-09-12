@@ -8,8 +8,10 @@ through `T178`. The presence of those pending tasks records planned work; it
 does not claim that the described services are implemented.
 
 Implemented within this roadmap so far: the strategy-development vertical
-workflow (`thesis.workflows`, T160), the hypothesis validation workflow with
-verdict evidence (T161), bounded autonomous discovery with budget guards and
+workflow (`thesis.workflows`, T160), the falsification-first
+hypothesis-development workflow with verdict evidence
+(`thesis.workflows.hypothesis_development`), bounded autonomous discovery with
+budget guards and
 candidate accounting (T162, plus `thesis.agent.search_policy`), the RCA and
 strategy revision loop with revision lineage (`thesis.workflows.rca`,
 `thesis.research`, T163), the statistical-discipline substrate
@@ -563,10 +565,15 @@ Workflow definitions are versioned, have custom phases, specify required
 artifacts, and can declare phase-required subagents. They are enforced by the
 orchestrator and evidence services, not only described in a system prompt.
 
-### Hypothesis Validation
+### Hypothesis Research Rigor
 
-This workflow starts from a user-supplied claim, including claims that do not
-yet define a tradable strategy. A typical workflow can:
+The older standalone `hypothesis-validation` workflow and its HTTP/UI surface
+have been retired; the falsification-first **Falsification-First Hypothesis
+Development** pipeline below is the canonical research workflow. The rigor
+requirements once enforced by the validation workflow are preserved there and
+by the experiment-contract substrate. A research run starts from a
+user-supplied claim, including claims that do not yet define a tradable
+strategy, and can:
 
 1. Operationalize the claim into measurable variables and falsifiable outcomes.
 2. Identify assumptions, causal story, alternative explanations, and required
@@ -1321,7 +1328,8 @@ create workspace
 
 ### Phase 2: Research Workflows And Iteration
 
-- Add first-class hypothesis validation and autonomous discovery workflows.
+- Add first-class falsification-first hypothesis-development and autonomous
+  discovery workflows.
 - Add workflow-specific custom phases and phase-required subagent roles.
 - Add investigation and strategy-lineage navigation across multiple chats.
 - Support concurrent investigations with isolated branches/artifacts and

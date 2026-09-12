@@ -27,20 +27,16 @@ from thesis.integrations import (
     HarnessBacktestResult,
     ThesisHarnessClient,
 )
-from thesis.persistence import CommandJournal
 from thesis.strategies import StrategyBundle
 from thesis.strategies.validation import (
     StrategyValidationRequest,
     StrategyValidationResult,
 )
 from thesis.workflows import (
-    VERDICT_SUPPORTED,
     BacktestRunner,
     BacktestRunRequest,
     BacktestRunResult,
     HarnessBacktestRunner,
-    HypothesisValidationPhase,
-    HypothesisValidationWorkflow,
     StrategyDevelopmentPhase,
     StrategyDevelopmentWorkflow,
     WorkflowRuntime,
@@ -375,43 +371,6 @@ def test_build_model_router_wires_providers_and_skills() -> None:
     decision = router.resolve("research")
     assert decision.role == "research"
     assert decision.allowed_tools == ("run_backtest",)
-
-
-def test_hypothesis_validation_executes_end_to_end(tmp_path: Path) -> None:
-    provider = FakeProvider(_hypothesis_envelope())
-    runner = FakeRunner(
-        metrics={"sharpe": 1.4, "hitRate": 0.58},
-        manifest={"manifestId": "manifest-h-1", "sha256": "c" * 64},
-        result_artifacts=[
-            {"uri": "run-1/fills.csv", "sha256": "d" * 64, "mediaType": "text/csv"}
-        ],
-    )
-    clock = _clock()
-    id_factory = _id_factory()
-    runtime = _runtime(
-        provider=provider,
-        clock=clock,
-        id_factory=id_factory,
-        runner=runner,
-    )
-    chat = ChatService(clock=clock, id_factory=id_factory)
-    journal = CommandJournal(tmp_path / "hypothesis-journal.sqlite3")
-    workflow = runtime.build_hypothesis_validation(chat=chat, journal=journal)
-    assert isinstance(workflow, HypothesisValidationWorkflow)
-    chat_id = chat.create_chat(
-        WORKSPACE, title="hypothesis chat", owner_actor_id=OWNER
-    ).chat_id
-    request = workflow.launch(WORKSPACE, chat_id, actor_id=OWNER, claim=CLAIM)
-
-    outcome = runtime.execute_hypothesis_validation(request, chat=chat, journal=journal)
-
-    assert outcome.phase is HypothesisValidationPhase.COMPLETED
-    assert outcome.verdict is not None
-    assert outcome.verdict.outcome == VERDICT_SUPPORTED
-    assert outcome.report is not None
-    assert outcome.journal_id == f"workflow-{request.execution_id}"
-    assert len(provider.prompts) == 1
-    assert len(runner.requests) == 1
 
 
 def test_strategy_development_executes_end_to_end(tmp_path: Path) -> None:

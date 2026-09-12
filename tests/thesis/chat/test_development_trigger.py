@@ -13,16 +13,16 @@ from thesis.chat import (
     ChatService,
     InMemoryChatStreamBroker,
 )
-from thesis.chat.contracts import MessageRole
+from thesis.chat.contracts import MessageRole, TranscriptItemKind
 from thesis.execution.events import ExecutionEventType
 from thesis.workflows.hypothesis_development import (
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
+    VERDICT_SUPPORTED,
     FalsificationVerdict,
     HypothesisDevelopmentOutcome,
     HypothesisDevelopmentPhase,
     HypothesisDevelopmentRequest,
 )
-from thesis.workflows.hypothesis_validation import VERDICT_SUPPORTED
 
 WORKSPACE = "workspace-a"
 IDEAS = "Momentum in SPY keeps going because the market underreacts."
@@ -50,6 +50,23 @@ class FakeWorkflow:
             actor_id=actor_id,
             body=ideas,
             investigation_id=investigation_id,
+        )
+        self._chat.create_message(
+            workspace_id,
+            chat_id,
+            actor_id=actor_id,
+            body=HYPOTHESIS_DEVELOPMENT_WORKFLOW.title,
+            role=MessageRole.SYSTEM,
+            kind=TranscriptItemKind.WORKFLOW,
+            data={
+                "currentPhase": execution.phase,
+                "executionId": execution.execution_id,
+                "status": execution.state.value,
+                "title": HYPOTHESIS_DEVELOPMENT_WORKFLOW.title,
+                "version": execution.workflow_version,
+                "workflowId": execution.workflow_id,
+            },
+            execution_id=execution.execution_id,
         )
         return HypothesisDevelopmentRequest(
             workspace_id=workspace_id,
@@ -180,3 +197,113 @@ def test_non_development_messages_use_the_provider(body: str) -> None:
     assert message is not None
     assert message.body == "plain reply"
     assert runtime.requests == []
+
+
+PLAIN_IDEAS = "Momentum in SPY keeps going because the market underreacts."
+
+
+def test_plain_language_idea_launches_hypothesis_development() -> None:
+    chat = ChatService()
+    broker = InMemoryChatStreamBroker()
+    runtime = FakeDevelopmentRuntime()
+    reply = ChatReplyService(
+        chat_service=chat,
+        broker=broker,
+        provider=lambda history: iter(("plain reply",)),
+        development_runtime=runtime,
+    )
+    chat_id = chat.create_chat(
+        WORKSPACE, title="Research", owner_actor_id="operator"
+    ).chat_id
+    chat.create_message(WORKSPACE, chat_id, actor_id="operator", body=PLAIN_IDEAS)
+
+    message = reply.respond(WORKSPACE, chat_id)
+
+    assert message is not None
+    assert len(runtime.requests) == 1
+    request = runtime.requests[0]
+    assert request.workspace_id == WORKSPACE
+    assert request.chat_id == chat_id
+    assert request.ideas == PLAIN_IDEAS
+    assert "workspace" not in message.body.lower()
+    assert "supported" in message.body
+    messages = chat.list_messages(WORKSPACE, chat_id)
+    anchors = [item for item in messages if item.kind is TranscriptItemKind.WORKFLOW]
+    assert len(anchors) == 1
+    anchor_data = anchors[0].data
+    assert anchor_data is not None
+    assert anchor_data["workflowId"] == "hypothesis-development"
+    executions = chat.list_executions(WORKSPACE)
+    assert [execution.workflow_id for execution in executions] == [
+        "hypothesis-development"
+    ]
+
+
+def test_plain_language_idea_workspace_comes_from_active_conversation() -> None:
+    chat = ChatService()
+    broker = InMemoryChatStreamBroker()
+    runtime = FakeDevelopmentRuntime()
+    reply = ChatReplyService(
+        chat_service=chat,
+        broker=broker,
+        provider=lambda history: iter(("plain reply",)),
+        development_runtime=runtime,
+    )
+    chat_id = chat.create_chat(
+        WORKSPACE, title="Research", owner_actor_id="operator"
+    ).chat_id
+    chat.create_message(
+        WORKSPACE,
+        chat_id,
+        actor_id="operator",
+        body="I have a theory: value stocks mean-revert after drawdowns.",
+    )
+
+    reply.respond(WORKSPACE, chat_id)
+
+    assert runtime.requests[0].workspace_id == WORKSPACE
+    assert runtime.requests[0].chat_id == chat_id
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "What is the Sharpe ratio?",
+        "Hello there",
+        "How do I read a backtest report?",
+        "Thanks, that helps.",
+        "Show me the backtests",
+        json.dumps({"workflow": "hypothesis-validation", "claim": "old trigger"}),
+    ],
+)
+def test_ordinary_qa_never_launches_the_pipeline(body: str) -> None:
+    chat = ChatService()
+    broker = InMemoryChatStreamBroker()
+    runtime = FakeDevelopmentRuntime()
+    reply = ChatReplyService(
+        chat_service=chat,
+        broker=broker,
+        provider=lambda history: iter(("plain reply",)),
+        development_runtime=runtime,
+    )
+    chat_id = chat.create_chat(
+        WORKSPACE, title="Research", owner_actor_id="operator"
+    ).chat_id
+    chat.create_message(WORKSPACE, chat_id, actor_id="operator", body=body)
+
+    message = reply.respond(WORKSPACE, chat_id)
+
+    assert message is not None
+    assert message.body == "plain reply"
+    assert runtime.requests == []
+    assert chat.list_executions(WORKSPACE) == ()
+
+
+def test_retired_validation_seams_are_removed() -> None:
+    import thesis.chat.responder as responder
+    import thesis.workflows.runtime as runtime_module
+
+    assert not hasattr(responder, "launch_hypothesis_validation")
+    assert not hasattr(responder, "ValidationRuntime")
+    assert not hasattr(runtime_module.WorkflowRuntime, "build_hypothesis_validation")
+    assert not hasattr(runtime_module.WorkflowRuntime, "execute_hypothesis_validation")

@@ -182,3 +182,27 @@ def test_create_app_composes_plain_reply_service_without_tools() -> None:
 
     assert "tools" not in transport.calls[0]
     assert system == DEFAULT_SYSTEM_PROMPT
+
+
+def test_retired_validation_routes_are_absent() -> None:
+    client = TestClient(create_app(bearer_token=TOKEN))
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    assert (
+        client.get("/v1/workspaces/workspace-a/validation", headers=headers).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            "/v1/workspaces/workspace-a/validation",
+            headers=headers,
+            json={"claim": "old claim"},
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/v1/workspaces/workspace-a/validation/val-1", headers=headers
+        ).status_code
+        == 404
+    )

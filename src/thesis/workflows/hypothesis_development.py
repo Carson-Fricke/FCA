@@ -108,11 +108,11 @@ from thesis.workflows.backtests import (
     BacktestRunResult,
     HarnessError,
 )
-from thesis.workflows.hypothesis_validation import (
-    VERDICT_INCONCLUSIVE,
-    VERDICT_REFUTED,
-    VERDICT_SUPPORTED,
-)
+
+#: Canonical falsification verdict outcomes shared by the thesis pipelines.
+VERDICT_SUPPORTED = "supported"
+VERDICT_REFUTED = "refuted"
+VERDICT_INCONCLUSIVE = "inconclusive"
 
 _WORKFLOW_ID = "hypothesis-development"
 _WORKFLOW_VERSION = "1.0.0"
@@ -2449,6 +2449,9 @@ __all__ = [
     "StrategyContent",
     "StrategyDesignDraft",
     "StrategyDesigner",
+    "VERDICT_INCONCLUSIVE",
+    "VERDICT_REFUTED",
+    "VERDICT_SUPPORTED",
     "WorkflowError",
     "check_evidence_bound",
     "check_falsifiability",

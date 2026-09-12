@@ -311,7 +311,6 @@ if os.environ.get("OPENROUTER_API_KEY"):
         chat_service=chat_service,
         broker=chat_stream_broker,
         provider=reply_provider_for(model_provider, harness_tools),
-        workflow_runtime=workflow_runtime,
         development_runtime=workflow_runtime,
     )
 
