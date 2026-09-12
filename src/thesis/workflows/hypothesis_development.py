@@ -1532,12 +1532,44 @@ class HypothesisDevelopmentWorkflow:
 
     # -- phases ------------------------------------------------------------
 
+    def _ideation_input(self, request: HypothesisDevelopmentRequest) -> str:
+        """Combine the launch ideas with on-demand operator guidance.
+
+        The ideation orchestrator accepts input for the whole phase, so any
+        user messages the operator addressed to the ideation node are gathered
+        alongside the launch trigger and become the ideation task.
+        """
+        additions = self._ideation_messages(request)
+        if not additions:
+            return request.ideas
+        return "\n\n".join((request.ideas, *additions))
+
+    def _ideation_messages(
+        self, request: HypothesisDevelopmentRequest
+    ) -> tuple[str, ...]:
+        """Return operator messages addressed to the ideation node, in order."""
+        messages: list[str] = []
+        for message in self._chat.list_messages(request.workspace_id, request.chat_id):
+            if message.execution_id != request.execution_id:
+                continue
+            if message.role is not MessageRole.USER:
+                continue
+            if message.kind is not TranscriptItemKind.SUB_AGENT:
+                continue
+            data = message.data
+            if not isinstance(data, Mapping) or data.get("phase") != _IDEATION.value:
+                continue
+            body = message.body.strip()
+            if body:
+                messages.append(body)
+        return tuple(messages)
+
     def _ideate(
         self, request: HypothesisDevelopmentRequest
     ) -> tuple[HypothesisDraft, dict[str, object]]:
         context = assemble_context(
             workspace_scope=request.workspace_id,
-            task=request.ideas,
+            task=self._ideation_input(request),
             role=f"Thesis {self._research_role} falsification analyst",
             context_id=request.execution_id,
         )
@@ -2088,6 +2120,7 @@ class HypothesisDevelopmentWorkflow:
             phase=phase,
             role=label,
             context=context,
+            accepts_input=phase is _IDEATION,
         )
         self._active_orchestrators[request.execution_id] = _ActiveSubAgent(
             sub_agent_id=sub_agent_id,

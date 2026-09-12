@@ -225,6 +225,31 @@ def test_post_message_is_accepted_only_when_accepting_input(
     assert stored["execution_id"] == execution.execution_id
 
 
+def test_post_message_keeps_on_demand_input_enabled(
+    client: TestClient, service: ChatService, launch: Any
+) -> None:
+    _, execution = _execution(service, launch)
+    base = f"/v1/workspaces/{WORKSPACE}/executions/{execution.execution_id}"
+    _seed(service, execution, "ideation", None, accepts_input=True)
+
+    first = client.post(
+        base + "/sub_agents/ideation/messages",
+        headers=HEADERS,
+        json={"actor_id": "operator", "body": "Focus on liquid names."},
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        base + "/sub_agents/ideation/messages",
+        headers=HEADERS,
+        json={"actor_id": "operator", "body": "Cap the horizon at 5 days."},
+    )
+    assert second.status_code == 200
+
+    record = client.get(base + "/sub_agents/ideation", headers=HEADERS).json()
+    assert record["accepts_input"] is True
+
+
 def test_node_event_stream_emits_only_the_node_scope(
     client: TestClient, service: ChatService, launch: Any
 ) -> None:
