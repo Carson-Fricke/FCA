@@ -139,7 +139,8 @@ application itself, run the canonical local composition in
 (`build_local_workspace_data`) and the T211 chat/SSE routers, delegates
 backtest launch to the real local harness process, and (when
 `OPENROUTER_API_KEY` is set) composes the workflow runtime so the structured
-hypothesis-validation trigger executes and streams execution events:
+hypothesis-development trigger and plain-language research ideas launch the
+falsification-first pipeline and stream execution events:
 
 ```powershell
 uv run --env-file .env python scripts/local/thesis_local_api.py

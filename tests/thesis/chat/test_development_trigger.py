@@ -13,7 +13,7 @@ from thesis.chat import (
     ChatService,
     InMemoryChatStreamBroker,
 )
-from thesis.chat.contracts import MessageRole
+from thesis.chat.contracts import MessageRole, TranscriptItemKind
 from thesis.execution.events import ExecutionEventType
 from thesis.workflows.hypothesis_development import (
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
@@ -50,6 +50,23 @@ class FakeWorkflow:
             actor_id=actor_id,
             body=ideas,
             investigation_id=investigation_id,
+        )
+        self._chat.create_message(
+            workspace_id,
+            chat_id,
+            actor_id=actor_id,
+            body=HYPOTHESIS_DEVELOPMENT_WORKFLOW.title,
+            role=MessageRole.SYSTEM,
+            kind=TranscriptItemKind.WORKFLOW,
+            data={
+                "currentPhase": execution.phase,
+                "executionId": execution.execution_id,
+                "status": execution.state.value,
+                "title": HYPOTHESIS_DEVELOPMENT_WORKFLOW.title,
+                "version": execution.workflow_version,
+                "workflowId": execution.workflow_id,
+            },
+            execution_id=execution.execution_id,
         )
         return HypothesisDevelopmentRequest(
             workspace_id=workspace_id,
@@ -210,6 +227,12 @@ def test_plain_language_idea_launches_hypothesis_development() -> None:
     assert request.ideas == PLAIN_IDEAS
     assert "workspace" not in message.body.lower()
     assert "supported" in message.body
+    messages = chat.list_messages(WORKSPACE, chat_id)
+    anchors = [item for item in messages if item.kind is TranscriptItemKind.WORKFLOW]
+    assert len(anchors) == 1
+    anchor_data = anchors[0].data
+    assert anchor_data is not None
+    assert anchor_data["workflowId"] == "hypothesis-development"
     executions = chat.list_executions(WORKSPACE)
     assert [execution.workflow_id for execution in executions] == [
         "hypothesis-development"
