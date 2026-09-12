@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 
 import pytest
 
@@ -11,6 +12,7 @@ from thesis.chat import (
     PROVIDER_DELTA,
     ChatReplyService,
     ChatService,
+    ChatStreamFrame,
     InMemoryChatStreamBroker,
 )
 from thesis.chat.contracts import MessageRole, TranscriptItemKind
@@ -26,6 +28,11 @@ from thesis.workflows.hypothesis_development import (
 
 WORKSPACE = "workspace-a"
 IDEAS = "Momentum in SPY keeps going because the market underreacts."
+
+
+def _frame_message(frame: ChatStreamFrame) -> dict[str, Any]:
+    """Return the nested ``message`` mapping of one durable chat frame."""
+    return cast(dict[str, Any], frame.data["message"])
 
 
 class FakeWorkflow:
@@ -436,3 +443,95 @@ def test_paused_development_message_points_to_needs_input() -> None:
     assert "needs input" in message.body
     assert "needs-input" in message.body
     assert "finished (failed)" not in message.body
+
+
+class AnchorOrderingRuntime(FakeDevelopmentRuntime):
+    """Runtime that snapshots the live frames at the moment execution begins."""
+
+    def __init__(self, broker: InMemoryChatStreamBroker) -> None:
+        super().__init__()
+        self._broker = broker
+        self.frames_at_execution: tuple[ChatStreamFrame, ...] = ()
+
+    def execute_hypothesis_development(
+        self,
+        request: HypothesisDevelopmentRequest,
+        *,
+        chat: ChatService,
+    ) -> HypothesisDevelopmentOutcome:
+        self.frames_at_execution = self._broker.read(
+            request.workspace_id, request.chat_id
+        )
+        return super().execute_hypothesis_development(request, chat=chat)
+
+
+def test_launch_publishes_one_anchor_frame_before_execution() -> None:
+    chat = ChatService()
+    broker = InMemoryChatStreamBroker()
+    runtime = AnchorOrderingRuntime(broker)
+    reply = ChatReplyService(
+        chat_service=chat,
+        broker=broker,
+        provider=lambda history: iter(()),
+        development_runtime=runtime,
+    )
+    chat_id = chat.create_chat(
+        WORKSPACE, title="Research", owner_actor_id="operator"
+    ).chat_id
+    chat.create_message(WORKSPACE, chat_id, actor_id="operator", body=_trigger())
+
+    message = reply.respond(WORKSPACE, chat_id)
+
+    assert message is not None
+    # Exactly one anchor plus one assistant summary reach the live stream.
+    chat_frames = [
+        frame
+        for frame in broker.read(WORKSPACE, chat_id)
+        if frame.event == CHAT_MESSAGE
+    ]
+    assert len(chat_frames) == 2
+    anchor = _frame_message(chat_frames[0])
+    assert anchor["kind"] == "workflow"
+    assert anchor["role"] == "system"
+    assert anchor["data"]["executionId"] == runtime.requests[0].execution_id
+    assert _frame_message(chat_frames[1])["role"] == "assistant"
+    assert _frame_message(chat_frames[1])["message_id"] == message.message_id
+
+    # The anchor frame is published after `start` and before the run executes.
+    assert [frame.event for frame in runtime.frames_at_execution] == [
+        PROVIDER_DELTA,
+        CHAT_MESSAGE,
+    ]
+    assert (
+        _frame_message(runtime.frames_at_execution[1])["message_id"]
+        == anchor["message_id"]
+    )
+
+
+def test_paused_workflow_still_emits_done_after_anchor() -> None:
+    chat = ChatService()
+    broker = InMemoryChatStreamBroker()
+    runtime = PausedDevelopmentRuntime()
+    reply = ChatReplyService(
+        chat_service=chat,
+        broker=broker,
+        provider=lambda history: iter(()),
+        development_runtime=runtime,
+    )
+    chat_id = chat.create_chat(
+        WORKSPACE, title="Research", owner_actor_id="operator"
+    ).chat_id
+    chat.create_message(WORKSPACE, chat_id, actor_id="operator", body=_trigger())
+
+    message = reply.respond(WORKSPACE, chat_id)
+
+    assert message is not None
+    frames = broker.read(WORKSPACE, chat_id)
+    assert frames[0].event == PROVIDER_DELTA
+    assert frames[0].data.get("start") is True
+    assert frames[1].event == CHAT_MESSAGE
+    assert _frame_message(frames[1])["kind"] == "workflow"
+    assert frames[-2].event == CHAT_MESSAGE
+    assert "needs input" in _frame_message(frames[-2])["body"]
+    assert frames[-1].event == PROVIDER_DELTA
+    assert frames[-1].data.get("done") is True
