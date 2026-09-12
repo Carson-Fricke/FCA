@@ -1,0 +1,1 @@
+"""Daily operations reporting tests."""

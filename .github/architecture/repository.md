@@ -84,6 +84,7 @@ adapters, and orchestration details stay behind those boundaries.
 | `harness.screening` | Process-isolated execution sandbox for custom screener filters. |
 | `harness.strategy` | Mode-independent strategy callbacks (`Strategy`, `CALLBACK_ORDER`), the protocol-only `StrategyContext` surface, the sandbox lint, and the callback-contract reference fixture. The engine-bound context and binding were deleted; the native Rust context replaces them. See `## Strategy Contract` for the implemented loading, dispatch, and context surface. |
 | `harness.testing` | Canonical artifact support, the Rust-core parity oracle, and the cross-mode tick-indicator parity oracle. |
+| `lake.operations` | Daily coverage and budget report: freshness, failure, queue-age, storage, and budget summaries with an injectable alert channel and the `lake operations` operator command. |
 
 `harness.oms`, `harness.fills`, `harness.portfolio`, `harness.risk`,
 `harness.venues`, `harness.results`, `harness.sweeps`, `harness.http`,
@@ -310,6 +311,12 @@ deployment. Container Apps pulls the mirrored digest with the runtime managed
 identity; the ACR admin account is disabled. The budget alert contact
 placeholder must be replaced with a valid user-supplied email before Azure
 operations. No secrets are stored in Bicep or parameter files.
+
+The lake lifecycle policy moves blobs to Cool after 14 days of no modification.
+Cold tier is deliberately disabled: retrieval and early-deletion charges make a
+Cold transition a retrieval-cost decision rather than a default tiering step.
+The rationale and re-evaluation trigger are recorded in
+`.github/runbooks/cold-tier-policy.md` (T065).
 
 Container Apps logs use the `PerGB2018` Log Analytics SKU with its required
 30-day minimum retention. The application operations setting reports the same
