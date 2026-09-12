@@ -15,9 +15,13 @@ task evidence.
 - `uv` (Python 3.12 project environment): `uv sync --extra dev`.
 - Node.js LTS with npm for the UI: `npm --version`; install once per checkout
   with `npm install` inside `src/ui`.
-- One bearer secret per API boundary, generated locally (for example
-  `[Convert]::ToBase64String((New-Object byte[] 32)).TrimEnd('=').Replace('+','-').Replace('/','_')`)
-  and kept only in the environment of each terminal.
+- Bearer tokens for market-lake (`LAKE_API__BEARER_TOKEN`), harness
+  (`HARNESS_API_BEARER_TOKEN`), and Thesis (`THESIS_API__BEARER_TOKEN`) are
+  managed in the ignored repository `.env` by `scripts/local/dev_tokens.py`.
+  It mints each value once, adopts an already-exported value, and derives the
+  UI's `PUBLIC_THESIS_API_BEARER_TOKEN` from the Thesis token. Run
+  `uv run python scripts/local/dev_tokens.py` once, or let the launcher in
+  section 3 run it on every start. Never echo a value.
 - The harness chain needs a runnable backtest config; the repository default
   is the deterministic synthetic fixture `config/harness/backtest.yaml`. Its
   engine path alone is verifiable without any server:
@@ -82,8 +86,30 @@ provider with a missing deployment reports `model_unavailable`.
 
 ## 3. Start The Stack
 
+### One command (recommended)
+
+`scripts/local/start-stack.ps1` runs the token helper, loads `.env`, and
+launches the harness API, Thesis API, and UI detached with logs under
+`.local/logs`. It stops an existing instance on the target port first, and it
+keeps the tokens stable across restarts so the UI's baked credential keeps
+matching the Thesis API:
+
+```powershell
+powershell -File scripts/local/start-stack.ps1
+# start a subset, or mint fresh tokens:
+powershell -File scripts/local/start-stack.ps1 -Servers harness,thesis
+powershell -File scripts/local/start-stack.ps1 -Rotate
+```
+
+The launcher adds the base CPython directory to `PATH` for the harness facade
+(see troubleshooting) and reports each server's PID and health.
+
+### Manual (three terminals)
+
 Three terminals, in order. All commands run from the repository root unless
-stated.
+stated. Tokens now come from `.env`; run
+`uv run python scripts/local/dev_tokens.py` first and set the bearer variables
+from that file, or keep using `Set-MaskedEnv` to override them per terminal.
 
 ### Terminal 1 — harness quant API (port 8001)
 
@@ -253,6 +279,12 @@ stage passed.
   terminal 2 after correcting the variable. The UI's bearer is baked in at
   dev-server start: re-run `npm run dev` after changing
   `PUBLIC_THESIS_API_BEARER_TOKEN`.
+- **`harness` exits `0xC0000135` (`STATUS_DLL_NOT_FOUND`).** The native
+  `harness` facade embeds CPython and loads `python312.dll` at startup; when the
+  base interpreter directory is not on `PATH` the binary exits with no output.
+  The launcher in section 3 prepends it. To do it by hand, prepend the directory
+  printed by `uv run python -c "import sys; print(sys.base_prefix)"` to `PATH`
+  before `uv run harness api ...`.
 - **Module not found.** Run Python commands through `uv` from the repository
   root (`uv sync --extra dev` first). For the UI run `npm install` inside
   `src/ui`. A wrong port or base URL in `--thesis-url`/`--harness-url` shows
