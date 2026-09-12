@@ -207,6 +207,7 @@ def test_local_in_process_provider_discovers_and_calls_every_typed_tool() -> Non
         provider.run_backtest(
             RunBacktestArgs(config_path="cfg/bt.yaml", workspace="ws")
         ),
+        provider.backtest_config_template(),
         provider.get_backtest_status(GetBacktestStatusArgs(job_id="job-1")),
         provider.get_run(GetRunArgs(run_id="run-1")),
         provider.list_artifacts(ListArtifactsArgs(run_id="run-1")),

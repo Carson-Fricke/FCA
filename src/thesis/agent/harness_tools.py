@@ -31,6 +31,7 @@ import httpx
 
 from thesis.agent.skills import SkillRef, SkillRegistry, ThesisSkill
 from thesis.integrations.mcp import (
+    TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_GET_BACKTEST_STATUS,
     TOOL_GET_RUN,
     TOOL_LAUNCH_TRADER,
@@ -54,6 +55,7 @@ from thesis.integrations.mcp import (
 #: The harness MCP tools the Thesis agent may discover and call.
 HARNESS_TOOL_NAMES: tuple[str, ...] = (
     TOOL_RUN_BACKTEST,
+    TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_GET_BACKTEST_STATUS,
     TOOL_GET_RUN,
     TOOL_LIST_ARTIFACTS,
@@ -69,8 +71,10 @@ HARNESS_MCP_SKILL_VERSION = "1.0.0"
 HARNESS_MCP_SKILL_INSTRUCTIONS = (
     "Use the quant-harness MCP tools for deterministic research execution. "
     "run_backtest and run_sweep launch backtest and sweep jobs; "
-    "get_backtest_status and get_run report job and run state; "
-    "list_artifacts enumerates a run's immutable outputs and read_artifact "
+    "backtest_config_template returns a starter configuration to adapt when no "
+    "config file exists, and run_backtest accepts that configuration inline as "
+    "the `config` argument; get_backtest_status and get_run report job and run "
+    "state; list_artifacts enumerates a run's immutable outputs and read_artifact "
     "reads one artifact's text or hex-encoded bytes; and launch_trader "
     "starts a supervised trader session. Pass typed arguments, rely on the "
     "structured result content as evidence, and surface any returned failure "
@@ -360,6 +364,10 @@ class HarnessToolProvider:
     def run_backtest(self, args: RunBacktestArgs) -> HarnessToolResult:
         """Call ``run_backtest`` with typed arguments."""
         return self.call_tool(TOOL_RUN_BACKTEST, args.to_arguments())
+
+    def backtest_config_template(self) -> HarnessToolResult:
+        """Call ``backtest_config_template`` for a starter configuration."""
+        return self.call_tool(TOOL_BACKTEST_CONFIG_TEMPLATE, {})
 
     def get_backtest_status(self, args: GetBacktestStatusArgs) -> HarnessToolResult:
         """Call ``get_backtest_status`` with typed arguments."""

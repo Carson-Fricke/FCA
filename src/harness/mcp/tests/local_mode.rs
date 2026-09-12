@@ -14,8 +14,8 @@ use mcp::store::{
 };
 use mcp::tools::{
     BacktestSubmitter, Boundary, HarnessToolsContext, ProcessOutcome, ProcessRunner,
-    SweepSubmitter, TOOL_BACKTEST_STATUS, TOOL_GET_RUN, TOOL_LIST_ARTIFACTS, TOOL_READ_ARTIFACT,
-    TOOL_RUN_BACKTEST, TOOL_RUN_SWEEP,
+    SweepSubmitter, TOOL_BACKTEST_CONFIG_TEMPLATE, TOOL_BACKTEST_STATUS, TOOL_GET_RUN,
+    TOOL_LIST_ARTIFACTS, TOOL_READ_ARTIFACT, TOOL_RUN_BACKTEST, TOOL_RUN_SWEEP,
 };
 use mcp::{create_server, McpServer};
 use serde_json::{json, Value};
@@ -65,6 +65,22 @@ impl BacktestSubmitter for FailingBacktestSubmitter {
         Err("could not read backtest config 'examples/backtest.yaml': \
              No such file or directory"
             .to_string())
+    }
+}
+
+struct RecordingBacktestSubmitter {
+    seen: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl BacktestSubmitter for RecordingBacktestSubmitter {
+    fn submit(&self, config_path: &str, _workspace: Option<&str>) -> Result<Value, String> {
+        let text = std::fs::read_to_string(config_path).unwrap_or_default();
+        self.seen.lock().expect("recording lock").push(text);
+        Ok(json!({
+            "boundary": "local-submit",
+            "run_id": "inline-run",
+            "state": "running",
+        }))
     }
 }
 
@@ -246,6 +262,46 @@ fn local_run_backtest_surfaces_the_submitter_error() {
         text.contains("could not read backtest config 'examples/backtest.yaml'"),
         "unexpected error text: {text}"
     );
+}
+
+#[test]
+fn local_run_backtest_accepts_an_inline_config() {
+    let mut context =
+        HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
+    context.runner = Some(Arc::new(EchoRunner));
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    context.backtest_submitter = Some(Arc::new(RecordingBacktestSubmitter { seen: seen.clone() }));
+    let server = create_server(context.validate().expect("context")).expect("server");
+
+    let response = call(
+        &server,
+        TOOL_RUN_BACKTEST,
+        json!({"config": {"schema_version": 1, "shell": "backtest", "run_id": "inline-run"}}),
+    );
+
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(
+        response["result"]["structuredContent"]["run_id"],
+        "inline-run"
+    );
+    let recorded = seen.lock().expect("recording lock");
+    assert_eq!(recorded.len(), 1);
+    let document: Value = serde_json::from_str(&recorded[0]).expect("inline config is JSON");
+    assert_eq!(document["run_id"], "inline-run");
+}
+
+#[test]
+fn local_backtest_config_template_is_published() {
+    let store = Arc::new(InMemoryRunStore::new());
+    let jobs = Arc::new(InMemoryJobRepository::new());
+    let server = local_server(store, jobs);
+    let response = call(&server, TOOL_BACKTEST_CONFIG_TEMPLATE, json!({}));
+
+    assert_eq!(response["result"]["isError"], false);
+    let template = response["result"]["structuredContent"]["template"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(template.contains("shell: backtest"), "template: {template}");
 }
 
 #[test]

@@ -39,8 +39,10 @@ HARNESS_TOOL_SYSTEM_PROMPT = (
     "operator's request needs it, pass typed arguments, and summarize the "
     "structured results as evidence. For run_backtest and run_sweep, use the "
     "exact config or spec path the operator provides; never guess or invent a "
-    "path, and if none is given, ask for it before calling the tool. When a "
-    "tool call fails, report the returned error message verbatim instead of "
+    "path, and if none is given, call backtest_config_template to obtain a "
+    "starter configuration, adapt it, and pass it inline as the run_backtest "
+    "`config` argument rather than searching for a file. When a tool call "
+    "fails, report the returned error message verbatim instead of "
     "paraphrasing it."
 )
 _CHAT_ROLES = frozenset(("user", "assistant", "system", "tool"))

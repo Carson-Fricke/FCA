@@ -129,6 +129,17 @@ fn write_sorted(value: &Value, output: &mut String) {
 }
 
 fn validate_arguments(schema: &Value, arguments: &Map<String, Value>) -> Result<(), JsonRpcError> {
+    if let Some(branches) = schema.get("anyOf").and_then(Value::as_array) {
+        let satisfied = branches
+            .iter()
+            .any(|branch| validate_arguments(branch, arguments).is_ok());
+        if !satisfied {
+            return Err(JsonRpcError::new(
+                INVALID_PARAMS,
+                "arguments must satisfy one of the accepted argument shapes",
+            ));
+        }
+    }
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)

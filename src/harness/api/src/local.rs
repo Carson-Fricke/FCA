@@ -109,6 +109,11 @@ fn run_background_backtest(
     };
     match host::backtest::run_backtest_config(&configuration, Some(output_dir.as_path()), None) {
         Ok((outcome, _artifact_path)) => {
+            // Persist the configuration that produced the run beside the result
+            // set so the run is reproducible and the document is retrievable.
+            if let Ok(text) = fs::read(&config_path) {
+                let _ = fs::write(output_dir.join("config.yaml"), text);
+            }
             let mut artifacts = BTreeMap::new();
             collect_artifacts(&output_dir, &output_dir, &mut artifacts);
             if artifacts.is_empty() {

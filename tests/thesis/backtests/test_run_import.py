@@ -263,6 +263,10 @@ def _artifacts(*, include_equity_parquet: bool = False) -> dict[str, dict[str, s
             "encoding": "utf-8",
             "content": json.dumps(_metrics_document()),
         },
+        "config.yaml": {
+            "encoding": "utf-8",
+            "content": f"shell: backtest\nrun_id: {RUN_ID}\n",
+        },
     }
     if include_equity_parquet:
         table = pa.table(
@@ -345,6 +349,8 @@ def test_import_maps_run_to_record_with_links_and_stats() -> None:
     detail = record.detail()
     manifest = cast(Mapping[str, object], detail["manifest"])
     assert detail["run_id"] == RUN_ID
+    assert record.config_path == "config.yaml"
+    assert "shell: backtest" in str(manifest["configuration"])
     assert manifest["run_digest"] == "a" * 64
     assert manifest["configuration_digest"] == "b" * 64
     assert len(cast(Sequence[object], detail["trades"])) == 2

@@ -33,6 +33,7 @@ _COMPLETE_STATES = frozenset({"complete", "completed", "succeeded", "success"})
 _EQUITY_ARTIFACT = "artifacts/equity.parquet"
 _BACKTEST_ARTIFACT = "backtest.json"
 _METRICS_ARTIFACT = "metrics.json"
+_CONFIG_ARTIFACT = "config.yaml"
 
 _ANNUALIZATION = math.sqrt(252.0)
 
@@ -78,6 +79,7 @@ def import_backtest_run(
 
     backtest = _read_json(reader, run_id, _BACKTEST_ARTIFACT)
     metrics = _read_json(reader, run_id, _METRICS_ARTIFACT)
+    configuration = _read_text(reader, run_id, _CONFIG_ARTIFACT)
     manifest_document = _mapping(backtest.get("manifest"))
     portfolio = _mapping(backtest.get("portfolio"))
     fills = _sequence(backtest.get("fills"))
@@ -126,6 +128,7 @@ def import_backtest_run(
         "metrics": dict(metrics),
         "stats": dict(stats),
         "harness_manifest": dict(manifest_document),
+        "configuration": configuration,
     }
 
     return BacktestRecord(
@@ -151,6 +154,7 @@ def import_backtest_run(
         run_id=run_id,
         chat_id=chat_id,
         execution_id=execution_id,
+        config_path=_CONFIG_ARTIFACT if configuration is not None else None,
     )
 
 
@@ -206,6 +210,16 @@ def _read_json(reader: ArtifactReader, run_id: str, name: str) -> dict[str, obje
     except (UnicodeDecodeError, ValueError):
         return {}
     return dict(document) if isinstance(document, Mapping) else {}
+
+
+def _read_text(reader: ArtifactReader, run_id: str, name: str) -> str | None:
+    data = reader.read(run_id, name)
+    if data is None:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _equity_from_parquet(

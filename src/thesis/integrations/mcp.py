@@ -73,6 +73,7 @@ DEFAULT_HTTP_TIMEOUT = 30.0
 McpLocation = Literal["local", "remote"]
 
 TOOL_RUN_BACKTEST = "run_backtest"
+TOOL_BACKTEST_CONFIG_TEMPLATE = "backtest_config_template"
 TOOL_GET_BACKTEST_STATUS = "get_backtest_status"
 TOOL_GET_RUN = "get_run"
 TOOL_LIST_ARTIFACTS = "list_artifacts"
@@ -888,6 +889,7 @@ __all__ = [
     "MCP_HTTP_ROUTE",
     "PROTOCOL_VERSION",
     "THESIS_LOCATION_VARIABLE",
+    "TOOL_BACKTEST_CONFIG_TEMPLATE",
     "TOOL_GET_BACKTEST_STATUS",
     "TOOL_GET_RUN",
     "TOOL_LAUNCH_TRADER",

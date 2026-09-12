@@ -12,12 +12,15 @@ use std::sync::Arc;
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::auth::{BearerTokenSource, BEARER_TOKEN_VARIABLE};
 use crate::store::{artifact_digest, run_prefix, JobRepository, RunStore};
 
 /// Tool name for the backtest runner.
 pub const TOOL_RUN_BACKTEST: &str = "run_backtest";
+/// Tool name for the embedded backtest configuration template.
+pub const TOOL_BACKTEST_CONFIG_TEMPLATE: &str = "backtest_config_template";
 /// Tool name for job status queries.
 pub const TOOL_BACKTEST_STATUS: &str = "get_backtest_status";
 /// Tool name for run queries.
@@ -35,6 +38,13 @@ const LAUNCH_ROUTE: &str = "/v1/backtests/jobs";
 const JOB_STATUS_ROUTE: &str = "/v1/backtests/jobs";
 const RUN_ROUTE: &str = "/v1/backtests/runs";
 const IDENTIFIER_MAX: usize = 128;
+
+/// Canonical starter configuration embedded at build time so an agent can
+/// author a backtest when no configuration file exists.
+const BACKTEST_CONFIG_TEMPLATE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../config/harness/backtest.yaml"
+));
 
 /// Characters left unescaped when encoding a path segment (RFC 3986 unreserved).
 const PATH_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
@@ -502,7 +512,7 @@ impl HarnessTools {
         &self,
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
-        let config_path = text_argument(arguments, "config_path")?;
+        let config_path = resolve_config(arguments)?;
         if self.context.mode == Boundary::Remote {
             return self.launch_remote_backtest(&config_path);
         }
@@ -533,6 +543,18 @@ impl HarnessTools {
         ];
         tail.extend(workspace_arguments(arguments)?);
         self.invoke_process(&tail, "backtest-job")
+    }
+
+    /// Return the embedded starter backtest configuration document.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolExecutionError`] when the template cannot be serialized.
+    pub fn backtest_config_template(&self) -> Result<Value, ToolExecutionError> {
+        Ok(json!({
+            "format": "yaml",
+            "template": BACKTEST_CONFIG_TEMPLATE,
+        }))
     }
 
     /// Run one supervised paper trading session locally.
@@ -918,6 +940,43 @@ fn identifier_argument(
     Ok(value)
 }
 
+/// Resolve the backtest configuration path from an existing path or an inline
+/// ``config`` document.
+///
+/// An inline document is serialized and written to a content-addressed file
+/// under the temp directory so the asynchronous runner can read it after the
+/// tool call returns; identical documents reuse the same file.
+fn resolve_config(arguments: &Map<String, Value>) -> Result<String, ToolExecutionError> {
+    if let Some(value) = arguments.get("config") {
+        if !value.is_null() {
+            let Some(document) = value.as_object() else {
+                return Err(ToolExecutionError::new("config must be a JSON object"));
+            };
+            let text = serde_json::to_string(document)
+                .map_err(|error| ToolExecutionError::new(error.to_string()))?;
+            return materialize_config(&text);
+        }
+    }
+    text_argument(arguments, "config_path")
+}
+
+fn materialize_config(text: &str) -> Result<String, ToolExecutionError> {
+    let digest = hex::encode(Sha256::digest(text.as_bytes()));
+    let directory = std::env::temp_dir().join("harness-mcp-configs");
+    std::fs::create_dir_all(&directory).map_err(|error| {
+        ToolExecutionError::new(format!("could not prepare the config directory: {error}"))
+    })?;
+    let path = directory.join(format!("{digest}.json"));
+    if !path.exists() {
+        std::fs::write(&path, text).map_err(|error| {
+            ToolExecutionError::new(format!(
+                "could not write the inline backtest config: {error}"
+            ))
+        })?;
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 fn workspace_arguments(arguments: &Map<String, Value>) -> Result<Vec<String>, ToolExecutionError> {
     match arguments.get("workspace") {
         None | Some(Value::Null) => Ok(Vec::new()),
@@ -955,12 +1014,19 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["config_path"],
+                "anyOf": [
+                    {"required": ["config_path"]},
+                    {"required": ["config"]}
+                ],
                 "properties": {
                     "config_path": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Path to the backtest configuration document."
+                        "description": "Path to an existing backtest configuration document."
+                    },
+                    "config": {
+                        "type": "object",
+                        "description": "An inline backtest configuration document, used when no config file exists. Same schema as the configuration file; call backtest_config_template for a starter document."
                     },
                     "workspace": {
                         "type": "string",
@@ -971,6 +1037,23 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             }),
             "backtest",
             move |arguments| handler.run_backtest(arguments),
+        ));
+    }
+    if capabilities.backtest {
+        let handler = tools.clone();
+        candidates.push(Tool::new(
+            TOOL_BACKTEST_CONFIG_TEMPLATE,
+            "Return a canonical starter backtest configuration document (YAML). \
+             Adapt run_id, the time window, symbols, initial_cash, and the \
+             strategy parameters, then pass the result as the inline `config` \
+             argument of run_backtest when no configuration file exists.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {}
+            }),
+            "backtest",
+            move |_arguments| handler.backtest_config_template(),
         ));
     }
     if capabilities.backtest_status {
