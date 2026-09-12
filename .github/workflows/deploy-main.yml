@@ -24,7 +24,10 @@ on:
       - src/**
 
 concurrency:
-  group: fca-main-deployment-${{ github.ref }}
+  # Shared across every workflow that deploys infra/main.bicep (deploy-main,
+  # deploy-thesis, deploy-bicep) so overlapping runs cannot collide on the same
+  # nested resource deployments (e.g. market-lake-storage -> DeploymentActive).
+  group: fca-deployment-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:

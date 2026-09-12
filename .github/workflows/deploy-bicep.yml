@@ -30,6 +30,12 @@ on:
         default: true
         type: boolean
 
+concurrency:
+  # Shared with deploy-main/deploy-thesis so no two infra deployments targeting
+  # infra/main.bicep overlap for the same ref.
+  group: fca-deployment-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write
