@@ -50,7 +50,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -120,6 +120,12 @@ _WORKFLOW_TITLE = "Hypothesis development"
 _TOOL_NAME = "harness.backtest"
 _WORKFLOW_ACTOR = "thesis-workflow"
 _HYPOTHESIS_MEDIA_TYPE = "text/markdown"
+
+#: Appended to every composer task so the model emits one bare JSON object.
+_JSON_ONLY_INSTRUCTION = (
+    "Respond with a single JSON object and nothing else: no prose, no "
+    "explanations, and no markdown code fences."
+)
 
 _VERDICTS = frozenset({VERDICT_SUPPORTED, VERDICT_REFUTED, VERDICT_INCONCLUSIVE})
 
@@ -851,16 +857,69 @@ class StrategyDesigner(Protocol):
     def compose(self, invocation: InvocationResult) -> StrategyDesignDraft: ...
 
 
+def _balanced_objects(text: str) -> Iterator[str]:
+    """Yield every balanced top-level ``{...}`` slice, in source order.
+
+    The scan respects JSON string quoting and escapes so braces inside string
+    literals never affect the nesting depth.
+    """
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    yield text[start : index + 1]
+                    break
+        start = text.find("{", start + 1)
+
+
+_FENCED_JSON = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _extract_json_document(output: str) -> object | None:
+    """Best-effort extraction of a JSON document from tolerant model output.
+
+    Tried in order: the raw output as-is; every fenced code block (``json`` or
+    bare); then each balanced top-level object.  Returns ``None`` when no
+    candidate parses as JSON.
+    """
+    candidates: list[str] = [output]
+    candidates.extend(match.group(1) for match in _FENCED_JSON.finditer(output))
+    candidates.extend(_balanced_objects(output))
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 def _json_document(invocation: InvocationResult, label: str) -> dict[str, object]:
     output = invocation.response.output
     if not isinstance(output, str) or not output.strip():
         raise FalsificationComposeError(f"model provider returned no {label} content")
-    try:
-        document = json.loads(output)
-    except json.JSONDecodeError as error:
+    document = _extract_json_document(output)
+    if document is None:
         raise FalsificationComposeError(
             f"model output is not valid JSON {label} content"
-        ) from error
+        )
     if not isinstance(document, dict):
         raise FalsificationComposeError(f"{label} content must be a JSON object")
     return document
@@ -1292,16 +1351,31 @@ class HypothesisDevelopmentWorkflow:
         actor_id: str,
         ideas: str,
         investigation_id: str | None = None,
+        trigger_message_id: str | None = None,
     ) -> HypothesisDevelopmentRequest:
-        """Persist the chat trigger and return the runnable request."""
-        execution = self._chat.launch_workflow(
-            workspace_id,
-            chat_id,
-            workflow=self.definition,
-            actor_id=actor_id,
-            body=ideas,
-            investigation_id=investigation_id,
-        )
+        """Persist the chat trigger and return the runnable request.
+
+        When ``trigger_message_id`` is supplied the execution binds to the
+        operator's existing message instead of creating a duplicate trigger.
+        """
+        if trigger_message_id is None:
+            execution = self._chat.launch_workflow(
+                workspace_id,
+                chat_id,
+                workflow=self.definition,
+                actor_id=actor_id,
+                body=ideas,
+                investigation_id=investigation_id,
+            )
+        else:
+            execution = self._chat.launch_workflow(
+                workspace_id,
+                chat_id,
+                workflow=self.definition,
+                actor_id=actor_id,
+                message_id=trigger_message_id,
+                investigation_id=investigation_id,
+            )
         self._chat.create_message(
             workspace_id,
             chat_id,
@@ -1569,7 +1643,7 @@ class HypothesisDevelopmentWorkflow:
     ) -> tuple[HypothesisDraft, dict[str, object]]:
         context = assemble_context(
             workspace_scope=request.workspace_id,
-            task=self._ideation_input(request),
+            task=(f"{self._ideation_input(request)}\n\n{_JSON_ONLY_INSTRUCTION}"),
             role=f"Thesis {self._research_role} falsification analyst",
             context_id=request.execution_id,
         )
@@ -1605,7 +1679,8 @@ class HypothesisDevelopmentWorkflow:
             workspace_scope=request.workspace_id,
             task=(
                 "Design falsification trials and negative controls for the "
-                f"hypothesis: {document.front_matter.claim}"
+                f"hypothesis: {document.front_matter.claim}\n\n"
+                f"{_JSON_ONLY_INSTRUCTION}"
             ),
             role=f"Thesis {self._research_role} falsification planner",
             context_id=f"{request.execution_id}-plan",
@@ -1720,7 +1795,8 @@ class HypothesisDevelopmentWorkflow:
                 "Diagnose the failed falsifier trial "
                 f"{trial.test_id!r} for observable "
                 f"{(None if falsifier is None else falsifier.observable)!r} "
-                f"on run {trial.run_id!r} (state {trial.run_state!r})."
+                f"on run {trial.run_id!r} (state {trial.run_state!r}).\n\n"
+                f"{_JSON_ONLY_INSTRUCTION}"
             )
             context = self._subagents.create(
                 role=agent_role,
@@ -1851,6 +1927,7 @@ class HypothesisDevelopmentWorkflow:
             task=(
                 "Implement a strategy for the surviving hypothesis whose exit "
                 f"criteria are falsifier re-checks: {document.front_matter.claim}"
+                f"\n\n{_JSON_ONLY_INSTRUCTION}"
             ),
             role=f"Thesis {self._coding_role} strategy author",
             context_id=f"{request.execution_id}-design",
