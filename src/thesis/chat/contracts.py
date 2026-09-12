@@ -61,6 +61,17 @@ class MessageState(StrEnum):
     DELETED = "deleted"
 
 
+class TranscriptItemKind(StrEnum):
+    """The discriminator carried by one conversation item."""
+
+    MESSAGE = "message"
+    TOOL = "tool"
+    WORKFLOW = "workflow"
+    SUB_AGENT = "sub_agent"
+    GATE = "gate"
+    ARTIFACT = "artifact"
+
+
 class AttachmentState(StrEnum):
     PENDING = "pending"
     UPLOADING = "uploading"
@@ -316,6 +327,8 @@ class ChatMessage(WorkspaceRecord):
     body: str
     reasoning: str | None = None
     tool_result: Mapping[str, object] | None = None
+    kind: TranscriptItemKind = TranscriptItemKind.MESSAGE
+    data: Mapping[str, object] | None = None
     state: MessageState = MessageState.ACCEPTED
     attachment_ids: tuple[str, ...] = ()
     investigation_ids: tuple[str, ...] = ()
@@ -331,6 +344,17 @@ class ChatMessage(WorkspaceRecord):
             self, "body", _validate_body(self.body, "body", max_length=32_768)
         )
         object.__setattr__(self, "reasoning", _normalise_reasoning(self.reasoning))
+        if not isinstance(self.kind, TranscriptItemKind):
+            try:
+                object.__setattr__(self, "kind", TranscriptItemKind(self.kind))
+            except ValueError as error:
+                raise ChatContractError(
+                    f"kind must be one of {[item.value for item in TranscriptItemKind]}"
+                ) from error
+        if self.data is not None:
+            if not isinstance(self.data, Mapping):
+                raise ChatContractError("data must be a mapping")
+            object.__setattr__(self, "data", MappingProxyType(dict(self.data)))
         if self.tool_result is not None:
             if not isinstance(self.tool_result, Mapping):
                 raise ChatContractError("tool_result must be a mapping")
@@ -622,6 +646,7 @@ __all__ = [
     "RecordNotFound",
     "ToolJob",
     "ToolJobState",
+    "TranscriptItemKind",
     "WorkflowDefinition",
     "WorkflowExecution",
     "WorkflowExecutionState",
