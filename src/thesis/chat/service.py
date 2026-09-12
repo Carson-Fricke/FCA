@@ -354,12 +354,17 @@ class ChatService:
         actor_id: str,
         body: str,
         role: MessageRole = MessageRole.USER,
+        reasoning: str | None = None,
         attachment_ids: tuple[str, ...] = (),
         investigation_ids: tuple[str, ...] = (),
         execution_id: str | None = None,
         intent_epoch: int = 0,
     ) -> ChatMessage:
-        """Persist an accepted message and verify every workspace link."""
+        """Persist an accepted message and verify every workspace link.
+
+        ``reasoning`` is an optional chain-of-thought side channel persisted
+        alongside, but never inside, the answer ``body``.
+        """
         chat = self.get_chat(workspace_id, chat_id)
         if chat.state is ChatState.ARCHIVED:
             raise InvalidLifecycleTransition(
@@ -393,6 +398,7 @@ class ChatService:
             actor_id=actor_id,
             role=role,
             body=body,
+            reasoning=reasoning,
             attachment_ids=tuple(
                 attachment.attachment_id for attachment in attachments
             ),
@@ -434,6 +440,7 @@ class ChatService:
         actor_id: str,
         body: str,
         role: MessageRole = MessageRole.USER,
+        reasoning: str | None = None,
         attachment_ids: tuple[str, ...] = (),
         investigation_ids: tuple[str, ...] = (),
         execution_id: str | None = None,
@@ -446,6 +453,7 @@ class ChatService:
             actor_id=actor_id,
             body=body,
             role=role,
+            reasoning=reasoning,
             attachment_ids=attachment_ids,
             investigation_ids=investigation_ids,
             execution_id=execution_id,

@@ -3,9 +3,13 @@
 The reply service is the missing link between the chat-owned message surface
 and the model providers: on a new user message it assembles the conversation,
 streams the model's reply as ``provider.delta`` frames, persists one assistant
-``ChatMessage``, and publishes a final ``chat.message`` frame.  The model call
-itself is injected as a :data:`ReplyProvider` callable, so the transport and
-credentials stay at the composition boundary.
+``ChatMessage``, and publishes a final ``chat.message`` frame.  Model
+chain-of-thought is a separate, explicitly-surfaced channel: reasoning chunks
+stream as ``provider.delta`` frames with ``kind: "reasoning"`` before the
+answer text and are persisted on the assistant message's ``reasoning`` field,
+never inside its ``body``.  The model call itself is injected as a
+:data:`ReplyProvider` callable, so the transport and credentials stay at the
+composition boundary.
 """
 
 from __future__ import annotations
@@ -26,8 +30,27 @@ if TYPE_CHECKING:
         HypothesisValidationRequest,
     )
 
-#: A reply provider maps a conversation to an iterator of reply text chunks.
-ReplyProvider = Callable[[Sequence[ChatMessage]], Iterator[str]]
+
+@dataclass(frozen=True, slots=True)
+class ReplyChunk:
+    """One streamed reply fragment tagged with its channel.
+
+    ``kind`` is ``"reasoning"`` for model chain-of-thought and ``"text"`` (the
+    default) for answer text.  A bare ``str`` from a provider is treated as
+    answer text.
+    """
+
+    text: str
+    kind: str = "text"
+
+
+#: A reply provider maps a conversation to an iterator of reply chunks.
+#:
+#: Answer text may be yielded either as a bare ``str`` or as a
+#: :class:`ReplyChunk` with ``kind="text"``.  Chain-of-thought is yielded as a
+#: :class:`ReplyChunk` with ``kind="reasoning"`` and is always surfaced on the
+#: separate reasoning channel, never mixed into the answer.
+ReplyProvider = Callable[[Sequence[ChatMessage]], Iterator[str | ReplyChunk]]
 
 _HISTORY_ROLES = frozenset(
     (MessageRole.USER, MessageRole.ASSISTANT, MessageRole.SYSTEM)
@@ -252,22 +275,43 @@ class ChatReplyService:
         """Stream and persist an ordinary model reply."""
         stream_id = self.id_factory()
         self._start_delta(workspace_id, chat_id, stream_id)
-        chunks: list[str] = []
+        answer_chunks: list[str] = []
+        reasoning_chunks: list[str] = []
         try:
             for chunk in self.provider(history):
-                if not chunk:
+                if isinstance(chunk, ReplyChunk):
+                    kind = chunk.kind
+                    text = chunk.text
+                else:
+                    kind = "text"
+                    text = chunk
+                if not text:
                     continue
-                chunks.append(chunk)
+                if kind == "reasoning":
+                    reasoning_chunks.append(text)
+                    self.broker.publish(
+                        workspace_id,
+                        chat_id,
+                        PROVIDER_DELTA,
+                        {
+                            "messageId": stream_id,
+                            "text": text,
+                            "kind": "reasoning",
+                        },
+                    )
+                    continue
+                answer_chunks.append(text)
                 self.broker.publish(
                     workspace_id,
                     chat_id,
                     PROVIDER_DELTA,
-                    {"messageId": stream_id, "text": chunk},
+                    {"messageId": stream_id, "text": text},
                 )
         except Exception as error:  # fail closed at the task boundary
             self._error_delta(workspace_id, chat_id, stream_id, str(error))
             return None
-        body = _sanitize("".join(chunks))
+        body = _sanitize("".join(answer_chunks))
+        reasoning = _sanitize("".join(reasoning_chunks))
         if not body:
             self.broker.publish(
                 workspace_id,
@@ -283,6 +327,7 @@ class ChatReplyService:
                 actor_id=self.actor_id,
                 body=body,
                 role=MessageRole.ASSISTANT,
+                reasoning=reasoning or None,
             )
         except Exception as error:
             # A reply must never be dropped silently: surface the failure on the
@@ -329,6 +374,7 @@ class ChatReplyService:
 __all__ = [
     "ChatReplyService",
     "LaunchableWorkflow",
+    "ReplyChunk",
     "ReplyProvider",
     "ValidationRuntime",
     "launch_hypothesis_validation",

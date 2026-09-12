@@ -125,7 +125,8 @@ class OpenRouterProvider:
 
         ``tools`` is an optional OpenAI-style function catalog.  When supplied
         it is posted verbatim and any ``message.tool_calls`` in the response are
-        parsed into the completion; reasoning fields are never read.
+        parsed into the completion; reasoning fields are parsed into a separate
+        ``reasoning`` channel and never become assistant content.
         """
         key = self._resolve_key()
         payload: dict[str, object] = {

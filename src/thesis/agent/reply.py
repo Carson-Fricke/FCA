@@ -17,7 +17,8 @@ catalog so the agent can actually execute research:
 
 Tool failures are never raised into the reply: transport, protocol, unknown
 tool, and denial results are rendered as the tool message content so the model
-can recover.  Internal reasoning is never read from a completion.
+can recover.  Model reasoning is read as a separate channel: it is streamed
+before the answer with ``kind: "reasoning"`` and never enters the answer text.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from thesis.agent.harness_tools import (
     HarnessToolSpec,
 )
 from thesis.chat.contracts import ChatMessage
-from thesis.chat.responder import ReplyProvider
+from thesis.chat.responder import ReplyChunk, ReplyProvider
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
 from thesis.providers.invocations import Role, ToolCall
 from thesis.providers.openrouter import OpenRouterProvider
@@ -50,6 +51,19 @@ DEFAULT_MAX_TOOL_ITERATIONS = 6
 def _chunks(text: str, chunk_size: int) -> Iterator[str]:
     for index in range(0, len(text), chunk_size):
         yield text[index : index + chunk_size]
+
+
+def _reasoning_chunks(text: str, chunk_size: int) -> Iterator[ReplyChunk]:
+    for index in range(0, len(text), chunk_size):
+        yield ReplyChunk(text=text[index : index + chunk_size], kind="reasoning")
+
+
+def _answer_stream(
+    reasoning: str, text: str, chunk_size: int
+) -> Iterator[str | ReplyChunk]:
+    """Emit reasoning chunks first, then the answer text chunks."""
+    yield from _reasoning_chunks(reasoning, chunk_size)
+    yield from _chunks(text, chunk_size)
 
 
 def _role_name(role: object) -> str:
@@ -153,7 +167,7 @@ def harness_agent_reply_provider(
     if max_tool_iterations < 1:
         raise ValueError("max_tool_iterations must be a positive integer")
 
-    def stream(history: Sequence[ChatMessage]) -> Iterator[str]:
+    def stream(history: Sequence[ChatMessage]) -> Iterator[str | ReplyChunk]:
         messages = _seed_messages(history, system_prompt)
         if not messages:
             return
@@ -163,12 +177,19 @@ def harness_agent_reply_provider(
             catalog = ()
         if not catalog:
             completion = provider.complete(messages=messages, role=role)
-            yield from _chunks(completion.content, chunk_size)
+            yield from _answer_stream(
+                completion.reasoning, completion.content, chunk_size
+            )
             return
+        reasoning_parts: list[str] = []
         for _ in range(max_tool_iterations):
             completion = provider.complete(messages=messages, role=role, tools=catalog)
+            if completion.reasoning:
+                reasoning_parts.append(completion.reasoning)
             if not completion.tool_calls:
-                yield from _chunks(completion.content, chunk_size)
+                yield from _answer_stream(
+                    "".join(reasoning_parts), completion.content, chunk_size
+                )
                 return
             messages.append(
                 ProviderChatMessage(
@@ -188,7 +209,11 @@ def harness_agent_reply_provider(
         # The cap was reached with tools still pending: ask once more without
         # the catalog so the operator always receives a text answer.
         completion = provider.complete(messages=messages, role=role)
-        yield from _chunks(completion.content, chunk_size)
+        if completion.reasoning:
+            reasoning_parts.append(completion.reasoning)
+        yield from _answer_stream(
+            "".join(reasoning_parts), completion.content, chunk_size
+        )
 
     return stream
 

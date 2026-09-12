@@ -118,7 +118,12 @@ class ChatMessage:
 
 @dataclass(frozen=True, slots=True)
 class ModelCompletion:
-    """Typed completion result; carries no credentials or raw payloads."""
+    """Typed completion result; carries no credentials or raw payloads.
+
+    ``reasoning`` is the model's chain-of-thought side channel, kept strictly
+    separate from ``content`` so a caller can surface it on its own channel
+    without ever mixing it into the assistant answer.
+    """
 
     content: str
     model: str
@@ -126,12 +131,15 @@ class ModelCompletion:
     role: Role
     prompt_tokens: int
     completion_tokens: int
+    reasoning: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     schema_version: Literal[1] = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.content, str):
             raise ValueError("completion content must be text")
+        if not isinstance(self.reasoning, str):
+            raise ValueError("completion reasoning must be text")
         for call in self.tool_calls:
             if not isinstance(call, ToolCall):
                 raise ValueError("tool_calls must contain ToolCall values")
@@ -170,9 +178,12 @@ def parse_chat_completion(
     message = choice.get("message") if isinstance(choice, dict) else None
     if not isinstance(message, dict):
         raise ProviderRejectedError("provider response did not contain a message")
-    # ``reasoning``/``reasoning_content`` (and any other side channel) are
-    # deliberately never read: they must not surface as assistant text.
+    # ``reasoning``/``reasoning_content`` are a separate, explicitly-surfaced
+    # channel: they populate ``ModelCompletion.reasoning`` and never enter the
+    # assistant ``content``.  A malformed (non-string) reasoning value is
+    # ignored rather than treated as a provider failure.
     content = message.get("content")
+    reasoning = _parse_reasoning(message)
     tool_calls = _parse_tool_calls(message.get("tool_calls"))
     if isinstance(content, str):
         text = content
@@ -192,8 +203,23 @@ def parse_chat_completion(
         role=role,
         prompt_tokens=tokens[0],
         completion_tokens=tokens[1],
+        reasoning=reasoning,
         tool_calls=tool_calls,
     )
+
+
+def _parse_reasoning(message: Mapping[str, object]) -> str:
+    """Read a string reasoning field, ignoring malformed or absent values.
+
+    Both the ``reasoning`` and ``reasoning_content`` field names are accepted;
+    the first non-empty string wins, and every non-string value is ignored so a
+    provider quirk never becomes a reply failure.
+    """
+    for name in ("reasoning", "reasoning_content"):
+        value = message.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def _parse_tool_calls(value: object) -> tuple[ToolCall, ...]:
