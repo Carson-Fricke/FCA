@@ -13,15 +13,24 @@ import json
 import os
 import pathlib
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Protocol
+from typing import TYPE_CHECKING, Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from thesis.artifacts.importer import ArtifactImporter
+from thesis.auth.workspace_access import (
+    AccountOwnerMap,
+    CatalogWorkspaceOwnerLookup,
+    WorkspaceAuthorizationError,
+    WorkspaceAuthorizer,
+    WorkspaceOwnerLookup,
+    identity_account_owner,
+    principal_account_id,
+)
 from thesis.chat import ChatService, ChatState
 from thesis.http.backtests import BacktestDataService, BacktestStore
 from thesis.http.dashboards import (
@@ -54,6 +63,9 @@ from thesis.integrations.harness_activation import (
 from thesis.integrations.mcp import open_local_harness_boundary
 from thesis.integrations.runtime_status import RuntimeStatusClient
 from thesis.screening.engine import MarketBar, ScreenerPortError, UniverseEntry
+
+if TYPE_CHECKING:
+    from azure.storage.blob import BlobServiceClient
 
 
 def _utc_now() -> datetime:
@@ -265,9 +277,119 @@ def get_workspace_service(request: Request) -> WorkspaceDataService:
     return service
 
 
-def create_workspaces_router() -> APIRouter:
-    """Create the workspace catalog and snapshot router."""
+def manifest_owner_lookup(store: WorkspaceStore) -> WorkspaceOwnerLookup:
+    """Build the catalog/manifest ``owner.owner_id`` lookup for a store.
+
+    The catalog summary carries the owner when a store records one; otherwise
+    the lookup opens the workspace manifest through the store's local provider.
+    Unknown workspaces, unreadable manifests, and catalogs without manifest
+    access all resolve to ``None`` so authorization fails closed.
+    """
+
+    def owner_of(workspace_id: str) -> str | None:
+        summary = store.get(workspace_id)
+        if summary is not None:
+            owner = summary.get("owner")
+            if isinstance(owner, Mapping):
+                owner_id = owner.get("owner_id")
+                if isinstance(owner_id, str) and owner_id:
+                    return owner_id
+            owner_id = summary.get("owner_id")
+            if isinstance(owner_id, str) and owner_id:
+                return owner_id
+        provider = getattr(store, "provider", None)
+        if provider is None:
+            return None
+        from thesis.workspaces.local import WorkspaceRepositoryError
+
+        try:
+            workspace = provider.open(workspace_id)
+        except (WorkspaceRepositoryError, ValueError):
+            return None
+        return workspace.manifest.owner.owner_id
+
+    return CatalogWorkspaceOwnerLookup(owner_of)
+
+
+def _workspace_forbidden() -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": "workspace_forbidden",
+            "message": "workspace access denied",
+        },
+    )
+
+
+def require_workspace_access(
+    authenticator: Callable[..., Awaitable[str]],
+    authorizer: WorkspaceAuthorizer,
+    *,
+    account_owner: AccountOwnerMap = identity_account_owner,
+) -> Callable[..., Awaitable[str]]:
+    """Build the reusable per-request workspace authorization dependency.
+
+    The returned dependency composes with the application authenticator instead
+    of replacing it: it resolves the caller's principal through the same
+    callable the shared auth dependency uses, derives the account id (unwrapping
+    the ``session:`` prefix for cookie sessions), maps it to the workspace owner
+    through the injectable ``account_owner`` seam, and checks ownership for the
+    route's ``workspace_id`` path parameter.  Routes without that parameter
+    (the catalog collection) require authentication only.  The authenticator
+    raises 401 when no credential is presented; an owner mismatch raises 403.
+    """
+
+    principal_dependency = Annotated[str, Depends(authenticator)]
+
+    async def dependency(
+        request: Request,
+        principal: str,
+    ) -> str:
+        workspace_id = request.path_params.get("workspace_id")
+        if not workspace_id:
+            return principal
+        account_id = principal_account_id(principal)
+        if account_id is None:
+            raise _workspace_forbidden()
+        try:
+            authorizer.authorize_operator(account_owner(account_id), workspace_id)
+        except WorkspaceAuthorizationError as error:
+            raise _workspace_forbidden() from error
+        return principal
+
+    # ``from __future__ import annotations`` stringifies the parameter
+    # annotation, which would hide the closure-scoped authenticator from
+    # FastAPI's forward-reference evaluation.  Rebind it to the live
+    # ``Annotated`` marker so dependency resolution sees the composition.
+    dependency.__annotations__["principal"] = principal_dependency
+    return dependency
+
+
+def create_workspaces_router(
+    *,
+    authenticator: Callable[..., Awaitable[str]] | None = None,
+    authorizer: WorkspaceAuthorizer | None = None,
+    account_owner: AccountOwnerMap | None = None,
+) -> APIRouter:
+    """Create the workspace catalog and snapshot router.
+
+    When both ``authenticator`` and ``authorizer`` are supplied, every route on
+    the router is gated by :func:`require_workspace_access`: workspace-scoped
+    routes also require the authenticated account to own ``{workspace_id}``,
+    while the catalog collection routes require authentication only.  Without
+    them the router keeps its previous behavior so callers that have not yet
+    adopted per-workspace authorization are unaffected.
+    """
     router = APIRouter(prefix="/v1", tags=["workspaces"])
+    if authenticator is not None and authorizer is not None:
+        guard = require_workspace_access(
+            authenticator,
+            authorizer,
+            account_owner=(
+                account_owner if account_owner is not None else identity_account_owner
+            ),
+        )
+        router.dependencies.append(Depends(guard))
 
     @router.get("/workspaces")
     async def list_workspaces(
@@ -406,8 +528,32 @@ def _workspace_template_path(
 ) -> pathlib.Path:
     if override is not None:
         return pathlib.Path(override)
+    # The packaged image mounts the config tree and points THESIS_CONFIG_ROOT at
+    # it, so prefer that root over the source checkout layout.
+    config_root = (os.environ.get("THESIS_CONFIG_ROOT") or "").strip()
+    if config_root:
+        candidate = pathlib.Path(config_root) / "config" / "thesis" / "workspace.yaml"
+        if candidate.is_file():
+            return candidate
     repo_root = pathlib.Path(__file__).resolve().parents[3]
     return repo_root / "config" / "thesis" / "workspace.yaml"
+
+
+def azure_workspace_store(
+    blob_service: BlobServiceClient,
+    *,
+    container_prefix: str = "thesis-ws-",
+    template: str | pathlib.Path | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> WorkspaceStore:
+    """Build the blob-container workspace catalog for Azure mode."""
+    from thesis.workspaces.azure_catalog import AzureWorkspaceCatalogStore
+    from thesis.workspaces.manifest import load_workspace_manifest
+
+    manifest = load_workspace_manifest(_workspace_template_path(template))
+    return AzureWorkspaceCatalogStore(
+        blob_service, manifest, container_prefix=container_prefix, clock=clock
+    )
 
 
 def _local_catalog_store(
@@ -434,6 +580,7 @@ def build_local_workspace_data(
     harness_base_url: str = "http://127.0.0.1:8777",
     harness_boundary: HarnessBoundary | None = None,
     chat_service: ChatService | None = None,
+    workspace_store: WorkspaceStore | None = None,
     market_port: ScreenerMarketPort | None = None,
     backtest_store: BacktestStore | None = None,
     artifact_importer: ArtifactImporter | None = None,
@@ -453,6 +600,8 @@ def build_local_workspace_data(
     ``workspace_root`` when one is supplied, else in memory.  When
     ``workspace_root`` is supplied, workspaces themselves persist as literal
     Git-backed directories under it; without one they live in memory.
+    ``workspace_store`` injects an alternative catalog (for example the Azure
+    blob-container store) and takes precedence over ``workspace_root``.
     """
     resolved_clock = clock if clock is not None else _utc_now
     ids = id_factory if id_factory is not None else _counting_id_factory()
@@ -511,14 +660,16 @@ def build_local_workspace_data(
             if thread.state == ChatState.ACTIVE
         ]
 
-    workspace_store: WorkspaceStore = WorkspaceCatalogStore()
-    if workspace_root is not None:
-        workspace_store = _local_catalog_store(
+    resolved_workspace_store: WorkspaceStore = (
+        workspace_store or WorkspaceCatalogStore()
+    )
+    if workspace_store is None and workspace_root is not None:
+        resolved_workspace_store = _local_catalog_store(
             pathlib.Path(workspace_root), workspace_template, resolved_clock
         )
 
     workspaces = WorkspaceDataService(
-        store=workspace_store,
+        store=resolved_workspace_store,
         clock=resolved_clock,
         id_factory=ids,
         count_providers={
@@ -553,4 +704,6 @@ __all__ = [
     "build_local_workspace_data",
     "create_workspaces_router",
     "get_workspace_service",
+    "manifest_owner_lookup",
+    "require_workspace_access",
 ]
