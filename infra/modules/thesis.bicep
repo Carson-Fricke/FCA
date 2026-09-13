@@ -88,6 +88,15 @@ param thesisWorkspaceContainerPrefix string
 @minLength(1)
 param thesisWorkspaceRegistryTableName string
 
+@description('Name of the operator-provisioned Key Vault secret holding the Azure Communication Services email connection string. No secret value is embedded in this module. Empty disables invite-mail delivery wiring so the module stays deployable before the operator creates the secret (see .github/runbooks/thesis-public-auth.md Step 4).')
+param mailerConnectionStringSecretName string = 'thesis-acs-email-connection-string'
+
+@description('Verified sender address used for invite emails, for example DoNotReply@<verified-domain>. Non-secret operator configuration injected into the Thesis Container App.')
+param mailerSenderAddress string = ''
+
+@description('Azure Communication Services endpoint URI used for invite emails. Empty lets the mailer derive it from the connection string. Non-secret operator configuration injected into the Thesis Container App.')
+param mailerEndpoint string = ''
+
 @description('Azure region for the Thesis API Container App.')
 param location string = resourceGroup().location
 
@@ -146,7 +155,24 @@ param thesisMaxReplicas int = 2
 var thesisContainerPort = 8000
 var thesisContainerName = 'thesis-api'
 var thesisSecretName = 'thesis-api-bearer-token'
-var thesisSecrets = [
+// The ACS connection string is operator-provisioned in Key Vault
+// (.github/runbooks/thesis-public-auth.md Step 4). The composition never
+// creates the ACS resource and never carries the connection string; an empty
+// secret name disables the mailer wiring so the module stays deployable before
+// the operator creates the secret. The bearer secret is always required.
+var thesisMailerEnabled = !empty(mailerConnectionStringSecretName)
+var thesisSecrets = thesisMailerEnabled ? [
+  {
+    name: thesisSecretName
+    keyVaultUrl: '${keyVaultUri}secrets/${thesisSecretName}'
+    identity: thesisIdentityResourceId
+  }
+  {
+    name: mailerConnectionStringSecretName
+    keyVaultUrl: '${keyVaultUri}secrets/${mailerConnectionStringSecretName}'
+    identity: thesisIdentityResourceId
+  }
+] : [
   {
     name: thesisSecretName
     keyVaultUrl: '${keyVaultUri}secrets/${thesisSecretName}'
@@ -154,7 +180,24 @@ var thesisSecrets = [
   }
 ]
 // The bearer token reaches the container only through a secretRef; no
-// provider, model, or broker secret is configured for Thesis.
+// provider, model, or broker secret is configured for Thesis. The ACS
+// connection string likewise reaches the container only through a secretRef.
+var thesisMailerEnvironment = thesisMailerEnabled ? concat([
+  {
+    name: 'THESIS_API__MAILER_CONNECTION_STRING'
+    secretRef: mailerConnectionStringSecretName
+  }
+], empty(mailerSenderAddress) ? [] : [
+  {
+    name: 'THESIS_API__MAILER_SENDER_ADDRESS'
+    value: mailerSenderAddress
+  }
+], empty(mailerEndpoint) ? [] : [
+  {
+    name: 'THESIS_API__MAILER_ENDPOINT'
+    value: mailerEndpoint
+  }
+]) : []
 var thesisBaseEnvironment = [
   {
     name: 'AZURE_CLIENT_ID'
@@ -201,7 +244,7 @@ var thesisApiEnvironment = concat(thesisBaseEnvironment, thesisEntraEnvironment,
     name: 'THESIS_API__BEARER_TOKEN'
     secretRef: thesisSecretName
   }
-])
+], thesisMailerEnvironment)
 
 // The vault is referenced, not created: the composition owns the Key Vault.
 var keyVaultName = split(replace(keyVaultUri, 'https://', ''), '.')[0]

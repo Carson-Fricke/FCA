@@ -404,6 +404,38 @@ ACS endpoint (no connection string), the operator must grant that identity the
 appropriate Communication Services role and this Key Vault secret is not
 created. Record which path was chosen.
 
+### Mailer configuration and send-failure behavior
+
+`infra/modules/thesis.bicep` injects the mailer configuration into the Thesis
+Container App. The connection string is a Key Vault `secretRef`, exactly like
+the existing `thesis-api-bearer-token`: the value never appears in Bicep
+parameters, environment variables, deployment logs, or Git. The Bicep
+parameters are:
+
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| `mailerConnectionStringSecretName` | `thesis-acs-email-connection-string` | Key Vault secret name for the versionless `secretRef`. Set to empty to disable mailer wiring. |
+| `mailerSenderAddress` | empty | Verified `From` address, e.g. `DoNotReply@$acsEmailDomain`. Non-secret. |
+| `mailerEndpoint` | empty | ACS endpoint URI override. Non-secret; empty derives it from the connection string. |
+
+The container variables are `THESIS_API__MAILER_CONNECTION_STRING` (secretRef
+only), `THESIS_API__MAILER_SENDER_ADDRESS`, and `THESIS_API__MAILER_ENDPOINT`
+(each set only when its parameter is non-empty). If the secret name is empty,
+none of the mailer variables are injected and invite mail delivery stays
+disabled, so the module remains deployable before the secret is created.
+
+Send behavior (`thesis.identity.mailer`): `AcsEmailMailer` posts the invite to
+the ACS Email REST API with an HMAC-signed request over an injected HTTP
+transport. A rejected request (any non-2xx) or a transport failure raises
+`MailerError`, whose message names the provider and the HTTP status/reason (or
+the transport exception type). The error intentionally excludes the invite
+token, the full invite link, and the recipient, so it is safe to log and to
+surface to an operator. Invite creation must fail closed when the send fails;
+do not record the invite as delivered before the send returns. Configuration
+problems (a connection string missing `endpoint`/`accesskey`, an unreadable
+access key, or an empty sender) raise `ValueError` at construction, before any
+request is attempted.
+
 ## Step 5 - Azure Static Web Apps And The Deployment Token
 
 Create the Standard-tier Static Web App, capture its default hostname, and
@@ -548,8 +580,9 @@ it is not a credential.
 | `THESIS_CUSTOM_DOMAIN` | Environment variable | SWA custom domain | `$thesisCustomDomain` |
 | `THESIS_OWNER_EMAIL` | Environment variable | `thesis.identity` owner seed | `$thesisOwnerEmail` |
 | `THESIS_API_APP_NAME` | Environment variable | Linked backend | derived Thesis API app name |
-| `THESIS_EMAIL_SENDER_ADDRESS` | Environment variable | Mailer | `DoNotReply@$acsEmailDomain` |
-| `THESIS_EMAIL_ACS_ENDPOINT` | Environment variable | Mailer (non-secret endpoint only) | ACS endpoint URL |
+| `THESIS_MAILER_SECRET_NAME` | Environment variable (Bicep `mailerConnectionStringSecretName`) | Thesis mailer secretRef | `$mailerSecretName` |
+| `THESIS_MAILER_SENDER_ADDRESS` | Environment variable (Bicep `mailerSenderAddress`) | Thesis mailer `From` | `DoNotReply@$acsEmailDomain` |
+| `THESIS_MAILER_ENDPOINT` | Environment variable (Bicep `mailerEndpoint`, non-secret) | Thesis mailer endpoint override | ACS endpoint URL |
 
 Secrets, and where they live:
 
@@ -568,8 +601,9 @@ $environmentValues = [ordered]@{
   THESIS_CUSTOM_DOMAIN        = $thesisCustomDomain
   THESIS_OWNER_EMAIL          = $thesisOwnerEmail
   THESIS_API_APP_NAME         = $thesisApiAppName
-  THESIS_EMAIL_SENDER_ADDRESS = "DoNotReply@$acsEmailDomain"
-  THESIS_EMAIL_ACS_ENDPOINT   = '<acs-endpoint-url>'
+  THESIS_MAILER_SECRET_NAME   = $mailerSecretName
+  THESIS_MAILER_SENDER_ADDRESS = "DoNotReply@$acsEmailDomain"
+  THESIS_MAILER_ENDPOINT      = '<acs-endpoint-url>'
 }
 foreach ($entry in $environmentValues.GetEnumerator()) {
   $entry.Value | gh variable set $entry.Key --env $environment --repo $repo
