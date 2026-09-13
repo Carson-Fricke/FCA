@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from thesis.auth import WorkspaceAuthorizer
 from thesis.auth.workspace_access import (
     CatalogWorkspaceOwnerLookup,
+    WorkspaceOwnerLookup,
     principal_account_id,
 )
 from thesis.http.workspaces import (
@@ -55,7 +56,7 @@ class FakeAuthenticator:
         return principal
 
 
-def _owner_lookup(owners: Mapping[str, str]) -> Callable[[str], str | None]:
+def _owner_lookup(owners: Mapping[str, str]) -> WorkspaceOwnerLookup:
     def lookup(workspace_id: str) -> str | None:
         return owners.get(workspace_id)
 
