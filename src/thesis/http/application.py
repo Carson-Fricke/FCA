@@ -33,6 +33,7 @@ from thesis.agent.harness_tools import (
 )
 from thesis.agent.reply import reply_provider_for
 from thesis.auth.session import OperatorSessionService
+from thesis.auth.workspace_access import WorkspaceAuthorizer
 from thesis.chat import ChatService
 from thesis.chat.responder import ChatReplyService, ToolResultChunk, ToolResultObserver
 from thesis.chat.streaming import InMemoryChatStreamBroker
@@ -61,6 +62,8 @@ from thesis.http.sub_agents import create_sub_agent_router
 from thesis.http.workspaces import (
     WorkspaceDataBundle,
     create_workspaces_router,
+    manifest_owner_lookup,
+    require_workspace_access,
 )
 from thesis.identity.ports import AccountStore, SessionStore
 from thesis.providers.openrouter import OpenRouterProvider
@@ -551,6 +554,20 @@ def create_app(
     auth_dependency = [Depends(primary_authenticator)]
     if csrf_guard is not None:
         auth_dependency.append(Depends(csrf_guard))
+    # In the invite-only public mode (sessions + accounts configured), every
+    # route is additionally workspace-authorized: a session's account id is
+    # mapped to the workspace owner and cross-workspace access fails closed.
+    # Bearer-only local/dev deployments keep their existing behavior because
+    # there is no account identity to map.
+    if workspace_data is not None and session_service is not None:
+        workspace_authorizer = WorkspaceAuthorizer(
+            manifest_owner_lookup(workspace_data.workspaces.store)
+        )
+        auth_dependency.append(
+            Depends(
+                require_workspace_access(primary_authenticator, workspace_authorizer)
+            )
+        )
     for router in routers:
         application.include_router(router, dependencies=auth_dependency)
 
