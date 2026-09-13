@@ -222,6 +222,12 @@ class LocalInviteStore(_LocalJsonCollection[Invite]):
             )
         return matches[0] if matches else None
 
+    def list(self) -> tuple[Invite, ...]:
+        """Return every stored invite ordered by id."""
+        with self._lock:
+            invites = sorted(self._read().values(), key=lambda item: item.id)
+        return tuple(invites)
+
     def put(self, invite: Invite) -> Invite:
         """Insert or replace ``invite`` by id."""
         if not isinstance(invite, Invite):

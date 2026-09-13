@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -16,6 +17,7 @@ from thesis.identity.invites import (
 )
 from thesis.identity.local import LocalInviteStore
 from thesis.identity.models import Invite, invite_token_hash
+from thesis.identity.ports import InviteStore
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _WEEK = timedelta(days=7)
@@ -45,17 +47,36 @@ class _FailingMailer:
         raise RuntimeError("smtp is unavailable")
 
 
-class _ListableLocalInviteStore(LocalInviteStore):
-    """Local store extended with the listing ``list_invites`` requires."""
+class _NoListInviteStore:
+    """An InviteStore lacking ``list`` to exercise the fail-closed guard."""
 
-    def list(self) -> tuple[Invite, ...]:
-        records = self._read().values()
-        return tuple(sorted(records, key=lambda invite: (invite.created_at, invite.id)))
+    def __init__(self, store: LocalInviteStore) -> None:
+        self._store = store
+
+    def get(self, invite_id: str) -> Invite | None:
+        return self._store.get(invite_id)
+
+    def get_by_token_hash(self, token_hash: str) -> Invite | None:
+        return self._store.get_by_token_hash(token_hash)
+
+    def put(self, invite: Invite) -> Invite:
+        return self._store.put(invite)
+
+    def consume(
+        self,
+        invite_id: str,
+        *,
+        token_hash: str,
+        at: datetime,
+        email: str | None = None,
+    ) -> Invite | None:
+        return self._store.consume(invite_id, token_hash=token_hash, at=at, email=email)
+
+    def revoke(self, invite_id: str, *, at: datetime) -> Invite | None:
+        return self._store.revoke(invite_id, at=at)
 
 
-def _store(tmp_path: Path, *, listable: bool = True) -> LocalInviteStore:
-    if listable:
-        return _ListableLocalInviteStore(tmp_path / "invites.json")
+def _store(tmp_path: Path) -> LocalInviteStore:
     return LocalInviteStore(tmp_path / "invites.json")
 
 
@@ -117,7 +138,9 @@ def test_list_invites_never_returns_raw_tokens(tmp_path: Path) -> None:
 
 
 def test_list_invites_requires_a_directory_store(tmp_path: Path) -> None:
-    service = InviteService(_store(tmp_path, listable=False), clock=_clock)
+    service = InviteService(
+        cast(InviteStore, _NoListInviteStore(_store(tmp_path))), clock=_clock
+    )
 
     with pytest.raises(InviteListingUnavailableError):
         service.list_invites()

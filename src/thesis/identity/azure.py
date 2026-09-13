@@ -365,6 +365,16 @@ class AzureTableInviteStore(_TableAccess):
             return None
         return self.get(str(index["InviteId"]))
 
+    def list(self) -> tuple[Invite, ...]:
+        invites = (
+            invite_from_entity(entity)
+            for entity in self._table.query_entities(
+                "PartitionKey eq @partition",
+                parameters={"partition": _INVITES_PARTITION},
+            )
+        )
+        return tuple(sorted(invites, key=lambda invite: invite.id))
+
     def put(self, invite: Invite) -> Invite:
         owner = self._get(_INVITE_TOKENS_PARTITION, _table_key(invite.token_hash))
         if owner is not None and str(owner["InviteId"]) != invite.id:

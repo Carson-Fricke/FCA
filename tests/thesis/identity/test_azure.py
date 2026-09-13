@@ -163,10 +163,11 @@ def _invite(
     *,
     bound_email: str | None = None,
     expires_at: datetime = _T0 + timedelta(hours=1),
+    token_hash: str = _TOKEN_HASH,
 ) -> Invite:
     return Invite(
         id=invite_id,
-        token_hash=_TOKEN_HASH,
+        token_hash=token_hash,
         bound_email=bound_email,
         role="member",
         expires_at=expires_at,
@@ -298,6 +299,15 @@ def test_invite_store_rejects_a_duplicate_token_hash() -> None:
     with pytest.raises(ValueError, match="belongs to another invite"):
         store.put(_invite("inv-2"))
     assert store.get("inv-2") is None
+
+
+def test_invite_list_returns_all_in_id_order() -> None:
+    table = FakeTable()
+    store = _invite_store(table)
+    store.put(_invite("inv-b", token_hash="b" * 64))
+    store.put(_invite("inv-a", token_hash="a" * 64))
+
+    assert [invite.id for invite in store.list()] == ["inv-a", "inv-b"]
 
 
 def test_invite_consume_marks_consumed_once() -> None:

@@ -72,6 +72,9 @@ class InviteStore(Protocol):
     def revoke(self, invite_id: Identifier, *, at: datetime) -> Invite | None:
         """Atomically revoke an unconsumed invite, returning it or ``None``."""
 
+    def list(self) -> tuple[Invite, ...]:
+        """Return every stored invite in stable id order."""
+
 
 @runtime_checkable
 class SessionStore(Protocol):
