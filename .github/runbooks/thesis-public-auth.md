@@ -707,6 +707,110 @@ Re-test both layers after any user-flow or identity-provider change.
 | Workspace authorization per request | `WorkspaceAuthorizer` runs on every request; anonymous and cross-workspace access fail closed |
 | No open signup / no multi-tenancy | User-flow self-service sign-up disabled; organization/multi-tenant collaboration remains a non-goal |
 
+## Identity Audit Trail
+
+Every identity act is recorded as a single, secret-free
+`thesis.identity.audit.IdentityAuditEvent`: one immutable record with a `kind`
+(`login`, `logout`, `invite_created`, `invite_revoked`, `invite_redeemed`, or
+`consent`), the injected `at` instant, an `outcome` (`success`, `failure`, or
+`rate_limited`), a required `reason` for any non-success, and non-secret
+identifiers (actor id, account id, invite id, normalized email, client key).
+
+An event **never** carries a raw invite token, a signup link, a session id, a
+CSRF secret, a connection string, or any other credential. Its `repr` and its
+canonical `as_dict()`/`digest` values contain identifiers and outcomes only, so
+the record is safe to log, ship to a durable audit store, or attach to task
+evidence.
+
+Composition seams:
+
+- `IdentityAuditSink` is the structural `record(event)` collector every call
+  site depends on. `IdentityAuditTrail` is the emitter: login, logout, invite,
+  and consent call sites hand it identifiers and an injected clock, and it
+  stamps and forwards the event.
+- `RecordingIdentityAuditSink` is the deterministic in-memory sink for tests
+  and local development; `drain()`/`clear()` keep tests isolated.
+- `RedemptionIdentityAuditSink` adapts T311's `RedemptionAuditEvent` onto the
+  unified event, so `RedemptionService` (configured with
+  `audit=RedemptionIdentityAuditSink(sink)`) shares one trail with login and
+  invite.
+- `ResidencyIdentityAuditSink` maps each unified event onto a durable
+  `thesis.agent.residency.OperationAuditRecord` through the store's existing
+  `append_audit` port. The residency `OperationKind` taxonomy is a closed set of
+  agent operations, so identity events are carried under `open_investigation`
+  and the precise identity kind is preserved in `route_ref`
+  (`identity/<kind>`); the non-secret event digest is stored as
+  `inputs_digest`.
+
+Operator verification (offline, no secrets printed):
+
+```powershell
+uv run --no-sync --extra dev pytest -p no:cacheprovider `
+  tests/thesis/http/test_auth_hardening.py -q
+```
+
+The audit assertions prove that login, invite creation, redemption, and consent
+land on the recording sink and that no raw token, token hash, or signup link
+appears in the rendered events.
+
+## Rate-Limit Policy And Knobs
+
+Rate limiting is a fail-closed, injectable policy, not an endpoint concern.
+`thesis.identity.audit.FixedWindowRateLimiter` implements
+`RateLimitPolicy(attempts, window)` over a caller-supplied instant; it satisfies
+T311's structural `RedemptionRateLimiter`, so the same primitive throttles
+login, invite, and redemption.
+
+- `FixedWindowRateLimiter(policy)` permits at most `policy.attempts` attempts
+  per key inside `policy.window`; the window rolls on the first attempt at or
+  after `window_start + policy.window`. It reads no wall clock and calls
+  `allow(key, at=...)` with the request instant.
+- `IdentityRateLimiters.from_policies(login=..., invite=..., redemption=...)`
+  holds one limiter per surface and exposes `limiter_for("login" | "invite" |
+  "redemption")`.
+- Keys are non-secret: login is keyed by the caller client key, invite by the
+  acting account/operator id, and redemption by the caller client key or — when
+  absent — the domain-separated invite token **digest**. A raw token is never a
+  limiter key.
+- On exhaustion the surface fails closed: a rejected redemption raises
+  `RedemptionRateLimited` before any store access, and endpoints should return
+  HTTP 429 with code `rate_limited` and no token material. The redemption
+  rejection is also audited with `outcome="rate_limited"` and
+  `reason="rate_limited"`.
+
+There are no new environment variables or Bicep parameters: the policies are
+composed in code and injected at application wiring. Defaults should be chosen
+per deployment (for example a small login budget with a short window and a
+tighter redemption budget), and the chosen values recorded in the deployment
+record. Changing a policy requires no secret and no schema change.
+
+## Revocation Drill Procedure
+
+Run this drill after any change to session issuance, cookie policy, or the
+authentication dependency. It proves a server-side revocation invalidates the
+very next request — not after a cache TTL or a browser reconnect. It needs only
+a signed-in browser session and no secret output.
+
+1. Sign in and keep the `thesis_session` cookie (the response body returns the
+   CSRF token, which is not a session credential).
+2. Confirm the session is live: `GET /v1/auth/check` must return 200.
+3. Revoke server-side, using either path:
+   - self-service: `POST /v1/auth/logout` with the `X-CSRF-Token` header; or
+   - operator: `POST /v1/auth/revoke` with `{"session_id": "<session-id>"}` and
+     the `X-CSRF-Token` header.
+4. Immediately replay the **same** cookie against `GET /v1/auth/check`. The
+   response must be 401: the recorder has no active session, so the
+   authenticator fails closed rather than falling back to bearer auth.
+5. Confirm the durable record shows `revoked_at` set (identifiers/state only;
+   never print the session id alongside a credential).
+
+The offline equivalent is
+`tests/thesis/http/test_auth_hardening.py::test_revocation_drill_rejects_the_very_next_request`,
+which opens a session, authenticates one request, revokes it through
+`OperatorSessionService`, and asserts the next request is rejected. Treat a 200
+after revocation as a security failure: clear the audience, disable public
+exposure, and investigate the session boundary before re-enabling.
+
 ## Rollback And Removal
 
 - **Deployment rollback:** clear `THESIS_API_AUDIENCE` first to return the API
