@@ -15,15 +15,20 @@ import json
 import os
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from thesis.identity.owner import DEFAULT_WORKSPACE_OWNER_ID
 from thesis.workspaces.local import (
     LocalWorkspaceProvider,
     WorkspaceNotFoundError,
     WorkspaceRepositoryError,
 )
-from thesis.workspaces.manifest import WorkspaceManifest
+from thesis.workspaces.manifest import (
+    WorkspaceManifest,
+    dump_workspace_manifest,
+)
 
 _MANIFEST_RELATIVE = ".thesis/workspace.yaml"
 _ACTIVITY_DIRECTORY = ".catalog"
@@ -129,6 +134,37 @@ class LocalWorkspaceCatalogStore:
         workspace = self._provider.create(manifest)
         return summary_from_manifest(workspace.manifest)
 
+    def replace_manifest(self, workspace_id: str, manifest: WorkspaceManifest) -> None:
+        """Atomically replace one workspace's manifest without touching content.
+
+        The workspace is reopened through the provider so its identity and Git
+        boundary are re-verified before the write, and the new document is
+        staged in the manifest's own directory and moved into place with
+        :func:`os.replace`, so a crash never leaves a partially written
+        manifest.  Only ``.thesis/workspace.yaml`` changes; every other file in
+        the workspace is left exactly as it was.
+        """
+        workspace = self._provider.open(workspace_id)
+        if manifest.workspace_id != workspace_id:
+            raise ValueError("manifest workspace_id must match the selected workspace")
+        path = workspace.root / _MANIFEST_RELATIVE
+        handle = tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=".workspace-",
+            suffix=".tmp",
+            delete=False,
+        )
+        try:
+            with handle:
+                handle.write(dump_workspace_manifest(manifest))
+            os.replace(handle.name, path)
+        except BaseException:
+            if os.path.exists(handle.name):
+                os.unlink(handle.name)
+            raise
+
     def add_activity(self, item: dict[str, object]) -> dict[str, object]:
         workspace_id = str(item["workspace_id"])
         activity = dict(self._read_activity())
@@ -181,8 +217,104 @@ class LocalWorkspaceCatalogStore:
             raise
 
 
+@dataclass(frozen=True, slots=True)
+class OwnershipMigrationEntry:
+    """One workspace whose owner changes (or would change) in a migration."""
+
+    workspace_id: str
+    old_owner_id: str
+    new_owner_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class OwnershipMigrationReport:
+    """Outcome of one ownership migration pass over a workspace catalog.
+
+    ``scanned`` is the number of workspaces the pass opened; ``entries`` holds
+    one row per workspace that was (or, for a dry run, would be) re-owned, so
+    ``changed`` is the number of workspaces actually rewritten.  A dry run
+    reports the same rows without writing anything.
+    """
+
+    dry_run: bool
+    scanned: int
+    entries: tuple[OwnershipMigrationEntry, ...]
+
+    @property
+    def changed(self) -> int:
+        """Number of workspaces re-owned (or that a dry run would re-own)."""
+        return len(self.entries)
+
+    @property
+    def workspace_ids(self) -> tuple[str, ...]:
+        """Ids of the affected workspaces, in catalog order."""
+        return tuple(entry.workspace_id for entry in self.entries)
+
+
+def migrate_workspace_ownership(
+    store: LocalWorkspaceCatalogStore,
+    *,
+    owner_account_id: str,
+    default_owner_id: str = DEFAULT_WORKSPACE_OWNER_ID,
+    dry_run: bool = False,
+) -> OwnershipMigrationReport:
+    """Re-own default-owner workspaces to the seeded owner account.
+
+    Every workspace whose manifest ``owner.owner_id`` equals
+    ``default_owner_id`` (``local-operator`` by default) is rewritten to
+    ``owner_account_id``; workspaces owned by anyone else are skipped so a
+    migration never steals another owner's workspace.  Only the owner field
+    changes: the manifest is re-validated and written through the store's
+    atomic :meth:`LocalWorkspaceCatalogStore.replace_manifest` path, leaving
+    every other workspace file untouched.
+
+    The pass is idempotent.  Once a workspace carries ``owner_account_id`` it
+    no longer matches ``default_owner_id``, so a second run reports zero
+    changes and writes nothing.  With ``dry_run=True`` the report lists the
+    workspaces that would change and no manifest is written.
+
+    Raises:
+        ValueError: when ``owner_account_id`` or ``default_owner_id`` is empty.
+    """
+    if not owner_account_id:
+        raise ValueError("owner_account_id must be non-empty")
+    if not default_owner_id:
+        raise ValueError("default_owner_id must be non-empty")
+
+    entries: list[OwnershipMigrationEntry] = []
+    scanned = 0
+    for summary in store.list():
+        workspace_id = str(summary["id"])
+        workspace = store.provider.open(workspace_id)
+        scanned += 1
+        owner = workspace.manifest.owner
+        if owner.owner_id != default_owner_id:
+            continue
+        if owner.owner_id == owner_account_id:
+            continue
+        entries.append(
+            OwnershipMigrationEntry(
+                workspace_id=workspace_id,
+                old_owner_id=owner.owner_id,
+                new_owner_id=owner_account_id,
+            )
+        )
+        if not dry_run:
+            values = workspace.manifest.model_dump(mode="json")
+            values["owner"]["owner_id"] = owner_account_id
+            store.replace_manifest(
+                workspace_id, WorkspaceManifest.model_validate(values)
+            )
+    return OwnershipMigrationReport(
+        dry_run=dry_run, scanned=scanned, entries=tuple(entries)
+    )
+
+
 __all__ = [
     "LocalWorkspaceCatalogStore",
+    "OwnershipMigrationEntry",
+    "OwnershipMigrationReport",
     "manifest_for_summary",
+    "migrate_workspace_ownership",
     "summary_from_manifest",
 ]

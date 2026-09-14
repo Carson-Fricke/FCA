@@ -302,15 +302,8 @@ def _invalid_json_constant(value: str) -> None:
     raise WorkspaceManifestError(f"unsupported manifest number: {value}")
 
 
-def load_workspace_manifest(path: str | Path) -> WorkspaceManifest:
-    """Load the deterministic JSON subset of YAML 1.2 and validate it strictly."""
-    manifest_path = Path(path)
-    try:
-        text = manifest_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
-        raise WorkspaceManifestError(
-            f"unable to read workspace manifest: {manifest_path}"
-        ) from error
+def parse_workspace_manifest(text: str) -> WorkspaceManifest:
+    """Validate the deterministic JSON subset of YAML 1.2 from text."""
     try:
         values = json.loads(
             text,
@@ -325,6 +318,18 @@ def load_workspace_manifest(path: str | Path) -> WorkspaceManifest:
         raise WorkspaceManifestError("workspace manifest root must be a mapping")
     _reject_secret_values(values)
     return WorkspaceManifest.model_validate(values)
+
+
+def load_workspace_manifest(path: str | Path) -> WorkspaceManifest:
+    """Load the deterministic JSON subset of YAML 1.2 and validate it strictly."""
+    manifest_path = Path(path)
+    try:
+        text = manifest_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise WorkspaceManifestError(
+            f"unable to read workspace manifest: {manifest_path}"
+        ) from error
+    return parse_workspace_manifest(text)
 
 
 def _manifest_values(manifest: WorkspaceManifest) -> dict[str, Any]:
@@ -384,5 +389,6 @@ __all__ = [
     "dump_workspace_manifest",
     "load_workspace_manifest",
     "manifest_sha256",
+    "parse_workspace_manifest",
     "write_workspace_manifest",
 ]
