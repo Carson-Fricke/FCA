@@ -13,7 +13,7 @@
       "Unrelated asset families",
       "Unconsented live activation"
     ],
-    "relationship": "Lineages share momentum hypotheses, data, and execution assumptions.",
+    "relationship": "Lineages share momentum hypotheses, data, and execution assumptions. Owner seeding: THESIS_OWNER_EMAIL seeds the owner account; owner_id local-operator maps to that seeded account.",
     "title": "US Equity Momentum"
   },
   "created_at": "2026-09-02T00:00:00Z",

@@ -37,6 +37,7 @@ from thesis.identity.models import (
     Sha256Digest,
     normalize_email,
 )
+from thesis.identity.owner import Clock, seed_owner_account
 
 _SCHEMA_VERSION: Final = 1
 _LOCAL_IDENTITY_PARTS: Final = (".local", "thesis", "identity")
@@ -359,6 +360,23 @@ class LocalIdentityStore:
         )
 
 
+def seed_local_owner(
+    store: LocalIdentityStore,
+    *,
+    email: str,
+    display_name: str | None = None,
+    clock: Clock,
+) -> Account:
+    """Seed the default owner into a local identity store's account file.
+
+    A thin convenience over :func:`thesis.identity.owner.seed_owner_account`
+    for the local composition point; it adds no behavior of its own.
+    """
+    return seed_owner_account(
+        store.accounts, email=email, display_name=display_name, clock=clock
+    )
+
+
 __all__ = [
     "LocalAccountStore",
     "LocalIdentityStore",
@@ -366,4 +384,5 @@ __all__ = [
     "LocalInviteStore",
     "LocalSessionStore",
     "default_local_identity_root",
+    "seed_local_owner",
 ]
