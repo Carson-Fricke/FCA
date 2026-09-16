@@ -1,60 +1,71 @@
-"""Falsification-first hypothesis-development workflow package.
+"""Falsification-first hypothesis-development workflow package."""
 
-This package is being decomposed from the original single module into
-concern-focused submodules (phases, contracts, gates, prompts, composers, state,
-and the workflow itself). Until every submodule is extracted, ``_core`` holds the
-implementation and this facade re-exports the public surface so existing imports
-keep working unchanged.
-"""
+from __future__ import annotations
 
-from thesis.workflows.hypothesis_development._core import (
-    DEFAULT_MAX_COMPOSE_REPAIRS,
-    DEFAULT_MAX_HYPOTHESIS_CYCLES,
-    DEFAULT_MAX_RCA_CYCLES,
-    HYPOTHESIS_DEVELOPMENT_PHASES,
-    HYPOTHESIS_DEVELOPMENT_WORKFLOW,
-    VERDICT_INCONCLUSIVE,
-    VERDICT_REFUTED,
-    VERDICT_SUPPORTED,
-    ExitCriterion,
-    FalsificationComposeError,
-    FalsificationPlan,
-    FalsificationPlanDraft,
-    FalsificationPlanner,
-    FalsificationTrial,
-    FalsificationVerdict,
-    FalsifierTest,
-    HypothesisComposer,
-    HypothesisDevelopmentIntakeError,
-    HypothesisDevelopmentOutcome,
-    HypothesisDevelopmentPhase,
-    HypothesisDevelopmentRequest,
-    HypothesisDevelopmentState,
-    HypothesisDevelopmentWorkflow,
-    HypothesisDraft,
-    InvalidPhaseTransition,
+from .composers import (
     JsonDevelopmentHypothesisComposer,
     JsonFalsificationPlanner,
     JsonRcaComposer,
     JsonStrategyDesigner,
-    PhaseTransition,
+    _json_document,
+)
+from .contracts import (
+    ExitCriterion,
+    FalsificationPlan,
+    FalsificationPlanDraft,
+    FalsificationTrial,
+    FalsificationVerdict,
+    FalsifierTest,
+    HypothesisDevelopmentRequest,
+    HypothesisDraft,
     PlaceboControl,
     PlannedTest,
-    RcaComposer,
     RcaDiagnosis,
     StrategyContent,
     StrategyDesignDraft,
-    StrategyDesigner,
+)
+from .errors import (
+    FalsificationComposeError,
+    HypothesisDevelopmentIntakeError,
+    InvalidPhaseTransition,
     WorkflowError,
-    _json_document,
-    _metric,
+)
+from .gates import (
     check_evidence_bound,
     check_falsifiability,
     check_falsification_plan,
     check_research_model,
     check_strategy_design,
     check_verdict_advances,
+)
+from .phases import (
+    HYPOTHESIS_DEVELOPMENT_PHASES,
+    HYPOTHESIS_DEVELOPMENT_WORKFLOW,
+    HypothesisDevelopmentPhase,
+    PhaseTransition,
     transition_phase,
+)
+from .primitives import (
+    DEFAULT_MAX_COMPOSE_REPAIRS,
+    DEFAULT_MAX_HYPOTHESIS_CYCLES,
+    DEFAULT_MAX_RCA_CYCLES,
+    VERDICT_INCONCLUSIVE,
+    VERDICT_REFUTED,
+    VERDICT_SUPPORTED,
+    _metric,
+)
+from .prompts import (
+    FalsificationPlanner,
+    HypothesisComposer,
+    RcaComposer,
+    StrategyDesigner,
+)
+from .state import (
+    HypothesisDevelopmentOutcome,
+    HypothesisDevelopmentState,
+)
+from .workflow import (
+    HypothesisDevelopmentWorkflow,
 )
 
 __all__ = [

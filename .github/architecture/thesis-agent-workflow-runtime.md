@@ -12,8 +12,7 @@ defines the target architecture.
 
 ### Implemented so far
 
-Wave 1 (core contracts) and the durable sub-agent lifecycle are implemented in
-`thesis.agent.runtime`:
+The durable sub-agent runtime is implemented in `thesis.agent.runtime`:
 
 - `SubAgentRecord` and `AgentInvocation` are durable `WorkspaceRecord` types,
   persisted through the shared chat persistence port, so the in-memory,
@@ -28,12 +27,25 @@ Wave 1 (core contracts) and the durable sub-agent lifecycle are implemented in
 - `ControlToolService` exposes the Thesis control tools, including
   `spawn_sub_agent` recorded as a first-class tool invocation;
 - `SubAgentNotifier` delivers a child's result to its parent asynchronously by
-  appending a durable `tool` message and scheduling a new parent turn.
+  appending a durable `tool` message and scheduling a new parent turn;
+- `AgentSession` is the single durable model/tool turn loop that the chat path
+  and workflow path must converge on: it sends the merged catalog, persists each
+  model and tool invocation as a first-class record, threads tool results back
+  as `tool` messages, stops on a terminal control tool, and enforces a safety
+  iteration cap.
 
-Still to implement: the unified `AgentSession` turn loop, the harness
-`run_study` MCP tool, phase-completion wiring into the workflow gates,
-the nested `hypothesis_development` package, and removal of the sibling
-workflows.
+The `hypothesis_development` workflow is now a nested package
+(`thesis/workflows/hypothesis_development/`) with concern modules (`errors`,
+`primitives`, `phases`, `contracts`, `gates`, `prompts`, `composers`, `state`,
+`workflow`) behind a stable public facade. The retired sibling workflows
+(strategy development, autonomous discovery, and the standalone RCA loop) and
+their tests were removed.
+
+Still to implement: the harness `run_study` MCP tool and removal of
+`ResearchModelAdapter(Strategy)`; and wiring the workflow acceptance gates
+through `PhaseCompletionProtocol` and `request_phase_completion`, which changes
+the current "gate failure pauses immediately" behavior and therefore lands
+together with the matching phase-test updates.
 
 ## Overview
 
