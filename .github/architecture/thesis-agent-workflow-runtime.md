@@ -1,4 +1,4 @@
-# Thesis Durable Agent and Workflow Runtime v1.0.0
+﻿# Thesis Durable Agent and Workflow Runtime v1.0.0
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHOULD",
 "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to
@@ -31,7 +31,7 @@ Wave 1 (core contracts) and the durable sub-agent lifecycle are implemented in
   appending a durable `tool` message and scheduling a new parent turn.
 
 Still to implement: the unified `AgentSession` turn loop, the harness
-`fit_research_model` MCP tool, phase-completion wiring into the workflow gates,
+`run_study` MCP tool, phase-completion wiring into the workflow gates,
 the nested `hypothesis_development` package, and removal of the sibling
 workflows.
 
@@ -75,7 +75,7 @@ without inventing or dropping intermediate activity.
 
 This specification does not select model providers, define the visual design of
 the Thesis UI, set broker or activation policy, or prescribe quant-harness
-internals beyond the published `fit_research_model` MCP contract and trusted
+internals beyond the published `run_study` MCP contract and trusted
 attribution requirements.
 
 ## Definitions
@@ -95,6 +95,7 @@ attribution requirements.
 | Construction | Parsing, validating, and normalizing a completion contract into a typed domain object. |
 | Acceptance gate | Deterministic code that validates a constructed contract against durable workflow state and evidence. |
 | Repair turn | A durable system turn that explains why no completion request was accepted and asks the same sub-agent to try again. |
+| Study | A durable replay execution with no order execution, used to run indicators and research models. A study may fit and observe one research model, or run indicators alone. It is never represented as a backtest or a strategy. |
 | Tool context | Trusted attribution attached by the runtime to a tool invocation. Models cannot provide or override it. |
 
 ## Requirements
@@ -435,11 +436,38 @@ The workflow runner validates the action against the transition table, persists
 the result, and applies it. Deterministic phase failures MUST retain the partial
 result and failure detail.
 
-## Harness Research Model Tool
+## Harness Study Tool
 
-Quant-harness MUST publish `fit_research_model` as a real MCP tool. It replaces
-the synthetic `harness.research_model` label and Thesis-side direct invocation
-of `ResearchModelRunner` from workflow code.
+Quant-harness MUST publish `run_study` as a real MCP tool. A **study** is a
+durable replay execution with no order execution, used to run indicators and
+research models: it may fit and observe one research model, or run indicators
+alone. The tool replaces the synthetic `harness.research_model` label and
+Thesis-side direct invocation of `ResearchModelRunner` from workflow code.
+
+### A Study Is Not A Backtest
+
+A study is a statistical replay, not a trading strategy. When it runs a research
+model, that model's contract is `fit(context)` plus `observe(fit, context)`
+returning finite named statistics, and its context MUST expose no order,
+position, sizing, portfolio, or venue capability. A backtest's contract is entry
+and exit logic producing fills with portfolio accounting, costs, and risk.
+
+Running a study through the backtest boundary is prohibited because it conflates
+two different contracts and produces a "backtest run" record, manifest, artifact
+kind, and tool name for what is a statistical replay. That corrupts the
+experiment ledger, the evidence-grade taxonomy, and the operator-visible report.
+
+The deterministic point-in-time replay substrate (data ensure, point-in-time
+resolution, session calendars, corporate actions, artifact publication, and run
+persistence) MAY be reused. Reuse MUST be through a distinct study execution
+mode that binds a no-order context and a distinct study run kind. A research
+model MUST NOT be represented as a `Strategy`, and
+`ResearchModelAdapter(Strategy)` is debt that MUST be removed. Studies MUST have
+their own study record, manifest, and artifact kind so the ledger, evidence
+grade, and UI label them as studies.
+
+The phase acceptance gate MUST bind falsifiers to the study's recorded metric
+references, never to a backtest run.
 
 ### Input
 
@@ -484,9 +512,9 @@ metrics.
 
 ```json
 {
-  "run_id": "research-run-...",
+  "study_id": "study-...",
   "state": "succeeded",
-  "run_digest": "<sha256>",
+  "study_digest": "<sha256>",
   "model_ref": "models/<model-id>/<content-sha>",
   "model_artifact_ref": "artifacts/...",
   "indicator_refs": [],
@@ -524,7 +552,7 @@ follows.
 | --- | --- | --- | --- |
 | `requested` | deterministic | None | Validate intake; advance to creation or fail. |
 | `hypothesis_creation` | conversation | Propose the statistical model, falsifiers, controls, and Layer B monitors. Yield so the operator can confirm or revise. After clear confirmation, call `request_phase_completion`. | Construct `HypothesisCreationCompletion`; apply falsifiability, model-output, and plan gates; advance to trials or remain. |
-| `falsification_trials` | one-shot | Call `fit_research_model` and artifact tools directly, inspect results, author the interpretation, then request completion. | Bind every falsifier/control to a recorded run metric and artifact; advance to verdict or remain. |
+| `falsification_trials` | one-shot | Call `run_study` and artifact tools directly, inspect results, author the interpretation, then request completion. | Bind every falsifier/control to a recorded run metric and artifact; advance to verdict or remain. |
 | `verdict` | conversation | Present the recorded deterministic verdict and ask whether to continue or loop back. After the operator replies, submit interpreted intent. | Construct `VerdictCompletion`; verify it refers to the latest operator message and verdict; map `continue` or `loop_back` through the transition table. |
 | `strategy_design` | one-shot | Read the surviving model and fit, write the strategy, call validation tools, then request completion. | Validate bundle refs, sandbox result, and falsifier-bound Layer B exits; advance or remain. |
 | `strategy_backtesting` | one-shot | Call harness backtest and artifact tools directly, interpret the result, then request completion. | Resolve the recorded run; advance to optimization on success or loop to strategy RCA on failure. |
@@ -555,7 +583,7 @@ contract.
 The contract MUST include:
 
 - hypothesis and research-model refs;
-- `fit_research_model` run id and digest;
+- `run_study` study id and digest;
 - fitted-model ref;
 - one evidence binding per falsifier;
 - one binding per required control;
@@ -740,7 +768,7 @@ end-to-end suites.
 
 ### Wave 4: Harness Research Tool
 
-- Publish `fit_research_model` in quant-harness MCP.
+- Publish `run_study` in quant-harness MCP.
 - Add trusted attribution and idempotency to harness calls.
 - Wire the Thesis harness adapter and durable evidence resolution.
 

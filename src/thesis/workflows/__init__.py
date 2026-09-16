@@ -1,5 +1,10 @@
-"""Orchestrated Thesis workflows: strategy development, hypothesis
-development, discovery, and RCA revision loops."""
+"""Orchestrated Thesis workflows: the falsification-first hypothesis pipeline.
+
+The retired sibling workflows (strategy development, autonomous discovery, and
+the standalone RCA revision loop) were removed. The falsification-first
+hypothesis-development pipeline is the canonical research workflow, and it owns
+strategy design, backtesting, and RCA as internal phases.
+"""
 
 from thesis.workflows.backtests import (
     BacktestMode,
@@ -9,15 +14,6 @@ from thesis.workflows.backtests import (
     BacktestRunResult,
     HarnessBacktestRunner,
     HarnessError,
-)
-from thesis.workflows.discovery import (
-    DiscoveryBudget,
-    DiscoveryOutcome,
-    DiscoveryPhase,
-    DiscoveryReport,
-    DiscoveryState,
-    DiscoveryWorkflow,
-    SearchPolicy,
 )
 from thesis.workflows.evidence import (
     EVIDENCE_GRADE,
@@ -60,34 +56,17 @@ from thesis.workflows.local import (
     McpBacktestRunner,
     build_local_workflow_runtime,
 )
-from thesis.workflows.rca import (
-    FailureClass,
-    RcaIntakeError,
-    RcaLoopPhase,
-    RcaRevisionLoopState,
-    RcaRevisionLoopWorkflow,
+from thesis.workflows.research_models import (
+    BacktestResearchModelRunner,
+    ResearchModelRunner,
+    ResearchModelRunRequest,
+    ResearchModelRunResult,
 )
 from thesis.workflows.runtime import (
     WorkflowRuntime,
     WorkflowRuntimeError,
     build_model_router,
     build_workflow_runtime,
-)
-from thesis.workflows.strategy_development import (
-    STRATEGY_DEVELOPMENT_PHASES,
-    STRATEGY_DEVELOPMENT_WORKFLOW,
-    InvalidPhaseTransition,
-    JsonStrategyComposer,
-    PhaseTransition,
-    StrategyComposer,
-    StrategyDevelopmentOutcome,
-    StrategyDevelopmentPhase,
-    StrategyDevelopmentRequest,
-    StrategyDevelopmentState,
-    StrategyDevelopmentWorkflow,
-    StrategyGenerationError,
-    WorkflowError,
-    transition_phase,
 )
 
 __all__ = [
@@ -109,7 +88,6 @@ __all__ = [
     "HypothesisDevelopmentState",
     "HypothesisDevelopmentWorkflow",
     "HypothesisDraft",
-    "InvalidPhaseTransition",
     "JsonDevelopmentHypothesisComposer",
     "JsonFalsificationPlanner",
     "JsonRcaComposer",
@@ -119,49 +97,27 @@ __all__ = [
     "RcaDiagnosis",
     "StrategyContent",
     "StrategyDesignDraft",
-    "STRATEGY_DEVELOPMENT_PHASES",
-    "STRATEGY_DEVELOPMENT_WORKFLOW",
     "BacktestMode",
+    "BacktestResearchModelRunner",
     "BacktestRunError",
     "BacktestRunRequest",
     "BacktestRunResult",
     "BacktestRunner",
-    "DiscoveryBudget",
-    "DiscoveryOutcome",
-    "DiscoveryPhase",
-    "DiscoveryReport",
-    "DiscoveryState",
-    "DiscoveryWorkflow",
     "EvidenceReport",
     "EvidenceReportError",
-    "FailureClass",
     "HarnessBacktestRunner",
     "HarnessError",
-    "InvalidPhaseTransition",
-    "JsonStrategyComposer",
     "McpBacktestRunner",
-    "PhaseTransition",
-    "RcaIntakeError",
-    "RcaLoopPhase",
-    "RcaRevisionLoopState",
-    "RcaRevisionLoopWorkflow",
-    "SearchPolicy",
-    "StrategyComposer",
-    "StrategyDevelopmentOutcome",
-    "StrategyDevelopmentPhase",
-    "StrategyDevelopmentRequest",
-    "StrategyDevelopmentState",
-    "StrategyDevelopmentWorkflow",
-    "StrategyGenerationError",
+    "ResearchModelRunner",
+    "ResearchModelRunRequest",
+    "ResearchModelRunResult",
     "VERDICT_INCONCLUSIVE",
     "VERDICT_REFUTED",
     "VERDICT_SUPPORTED",
-    "WorkflowError",
     "WorkflowRuntime",
     "WorkflowRuntimeError",
     "build_evidence_report",
     "build_local_workflow_runtime",
     "build_model_router",
     "build_workflow_runtime",
-    "transition_phase",
 ]

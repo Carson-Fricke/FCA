@@ -5,9 +5,9 @@ builds the policy-driven :class:`~thesis.agent.router.ModelRouter` from role
 policies, model profiles, and a :class:`~thesis.agent.skills.SkillRegistry`,
 and builds a :class:`~thesis.workflows.backtests.HarnessBacktestRunner` over
 the published :class:`~thesis.integrations.harness.ThesisHarnessClient`
-boundary.  The resulting :class:`WorkflowRuntime` holder constructs and
-executes the hypothesis-development and strategy-development workflows against
-those composed ports.
+boundary. The resulting :class:`WorkflowRuntime` holder constructs and executes
+the falsification-first hypothesis-development workflow against those composed
+ports.
 
 Composition stays entirely behind injected boundaries: callers provide the
 provider registry, the policy/profile/skill registries, and either a harness
@@ -40,12 +40,13 @@ from thesis.agent.router import (
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.agent.tool_dispatch import HarnessToolCall, HarnessToolDispatcher
-from thesis.artifacts.importer import ArtifactImporter
 from thesis.chat.service import ChatService
 from thesis.experiments.ledger import AttemptLedger
 from thesis.integrations.harness import HarnessClientPort, ThesisHarnessClient
 from thesis.persistence.journal import CommandJournal
 from thesis.research.hypothesis import HypothesisStore
+from thesis.research.indicators import IndicatorStore
+from thesis.research.models import ResearchModelStore
 from thesis.strategies.validation import StrategySandboxValidator
 from thesis.workflows.backtests import (
     BacktestMode,
@@ -64,11 +65,9 @@ from thesis.workflows.hypothesis_development import (
 from thesis.workflows.hypothesis_development import (
     HypothesisComposer as DevelopmentHypothesisComposer,
 )
-from thesis.workflows.strategy_development import (
-    StrategyComposer,
-    StrategyDevelopmentOutcome,
-    StrategyDevelopmentRequest,
-    StrategyDevelopmentWorkflow,
+from thesis.workflows.research_models import (
+    BacktestResearchModelRunner,
+    ResearchModelRunner,
 )
 
 
@@ -157,6 +156,9 @@ def build_workflow_runtime(
     harness_tools: HarnessToolProvider | None = None,
     strategy_validator: StrategySandboxValidator | None = None,
     hypothesis_store: HypothesisStore | None = None,
+    research_model_store: ResearchModelStore | None = None,
+    indicator_store: IndicatorStore | None = None,
+    research_runner: ResearchModelRunner | None = None,
     bundle: PolicyBundle | None = None,
     bundle_hashes: Mapping[str, str] | None = None,
     backtest_mode: BacktestMode = "local",
@@ -197,9 +199,19 @@ def build_workflow_runtime(
         if runner is not None
         else _harness_runner(harness, mode=backtest_mode, metadata=metadata)
     )
+    resolved_research_runner = (
+        research_runner
+        if research_runner is not None
+        else BacktestResearchModelRunner(
+            resolved_runner,
+            models=research_model_store,
+            indicators=indicator_store,
+        )
+    )
     return WorkflowRuntime(
         router=router,
         runner=resolved_runner,
+        research_runner=resolved_research_runner,
         harness_tools=harness_tools,
         validator=strategy_validator,
         hypothesis_store=hypothesis_store,
@@ -224,6 +236,7 @@ class WorkflowRuntime:
         *,
         router: ModelRouter,
         runner: BacktestRunner,
+        research_runner: ResearchModelRunner | None = None,
         harness_tools: HarnessToolProvider | None = None,
         validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
@@ -234,12 +247,22 @@ class WorkflowRuntime:
             raise WorkflowRuntimeError("router must be a ModelRouter")
         if not callable(getattr(runner, "run", None)):
             raise WorkflowRuntimeError("runner must implement the BacktestRunner port")
+        resolved_research_runner = (
+            BacktestResearchModelRunner(runner)
+            if research_runner is None
+            else research_runner
+        )
+        if not callable(getattr(resolved_research_runner, "run", None)):
+            raise WorkflowRuntimeError(
+                "research_runner must implement the ResearchModelRunner port"
+            )
         if harness_tools is not None and not isinstance(
             harness_tools, HarnessToolProvider
         ):
             raise WorkflowRuntimeError("harness_tools must be a HarnessToolProvider")
         self._router = router
         self._runner = runner
+        self._research_runner = resolved_research_runner
         self._harness_tools = harness_tools
         self._validator = validator
         self._hypothesis_store = hypothesis_store
@@ -250,6 +273,10 @@ class WorkflowRuntime:
         )
         self._clock = clock
         self._id_factory = id_factory
+        # Keep an in-process paused workflow alive so a conversational phase can
+        # resume with the complete state produced before its operator review.
+        # A process restart does not claim to reconstruct this state.
+        self._hypothesis_workflows: dict[str, HypothesisDevelopmentWorkflow] = {}
 
     @property
     def router(self) -> ModelRouter:
@@ -260,6 +287,11 @@ class WorkflowRuntime:
     def runner(self) -> BacktestRunner:
         """Return the composed backtest runner port."""
         return self._runner
+
+    @property
+    def research_runner(self) -> ResearchModelRunner:
+        """Return the workspace research-model execution port."""
+        return self._research_runner
 
     @property
     def harness_tools(self) -> HarnessToolProvider | None:
@@ -283,56 +315,6 @@ class WorkflowRuntime:
                 "provide a harness tool provider to dispatch tool calls"
             )
         return self._tool_dispatcher.dispatch(role, call, arguments)
-
-    def build_strategy_development(
-        self,
-        *,
-        chat: ChatService,
-        validator: StrategySandboxValidator,
-        composer: StrategyComposer | None = None,
-        importer: ArtifactImporter | None = None,
-        journal: CommandJournal | None = None,
-        role: Role = "coding",
-        experiment_id: str | None = None,
-    ) -> StrategyDevelopmentWorkflow:
-        """Compose the strategy-development workflow over the runtime ports."""
-        return StrategyDevelopmentWorkflow(
-            chat=chat,
-            router=self._router,
-            validator=validator,
-            runner=self._runner,
-            composer=composer,
-            importer=importer,
-            journal=journal,
-            clock=self._clock,
-            id_factory=self._id_factory,
-            role=role,
-            experiment_id=experiment_id,
-        )
-
-    def execute_strategy_development(
-        self,
-        request: StrategyDevelopmentRequest,
-        *,
-        chat: ChatService,
-        validator: StrategySandboxValidator,
-        composer: StrategyComposer | None = None,
-        importer: ArtifactImporter | None = None,
-        journal: CommandJournal | None = None,
-        role: Role = "coding",
-        experiment_id: str | None = None,
-    ) -> StrategyDevelopmentOutcome:
-        """Run one launched strategy-development request to completion."""
-        workflow = self.build_strategy_development(
-            chat=chat,
-            validator=validator,
-            composer=composer,
-            importer=importer,
-            journal=journal,
-            role=role,
-            experiment_id=experiment_id,
-        )
-        return workflow.run(request)
 
     def build_hypothesis_development(
         self,
@@ -367,6 +349,7 @@ class WorkflowRuntime:
             chat=chat,
             router=self._router,
             runner=self._runner,
+            research_runner=self._research_runner,
             validator=resolved_validator,
             hypothesis_store=resolved_store,
             composer=composer,
@@ -423,7 +406,35 @@ class WorkflowRuntime:
             experiment_id=experiment_id,
             max_rca_cycles=max_rca_cycles,
         )
-        return workflow.run(request)
+        self._hypothesis_workflows[request.execution_id] = workflow
+        outcome = workflow.run(request)
+        if outcome.phase.value in {"completed", "failed"}:
+            self._hypothesis_workflows.pop(request.execution_id, None)
+        return outcome
+
+    def resume_hypothesis_development(
+        self,
+        request: HypothesisDevelopmentRequest,
+        *,
+        chat: ChatService,
+    ) -> HypothesisDevelopmentOutcome:
+        """Run one more hypothesis-creation turn for a resumed execution.
+
+        Called when an operator message arrives for the paused
+        hypothesis-creation node.  The runtime rebuilds the workflow over the
+        same composed ports and re-enters the conversation; the durable
+        transcript is the state, so no checkpoint is required.
+        """
+        workflow = self._hypothesis_workflows.get(request.execution_id)
+        if workflow is None:
+            raise WorkflowRuntimeError(
+                "paused hypothesis development state is unavailable; "
+                "restart resume is not supported yet"
+            )
+        outcome = workflow.resume(request)
+        if outcome.phase.value in {"completed", "failed"}:
+            self._hypothesis_workflows.pop(request.execution_id, None)
+        return outcome
 
 
 __all__ = [

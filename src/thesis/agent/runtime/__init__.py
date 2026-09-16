@@ -32,6 +32,17 @@ from thesis.agent.runtime.lifecycle import (
     SubAgentLifecycleError,
 )
 from thesis.agent.runtime.notify import SubAgentNotifier, TurnScheduler
+from thesis.agent.runtime.session import (
+    DEFAULT_MAX_TOOL_ITERATIONS,
+    AgentSession,
+    CompletionProvider,
+    RegisteredTool,
+    SessionResult,
+    SessionToolRegistry,
+    SessionTurn,
+    ToolExecution,
+    ToolHandler,
+)
 from thesis.agent.runtime.specs import (
     DEFAULT_CONSTRUCTION_ATTEMPTS,
     DEFAULT_MAX_CHILDREN,
@@ -49,8 +60,11 @@ from thesis.agent.runtime.store import (
 __all__ = [
     "CONTROL_TOOL_NAMES",
     "CONTROL_TOOL_SPECS",
+    "DEFAULT_MAX_TOOL_ITERATIONS",
+    "AgentSession",
     "AwaitResult",
     "CompletionOutcome",
+    "CompletionProvider",
     "CompletionStatus",
     "ControlToolService",
     "ControlToolSpec",
@@ -62,6 +76,10 @@ __all__ = [
     "OperatorInputRequest",
     "PersistenceSubAgentStore",
     "PhaseCompletionProtocol",
+    "RegisteredTool",
+    "SessionResult",
+    "SessionToolRegistry",
+    "SessionTurn",
     "SpawnResult",
     "SubAgentBudget",
     "SubAgentLifecycle",
@@ -74,6 +92,8 @@ __all__ = [
     "TOOL_REQUEST_PHASE_COMPLETION",
     "TOOL_REQUEST_SUB_AGENT_COMPLETION",
     "TOOL_SPAWN_SUB_AGENT",
+    "ToolExecution",
+    "ToolHandler",
     "TurnScheduler",
     "set_result_ref",
 ]

@@ -4,7 +4,6 @@ import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from itertools import count
-from pathlib import Path
 from typing import cast
 
 import pytest
@@ -19,7 +18,6 @@ from thesis.agent.router import (
     RolePolicy,
 )
 from thesis.agent.skills import SkillRegistry, ThesisSkill
-from thesis.chat.service import ChatService
 from thesis.integrations import (
     BacktestRequest,
     CapabilityReport,
@@ -28,17 +26,11 @@ from thesis.integrations import (
     ThesisHarnessClient,
 )
 from thesis.strategies import StrategyBundle
-from thesis.strategies.validation import (
-    StrategyValidationRequest,
-    StrategyValidationResult,
-)
 from thesis.workflows import (
     BacktestRunner,
     BacktestRunRequest,
     BacktestRunResult,
     HarnessBacktestRunner,
-    StrategyDevelopmentPhase,
-    StrategyDevelopmentWorkflow,
     WorkflowRuntime,
     WorkflowRuntimeError,
     build_model_router,
@@ -108,22 +100,6 @@ def _hypothesis_envelope() -> dict[str, object]:
     }
 
 
-def _strategy_envelope() -> dict[str, object]:
-    return {
-        "strategyId": "momentum",
-        "version": "1.2.0",
-        "files": {
-            "strategy.py": (
-                "from harness.strategy import Strategy\n\n"
-                "class Momentum(Strategy):\n    pass\n"
-            )
-        },
-        "tests": {"test_strategy.py": "def test_strategy():\n    assert True\n"},
-        "harnessConfiguration": {"seed": 7, "symbols": ["SPY"]},
-        "limitations": ["single-symbol momentum only"],
-    }
-
-
 class FakeProvider:
     """Deterministic fake model provider behind the policy boundary."""
 
@@ -169,17 +145,6 @@ class FakeRunner:
             metrics=self._metrics,
             result_artifacts=self._result_artifacts,
         )
-
-
-class FakeValidator:
-    """Deterministic fake sandbox validator behind the validator port."""
-
-    def __init__(self) -> None:
-        self.requests: list[StrategyValidationRequest] = []
-
-    def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
-        self.requests.append(request)
-        return StrategyValidationResult(True, (), validation_id="validation-1")
 
 
 class FakeHarnessPort:
@@ -309,6 +274,7 @@ def test_build_workflow_runtime_composes_router_and_harness_runner() -> None:
     result = runtime.runner.run(
         BacktestRunRequest(
             run_id="run-1",
+            workspace_id="workspace-demo",
             bundle=_bundle(),
             workflow_execution_id="execution-1",
             experiment_id="experiment-1",
@@ -371,45 +337,6 @@ def test_build_model_router_wires_providers_and_skills() -> None:
     decision = router.resolve("research")
     assert decision.role == "research"
     assert decision.allowed_tools == ("run_backtest",)
-
-
-def test_strategy_development_executes_end_to_end(tmp_path: Path) -> None:
-    provider = FakeProvider(_strategy_envelope())
-    runner = FakeRunner(metrics={"sharpe": 1.25}, manifest=None)
-    clock = _clock()
-    id_factory = _id_factory()
-    runtime = _runtime(
-        provider=provider,
-        clock=clock,
-        id_factory=id_factory,
-        runner=runner,
-    )
-    chat = ChatService(clock=clock, id_factory=id_factory)
-    validator = FakeValidator()
-    workflow = runtime.build_strategy_development(chat=chat, validator=validator)
-    assert isinstance(workflow, StrategyDevelopmentWorkflow)
-    chat_id = chat.create_chat(
-        WORKSPACE, title="strategy chat", owner_actor_id=OWNER
-    ).chat_id
-    request = workflow.launch(
-        WORKSPACE,
-        chat_id,
-        actor_id=OWNER,
-        objective="Build a momentum strategy",
-    )
-
-    outcome = runtime.execute_strategy_development(
-        request, chat=chat, validator=validator
-    )
-
-    assert outcome.phase is StrategyDevelopmentPhase.COMPLETED
-    assert outcome.bundle is not None
-    assert outcome.backtest is not None
-    assert outcome.backtest.succeeded is True
-    assert outcome.import_receipt is None
-    assert len(provider.prompts) == 1
-    assert len(runner.requests) == 1
-    assert len(validator.requests) == 1
 
 
 def test_workflow_runtime_rejects_runner_without_run_port() -> None:
