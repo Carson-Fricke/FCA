@@ -107,6 +107,40 @@ class ToolJobState(StrEnum):
     CANCELLED = "cancelled"
 
 
+class SubAgentKind(StrEnum):
+    """The two agent-backed phase kinds; deterministic work is never a sub-agent."""
+
+    CONVERSATION = "conversation"
+    ONE_SHOT = "one_shot"
+
+
+class SubAgentStatus(StrEnum):
+    """Lifecycle status projected for one durable sub-agent."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    NEEDS_INPUT = "needs_input"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class AgentInvocationKind(StrEnum):
+    """First-class invocation discriminator for model and tool calls."""
+
+    MODEL = "model"
+    TOOL = "tool"
+
+
+class AgentInvocationState(StrEnum):
+    """Durable lifecycle of one model or tool invocation."""
+
+    REQUESTED = "requested"
+    STARTED = "started"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 def _validate_id(value: str, name: str) -> None:
     if (
         not isinstance(value, str)
@@ -586,6 +620,160 @@ class ToolJob(WorkspaceRecord):
         WorkspaceRecord.__post_init__(self)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SubAgentRecord(WorkspaceRecord):
+    """An independently durable agent attached directly to one chat.
+
+    A sub-agent owns its own conversation, specification snapshot, tool policy,
+    invocation history, and result.  ``workflow_execution_id`` and
+    ``phase_attempt_id`` are optional attribution links; they never make the
+    workflow the owner of the sub-agent.
+    """
+
+    sub_agent_id: str
+    chat_id: str
+    role: str
+    parent_sub_agent_id: str | None = None
+    spawned_by_invocation_id: str | None = None
+    workflow_execution_id: str | None = None
+    phase_attempt_id: str | None = None
+    spec_version: str = "1.0.0"
+    kind: SubAgentKind = SubAgentKind.CONVERSATION
+    allowed_tools: tuple[str, ...] = ()
+    status: SubAgentStatus = SubAgentStatus.PENDING
+    accepts_input: bool = False
+    input_contract_ref: str | None = None
+    completion_contract_ref: str | None = None
+    result_ref: str | None = None
+    result: Mapping[str, object] | None = None
+    delegated_budget: int = 0
+    updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _validate_id(self.sub_agent_id, "sub_agent_id")
+        _validate_id(self.chat_id, "chat_id")
+        _validate_text(self.role, "role", max_length=256)
+        for name in (
+            "parent_sub_agent_id",
+            "spawned_by_invocation_id",
+            "workflow_execution_id",
+            "phase_attempt_id",
+            "input_contract_ref",
+            "completion_contract_ref",
+            "result_ref",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _validate_id(value, name)
+        _validate_text(self.spec_version, "spec_version", max_length=64)
+        if not isinstance(self.kind, SubAgentKind):
+            try:
+                object.__setattr__(self, "kind", SubAgentKind(self.kind))
+            except ValueError as error:
+                raise ChatContractError(
+                    "kind must be 'conversation' or 'one_shot'"
+                ) from error
+        if not isinstance(self.status, SubAgentStatus):
+            try:
+                object.__setattr__(self, "status", SubAgentStatus(self.status))
+            except ValueError as error:
+                raise ChatContractError("status must be a sub-agent status") from error
+        if (
+            self.kind is SubAgentKind.ONE_SHOT
+            and self.accepts_input
+            and (self.status is not SubAgentStatus.NEEDS_INPUT)
+        ):
+            raise ChatContractError(
+                "a running one-shot sub-agent must not accept unsolicited input"
+            )
+        object.__setattr__(
+            self, "allowed_tools", _normalise_ids(self.allowed_tools, "allowed_tool")
+        )
+        if self.delegated_budget < 0:
+            raise ChatContractError("delegated_budget must not be negative")
+        if self.result is not None:
+            if not isinstance(self.result, Mapping):
+                raise ChatContractError("result must be a mapping")
+            object.__setattr__(self, "result", MappingProxyType(dict(self.result)))
+        if self.updated_at is not None:
+            _validate_timestamp(self.updated_at, "updated_at")
+        WorkspaceRecord.__post_init__(self)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AgentInvocation(WorkspaceRecord):
+    """One first-class durable model or tool invocation.
+
+    Invocations are never inferred from UI events: each completion and each tool
+    call is persisted with its trusted attribution, hashes, and terminal state so
+    recovery can deduplicate side effects by ``idempotency_key``.
+    """
+
+    invocation_id: str
+    chat_id: str
+    conversation_id: str
+    kind: AgentInvocationKind
+    state: AgentInvocationState = AgentInvocationState.REQUESTED
+    sub_agent_id: str | None = None
+    parent_invocation_id: str | None = None
+    workflow_execution_id: str | None = None
+    phase_attempt_id: str | None = None
+    role: str | None = None
+    model_profile: str | None = None
+    tool_name: str | None = None
+    policy_hash: str | None = None
+    input_hash: str | None = None
+    output_hash: str | None = None
+    idempotency_key: str | None = None
+    failure: Mapping[str, object] | None = None
+    updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "invocation_id",
+            "chat_id",
+            "conversation_id",
+            "sub_agent_id",
+            "parent_invocation_id",
+            "workflow_execution_id",
+            "phase_attempt_id",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _validate_id(value, name)
+        for enum_type in (AgentInvocationKind, AgentInvocationState):
+            value = self.kind if enum_type is AgentInvocationKind else self.state
+            if not isinstance(value, enum_type):
+                try:
+                    coerced = enum_type(value)
+                except ValueError as error:
+                    raise ChatContractError(
+                        f"{enum_type.__name__} value is invalid"
+                    ) from error
+                object.__setattr__(
+                    self,
+                    "kind" if enum_type is AgentInvocationKind else "state",
+                    coerced,
+                )
+        for name in ("role", "model_profile", "tool_name", "idempotency_key"):
+            value = getattr(self, name)
+            if value is not None:
+                _validate_text(value, name, max_length=256)
+        for name in ("policy_hash", "input_hash", "output_hash"):
+            value = getattr(self, name)
+            if value is not None and _HASH_PATTERN.fullmatch(value) is None:
+                raise ChatContractError(f"{name} must be a lowercase SHA-256 hash")
+        if self.kind is AgentInvocationKind.TOOL and not self.tool_name:
+            raise ChatContractError("a tool invocation requires tool_name")
+        if self.failure is not None:
+            if not isinstance(self.failure, Mapping):
+                raise ChatContractError("failure must be a mapping")
+            object.__setattr__(self, "failure", MappingProxyType(dict(self.failure)))
+        if self.updated_at is not None:
+            _validate_timestamp(self.updated_at, "updated_at")
+        WorkspaceRecord.__post_init__(self)
+
+
 def _as_dict(record: object) -> dict[str, object]:
     """Serialize dataclasses without exposing a mutable internal mapping."""
     if not is_dataclass(record):
@@ -630,6 +818,9 @@ def replace_record[T: WorkspaceRecord](record: T, **changes: Any) -> T:
 
 
 __all__ = [
+    "AgentInvocation",
+    "AgentInvocationKind",
+    "AgentInvocationState",
     "Attachment",
     "AttachmentState",
     "ChatContractError",
@@ -644,6 +835,9 @@ __all__ = [
     "MessageState",
     "RecordLinks",
     "RecordNotFound",
+    "SubAgentKind",
+    "SubAgentRecord",
+    "SubAgentStatus",
     "ToolJob",
     "ToolJobState",
     "TranscriptItemKind",

@@ -1,6 +1,10 @@
 """Public workspace chat, investigation, and workflow contracts."""
 
+from thesis.chat.azure import AzureBlobChatPersistence
 from thesis.chat.contracts import (
+    AgentInvocation,
+    AgentInvocationKind,
+    AgentInvocationState,
     Attachment,
     AttachmentState,
     ChatContractError,
@@ -15,6 +19,9 @@ from thesis.chat.contracts import (
     MessageState,
     RecordLinks,
     RecordNotFound,
+    SubAgentKind,
+    SubAgentRecord,
+    SubAgentStatus,
     ToolJob,
     ToolJobState,
     TranscriptItemKind,
@@ -24,6 +31,7 @@ from thesis.chat.contracts import (
     WorkspaceRecord,
     replace_record,
 )
+from thesis.chat.persistence import FileChatPersistence
 from thesis.chat.responder import ChatReplyService, ReplyChunk, ReplyProvider
 from thesis.chat.service import ChatPersistence, ChatService, InMemoryChatPersistence
 from thesis.chat.streaming import (
@@ -34,8 +42,12 @@ from thesis.chat.streaming import (
 )
 
 __all__ = [
+    "AgentInvocation",
+    "AgentInvocationKind",
+    "AgentInvocationState",
     "Attachment",
     "AttachmentState",
+    "AzureBlobChatPersistence",
     "CHAT_MESSAGE",
     "ChatContractError",
     "ChatMessage",
@@ -46,6 +58,7 @@ __all__ = [
     "ChatStreamFrame",
     "ChatThread",
     "CrossWorkspaceLinkError",
+    "FileChatPersistence",
     "InMemoryChatPersistence",
     "InMemoryChatStreamBroker",
     "InvalidLifecycleTransition",
@@ -58,6 +71,9 @@ __all__ = [
     "RecordNotFound",
     "ReplyChunk",
     "ReplyProvider",
+    "SubAgentKind",
+    "SubAgentRecord",
+    "SubAgentStatus",
     "ToolJob",
     "ToolJobState",
     "TranscriptItemKind",

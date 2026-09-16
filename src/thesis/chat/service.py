@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Protocol, TypeVar, cast
 
 from thesis.chat.contracts import (
+    AgentInvocation,
     Attachment,
     AttachmentState,
     ChatMessage,
@@ -22,6 +23,7 @@ from thesis.chat.contracts import (
     MessageState,
     RecordLinks,
     RecordNotFound,
+    SubAgentRecord,
     ToolJob,
     ToolJobState,
     TranscriptItemKind,
@@ -40,7 +42,14 @@ from thesis.execution.events import (
 )
 
 Record = (
-    ChatThread | ChatMessage | Attachment | Investigation | WorkflowExecution | ToolJob
+    ChatThread
+    | ChatMessage
+    | Attachment
+    | Investigation
+    | WorkflowExecution
+    | ToolJob
+    | SubAgentRecord
+    | AgentInvocation
 )
 RecordType = type[Record]
 RecordT = TypeVar("RecordT", bound=Record)
@@ -90,6 +99,8 @@ class InMemoryChatPersistence:
         Investigation,
         WorkflowExecution,
         ToolJob,
+        SubAgentRecord,
+        AgentInvocation,
     )
 
     def __init__(self, records: Iterable[Record] = ()) -> None:
@@ -139,6 +150,8 @@ def _record_id(record: Record) -> str:
         Investigation: "investigation_id",
         WorkflowExecution: "execution_id",
         ToolJob: "tool_job_id",
+        SubAgentRecord: "sub_agent_id",
+        AgentInvocation: "invocation_id",
     }.get(type(record))
     if id_name is not None:
         value = getattr(record, id_name)
@@ -258,6 +271,21 @@ class ChatService:
             if execution.chat_id == chat_id
         ]
         execution_ids = {execution.execution_id for execution in executions}
+        # Cancel before deleting the records. Background workflow workers use
+        # the terminal execution state as their cooperative cancellation fence;
+        # deleting first would remove the signal and let in-flight work run on.
+        for execution in executions:
+            if execution.state not in {
+                WorkflowExecutionState.COMPLETED,
+                WorkflowExecutionState.FAILED,
+                WorkflowExecutionState.STOPPED,
+                WorkflowExecutionState.CANCELLED,
+            }:
+                self.cancel_workflow(
+                    workspace_id,
+                    execution.execution_id,
+                    actor_id="chat-deletion",
+                )
         for job in self._list(ToolJob, workspace_id):
             if job.execution_id in execution_ids:
                 self._delete(ToolJob, workspace_id, job.tool_job_id)
@@ -744,6 +772,10 @@ class ChatService:
             strategy_ids=strategy_ids,
             experiment_ids=experiment_ids,
             phase=workflow.phases[0] if workflow.phases else None,
+            # Chat launches have an immediately dedicated worker. There is no
+            # shared workflow queue, so accepted executions are active rather
+            # than advertising a false queued state while the task starts.
+            state=WorkflowExecutionState.RUNNING,
             updated_at=now,
         )
         self._save(execution)
@@ -793,6 +825,14 @@ class ChatService:
                 "workflow": workflow.as_dict(),
             },
         )
+        self._append_event(
+            execution,
+            ExecutionEventType.WORKFLOW_STARTED,
+            correlation_id=execution.execution_id,
+            actor_id=actor_id,
+            actor_scope=ActorScope.WORKFLOW,
+            payload={"state": execution.state.value},
+        )
         return execution
 
     def get_execution(self, workspace_id: str, execution_id: str) -> WorkflowExecution:
@@ -800,6 +840,31 @@ class ChatService:
 
     def list_executions(self, workspace_id: str) -> tuple[WorkflowExecution, ...]:
         return self._list(WorkflowExecution, workspace_id)
+
+    def stop_active_executions(
+        self, workspace_id: str, *, actor_id: str = "thesis-startup"
+    ) -> tuple[WorkflowExecution, ...]:
+        """Stop queued/running executions stranded by a server restart.
+
+        Execution state is durable, but the worker that owned an in-process
+        execution is not. Marking those records stopped at startup prevents the
+        UI from waiting on work that no longer has a worker and prevents a
+        restarted service from treating stale queued work as live.
+        """
+        active = tuple(
+            execution
+            for execution in self.list_executions(workspace_id)
+            if execution.state
+            in {WorkflowExecutionState.QUEUED, WorkflowExecutionState.RUNNING}
+        )
+        return tuple(
+            self.stop_workflow(
+                workspace_id,
+                execution.execution_id,
+                actor_id=actor_id,
+            )
+            for execution in active
+        )
 
     def post_steering_message(
         self,
@@ -971,6 +1036,17 @@ class ChatService:
             payload={"state": updated.state.value},
         )
         return updated
+
+    def set_execution_phase(
+        self, workspace_id: str, execution_id: str, phase: str
+    ) -> WorkflowExecution:
+        """Persist the workflow's current phase on the durable execution."""
+        execution = self.get_execution(workspace_id, execution_id)
+        if execution.phase == phase:
+            return execution
+        return self._save(
+            replace_record(execution, phase=phase, updated_at=self._now())
+        )
 
     def pause_workflow(
         self, workspace_id: str, execution_id: str, *, actor_id: str
