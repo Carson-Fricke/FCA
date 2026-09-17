@@ -83,21 +83,27 @@ def requested_coverage(
     catalog: CatalogRepository,
     spec: EnsureSpec,
     *,
-    max_range_days: int,
+    max_range_days: int | None = None,
     as_of: datetime,
     operation: str,
 ) -> CoverageReport:
-    """Validate and calculate one bounded coverage request."""
-    requested_days = (spec.end_date - spec.start_date).days + 1
-    if requested_days > max_range_days:
-        raise CoverageRequestError(
-            "range_too_large",
-            f"requested date range exceeds the {operation} limit",
-            details={
-                "max_range_days": max_range_days,
-                "requested_range_days": requested_days,
-            },
-        )
+    """Validate and calculate one coverage request.
+
+    Callers that keep bounded protection (catalog and query) pass
+    ``max_range_days``; ensure requests omit it so one request can cover any
+    window, including full history.
+    """
+    if max_range_days is not None:
+        requested_days = (spec.end_date - spec.start_date).days + 1
+        if requested_days > max_range_days:
+            raise CoverageRequestError(
+                "range_too_large",
+                f"requested date range exceeds the {operation} limit",
+                details={
+                    "max_range_days": max_range_days,
+                    "requested_range_days": requested_days,
+                },
+            )
     if spec.asset_class not in {AssetClass.EQUITY, AssetClass.CRYPTO}:
         subject = "coverage" if operation == "catalog" else operation
         raise CoverageRequestError(
@@ -123,7 +129,6 @@ async def ensure_coverage(
     launcher: EnsureJobLauncher,
     spec: EnsureSpec,
     *,
-    max_range_days: int,
     as_of: datetime,
     wait_deadline_seconds: float,
 ) -> CoverageReport | JobRecord:
@@ -135,11 +140,12 @@ async def ensure_coverage(
     that ended in error or partial states. The record is marked running while
     the launcher works and reaches a terminal state (``complete`` or ``failed``)
     as soon as it returns, even when the HTTP caller's wait deadline expires.
+    Ensure requests are unbounded: the spec may span any window, including
+    full history.
     """
     report = requested_coverage(
         catalog,
         spec,
-        max_range_days=max_range_days,
         as_of=as_of,
         operation="ensure",
     )
@@ -195,7 +201,6 @@ async def ensure_coverage(
         refreshed = requested_coverage(
             catalog,
             spec,
-            max_range_days=max_range_days,
             as_of=as_of,
             operation="ensure",
         )
