@@ -35,6 +35,12 @@ class SubAgentStore(Protocol):
         self, workspace_id: str, invocation_id: str
     ) -> AgentInvocation | None: ...
 
+    def find_invocation_by_idempotency_key(
+        self, workspace_id: str, idempotency_key: str
+    ) -> AgentInvocation | None:
+        """Return the invocation recorded for one idempotency key, if any."""
+        ...
+
 
 class InMemorySubAgentStore:
     """Deterministic store for tests and process-local composition."""
@@ -116,6 +122,15 @@ class PersistenceSubAgentStore:
         self, workspace_id: str, invocation_id: str
     ) -> AgentInvocation | None:
         return self._persistence.get(AgentInvocation, workspace_id, invocation_id)
+
+    def find_invocation_by_idempotency_key(
+        self, workspace_id: str, idempotency_key: str
+    ) -> AgentInvocation | None:
+        """Return the recorded invocation for a key so recovery stays idempotent."""
+        for invocation in self._persistence.list(AgentInvocation, workspace_id):
+            if invocation.idempotency_key == idempotency_key:
+                return invocation
+        return None
 
 
 __all__ = [
