@@ -76,6 +76,7 @@ from .composers import (
     JsonFalsificationPlanner,
     JsonRcaComposer,
     JsonStrategyDesigner,
+    _json_document,
 )
 from .contracts import (
     FalsificationPlan,
@@ -151,7 +152,6 @@ from .primitives import (
     _new_id,
     _text,
     _utc_now,
-    _verdict_review_action,
 )
 from .prompts import (
     FalsificationPlanner,
@@ -165,6 +165,11 @@ from .prompts import (
     _hypothesis_context_lines,
 )
 from .state import HypothesisDevelopmentOutcome, HypothesisDevelopmentState
+
+#: Structured intent the verdict gate asks the model to return.
+_VERDICT_INTENT_SCHEMA = (
+    '{"action": "check_off"|"circle_back"|"ambiguous", "message": string}'
+)
 
 
 class HypothesisDevelopmentWorkflow:
@@ -497,7 +502,7 @@ class HypothesisDevelopmentWorkflow:
             )
             active = self._activate_orchestrator(request, _VERDICT)
             body = self._latest_sub_agent_user_message(request, active.sub_agent_id)
-            action = _verdict_review_action(body)
+            action = self._interpret_verdict_intent(request, state, active, body)
             if action is None:
                 return self._request_operator_input(
                     request,
@@ -549,6 +554,52 @@ class HypothesisDevelopmentWorkflow:
             failed = self._fail(request, state, error)
             self._emit_phase(request, failed.phase, {"state": failed.phase.value})
             return self._outcome(failed)
+
+    def _interpret_verdict_intent(
+        self,
+        request: HypothesisDevelopmentRequest,
+        state: HypothesisDevelopmentState,
+        active: _ActiveSubAgent,
+        body: str,
+    ) -> str | None:
+        """Interpret the operator's verdict reply with the model, not keywords.
+
+        The phase agent reads the operator's prose and returns a structured
+        intent. Ambiguity or an unavailable model returns ``None`` so the
+        workflow asks the operator again instead of guessing.
+        """
+        verdict = state.verdict
+        if verdict is None:
+            return None
+        prompt_for = self._prompt_builder(
+            workspace_scope=request.workspace_id,
+            role=active.role,
+            context_id=f"{request.execution_id}-verdict-intent",
+        )
+        task = "\n".join(
+            [
+                "You are the workflow's verdict gate.",
+                f"Recorded falsification verdict: {verdict.outcome}. {verdict.reason}",
+                f"Operator's latest message: {body}",
+                "",
+                "Decide the operator's intent: 'check_off' when the reply clearly "
+                "accepts or applies the recorded verdict, 'circle_back' when it "
+                "clearly asks to revise the hypothesis, or 'ambiguous' when it is "
+                "unclear. Reply with exactly one JSON object and nothing else:",
+                _VERDICT_INTENT_SCHEMA,
+            ]
+        )
+        try:
+            invocation = self._router.invoke(
+                self._research_role,
+                prompt_for(task),
+                response_format={"type": "json_object"},
+            )
+            document = _json_document(invocation, "verdict intent")
+        except Exception:  # noqa: BLE001 - an unavailable model is not a decision
+            return None
+        action = document.get("action")
+        return action if action in {"check_off", "circle_back"} else None
 
     def _run_after_creation(
         self,

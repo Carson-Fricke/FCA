@@ -481,6 +481,26 @@ grade, and UI label them as studies.
 The phase acceptance gate MUST bind falsifiers to the study's recorded metric
 references, never to a backtest run.
 
+### Implementation Plan
+
+The study tool spans the harness Rust MCP crate and the harness execution
+entrypoint, so it lands as one harness change:
+
+1. Add `TOOL_RUN_STUDY` (`run_study`) to the MCP tool catalog with a study input
+   schema (model ref, indicator refs, experiment contract ref, data window,
+   requested observables) and result schema.
+2. Add a study execution mode to the harness engine that runs the point-in-time
+   replay without binding order, position, sizing, portfolio, or venue
+   capability. Reuse the replay substrate; do not reuse the strategy contract.
+3. Add a `study` subcommand/entrypoint alongside `backtest-job`, and a durable
+   study run record, manifest, and artifact kind distinct from backtest runs.
+4. Remove `ResearchModelAdapter(Strategy)` and route research-model execution
+   through the study mode.
+5. Record trusted attribution (workspace, chat, conversation, sub-agent,
+   workflow, phase, invocation) and an idempotency key on every study.
+6. Update the Thesis harness adapter to call `run_study` and bind phase
+   completion to the returned study run's metric references.
+
 ### Input
 
 ```json

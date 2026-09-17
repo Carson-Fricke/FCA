@@ -221,6 +221,30 @@ class FakeProvider:
                 else "the workflow paused"
             )
             return ModelResponse(output=f"To continue, I need your direction: {detail}")
+        if "workflow's verdict gate" in prompt.rendered:
+            marker = "Operator's latest message: "
+            body = (
+                prompt.rendered.split(marker, 1)[-1].splitlines()[0].lower()
+                if marker in prompt.rendered
+                else ""
+            )
+            circle = any(
+                word in body
+                for word in (
+                    "circle",
+                    "revise",
+                    "revisit",
+                    "disagree",
+                    "not ready",
+                    "go back",
+                )
+            )
+            action = (
+                "circle_back"
+                if circle
+                else ("check_off" if body.strip() else "ambiguous")
+            )
+            return ModelResponse(output=json.dumps({"action": action, "message": "ok"}))
         if "falsification trials orchestrator" in prompt.rendered:
             return ModelResponse(
                 output="### Empirical Falsification Findings\n\nAll planned trials survived historical testing."

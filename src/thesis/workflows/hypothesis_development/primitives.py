@@ -58,33 +58,6 @@ _JSON_ONLY_INSTRUCTION = (
 _CREATION_TURN_SCHEMA = '{"message": string, "advance": boolean}'
 
 
-_VERDICT_CHECK_OFF_MARKERS = (
-    "check off",
-    "approve",
-    "approved",
-    "accept",
-    "accepted",
-    "confirm",
-    "confirmed",
-    "proceed",
-    "looks good",
-    "continue",
-    "yes",
-)
-
-
-_VERDICT_CIRCLE_BACK_MARKERS = (
-    "circle back",
-    "revise",
-    "revision",
-    "revisit",
-    "go back",
-    "return",
-    "disagree",
-    "not ready",
-)
-
-
 _VERDICTS = frozenset({VERDICT_SUPPORTED, VERDICT_REFUTED, VERDICT_INCONCLUSIVE})
 
 
@@ -195,18 +168,6 @@ def _text(value: object, label: str, *, max_length: int) -> str:
     if any(ord(character) < 32 and character not in "\n\t" for character in sanitized):
         raise WorkflowError(f"{label} contains unsupported control characters")
     return sanitized
-
-
-def _verdict_review_action(body: str) -> str | None:
-    """Classify explicit operator input for the verdict checkpoint."""
-    lowered = body.strip().lower()
-    if not lowered:
-        return None
-    if any(marker in lowered for marker in _VERDICT_CIRCLE_BACK_MARKERS):
-        return "circle_back"
-    if any(marker in lowered for marker in _VERDICT_CHECK_OFF_MARKERS):
-        return "check_off"
-    return None
 
 
 def _format_observed(val: float | None) -> str:
