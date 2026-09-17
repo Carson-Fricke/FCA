@@ -90,6 +90,18 @@ _HISTORY_ROLES = frozenset(
 )
 
 
+def _owns_anchor(message: ChatMessage, sub_agent_id: str | None) -> bool:
+    """Return whether ``message`` belongs to the conversation at the anchor.
+
+    The root conversation (``sub_agent_id is None``) owns every message with no
+    sub-agent anchor; a node owns only its own.  A message created without a
+    ``data`` payload is root-owned.  Seeding is parameterized by anchor so a
+    node's turns never leak into another conversation's prompt.
+    """
+    anchor = None if message.data is None else message.data.get("subAgentId")
+    return anchor == sub_agent_id
+
+
 class DevelopmentRuntime(Protocol):
     """The narrow runtime surface for the hypothesis-development pipeline."""
 
@@ -121,37 +133,6 @@ class LaunchableDevelopmentWorkflow(Protocol):
         trigger_message_id: str | None = None,
     ) -> HypothesisDevelopmentRequest:
         """Persist the chat trigger and return the runnable request."""
-
-
-def launch_hypothesis_development(
-    runtime: DevelopmentRuntime,
-    chat: ChatService,
-    *,
-    workspace_id: str,
-    chat_id: str,
-    actor_id: str,
-    ideas: str,
-    investigation_id: str | None = None,
-    trigger_message_id: str | None = None,
-) -> tuple[HypothesisDevelopmentRequest, HypothesisDevelopmentOutcome]:
-    """Launch and fully execute one falsification-first hypothesis pipeline.
-
-    The launch goes through the composed workflow (and therefore through
-    :meth:`~thesis.chat.service.ChatService.launch_workflow`), and the run is
-    executed through the same injected runtime.  Callers own error handling: a
-    misconfigured runtime or an unhandled provider failure propagates.
-    """
-    workflow = runtime.build_hypothesis_development(chat=chat)
-    request = workflow.launch(
-        workspace_id,
-        chat_id,
-        actor_id=actor_id,
-        ideas=ideas,
-        investigation_id=investigation_id,
-        trigger_message_id=trigger_message_id,
-    )
-    outcome = runtime.execute_hypothesis_development(request, chat=chat)
-    return request, outcome
 
 
 #: Active (non-terminal) hypothesis-development phases, by wire value.
@@ -254,8 +235,18 @@ class ChatReplyService:
     development_runtime: DevelopmentRuntime | None = None
     tool_result_observer: ToolResultObserver | None = None
 
-    def respond(self, workspace_id: str, chat_id: str) -> ChatMessage | None:
+    def respond(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        *,
+        sub_agent_id: str | None = None,
+    ) -> ChatMessage | None:
         """Stream and persist the assistant reply; return the durable message.
+
+        The prompt history is the conversation at ``sub_agent_id``: the root
+        chat by default, or one node's own turns.  Another anchor's turns are
+        never seeded into this conversation.
 
         Returns ``None`` when there is no conversation, no reply text, or an
         unhandled launch/provider failure; failures are published as error
@@ -264,7 +255,7 @@ class ChatReplyService:
         history = tuple(
             message
             for message in self.chat_service.list_messages(workspace_id, chat_id)
-            if message.role in _HISTORY_ROLES
+            if message.role in _HISTORY_ROLES and _owns_anchor(message, sub_agent_id)
         )[-self.max_history :]
         if not history:
             return None
@@ -421,5 +412,4 @@ __all__ = [
     "ToolResultChunk",
     "ToolResultObserver",
     "development_summary",
-    "launch_hypothesis_development",
 ]

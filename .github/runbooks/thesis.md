@@ -58,7 +58,7 @@ their representation.
 ### Confused Deputy
 
 A model tool request is permitted only when the resolved role policy allows the
-tool. `HarnessToolDispatcher` rejects an unpermitted harness tool before any
+tool. The unified session registry rejects an unpermitted harness tool before any
 transport exchange, and `assert_tool_permitted` fails closed for a tool outside
 the role's allowlist.
 

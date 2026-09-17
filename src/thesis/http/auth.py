@@ -117,10 +117,17 @@ def _load_active_session(
 
 
 class _BearerAuthenticator(Protocol):
-    """The application bearer/Entra authenticator this dependency composes."""
+    """The application bearer/Entra authenticator this dependency composes.
+
+    The authenticator is a FastAPI dependency, so it receives the request
+    alongside the extracted bearer credentials and may store the resolved
+    principal on ``request.state`` for downstream routes.
+    """
 
     async def __call__(
-        self, credentials: HTTPAuthorizationCredentials | None
+        self,
+        request: Request,
+        credentials: HTTPAuthorizationCredentials | None,
     ) -> str: ...
 
 
@@ -146,7 +153,11 @@ class SessionCookieAuthenticator:
             HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)
         ],
     ) -> str:
-        """Return the authenticated principal or raise the shared 401."""
+        """Return the authenticated principal or raise the shared 401.
+
+        The principal is also stored on the request state so downstream routes
+        attribute actions to the authenticated operator.
+        """
         raw = request.cookies.get(self.cookie_name)
         if raw:
             record = _load_active_session(
@@ -154,10 +165,14 @@ class SessionCookieAuthenticator:
             )
             if record is None:
                 raise _unauthorized()
-            return f"session:{record.account_id}"
+            principal = f"session:{record.account_id}"
+            request.state.authenticated_principal = principal
+            return principal
         if self.fallback is None:
             raise _unauthorized()
-        return await self.fallback(credentials)
+        principal = await self.fallback(request, credentials)
+        request.state.authenticated_principal = principal
+        return principal
 
 
 @dataclass(frozen=True, slots=True)

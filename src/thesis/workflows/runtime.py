@@ -25,7 +25,6 @@ from datetime import UTC, datetime
 
 from thesis.agent.harness_tools import (
     HarnessToolProvider,
-    HarnessToolResult,
     register_harness_mcp_skill,
 )
 from thesis.agent.hypothesis_skills import register_hypothesis_development_skills
@@ -37,9 +36,9 @@ from thesis.agent.router import (
     Role,
     RolePolicy,
 )
+from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContextFactory
-from thesis.agent.tool_dispatch import HarnessToolCall, HarnessToolDispatcher
 from thesis.chat.service import ChatService
 from thesis.experiments.ledger import AttemptLedger
 from thesis.integrations.harness import HarnessClientPort, ThesisHarnessClient
@@ -163,6 +162,7 @@ def build_workflow_runtime(
     bundle_hashes: Mapping[str, str] | None = None,
     backtest_mode: BacktestMode = "local",
     metadata: Mapping[str, object] | None = None,
+    subagent_lifecycle: SubAgentLifecycle | None = None,
     clock: Callable[[], datetime] = _utc_now,
     id_factory: Callable[[str], str] = _new_id,
     invocation_id_factory: Callable[[], str] | None = None,
@@ -171,10 +171,10 @@ def build_workflow_runtime(
 
     A :class:`HarnessBacktestRunner` is built over the injected harness client
     unless an explicit ``runner`` is supplied, so tests can replace the harness
-    with a fake while exercising the same runtime surface.  When a
-    :class:`~thesis.agent.harness_tools.HarnessToolProvider` is supplied, the
-    runtime also exposes a policy-scoped
-    :class:`~thesis.agent.tool_dispatch.HarnessToolDispatcher`.
+    with a fake while exercising the same runtime surface.  A
+    :class:`~thesis.agent.harness_tools.HarnessToolProvider` supplied here is
+    held for composition consumers; tool dispatch happens through the unified
+    session registry.
     """
 
     def _invocation_id() -> str:
@@ -215,6 +215,7 @@ def build_workflow_runtime(
         harness_tools=harness_tools,
         validator=strategy_validator,
         hypothesis_store=hypothesis_store,
+        subagent_lifecycle=subagent_lifecycle,
         clock=clock,
         id_factory=id_factory,
     )
@@ -240,6 +241,7 @@ class WorkflowRuntime:
         harness_tools: HarnessToolProvider | None = None,
         validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
+        subagent_lifecycle: SubAgentLifecycle | None = None,
         clock: Callable[[], datetime] = _utc_now,
         id_factory: Callable[[str], str] = _new_id,
     ) -> None:
@@ -266,11 +268,7 @@ class WorkflowRuntime:
         self._harness_tools = harness_tools
         self._validator = validator
         self._hypothesis_store = hypothesis_store
-        self._tool_dispatcher = (
-            None
-            if harness_tools is None
-            else HarnessToolDispatcher(router, harness_tools)
-        )
+        self._subagent_lifecycle = subagent_lifecycle
         self._clock = clock
         self._id_factory = id_factory
         # Keep an in-process paused workflow alive so a conversational phase can
@@ -297,24 +295,6 @@ class WorkflowRuntime:
     def harness_tools(self) -> HarnessToolProvider | None:
         """Return the composed harness MCP tool provider, when configured."""
         return self._harness_tools
-
-    @property
-    def tool_dispatcher(self) -> HarnessToolDispatcher | None:
-        """Return the policy-scoped harness tool dispatcher, when configured."""
-        return self._tool_dispatcher
-
-    def dispatch_tool(
-        self,
-        role: Role | str,
-        call: HarnessToolCall | str,
-        arguments: Mapping[str, object] | None = None,
-    ) -> HarnessToolResult:
-        """Dispatch a model tool request through the harness MCP provider."""
-        if self._tool_dispatcher is None:
-            raise WorkflowRuntimeError(
-                "provide a harness tool provider to dispatch tool calls"
-            )
-        return self._tool_dispatcher.dispatch(role, call, arguments)
 
     def build_hypothesis_development(
         self,
@@ -366,6 +346,7 @@ class WorkflowRuntime:
             coding_role=coding_role,
             experiment_id=experiment_id,
             max_rca_cycles=max_rca_cycles,
+            subagent_lifecycle=self._subagent_lifecycle,
         )
 
     def execute_hypothesis_development(

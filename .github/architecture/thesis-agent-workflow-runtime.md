@@ -26,13 +26,26 @@ The durable sub-agent runtime is implemented in `thesis.agent.runtime`:
   escalation, with durable repair epochs;
 - `ControlToolService` exposes the Thesis control tools, including
   `spawn_sub_agent` recorded as a first-class tool invocation;
-- `SubAgentNotifier` delivers a child's result to its parent asynchronously by
-  appending a durable `tool` message and scheduling a new parent turn;
+- `DeliveryService` is the single delivery path for a child's result, a
+  workflow outcome, or an operator answer: it persists the typed datum at the
+  anchor and then schedules that anchor's turn, durable before scheduled and
+  idempotent under retry, with `SubAgentNotifier` folded into it;
 - `AgentSession` is the single durable model/tool turn loop that the chat path
   and workflow path must converge on: it sends the merged catalog, persists each
   model and tool invocation as a first-class record, threads tool results back
   as `tool` messages, stops on a terminal control tool, and enforces a safety
-  iteration cap.
+  iteration cap;
+- chat transcript seeding is parameterized by anchor: the root prompt is seeded
+  only from root messages and a node only from its own, so one anchor's turns
+  never leak into another conversation;
+- starting a workflow returns its execution handle immediately and runs the
+  execution detached; the outcome is delivered later at the caller's anchor
+  through `DeliveryService`, so a workflow never executes inside the launching
+  tool call;
+- the legacy `agent/reply.py` tool-calling provider and the
+  `HarnessToolDispatcher`/`WorkflowRuntime.tool_dispatcher` path are removed;
+  tool dispatch is the unified session registry and the plain provider remains
+  only as `create_app`'s non-tool fallback.
 
 The `hypothesis_development` workflow is now a nested package
 (`thesis/workflows/hypothesis_development/`) with concern modules (`errors`,
@@ -58,6 +71,20 @@ Python bridge:
 Still to implement: wiring conversation-phase gate failures through durable
 repair turns, which changes the current "gate failure pauses immediately"
 behavior and therefore lands together with the matching phase-test updates.
+
+### Accepted v1.0.1 decisions
+
+Conversation anchoring and datum rendering were settled in review and are
+normative for the migration; see "Chat Surface, Anchoring, and Datum Rendering"
+below and the accepted design record
+`thesis-chat-surface-and-subagent-anchoring-v1`. In brief: a sub-agent is the same
+conversation abstraction as the top-level agent, nested; the caller's anchor
+decides where a datum renders; tools return typed datums (possibly several, of
+different types, asynchronously) and the shared surface maps datum type to
+rendering; workflow executions are owned by the anchor that launched them; a
+durable workflow-node record owns the phase agents; an execution-scoped sub-agent
+tree is replaced by durable-record trees; and node input is governed by a
+per-node operator policy whose default is human-only.
 
 ## Overview
 
@@ -612,7 +639,12 @@ and falsification-plan fields. It MUST include:
 - claim, disagreement, risk factor, horizon, and universe;
 - falsifiers with id, observable, condition, threshold, and exact test;
 - the content-addressable research model source, outputs, tests, indicators,
-  and harness configuration;
+  and harness configuration; the adapter materializes the study window (symbols,
+  start, end) into the harness configuration and defaults a missing window to
+  the closed-session lake history instead of the harness's two-day synthetic
+  default; the strategy bundle materializes the universe symbols and the same
+  window so a strategy backtest never relies on the design agent to declare
+  them;
 - negative or placebo controls;
 - Layer B monitor mappings; and
 - a concise operator-confirmation reference to the latest confirming message.
@@ -675,6 +707,83 @@ checkpoint, and resume only unfinished invocations.
 be persisted immediately. Before applying a completion request or transition,
 the workflow MUST detect stale intent and re-enter the phase with the new
 operator input rather than advancing under obsolete assumptions.
+
+## Chat Surface, Anchoring, and Datum Rendering
+
+These requirements extend the tool architecture above and are normative for the
+migration recorded in `thesis-chat-surface-and-subagent-anchoring-v1`.
+
+**REQ-018: Sub-agent parity.** A sub-agent MUST use the same chat surface and
+piping as the top-level agent, nested one level down. Transcript seeding, turn
+persistence, datum projection, streaming, and operator input MUST be one
+implementation parameterized by anchor. The only permitted differences are the
+anchor, the tool policy, and the lifecycle that creates, drives, and terminates
+the agent.
+
+- Rationale: a sub-agent is the same conversation abstraction, not a second class
+  of agent.
+- Verification: the same code path serves a root turn and a node turn, and a
+  parity test asserts identical persistence and projection for both.
+
+**REQ-019: Caller anchor decides placement.** Every turn and datum MUST render at
+the anchor of the agent that produced it. There MUST NOT be a per-tool rendering
+exception, a per-tool suppression rule, or a tiebreaker between the caller anchor
+and record ownership.
+
+- Rationale: one uniform rule; nesting then falls out without special cases.
+- Verification: a workflow launched by a sub-agent renders entirely inside that
+  sub-agent, identically to a root launch.
+
+**REQ-020: Typed datum contract.** A tool MUST return one or more typed datums.
+Each datum MUST carry its declared type, and the type MUST be persisted with the
+datum so rendering survives reload. The shared surface MUST select the canonical
+rendering from the datum type, with the generic tool card as the fallback. A tool
+MUST NOT carry rendering instructions, and no tool may be special-cased by name. A
+single tool call MAY return several datums of different types asynchronously.
+
+- Rationale: the contract is the type; the surface owns rendering.
+- Verification: a multi-datum tool renders each datum by its own type; an unknown
+  type falls back to the generic card.
+
+**REQ-021: Anchor-owned executions.** A workflow execution MUST be owned by the
+anchor that launched it. Execution-scoped routes MUST be anchor-qualified, and a
+chat listing MUST NOT include executions launched by its sub-agents.
+
+- Rationale: execution ownership and card placement must agree, or a
+  node-launched execution can never match root-launched parity.
+- Verification: a node-launched execution is retrievable and resumable under the
+  node, and is absent from the chat-level list.
+
+**REQ-022: Durable workflow node.** Every workflow execution MUST have a durable
+workflow-node record created by, and parented to, the launching anchor. Phase
+agents MUST be children of that workflow node, so the chain is launching agent →
+workflow node → phase agents and the existing depth, active-children, and budget
+guards apply to phase agents.
+
+- Rationale: sub-agents belong to the execution, and the execution belongs to the
+  parent.
+- Verification: a phase agent's durable record resolves to the workflow node, and
+  the guards reject an over-deep or over-budget phase spawn.
+
+**REQ-023: Per-node operator policy.** Answering a node's question MUST be
+governed by a per-node operator policy that can authorize the human operator, a
+parent agent, or another agent. The default MUST be human-only. The answering
+actor MUST be derived from the authenticated session and MUST NOT be accepted from
+model arguments or the request body.
+
+- Rationale: autonomy becomes a policy change rather than a structural change,
+  and attribution stays trustworthy.
+- Verification: a node whose policy is human-only rejects an agent answer; a node
+  whose policy authorizes a parent accepts one with provenance.
+
+**REQ-024: Single delivery path.** Delivering a datum to a conversation MUST use
+one path parameterized by anchor: persist the datum at the anchor, then schedule a
+turn at that anchor. Delivery MUST be durable before it is scheduled and MUST be
+idempotent under retry. A parent-bound result MUST NOT be delivered only through
+an execution event.
+
+- Rationale: one mechanism for roots and nodes; no second-class delivery.
+- Verification: a retried delivery does not duplicate the datum or the turn.
 
 ## Target Package Layout
 

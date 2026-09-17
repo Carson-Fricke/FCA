@@ -18,7 +18,6 @@ from thesis.agent.runtime.delivery import (
     NodeInputService,
 )
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
-from thesis.agent.runtime.notify import SubAgentNotifier
 from thesis.agent.runtime.policy import (
     AnsweringActor,
     NodeOperatorPolicy,
@@ -172,41 +171,6 @@ def test_delivery_to_the_root_anchor_uses_the_root_scheduler_id() -> None:
     assert receipt.message.data is not None
     assert receipt.message.data["subAgentId"] is None
     assert receipt.message.data[DELIVERY_KEY_FIELD] == receipt.idempotency_key
-
-
-def test_notifier_delivers_child_results_through_the_single_path() -> None:
-    chat, chat_id, store, lifecycle = _setup()
-    parent = _spawn(lifecycle, chat_id, role="lead")
-    child = _spawn(
-        lifecycle,
-        chat_id,
-        role="critique",
-        kind=SubAgentKind.ONE_SHOT,
-        parent_sub_agent_id=parent,
-    )
-    scheduled: list[tuple[str, str, str]] = []
-    notifier = SubAgentNotifier(
-        chat,
-        schedule=lambda workspace, chat, node_id: scheduled.append(
-            (workspace, chat, node_id)
-        ),
-    )
-    lifecycle.start(_WORKSPACE, child)
-    terminal = lifecycle.complete(
-        _WORKSPACE, child, result={"finding": "no regularity"}
-    )
-
-    message = notifier.notify(terminal)
-    duplicate = notifier.notify(terminal)
-
-    assert message is not None
-    assert duplicate is not None
-    assert duplicate.message_id == message.message_id
-    assert message.data is not None
-    assert message.data["subAgentId"] == parent
-    assert message.data["childSubAgentId"] == child
-    assert message.data["kind"] == "child_result"
-    assert scheduled == [(_WORKSPACE, chat_id, parent)]
 
 
 def test_deliver_child_result_reaches_a_node_anchor() -> None:

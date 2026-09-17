@@ -20,9 +20,14 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
 from thesis.agent.runtime.context import ToolContext
-from thesis.agent.runtime.delivery import Anchor, DeliveryService, TurnScheduler
+from thesis.agent.runtime.delivery import (
+    DELIVERY_KEY_FIELD,
+    Anchor,
+    DeliveryService,
+    TurnScheduler,
+    find_delivered,
+)
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
-from thesis.agent.runtime.notify import SubAgentNotifier
 from thesis.agent.runtime.session import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     AgentSession,
@@ -104,7 +109,6 @@ class ChildRunner:
         lifecycle: SubAgentLifecycle,
         provider: CompletionProvider,
         registry_factory: RegistryFactory,
-        notifier: SubAgentNotifier | None = None,
         schedule: TurnScheduler | None = None,
         delivery: DeliveryService | None = None,
         max_tool_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS,
@@ -115,7 +119,6 @@ class ChildRunner:
         self._lifecycle = lifecycle
         self._provider = provider
         self._registry_factory = registry_factory
-        self._notifier = notifier
         self._schedule = schedule
         self._delivery = delivery or DeliveryService(chat, schedule=schedule)
         self._max_tool_iterations = max_tool_iterations
@@ -124,7 +127,8 @@ class ChildRunner:
     def run(self, child: SubAgentRecord, task: str) -> SubAgentRecord:
         """Run one child to a terminal state and deliver its result."""
         running = self._lifecycle.start(child.workspace_id, child.sub_agent_id)
-        context = _node_context(running)
+        task_message = self._task_message(running, task)
+        context = _node_context(running, trigger_message_id=task_message.message_id)
         session = AgentSession(
             workspace_id=running.workspace_id,
             chat_id=running.chat_id,
@@ -168,9 +172,35 @@ class ChildRunner:
         self._deliver(terminal)
         return terminal
 
+    def _task_message(self, child: SubAgentRecord, task: str) -> ChatMessage:
+        """Persist the child's own task turn and return its durable message.
+
+        The task is the child conversation's first user message, so its id is
+        the trigger a child-initiated workflow launch binds to.  A retried run
+        resolves to the existing message instead of duplicating the turn.
+        """
+        key = f"child-task-{child.sub_agent_id}"
+        anchor = Anchor(
+            child.workspace_id, child.chat_id, sub_agent_id=child.sub_agent_id
+        )
+        existing = find_delivered(self._chat, anchor, key)
+        if existing is not None:
+            return existing
+        return self._chat.create_message(
+            child.workspace_id,
+            child.chat_id,
+            actor_id=child.created_by,
+            body=task,
+            role=MessageRole.USER,
+            kind=TranscriptItemKind.SUB_AGENT,
+            data={
+                "subAgentId": child.sub_agent_id,
+                "kind": "child_task",
+                DELIVERY_KEY_FIELD: key,
+            },
+        )
+
     def _deliver(self, child: SubAgentRecord) -> ChatMessage | None:
-        if child.parent_sub_agent_id is not None and self._notifier is not None:
-            return self._notifier.notify(child)
         receipt = self._delivery.deliver_child_result(
             Anchor(
                 child.workspace_id,

@@ -32,7 +32,7 @@ from thesis.agent.harness_tools import (
     HarnessToolResult,
     open_harness_tool_provider,
 )
-from thesis.agent.reply import reply_provider_for
+from thesis.agent.runtime.policy import OperatorPolicyRegistry
 from thesis.auth.session import OperatorSessionService
 from thesis.auth.workspace_access import WorkspaceAuthorizer
 from thesis.chat import ChatService
@@ -46,6 +46,7 @@ from thesis.http.auth import (
 )
 from thesis.http.backtests import create_backtest_router
 from thesis.http.chat import create_chat_router
+from thesis.http.chat_sub_agents import create_chat_sub_agent_router
 from thesis.http.dashboards import create_dashboard_router
 from thesis.http.deployments import create_deployment_router
 from thesis.http.harness import HarnessDataService, create_harness_router
@@ -69,6 +70,10 @@ from thesis.http.workspaces import (
 )
 from thesis.identity.ports import AccountStore, SessionStore
 from thesis.providers.openrouter import OpenRouterProvider
+from thesis.providers.transports import (
+    DEFAULT_SYSTEM_PROMPT,
+    openrouter_reply_provider,
+)
 from thesis.screening.service import ScreenerService
 
 if TYPE_CHECKING:
@@ -204,19 +209,27 @@ class CombinedAuthenticator:
 
     async def __call__(
         self,
+        request: Request,
         credentials: Annotated[
             HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
         ],
     ) -> str:
-        """Return the presented token or raise a uniform authentication error."""
+        """Return the presented token or raise a uniform authentication error.
+
+        The authenticated principal is also stored on the request state, so
+        downstream routes can attribute an action to the authenticated operator
+        instead of trusting a client-supplied identifier.
+        """
         if self.entra is None:
-            return authenticate_bearer(credentials, self.expected_token)
-        if credentials is None or credentials.scheme.lower() != "bearer":
+            principal = authenticate_bearer(credentials, self.expected_token)
+        elif credentials is None or credentials.scheme.lower() != "bearer":
             raise _unauthorized()
-        credential = credentials.credentials
-        if _looks_like_jwt(credential):
-            return self.entra.authenticate(credential)
-        return authenticate_bearer(credentials, self.expected_token)
+        elif _looks_like_jwt(credentials.credentials):
+            principal = self.entra.authenticate(credentials.credentials)
+        else:
+            principal = authenticate_bearer(credentials, self.expected_token)
+        request.state.authenticated_principal = principal
+        return principal
 
 
 def _configured_token(bearer_token: str | None) -> str | None:
@@ -318,6 +331,7 @@ def create_app(
     session_workspace_id: str | None = None,
     session_clock: Callable[[], datetime] | None = None,
     timeline: CosmosTimeline | None = None,
+    sub_agent_turn: Callable[[str, str, str], None] | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
@@ -335,11 +349,15 @@ def create_app(
 
     Pass     ``model_provider`` (with an optional ``harness_tool_provider``) to
     compose the streamed chat reply service without injecting one directly.
-    When a harness tool surface is configured the agent replies through the
-    harness MCP tool catalog; an unavailable catalog degrades to a plain reply
-    at request time, so composition never blocks startup.  A ``harness_client``
-    shared with the backtest boundary is adapted into the tool provider without
-    opening or initializing a second MCP transport.
+    The composed reply is the plain single-shot provider; tool-calling chat
+    replies come from the session-backed provider a composition injects, and
+    the harness tool surface is consumed by the backtest coordinator.  A
+    ``harness_client`` shared with the backtest boundary is adapted into the
+    tool provider without opening or initializing a second MCP transport.  Pass
+    ``sub_agent_turn`` to expose the composition's scheduler that runs one node
+    turn ``(workspace_id, chat_id, sub_agent_id)``; the chat sub-agent router
+    resolves it from ``app.state``.  ``app.state.operator_policies`` is always
+    populated with the human-only default.
 
     Pass ``account_store`` and ``auth_verifier`` together to register the
     anonymous OIDC login router.  Adding ``session_service``, ``session_store``,
@@ -420,6 +438,12 @@ def create_app(
             422: {"description": "validation error"},
         },
     )
+    # Per-node operator policy is always present so the chat sub-agent router
+    # fails closed to human-only instead of having no registry at all; a
+    # composition may replace the registry to authorize parent or peer agents.
+    application.state.operator_policies = OperatorPolicyRegistry()
+    if sub_agent_turn is not None:
+        application.state.sub_agent_turn = sub_agent_turn
     backtest_coordinator: BacktestRunCoordinator | None = None
     if harness_tool_provider is not None and workspace_data is not None:
         from thesis.backtests import BacktestRunCoordinator
@@ -461,7 +485,9 @@ def create_app(
         application.state.chat_reply_service = ChatReplyService(
             chat_service=resolved_chat_service,
             broker=resolved_broker,
-            provider=reply_provider_for(model_provider, harness_tool_provider),
+            provider=openrouter_reply_provider(
+                model_provider, system_prompt=DEFAULT_SYSTEM_PROMPT
+            ),
             development_runtime=workflow_runtime,
             tool_result_observer=tool_result_observer,
         )
@@ -550,6 +576,7 @@ def create_app(
             sleeper=stream_sleeper,
             max_poll_cycles=stream_max_poll_cycles,
         ),
+        create_chat_sub_agent_router(),
         create_timeline_router(
             poll_interval_seconds=min(stream_poll_interval_seconds, 0.5),
             sleeper=stream_sleeper,

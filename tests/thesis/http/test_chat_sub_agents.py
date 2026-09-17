@@ -18,6 +18,7 @@ from thesis.chat.contracts import SubAgentKind
 from thesis.http.application import create_app
 from thesis.http.chat_sub_agents import (
     AUTHENTICATED_PRINCIPAL_STATE_KEY,
+    authenticated_actor_id,
     create_chat_sub_agent_router,
 )
 
@@ -48,13 +49,8 @@ def _with_principal(app: FastAPI, principal: str) -> FastAPI:
     return app
 
 
-def _client(
-    chat: ChatService, *, principal: str | None = SESSION_PRINCIPAL
-) -> TestClient:
-    app = create_app(bearer_token=TOKEN, chat_service=chat)
-    if principal is not None:
-        _with_principal(app, principal)
-    return TestClient(app)
+def _client(chat: ChatService) -> TestClient:
+    return TestClient(create_app(bearer_token=TOKEN, chat_service=chat))
 
 
 def _spawn(
@@ -151,14 +147,17 @@ def test_operator_input_uses_the_authenticated_actor() -> None:
         json={"body": "please continue"},
     )
 
+    # The shared authenticator exposes the bearer principal it validated, and
+    # the route derives a stable, non-secret actor id from it: never the body.
+    expected_actor = authenticated_actor_id(TOKEN)
     assert response.status_code == 200
     assert response.json()["subAgentId"] == child
-    assert response.json()["actor_id"] == "acct-9"
+    assert response.json()["actor_id"] == expected_actor
     assert response.json()["operatorPolicy"]["actorKind"] == "human_operator"
     messages = chat.list_messages(WORKSPACE, chat_id)
     persisted = [message for message in messages if message.body == "please continue"]
     assert len(persisted) == 1
-    assert persisted[0].actor_id == "acct-9"
+    assert persisted[0].actor_id == expected_actor
     assert persisted[0].data is not None
     assert persisted[0].data["actorKind"] == "human_operator"
 
@@ -180,16 +179,22 @@ def test_operator_input_rejects_a_body_supplied_actor() -> None:
 def test_operator_input_fails_closed_without_an_exposed_principal() -> None:
     chat, chat_id = _service()
     child = _spawn(chat, chat_id)
+    # A composition with no authenticator exposing a principal: the route must
+    # refuse to invent an actor rather than trusting anything else.
+    app = FastAPI()
+    app.state.chat_service = chat
+    app.include_router(create_chat_sub_agent_router())
+    client = TestClient(app)
 
-    response = _client(chat, principal=None).post(
+    response = client.post(
         f"/v1/workspaces/{WORKSPACE}/chats/{chat_id}/sub_agents/{child}/messages",
-        headers=_headers(),
         json={"body": "please continue"},
     )
 
     assert response.status_code == 500
-    assert response.json()["error"]["code"] == "actor_identity_unavailable"
-    assert "authenticated_principal" in response.json()["error"]["message"]
+    detail = response.json()["detail"]
+    assert detail["code"] == "actor_identity_unavailable"
+    assert "authenticated_principal" in detail["message"]
     assert chat.list_messages(WORKSPACE, chat_id) == ()
 
 

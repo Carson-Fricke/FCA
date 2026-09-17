@@ -126,8 +126,12 @@ contracts rather than importing engine internals.
 A harness backtest never fails merely because a requested symbol was not
 ingested before: the harness asks the published market-lake ensure contract to
 fetch the run window's configured symbols, then polls coverage to a terminal
-status before reading the local Parquet lake. The lake owns provider
-credentials and the fetch; the harness only issues the ensure request.
+status before reading the local Parquet lake. Ensure guarantees completeness:
+the lake pages every fetch until the provider cursor is exhausted, long
+windows are split into lake-sized ranges, and the harness fails fast (naming
+the sessions) when a closed session is left `partial` or errored instead of
+waiting out its one-hour bound. The lake owns provider credentials and the
+fetch; the harness only issues the ensure request.
 
 The FCA repository's root `strategies` directory remains reserved for
 repository-owned examples and reference strategies. Thesis-generated and user
@@ -375,6 +379,29 @@ Workflow phases are defined independently for each workflow. Thesis does not
 force unrelated research requests through one superficial phase taxonomy. The
 UI renders whatever phases the selected workflow declares.
 
+### Conversation Anchoring And Datum Rendering
+
+Every conversation has an anchor: the root chat for the top-level agent, and a
+sub-agent node for anything nested. A sub-agent is the same conversation
+abstraction as the top-level agent — same chat surface, same transcript semantics,
+same tool-result projection, same streaming, same operator input — parameterized by
+anchor. The only permitted differences are the anchor, the tool policy, and the
+lifecycle that creates and terminates the agent.
+
+Tools return typed datums; a single call may return several datums of different
+types asynchronously. The surface selects each datum's rendering from its declared
+type, with the generic tool card as the fallback, and renders it at the caller's
+anchor. Tools never carry rendering instructions and no tool is special-cased by
+name.
+
+Workflow executions are owned by the anchor that launched them, and each execution
+has a durable workflow-node record parented to that anchor which owns its phase
+agents. Node input is governed by a per-node operator policy whose default is
+human-only, so future autonomous orchestration is a policy change rather than a
+structural one. The normative requirements are REQ-018 through REQ-024 in
+`thesis-agent-workflow-runtime.md`, with the accepted design record at
+`thesis-chat-surface-and-subagent-anchoring-v1`.
+
 ### Chat And Execution Boundary
 
 The chat is the sole messaging surface. User messages and agent narration are
@@ -537,8 +564,9 @@ representation. `thesis.agent.harness_tools` wraps the client in a
 `HarnessToolProvider` that adds typed arguments, structured results, and
 agent-visible failures, and the `harness-mcp` skill is registered into the
 `SkillRegistry` used to build the model router so role policies resolve the
-bundle and permit `HARNESS_TOOL_NAMES`. A `HarnessToolDispatcher` enforces the
-resolved `allowedTools` before routing a model tool request to the provider.
+bundle and permit `HARNESS_TOOL_NAMES`. The unified session registry enforces
+the resolved `allowedTools` before a model tool request reaches the provider;
+there is no second policy-enforcing dispatcher.
 
 Backtest launches route through the MCP `run_backtest` tool via a
 `HarnessMcpBoundary` whose capabilities derive from the discovered catalog. The
@@ -1538,7 +1566,12 @@ must be available and declared.
 
 ## Open Design Decisions
 
-The following decisions should be resolved before their owning phase begins:
+The following decisions should be resolved before their owning phase begins.
+Decisions recorded after this list was authored are tracked in the accepted design
+records; conversation anchoring, datum rendering, anchor-owned executions,
+workflow-node ownership, and per-node operator policy were settled in
+`thesis-chat-surface-and-subagent-anchoring-v1` and are specified as REQ-018
+through REQ-024 in `thesis-agent-workflow-runtime.md`.
 
 - Exact primary, coding, research, critique, and RCA models and providers.
 - The default anti-overfitting protocol by asset class and horizon.

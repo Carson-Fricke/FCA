@@ -1,21 +1,17 @@
-"""Policy-scoped harness tool dispatch for the Thesis agent.
+"""Role-policy harness tool coverage for the Thesis agent.
 
-These tests prove the last mile between the model router and the harness MCP
+These tests prove the policy layer between the model router and the harness MCP
 tool provider: a role policy that selects ``harness-mcp`` resolves the skill
-bundle and permits the harness tools, and a permitted tool request executes
-end-to-end over both the local in-process/stdio and remote HTTP ``/mcp``
-topologies.  Denied and unknown tools surface as typed failures before any
-transport exchange.
+bundle and permits the harness tools, and permitted tool requests execute
+end-to-end over the local in-process/stdio and remote HTTP ``/mcp`` topologies.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import cast
 
 import httpx
-import pytest
 
 from thesis.agent.harness_tools import (
     HARNESS_MCP_SKILL_ID,
@@ -34,15 +30,9 @@ from thesis.agent.router import (
     RolePolicy,
 )
 from thesis.agent.skills import SkillRef, SkillRegistry
-from thesis.agent.tool_dispatch import (
-    HarnessToolCall,
-    HarnessToolDispatcher,
-    harness_mcp_role_policy,
-    with_harness_mcp,
-)
+from thesis.agent.tool_dispatch import harness_mcp_role_policy, with_harness_mcp
 from thesis.integrations.mcp import HarnessMcpTopology
-from thesis.workflows import BacktestRunner
-from thesis.workflows.runtime import build_model_router, build_workflow_runtime
+from thesis.workflows.runtime import build_model_router
 
 HARNESS_URL = "http://harness.test:9000"
 BEARER = "harness-secret"
@@ -166,12 +156,6 @@ class FakeModelProvider:
         return ModelResponse(output="ok")
 
 
-class FakeRunner:
-    def run(self, request: object) -> object:
-        del request
-        raise AssertionError("the tool dispatcher test never runs a backtest")
-
-
 def _build_router(
     *,
     policies: Mapping[Role, RolePolicy] | None = None,
@@ -240,13 +224,10 @@ def test_role_policy_resolves_harness_skill_bundle_and_tools() -> None:
     assert set(HARNESS_TOOL_NAMES) <= set(decision.allowed_tools)
 
 
-def test_local_in_process_dispatch_invokes_harness_tool() -> None:
+def test_local_in_process_call_invokes_harness_tool() -> None:
     provider, handler = _local_provider()
-    dispatcher = HarnessToolDispatcher(_build_router(), provider)
 
-    result = dispatcher.dispatch(
-        "research", "run_backtest", {"config_path": "cfg/bt.yaml"}
-    )
+    result = provider.call_tool("run_backtest", {"config_path": "cfg/bt.yaml"})
 
     assert result.ok, result.failure
     assert result.structured["tool"] == "run_backtest"
@@ -256,30 +237,24 @@ def test_local_in_process_dispatch_invokes_harness_tool() -> None:
     }
 
 
-def test_stdio_dispatch_invokes_harness_tool() -> None:
+def test_stdio_call_invokes_harness_tool() -> None:
     handler = FakeHandler()
     provider = open_harness_tool_provider(
         HarnessMcpTopology(thesis_location="remote", harness_location="local"),
         stdio_transport=HandlerTransport(handler),
     )
-    dispatcher = HarnessToolDispatcher(_build_router(), provider)
 
-    result = dispatcher.dispatch(
-        "research", HarnessToolCall("get_run", {"run_id": "run-7"})
-    )
+    result = provider.call_tool("get_run", {"run_id": "run-7"})
 
     assert result.ok, result.failure
     assert handler.calls[-1] == {"name": "get_run", "arguments": {"run_id": "run-7"}}
 
 
-def test_remote_http_dispatch_invokes_harness_tool() -> None:
+def test_remote_http_call_invokes_harness_tool() -> None:
     server = FakeHttpServer()
     provider = _remote_provider(server)
-    dispatcher = HarnessToolDispatcher(_build_router(), provider)
 
-    result = dispatcher.dispatch(
-        "research", "launch_trader", {"config_path": "cfg/trader.yaml"}
-    )
+    result = provider.call_tool("launch_trader", {"config_path": "cfg/trader.yaml"})
 
     assert result.ok, result.failure
     assert result.structured["jobId"] == "job-1"
@@ -291,57 +266,6 @@ def test_remote_http_dispatch_invokes_harness_tool() -> None:
         "name": "launch_trader",
         "arguments": {"config_path": "cfg/trader.yaml"},
     }
-
-
-def test_dispatch_denies_tool_not_permitted_by_policy() -> None:
-    policy = RolePolicy(
-        role="research",
-        version="1.0.0",
-        model_profile="research-profile",
-        skills=("harness-mcp",),
-        allowed_tools=("get_run",),
-    )
-    provider, handler = _local_provider()
-    dispatcher = HarnessToolDispatcher(
-        _build_router(policies={"research": policy}), provider
-    )
-
-    result = dispatcher.dispatch("research", "run_backtest", {"config_path": "x"})
-
-    assert result.ok is False
-    assert result.failure is not None
-    assert result.failure.kind == "denied"
-    assert handler.calls == []
-
-
-def test_dispatch_reports_unknown_tool_as_unknown() -> None:
-    provider, handler = _local_provider()
-    dispatcher = HarnessToolDispatcher(_build_router(), provider)
-
-    result = dispatcher.dispatch("research", "delete_everything")
-
-    assert result.failure is not None
-    assert result.failure.kind == "unknown_tool"
-    assert handler.calls == []
-
-
-def test_dispatch_many_runs_a_model_turn_in_order() -> None:
-    provider, handler = _local_provider()
-    dispatcher = HarnessToolDispatcher(_build_router(), provider)
-
-    results = dispatcher.dispatch_many(
-        "research",
-        (
-            HarnessToolCall("get_run", {"run_id": "run-1"}),
-            HarnessToolCall.from_mapping(
-                {"name": "list_artifacts", "arguments": {"run_id": "run-1"}}
-            ),
-        ),
-    )
-
-    assert [result.tool for result in results] == ["get_run", "list_artifacts"]
-    assert all(result.ok for result in results)
-    assert [call["name"] for call in handler.calls] == ["get_run", "list_artifacts"]
 
 
 def test_with_harness_mcp_merges_skill_and_tools() -> None:
@@ -363,51 +287,3 @@ def test_with_harness_mcp_merges_skill_and_tools() -> None:
     assert "read_workspace" in augmented.allowed_tools
     assert set(HARNESS_TOOL_NAMES) <= set(augmented.allowed_tools)
     assert base.allowed_tools == ("read_workspace",)
-
-
-def test_workflow_runtime_exposes_policy_scoped_dispatcher() -> None:
-    provider, handler = _local_provider()
-    runtime = build_workflow_runtime(
-        role_policies={
-            "research": harness_mcp_role_policy(
-                "research", model_profile="research-profile", version="1.0.0"
-            )
-        },
-        model_profiles={
-            "research-profile": ModelProfile(
-                profile_id="research-profile",
-                version="1.0.0",
-                provider="fake",
-                model="research-model",
-            )
-        },
-        providers={"fake": FakeModelProvider()},
-        skills=SkillRegistry(),
-        runner=cast(BacktestRunner, FakeRunner()),
-        harness_tools=provider,
-    )
-
-    assert runtime.tool_dispatcher is not None
-    result = runtime.dispatch_tool("research", "get_run", {"run_id": "run-1"})
-
-    assert result.ok, result.failure
-    assert handler.calls[-1] == {"name": "get_run", "arguments": {"run_id": "run-1"}}
-
-
-def test_harness_tool_call_validates_and_serializes() -> None:
-    call = HarnessToolCall.from_mapping(
-        {"name": "run_backtest", "arguments": {"config_path": "cfg.yaml"}}
-    )
-
-    assert call.as_dict() == {
-        "name": "run_backtest",
-        "arguments": {"config_path": "cfg.yaml"},
-    }
-    assert HarnessToolCall.from_mapping({"name": "get_run"}).arguments == {}
-
-    with pytest.raises(ValueError, match="name"):
-        HarnessToolCall("  ")
-    with pytest.raises(ValueError, match="string 'name'"):
-        HarnessToolCall.from_mapping({"name": 1})
-    with pytest.raises(ValueError, match="must be an object"):
-        HarnessToolCall.from_mapping({"name": "get_run", "arguments": "no"})

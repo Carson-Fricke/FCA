@@ -57,6 +57,7 @@ from thesis.agent.runtime.delivery import (
     NodeInputNotFound,
     NodeInputReceipt,
     NodeInputService,
+    TurnScheduler,
     delivery_key,
     find_delivered,
 )
@@ -64,7 +65,6 @@ from thesis.agent.runtime.lifecycle import (
     SubAgentLifecycle,
     SubAgentLifecycleError,
 )
-from thesis.agent.runtime.notify import SubAgentNotifier, TurnScheduler
 from thesis.agent.runtime.policy import (
     DEFAULT_ROOT_BUDGET_CEILING,
     HUMAN_ONLY_ACTOR_KINDS,
@@ -192,7 +192,6 @@ __all__ = [
     "SubAgentBudget",
     "SubAgentLifecycle",
     "SubAgentLifecycleError",
-    "SubAgentNotifier",
     "SubAgentSpec",
     "SubAgentStore",
     "THESIS_TOOL_NAMES",
