@@ -262,7 +262,6 @@ def test_crypto_ensure_uses_utc_days_and_the_equity_job_contract() -> None:
 @pytest.mark.parametrize(
     ("body", "expected_code"),
     [
-        (_request(start_date="2024-01-01", end_date="2024-01-03"), "range_too_large"),
         (
             {
                 **_request(),
@@ -273,16 +272,36 @@ def test_crypto_ensure_uses_utc_days_and_the_equity_job_contract() -> None:
         ({**_request(), "unexpected": "value"}, "validation_error"),
     ],
 )
-def test_ensure_rejects_unsupported_or_unbounded_requests(
+def test_ensure_rejects_unsupported_requests(
     body: dict[str, str], expected_code: str
 ) -> None:
-    response = _post(
-        _client(InMemoryCatalogRepository(), max_range_days=2),
-        body,
-    )
+    response = _post(_client(InMemoryCatalogRepository()), body)
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == expected_code
+
+
+def test_ensure_accepts_a_range_beyond_the_catalog_cap() -> None:
+    catalog = InMemoryCatalogRepository()
+    jobs = InMemoryJobRepository()
+    launched: list[EnsureJob] = []
+    client = _client(catalog, jobs, launcher=launched.append, max_range_days=366)
+
+    response = _post(
+        client,
+        _request(start_date="2022-01-03", end_date="2024-01-19"),
+    )
+
+    assert response.status_code == 202
+    assert response.json()["state"] == "complete"
+    assert len(launched) == 1
+    assert launched[0].request.start_date == date(2022, 1, 3)
+    assert launched[0].request.end_date == date(2024, 1, 19)
+    # The full multi-year window is planned in one job despite the configured
+    # catalog cap: every XNYS session in the range is a gap.
+    assert len(launched[0].gaps) > 366
+    assert launched[0].gaps[0].session_date == date(2022, 1, 3)
+    assert launched[0].gaps[-1].session_date == date(2024, 1, 19)
 
 
 def test_ensure_and_poll_require_authentication() -> None:

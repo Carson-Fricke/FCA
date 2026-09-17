@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import sys
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from threading import Event, Thread
@@ -34,7 +35,6 @@ from lake.http.routes.catalog import (
     CatalogCoverageResponse,
     CoverageEntryResponse,
     OptionCatalogCoverageResponse,
-    get_catalog_max_range_days,
     get_catalog_repository,
     get_coverage_as_of,
     get_option_contract_repository,
@@ -43,9 +43,14 @@ from lake.http.routes.catalog import (
     option_coverage_response,
 )
 
+# Ensure requests are unbounded: one request may cover any window, including
+# full history. The shared option planner still requires a cap argument, so
+# ensure passes one that can never bind.
+_UNBOUNDED_MAX_RANGE_DAYS = sys.maxsize
+
 
 class EnsureAcceptedResponse(StrictModel):
-    """A bounded ensure request that continues as an asynchronous job."""
+    """An ensure request that continues as an asynchronous job."""
 
     job_id: str
     state: JobState
@@ -132,7 +137,6 @@ def create_ensure_router() -> APIRouter:
         request: EnsureRequestBody,
         repository: Annotated[JobRepository, Depends(get_job_repository)],
         launcher: Annotated[EnsureJobLauncher, Depends(get_job_launcher)],
-        max_range_days: Annotated[int, Depends(get_catalog_max_range_days)],
         as_of: Annotated[datetime, Depends(get_coverage_as_of)],
         wait_deadline_seconds: Annotated[
             float, Depends(get_ensure_wait_deadline_seconds)
@@ -147,7 +151,7 @@ def create_ensure_router() -> APIRouter:
             DailyFrontSetRepository | None, Depends(get_option_front_set_repository)
         ],
     ) -> CatalogCoverageResponse | OptionCatalogCoverageResponse | JSONResponse:
-        """Return existing coverage or launch bounded asynchronous ensure work."""
+        """Return existing coverage or launch asynchronous ensure work."""
         try:
             if request.asset_class is AssetClass.OPTION:
                 return await _ensure_option(
@@ -157,7 +161,6 @@ def create_ensure_router() -> APIRouter:
                     launcher=launcher,
                     contract_repository=contract_repository,
                     front_set_repository=front_set_repository,
-                    max_range_days=max_range_days,
                     as_of=as_of,
                     wait_deadline_seconds=wait_deadline_seconds,
                 )
@@ -172,7 +175,6 @@ def create_ensure_router() -> APIRouter:
                     start_date=request.start_date,
                     end_date=request.end_date,
                 ),
-                max_range_days=max_range_days,
                 as_of=as_of,
                 wait_deadline_seconds=wait_deadline_seconds,
             )
@@ -226,7 +228,6 @@ async def _ensure_option(
     launcher: EnsureJobLauncher,
     contract_repository: ContractRepository | None,
     front_set_repository: DailyFrontSetRepository | None,
-    max_range_days: int,
     as_of: datetime,
     wait_deadline_seconds: float,
 ) -> OptionCatalogCoverageResponse | JSONResponse:
@@ -236,7 +237,7 @@ async def _ensure_option(
         request,
         contract_repository=contract_repository,
         front_set_repository=front_set_repository,
-        max_range_days=max_range_days,
+        max_range_days=_UNBOUNDED_MAX_RANGE_DAYS,
         as_of=as_of,
     )
     if all(entry.is_terminal for entry in report.entries):
@@ -294,7 +295,7 @@ async def _ensure_option(
             request,
             contract_repository=contract_repository,
             front_set_repository=front_set_repository,
-            max_range_days=max_range_days,
+            max_range_days=_UNBOUNDED_MAX_RANGE_DAYS,
             as_of=as_of,
         )
         if all(entry.is_terminal for entry in refreshed.entries):
