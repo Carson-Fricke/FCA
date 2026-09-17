@@ -251,9 +251,16 @@ def _development_runtime(
     runner = McpBacktestRunner(harness_tools)
     # Research models always compile to a ``study`` shell, so the falsification
     # phase must execute through ``run_study``; the backtest runner would reject
-    # the study configuration before any computation.
-    research_runner = BacktestResearchModelRunner(McpStudyRunner(harness_tools))
+    # the study configuration before any computation.  The durable workspace
+    # stores are bound to the runner itself: model publications, fits, and run
+    # records persist under the workspace models/ tree instead of an
+    # in-process store that dies with the API process.
     workspaces = LocalWorkspaceProvider(WORKSPACE_ROOT)
+    research_runner = BacktestResearchModelRunner(
+        McpStudyRunner(harness_tools),
+        models=WorkspaceResearchModelStore(workspaces),
+        indicators=WorkspaceIndicatorStore(workspaces),
+    )
     return build_workflow_runtime(
         role_policies={
             "research": policy("research"),
@@ -267,8 +274,6 @@ def _development_runtime(
         research_runner=research_runner,
         strategy_validator=_StructuralStrategyValidator(),
         hypothesis_store=WorkspaceHypothesisStore(WORKSPACE_ROOT),
-        indicator_store=WorkspaceIndicatorStore(workspaces),
-        research_model_store=WorkspaceResearchModelStore(workspaces),
         subagent_lifecycle=subagent_lifecycle,
     )
 

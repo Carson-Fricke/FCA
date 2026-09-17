@@ -323,8 +323,15 @@ def build_local_workflow_runtime(
         harness_tools=harness_tools,
         backtest_mode=backtest_mode,
         metadata=metadata,
-        research_model_store=research_model_store,
-        indicator_store=indicator_store,
+        # When the study-backed research runner was composed above it already
+        # owns the stores; forwarding them again beside the explicit runner is
+        # a composition error, so they are only forwarded for the default
+        # runner that ``build_workflow_runtime`` builds when no harness tools
+        # were supplied.
+        research_model_store=(
+            research_model_store if resolved_research_runner is None else None
+        ),
+        indicator_store=(indicator_store if resolved_research_runner is None else None),
         research_runner=resolved_research_runner,
     )
 

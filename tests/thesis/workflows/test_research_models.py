@@ -2,17 +2,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 from thesis.research.indicators import (
     IndicatorScope,
     InMemoryIndicatorStore,
     WorkspaceIndicator,
+    WorkspaceIndicatorStore,
 )
 from thesis.research.models import (
     IndicatorBinding,
     InMemoryResearchModelStore,
     ResearchModel,
+    WorkspaceResearchModelStore,
 )
 from thesis.workflows.backtests import (
     BacktestRunRequest,
@@ -41,6 +44,27 @@ class _Backtests:
                 }
             },
         )
+
+
+class _Paths:
+    """Workspace path provider rooted at a temporary directory."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def resolve_path(
+        self,
+        workspace_id: str,
+        relative_path: str | Path = ".",
+        *,
+        must_exist: bool = False,
+    ) -> Path:
+        boundary = (self.root / workspace_id).resolve(strict=False)
+        boundary.mkdir(parents=True, exist_ok=True)
+        path = (boundary / relative_path).resolve(strict=must_exist)
+        if not path.is_relative_to(boundary):
+            raise ValueError("escaped")
+        return path
 
 
 def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
@@ -126,6 +150,79 @@ def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
     assert bindings[0]["source"] == indicator.source
     dependencies = cast("Sequence[str]", request.bundle.dependencies)
     assert result.model_reference.key in dependencies
+
+
+def test_runner_persists_artifacts_through_workspace_stores(tmp_path: Path) -> None:
+    indicator = WorkspaceIndicator(
+        name="rolling_corr",
+        version="1.0.0",
+        description="Pair correlation.",
+        source="def calculate(context, parameters):\n    return 0.73\n",
+        tests={"test_indicator.py": "def test_indicator():\n    assert True\n"},
+    )
+    paths = _Paths(tmp_path)
+    indicators = WorkspaceIndicatorStore(paths)
+    published = indicators.publish("workspace-one", indicator)
+
+    # The binding carries only the content hash: resolution must go through
+    # the workspace store (binding.resolve -> store.load), never an inline
+    # definition.
+    binding = IndicatorBinding(
+        alias="pair_corr",
+        scope=IndicatorScope.WORKSPACE,
+        name="rolling_corr",
+        symbol="MSTR",
+        content_sha256=published.content_sha256,
+    )
+    reference = binding.resolve("workspace-one", indicators)
+    assert reference == published
+    assert indicators.load("workspace-one", reference) == indicator
+
+    model = ResearchModel(
+        model_id="pair-model",
+        version="1.0.0",
+        description="Pair regularity model.",
+        source=(
+            "def fit(context):\n"
+            "    return {'baseline': 0.5}\n\n"
+            "def observe(fit, context):\n"
+            "    return {'rolling_corr_60d_median': "
+            "context['indicators']['pair_corr']}\n"
+        ),
+        fit_entrypoint="fit",
+        observe_entrypoint="observe",
+        outputs=("rolling_corr_60d_median",),
+        harness_configuration={"symbols": ["MSTR", "IBIT"], "seed": 7},
+        indicators=(binding,),
+        tests={"test_model.py": "def test_model():\n    assert True\n"},
+    )
+    models = WorkspaceResearchModelStore(paths)
+    runner = BacktestResearchModelRunner(
+        _Backtests(),
+        models=models,
+        indicators=indicators,
+    )
+
+    result = runner.run(
+        ResearchModelRunRequest(
+            run_id="run-pair-model",
+            workspace_id="workspace-one",
+            model=model,
+            workflow_execution_id="execution-one",
+            experiment_id="experiment-one",
+        )
+    )
+
+    workspace = tmp_path / "workspace-one"
+    model_directory = workspace / result.model_reference.relative_path
+    assert (model_directory / "definition.json").is_file()
+    assert (model_directory / "model.py").read_text(encoding="utf-8") == model.source
+    assert result.fitted_reference is not None
+    assert (workspace / result.fitted_reference.relative_path).is_file()
+    assert result.workspace_artifact.startswith("models/runs/")
+    assert (workspace / result.workspace_artifact).is_file()
+    assert result.indicator_references[0].content_sha256 == indicator.content_sha256
+    assert models.load("workspace-one", result.model_reference) == model
 
 
 def test_runner_falls_back_to_request_universe_when_configuration_omits_symbols() -> (
