@@ -21,8 +21,11 @@ from thesis.agent.harness_tools import (
     HarnessToolProvider,
     HarnessToolResult,
 )
-from thesis.agent.router import ModelProfile, ModelResponse
+from thesis.agent.router import ModelProfile, ModelResponse, Role, RolePolicy
+from thesis.agent.skills import SkillRegistry
 from thesis.integrations.mcp import HarnessMcpClient, InProcessMcpTransport
+from thesis.research.indicators import InMemoryIndicatorStore
+from thesis.research.models import InMemoryResearchModelStore
 from thesis.strategies import StrategyBundle
 from thesis.workflows import (
     BacktestRunRequest,
@@ -31,9 +34,11 @@ from thesis.workflows import (
     WorkflowRuntime,
     WorkflowRuntimeError,
     build_local_workflow_runtime,
+    build_workflow_runtime,
 )
 from thesis.workflows.backtests import BacktestRunError, BacktestRunTimeout
 from thesis.workflows.local import McpStudyRunner
+from thesis.workflows.research_models import BacktestResearchModelRunner
 
 
 class FakeModelProvider:
@@ -335,6 +340,49 @@ def test_local_api_composes_a_study_backed_research_runner() -> None:
     assert "McpStudyRunner(" in source
     assert "BacktestResearchModelRunner(" in source
     assert "research_runner=research_runner" in source
+    # The runner owns the durable workspace stores so model publications,
+    # fits, and run records reach the workspace models/ tree instead of an
+    # in-process store.
+    assert "models=WorkspaceResearchModelStore(workspaces)" in source
+    assert "indicators=WorkspaceIndicatorStore(workspaces)" in source
+    # The stores are bound to the runner, not passed beside the explicit
+    # research runner (that composition now raises).
+    assert "indicator_store=WorkspaceIndicatorStore(workspaces)" not in source
+    assert "research_model_store=WorkspaceResearchModelStore(workspaces)" not in (
+        source
+    )
+
+
+def test_build_workflow_runtime_rejects_stores_beside_a_research_runner() -> None:
+    profiles = {
+        "local-openrouter": ModelProfile(
+            profile_id="local-openrouter",
+            version="1.0.0",
+            provider="openrouter",
+            model="test/model",
+        )
+    }
+    policies: dict[Role, RolePolicy] = {
+        role: RolePolicy(
+            role=role,
+            version="1.0.0",
+            model_profile="local-openrouter",
+            allowed_tools=(),
+        )
+        for role in ("research", "critique", "coding")
+    }
+
+    with pytest.raises(WorkflowRuntimeError, match="research_runner is omitted"):
+        build_workflow_runtime(
+            role_policies=policies,
+            model_profiles=profiles,
+            providers={"openrouter": FakeModelProvider()},
+            skills=SkillRegistry(),
+            runner=FakeRunner(),
+            research_runner=BacktestResearchModelRunner(FakeRunner()),
+            research_model_store=InMemoryResearchModelStore(),
+            indicator_store=InMemoryIndicatorStore(),
+        )
 
 
 def test_local_api_grants_the_coordinator_control_tools() -> None:

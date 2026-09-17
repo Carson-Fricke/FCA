@@ -175,7 +175,20 @@ def build_workflow_runtime(
     :class:`~thesis.agent.harness_tools.HarnessToolProvider` supplied here is
     held for composition consumers; tool dispatch happens through the unified
     session registry.
+
+    ``research_model_store``/``indicator_store`` feed the default
+    :class:`~thesis.workflows.research_models.BacktestResearchModelRunner` and
+    therefore apply only when ``research_runner`` is omitted; supplying them
+    beside an explicit runner is a composition error, never a silent ignore.
     """
+
+    if research_runner is not None and (
+        research_model_store is not None or indicator_store is not None
+    ):
+        raise WorkflowRuntimeError(
+            "research_model_store/indicator_store apply only when "
+            "research_runner is omitted"
+        )
 
     def _invocation_id() -> str:
         return id_factory("invocation")
