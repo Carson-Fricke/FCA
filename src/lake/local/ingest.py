@@ -2,22 +2,33 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 
-from lake.catalog.models import CoverageRecord, CoverageStatus
+from lake.catalog.models import CoverageRecord, CoverageStatus, canonical_symbol
 from lake.configuration import load_settings, load_universes
-from lake.coverage import CoverageSession, equity_sessions
+from lake.contracts import symbol_filename
+from lake.coverage import CoverageSession, crypto_sessions, equity_sessions
 from lake.ingestion.common import StagedParquetObject
+from lake.ingestion.crypto.transaction import CryptoIngestTransaction
 from lake.ingestion.equities.transaction import EquityIngestTransaction
 from lake.local.state import LocalCatalogRepository, LocalLayout
 from lake.providers.alpaca.client import AlpacaClient
-from lake.providers.alpaca.records import NormalizedQuote, NormalizedTrade
+from lake.providers.alpaca.records import (
+    NormalizedCryptoQuote,
+    NormalizedCryptoTrade,
+    NormalizedQuote,
+    NormalizedTrade,
+)
 from lake.storage.parquet import LocalFilesystemStore
 
 _DEFAULT_LOOKBACK_DAYS = 31
+#: Per-data-type record bound for a full historical session fetch. Sessions
+#: that exceed the bound are persisted as partial so a later ensure repairs
+#: them instead of silently sealing an incomplete session.
+_DEFAULT_SESSION_RECORD_CAP = 100_000
 
 
 class LocalIngestError(RuntimeError):
@@ -46,6 +57,28 @@ class AlpacaEquityProvider(Protocol):
     ) -> Sequence[NormalizedQuote]: ...
 
 
+class AlpacaCryptoProvider(Protocol):
+    """Crypto Alpaca surface kept injectable for fake-only tests."""
+
+    async def fetch_crypto_trades(
+        self,
+        pairs: str,
+        start: date | datetime | str,
+        end: date | datetime | str,
+        *,
+        limit: int = 10_000,
+    ) -> Sequence[NormalizedCryptoTrade]: ...
+
+    async def fetch_crypto_quotes(
+        self,
+        pairs: str,
+        start: date | datetime | str,
+        end: date | datetime | str,
+        *,
+        limit: int = 10_000,
+    ) -> Sequence[NormalizedCryptoQuote]: ...
+
+
 class LocalIngestCommitter:
     """Publish local objects before atomically replacing catalog JSON."""
 
@@ -69,7 +102,7 @@ class LocalIngestCommitter:
         self._catalog.upsert_many(coverage)
 
 
-class _BoundedProvider:
+class _BoundedEquityProvider:
     def __init__(self, provider: AlpacaEquityProvider, max_records: int) -> None:
         self._provider = provider
         self._max_records = max_records
@@ -92,6 +125,32 @@ class _BoundedProvider:
     ) -> Sequence[NormalizedQuote]:
         return await self._provider.fetch_quotes(
             symbol, start, end, max_records=self._max_records
+        )
+
+
+class _BoundedCryptoProvider:
+    def __init__(self, provider: AlpacaCryptoProvider, max_records: int) -> None:
+        self._provider = provider
+        self._max_records = max_records
+
+    async def get_crypto_trades(
+        self,
+        pair: str,
+        start: date | datetime | str,
+        end: date | datetime | str,
+    ) -> Sequence[NormalizedCryptoTrade]:
+        return await self._provider.fetch_crypto_trades(
+            pair, start, end, limit=self._max_records
+        )
+
+    async def get_crypto_quotes(
+        self,
+        pair: str,
+        start: date | datetime | str,
+        end: date | datetime | str,
+    ) -> Sequence[NormalizedCryptoQuote]:
+        return await self._provider.fetch_crypto_quotes(
+            pair, start, end, limit=self._max_records
         )
 
 
@@ -119,10 +178,6 @@ async def run_local_ingest(
     selected_symbol = (
         universes.equities.soak.symbols[0] if symbol is None else symbol.strip().upper()
     )
-    if selected_symbol not in universes.equities.soak.symbols:
-        raise ValueError(
-            f"symbol is not in the configured equity universe: {selected_symbol}"
-        )
     current_time = datetime.now(UTC) if now is None else _utc(now)
     # A record bound can truncate either dataset, so bounded ingests are partial.
     session = replace(_select_session(session_date, current_time), is_partial=True)
@@ -140,7 +195,7 @@ async def run_local_ingest(
         alpaca = provider
     try:
         result = await EquityIngestTransaction(
-            client=_BoundedProvider(alpaca, max_records),
+            client=_BoundedEquityProvider(alpaca, max_records),
             committer=committer,
         ).run(selected_symbol, session)
     finally:
@@ -174,6 +229,252 @@ async def run_local_ingest(
     }
 
 
+async def run_local_backfill(
+    *,
+    layout: LocalLayout,
+    symbols: Sequence[str],
+    start_date: date,
+    end_date: date,
+    max_records: int | None = None,
+    provider: AlpacaEquityProvider | None = None,
+    environ: Mapping[str, str] | None = None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """Fetch every closed equity session an arbitrary symbol set still misses.
+
+    Unlike :func:`run_local_ingest`, the symbol set is not restricted to the
+    configured soak universe: any canonical equity symbol may be requested.
+    Sessions with terminal coverage for every requested data type are skipped,
+    so a repeated ensure resumes from the catalog instead of refetching.
+    """
+    cap = _session_record_cap(max_records)
+    normalized = _normalize_symbols(symbols)
+    if end_date < start_date:
+        raise ValueError("start_date must be on or before end_date")
+    current_time = datetime.now(UTC) if now is None else _utc(now)
+    settings = load_settings(environ=environ)
+    if settings.provider.api_key is None or settings.provider.api_secret is None:
+        raise LocalIngestError(
+            "LAKE_PROVIDER__API_KEY and LAKE_PROVIDER__API_SECRET are required "
+            "for local backfill"
+        )
+
+    layout.initialize()
+    catalog = LocalCatalogRepository(layout.catalog)
+    committer = LocalIngestCommitter(
+        object_store=LocalFilesystemStore(layout.objects),
+        catalog=catalog,
+    )
+    owned_provider: AlpacaClient | None = None
+    if provider is None:
+        owned_provider = AlpacaClient.from_settings(settings.provider)
+        alpaca: AlpacaEquityProvider = owned_provider
+    else:
+        alpaca = provider
+
+    sessions = equity_sessions(start_date, end_date, as_of=current_time)
+    complete = _terminal_keys(catalog, start_date, end_date)
+    fetched: list[dict[str, object]] = []
+    failures: list[str] = []
+    try:
+        for symbol in normalized:
+            for session in sessions:
+                if _session_is_terminal(complete, symbol, session.session_date):
+                    continue
+                result = await EquityIngestTransaction(
+                    client=_BoundedEquityProvider(alpaca, cap),
+                    committer=committer,
+                ).run(symbol, session)
+                _remember(complete, result.coverage)
+                fetched.append(
+                    {
+                        "data_type_rows": {
+                            record.data_type.value: record.row_count
+                            for record in result.coverage
+                        },
+                        "session_date": result.session_date.isoformat(),
+                        "statuses": [record.status.value for record in result.coverage],
+                        "symbol": result.symbol,
+                    }
+                )
+                failures.extend(
+                    record.error_message or "provider request failed"
+                    for record in result.coverage
+                    if record.status is CoverageStatus.ERROR
+                )
+    finally:
+        if owned_provider is not None:
+            await owned_provider.aclose()
+
+    if failures:
+        raise LocalIngestError(f"Alpaca backfill failed: {failures[0]}")
+    return {
+        "data_root": str(layout.root),
+        "requested_end": end_date.isoformat(),
+        "requested_start": start_date.isoformat(),
+        "sessions": fetched,
+        "symbols": list(normalized),
+    }
+
+
+async def run_local_crypto_backfill(
+    *,
+    layout: LocalLayout,
+    pairs: Sequence[str],
+    start_date: date,
+    end_date: date,
+    max_records: int | None = None,
+    provider: AlpacaCryptoProvider | None = None,
+    environ: Mapping[str, str] | None = None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """Fetch every UTC day a crypto pair set still misses from Alpaca."""
+    cap = _session_record_cap(max_records)
+    normalized = _normalize_pairs(pairs)
+    if end_date < start_date:
+        raise ValueError("start_date must be on or before end_date")
+    current_time = datetime.now(UTC) if now is None else _utc(now)
+    settings = load_settings(environ=environ)
+    if settings.provider.api_key is None or settings.provider.api_secret is None:
+        raise LocalIngestError(
+            "LAKE_PROVIDER__API_KEY and LAKE_PROVIDER__API_SECRET are required "
+            "for local backfill"
+        )
+
+    layout.initialize()
+    catalog = LocalCatalogRepository(layout.catalog)
+    committer = LocalIngestCommitter(
+        object_store=LocalFilesystemStore(layout.objects),
+        catalog=catalog,
+    )
+    owned_provider: AlpacaClient | None = None
+    if provider is None:
+        owned_provider = AlpacaClient.from_settings(settings.provider)
+        alpaca: AlpacaCryptoProvider = owned_provider
+    else:
+        alpaca = provider
+
+    sessions = crypto_sessions(start_date, end_date, as_of=current_time)
+    complete = _terminal_keys(catalog, start_date, end_date)
+    fetched: list[dict[str, object]] = []
+    failures: list[str] = []
+    try:
+        for pair in normalized:
+            for session in sessions:
+                if _session_is_terminal(complete, pair, session.session_date):
+                    continue
+                result = await CryptoIngestTransaction(
+                    client=_BoundedCryptoProvider(alpaca, cap),
+                    committer=committer,
+                ).run(pair, session)
+                _remember(complete, result.coverage)
+                fetched.append(
+                    {
+                        "data_type_rows": {
+                            record.data_type.value: record.row_count
+                            for record in result.coverage
+                        },
+                        "session_date": result.session_date.isoformat(),
+                        "statuses": [record.status.value for record in result.coverage],
+                        "symbol": result.symbol,
+                    }
+                )
+                failures.extend(
+                    record.error_message or "provider request failed"
+                    for record in result.coverage
+                    if record.status is CoverageStatus.ERROR
+                )
+    finally:
+        if owned_provider is not None:
+            await owned_provider.aclose()
+
+    if failures:
+        raise LocalIngestError(f"Alpaca backfill failed: {failures[0]}")
+    return {
+        "asset_class": "crypto",
+        "data_root": str(layout.root),
+        "requested_end": end_date.isoformat(),
+        "requested_start": start_date.isoformat(),
+        "sessions": fetched,
+        "symbols": list(normalized),
+    }
+
+
+def _session_record_cap(max_records: int | None) -> int:
+    if max_records is None:
+        return _DEFAULT_SESSION_RECORD_CAP
+    if (
+        isinstance(max_records, bool)
+        or not isinstance(max_records, int)
+        or not 1 <= max_records <= 100_000
+    ):
+        raise ValueError("max_records must be between 1 and 100000")
+    return max_records
+
+
+def _normalize_symbols(symbols: Iterable[str]) -> tuple[str, ...]:
+    if isinstance(symbols, str):
+        raise TypeError("symbols must be a sequence of symbols")
+    normalized: list[str] = []
+    for value in symbols:
+        if not isinstance(value, str):
+            raise TypeError("symbols must contain strings")
+        canonical = canonical_symbol(value)
+        symbol_filename(canonical)
+        if canonical not in normalized:
+            normalized.append(canonical)
+    if not normalized:
+        raise ValueError("backfill requires at least one symbol")
+    return tuple(normalized)
+
+
+def _normalize_pairs(pairs: Iterable[str]) -> tuple[str, ...]:
+    if isinstance(pairs, str):
+        raise TypeError("pairs must be a sequence of pairs")
+    normalized: list[str] = []
+    for value in pairs:
+        if not isinstance(value, str):
+            raise TypeError("pairs must contain strings")
+        canonical = value.strip().upper()
+        if "/" not in canonical:
+            raise ValueError(f"invalid crypto pair: {value!r}")
+        symbol_filename(canonical)
+        if canonical not in normalized:
+            normalized.append(canonical)
+    if not normalized:
+        raise ValueError("backfill requires at least one crypto pair")
+    return tuple(normalized)
+
+
+def _terminal_keys(
+    catalog: LocalCatalogRepository, start: date, end: date
+) -> dict[tuple[str, date, object], CoverageStatus]:
+    return {
+        (record.symbol, record.session_date, record.data_type): record.status
+        for record in catalog.list(start=start, end=end)
+    }
+
+
+def _session_is_terminal(
+    keys: Mapping[tuple[str, date, object], CoverageStatus],
+    symbol: str,
+    session_date: date,
+) -> bool:
+    for data_type in ("trade", "quote"):
+        status = keys.get((symbol, session_date, data_type))
+        if status not in {CoverageStatus.COMPLETE, CoverageStatus.EMPTY}:
+            return False
+    return True
+
+
+def _remember(
+    keys: dict[tuple[str, date, object], CoverageStatus],
+    coverage: Sequence[CoverageRecord],
+) -> None:
+    for record in coverage:
+        keys[(record.symbol, record.session_date, record.data_type)] = record.status
+
+
 def _select_session(session_date: date | None, now: datetime) -> CoverageSession:
     if session_date is None:
         sessions = equity_sessions(
@@ -199,8 +500,11 @@ def _utc(value: datetime) -> datetime:
 
 
 __all__ = [
+    "AlpacaCryptoProvider",
     "AlpacaEquityProvider",
     "LocalIngestCommitter",
     "LocalIngestError",
+    "run_local_backfill",
+    "run_local_crypto_backfill",
     "run_local_ingest",
 ]

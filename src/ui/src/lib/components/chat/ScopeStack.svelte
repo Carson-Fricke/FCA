@@ -6,9 +6,9 @@
 	 * conversation → workflow → orchestrator → sub-agent → …
 	 *
 	 * Renders a breadcrumb with a back control; the host supplies the current
-	 * node's content through the default snippet. Hosted by the conversation
-	 * pane and by the standalone `/w/{workspace}/workflows/{execution_id}`
-	 * route, so entering/back behaves identically in both.
+	 * node's content through the default snippet. Hosted by the shared chat
+	 * surface, so entering/back behaves identically in the copilot pane and the
+	 * full conversations page.
 	 */
 	let {
 		segments = [],

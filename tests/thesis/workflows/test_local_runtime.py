@@ -17,6 +17,7 @@ import pytest
 from thesis.agent.context import PromptContext
 from thesis.agent.harness_tools import (
     HARNESS_TOOL_NAMES,
+    HarnessToolFailure,
     HarnessToolProvider,
     HarnessToolResult,
 )
@@ -31,6 +32,7 @@ from thesis.workflows import (
     WorkflowRuntimeError,
     build_local_workflow_runtime,
 )
+from thesis.workflows.backtests import BacktestRunError
 
 
 class FakeModelProvider:
@@ -73,6 +75,53 @@ class FakeHarnessTools:
     ) -> HarnessToolResult:
         self.calls.append((name, dict(arguments or {})))
         return self._result
+
+
+class SequencedHarnessTools:
+    """Return one result per expected MCP operation."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.status_calls = 0
+
+    def call_tool(
+        self, name: str, arguments: Mapping[str, object] | None = None
+    ) -> HarnessToolResult:
+        del arguments
+        self.calls.append(name)
+        if name == "run_backtest":
+            return HarnessToolResult(
+                tool=name,
+                ok=True,
+                structured={"run_id": "run-model", "state": "running"},
+            )
+        if name == "get_backtest_status":
+            self.status_calls += 1
+            return HarnessToolResult(
+                tool=name,
+                ok=True,
+                structured={
+                    "job_id": "run-model",
+                    "state": "running" if self.status_calls == 1 else "succeeded",
+                },
+            )
+        if name == "get_run":
+            return HarnessToolResult(
+                tool=name,
+                ok=True,
+                structured={
+                    "run_id": "run-model",
+                    "status": "complete",
+                    "metrics": {"rolling_corr_60d_median": "0.73"},
+                },
+            )
+        if name == "list_artifacts":
+            return HarnessToolResult(
+                tool=name,
+                ok=True,
+                structured={"artifacts": [{"name": "metrics.json"}]},
+            )
+        raise AssertionError(name)
 
 
 def _bundle() -> StrategyBundle:
@@ -161,6 +210,7 @@ def test_mcp_backtest_runner_maps_structured_result() -> None:
     runner = McpBacktestRunner(cast(HarnessToolProvider, tools))
     request = BacktestRunRequest(
         run_id="run-fallback",
+        workspace_id="workspace-demo",
         bundle=_bundle(),
         workflow_execution_id="execution-1",
         experiment_id="experiment-1",
@@ -192,6 +242,7 @@ def test_mcp_backtest_runner_defaults_state_from_exit_code() -> None:
     mapped = runner.run(
         BacktestRunRequest(
             run_id="run-fallback",
+            workspace_id="workspace-demo",
             bundle=_bundle(),
             workflow_execution_id="execution-1",
             experiment_id="experiment-1",
@@ -200,3 +251,57 @@ def test_mcp_backtest_runner_defaults_state_from_exit_code() -> None:
 
     assert mapped.job_id == "job-2"
     assert mapped.state == "succeeded"
+
+
+def test_mcp_backtest_runner_surfaces_launch_failure() -> None:
+    result = HarnessToolResult(
+        tool="run_backtest",
+        ok=False,
+        failure=HarnessToolFailure(
+            kind="tool",
+            message="research adapter could not load model source",
+            tool="run_backtest",
+        ),
+    )
+    runner = McpBacktestRunner(cast(HarnessToolProvider, FakeHarnessTools(result)))
+
+    with pytest.raises(BacktestRunError, match="could not load model source"):
+        runner.run(
+            BacktestRunRequest(
+                run_id="run-model",
+                workspace_id="workspace-demo",
+                bundle=_bundle(),
+                workflow_execution_id="execution-1",
+                experiment_id="experiment-1",
+            )
+        )
+
+
+def test_mcp_runner_polls_then_reads_custom_metrics_and_artifacts() -> None:
+    tools = SequencedHarnessTools()
+    runner = McpBacktestRunner(
+        cast(HarnessToolProvider, tools),
+        poll_interval_seconds=0,
+        sleep=lambda _: None,
+    )
+
+    result = runner.run(
+        BacktestRunRequest(
+            run_id="run-model",
+            workspace_id="workspace-demo",
+            bundle=_bundle(),
+            workflow_execution_id="execution-1",
+            experiment_id="experiment-1",
+        )
+    )
+
+    assert result.state == "complete"
+    assert result.metrics == {"rolling_corr_60d_median": "0.73"}
+    assert result.result_artifacts == [{"name": "metrics.json"}]
+    assert tools.calls == [
+        "run_backtest",
+        "get_backtest_status",
+        "get_backtest_status",
+        "get_run",
+        "list_artifacts",
+    ]

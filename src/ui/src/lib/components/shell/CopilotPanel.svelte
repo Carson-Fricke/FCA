@@ -1,19 +1,20 @@
 <script lang="ts">
-	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
-	import ChatStarters from '$lib/components/chat/ChatStarters.svelte';
-	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
+	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
-	import StreamingReply from '$lib/components/chat/StreamingReply.svelte';
 	import {
 		conversationTitleFrom,
 		createChat,
 		deleteChat,
+		getExecution,
 		listChats,
-		listMessages,
 		postMessage
 	} from '$lib/api';
-	import { ChatStreamController, appendMessage } from '$lib/chat-stream.svelte';
-	import type { ChatMessage, ChatThread, SteeringPercolationTarget } from '$lib/types';
+	import { TimelineController } from '$lib/timeline.svelte';
+	import type {
+		ChatThread,
+		SteeringPercolationTarget,
+		WorkflowExecutionRecord
+	} from '$lib/types';
 
 	/**
 	 * Collapsible right-hand assistant on every page except the full-page
@@ -36,27 +37,42 @@
 
 	let chats = $state<ChatThread[]>([]);
 	let chatId = $state<string | null>(null);
-	let messages = $state<ChatMessage[]>([]);
+	let drafting = $state(false);
+	let execution = $state<WorkflowExecutionRecord | null>(null);
 	let busy = $state(false);
 	let historyOpen = $state(false);
 	/** The conversation queued for modal delete confirmation. */
 	let deleteTarget = $state<ChatThread | null>(null);
 	let percolations = $state<Record<string, SteeringPercolationTarget[]>>({});
-	const chatStream = new ChatStreamController({
-		workspaceId: () => workspaceId,
-		onMessage: (message) => {
-			messages = appendMessage(messages, message);
-		}
-	});
+	const timeline = new TimelineController();
+	const messages = $derived(timeline.messages);
+	const events = $derived(timeline.events);
 
 	const activeThread = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
+	const DRAFT_CHAT_ID = '__draft_conversation__';
+	function draftThread(): ChatThread {
+		return {
+			chat_id: DRAFT_CHAT_ID,
+			workspace_id: workspaceId,
+			title: 'New conversation',
+			state: 'active',
+			kind: 'chat',
+			owner_actor_id: 'local-operator',
+			created_at: new Date().toISOString(),
+			updated_at: null,
+			investigation_ids: [],
+			strategy_ids: []
+		};
+	}
+	const visibleChats = $derived(drafting ? [draftThread(), ...chats] : chats);
+	const selectedThread = $derived(drafting ? draftThread() : activeThread);
 
 	$effect(() => {
 		let cancelled = false;
 		listChats(workspaceId).then((items) => {
 			if (cancelled) return;
 			chats = items;
-			chatId = items[0]?.chat_id ?? null;
+			if (!drafting) chatId = items[0]?.chat_id ?? null;
 		});
 		return () => {
 			cancelled = true;
@@ -66,29 +82,26 @@
 	$effect(() => {
 		const id = chatId;
 		if (!id) {
-			messages = [];
-			chatStream.stop();
+			execution = null;
+			timeline.stop();
 			return;
 		}
 		let cancelled = false;
-		// Dedupe the snapshot against any live frames received while the
-		// re-fetch is in flight, so a `chat.message` anchor is never lost.
-		messages = [];
-		listMessages(workspaceId, id).then((items) => {
-			if (cancelled) return;
-			for (const item of items) messages = appendMessage(messages, item);
+		timeline.start(workspaceId, id);
+		getExecution(workspaceId, id).then((exec) => {
+			if (!cancelled) execution = exec;
 		});
-		chatStream.start(id);
 		return () => {
 			cancelled = true;
-			chatStream.stop();
+			timeline.stop();
 		};
 	});
 
 	/** Start a draft conversation; it persists only when the first message is sent. */
 	function newConversation(): void {
+		timeline.reset();
+		drafting = true;
 		chatId = null;
-		messages = [];
 		historyOpen = false;
 		deleteTarget = null;
 	}
@@ -99,7 +112,7 @@
 			chats = chats.filter((thread) => thread.chat_id !== id);
 			if (chatId === id) {
 				chatId = chats[0]?.chat_id ?? null;
-				messages = [];
+				drafting = false;
 			}
 		} catch {
 			// surfaced by toast in the full conversations view; copilot stays quiet
@@ -132,8 +145,10 @@
 			if (created) {
 				chats = [created, ...chats];
 				chatId = created.chat_id;
+				drafting = false;
 			}
-			messages = [...messages, result.message];
+			// The unified timeline stream delivers the persisted message; do not
+			// append locally or it would duplicate.
 			if (result.percolated.length) {
 				percolations = {
 					...percolations,
@@ -155,9 +170,9 @@
 	<div class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
 		<span class="text-accent" aria-hidden="true">✦</span>
 		<h2 class="text-sm font-semibold text-slate-800">Copilot</h2>
-		{#if activeThread}
+		{#if selectedThread}
 			<span class="ml-1 min-w-0 truncate text-[11px] text-slate-500">
-				{activeThread.title}
+				{selectedThread.title}
 			</span>
 		{/if}
 		<div class="ml-auto flex items-center gap-1">
@@ -224,16 +239,22 @@
 				</button>
 			</div>
 			<div class="min-h-0 flex-1 space-y-2 overflow-y-auto">
-				{#each chats as thread (thread.chat_id)}
+				{#each visibleChats as thread (thread.chat_id)}
 					<div class="group relative">
 						<button
 							type="button"
-							class="w-full rounded-lg border border-surface-700 bg-surface-950 p-3 pr-9 text-left transition hover:border-accent/40 hover:bg-surface-800 {thread.chat_id ===
-							chatId
+							class="w-full rounded-lg border border-surface-700 bg-surface-950 p-3 pr-9 text-left transition hover:border-accent/40 hover:bg-surface-800 {(drafting &&
+							thread.chat_id === DRAFT_CHAT_ID) ||
+							(!drafting && thread.chat_id === chatId)
 								? 'border-accent/50'
 								: ''}"
 							onclick={() => {
-								chatId = thread.chat_id;
+								if (thread.chat_id === DRAFT_CHAT_ID) {
+									newConversation();
+								} else {
+									chatId = thread.chat_id;
+									drafting = false;
+								}
 								historyOpen = false;
 								deleteTarget = null;
 							}}
@@ -244,6 +265,7 @@
 								<p class="mt-1 text-[10px] text-slate-500">Scoped to {workspaceName}</p>
 							{/if}
 						</button>
+						{#if thread.chat_id !== DRAFT_CHAT_ID}
 						<button
 							type="button"
 							class="absolute top-2 right-2 hidden rounded p-1 text-slate-500 transition group-hover:block hover:text-loss"
@@ -269,6 +291,7 @@
 								<path d="M10 11v6M14 11v6" />
 							</svg>
 						</button>
+						{/if}
 					</div>
 				{:else}
 					<p class="px-1 py-4 text-center text-xs text-slate-500">
@@ -279,34 +302,19 @@
 		</div>
 	{/if}
 
-	<div class="min-h-0 flex-1 overflow-y-auto p-3">
-		{#if !messages.length && !chatStream.active}
-			<div class="mb-3">
-				<p class="mb-2 text-xs text-slate-500">Start with a suggestion, or ask anything.</p>
-				<ChatStarters
-					onSelect={(prompt) =>
-						send({ body: prompt, attachmentIds: [], steeringIntent: null })}
-					disabled={busy}
-				/>
-			</div>
-		{/if}
-		<ChatTranscript
-			{messages}
-			{workspaceId}
-			{percolations}
-			proposal={null}
-			onConfirmConsent={undefined}
-			onRejectConsent={undefined}
-		/>
-		<StreamingReply
-			active={chatStream.active}
-			text={chatStream.streamingText}
-			reasoning={chatStream.streamingReasoning}
-			testId="copilot-streaming-reply"
-		/>
-	</div>
-
-	<ChatComposer onSubmit={send} activeExecutionId={null} {busy} />
+	<ChatSurface
+		{workspaceId}
+		{chatId}
+		{messages}
+		{events}
+		{execution}
+		{percolations}
+		proposal={null}
+		{busy}
+		onSend={send}
+		hostId="copilot"
+		rootLabel={selectedThread?.title ?? 'Conversation'}
+	/>
 </aside>
 
 {#if deleteTarget}

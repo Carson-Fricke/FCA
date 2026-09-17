@@ -683,9 +683,9 @@ export function replayExecutionEvents(
 			return plain(items).filter((e) => e.cursor > afterCursor);
 		});
 	}
-	return apiFetch<{ items: ExecutionEvent[] }>(
+	return apiFetch<{ events: ExecutionEvent[] }>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}/events?after_cursor=${afterCursor}`
-	).then((r) => r.items);
+	).then((r) => r.events);
 }
 
 // ---------------------------------------------------------------------------
@@ -711,6 +711,30 @@ export function executionNodeBase(
 }
 
 /**
+ * Normalize the backend's snake_case sub-agent record to the camelCase UI
+ * contract. The hierarchy route serializes `SubAgentNode.as_dict()`, so the
+ * field names differ from the transport type the UI consumes.
+ */
+function toSubAgentNode(raw: Record<string, unknown>): SubAgentNode {
+	const context = (raw.context as SubAgentNode['context'] | undefined) ?? {
+		isolated: false,
+		knowledge_cutoff: null,
+		mcp: { enabled: false, tools: [] }
+	};
+	return {
+		subAgentId: String(raw.subAgentId ?? raw.sub_agent_id ?? ''),
+		parentSubAgentId: (raw.parentSubAgentId ?? raw.parent_sub_agent_id ?? null) as
+			| string
+			| null,
+		phase: String(raw.phase ?? ''),
+		role: String(raw.role ?? ''),
+		status: String(raw.status ?? 'running') as SubAgentNode['status'],
+		acceptsInput: Boolean(raw.acceptsInput ?? raw.accepts_input ?? false),
+		context
+	};
+}
+
+/**
  * List one execution node's direct sub-agents. Omit `parentSubAgentId` for
  * the root execution's children; provide it to read a nested node's children.
  */
@@ -723,9 +747,9 @@ export function listExecutionSubAgents(
 		? ({ kind: 'sub_agent', id: options.parentSubAgentId } as ExecutionNodeRef)
 		: null;
 	if (fixtureMode) return wait(5).then(() => []);
-	return apiFetch<{ items: SubAgentNode[] }>(
+	return apiFetch<{ items: Record<string, unknown>[] }>(
 		`${executionNodeBase(workspaceId, executionId, parent)}/sub_agents`
-	).then((r) => r.items);
+	).then((r) => r.items.map(toSubAgentNode));
 }
 
 /** Read one page of an execution node's durable events. */
@@ -745,7 +769,7 @@ export function listNodeEvents(
 			return plain(items).filter((e) => e.cursor > afterCursor);
 		});
 	}
-	return apiFetch<{ items: ExecutionEvent[] }>(path).then((r) => r.items);
+	return apiFetch<{ events: ExecutionEvent[] }>(path).then((r) => r.events);
 }
 
 export interface PostNodeMessageInput {
@@ -773,24 +797,30 @@ export function postNodeMessage(
 			chat_id: '',
 			workspace_id: workspaceId,
 			actor_id: input.actorId ?? localActorId,
-			role: 'user',
+			role: 'user' as const,
 			body: input.body,
 			state: 'accepted',
 			attachment_ids: [],
 			created_at: new Date().toISOString(),
 			updated_at: null,
 			execution_id: executionId,
-			intent_epoch: 0
+			intent_epoch: 0,
+			kind: 'sub_agent' as const,
+			data: { subAgentId: node.id, executionId }
 		}));
 	}
-	return apiFetch<ChatMessage>(path, {
+	return apiFetch<ChatMessage & { subAgentId?: string }>(path, {
 		method: 'POST',
 		body: JSON.stringify({
 			actor_id: input.actorId ?? localActorId,
 			body: input.body,
 			metadata: input.metadata ?? {}
 		})
-	});
+	}).then((raw) => ({
+		...raw,
+		kind: 'sub_agent' as const,
+		data: { ...(raw.data ?? {}), subAgentId: raw.subAgentId ?? node.id }
+	}));
 }
 
 /** Fetch one workflow execution record by its execution id. */

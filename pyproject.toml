@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Financial data and quantitative trading platform"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "azure-cosmos>=4.9",
     "azure-data-tables>=12.5",
     "azure-identity>=1.17",
     "azure-storage-blob>=12.22",

@@ -80,11 +80,13 @@ adapters, and orchestration details stay behind those boundaries.
 | `harness.configuration` | Strict API, backtest, and trader configuration; runtime-only secret references; canonical cross-machine hashes. |
 | `harness.core` | Decimal-safe records, deterministic IDs, explicit clocks, and the synchronous event queue and bus. |
 | `harness.data` | Point-in-time market-data views retained for the plugin surface and products: exact OHLCV bar derivation, the engine-clocked history and strategy-history capabilities, derived listing lifecycle events, the point-in-time option contract universe with DTE/strike/moneyness filters, the SecurityMaster listings view, and the composite universe view. Live and replay ingestion moved to the Rust `marketdata` and `backtest` crates. |
-| `harness.indicators` | Tick-native indicators, the deterministic router, and cross-mode snapshot/resume semantics. |
+| `harness.indicators` | Immutable global built-in indicator registry, tick-native indicators, deterministic routing, and cross-mode snapshot/resume semantics. |
+| `harness.research` | Restricted-namespace statistical model and workspace-indicator evaluation over plain historical event data; the platform adapter publishes finite named run metrics without exposing order capabilities to workspace source. |
 | `harness.screening` | Process-isolated execution sandbox for custom screener filters. |
 | `harness.strategy` | Mode-independent strategy callbacks (`Strategy`, `CALLBACK_ORDER`), the protocol-only `StrategyContext` surface, the sandbox lint, and the callback-contract reference fixture. The engine-bound context and binding were deleted; the native Rust context replaces them. See `## Strategy Contract` for the implemented loading, dispatch, and context surface. |
 | `harness.testing` | Canonical artifact support, the Rust-core parity oracle, and the cross-mode tick-indicator parity oracle. |
 | `lake.operations` | Daily coverage and budget report: freshness, failure, queue-age, storage, and budget summaries with an injectable alert channel and the `lake operations` operator command. |
+| `lake.local` | Local-only composition over filesystem state: the deterministic Hive layout and catalog, the bounded single-session ingest, and the arbitrary-symbol ranged ensure/backfill that fetches a requested symbol set on demand instead of failing because it was never ingested. |
 
 `harness.oms`, `harness.fills`, `harness.portfolio`, `harness.risk`,
 `harness.venues`, `harness.results`, `harness.sweeps`, `harness.http`,
@@ -197,7 +199,12 @@ A strategy is an unmodified Python class loaded from configuration as
   portfolio mutation.
 - Context. The native `PyEngineContext` supplies `book_id`, `clock`, `universe`,
   `books`, `orders`, `state`, `random`, `log`, `emissions`, and `emit`
-  (`src/harness/host/src/context.rs`). The protocol in `harness.strategy`
+  (`src/harness/host/src/context.rs`). It also supplies
+  `publish_metric(name, value)`, which accepts a finite numeric value under a
+  non-reserved stable name. Repeated publication replaces the prior value;
+  final values are written to `metrics.json.custom`, `backtest.json`, the
+  recorder's `emissions.parquet`, and the local/HTTP run catalog. Metric names
+  are run outputs, not indicator registrations. The protocol in `harness.strategy`
   additionally declares `data`/`history`, which the native host does not yet
   supply. `orders.cancel` is a no-op and `orders.replace` records a new
   submission rather than cancelling the original.
@@ -263,7 +270,14 @@ workflow boundary; `thesis.agent` owns policy-driven model context and
 provenance; `thesis.integrations` owns lake and harness adapters;
 `thesis.identity` owns durable accounts, one-time invite links, and
 server-side sessions for the invite-only public release (ADR-001);
-`thesis.strategies` owns content-addressed strategy bundles; `thesis.artifacts`
+`thesis.research` owns content-addressed research models, explicit
+`IndicatorRef` scope, and workspace indicator publication. The immutable
+global indicator registry remains in `harness.indicators`; workspace indicator
+source is published under `indicators/<name>/<content-sha>/` and never mutates
+or shadows that registry. Research models are published under
+`models/<model-id>/<content-sha>/`, compose explicitly scoped indicator refs,
+and publish each run's evidence under `models/runs/`. `thesis.strategies` owns
+content-addressed strategy bundles; `thesis.artifacts`
 owns reproducibility-critical result imports; `thesis.backtests` imports
 completed harness runs into workspace backtest records (equity, trades, stats)
 linked to the originating chat and workflow execution; and `thesis.providers`

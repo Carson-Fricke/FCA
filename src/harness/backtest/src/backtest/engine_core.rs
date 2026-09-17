@@ -826,6 +826,11 @@ pub trait StrategyRuntime {
     fn on_stop(&mut self) -> Result<(), BacktestError> {
         Ok(())
     }
+    /// Return the latest finite numeric run metrics published by this runtime.
+    #[must_use]
+    fn published_metrics(&self) -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
 }
 
 /// Explicit knobs for one native engine run.
@@ -883,6 +888,8 @@ pub struct BacktestOutcome {
     pub teardown_errors: Vec<String>,
     /// Lookahead violations.
     pub lookahead_violations: Vec<String>,
+    /// Custom finite numeric observations published by research or strategy code.
+    pub custom_metrics: BTreeMap<String, String>,
 }
 
 impl BacktestOutcome {
@@ -895,7 +902,7 @@ impl BacktestOutcome {
     /// Return the canonical, JSON-ready run artifacts.
     #[must_use]
     pub fn artifacts(&self) -> JsonValue {
-        JsonValue::object([
+        let mut entries = vec![
             ("manifest", self.manifest.to_json()),
             ("status", JsonValue::string(self.status.value())),
             (
@@ -945,7 +952,18 @@ impl BacktestOutcome {
                 "risk",
                 JsonValue::Array(self.risk_decisions.iter().map(risk_json).collect()),
             ),
-        ])
+        ];
+        if !self.custom_metrics.is_empty() {
+            entries.push((
+                "custom_metrics",
+                JsonValue::object(
+                    self.custom_metrics
+                        .iter()
+                        .map(|(name, value)| (name.clone(), JsonValue::String(value.clone()))),
+                ),
+            ));
+        }
+        JsonValue::object(entries)
     }
 
     /// Return the stable byte-for-byte artifact document for this run.
@@ -1334,9 +1352,23 @@ pub fn run_native_engine(
 
     let mut stopped = Vec::new();
     let mut teardown_errors = Vec::new();
+    let mut custom_metrics = BTreeMap::new();
+    let mut metric_owners = BTreeMap::new();
     for instance in &mut strategies {
         if let Err(error) = instance.runtime.on_stop() {
             teardown_errors.push(error.to_string());
+        }
+        for (name, value) in instance.runtime.published_metrics() {
+            if let Some(owner) = metric_owners.get(&name) {
+                teardown_errors.push(format!(
+                    "custom metric {name:?} was published by both {owner:?} and {:?}",
+                    instance.instance_id
+                ));
+                custom_metrics.remove(&name);
+                continue;
+            }
+            metric_owners.insert(name.clone(), instance.instance_id.clone());
+            custom_metrics.insert(name, value);
         }
         stopped.push(instance.instance_id.clone());
     }
@@ -1362,6 +1394,7 @@ pub fn run_native_engine(
         stopped_strategies: stopped,
         teardown_errors,
         lookahead_violations: Vec::new(),
+        custom_metrics,
     })
 }
 

@@ -41,9 +41,11 @@ impl BacktestRunner for StubRunner {
             "{{\"manifest\":{{\"run_id\":\"{}\"}},\"status\":\"completed\"}}",
             configuration.run_id
         );
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert("backtest.json".to_string(), body.into_bytes());
         Ok(RunOutcome {
             completed: true,
-            artifact_json: body.into_bytes(),
+            artifacts,
         })
     }
 }
@@ -891,5 +893,74 @@ async fn native_engine_launch_reaches_a_terminal_state() {
         "native-api-run"
     );
 
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn native_research_metrics_are_queryable_over_http() {
+    let root = temp_root("native-research");
+    let router = durable_router(
+        &root,
+        Arc::new(api::http::native::NativeBacktestRunner::default()),
+    );
+    let model_source = "def fit(context):\n    return {'baseline': 0.5}\n\ndef observe(fit, context):\n    return {'trade_observations': len(context['trades'])}\n";
+    let document = json!({
+        "schema_version": 1,
+        "shell": "backtest",
+        "run_id": "native-research-run",
+        "start": "2024-01-02T14:30:00Z",
+        "end": "2024-01-04T21:00:00Z",
+        "seed": 7,
+        "data": {"symbols": ["SPY"]},
+        "strategy_instances": [{
+            "instance_id": "research-model",
+            "implementation": "harness.research.adapter:ResearchModelAdapter",
+            "bundle_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "capital_fraction": "1.0",
+            "symbols": ["SPY"],
+            "parameters": {
+                "model_source": model_source,
+                "model_fit_entrypoint": "fit",
+                "model_observe_entrypoint": "observe",
+                "indicators": []
+            }
+        }]
+    });
+
+    let (status, _, body) = send(
+        &router,
+        post_json("/v1/backtests/jobs", Some(BEARER), document),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(json_body(&body)["state"], "succeeded");
+
+    let (run_status, _, run_body) = send(
+        &router,
+        get_auth("/v1/backtests/runs/native-research-run", BEARER),
+    )
+    .await;
+    assert_eq!(run_status, StatusCode::OK);
+    let observed = json_body(&run_body)["metrics"]["trade_observations"]
+        .as_str()
+        .and_then(|value| value.parse::<f64>().ok())
+        .expect("custom metric");
+    assert!(observed > 0.0);
+
+    let (artifact_status, _, artifact_body) = send(
+        &router,
+        get_auth(
+            "/v1/backtests/runs/native-research-run/artifacts/metrics.json",
+            BEARER,
+        ),
+    )
+    .await;
+    assert_eq!(artifact_status, StatusCode::OK);
+    assert_eq!(
+        json_body(&artifact_body)["custom"]["trade_observations"]
+            .as_str()
+            .and_then(|value| value.parse::<f64>().ok()),
+        Some(observed)
+    );
     let _ = std::fs::remove_dir_all(&root);
 }

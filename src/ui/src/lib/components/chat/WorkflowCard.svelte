@@ -5,27 +5,24 @@
 	 * Transcript item of kind `workflow`.
 	 *
 	 * A compact card: status chip, phase stepper, and a live summary. Clicking
-	 * the card body enters the current phase orchestrator in-pane; the
-	 * `↗ Open full page` link opens the standalone workflow route. Clicking a
-	 * completed phase in the stepper enters that finished orchestrator
-	 * read-only.
+	 * the card body enters the current phase orchestrator in-pane; clicking a
+	 * phase enters that phase's governing sub-agent (read-only when finished).
 	 */
 	let {
 		execution = null,
 		phases = [],
 		status = 'running',
 		summary = '',
-		fullPageHref = null,
-		onEnterPhase = () => {},
-		onOpenFullPage
+		attentionPhases = [],
+		onEnterPhase = () => {}
 	}: {
 		execution?: WorkflowExecutionRecord | null;
 		phases?: WorkflowPhase[];
 		status?: string;
 		summary?: string;
-		fullPageHref?: string | null;
+		/** Phases whose governing agent is blocked waiting on operator input. */
+		attentionPhases?: string[];
 		onEnterPhase?: (phase: string, options: { readOnly: boolean }) => void;
-		onOpenFullPage?: () => void;
 	} = $props();
 
 	const TONE: Record<string, string> = {
@@ -80,6 +77,15 @@
 			{#if summary}
 				<p class="mt-1 text-xs text-slate-500" data-testid="workflow-card-summary">{summary}</p>
 			{/if}
+			{#if attentionPhases.length}
+				<p
+					class="mt-1 flex items-center gap-1.5 text-xs font-semibold text-warn"
+					data-testid="workflow-card-needs-input"
+				>
+					<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" aria-hidden="true"></span>
+					Input needed for {attentionPhases.join(', ')} — open the phase to answer.
+				</p>
+			{/if}
 		</div>
 		<span class="mt-0.5 text-xs text-slate-500" aria-hidden="true">›</span>
 	</button>
@@ -97,49 +103,40 @@
 					{/if}
 					<button
 						type="button"
-						class="rounded-full border px-2 py-0.5 font-mono text-[10px] transition disabled:cursor-not-allowed disabled:opacity-40
-							{phase.status === 'active'
-							? 'border-accent/50 bg-accent/10 text-accent'
+						class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10px] transition disabled:cursor-not-allowed
+							{attentionPhases.includes(phase.name)
+							? 'border-warn/60 bg-warn/10 text-warn'
+							: phase.status === 'active'
+							? 'border-warn/60 bg-warn/10 text-warn'
 							: phase.status === 'done'
-								? 'border-surface-600 text-slate-500 hover:border-accent/40 hover:text-accent'
-								: 'border-surface-700 text-slate-500'}"
+								? 'border-profit/50 bg-profit/10 text-profit hover:border-profit/70'
+								: 'border-surface-700 bg-surface-800/40 text-slate-500 opacity-50'}"
 						disabled={phase.status === 'pending'}
 						onclick={() => onEnterPhase(phase.name, { readOnly: phase.status === 'done' })}
 						data-testid="phase-step"
 						data-phase={phase.name}
 						data-status={phase.status}
-						title={phase.status === 'done'
-							? `View finished ${phase.name} orchestrator (read-only)`
-							: `Enter ${phase.name} orchestrator`}
+						data-attention={attentionPhases.includes(phase.name) ? 'true' : 'false'}
+						title={attentionPhases.includes(phase.name)
+							? `Input needed — enter the ${phase.name} agent to answer`
+							: phase.status === 'done'
+								? `View finished ${phase.name} orchestrator (read-only)`
+								: `Enter ${phase.name} orchestrator`}
 					>
-						{phase.name}
+						{#if phase.status === 'active'}
+							<span
+								class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn"
+								aria-hidden="true"
+								data-testid="phase-liveness"
+							></span>
+						{/if}
+						{phase.name.replace(/_/g, ' ')}
+						{#if (phase.attempts ?? 0) > 1}
+							<span class="text-[9px] opacity-75">· attempt {phase.attempts}</span>
+						{/if}
 					</button>
 				</li>
 			{/each}
 		</ol>
-	{/if}
-
-	{#if fullPageHref || onOpenFullPage}
-		<div class="border-t border-surface-700 px-3 py-1.5">
-			{#if fullPageHref}
-				<a
-					href={fullPageHref}
-					class="text-[11px] text-accent hover:underline"
-					data-testid="workflow-open-full"
-					onclick={() => onOpenFullPage?.()}
-				>
-					↗ Open full page
-				</a>
-			{:else}
-				<button
-					type="button"
-					class="text-[11px] text-accent hover:underline"
-					data-testid="workflow-open-full"
-					onclick={() => onOpenFullPage?.()}
-				>
-					↗ Open full page
-				</button>
-			{/if}
-		</div>
 	{/if}
 </section>

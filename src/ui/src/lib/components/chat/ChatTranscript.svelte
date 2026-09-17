@@ -4,10 +4,12 @@
 	import ThinkingAccordion from './ThinkingAccordion.svelte';
 	import ToolResultCard from './ToolResultCard.svelte';
 	import WorkflowCard from './WorkflowCard.svelte';
+	import { derivePhases, executionEvents, projectExecution } from '$lib/subagent';
 	import type {
 		ChatMessage,
 		ConsentConfirmation,
 		ConsentProposal,
+		ExecutionEvent,
 		SteeringPercolationTarget,
 		WorkflowExecutionRecord,
 		WorkflowPhase
@@ -24,11 +26,12 @@
 	 * A `kind=workflow` item renders as the live `WorkflowCard`: both panes
 	 * append the anchor through the shared chat stream, so the card appears
 	 * without a reload. Callers may pass the live `execution`/`phases` so the
-	 * anchor upgrades to the current phase state and full enter/link
-	 * affordances; otherwise the card is derived from the anchor's own `data`.
+	 * anchor upgrades to the current phase state and enter affordances;
+	 * otherwise the card is derived from the anchor's own `data`.
 	 */
 	let {
 		messages,
+		events = [],
 		workspaceId,
 		percolations = {},
 		proposal = null,
@@ -37,10 +40,11 @@
 		consentBusy = false,
 		execution = null,
 		phases = [],
-		onEnterPhase = () => {},
-		fullPageHref = null
+		attentionPhases = [],
+		onEnterPhase = () => {}
 	}: {
 		messages: ChatMessage[];
+		events?: ExecutionEvent[];
 		workspaceId: string;
 		percolations?: Record<string, SteeringPercolationTarget[]>;
 		proposal?: ConsentProposal | null;
@@ -49,19 +53,19 @@
 		consentBusy?: boolean;
 		execution?: WorkflowExecutionRecord | null;
 		phases?: WorkflowPhase[];
+		attentionPhases?: string[];
 		onEnterPhase?: (phase: string, options: { readOnly: boolean }) => void;
-		fullPageHref?: string | null;
 	} = $props();
 
 	const isUser = (role: string) => role === 'user';
+	const rootMessages = $derived(messages.filter((message) => message.kind !== 'sub_agent'));
 
 	/** The live execution when it matches the anchor, else a minimal record. */
 	function anchorExecution(message: ChatMessage): WorkflowExecutionRecord | null {
 		const data = message.data ?? {};
 		const executionId = String(data.executionId ?? message.execution_id ?? '');
-		if (execution && execution.execution_id === executionId) return execution;
 		if (!executionId) return null;
-		return {
+		const snapshot = execution && execution.execution_id === executionId ? execution : {
 			execution_id: executionId,
 			chat_id: message.chat_id,
 			trigger_message_id: message.message_id,
@@ -74,6 +78,7 @@
 			steering_message_ids: [],
 			created_at: message.created_at
 		};
+		return projectExecution(snapshot, executionEvents(events, executionId));
 	}
 
 	function anchorPhases(message: ChatMessage): WorkflowPhase[] {
@@ -81,36 +86,34 @@
 		if (execution && anchor && execution.execution_id === anchor.execution_id) {
 			return phases;
 		}
-		return anchor?.phase ? [{ name: anchor.phase, status: 'active' }] : [];
+		if (!anchor) return [];
+		const derived = derivePhases(executionEvents(events, anchor.execution_id));
+		return derived.length ? derived : (anchor.phase ? [{ name: anchor.phase, status: 'active' }] : []);
 	}
 
 	function anchorStatus(message: ChatMessage): string {
-		const data = message.data ?? {};
-		return String(data.status ?? anchorExecution(message)?.state ?? 'running');
+		return String(anchorExecution(message)?.state ?? message.data?.status ?? 'running');
 	}
 
 	function anchorSummary(message: ChatMessage): string {
-		const data = message.data ?? {};
-		const phase = data.currentPhase == null ? null : String(data.currentPhase);
-		return phase ? `Current phase ${phase}` : (String(data.title ?? '') || 'Workflow launched');
-	}
-
-	function anchorHref(message: ChatMessage): string | null {
-		if (fullPageHref) return fullPageHref;
-		const executionId = anchorExecution(message)?.execution_id;
-		return executionId ? `/w/${workspaceId}/workflows/${executionId}` : null;
+		const phase = anchorExecution(message)?.phase;
+		return phase
+			? `Current phase ${phase}`
+			: (String(message.data?.title ?? '') || 'Workflow launched');
 	}
 </script>
 
 <div class="space-y-3" data-testid="chat-transcript">
-	{#each messages as message (message.message_id)}
+	{#each rootMessages as message (message.message_id)}
 		{#if message.kind === 'workflow'}
 			<WorkflowCard
 				execution={anchorExecution(message)}
 				phases={anchorPhases(message)}
 				status={anchorStatus(message)}
 				summary={anchorSummary(message)}
-				fullPageHref={anchorHref(message)}
+				attentionPhases={execution?.execution_id === anchorExecution(message)?.execution_id
+					? attentionPhases
+					: []}
 				{onEnterPhase}
 			/>
 		{:else if message.role === 'tool'}

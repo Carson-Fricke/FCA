@@ -1,13 +1,15 @@
 # Thesis Local Stack
 
 Run the complete Thesis stack locally with no Azure dependency: the
-quant-harness API (`harness api`), the Thesis API (workspace data routes with
-chat/SSE), and the Svelte UI in real mode. The provider behind the Thesis
-model calls is either OpenRouter (env key) or Azure AI Foundry (preflight);
-both are optional for the connectivity chain this runbook verifies. This is a
-local loopback stack: bearer credential names below are references, never
-values — never echo a secret value into a terminal transcript, log, issue, or
-task evidence.
+market-lake API (`lake local api`), the quant-harness API (`harness api`), the
+Thesis API (workspace data routes with chat/SSE), and the Svelte UI in real
+mode. The provider behind the Thesis model calls is either OpenRouter (env key)
+or Azure AI Foundry (preflight); both are optional for the connectivity chain
+this runbook verifies. The market-lake API is what lets the harness fetch
+symbols a backtest requests for the first time instead of failing on a
+not-yet-ingested symbol. This is a local loopback stack: bearer credential
+names below are references, never values — never echo a secret value into a
+terminal transcript, log, issue, or task evidence.
 
 ## 1. Prerequisites
 
@@ -15,6 +17,10 @@ task evidence.
 - `uv` (Python 3.12 project environment): `uv sync --extra dev`.
 - Node.js LTS with npm for the UI: `npm --version`; install once per checkout
   with `npm install` inside `src/ui`.
+- Docker Desktop for the Cosmos DB emulator that backs durable conversation
+  state. The launcher starts Docker when needed and runs the emulator from the
+  vNext image with a named data volume mounted at `/data`, so conversations
+  survive restarts. The legacy emulator image does not persist data.
 - Bearer tokens for market-lake (`LAKE_API__BEARER_TOKEN`), harness
   (`HARNESS_API_BEARER_TOKEN`), and Thesis (`THESIS_API__BEARER_TOKEN`) are
   managed in the ignored repository `.env` by `scripts/local/dev_tokens.py`.
@@ -88,17 +94,25 @@ provider with a missing deployment reports `model_unavailable`.
 
 ### One command (recommended)
 
-`scripts/local/start-stack.ps1` runs the token helper, loads `.env`, and
-launches the harness API, Thesis API, and UI detached with logs under
-`.local/logs`. It stops an existing instance on the target port first, and it
-keeps the tokens stable across restarts so the UI's baked credential keeps
-matching the Thesis API:
+`scripts/local/start-stack.ps1` runs the token helper, loads `.env`, ensures
+the Cosmos DB emulator is running (creating it on first use, with a persistent
+data volume), and launches the market-lake API (port 8002), harness API,
+Thesis API, and UI detached with logs under `.local/logs`. It stops an existing
+instance on the target port first, and it keeps the tokens stable across
+restarts so the UI's baked credential keeps matching the Thesis API:
+
+The default command schedules a detached worker and returns before it stops
+the Thesis API. This prevents a live chat/tool request from killing its own SSE
+completion channel. Pass `-Foreground` only from an external terminal when you
+want the invoking shell to wait for port and health checks.
 
 ```powershell
 powershell -File scripts/local/start-stack.ps1
 # start a subset, or mint fresh tokens:
 powershell -File scripts/local/start-stack.ps1 -Servers harness,thesis
 powershell -File scripts/local/start-stack.ps1 -Rotate
+# external terminal, synchronous health report:
+powershell -File scripts/local/start-stack.ps1 -Foreground
 ```
 
 The launcher adds the base CPython directory to `PATH` for the harness facade
@@ -153,6 +167,21 @@ Notes on the composition:
 - `THESIS_WORKSPACE_ROOT` overrides the persisted workspace root; omit it for
   the default local app-data location. Workspaces themselves are created through
   the API (see section 4).
+- Conversations are durable and use the same store in local and workspace
+  runs. When `THESIS_STORAGE_ACCOUNT_NAME` is configured (the deployed
+  Container App always sets it), chat records are written to each workspace's
+  provisioned blob container under `repository/chats/` using the runtime
+  managed identity. Otherwise they persist as JSON documents under
+  `<THESIS_WORKSPACE_ROOT>/chat` (default: the local app-data location), so
+  they survive a restart of the Thesis API process.
+- Workspaces use the same store selection. With `THESIS_STORAGE_ACCOUNT_NAME`
+  set, the catalog lists the blob containers under
+  `THESIS_WORKSPACE_CONTAINER_PREFIX` (`thesis-ws-` by default) and each
+  workspace's manifest lives at `repository/.thesis/workspace.yaml`; creating a
+  workspace through the UI provisions its container and manifest, so a
+  UI-created workspace can immediately read and write its own container.
+  Without a storage account the catalog is the filesystem tree under
+  `<THESIS_WORKSPACE_ROOT>`, as before.
 - Screener data context: with no `market_port` configured the screener
   surface answers 503 by design (fail closed when no data source is
   configured). Chat/SSE and the workspace data routes do not depend on it.

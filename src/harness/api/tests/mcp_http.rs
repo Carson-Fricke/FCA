@@ -30,9 +30,14 @@ struct StubRunner;
 
 impl BacktestRunner for StubRunner {
     fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert(
+            "backtest.json".to_string(),
+            b"{\"status\":\"completed\"}".to_vec(),
+        );
         Ok(RunOutcome {
             completed: true,
-            artifact_json: b"{\"status\":\"completed\"}".to_vec(),
+            artifacts,
         })
     }
 }
@@ -173,6 +178,30 @@ async fn mcp_tool_call_get_backtest_status_reads_the_durable_jobs() {
     assert_eq!(body["result"]["isError"], false);
     assert_eq!(body["result"]["structuredContent"]["job_id"], "job-mcp");
     assert_eq!(body["result"]["structuredContent"]["state"], "succeeded");
+}
+
+#[tokio::test]
+async fn mcp_run_backtest_uses_the_composed_native_submitter() {
+    let root = temp_root("backtest-submitter");
+    let router = durable_app(&root);
+
+    let (status, body) = send(
+        &router,
+        post_mcp(
+            Some(BEARER),
+            &tool_call("run_backtest", json!({"config_path": "missing.json"})),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let body = json_body(&body);
+    assert_eq!(body["result"]["isError"], true);
+    let text = body["result"]["content"][0]["text"]
+        .as_str()
+        .expect("tool error text");
+    assert!(text.contains("local backtest runner could not complete"));
+    assert!(!text.contains("no process runner is composed"));
 }
 
 #[tokio::test]

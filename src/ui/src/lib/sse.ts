@@ -11,7 +11,7 @@
  * request can carry the persisted cursor as a header, and so tests can
  * inject a fake stream implementation.
  */
-import type { ChatMessage, ExecutionEvent } from './types';
+import type { ChatMessage, ExecutionEvent, TimelineItem } from './types';
 
 export const CHAT_MESSAGE_EVENT_KIND = 'chat.message';
 export const PROVIDER_DELTA_EVENT_KIND = 'provider.delta';
@@ -289,6 +289,113 @@ export class ChatEventStream extends ExecutionEventStream {
 			executionId: chatId,
 			streamPath: (workspaceId, id) => chatStreamUrl(options.baseUrl, workspaceId, id)
 		});
+	}
+}
+
+export interface TimelineStreamOptions {
+	baseUrl: string;
+	workspaceId: string;
+	chatId: string;
+	/** Backfill size for the first connect; ignored on reconnect. */
+	limit?: number;
+	/** Narrow the stream to one sub-agent thread. */
+	thread?: string | null;
+	fetchImpl?: typeof fetch;
+	reconnectDelayMs?: number;
+}
+
+export function chatTimelineStreamUrl(
+	baseUrl: string,
+	workspaceId: string,
+	chatId: string,
+	options: { after?: number; limit?: number; thread?: string | null } = {}
+): string {
+	const base = baseUrl.replace(/\/+$/, '');
+	const params = new URLSearchParams();
+	if (options.limit) params.set('limit', String(options.limit));
+	if (options.thread) params.set('thread', options.thread);
+	const query = params.toString();
+	return `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/timeline/stream${query ? `?${query}` : ''}`;
+}
+
+/**
+ * SSE subscription to one chat's unified Cosmos timeline.
+ *
+ * The first connect backfills the most recent items and then tails by `seq`;
+ * reconnects resume with `Last-Event-ID` set to the last sequence seen.
+ */
+export class TimelineStream {
+	private readonly fetchImpl: typeof fetch;
+	private readonly reconnectDelayMs: number;
+	private closed = false;
+	private cursor = 0;
+	private activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+	constructor(private readonly options: TimelineStreamOptions) {
+		this.fetchImpl = options.fetchImpl ?? fetch;
+		this.reconnectDelayMs = options.reconnectDelayMs ?? 1000;
+	}
+
+	stop(): void {
+		this.closed = true;
+		void this.activeReader?.cancel().catch(() => undefined);
+	}
+
+	async start(onItem: (item: TimelineItem) => void): Promise<void> {
+		const url = chatTimelineStreamUrl(
+			this.options.baseUrl,
+			this.options.workspaceId,
+			this.options.chatId,
+			{ limit: this.options.limit, thread: this.options.thread }
+		);
+		while (!this.closed) {
+			try {
+				const headers: Record<string, string> = { Accept: 'text/event-stream' };
+				if (this.cursor > 0) headers['Last-Event-ID'] = String(this.cursor);
+				const response = await this.fetchImpl(url, { headers });
+				if (this.closed) return;
+				if (!response.ok || !response.body) {
+					await delay(this.reconnectDelayMs);
+					continue;
+				}
+				await this.pump(response.body, onItem);
+			} catch {
+				if (this.closed) return;
+			}
+			if (!this.closed) await delay(this.reconnectDelayMs);
+		}
+	}
+
+	private async pump(
+		body: ReadableStream<Uint8Array>,
+		onItem: (item: TimelineItem) => void
+	): Promise<void> {
+		const reader = body.getReader();
+		this.activeReader = reader;
+		const decoder = new TextDecoder();
+		let buffer = '';
+		try {
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (this.closed) {
+					await reader.cancel().catch(() => undefined);
+					return;
+				}
+				if (done) return;
+				const parsed = parseSseChunk(buffer, decoder.decode(value, { stream: true }));
+				buffer = parsed.buffer;
+				for (const frame of parsed.frames) {
+					const item = frame.data as unknown as TimelineItem;
+					if (item && typeof item.seq === 'number') {
+						this.cursor = item.seq;
+						onItem(item);
+					}
+				}
+			}
+		} finally {
+			if (this.activeReader === reader) this.activeReader = null;
+			reader.releaseLock();
+		}
 	}
 }
 

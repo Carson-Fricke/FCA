@@ -8,10 +8,11 @@
  *  - persist scope and expansion in localStorage and project the scope path
  *    into the `?scope=` query (deep links enter through `#sub_agent=`).
  *
- * The controller is intentionally host-neutral: the conversation pane and the
- * standalone `/w/{workspace}/workflows/{execution_id}` route both construct
- * one and render the same `WorkflowScope` shell.
+ * The controller is intentionally host-neutral: the shared `ChatSurface` uses
+ * one instance for the copilot pane and another for the full conversations
+ * page, so the drill-in behavior is identical in both.
  */
+import { untrack } from 'svelte';
 import {
 	apiBaseUrl,
 	fixtureMode,
@@ -42,16 +43,12 @@ import {
 	type ScopeSegment
 } from './scope.svelte';
 import type {
+	ChatMessage,
 	ExecutionEvent,
 	ExecutionNodeRef,
-	GateResolution,
 	SubAgentNode,
-	WorkflowExecutionRecord,
-	WorkflowGate
+	WorkflowExecutionRecord
 } from './types';
-
-/** The synthetic node used to view the workflow orchestrator for a phase. */
-export const ORCHESTRATOR_ID = 'orchestrator';
 
 function mergeNodes(existing: SubAgentNode[], incoming: SubAgentNode[]): SubAgentNode[] {
 	const byId = new Map<string, SubAgentNode>();
@@ -74,6 +71,8 @@ export interface AttachOptions {
 	rootLabel?: string;
 	scope?: string | null;
 	hash?: string | null;
+	/** Events arrive from the shared timeline stream instead of this controller. */
+	externalEvents?: boolean;
 }
 
 export class WorkflowScopeController {
@@ -96,12 +95,22 @@ export class WorkflowScopeController {
 	#cursorStore = new LocalCursorStore();
 	#subscriptions = new Map<string, ExecutionEventStream>();
 	#readonlyCursorStore: CursorStore;
+	/** Resolves once the initial root events and sub-agent list are loaded. */
+	#initialLoad: Promise<void> | null = null;
 
 	constructor(workspaceId: string, hostId: string, cursorStore?: CursorStore) {
 		this.#workspaceId = workspaceId;
 		this.#hostId = hostId;
 		this.#readonlyCursorStore = cursorStore ?? this.#cursorStore;
 		this.scope = new ScopeController(scopeStorageKey(workspaceId, hostId));
+	}
+
+	/** Merge events delivered by the shared chat timeline stream. */
+	ingestEvents(events: ExecutionEvent[]): void {
+		if (!events.length) return;
+		// Read the existing stream untracked: the caller runs inside an effect,
+		// and reading the state we write here would re-trigger that effect.
+		this.rootEvents = untrack(() => mergeEvents(this.rootEvents, events));
 	}
 
 	/** All events known to the client: root plus every lazily loaded node. */
@@ -129,6 +138,7 @@ export class WorkflowScopeController {
 	attach(executionId: string, execution: WorkflowExecutionRecord | null, options: AttachOptions = {}): void {
 		this.detach();
 		this.#executionId = executionId;
+		const attachedExecutionId = executionId;
 		this.execution = execution;
 		this.rootEvents = [];
 		this.knownNodes = [];
@@ -141,28 +151,40 @@ export class WorkflowScopeController {
 			id: options.chatId ?? execution?.chat_id ?? executionId,
 			label: options.rootLabel ?? 'Conversation'
 		};
-		let segments = parseScope(options.scope);
+		let segments = parseScope(options.scope).filter(
+			(segment) => segment.kind !== 'workflow'
+		);
 		if (!segments.some((segment) => segment.kind === 'conversation')) segments = [root, ...segments];
-		segments = applyHashTarget(segments, scopeFromHash(options.hash));
+		segments = applyHashTarget(segments, scopeFromHash(options.hash)).filter(
+			(segment) => segment.kind !== 'workflow'
+		);
 		this.scope.reset(segments);
 
-		listNodeEvents(this.#workspaceId, executionId, executionNodeRef(executionId), {
-			includeDescendants: false
-		})
-			.then((events) => {
-				this.rootEvents = mergeEvents(this.rootEvents, events);
+		let eventsReady = Promise.resolve();
+		if (!options.externalEvents) {
+			eventsReady = listNodeEvents(this.#workspaceId, executionId, executionNodeRef(executionId), {
+				includeDescendants: false
 			})
-			.catch((error: unknown) => {
-				this.error = error instanceof Error ? error.message : 'Failed to load events';
-			});
+				.then((events) => {
+					if (this.#executionId !== attachedExecutionId) return;
+					this.rootEvents = mergeEvents(this.rootEvents, events);
+				})
+				.catch((error: unknown) => {
+					if (this.#executionId !== attachedExecutionId) return;
+					this.error = error instanceof Error ? error.message : 'Failed to load events';
+				});
+		}
 
-		listExecutionSubAgents(this.#workspaceId, executionId)
+		const nodesReady = listExecutionSubAgents(this.#workspaceId, executionId)
 			.then((nodes) => {
+				if (this.#executionId !== attachedExecutionId) return;
 				this.knownNodes = mergeNodes(this.knownNodes, nodes);
 			})
 			.catch(() => undefined);
 
-		this.#subscribe(executionNodeRef(executionId));
+		this.#initialLoad = Promise.all([eventsReady, nodesReady]).then(() => undefined);
+
+		if (!options.externalEvents) this.#subscribe(executionNodeRef(executionId));
 		this.restoreActiveSubscription();
 	}
 
@@ -170,39 +192,60 @@ export class WorkflowScopeController {
 		for (const stream of this.#subscriptions.values()) stream.stop();
 		this.#subscriptions.clear();
 		this.#executionId = '';
+		this.#initialLoad = null;
 	}
 
-	/** Enter the workflow root card's current orchestrator. */
-	enterWorkflow(): void {
-		if (!this.execution) return;
-		this.scope.push({
-			kind: 'workflow',
-			id: this.execution.execution_id,
-			label: this.execution.workflow_id || 'Workflow'
-		});
+	/** Wait for the initial root events and sub-agent list to load. */
+	async ensureLoaded(): Promise<void> {
+		if (this.#initialLoad) await this.#initialLoad;
 	}
 
-	/** Enter the orchestrator for a phase; finished phases are read-only. */
-	enterOrchestrator(phase: string, readOnly = false): void {
-		this.scope.push({
-			kind: 'sub_agent',
-			id: ORCHESTRATOR_ID,
-			label: phase ? `Orchestrator · ${phase}` : 'Orchestrator',
-			role: 'orchestrator',
-			phase,
-			readOnly
-		});
+	/**
+	 * Enter the sub-agent that governs a phase.
+	 *
+	 * The real phase orchestrator is located in the projected tree so the
+	 * operator drills straight into the actual node (its messages, events, and
+	 * composer target). The tree is awaited first so a click that races the
+	 * initial load still resolves to the real node instead of a placeholder.
+	 */
+	async enterPhase(phase: string, readOnly = false): Promise<void> {
+		await this.ensureLoaded();
+		const node =
+			this.tree.find((candidate) => candidate.node.phase === phase)?.node ??
+			this.latestOrchestrator();
+		if (!node) return;
+		this.enterSubAgent(node);
+		if (readOnly) this.scope.updateActive({ readOnly: true });
+	}
+
+	/**
+	 * The most recently spawned top-level phase orchestrator, used when the
+	 * requested phase has no sub-agent of its own (for example the
+	 * pre-orchestration `requested` phase).
+	 */
+	private latestOrchestrator(): SubAgentNode | null {
+		let best: { node: SubAgentNode; cursor: number } | null = null;
+		for (const treeNode of this.tree) {
+			if (treeNode.node.parentSubAgentId !== null) continue;
+			const spawn = treeNode.events.find((event) => event.eventType === 'sub_agent.spawned');
+			const cursor = spawn?.cursor ?? 0;
+			if (best === null || cursor >= best.cursor) {
+				best = { node: treeNode.node, cursor };
+			}
+		}
+		return best?.node ?? null;
 	}
 
 	/** Enter one sub-agent node, subscribing and lazily loading its events. */
 	enterSubAgent(node: SubAgentNode): void {
 		// Truncate to the node's parent when it is already in scope, so sibling
-		// sub-agents switch in place instead of accumulating on the path.
+		// sub-agents switch in place instead of accumulating on the path. A
+		// root-level phase agent truncates to the conversation root.
 		const parentIndex = node.parentSubAgentId
 			? this.scope.segments.findIndex(
 					(segment) => segment.kind === 'sub_agent' && segment.id === node.parentSubAgentId
 				)
-			: this.scope.segments.findIndex((segment) => segment.kind === 'workflow');
+			: this.scope.segments.findIndex((segment) => segment.kind === 'conversation');
 		if (parentIndex !== -1 && parentIndex < this.scope.segments.length - 1) {
 			const removed = this.scope.segments.slice(parentIndex + 1);
 			this.scope.navigateTo(parentIndex);
@@ -240,20 +283,24 @@ export class WorkflowScopeController {
 	/** Subscribe to whichever node the restored scope points at. */
 	private restoreActiveSubscription(): void {
 		const active = this.scope.active;
-		if (active?.kind === 'sub_agent' && active.id !== ORCHESTRATOR_ID) {
+		if (active?.kind === 'sub_agent') {
 			this.loadNode(active.id);
 		}
 	}
 
 	/** Lazy-load a node's own events and direct children. */
 	loadNode(subAgentId: string): void {
-		if (subAgentId === ORCHESTRATOR_ID) return;
-		this.#subscribe(subAgentNodeRef(subAgentId));
+		// Live events arrive on the single execution subscription (it carries
+		// every node's events), so a node needs only its history page here. This
+		// keeps one SSE connection per execution instead of one per visited node,
+		// which matters because browsers cap concurrent connections per origin.
 		if (this.nodeEventCache[subAgentId]) return;
-		listNodeEvents(this.#workspaceId, this.#executionId, subAgentNodeRef(subAgentId), {
+		const executionId = this.#executionId;
+		listNodeEvents(this.#workspaceId, executionId, subAgentNodeRef(subAgentId), {
 			includeDescendants: false
 		})
 			.then((events) => {
+				if (this.#executionId !== executionId) return;
 				this.nodeEventCache = {
 					...this.nodeEventCache,
 					[subAgentId]: mergeEvents(this.nodeEventCache[subAgentId] ?? [], events)
@@ -277,10 +324,12 @@ export class WorkflowScopeController {
 	/** Lazy-load a node's direct children from REST. */
 	loadChildren(subAgentId: string): void {
 		this.loadNode(subAgentId);
-		listExecutionSubAgents(this.#workspaceId, this.#executionId, {
+		const executionId = this.#executionId;
+		listExecutionSubAgents(this.#workspaceId, executionId, {
 			parentSubAgentId: subAgentId
 		})
 			.then((nodes) => {
+				if (this.#executionId !== executionId) return;
 				this.knownNodes = mergeNodes(this.knownNodes, nodes);
 			})
 			.catch(() => undefined);
@@ -292,38 +341,21 @@ export class WorkflowScopeController {
 	}
 
 	subAgentById(id: string): SubAgentNode | null {
-		if (id === ORCHESTRATOR_ID) return this.orchestratorNode();
 		return findNode(this.tree, id)?.node ?? this.knownNodes.find((n) => n.subAgentId === id) ?? null;
 	}
 
 	eventsForSubAgent(id: string): ExecutionEvent[] {
-		if (id === ORCHESTRATOR_ID) return this.rootEvents;
 		const cached = this.nodeEventCache[id];
 		const attributed = nodeEvents(this.flatEvents, id);
 		return cached ? mergeEvents(attributed, cached) : attributed;
 	}
 
-	/** The synthetic orchestrator node for the active phase. */
-	orchestratorNode(): SubAgentNode {
-		const active = this.scope.active;
-		const phase = active?.kind === 'sub_agent' ? (active.phase ?? '') : '';
-		return {
-			subAgentId: ORCHESTRATOR_ID,
-			parentSubAgentId: null,
-			phase,
-			role: 'orchestrator',
-			status: this.execution?.state === 'failed' ? 'failed' : this.execution?.state === 'completed' ? 'completed' : 'running',
-			context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
-			acceptsInput: !active?.readOnly
-		};
-	}
-
 	/** Submit operator input to a node that accepts it. */
-	async submit(node: SubAgentNode, body: string): Promise<void> {
-		if (!node.acceptsInput || !body.trim()) return;
+	async submit(node: SubAgentNode, body: string): Promise<ChatMessage | null> {
+		if (!node.acceptsInput || !body.trim()) return null;
 		this.busy = true;
 		try {
-			await postNodeMessage(
+			return await postNodeMessage(
 				this.#workspaceId,
 				this.#executionId,
 				this.nodeRefFor(node.subAgentId),
@@ -331,40 +363,14 @@ export class WorkflowScopeController {
 			);
 		} catch (error: unknown) {
 			this.error = error instanceof Error ? error.message : 'Message failed';
-		} finally {
-			this.busy = false;
-		}
-	}
-
-	/** Resume a blocked workflow by posting the structured gate resolution. */
-	async resolveGate(gate: WorkflowGate, resolution: GateResolution): Promise<void> {
-		this.busy = true;
-		try {
-			await postNodeMessage(
-				this.#workspaceId,
-				this.#executionId,
-				executionNodeRef(this.#executionId),
-				{
-					body: resolution.note ?? `${resolution.kind}:${gate.gateId}`,
-					metadata: {
-						gate_id: gate.gateId,
-						gate_resolution: resolution.kind,
-						verdict: resolution.verdict ?? null,
-						note: resolution.note ?? null
-					}
-				}
-			);
-		} catch (error: unknown) {
-			this.error = error instanceof Error ? error.message : 'Gate resolution failed';
+			return null;
 		} finally {
 			this.busy = false;
 		}
 	}
 
 	private nodeRefFor(subAgentId: string): ExecutionNodeRef {
-		return subAgentId === ORCHESTRATOR_ID
-			? executionNodeRef(this.#executionId)
-			: subAgentNodeRef(subAgentId);
+		return subAgentNodeRef(subAgentId);
 	}
 
 	#subscriptionKey(node: ExecutionNodeRef): string {

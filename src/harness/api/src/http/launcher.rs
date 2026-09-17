@@ -12,10 +12,9 @@ use std::sync::Arc;
 
 use super::clock::Clock;
 use super::configuration::ValidatedConfiguration;
-use super::store::{JobRecord, JobRepository, RunCatalogRecord, RunStatus, RunStore, StoreError};
+use serde_json::Value;
 
-/// Canonical name of the backtest artifact.
-pub const ARTIFACT_NAME: &str = "backtest.json";
+use super::store::{JobRecord, JobRepository, RunCatalogRecord, RunStatus, RunStore, StoreError};
 
 /// Work description passed to an injected backtest launcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,8 +30,8 @@ pub struct LaunchJob {
 pub struct RunOutcome {
     /// Whether the run completed successfully.
     pub completed: bool,
-    /// Canonical backtest artifact bytes.
-    pub artifact_json: Vec<u8>,
+    /// Complete immutable result set keyed by run-relative artifact name.
+    pub artifacts: BTreeMap<String, Vec<u8>>,
 }
 
 /// Execution seam between the launch route and the Rust backtest engine.
@@ -112,7 +111,52 @@ pub fn launch_record(
     record.data_start = configuration.data_start;
     record.data_end = configuration.data_end;
     record.configuration_digest = Some(configuration.configuration_digest.clone());
+    record.metrics = artifact_metrics(&outcome.artifacts);
     record
+}
+
+/// Extract built-in and custom scalar values from a run's `metrics.json`.
+#[must_use]
+pub fn artifact_metrics(artifacts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, String> {
+    let Some(payload) = artifacts.get("metrics.json") else {
+        return BTreeMap::new();
+    };
+    let Ok(document) = serde_json::from_slice::<Value>(payload) else {
+        return BTreeMap::new();
+    };
+    let mut metrics = BTreeMap::new();
+    let equity = document.get("equity");
+    let execution = document.get("execution");
+    for (key, section) in [
+        ("total_return", equity),
+        ("max_drawdown", equity),
+        ("cagr", equity),
+        ("fill_count", execution),
+        ("fees_total", execution),
+    ] {
+        if let Some(value) = section.and_then(|section| section.get(key)) {
+            if let Some(text) = scalar_string(value) {
+                metrics.insert(key.to_string(), text);
+            }
+        }
+    }
+    if let Some(custom) = document.get("custom").and_then(Value::as_object) {
+        for (key, value) in custom {
+            if let Some(text) = scalar_string(value) {
+                metrics.entry(key.clone()).or_insert(text);
+            }
+        }
+    }
+    metrics
+}
+
+fn scalar_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
 }
 
 /// Persist one failed launch while preserving the original creation time.
@@ -174,9 +218,7 @@ impl BacktestLauncher for InProcessLauncher {
             .run(&job.configuration)
             .map_err(LaunchError::Engine)?;
         let record = launch_record(&job.configuration, &outcome);
-        let mut artifacts = BTreeMap::new();
-        artifacts.insert(ARTIFACT_NAME.to_string(), outcome.artifact_json.clone());
-        self.run_store.put(record, artifacts)?;
+        self.run_store.put(record, outcome.artifacts.clone())?;
         self.update_job(&job.job_id, super::store::JobState::Succeeded);
         Ok(())
     }

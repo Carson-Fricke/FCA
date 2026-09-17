@@ -8,10 +8,13 @@
 	 */
 	let {
 		text,
-		testId = 'thinking-accordion'
-	}: { text: string; testId?: string } = $props();
+		testId = 'thinking-accordion',
+		initiallyOpen = false
+	}: { text: string; testId?: string; initiallyOpen?: boolean } = $props();
 
-	let open = $state(false);
+	// The initial open state is intentionally captured once per mounted accordion.
+	// svelte-ignore state_referenced_locally
+	let open = $state(initiallyOpen);
 </script>
 
 {#if text}

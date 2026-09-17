@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
@@ -47,17 +47,25 @@ from thesis.strategies.validation import (
     StrategyValidationRequest,
     StrategyValidationResult,
 )
-from thesis.workflows.backtests import BacktestRunRequest, BacktestRunResult
+from thesis.workflows.backtests import (
+    BacktestRunError,
+    BacktestRunRequest,
+    BacktestRunResult,
+)
 from thesis.workflows.hypothesis_development import (
     HYPOTHESIS_DEVELOPMENT_PHASES,
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
     VERDICT_REFUTED,
     VERDICT_SUPPORTED,
     FalsificationComposeError,
+    HypothesisDevelopmentIntakeError,
+    HypothesisDevelopmentOutcome,
     HypothesisDevelopmentPhase,
+    HypothesisDevelopmentRequest,
     HypothesisDevelopmentWorkflow,
     InvalidPhaseTransition,
     _json_document,
+    _metric,
     check_evidence_bound,
     check_falsifiability,
     check_falsification_plan,
@@ -89,14 +97,22 @@ def _id_factory() -> Callable[[str], str]:
     return lambda prefix: f"{prefix}-{next(counter)}"
 
 
-def _probe() -> dict[str, object]:
+def _model() -> dict[str, object]:
     return {
-        "strategyId": "momentum-probe",
+        "modelId": "momentum-model",
         "version": "1.0.0",
-        "files": {
-            "strategy.py": "from harness.strategy import Strategy\n",
-        },
-        "tests": {"test_strategy.py": "def test_strategy():\n    assert True\n"},
+        "description": "Estimate the historical momentum continuation regularity.",
+        "source": (
+            "def fit(context):\n"
+            "    return {'baseline': 0.5}\n\n"
+            "def observe(fit, context):\n"
+            "    return {'sharpe': 1.0}\n"
+        ),
+        "fitEntrypoint": "fit",
+        "observeEntrypoint": "observe",
+        "outputs": ["sharpe"],
+        "indicators": [],
+        "tests": {"test_model.py": "def test_model():\n    assert True\n"},
         "harnessConfiguration": {"seed": 7, "symbols": ["SPY"]},
     }
 
@@ -127,7 +143,7 @@ def _hypothesis_envelope(
         else falsifiers,
         "sizing": "fixed fraction 0.1 of equity",
         "body": "The continuation thesis.",
-        "probe": _probe(),
+        "model": _model(),
     }
 
 
@@ -197,6 +213,18 @@ class FakeProvider:
         del profile, allowed_tools
         self.prompts.append(prompt.rendered)
         self.response_formats.append(response_format)
+        if "operator-facing voice" in prompt.rendered:
+            marker = "Concrete reason the workflow paused: "
+            detail = (
+                prompt.rendered.split(marker, 1)[-1].splitlines()[0]
+                if marker in prompt.rendered
+                else "the workflow paused"
+            )
+            return ModelResponse(output=f"To continue, I need your direction: {detail}")
+        if "falsification trials orchestrator" in prompt.rendered:
+            return ModelResponse(
+                output="### Empirical Falsification Findings\n\nAll planned trials survived historical testing."
+            )
         if not self._payloads:
             raise AssertionError("model invoked more times than expected")
         payload = self._payloads.pop(0)
@@ -207,13 +235,20 @@ class FakeProvider:
 class FakeRunner:
     """Deterministic fake runner returning queued ``(state, metrics)`` pairs."""
 
-    def __init__(self, results: list[tuple[str, object | None]]) -> None:
+    def __init__(
+        self, results: list[tuple[str, object | None] | BacktestRunError]
+    ) -> None:
         self._results = list(results)
         self.requests: list[BacktestRunRequest] = []
 
     def run(self, request: BacktestRunRequest) -> BacktestRunResult:
         self.requests.append(request)
-        state, metrics = self._results.pop(0)
+        result = self._results.pop(0)
+        if isinstance(result, BacktestRunError):
+            raise result
+        state, metrics = result
+        if isinstance(metrics, Mapping):
+            metrics = {"fit.baseline": 0.5, **dict(metrics)}
         return BacktestRunResult(
             job_id=f"job-{len(self.requests)}",
             state=state,
@@ -277,13 +312,23 @@ def _kit(
     tmp_path: Path,
     *,
     payloads: list[dict[str, object] | str],
-    results: list[tuple[str, object | None]],
+    results: list[tuple[str, object | None] | BacktestRunError],
     exit_criteria: list[dict[str, object]] | None = None,
+    prepend_ready: bool = True,
+    insert_strategy_success: bool = True,
 ) -> _Kit:
     clock = _clock()
     id_factory = _id_factory()
     chat = ChatService(clock=clock, id_factory=id_factory)
-    provider = FakeProvider(*payloads)
+    # Most tests model a ready first proposal followed by accepted confirmation.
+    queued: list[dict[str, object] | str] = list(payloads)
+    if prepend_ready:
+        queued = [
+            {"message": "Ready for operator review.", "advance": True},
+            {"message": "Confirmation accepted.", "advance": True},
+            *queued,
+        ]
+    provider = FakeProvider(*queued)
     profiles = {
         "research-profile": ModelProfile(
             profile_id="research-profile",
@@ -333,7 +378,10 @@ def _kit(
     ledger = AttemptLedger()
     factory = RecordingSubagentFactory()
     journal = CommandJournal(tmp_path / "journal.sqlite3")
-    runner = FakeRunner(results)
+    runner_results = list(results)
+    if insert_strategy_success and len(runner_results) >= 2:
+        runner_results.insert(1, ("completed", {"sharpe": 1.0}))
+    runner = FakeRunner(runner_results)
     workflow = HypothesisDevelopmentWorkflow(
         chat=chat,
         router=router,
@@ -366,6 +414,81 @@ def _request(kit: _Kit, ideas: str = IDEAS):
     return kit.workflow.launch(WORKSPACE, chat_id, actor_id=OWNER, ideas=ideas)
 
 
+def _phase_node_id(kit: _Kit, request: HypothesisDevelopmentRequest, phase: str) -> str:
+    for event in reversed(kit.workflow.observe(WORKSPACE, request.execution_id).events):
+        if event.event_type is not ExecutionEventType.SUB_AGENT_SPAWNED:
+            continue
+        if (
+            event.payload.get("phase") == phase
+            and event.payload.get("parentSubAgentId") is None
+        ):
+            return str(event.payload["subAgentId"])
+    raise AssertionError(f"no {phase} node was spawned")
+
+
+def _creation_node_id(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
+    return _phase_node_id(kit, request, "hypothesis_creation")
+
+
+def _latest_input_phase(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
+    needs_input = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+    )
+    return str(needs_input[-1].payload["phase"])
+
+
+def _answer_current_pause(
+    kit: _Kit, request: HypothesisDevelopmentRequest, *, body: str | None = None
+) -> HypothesisDevelopmentOutcome:
+    phase = _latest_input_phase(kit, request)
+    if body is None:
+        body = "check off" if phase == "verdict" else "confirm"
+    node_id = _phase_node_id(kit, request, phase)
+    kit.chat.create_message(
+        WORKSPACE,
+        request.chat_id,
+        actor_id=OWNER,
+        body=body,
+        role=MessageRole.USER,
+        kind=TranscriptItemKind.SUB_AGENT,
+        execution_id=request.execution_id,
+        data={
+            "executionId": request.execution_id,
+            "parentSubAgentId": None,
+            "phase": phase,
+            "subAgentId": node_id,
+        },
+    )
+    return kit.workflow.resume(request)
+
+
+def _prompt_with(kit: _Kit, marker: str) -> str:
+    for prompt in kit.provider.prompts:
+        if marker in prompt:
+            return prompt
+    raise AssertionError(f"no prompt contains {marker!r}")
+
+
+def _run(kit: _Kit, request: HypothesisDevelopmentRequest, confirm: str = "confirm"):
+    """Drive the conversational phase to completion.
+
+    ``run`` opens the hypothesis-creation conversation and pauses for the
+    operator; this helper posts the confirming message and resumes, which
+    finalizes the hypothesis and runs the remaining phases.
+    """
+    outcome = kit.workflow.run(request)
+    if outcome.phase is not HypothesisDevelopmentPhase.PAUSED:
+        return outcome
+    if _latest_input_phase(kit, request) == "hypothesis_creation":
+        outcome = _answer_current_pause(kit, request, body=confirm)
+    if (
+        outcome.phase is HypothesisDevelopmentPhase.PAUSED
+        and _latest_input_phase(kit, request) == "verdict"
+    ):
+        outcome = _answer_current_pause(kit, request)
+    return outcome
+
+
 def test_hypothesis_development_end_to_end(tmp_path: Path) -> None:
     kit = _kit(
         tmp_path,
@@ -381,7 +504,7 @@ def test_hypothesis_development_end_to_end(tmp_path: Path) -> None:
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
     assert outcome.fenced is False
@@ -391,26 +514,140 @@ def test_hypothesis_development_end_to_end(tmp_path: Path) -> None:
     assert outcome.optimization_backtest is not None
     assert outcome.journal_id == f"workflow-{request.execution_id}"
     assert [item.to_phase for item in outcome.transitions] == [
-        HypothesisDevelopmentPhase.IDEATION,
-        HypothesisDevelopmentPhase.HYPOTHESIS,
-        HypothesisDevelopmentPhase.FALSIFICATION_PLAN,
+        HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
         HypothesisDevelopmentPhase.FALSIFICATION_TRIALS,
         HypothesisDevelopmentPhase.VERDICT,
         HypothesisDevelopmentPhase.STRATEGY_DESIGN,
+        HypothesisDevelopmentPhase.STRATEGY_BACKTESTING,
         HypothesisDevelopmentPhase.OPTIMIZATION,
         HypothesisDevelopmentPhase.COMPLETED,
     ]
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.state is WorkflowExecutionState.COMPLETED
-    assert len(kit.runner.requests) == 2
+    assert execution.phase == "completed"
+    assert len(kit.runner.requests) == 3
 
     stored = kit.store.load("momentum-breakout")
     assert stored.status is HypothesisStatus.SUPPORTED
     assert stored.front_matter.links.runs == ("job-1",)
     assert stored.front_matter.links.evidence
+    assert outcome.research_model_reference is not None
+    assert outcome.research_model_reference.workspace_id == WORKSPACE
+    assert outcome.research_model_artifact is not None
+    assert outcome.research_model_artifact.startswith("models/runs/")
+    assert outcome.as_dict()["researchModel"]["evidenceArtifact"] == (
+        outcome.research_model_artifact
+    )
+    assert outcome.strategy_bundle is not None
+    assert outcome.research_model_reference.key in outcome.strategy_bundle.dependencies
     assert kit.ledger.entries()
     kit.ledger.verify()
     kit.journal.verify_integrity()
+
+
+def test_first_creation_turn_requires_explicit_confirmation(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    outcome = kit.workflow.run(request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    assert execution.state is WorkflowExecutionState.PAUSED
+    needs_input = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+    )
+    question = str(needs_input[-1].payload["question"])
+    assert "hypothesis" in question.lower()
+    assert needs_input[-1].payload["ready"] is True
+
+
+def test_structured_finalization_emits_only_concise_summary(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    _run(kit, request)
+
+    outputs = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_OUTPUT
+    )
+    text = [
+        str(event.payload.get("artifact", {}).get("content", "")) for event in outputs
+    ]
+    assert any(item.startswith("Hypothesis finalization recorded.") for item in text)
+    assert not any(item.lstrip().startswith("{") for item in text)
+
+
+def test_falsification_agent_explains_results_before_visual_report(
+    tmp_path: Path,
+) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    _run(kit, request)
+
+    outputs = [
+        event
+        for event in _events_by_type(
+            kit, request.execution_id, ExecutionEventType.SUB_AGENT_OUTPUT
+        )
+        if event.payload.get("phase") == "falsification_trials"
+    ]
+    artifacts = [cast("dict[str, Any]", event.payload["artifact"]) for event in outputs]
+    prose_index = next(
+        index
+        for index, artifact in enumerate(artifacts)
+        if artifact.get("type") == "text"
+        and "Empirical Falsification Findings" in str(artifact.get("content"))
+    )
+    report_index = next(
+        index
+        for index, artifact in enumerate(artifacts)
+        if artifact.get("type") == "falsification_report"
+    )
+    assert prose_index < report_index
+    assert any(
+        "falsification trials orchestrator" in prompt for prompt in kit.provider.prompts
+    )
+
+
+def test_launch_accepts_multiline_hypothesis_ideas(tmp_path: Path) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+
+    request = _request(kit, f"FLAG.\n\n{IDEAS}")
+
+    assert request.ideas == f"FLAG.\n\n{IDEAS}"
+    assert len(kit.chat.list_executions(WORKSPACE)) == 1
+
+
+def test_invalid_ideas_do_not_persist_an_orphaned_execution(tmp_path: Path) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+    chat_id = kit.chat.create_chat(
+        WORKSPACE, title="hypothesis chat", owner_actor_id=OWNER
+    ).chat_id
+
+    with pytest.raises(HypothesisDevelopmentIntakeError, match="unsupported"):
+        kit.workflow.launch(
+            WORKSPACE,
+            chat_id,
+            actor_id=OWNER,
+            ideas=f"{IDEAS}\x00",
+        )
+
+    assert kit.chat.list_executions(WORKSPACE) == ()
+    assert kit.chat.list_messages(WORKSPACE, chat_id) == ()
 
 
 def test_each_phase_emits_a_workflow_phase_event(tmp_path: Path) -> None:
@@ -421,7 +658,7 @@ def test_each_phase_emits_a_workflow_phase_event(tmp_path: Path) -> None:
     )
     request = _request(kit)
 
-    kit.workflow.run(request)
+    _run(kit, request)
 
     replay = kit.workflow.observe(WORKSPACE, request.execution_id)
     phases = [
@@ -430,12 +667,13 @@ def test_each_phase_emits_a_workflow_phase_event(tmp_path: Path) -> None:
         if event.event_type is ExecutionEventType.WORKFLOW_PHASE
     ]
     assert phases == [
-        "ideation",
-        "hypothesis",
-        "falsification_plan",
+        "hypothesis_creation",
+        "paused",
         "falsification_trials",
         "verdict",
+        "paused",
         "strategy_design",
+        "strategy_backtesting",
         "optimization",
         "completed",
     ]
@@ -449,14 +687,30 @@ def test_falsifiability_gate_pauses_without_advancing(tmp_path: Path) -> None:
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     assert outcome.fenced is True
     assert outcome.detail is not None
     assert "falsifier" in outcome.detail
     assert kit.runner.requests == []
-    assert kit.store.load("momentum-breakout").status is HypothesisStatus.ACTIVE
+    assert outcome.hypothesis is None
+
+
+def test_model_gate_requires_every_falsifier_observable(tmp_path: Path) -> None:
+    envelope = _hypothesis_envelope()
+    model = dict(_model())
+    model["outputs"] = ["some_other_statistic"]
+    envelope["model"] = model
+    kit = _kit(tmp_path, payloads=[envelope], results=[])
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+    assert outcome.detail is not None
+    assert "missing model outputs" in outcome.detail
+    assert kit.runner.requests == []
 
 
 def test_falsification_plan_gate_pauses_without_a_control(tmp_path: Path) -> None:
@@ -467,7 +721,7 @@ def test_falsification_plan_gate_pauses_without_a_control(tmp_path: Path) -> Non
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     assert outcome.detail is not None
@@ -475,24 +729,81 @@ def test_falsification_plan_gate_pauses_without_a_control(tmp_path: Path) -> Non
     assert kit.runner.requests == []
 
 
-def test_verdict_gate_returns_refuted_premise_to_hypothesis(tmp_path: Path) -> None:
+def test_verdict_review_returns_refuted_premise_to_hypothesis(tmp_path: Path) -> None:
     kit = _kit(
         tmp_path,
-        payloads=[_hypothesis_envelope(), _plan_envelope()],
+        payloads=[
+            _hypothesis_envelope(),
+            _plan_envelope(),
+            {
+                "message": "I revised the premise from the failed trials.",
+                "advance": True,
+            },
+        ],
         results=[("completed", {"sharpe": -0.5})],
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     assert outcome.fenced is True
     assert outcome.verdict is not None
     assert outcome.verdict.outcome == VERDICT_REFUTED
     assert outcome.detail is not None
-    assert "refuted" in outcome.detail
+    assert "review" in outcome.detail.lower()
     assert outcome.strategy_bundle is None
     assert kit.store.load("momentum-breakout").status is HypothesisStatus.REFUTED
+    assert (
+        _events_by_type(
+            kit, request.execution_id, ExecutionEventType.WORKFLOW_GATE_BLOCKED
+        )
+        == []
+    )
+    verdict_questions = [
+        event
+        for event in _events_by_type(
+            kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+        )
+        if event.payload.get("phase") == "verdict"
+    ]
+    assert verdict_questions
+    assert verdict_questions[-1].payload["acceptsInput"] is True
+    handoffs = [
+        message
+        for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
+        if message.kind is TranscriptItemKind.SUB_AGENT
+        and message.role is MessageRole.SYSTEM
+    ]
+    assert len(handoffs) == 1
+    assert "observed=-0.5000" in handoffs[0].body
+    hypothesis_nodes = [
+        event
+        for event in _events_by_type(
+            kit, request.execution_id, ExecutionEventType.SUB_AGENT_SPAWNED
+        )
+        if event.payload["phase"] == "hypothesis_creation"
+    ]
+    assert len(hypothesis_nodes) == 1
+    hypothesis_needs_input = [
+        event
+        for event in _events_by_type(
+            kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+        )
+        if event.payload.get("phase") == "hypothesis_creation"
+    ]
+    assert len(hypothesis_needs_input) == 2
+    assert "attempt 2" in hypothesis_needs_input[-1].payload["question"]
+    assert hypothesis_needs_input[-1].payload["acceptsInput"] is True
+    hypothesis_outputs = [
+        event
+        for event in _events_by_type(
+            kit, request.execution_id, ExecutionEventType.SUB_AGENT_OUTPUT
+        )
+        if event.payload.get("phase") == "hypothesis_creation"
+    ]
+    latest_output = str(hypothesis_outputs[-1].payload["artifact"]["content"])
+    assert "attempt 2" in latest_output
 
 
 def test_strategy_design_gate_requires_falsifier_exit_criteria(
@@ -518,7 +829,7 @@ def test_strategy_design_gate_requires_falsifier_exit_criteria(
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     assert outcome.detail is not None
@@ -526,73 +837,295 @@ def test_strategy_design_gate_requires_falsifier_exit_criteria(
     assert outcome.optimization_backtest is None
 
 
-def test_rca_fans_out_fresh_subagents_and_retries(tmp_path: Path) -> None:
+def test_failed_strategy_backtest_runs_rca_and_reuses_phase_threads(
+    tmp_path: Path,
+) -> None:
+    diagnosis: dict[str, object] = {
+        "falsifierId": "strategy_backtest",
+        "failureClass": "strategy",
+        "rationale": "Entry timing caused excessive adverse selection.",
+        "confidence": 0.8,
+        "followUps": ["Delay entry until the next bar and widen the exit band."],
+    }
     kit = _kit(
         tmp_path,
         payloads=[
             _hypothesis_envelope(),
             _plan_envelope(),
-            {
-                "falsifierId": "f1",
-                "failureClass": "harness",
-                "rationale": "The trial run aborted before recording metrics.",
-                "confidence": 0.7,
-                "followUps": ["Re-run the unchanged probe on a clean worker."],
-            },
+            _design_envelope(),
+            diagnosis,
             _design_envelope(),
         ],
         results=[
-            ("aborted", None),
             ("completed", {"sharpe": 1.5}),
+            ("failed", None),
+            ("completed", {"sharpe": 1.1}),
             ("completed", {"sharpe": 1.2}),
         ],
+        insert_strategy_success=False,
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
     assert len(outcome.rca) == 1
-    assert outcome.rca[0].failure_class == "harness"
-    assert len(kit.factory.created) == 1
-    assert kit.factory.created[0].transcript is None
-    assert len(kit.runner.requests) == 3
+    assert outcome.rca[0].failure_class == "strategy"
+    assert outcome.strategy_cycles == 2
+    assert len(kit.runner.requests) == 4
     phases = [item.to_phase for item in outcome.transitions]
-    assert HypothesisDevelopmentPhase.RCA in phases
-    assert phases.count(HypothesisDevelopmentPhase.FALSIFICATION_TRIALS) == 2
+    assert HypothesisDevelopmentPhase.STRATEGY_RCA in phases
+    assert phases.count(HypothesisDevelopmentPhase.STRATEGY_DESIGN) == 2
+    assert phases.count(HypothesisDevelopmentPhase.STRATEGY_BACKTESTING) == 2
+    spawned = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_SPAWNED
+    )
+    assert (
+        len([event for event in spawned if event.payload["phase"] == "strategy_design"])
+        == 1
+    )
+    assert (
+        len([event for event in spawned if event.payload["phase"] == "strategy_rca"])
+        == 1
+    )
+    handoffs = [
+        message
+        for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
+        if message.data and message.data.get("handoffKind") == "strategy_rca_findings"
+    ]
+    assert len(handoffs) == 1
+    assert "adverse selection" in handoffs[0].body
+
+
+def test_research_launch_failures_pause_without_strategy_rca(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[
+            _hypothesis_envelope(),
+            _plan_envelope(),
+        ],
+        results=[BacktestRunError("MCP launch failed")],
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+    assert outcome.rca == ()
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    jobs = [
+        kit.chat.get_tool_job(WORKSPACE, tool_job_id)
+        for tool_job_id in execution.tool_job_ids
+    ]
+    assert len(jobs) == 1
+    assert all(job.state.value == "failed" for job in jobs)
+    assert len(kit.factory.created) == 0
+    assert len(kit.runner.requests) == 1
+    phases = [item.to_phase for item in outcome.transitions]
+    assert HypothesisDevelopmentPhase.STRATEGY_RCA not in phases
+
+
+def test_data_validity_failure_pauses_as_execution_problem_without_verdict_refutation(
+    tmp_path: Path,
+) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[
+            _hypothesis_envelope(),
+            _plan_envelope(),
+        ],
+        results=[("completed", {"sample_valid": 0, "sharpe": 0.0})],
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+    assert outcome.verdict is None
+    needs_input = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+    )
+    assert len(needs_input) >= 1
+    assert "falsifier" in str(needs_input[-1].payload.get("question", ""))
+
+
+def test_hypothesis_loop_pauses_after_five_refuted_attempts(tmp_path: Path) -> None:
+    payloads: list[dict[str, object] | str] = []
+    for cycle in range(1, 6):
+        payloads.extend([_hypothesis_envelope(), _plan_envelope()])
+        if cycle < 5:
+            payloads.extend(
+                [
+                    {
+                        "message": f"Revised hypothesis proposal {cycle + 1}.",
+                        "advance": True,
+                    },
+                    {"message": "Revision confirmed.", "advance": True},
+                ]
+            )
+    kit = _kit(
+        tmp_path,
+        payloads=payloads,
+        results=[("completed", {"sharpe": -0.5}) for _ in range(5)],
+        insert_strategy_success=False,
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+    for _ in range(10):
+        if outcome.phase is not HypothesisDevelopmentPhase.PAUSED:
+            break
+        phase = _latest_input_phase(kit, request)
+        body = (
+            "The revision addresses the findings; proceed."
+            if phase == "hypothesis_creation"
+            else "check off"
+        )
+        outcome = _answer_current_pause(kit, request, body=body)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.FAILED
+    assert outcome.hypothesis_cycles == 5
+    assert outcome.detail is not None and "5 attempts" in outcome.detail
+    spawned = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_SPAWNED
+    )
+    assert (
+        len(
+            [
+                event
+                for event in spawned
+                if event.payload["phase"] == "hypothesis_creation"
+            ]
+        )
+        == 1
+    )
+
+
+def test_strategy_loop_pauses_after_five_failed_attempts(tmp_path: Path) -> None:
+    diagnosis = {
+        "falsifierId": "strategy_backtest",
+        "failureClass": "strategy",
+        "rationale": "The implementation did not preserve the measured edge.",
+        "confidence": 0.8,
+        "followUps": ["Revise the entry timing and risk controls."],
+    }
+    payloads: list[dict[str, object] | str] = [
+        _hypothesis_envelope(),
+        _plan_envelope(),
+    ]
+    for cycle in range(5):
+        payloads.append(_design_envelope())
+        payloads.append(
+            {**diagnosis, "rationale": f"Strategy attempt {cycle + 1} failed."}
+        )
+    kit = _kit(
+        tmp_path,
+        payloads=payloads,
+        results=[
+            ("completed", {"sharpe": 1.5}),
+            *[("failed", None) for _ in range(5)],
+        ],
+        insert_strategy_success=False,
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.FAILED
+    assert outcome.strategy_cycles == 5
+    assert len(outcome.rca) == 5
+    assert outcome.detail is not None and "5 attempts" in outcome.detail
+    spawned = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_SPAWNED
+    )
+    assert (
+        len([event for event in spawned if event.payload["phase"] == "strategy_design"])
+        == 1
+    )
+    assert (
+        len([event for event in spawned if event.payload["phase"] == "strategy_rca"])
+        == 1
+    )
+
+
+def test_failed_optimization_reenters_strategy_rca_and_design(tmp_path: Path) -> None:
+    diagnosis: dict[str, object] = {
+        "falsifierId": "strategy_backtest",
+        "failureClass": "strategy",
+        "rationale": "The optimization run exposed unstable exit timing.",
+        "confidence": 0.85,
+        "followUps": ["Stabilize the exit window before rerunning optimization."],
+    }
+    kit = _kit(
+        tmp_path,
+        payloads=[
+            _hypothesis_envelope(),
+            _plan_envelope(),
+            _design_envelope(),
+            diagnosis,
+            _design_envelope(),
+        ],
+        results=[
+            ("completed", {"sharpe": 1.5}),
+            ("completed", {"sharpe": 1.1}),
+            ("failed", None),
+            ("completed", {"sharpe": 1.2}),
+            ("completed", {"sharpe": 1.3}),
+        ],
+        insert_strategy_success=False,
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
+    assert outcome.strategy_cycles == 2
+    assert len(outcome.rca) == 1
+    phases = [transition.to_phase for transition in outcome.transitions]
+    assert phases.count(HypothesisDevelopmentPhase.OPTIMIZATION) == 2
+    assert phases.count(HypothesisDevelopmentPhase.STRATEGY_RCA) == 1
 
 
 def test_phase_transition_table_is_explicit_and_auditable() -> None:
     assert (
         transition_phase(
             HypothesisDevelopmentPhase.REQUESTED,
-            HypothesisDevelopmentPhase.IDEATION,
+            HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
         )
-        is HypothesisDevelopmentPhase.IDEATION
+        is HypothesisDevelopmentPhase.HYPOTHESIS_CREATION
     )
     assert (
         transition_phase(
             HypothesisDevelopmentPhase.FALSIFICATION_TRIALS,
-            HypothesisDevelopmentPhase.RCA,
+            HypothesisDevelopmentPhase.VERDICT,
         )
-        is HypothesisDevelopmentPhase.RCA
+        is HypothesisDevelopmentPhase.VERDICT
     )
     assert (
         transition_phase(
-            HypothesisDevelopmentPhase.RCA,
-            HypothesisDevelopmentPhase.FALSIFICATION_TRIALS,
+            HypothesisDevelopmentPhase.STRATEGY_BACKTESTING,
+            HypothesisDevelopmentPhase.STRATEGY_RCA,
         )
-        is HypothesisDevelopmentPhase.FALSIFICATION_TRIALS
+        is HypothesisDevelopmentPhase.STRATEGY_RCA
+    )
+    assert (
+        transition_phase(
+            HypothesisDevelopmentPhase.STRATEGY_RCA,
+            HypothesisDevelopmentPhase.STRATEGY_DESIGN,
+        )
+        is HypothesisDevelopmentPhase.STRATEGY_DESIGN
     )
     with pytest.raises(InvalidPhaseTransition, match="requested to verdict"):
         transition_phase(
             HypothesisDevelopmentPhase.REQUESTED,
             HypothesisDevelopmentPhase.VERDICT,
         )
-    with pytest.raises(InvalidPhaseTransition, match="completed to hypothesis"):
+    with pytest.raises(
+        InvalidPhaseTransition, match="completed to hypothesis_creation"
+    ):
         transition_phase(
             HypothesisDevelopmentPhase.COMPLETED,
-            HypothesisDevelopmentPhase.HYPOTHESIS,
+            HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
         )
     assert HYPOTHESIS_DEVELOPMENT_WORKFLOW.phases == HYPOTHESIS_DEVELOPMENT_PHASES
 
@@ -706,20 +1239,20 @@ def test_phase_skills_register_and_wire_role_policies() -> None:
     registry = SkillRegistry()
     registered = register_hypothesis_development_skills(registry)
     assert len(registered) == len(HYPOTHESIS_DEVELOPMENT_SKILLS)
-    assert registry.resolve(HYPOTHESIS_AUTHORING_SKILL_ID).version == "1.0.0"
-    assert registry.resolve(FALSIFICATION_RCA_SKILL_ID).version == "1.0.0"
+    assert registry.resolve(HYPOTHESIS_AUTHORING_SKILL_ID).version == "1.2.0"
+    assert registry.resolve(FALSIFICATION_RCA_SKILL_ID).version == "1.2.0"
 
     research = with_hypothesis_development_skills(
         RolePolicy(role="research", version="1.0.0", model_profile="research-profile")
     )
     assert _skill_keys(research) == {
-        "hypothesis-authoring@1.0.0",
-        "falsification-planning@1.0.0",
+        "hypothesis-authoring@1.2.0",
+        "falsification-planning@1.2.0",
     }
     coding = with_hypothesis_development_skills(
         RolePolicy(role="coding", version="1.0.0", model_profile="coding-profile")
     )
-    assert _skill_keys(coding) == {STRATEGY_AUTHORING_SKILL_ID + "@1.0.0"}
+    assert _skill_keys(coding) == {STRATEGY_AUTHORING_SKILL_ID + "@1.2.0"}
     primary = with_hypothesis_development_skills(
         RolePolicy(role="primary", version="1.0.0", model_profile="primary-profile")
     )
@@ -741,7 +1274,7 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
     )
     request = _request(kit)
 
-    kit.workflow.run(request)
+    _run(kit, request)
 
     spawned = _events_by_type(
         kit, request.execution_id, ExecutionEventType.SUB_AGENT_SPAWNED
@@ -750,22 +1283,43 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
         event for event in spawned if event.payload["parentSubAgentId"] is None
     ]
     assert [event.payload["phase"] for event in top_level] == [
-        "ideation",
-        "hypothesis",
-        "falsification_plan",
+        "hypothesis_creation",
         "falsification_trials",
         "verdict",
         "strategy_design",
+        "strategy_backtesting",
         "optimization",
     ]
     for event in top_level:
         assert event.payload["subAgentId"]
-        expected_input = event.payload["phase"] == "ideation"
+        expected_input = event.payload["phase"] in {"hypothesis_creation", "verdict"}
         assert event.payload["acceptsInput"] is expected_input
         context = cast("dict[str, Any]", event.payload["context"])
         assert context["isolated"] is True
         assert context["knowledge_cutoff"] is None
         assert context["mcp"] == {"enabled": False, "tools": []}
+    # Each phase orchestrator records a safe activity label and reply so the
+    # nested chat view is never blank without exposing raw model instructions.
+    progress = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_PROGRESS
+    )
+    activities = [
+        event
+        for event in progress
+        if event.payload.get("kind") == "activity" and event.payload.get("text")
+    ]
+    assert activities
+    assert {event.payload["subAgentId"] for event in activities} <= {
+        event.payload["subAgentId"] for event in top_level
+    }
+    assert all(
+        "Produce the FINAL hypothesis" not in str(event.payload.get("text"))
+        for event in activities
+    )
+    outputs = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_OUTPUT
+    )
+    assert any(event.payload.get("artifact") for event in outputs)
     completed = _events_by_type(
         kit, request.execution_id, ExecutionEventType.SUB_AGENT_COMPLETED
     )
@@ -774,15 +1328,56 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
     }
 
 
-def test_ideation_incorporates_operator_messages_sent_to_the_ideation_node(
-    tmp_path: Path,
-) -> None:
+def test_every_phase_orchestrator_records_its_task_and_summary(tmp_path: Path) -> None:
     kit = _kit(
         tmp_path,
         payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
         results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
     )
     request = _request(kit)
+
+    _run(kit, request)
+
+    events = kit.workflow.observe(WORKSPACE, request.execution_id).events
+    spawned = [
+        event
+        for event in events
+        if event.event_type is ExecutionEventType.SUB_AGENT_SPAWNED
+        and event.payload["parentSubAgentId"] is None
+    ]
+    assert spawned
+    for spawn in spawned:
+        sub_agent_id = spawn.payload["subAgentId"]
+        node_events = [
+            event for event in events if event.payload.get("subAgentId") == sub_agent_id
+        ]
+        assert any(
+            event.event_type is ExecutionEventType.SUB_AGENT_PROGRESS
+            and event.payload.get("kind") == "activity"
+            for event in node_events
+        ), f"phase {spawn.payload['phase']} records no task"
+        assert any(
+            event.event_type is ExecutionEventType.SUB_AGENT_OUTPUT
+            for event in node_events
+        ), f"phase {spawn.payload['phase']} records no summary"
+
+
+def test_creation_conversation_includes_operator_messages(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[
+            {"message": "Describe the model in more detail.", "advance": False},
+            {"message": "The model is ready.", "advance": True},
+            _hypothesis_envelope(),
+            _plan_envelope(),
+            _design_envelope(),
+        ],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+        prepend_ready=False,
+    )
+    request = _request(kit)
+    kit.workflow.run(request)
+    node_id = _creation_node_id(kit, request)
     kit.chat.create_message(
         WORKSPACE,
         request.chat_id,
@@ -794,91 +1389,113 @@ def test_ideation_incorporates_operator_messages_sent_to_the_ideation_node(
         data={
             "executionId": request.execution_id,
             "parentSubAgentId": None,
-            "phase": "ideation",
-            "subAgentId": "subagent-ideation",
+            "phase": "hypothesis_creation",
+            "subAgentId": node_id,
+        },
+    )
+    kit.chat.create_message(
+        WORKSPACE,
+        request.chat_id,
+        actor_id=OWNER,
+        body="confirm",
+        role=MessageRole.USER,
+        kind=TranscriptItemKind.SUB_AGENT,
+        execution_id=request.execution_id,
+        data={
+            "executionId": request.execution_id,
+            "parentSubAgentId": None,
+            "phase": "hypothesis_creation",
+            "subAgentId": node_id,
         },
     )
 
-    kit.workflow.run(request)
+    kit.workflow.resume(request)
 
-    ideation_prompt = kit.provider.prompts[0]
-    assert IDEAS in ideation_prompt
-    assert "Restrict the universe to large-cap technology names." in ideation_prompt
+    finalize_prompt = _prompt_with(kit, "Produce the FINAL hypothesis")
+    assert IDEAS in finalize_prompt
+    assert "Restrict the universe to large-cap technology names." in finalize_prompt
 
 
-def test_nested_rca_sub_agent_links_to_its_phase_orchestrator(tmp_path: Path) -> None:
+def test_creation_conversation_runs_multiple_turns(tmp_path: Path) -> None:
     kit = _kit(
         tmp_path,
         payloads=[
+            {
+                "message": "What is the disagreement with market pricing?",
+                "advance": False,
+            },
+            {"message": "Ready to finalize.", "advance": False},
+            {"message": "Confirmation accepted.", "advance": True},
             _hypothesis_envelope(),
             _plan_envelope(),
-            {
-                "falsifierId": "f1",
-                "failureClass": "harness",
-                "rationale": "The trial run aborted before recording metrics.",
-                "confidence": 0.7,
-                "followUps": ["Re-run the unchanged probe on a clean worker."],
-            },
             _design_envelope(),
         ],
-        results=[
-            ("aborted", None),
-            ("completed", {"sharpe": 1.5}),
-            ("completed", {"sharpe": 1.2}),
-        ],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+        prepend_ready=False,
     )
     request = _request(kit)
 
-    kit.workflow.run(request)
+    first = kit.workflow.run(request)
+    assert first.phase is HypothesisDevelopmentPhase.PAUSED
+    node_id = _creation_node_id(kit, request)
 
-    events = kit.workflow.observe(WORKSPACE, request.execution_id).events
-    spawned = {
-        event.payload["subAgentId"]: event
-        for event in events
-        if event.event_type is ExecutionEventType.SUB_AGENT_SPAWNED
-    }
-    nested = [
-        event
-        for event in spawned.values()
-        if event.payload["parentSubAgentId"] is not None
-    ]
-    assert len(nested) == 1
-    child = nested[0]
-    assert child.payload["phase"] == "rca"
-    parent_id = child.payload["parentSubAgentId"]
-    assert isinstance(parent_id, str)
-    parent = spawned[parent_id]
-    assert parent.payload["phase"] == "rca"
-    assert parent.payload["parentSubAgentId"] is None
-    assert kit.factory.created[0].context_id == child.payload["subAgentId"]
-    child_events = [
-        event
-        for event in events
-        if event.payload.get("subAgentId") == child.payload["subAgentId"]
-    ]
-    assert {event.event_type for event in child_events} == {
-        ExecutionEventType.SUB_AGENT_SPAWNED,
-        ExecutionEventType.SUB_AGENT_PROGRESS,
-        ExecutionEventType.SUB_AGENT_OUTPUT,
-        ExecutionEventType.SUB_AGENT_COMPLETED,
-    }
-    output = next(
-        event
-        for event in child_events
-        if event.event_type is ExecutionEventType.SUB_AGENT_OUTPUT
+    def answer(body: str) -> None:
+        kit.chat.create_message(
+            WORKSPACE,
+            request.chat_id,
+            actor_id=OWNER,
+            body=body,
+            role=MessageRole.USER,
+            kind=TranscriptItemKind.SUB_AGENT,
+            execution_id=request.execution_id,
+            data={
+                "executionId": request.execution_id,
+                "parentSubAgentId": None,
+                "phase": "hypothesis_creation",
+                "subAgentId": node_id,
+            },
+        )
+
+    answer("The market underreacts to slow information diffusion.")
+    second = kit.workflow.resume(request)
+    assert second.phase is HypothesisDevelopmentPhase.PAUSED
+
+    answer("confirm")
+    final = kit.workflow.resume(request)
+    assert final.phase is HypothesisDevelopmentPhase.PAUSED
+    assert _latest_input_phase(kit, request) == "verdict"
+    final = _answer_current_pause(kit, request)
+    assert final.phase is HypothesisDevelopmentPhase.COMPLETED
+    # The judged turns, the finalize compose, the plan, the trials analysis, and
+    # the design all ran; operator requests are authored by the model as well.
+    _prompt_with(kit, "Produce the FINAL hypothesis")
+    _prompt_with(kit, "Design falsification trials and negative controls")
+    _prompt_with(kit, "falsification trials orchestrator")
+
+
+def test_model_judges_confirmation_prose_before_advancing(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[
+            {"message": "The model is ready for review.", "advance": False},
+            {"message": "That clearly confirms the proposal.", "advance": True},
+            _hypothesis_envelope(),
+            _plan_envelope(),
+            _design_envelope(),
+        ],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+        prepend_ready=False,
     )
-    artifact = cast("dict[str, Any]", output.payload["artifact"])
-    assert artifact["type"] == "rca_diagnosis"
-    progress = next(
-        event
-        for event in child_events
-        if event.event_type is ExecutionEventType.SUB_AGENT_PROGRESS
-    )
-    assert progress.payload["kind"] == "thinking"
-    assert progress.payload["text"]
+    request = _request(kit)
+
+    outcome = _run(kit, request, confirm="Looks good to me, please proceed.")
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
 
 
-def test_satisfied_gates_emit_resolved_events(tmp_path: Path) -> None:
+def test_creation_turn_prompt_builds_a_statistical_model_on_history(
+    tmp_path: Path,
+) -> None:
     kit = _kit(
         tmp_path,
         payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
@@ -886,26 +1503,119 @@ def test_satisfied_gates_emit_resolved_events(tmp_path: Path) -> None:
     )
     request = _request(kit)
 
-    kit.workflow.run(request)
+    _run(kit, request)
 
-    resolved = _events_by_type(
-        kit, request.execution_id, ExecutionEventType.WORKFLOW_GATE_RESOLVED
+    turn_prompt = kit.provider.prompts[0]
+    assert IDEAS in turn_prompt
+    assert kit.provider.response_formats[0] == {"type": "json_object"}
+    # The agent builds the model itself, on history, instead of interrogating
+    # the operator about strategy-level details or proposing a forward test.
+    assert "ONE statistical model" in turn_prompt
+    assert "from HISTORICAL data" in turn_prompt
+    assert "never propose a forward-looking experiment" in turn_prompt
+    assert "Propose the model yourself" in turn_prompt
+    assert "Do not ask the operator which statistics" in turn_prompt
+    assert "lead with the proposed model, not with questions" in turn_prompt
+    assert "Sizing, costs, borrow, financing, execution" in turn_prompt
+    assert "do not ask about them now" in turn_prompt
+    # Both falsification layers are explained so the falsifiers serve both.
+    assert "Layer A (this pipeline, on history)" in turn_prompt
+    assert "Layer B (later, while a position is open)" in turn_prompt
+    # The guidance is general across the idea shapes the product supports.
+    assert "Two or more assets" in turn_prompt
+    assert "Structure of one asset's price action" in turn_prompt
+    assert "Options and volatility" in turn_prompt
+    assert "negative control" in turn_prompt
+    assert "Return a single JSON object" in turn_prompt
+    assert '"advance": boolean' in turn_prompt
+
+
+def test_finalize_prompt_requests_the_model_specification(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
     )
-    assert [event.payload["gate"] for event in resolved] == [
-        "falsifiability",
-        "falsification_plan",
-        "evidence_bound",
-        "strategy_design",
-    ]
+    request = _request(kit)
+
+    _run(kit, request)
+
+    finalize_prompt = _prompt_with(kit, "Produce the FINAL hypothesis")
+    assert {"type": "json_object"} in kit.provider.response_formats
+    assert "estimated and falsified on historical data" in finalize_prompt
+    assert "never with a placeholder" in finalize_prompt
+    assert "- claim:" in finalize_prompt
+    assert "- disagreement:" in finalize_prompt
+    assert "no-structure null" in finalize_prompt
+    assert "- falsifiers: the Layer A falsifiers" in finalize_prompt
+    assert "double as Layer B monitors" in finalize_prompt
+    assert "- body: Markdown with the full model specification" in finalize_prompt
+    assert "- model (required)" in finalize_prompt
+    assert "Never encode an indicator as a strategy" in finalize_prompt
+    assert "Omit sizing" in finalize_prompt
+
+
+def test_later_phases_receive_the_model_and_declared_falsifiers(
+    tmp_path: Path,
+) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
+    plan_prompt = _prompt_with(
+        kit, "binds to one declared falsifier by its falsifierId"
+    )
+    design_prompt = _prompt_with(
+        kit, "re-check the declared falsifiers (by falsifierId)"
+    )
+    for prompt in (plan_prompt, design_prompt):
+        assert "Claim: Five-day momentum in SPY continues" in prompt
+        assert "Null / disagreement: The market treats momentum as noise" in prompt
+        assert "Universe: SPY" in prompt
+        assert (
+            "- f1: sharpe lt 0 :: Run the momentum probe and require a negative "
+            "Sharpe." in prompt
+        )
+        assert "Model specification:\nThe continuation thesis." in prompt
+    assert "binds to one declared falsifier by its falsifierId" in plan_prompt
+    assert "Layer B monitor" in design_prompt
+    assert "re-check the declared falsifiers (by falsifierId)" in design_prompt
+
+
+def test_workflow_advances_without_gate_events(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
     assert (
         _events_by_type(
             kit, request.execution_id, ExecutionEventType.WORKFLOW_GATE_BLOCKED
         )
         == []
     )
+    assert (
+        _events_by_type(
+            kit, request.execution_id, ExecutionEventType.WORKFLOW_GATE_RESOLVED
+        )
+        == []
+    )
 
 
-def test_blocked_gate_marks_orchestrator_as_needing_input(tmp_path: Path) -> None:
+def test_unfalsifiable_hypothesis_marks_orchestrator_as_needing_input(
+    tmp_path: Path,
+) -> None:
     kit = _kit(
         tmp_path,
         payloads=[_hypothesis_envelope(falsifiers=[])],
@@ -913,24 +1623,22 @@ def test_blocked_gate_marks_orchestrator_as_needing_input(tmp_path: Path) -> Non
     )
     request = _request(kit)
 
-    kit.workflow.run(request)
+    outcome = _run(kit, request)
 
-    blocked = _events_by_type(
-        kit, request.execution_id, ExecutionEventType.WORKFLOW_GATE_BLOCKED
-    )
-    assert len(blocked) == 1
-    assert blocked[0].payload["gate"] == "falsifiability"
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+    assert outcome.detail is not None
+    assert "falsifier" in outcome.detail
     needs_input = _events_by_type(
         kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
     )
-    assert len(needs_input) == 1
-    assert needs_input[0].payload["acceptsInput"] is True
-    assert needs_input[0].payload["question"]
+    assert needs_input
+    assert needs_input[-1].payload["acceptsInput"] is True
+    assert needs_input[-1].payload["question"]
     tree = SubAgentTree.from_events(
         request.execution_id,
         kit.workflow.observe(WORKSPACE, request.execution_id).events,
     )
-    orchestrator = tree.get(cast(str, needs_input[0].payload["subAgentId"]))
+    orchestrator = tree.get(cast(str, needs_input[-1].payload["subAgentId"]))
     assert orchestrator is not None
     assert orchestrator.accepts_input is True
     assert orchestrator.status == "needs_input"
@@ -953,7 +1661,7 @@ def test_launch_appends_a_workflow_anchor_transcript_item(tmp_path: Path) -> Non
     assert anchor.data["workflowId"] == "hypothesis-development"
     assert anchor.data["version"] == "1.0.0"
     assert anchor.data["title"] == "Hypothesis development"
-    assert anchor.data["status"] == "queued"
+    assert anchor.data["status"] == "running"
     assert anchor.data["currentPhase"] == "requested"
 
 
@@ -980,11 +1688,12 @@ def test_fenced_hypothesis_output_advances_the_pipeline(tmp_path: Path) -> None:
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
-    assert (
-        "Respond with a single JSON object and nothing else" in kit.provider.prompts[0]
+    assert any(
+        "Respond with a single JSON object and nothing else" in prompt
+        for prompt in kit.provider.prompts
     )
 
 
@@ -1001,7 +1710,7 @@ def test_prose_wrapped_hypothesis_output_advances_the_pipeline(tmp_path: Path) -
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
 
@@ -1037,12 +1746,12 @@ def test_non_json_hypothesis_output_repairs_then_pauses_for_input(
     kit = _kit(tmp_path, payloads=[bad, bad, bad], results=[])
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     assert outcome.fenced is True
     assert outcome.detail is not None
-    assert "falsifier" in outcome.detail
+    assert "JSON" in outcome.detail
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.state is WorkflowExecutionState.PAUSED
 
@@ -1055,9 +1764,10 @@ def test_non_json_hypothesis_output_repairs_then_pauses_for_input(
         for event in events
         if event.event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT
     ]
-    assert len(needs_input) == 1
-    assert needs_input[0].payload["acceptsInput"] is True
-    assert needs_input[0].payload["question"]
+    # Confirmation is always explicit; malformed finalization opens a second pause.
+    assert len(needs_input) == 2
+    assert needs_input[-1].payload["acceptsInput"] is True
+    assert needs_input[-1].payload["question"]
 
 
 def test_non_json_output_reinvokes_the_model_with_error_and_schema(
@@ -1067,14 +1777,12 @@ def test_non_json_output_reinvokes_the_model_with_error_and_schema(
     kit = _kit(tmp_path, payloads=[bad, bad, bad], results=[])
     request = _request(kit)
 
-    kit.workflow.run(request)
+    _run(kit, request)
 
-    assert len(kit.provider.prompts) == 3
-    assert "not valid JSON" in kit.provider.prompts[1]
-    assert '"claim"' in kit.provider.prompts[1]
-    assert all(
-        item == {"type": "json_object"} for item in kit.provider.response_formats
-    )
+    # The creation turn, the repair re-invocation, then the plan and design.
+    repair_prompt = _prompt_with(kit, "not valid JSON")
+    assert '"claim"' in repair_prompt
+    assert {"type": "json_object"} in kit.provider.response_formats
 
 
 def test_optional_hypothesis_fields_default_and_compose(tmp_path: Path) -> None:
@@ -1089,6 +1797,7 @@ def test_optional_hypothesis_fields_default_and_compose(tmp_path: Path) -> None:
                 "test": "Run the probe and require a negative Sharpe.",
             }
         ],
+        "model": _model(),
     }
     kit = _kit(
         tmp_path,
@@ -1097,15 +1806,23 @@ def test_optional_hypothesis_fields_default_and_compose(tmp_path: Path) -> None:
     )
     request = _request(kit)
 
-    outcome = kit.workflow.run(request)
+    outcome = _run(kit, request)
 
     assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
     assert outcome.hypothesis is not None
     front = outcome.hypothesis.front_matter
     assert front.horizon == "unspecified"
     assert front.risk_factor == "unspecified"
-    assert front.universe == ("UNSPECIFIED",)
+    assert front.universe == ("SPY",)
     assert front.falsifiers[0].falsifier_id == "f1"
+
+
+def test_metric_accepts_catalog_strings_and_nested_custom_values() -> None:
+    assert _metric({"rolling_corr": "0.73"}, "rolling_corr") == 0.73
+    assert _metric({"custom": {"rolling_corr": "0.81"}}, "rolling_corr") == 0.81
+    assert _metric({"rolling_corr": True}, "rolling_corr") is None
+    assert _metric({"rolling_corr": "NaN"}, "rolling_corr") is None
+    assert _metric({"rolling_corr": "not-a-number"}, "rolling_corr") is None
 
 
 def test_launch_is_deterministic_and_never_calls_the_model(tmp_path: Path) -> None:
@@ -1118,3 +1835,28 @@ def test_launch_is_deterministic_and_never_calls_the_model(tmp_path: Path) -> No
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.workflow_id == "hypothesis-development"
     assert execution.trigger_message_id == request.trigger_message_id
+
+
+def test_long_horizon_and_crlf_newlines_finalize_successfully(tmp_path: Path) -> None:
+    envelope = _hypothesis_envelope()
+    long_horizon = (
+        "Synchronized 5-minute regular-session returns for MSTR and IBIT from IBIT "
+        "inception through the latest complete session, with QQQ as a broad-equity "
+        "control. Full-sample estimation plus trailing 20-session monitoring windows "
+        "containing at least 500 bars; 15-minute bars are evaluated as a robustness "
+        "alternative.\r\nDetailed sampling window notes."
+    )
+    assert len(long_horizon) > 256
+    envelope["horizon"] = long_horizon
+    kit = _kit(
+        tmp_path,
+        payloads=[envelope, _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
+    assert outcome.hypothesis is not None
+    assert outcome.hypothesis.front_matter.horizon.startswith("Synchronized 5-minute")

@@ -19,6 +19,7 @@ import type {
 	SubAgentStatus,
 	ToolResult,
 	TranscriptItem,
+	WorkflowExecutionRecord,
 	WorkflowGate,
 	WorkflowPhase
 } from './types';
@@ -200,9 +201,50 @@ export function mergeEvents(
 	return [...byId.values()].sort((a, b) => a.cursor - b.cursor);
 }
 
+/** Events belonging to one execution in a chat-wide timeline. */
+export function executionEvents(events: ExecutionEvent[], executionId: string): ExecutionEvent[] {
+	return events.filter((event) => event.executionId === executionId);
+}
+
+/** Project the latest durable lifecycle event onto an execution snapshot. */
+export function projectExecution(
+	execution: WorkflowExecutionRecord,
+	events: ExecutionEvent[]
+): WorkflowExecutionRecord {
+	let state = execution.state;
+	let phase = execution.phase;
+	for (const event of [...events].sort((a, b) => a.cursor - b.cursor)) {
+		const eventPhase = event.payload?.phase;
+		if (typeof eventPhase === 'string' && eventPhase.length > 0) phase = eventPhase;
+		switch (event.eventType) {
+			case 'workflow.started':
+				state = 'running';
+				break;
+			case 'workflow.paused':
+				state = 'paused';
+				break;
+			case 'workflow.stopped':
+				state = 'stopped';
+				break;
+			case 'workflow.cancelled':
+				state = 'cancelled';
+				break;
+			case 'workflow.completed':
+				state = 'completed';
+				break;
+			case 'workflow.failed':
+				state = 'failed';
+				break;
+		}
+	}
+	return { ...execution, state, phase };
+}
+
 /** Decode a `tool.result` payload into a `ToolResult`, when present. */
 export function parseToolResult(event: ExecutionEvent): ToolResult | null {
-	if (!event.eventType.startsWith('tool.')) return null;
+	if (!event.eventType.startsWith('tool.') && !event.eventType.startsWith('sub_agent.')) {
+		return null;
+	}
 	const raw = field(event, 'toolResult') ?? field(event, 'tool_result');
 	if (typeof raw !== 'object' || raw === null) return null;
 	return raw as ToolResult;
@@ -223,77 +265,98 @@ interface GateDraft {
 	resolution: WorkflowGate['resolution'];
 }
 
-/** Derive gate cards (blocked and resolved) from the event stream. */
-export function deriveGates(events: ExecutionEvent[]): WorkflowGate[] {
-	const gates = new Map<string, GateDraft>();
-	const ordered = [...events].sort((a, b) => a.cursor - b.cursor);
-	for (const event of ordered) {
-		if (!event.eventType.startsWith('workflow.gate.')) continue;
-		const gateId =
-			stringField(event, 'gateId') ?? stringField(event, 'gate_id') ?? `${event.executionId}:${event.cursor}`;
-		const blocked = event.eventType === 'workflow.gate.blocked';
-		const existing = gates.get(gateId);
-		if (blocked || !existing) {
-			gates.set(gateId, {
-				gateId,
-				executionId: event.executionId,
-				phase: stringField(event, 'phase') ?? existing?.phase ?? '',
-				status: blocked ? 'blocked' : 'resolved',
-				reason: stringField(event, 'reason') ?? existing?.reason ?? '',
-				resolution: existing?.resolution ?? null
-			});
-			if (blocked) continue;
-		}
-		const draft = gates.get(gateId);
-		if (!draft) continue;
-		draft.status = 'resolved';
-		const verdict = stringField(event, 'verdict');
-		const note = stringField(event, 'note');
-		const kind = stringField(event, 'resolution');
-		draft.resolution = {
-			kind:
-				kind === 'disagreement' || kind === 'approve_plan' || kind === 'verdict'
-					? kind
-					: verdict
-						? 'verdict'
-						: 'approve_plan',
-			note,
-			verdict,
-			resolvedAt: event.occurredAt
-		};
-	}
-	return [...gates.values()];
+/** Derive gate cards (blocked and resolved) from the event stream. Deprecated: gates are replaced by conversational needs_input. */
+export function deriveGates(_events: ExecutionEvent[]): WorkflowGate[] {
+	return [];
 }
 
 /**
  * Derive the phase stepper from workflow lifecycle events. Phases appear in
- * first-seen order; the most recent phase is active and earlier ones are
- * done. A terminal workflow state marks every phase done.
+ * declared order when available; the current phase is active, earlier phases
+ * are done, and future phases remain pending. Completion marks every phase done.
  */
 export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
-	const order: string[] = [];
+	let order: string[] = [];
 	let current: string | null = null;
-	let terminal = false;
+	let completed = false;
 	let started = false;
+	const visited = new Set<string>();
+	const visits = new Map<string, number>();
 	for (const event of [...events].sort((a, b) => a.cursor - b.cursor)) {
-		if (event.eventType === 'workflow.completed' || event.eventType === 'workflow.failed' || event.eventType === 'workflow.cancelled') {
-			terminal = true;
+		if (event.eventType === 'workflow.launched') {
+			const workflow = recordField(event, 'workflow');
+			const declared = workflow['phases'];
+			if (Array.isArray(declared)) {
+				order = declared
+					.filter((phase): phase is string => typeof phase === 'string')
+					.filter((phase) => !['requested', 'completed', 'failed', 'paused'].includes(phase));
+			}
+		}
+		if (event.eventType === 'workflow.completed') {
+			completed = true;
+			continue;
+		}
+		if (event.eventType === 'sub_agent.spawned') {
+			const phase = stringField(event, 'phase');
+			if (phase && !order.includes(phase)) order.push(phase);
+			if (phase) {
+				visited.add(phase);
+				if (!visits.has(phase)) visits.set(phase, 1);
+				current = phase;
+			}
 			continue;
 		}
 		if (!event.eventType.startsWith('workflow.')) continue;
 		const phase = stringField(event, 'phase');
-		if (phase) {
+		if (phase && !['requested', 'completed', 'failed', 'paused'].includes(phase)) {
 			if (!order.includes(phase)) order.push(phase);
+			visited.add(phase);
+			visits.set(phase, (visits.get(phase) ?? 0) + 1);
 			current = phase;
 		}
 		if (event.eventType === 'workflow.started') started = true;
 	}
 	if (!started && current === null) return [];
-	const lastIndex = order.length - 1;
-	return order.map((name, index) => ({
+	if (completed) current = null;
+	return order.map((name) => ({
 		name,
-		status: terminal || index < lastIndex ? 'done' : 'active'
+		attempts: visits.get(name) ?? 0,
+		status: name === current
+				? 'active'
+				: visited.has(name)
+					? 'done'
+					: 'pending'
 	}));
+}
+
+/**
+ * Derive the phase stepper from the phase orchestrator sub-agents.
+ *
+ * A workflow's phases are the top-level sub-agents it spawns, in spawn order.
+ * Driving the stepper from the tree rather than `workflow.*` events keeps every
+ * completed phase visible and clickable and never invents a phase (such as the
+ * pre-orchestration `requested` phase) that has no sub-agent to drill into.
+ */
+export function derivePhaseSteps(nodes: SubAgentTreeNode[]): WorkflowPhase[] {
+	const ordered = nodes
+		.filter((node) => node.node.parentSubAgentId === null && node.node.phase.length > 0)
+		.map((node) => {
+			const spawn = node.events.find((event) => event.eventType === 'sub_agent.spawned');
+			return {
+				phase: node.node.phase,
+				status: node.node.status,
+				cursor: spawn?.cursor ?? Number.MAX_SAFE_INTEGER
+			};
+		})
+		.sort((a, b) => a.cursor - b.cursor);
+	const byPhase = new Map<string, WorkflowPhase>();
+	for (const item of ordered) {
+		byPhase.set(item.phase, {
+			name: item.phase,
+			status: item.status === 'completed' ? 'done' : 'active'
+		});
+	}
+	return [...byPhase.values()];
 }
 
 /**
@@ -310,9 +373,6 @@ export function buildTranscriptItems(events: ExecutionEvent[]): TranscriptItem[]
 			}
 			if (event.eventType.startsWith('sub_agent.')) {
 				return { id: event.eventId, kind: 'sub_agent', data: { event } } satisfies TranscriptItem;
-			}
-			if (event.eventType.startsWith('workflow.gate.')) {
-				return { id: event.eventId, kind: 'gate', data: { event } } satisfies TranscriptItem;
 			}
 			if (event.eventType.startsWith('workflow.')) {
 				return { id: event.eventId, kind: 'workflow', data: { event } } satisfies TranscriptItem;

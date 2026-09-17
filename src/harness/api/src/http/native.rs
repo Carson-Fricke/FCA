@@ -8,7 +8,8 @@
 //! `harness-host` PyO3 adapter — the same entry point the `backtest-job`
 //! command uses.
 
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::yaml::YamlValue;
@@ -48,10 +49,32 @@ impl BacktestRunner for NativeBacktestRunner {
         let (outcome, _artifact_path) =
             host::backtest::run_backtest_config(&native, Some(directory.as_path()), None)
                 .map_err(|error| error.to_string())?;
+        let mut artifacts = BTreeMap::new();
+        collect_artifacts(&directory, &directory, &mut artifacts);
         Ok(RunOutcome {
             completed: outcome.completed(),
-            artifact_json: outcome.artifact_json().into_bytes(),
+            artifacts,
         })
+    }
+}
+
+fn collect_artifacts(base: &Path, directory: &Path, output: &mut BTreeMap<String, Vec<u8>>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect();
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            collect_artifacts(base, &path, output);
+        } else if let Ok(payload) = std::fs::read(&path) {
+            if let Ok(relative) = path.strip_prefix(base) {
+                output.insert(relative.to_string_lossy().replace('\\', "/"), payload);
+            }
+        }
     }
 }
 

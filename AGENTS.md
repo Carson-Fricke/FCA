@@ -78,3 +78,11 @@
 - Run `cleo graph impact <symbol>` before moving or renaming any public
   symbol. HIGH/CRITICAL blast-radius findings stop the change and surface as
   integration findings.
+- NEVER use workflow gates, gate tools, or gate events (`workflow.gate.*`). All
+  workflow gates, gate resolution schemas, and gate cards are permanently
+  removed and prohibited. Any operator clarification, review, step validation,
+  or approval blockage MUST route conversationally through
+  `_emit_orchestrator_text` and `SUB_AGENT_NEEDS_INPUT` (`_Fenced`), using the
+  exact same conversational message pattern as hypothesis creation. The operator
+  always responds via standard chat input.
+

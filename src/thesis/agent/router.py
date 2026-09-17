@@ -488,8 +488,9 @@ class ModelRouter:
                 output_reference=f"error://{invocation_id}",
             )
             self._invocations.append(provenance)
+            detail = str(error).strip() or type(error).__name__
             raise ModelInvocationError(
-                "injected model provider failed", provenance
+                f"injected model provider failed: {detail}", provenance
             ) from error
 
         if output_reference is not None:

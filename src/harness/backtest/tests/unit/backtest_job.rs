@@ -17,6 +17,10 @@ fn parses_shell_and_scalars() {
         parse_shell("shell: backtest\n").as_deref(),
         Some("backtest")
     );
+    assert_eq!(
+        parse_shell(r#"{"schema_version":1,"shell":"backtest","run_id":"r"}"#).as_deref(),
+        Some("backtest")
+    );
     assert_eq!(parse_shell("market_data:\n  shell: nested\n"), None);
     assert_eq!(
         parse_scalar("run_id: bt-1\n", "run_id").as_deref(),

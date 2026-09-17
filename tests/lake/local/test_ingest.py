@@ -8,8 +8,10 @@ import pytest
 
 from lake.catalog.models import CoverageStatus
 from lake.contracts import AssetClass, DataType
+from lake.coverage.application import EnsureJob, EnsureSpec
 from lake.local import LocalCatalogRepository, LocalIngestError, LocalLayout
-from lake.local.ingest import run_local_ingest
+from lake.local.ensure import LocalEnsureLauncher
+from lake.local.ingest import run_local_backfill, run_local_ingest
 from lake.providers.alpaca.records import NormalizedQuote, NormalizedTrade
 
 
@@ -130,21 +132,10 @@ def test_missing_credentials_fail_before_provider_or_state_use(tmp_path) -> None
     assert not layout.root.exists()
 
 
-def test_ingest_rejects_unconfigured_symbols_and_unbounded_counts(tmp_path) -> None:
+def test_ingest_rejects_unbounded_counts(tmp_path) -> None:
     layout = LocalLayout(tmp_path / "local")
     provider = FakeAlpaca()
 
-    with pytest.raises(ValueError, match="configured equity universe"):
-        asyncio.run(
-            run_local_ingest(
-                layout=layout,
-                symbol="MSFT",
-                session_date=date(2024, 1, 19),
-                provider=provider,
-                environ=_credentials(),
-                now=datetime(2024, 1, 22, tzinfo=UTC),
-            )
-        )
     with pytest.raises(ValueError, match="between 1 and 10000"):
         asyncio.run(
             run_local_ingest(
@@ -157,6 +148,25 @@ def test_ingest_rejects_unconfigured_symbols_and_unbounded_counts(tmp_path) -> N
         )
 
     assert provider.calls == []
+
+
+def test_ingest_accepts_symbols_outside_the_configured_universe(tmp_path) -> None:
+    layout = LocalLayout(tmp_path / "local")
+    provider = FakeAlpaca()
+
+    result = asyncio.run(
+        run_local_ingest(
+            layout=layout,
+            symbol="MSFT",
+            session_date=date(2024, 1, 19),
+            provider=provider,
+            environ=_credentials(),
+            now=datetime(2024, 1, 22, tzinfo=UTC),
+        )
+    )
+
+    assert provider.calls == [("trade", "MSFT", 100), ("quote", "MSFT", 100)]
+    assert result["symbol"] == "MSFT"
 
 
 def test_fake_provider_failure_is_persisted_but_returns_a_clear_error(tmp_path) -> None:
@@ -193,3 +203,74 @@ def test_fake_provider_failure_is_persisted_but_returns_a_clear_error(tmp_path) 
     assert all(
         "provider unavailable" in (record.error_message or "") for record in records
     )
+
+
+def test_backfill_fetches_arbitrary_symbol_once_and_resumes(tmp_path) -> None:
+    layout = LocalLayout(tmp_path / "local")
+    provider = FakeAlpaca()
+
+    first = asyncio.run(
+        run_local_backfill(
+            layout=layout,
+            symbols=["msft"],
+            start_date=date(2024, 1, 19),
+            end_date=date(2024, 1, 19),
+            provider=provider,
+            environ=_credentials(),
+            now=datetime(2024, 1, 22, tzinfo=UTC),
+        )
+    )
+
+    assert provider.calls == [("trade", "MSFT", 100_000), ("quote", "MSFT", 100_000)]
+    assert first["symbols"] == ["MSFT"]
+    assert first["sessions"] == [
+        {
+            "data_type_rows": {"quote": 1, "trade": 1},
+            "session_date": "2024-01-19",
+            "statuses": ["complete", "complete"],
+            "symbol": "MSFT",
+        }
+    ]
+    records = LocalCatalogRepository(layout.catalog).list(symbol="MSFT")
+    assert {record.status for record in records} == {CoverageStatus.COMPLETE}
+
+    # A rerun reads the catalog checkpoint and does not refetch.
+    second = asyncio.run(
+        run_local_backfill(
+            layout=layout,
+            symbols=["MSFT"],
+            start_date=date(2024, 1, 19),
+            end_date=date(2024, 1, 19),
+            provider=provider,
+            environ=_credentials(),
+            now=datetime(2024, 1, 22, tzinfo=UTC),
+        )
+    )
+
+    assert second["sessions"] == []
+    assert len(provider.calls) == 2
+
+
+def test_local_ensure_launcher_fetches_the_requested_symbol(tmp_path) -> None:
+    layout = LocalLayout(tmp_path / "local")
+    provider = FakeAlpaca()
+    launcher = LocalEnsureLauncher(
+        layout, environ=_credentials(), equity_provider=provider
+    )
+    job = EnsureJob(
+        job_id="ensure-test",
+        request=EnsureSpec(
+            asset_class=AssetClass.EQUITY,
+            data_type=DataType.TRADE,
+            symbol="GLD",
+            start_date=date(2024, 1, 19),
+            end_date=date(2024, 1, 19),
+        ),
+        gaps=(),
+    )
+
+    asyncio.run(launcher(job))
+
+    assert provider.calls == [("trade", "GLD", 100_000), ("quote", "GLD", 100_000)]
+    records = LocalCatalogRepository(layout.catalog).list(symbol="GLD")
+    assert {record.status for record in records} == {CoverageStatus.COMPLETE}

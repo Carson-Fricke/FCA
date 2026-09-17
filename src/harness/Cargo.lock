@@ -123,6 +123,7 @@ dependencies = [
  "host",
  "http-body-util",
  "live",
+ "marketdata",
  "mcp",
  "num",
  "percent-encoding",

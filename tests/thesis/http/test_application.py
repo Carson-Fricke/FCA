@@ -13,10 +13,17 @@ from thesis.agent.harness_tools import (
     open_harness_mcp_composition,
     open_harness_tool_provider,
 )
-from thesis.http.application import create_app
+from thesis.chat import AzureBlobChatPersistence
+from thesis.chat.persistence import FileChatPersistence
+from thesis.http.application import (
+    create_app,
+    durable_chat_service,
+    serving_workspace_store,
+)
 from thesis.integrations.mcp import HarnessMcpTopology
 from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
 from thesis.providers.transports import DEFAULT_SYSTEM_PROMPT
+from thesis.workspaces.azure_catalog import AzureWorkspaceCatalogStore
 
 TOKEN = "thesis-test-token"
 
@@ -226,3 +233,48 @@ def test_retired_validation_routes_are_absent() -> None:
         ).status_code
         == 404
     )
+
+
+def test_durable_chat_service_uses_the_filesystem_without_a_storage_account(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv("THESIS_STORAGE_ACCOUNT_NAME", raising=False)
+    monkeypatch.setenv("THESIS_WORKSPACE_ROOT", str(tmp_path))
+
+    service = durable_chat_service()
+    assert isinstance(service.persistence, FileChatPersistence)
+
+    chat = service.create_chat(
+        "workspace-a", title="Research", owner_actor_id="operator"
+    )
+    message = service.create_message(
+        "workspace-a", chat.chat_id, actor_id="operator", body="Hello"
+    )
+
+    restarted = durable_chat_service()
+    assert restarted.get_message("workspace-a", message.message_id).body == "Hello"
+
+
+def test_durable_chat_service_uses_azure_blobs_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("THESIS_STORAGE_ACCOUNT_NAME", "thesiswstest")
+    monkeypatch.setenv("THESIS_WORKSPACE_CONTAINER_PREFIX", "thesis-ws-")
+
+    service = durable_chat_service()
+
+    assert isinstance(service.persistence, AzureBlobChatPersistence)
+    assert service.persistence.container_prefix == "thesis-ws-"
+
+
+def test_serving_workspace_store_is_none_without_a_storage_account(monkeypatch) -> None:
+    monkeypatch.delenv("THESIS_STORAGE_ACCOUNT_NAME", raising=False)
+    assert serving_workspace_store() is None
+
+
+def test_serving_workspace_store_uses_azure_blobs_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("THESIS_STORAGE_ACCOUNT_NAME", "thesiswstest")
+    monkeypatch.setenv("THESIS_WORKSPACE_CONTAINER_PREFIX", "thesis-ws-")
+
+    store = serving_workspace_store()
+
+    assert isinstance(store, AzureWorkspaceCatalogStore)
+    assert store.container_prefix == "thesis-ws-"

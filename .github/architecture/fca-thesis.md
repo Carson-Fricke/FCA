@@ -123,6 +123,12 @@ The lake and harness must remain operable without Thesis. Thesis must consume
 published lake and harness APIs, clients, schemas, manifests, and strategy
 contracts rather than importing engine internals.
 
+A harness backtest never fails merely because a requested symbol was not
+ingested before: the harness asks the published market-lake ensure contract to
+fetch the run window's configured symbols, then polls coverage to a terminal
+status before reading the local Parquet lake. The lake owns provider
+credentials and the fetch; the harness only issues the ensure request.
+
 The FCA repository's root `strategies` directory remains reserved for
 repository-owned examples and reference strategies. Thesis-generated and user
 workspace strategies live only in `<workspace>/strategies`. The harness accepts
@@ -536,9 +542,15 @@ resolved `allowedTools` before routing a model tool request to the provider.
 
 Backtest launches route through the MCP `run_backtest` tool via a
 `HarnessMcpBoundary` whose capabilities derive from the discovered catalog. The
+local harness HTTP `/mcp` endpoint composes `NativeBacktestSubmitter` over the
+same durable run and job stores as its REST routes, so local HTTP MCP launches
+never depend on an external process runner. The
 local composition prefers the MCP boundary and falls back to the direct
 `LocalHarnessProcess` process boundary when the MCP server cannot be started;
-a remote harness never silently falls back to local execution.
+a remote harness never silently falls back to local execution. That direct
+boundary serves non-agent workspace integration only: workflow sub-agents and
+their research/backtest operations are composed only when the MCP tool provider
+is available and always execute through `McpBacktestRunner`.
 
 The local harness submitter is asynchronous like the remote one: `run_backtest`
 returns a `run_id` with `state: running` immediately and completes on a worker,
@@ -602,54 +614,150 @@ claim into a different claim merely to produce a positive conclusion.
 ### Falsification-First Hypothesis Development
 
 This workflow captures the falsification-first research pipeline: a user
-brings an informal theory or trade setup, and the agent forms a *falsifiable*
-hypothesis that states explicitly why it disagrees with current market pricing,
-makes a real effort to destroy it before designing a strategy, and only then
-moves into strategy design and optimization. A strategy is a falsification
-instrument: its declared exit criteria are falsifier re-checks and PnL is only
-a guardrail.
+brings an intuition about a trading opportunity, and the agent turns it into a
+*statistical model* of the assets involved, asks whether a regularity matching
+the intuition exists in historical data, makes a real effort to destroy it
+before designing a strategy, and only then moves into strategy design and
+optimization. The model is general: it may describe the relationship between
+several assets (co-movement, cointegration, persistent relative
+underperformance), the structure of one asset's price action (trendiness,
+periodicity), or the pricing of options and volatility in a given regime.
 
-The workflow phases and their enforced gates are:
+The model serves two falsification layers:
+
+- **Layer A** runs inside this pipeline, on history. The hypothesis is refuted
+  when no such model can be built, when the fitted model shows no regularity
+  that beats a no-structure null (independence, random walk, fairly priced
+  volatility), or when a regularity exists but does not match the intuition
+  (wrong direction, far too weak). A refuted hypothesis is adjusted and tried
+  again.
+- Layer A thresholds account for market noise and test whether a stable
+  regularity survives a no-structure null and negative controls. Modest effects
+  with the predicted direction count as successful research when they survive
+  those checks; aspirational strategy metrics such as a high Sharpe, hit rate,
+  R-squared, or conventional significance cutoff are not themselves grounds for
+  refutation. Borderline evidence is inconclusive rather than refuted.
+- **Layer B** runs while a position is open. The strategy applies the same
+  model's frozen Layer A fit to a trailing window and exits when observations
+  leave the calibrated range: the idea behind the entry has been refuted. It
+  does not call `fit()` again or estimate replacement parameters. A strategy is
+  therefore a falsification instrument whose declared exit criteria are
+  monitor re-checks, and PnL is only a guardrail.
+
+The hypothesis-creation agent proposes the model itself -- assets, estimator,
+sampling frequency, windows, sample period, expected estimates versus the
+null, falsifiers, and negative controls -- and infers rather than interrogates.
+It never proposes a forward-looking experiment, and it does not ask about
+sizing, costs, borrow, financing, or execution, which belong to strategy
+design.
+
+Indicators and strategies are separate contracts. The immutable global
+indicator registry contains platform implementations such as `sma`, `rsi`,
+and `realized_vol`. Workspace-authored indicators are content-addressed Python
+artifacts under `indicators/<name>/<content-sha>/`. Every `IndicatorRef`
+explicitly declares `global` or `workspace` scope; workspace refs also carry
+the owning workspace and content hash, so they cannot shadow a built-in or
+resolve from a sibling workspace. A statistical research model composes those
+refs and is published independently under
+`models/<model-id>/<content-sha>/`. The artifact contains `model.py`, whose
+contract is `fit(context)` plus `observe(fit, context)`, and `fits/<fit-sha>.json`
+contains the immutable numeric Layer A parameters and calibration bounds. The
+fitted reference is workspace-local and is the only model state a Layer B
+strategy may consume; the model is never represented as a strategy.
+
+The workflow phases and their conversational checkpoints (all workflow gates, gate resolution schemas, and gate tools are permanently removed; all operator review, step validation, and blockage route conversationally via `_emit_orchestrator_text` and `SUB_AGENT_NEEDS_INPUT`) are:
+
+Every request for operator input or direction is model-authored from a structured reason, never a canned workflow string; only mechanical text (phase names, counts, digests, ledger statements, activity labels) is deterministic. See `thesis-operator-text.md` for the rule and the current inventory.
 
 1. `requested` -- the chat request is accepted.
-2. `ideation` -- the agent turns the informal ideas into a candidate
-   falsifiable hypothesis.
-3. `hypothesis` -- the hypothesis is projected into a workspace artifact under
-   `hypotheses/<slug>.md`. **Gate (falsifiability):** the front matter must
-   carry a non-empty disagreement with market pricing and at least one
-   falsifier with `{observable, condition, threshold, test}`. No edge or no
-   falsifier cannot advance; if the market prices the claim fairly, there is no
-   trade.
-4. `falsification_plan` -- the agent plans the destructive tests. **Gate:** at
-   least one falsifier test and at least one negative/placebo control.
-5. `falsification_trials` -- the planned trials run through the harness and
-   each records a bound run digest and metric.
-6. `rca` -- failed trials are diagnosed by fresh, knowledge-cutoff subagents
-   (no inherited transcript) before the trials are retried; the phase loops
-   back to `falsification_trials`.
-7. `verdict` -- the deterministic verdict is `refuted` when any falsifier
-   fires, `supported` when none fires and every falsifier has evidence, and
-   `inconclusive` otherwise. **Gate:** only a not-falsified
-   (`supported`/`inconclusive`) verdict may advance to `strategy_design`;
-   `refuted` returns to `hypothesis`.
-8. `strategy_design` -- the agent implements the surviving hypothesis.
-   **Gate:** the strategy must pass sandbox validation and declare exit
-   criteria phrased as re-checks of the delivered falsifiers.
-9. `optimization` -- the validated strategy is optimized within the declared
-   falsifier bounds.
-10. `completed`, plus `paused` (a failed gate or steering pauses with a
+2. `hypothesis_creation` -- a durable conversation in which the agent turns the
+    intuition into the candidate model, states the Layer A falsifiers, and
+    returns `{message, advance}` on every proposal turn. `advance` reports that
+    the proposal is ready for operator review; it never authorizes a phase
+    transition. The workflow pauses at a durable `needs_input` gate after every
+    proposal. On subsequent turns the model judges whether the operator's prose
+    clearly confirms the proposal; positive confirmation composes the structured
+    hypothesis document and falsification plan, while feedback or ambiguity
+    returns to the input gate. Raw structured model responses remain internal,
+    while the transcript records concise finalization summaries. The hypothesis
+    is projected into a workspace artifact under `hypotheses/<slug>.md`.
+   **Gate (falsifiability):** the front matter must carry a non-empty
+   disagreement (what the no-structure null predicts instead) and at least one
+   falsifier with `{observable, condition, threshold, test}`. No departure
+   from the null or no falsifier cannot advance; without a regularity there is
+   nothing to trade. **Gate (model):** the separate research model must declare
+   every falsifier observable as a finite named output. **Gate (plan):** at
+   least one falsifier test bound to a declared falsifier and at least one
+   negative/placebo control.
+3. `falsification_trials` -- the planned trials run through the harness and
+   bind every falsifier to a metric from one historical model execution. The
+   model's `fit(context)` runs once, its numeric result is published as a
+   content-addressed fitted-model artifact, and `observe(fit, context)` produces
+   the Layer A observations. Model
+   source receives plain quotes, trades, prices, returns, and resolved
+   indicator values; it has no order, position, sizing, portfolio, or venue
+   capability. The platform adapter publishes arbitrary finite numeric values
+   through `publish_metric`. Thesis writes a workspace evidence record under
+    `models/runs/` containing the model/indicator refs, run ID, state, metrics,
+    and result artifacts. The phase agent receives the MCP result in the same
+    logical turn, authors a Markdown interpretation, and emits a structured
+    visual report. Scorecards use observed metrics and declared thresholds;
+    distribution and time-series charts render only when the evidence artifact
+    contains real samples, never client-generated placeholder data. Missing
+    evidence pauses as an execution/data problem; it does not rewrite the premise.
+4. `verdict` -- the deterministic verdict is `refuted` when any falsifier
+    fires, `supported` when none fires and every falsifier has evidence, and
+    `inconclusive` otherwise. A supported verdict advances to strategy design.
+    A refuted verdict posts the observed findings into the persistent
+    `hypothesis_creation` conversation, reopens that same phase node, and asks
+    the agent for a revised proposal before the manual approval gate. This
+    premise loop is bounded to five approved hypothesis attempts.
+5. `strategy_design` -- the agent implements the surviving hypothesis from the
+    finalized model specification and its declared falsifiers. The strategy
+   references the surviving workspace model and fitted-model hashes instead of
+   copying their definitions, feeds trailing events to the model monitor, and
+   publishes each current Layer B observation under the exact falsifier name.
+   A falsifier hit submits flattening orders and prevents new entries.
+    **Gate:** the strategy must pass sandbox validation and declare exit criteria
+    phrased as re-checks of the declared falsifiers (Layer B).
+6. `strategy_backtesting` -- the validated strategy is run through the harness.
+   A successful terminal run advances to optimization. A failed run advances to
+   `strategy_rca`; no economic threshold is invented unless a future strategy
+   contract explicitly declares one.
+7. `strategy_rca` -- the critique agent diagnoses the failed strategy run and
+   posts concrete recommendations into the persistent `strategy_design`
+   conversation. The design agent revises and re-enters strategy backtesting.
+   Optimization failures use the same back-edge. This strategy loop is bounded
+   to five designed-and-tested attempts.
+8. `optimization` -- the validated and successfully tested strategy is optimized
+   within the declared falsifier bounds.
+9. `completed`, plus `paused` (a failed gate, exhausted loop budget, or steering pauses with a
     recorded reason) and `failed`.
+
+Each repeated phase uses one durable top-level phase node. Re-entry appends new
+activity, handoff, tool, and model events to that node's existing chronological
+conversation. Attempt boundaries and cycle counts remain explicit in durable
+handoff messages and phase-transition events without fragmenting the operator's
+phase conversation across multiple nodes.
+
+The falsification planner and the strategy author are prompted with the
+finalized model, not only the claim: the claim, the null/disagreement, the
+horizon and universe, every declared falsifier with its id, observable,
+condition, threshold and computation, the workspace model reference, and the
+Markdown model specification.
 
 The hypothesis artifact is a workspace Markdown document whose small,
 strictly validated YAML front matter (rendered in the deterministic JSON
 subset of YAML 1.2) carries `schema_version`, `hypothesis_id`, `status`,
 `claim`, `disagreement`, `risk_factor`, `horizon`, `universe`, `falsifiers[]`,
-`sizing`, and `links`. The artifact is a projection: the agent owns the prose
-fields, while the workflow and the hash-chained experiment ledger own `status`
-and `links`, and `links.runs`/`links.evidence` are populated from executed
-backtests rather than hand-edited. The workflow emits a durable
-`workflow.phase` execution event for every transition so the UI execution
-timeline renders the pipeline.
+`sizing`, and `links`; the Markdown body carries the full model specification
+(variables and transformations, estimator, expected estimates versus the null,
+negative controls, the Layer B monitoring rule, and limitations). The artifact
+is a projection: the agent owns the prose fields, while the workflow and the
+hash-chained experiment ledger own `status` and `links`, and
+`links.runs`/`links.evidence` are populated from executed backtests rather
+than hand-edited. The workflow emits a durable `workflow.phase` execution
+event for every transition so the UI execution timeline renders the pipeline.
 
 ### Strategy Development And Improvement
 

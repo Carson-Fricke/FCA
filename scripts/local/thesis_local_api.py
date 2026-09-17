@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Mapping
 
 import uvicorn
 
@@ -46,13 +45,15 @@ from thesis.agent.router import (  # noqa: E402
 from thesis.agent.skills import SkillRegistry  # noqa: E402
 from thesis.agent.tool_dispatch import with_harness_mcp  # noqa: E402
 from thesis.chat.responder import ChatReplyService  # noqa: E402
-from thesis.chat.service import ChatService  # noqa: E402
 from thesis.chat.streaming import InMemoryChatStreamBroker  # noqa: E402
-from thesis.http.application import create_app  # noqa: E402
+from thesis.cosmos.stack import open_cosmos_chat_stack  # noqa: E402
+from thesis.http.application import (  # noqa: E402
+    create_app,
+    serving_workspace_store,
+)
 from thesis.http.workspaces import build_local_workspace_data  # noqa: E402
 from thesis.integrations.harness import ProcessResult  # noqa: E402
 from thesis.integrations.harness_activation import (  # noqa: E402
-    HarnessActivationRequest,
     HarnessBoundary,
     LocalHarnessProcess,
 )
@@ -70,29 +71,20 @@ from thesis.providers.transports import (  # noqa: E402
     HttpOpenRouterTransport,
 )
 from thesis.research.hypothesis import WorkspaceHypothesisStore  # noqa: E402
+from thesis.research.indicators import WorkspaceIndicatorStore  # noqa: E402
+from thesis.research.models import WorkspaceResearchModelStore  # noqa: E402
 from thesis.strategies.validation import (  # noqa: E402
     StrategyValidationRequest,
     StrategyValidationResult,
 )
-from thesis.workflows.backtests import (  # noqa: E402
-    BacktestRunRequest,
-    BacktestRunResult,
-)
+from thesis.workflows.local import McpBacktestRunner  # noqa: E402
 from thesis.workflows.runtime import build_workflow_runtime  # noqa: E402
+from thesis.workspaces.local import (  # noqa: E402
+    LocalWorkspaceProvider,
+    default_workspace_root,
+)
 
-
-def _workspace_root() -> str:
-    """Resolve the local workspace root; default to the OS local app data."""
-    override = os.environ.get("THESIS_WORKSPACE_ROOT")
-    if override and override.strip():
-        return override.strip()
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME")
-    if not base:
-        base = os.path.expanduser("~/.local/share")
-    return os.path.join(base, "FCA", "thesis-workspaces")
-
-
-WORKSPACE_ROOT = _workspace_root()
+WORKSPACE_ROOT = str(default_workspace_root())
 HARNESS_BASE_URL = "http://127.0.0.1:8001"
 
 
@@ -175,62 +167,23 @@ class _WorkflowModelProvider:
     def __init__(self, provider: OpenRouterProvider) -> None:
         self._provider = provider
 
-    def invoke(self, *, profile, prompt, allowed_tools):  # noqa: ANN001
+    def invoke(
+        self,
+        *,
+        profile,  # noqa: ANN001
+        prompt,  # noqa: ANN001
+        allowed_tools,
+        response_format=None,  # noqa: ANN001
+    ):
         del profile, allowed_tools
         from thesis.agent.router import ModelResponse
         from thesis.providers.invocations import ChatMessage as ProviderChatMessage
 
         completion = self._provider.complete(
-            messages=[ProviderChatMessage(role="user", content=prompt.rendered)]
+            messages=[ProviderChatMessage(role="user", content=prompt.rendered)],
+            response_format=response_format,
         )
         return ModelResponse(output=completion.content)
-
-
-class _BoundaryBacktestRunner:
-    """Adapt the local harness activation boundary to the runner port."""
-
-    def __init__(self, boundary) -> None:  # noqa: ANN001
-        self._boundary = boundary
-
-    def run(self, request: BacktestRunRequest) -> BacktestRunResult:
-        import json
-        import os
-        import tempfile
-
-        raw_configuration = request.bundle.harness_configuration
-        document: dict[str, object] = (
-            {str(key): value for key, value in raw_configuration.items()}
-            if isinstance(raw_configuration, Mapping)
-            else {}
-        )
-        document.setdefault("run_id", request.run_id)
-        descriptor, path = tempfile.mkstemp(prefix="thesis-backtest-", suffix=".json")
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(document, handle)
-            outcome = self._boundary.run_backtest(
-                HarnessActivationRequest(
-                    bundle_ref=request.bundle.bundle_sha256,
-                    config_path=path,
-                    action="backtest",
-                    environment="paper",
-                )
-            )
-        finally:
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
-        raw = dict(outcome.raw)
-        state = outcome.state or ("completed" if outcome.exit_code == 0 else "failed")
-        return BacktestRunResult(
-            job_id=outcome.job_id or request.run_id,
-            state=state,
-            mode="local",
-            manifest=raw.get("manifest"),
-            metrics=raw.get("metrics"),
-            result_artifacts=raw.get("artifacts"),
-        )
 
 
 class _StructuralStrategyValidator:
@@ -244,7 +197,7 @@ class _StructuralStrategyValidator:
 
 def _development_runtime(
     model_provider: OpenRouterProvider,
-    boundary,  # noqa: ANN001
+    harness_tools: HarnessToolProvider,
 ):
     """Compose the workflow runtime for the falsification-first pipeline."""
     skills = SkillRegistry()
@@ -266,7 +219,8 @@ def _development_runtime(
         )
         return with_hypothesis_development_skills(with_harness_mcp(base))
 
-    runner = _BoundaryBacktestRunner(boundary) if boundary is not None else None
+    runner = McpBacktestRunner(harness_tools)
+    workspaces = LocalWorkspaceProvider(WORKSPACE_ROOT)
     return build_workflow_runtime(
         role_policies={
             "research": policy("research"),
@@ -279,18 +233,25 @@ def _development_runtime(
         runner=runner,
         strategy_validator=_StructuralStrategyValidator(),
         hypothesis_store=WorkspaceHypothesisStore(WORKSPACE_ROOT),
+        indicator_store=WorkspaceIndicatorStore(workspaces),
+        research_model_store=WorkspaceResearchModelStore(workspaces),
     )
 
 
 _harness, _harness_tools = _harness_composition()
+
+# Conversations persist in Cosmos DB (the local emulator by default) and every
+# message/event shares one per-chat timeline served by the unified stream.
+chat_service, timeline = open_cosmos_chat_stack()
+chat_stream_broker = InMemoryChatStreamBroker()
+
 workspace_data = build_local_workspace_data(
     workspace_root=WORKSPACE_ROOT,
     harness_boundary=_harness,
     harness_base_url=HARNESS_BASE_URL,
+    chat_service=chat_service,
+    workspace_store=serving_workspace_store(),
 )
-
-chat_service = ChatService()
-chat_stream_broker = InMemoryChatStreamBroker()
 
 # Wire a live model provider only when a key is present; otherwise chat stays
 # a durable message surface with no reply, rather than failing every send.
@@ -309,8 +270,8 @@ if os.environ.get("OPENROUTER_API_KEY"):
         HttpOpenRouterTransport(provider_profile.base_url),
     )
     harness_tools = _harness_tools
-    if _harness is not None:
-        workflow_runtime = _development_runtime(model_provider, _harness)
+    if _harness_tools is not None:
+        workflow_runtime = _development_runtime(model_provider, _harness_tools)
     reply_service = ChatReplyService(
         chat_service=chat_service,
         broker=chat_stream_broker,
@@ -325,6 +286,7 @@ app = create_app(
     chat_reply_service=reply_service,
     workflow_runtime=workflow_runtime,
     harness_tool_provider=harness_tools,
+    timeline=timeline,
 )
 app.add_middleware(
     CORSMiddleware,

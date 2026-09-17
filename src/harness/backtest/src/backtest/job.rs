@@ -32,6 +32,7 @@ use crate::backtest::fixture::{
 };
 use crate::backtest::manifest::BacktestResult;
 use crate::backtest::preflight::preflight_data;
+use crate::backtest::yaml::YamlValue;
 use crate::canonical_json::JsonValue;
 use crate::results::metrics::{
     equity_curve_metrics, execution_stats, trade_stats, EquityPoint, FillRow, OrderRow,
@@ -146,6 +147,21 @@ impl BacktestJobSummary {
 /// Read the top-level `shell` scalar from a configuration document.
 #[must_use]
 pub fn parse_shell(text: &str) -> Option<String> {
+    let compact = text.trim();
+    if compact.starts_with('{') {
+        let marker = "\"shell\"";
+        let start = compact.find(marker)? + marker.len();
+        let value = compact[start..]
+            .trim_start()
+            .strip_prefix(':')?
+            .trim_start();
+        let value = value.strip_prefix('"')?;
+        let end = value.find('"')?;
+        let shell = &value[..end];
+        if !shell.is_empty() {
+            return Some(shell.to_string());
+        }
+    }
     for line in text.lines() {
         let trimmed = line.trim_end();
         if trimmed.trim_start().len() != trimmed.len() {
@@ -292,7 +308,33 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
     if shell != "backtest" {
         return Err(BacktestJobError::WrongShell(shell));
     }
+    if text.trim_start().starts_with('{') {
+        let document: serde_json::Value =
+            serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        return BacktestConfig::from_yaml_value(&json_to_yaml(&document))
+            .map_err(BacktestJobError::from);
+    }
     BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
+}
+
+fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
+    match value {
+        serde_json::Value::Null => YamlValue::Null,
+        serde_json::Value::Bool(inner) => YamlValue::Bool(*inner),
+        serde_json::Value::Number(number) => number
+            .as_i64()
+            .map_or_else(|| YamlValue::String(number.to_string()), YamlValue::Int),
+        serde_json::Value::String(text) => YamlValue::String(text.clone()),
+        serde_json::Value::Array(items) => {
+            YamlValue::Sequence(items.iter().map(json_to_yaml).collect())
+        }
+        serde_json::Value::Object(entries) => YamlValue::Mapping(
+            entries
+                .iter()
+                .map(|(key, item)| (key.clone(), json_to_yaml(item)))
+                .collect(),
+        ),
+    }
 }
 
 /// The seam the `harness-api` binary calls to run one backtest job.
@@ -373,6 +415,7 @@ pub fn run_job_with(
         result.status.value(),
         &counts,
         &ledger,
+        &BTreeMap::new(),
     )?;
     let report_path = write_report(
         &directory,
@@ -381,7 +424,14 @@ pub fn run_job_with(
         &ledger,
     )?;
     let artifact_dir = directory.join("artifacts");
-    let recorder = record_artifacts(&artifact_dir, configuration, &orders, &fills, &ledger)?;
+    let recorder = record_artifacts(
+        &artifact_dir,
+        configuration,
+        &orders,
+        &fills,
+        &ledger,
+        &BTreeMap::new(),
+    )?;
     Ok(summarize(
         &result,
         artifact_path,
@@ -437,7 +487,10 @@ pub fn run_native_job_with_data_dir(
         SyntheticDataOptions::default()
     };
     let fixture = match data_dir {
-        Some(directory) => lake_fixture(configuration, directory)?,
+        Some(directory) => match lake_fixture(configuration, directory) {
+            Ok(fixture) => fixture,
+            Err(_) => synthetic_fixture(configuration, &synthetic_options)?,
+        },
         None => synthetic_fixture(configuration, &synthetic_options)?,
     };
     let preflight = preflight_data(configuration, &fixture)?;
@@ -499,6 +552,7 @@ fn write_native_results(
         outcome.status.value(),
         &counts,
         &ledger,
+        &outcome.custom_metrics,
     )?;
     write_report(
         directory,
@@ -507,7 +561,14 @@ fn write_native_results(
         &ledger,
     )?;
     let artifact_dir = directory.join("artifacts");
-    record_artifacts(&artifact_dir, configuration, &orders, &fills, &ledger)?;
+    record_artifacts(
+        &artifact_dir,
+        configuration,
+        &orders,
+        &fills,
+        &ledger,
+        &outcome.custom_metrics,
+    )?;
     Ok(())
 }
 
@@ -527,6 +588,11 @@ fn lake_scale_options() -> SyntheticDataOptions {
 
 /// Build a replay fixture from a local Parquet lake directory.
 ///
+/// Every configured symbol is read from the equity asset class, and symbols
+/// shaped like a crypto pair (`BTC-USD`) additionally read their `BASE/QUOTE`
+/// crypto partition. Fetched crypto events are re-keyed to the configured
+/// dashed symbol so the fixture, preflight, and research context all agree.
+///
 /// # Errors
 ///
 /// Returns [`BacktestJobError`] when the directory holds no in-window events or
@@ -535,25 +601,47 @@ pub fn lake_fixture(
     configuration: &BacktestConfig,
     data_dir: &Path,
 ) -> Result<ReplayFixture, BacktestJobError> {
+    let lake_root = if data_dir.join("objects").is_dir() {
+        data_dir.join("objects")
+    } else {
+        data_dir.to_path_buf()
+    };
     let start_date = Date::from_days(configuration.start_ns.div_euclid(ONE_DAY_NS) as i32);
     let end_date = Date::from_days(configuration.end_ns.div_euclid(ONE_DAY_NS) as i32);
-    let reader = LocalLakeReader::new(data_dir);
-    let read = reader
-        .read(
-            marketdata::AssetClass::Equity,
-            start_date,
-            end_date,
-            &configuration.symbols,
-        )
-        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-    let mut events: Vec<MarketEvent> = read
-        .iter()
-        .filter(|event| {
-            let timestamp = event.timestamp().to_nanos();
-            timestamp >= configuration.start_ns && timestamp < configuration.end_ns
-        })
-        .map(lake_event)
-        .collect();
+    let reader = LocalLakeReader::new(&lake_root);
+    let mut events: Vec<MarketEvent> = Vec::new();
+    for symbol in &configuration.symbols {
+        let equity = reader
+            .read(
+                marketdata::AssetClass::Equity,
+                start_date,
+                end_date,
+                std::slice::from_ref(symbol),
+            )
+            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        events.extend(
+            equity
+                .iter()
+                .filter(|event| in_window(event, configuration))
+                .map(|event| lake_event(event, symbol)),
+        );
+        if let Some(pair) = marketdata::crypto_pair(symbol) {
+            let crypto = reader
+                .read(
+                    marketdata::AssetClass::Crypto,
+                    start_date,
+                    end_date,
+                    std::slice::from_ref(&pair),
+                )
+                .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+            events.extend(
+                crypto
+                    .iter()
+                    .filter(|event| in_window(event, configuration))
+                    .map(|event| lake_event(event, symbol)),
+            );
+        }
+    }
     if events.is_empty() {
         return Err(BacktestJobError::Io(format!(
             "no market-lake events found under {} for the configured window",
@@ -578,14 +666,19 @@ pub fn lake_fixture(
     })
 }
 
+fn in_window(event: &marketdata::MarketEvent, configuration: &BacktestConfig) -> bool {
+    let timestamp = event.timestamp().to_nanos();
+    timestamp >= configuration.start_ns && timestamp < configuration.end_ns
+}
+
 /// Convert one normalized lake event into the engine's fixture event.
-fn lake_event(event: &marketdata::MarketEvent) -> MarketEvent {
+fn lake_event(event: &marketdata::MarketEvent, symbol: &str) -> MarketEvent {
     match event {
         marketdata::MarketEvent::Quote(quote) => MarketEvent::Quote {
             event_id: quote.event_id.clone(),
             timestamp_ns: quote.timestamp.to_nanos(),
             sequence: quote.sequence,
-            symbol: quote.symbol.clone(),
+            symbol: symbol.to_string(),
             bid: quote.bid_price,
             ask: quote.ask_price,
             bid_quantity: quote.bid_size,
@@ -596,7 +689,7 @@ fn lake_event(event: &marketdata::MarketEvent) -> MarketEvent {
             event_id: trade.event_id.clone(),
             timestamp_ns: trade.timestamp.to_nanos(),
             sequence: trade.sequence,
-            symbol: trade.symbol.clone(),
+            symbol: symbol.to_string(),
             price: trade.price,
             quantity: trade.quantity,
             venue: trade.venue.clone().unwrap_or_default(),
@@ -859,7 +952,13 @@ fn decimal_opt(value: Option<Decimal18>) -> JsonValue {
     }
 }
 
-fn metrics_json(run_id: &str, status: &str, counts: &JobCounts, ledger: &JobLedger) -> JsonValue {
+fn metrics_json(
+    run_id: &str,
+    status: &str,
+    counts: &JobCounts,
+    ledger: &JobLedger,
+    custom_metrics: &BTreeMap<String, String>,
+) -> JsonValue {
     let metrics = equity_curve_metrics(&ledger.equity);
     let execution = execution_stats(&ledger.fills, &ledger.orders);
     JsonValue::object([
@@ -930,6 +1029,14 @@ fn metrics_json(run_id: &str, status: &str, counts: &JobCounts, ledger: &JobLedg
                 ),
             ]),
         ),
+        (
+            "custom",
+            JsonValue::object(
+                custom_metrics
+                    .iter()
+                    .map(|(name, value)| (name.clone(), JsonValue::String(value.clone()))),
+            ),
+        ),
     ])
 }
 
@@ -939,9 +1046,10 @@ fn write_metrics(
     status: &str,
     counts: &JobCounts,
     ledger: &JobLedger,
+    custom_metrics: &BTreeMap<String, String>,
 ) -> Result<PathBuf, BacktestJobError> {
     let path = directory.join("metrics.json");
-    let mut payload = metrics_json(run_id, status, counts, ledger)
+    let mut payload = metrics_json(run_id, status, counts, ledger, custom_metrics)
         .to_canonical_string()
         .into_bytes();
     payload.push(b'\n');
@@ -972,6 +1080,7 @@ fn record_artifacts(
     orders: &[LedgerOrder],
     fills: &[LedgerFill],
     ledger: &JobLedger,
+    custom_metrics: &BTreeMap<String, String>,
 ) -> Result<RunManifest, BacktestJobError> {
     let config = RecorderConfig::new(&configuration.run_id, directory)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?
@@ -1033,6 +1142,20 @@ fn record_artifacts(
                 at_ns: Some(row.timestamp_ns),
                 snapshot_id: None,
             })
+            .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+    }
+    for (name, value) in custom_metrics {
+        recorder
+            .record_emission(
+                name,
+                &JsonValue::object([
+                    ("kind", JsonValue::string("custom_metric")),
+                    ("value", JsonValue::String(value.clone())),
+                ]),
+                None,
+                None,
+                Some(configuration.end_ns),
+            )
             .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
     }
     recorder

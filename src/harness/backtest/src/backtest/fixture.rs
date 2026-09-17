@@ -655,20 +655,41 @@ pub fn synthetic_fixture(
     options: &SyntheticDataOptions,
 ) -> Result<ReplayFixture, BacktestError> {
     options.validate()?;
-    let symbol = configuration
-        .symbols
-        .first()
-        .cloned()
-        .unwrap_or_else(|| options.symbol.clone())
-        .to_uppercase();
+    let symbols: Vec<String> = if configuration.symbols.is_empty() {
+        vec![options.symbol.clone().to_uppercase()]
+    } else {
+        configuration
+            .symbols
+            .iter()
+            .map(|s| s.to_uppercase())
+            .collect()
+    };
     let sessions = backtest_sessions(configuration, options);
-    let events = synthetic_events(configuration, options, &symbol, &sessions)?;
-    let fingerprints = synthetic_fingerprints(&events, &sessions, options, &symbol);
+    let mut all_events = Vec::new();
+    let mut primary_fingerprints: Option<ReplayFingerprints> = None;
+    for (idx, symbol) in symbols.iter().enumerate() {
+        let events = synthetic_events(configuration, options, symbol, &sessions)?;
+        if idx == 0 {
+            primary_fingerprints = Some(synthetic_fingerprints(&events, &sessions, options, symbol));
+        }
+        all_events.extend(events);
+    }
+    if symbols.len() > 1 {
+        all_events.sort_by(|left, right| {
+            left.timestamp_ns()
+                .cmp(&right.timestamp_ns())
+                .then_with(|| left.sequence().cmp(&right.sequence()))
+        });
+    }
+    let fingerprints = match primary_fingerprints {
+        Some(fp) => fp,
+        None => ReplayFingerprints::of_events(&all_events),
+    };
     Ok(ReplayFixture {
         sessions,
-        events,
+        events: all_events,
         source_id: "synthetic".to_string(),
-        symbols: vec![symbol],
+        symbols,
         fingerprints,
         expected_data_fingerprint: None,
     })

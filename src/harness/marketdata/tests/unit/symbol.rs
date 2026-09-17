@@ -22,3 +22,13 @@ fn osi_symbols_canonicalize() {
     assert!(is_osi_symbol("AAPL240119C00150000"));
     assert!(!is_osi_symbol("AAPL"));
 }
+
+#[test]
+fn dashed_crypto_shapes_map_to_pairs() {
+    assert_eq!(crypto_pair("BTC-USD").as_deref(), Some("BTC/USD"));
+    assert_eq!(crypto_pair(" btc/usd ").as_deref(), Some("BTC/USD"));
+    assert_eq!(crypto_pair("ETH-USD").as_deref(), Some("ETH/USD"));
+    assert_eq!(crypto_pair("MSTR"), None);
+    assert_eq!(crypto_pair("BRK.B"), None);
+    assert_eq!(crypto_pair("AAPL240119C00150000"), None);
+}

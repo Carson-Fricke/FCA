@@ -110,17 +110,17 @@ def test_stream_resumes_from_last_event_id(
     url = _stream_url(execution.execution_id)
 
     initial = _parse_frames(_read_stream(client, url))
-    assert [frame["id"] for frame in _machine_frames(initial)] == ["1", "2"]
+    assert [frame["id"] for frame in _machine_frames(initial)] == ["1", "2", "3"]
 
-    service.start_workflow(WORKSPACE, execution.execution_id, actor_id="worker")
+    service.pause_workflow(WORKSPACE, execution.execution_id, actor_id="worker")
 
     resumed = _parse_frames(
-        _read_stream(client, url, headers={**AUTH, "Last-Event-ID": "2"})
+        _read_stream(client, url, headers={**AUTH, "Last-Event-ID": "3"})
     )
-    assert [frame["id"] for frame in _machine_frames(resumed)] == ["3"]
+    assert [frame["id"] for frame in _machine_frames(resumed)] == ["4"]
 
-    queried = _parse_frames(_read_stream(client, f"{url}?after_cursor=2"))
-    assert [frame["id"] for frame in _machine_frames(queried)] == ["3"]
+    queried = _parse_frames(_read_stream(client, f"{url}?after_cursor=3"))
+    assert [frame["id"] for frame in _machine_frames(queried)] == ["4"]
 
 
 def test_stream_rejects_invalid_last_event_id(

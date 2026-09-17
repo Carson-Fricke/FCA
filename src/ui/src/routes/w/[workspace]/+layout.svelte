@@ -30,6 +30,13 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 	const isChats = $derived(pageLabel === 'conversations');
 	const copilotVisible = $derived(!isChats && ui.copilotOpen);
 
+	$effect(() => {
+		// The full-page conversations view hides the copilot pane. Clear the
+		// open state there so leaving the page defaults the pane back to closed
+		// instead of resurrecting a stale open state.
+		if (isChats) ui.copilotOpen = false;
+	});
+
 	let paletteOpen = $state(false);
 	let createOpen = $state(false);
 	let settingsOpen = $state(false);

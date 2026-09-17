@@ -52,6 +52,31 @@ pub fn is_osi_symbol(value: &str) -> bool {
     upper.is_ascii() && is_osi(&upper)
 }
 
+/// Return the canonical `BASE/QUOTE` lake pair for a dashed crypto symbol.
+///
+/// Research models name crypto instruments with a dash (`BTC-USD`), while the
+/// market lake stores them as pairs (`BTC/USD`). Equity tickers that carry a
+/// dash (`BRK-B`) are indistinguishable from a crypto pair by shape alone; the
+/// caller resolves the ambiguity by attempting the equity partition first and
+/// falling back to this pair form. `None` means the symbol is not shaped like a
+/// pair and should be treated as equity.
+#[must_use]
+pub fn crypto_pair(symbol: &str) -> Option<String> {
+    let upper = symbol.trim().to_uppercase();
+    if let Some((base, quote)) = upper.split_once('/') {
+        return pair_segments(base, quote).then(|| format!("{base}/{quote}"));
+    }
+    let (base, quote) = upper.split_once('-')?;
+    pair_segments(base, quote).then(|| format!("{base}/{quote}"))
+}
+
+fn pair_segments(base: &str, quote: &str) -> bool {
+    (2..=6).contains(&base.len())
+        && (2..=6).contains(&quote.len())
+        && base.chars().all(|c| c.is_ascii_alphabetic())
+        && quote.chars().all(|c| c.is_ascii_alphabetic())
+}
+
 fn is_osi(value: &str) -> bool {
     if !value.is_ascii() {
         return false;

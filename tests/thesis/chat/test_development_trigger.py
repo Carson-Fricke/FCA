@@ -387,13 +387,13 @@ def test_development_summary_reports_running_paused_and_failed() -> None:
     running = HypothesisDevelopmentOutcome(
         workspace_id=WORKSPACE,
         execution_id="execution-1",
-        phase=HypothesisDevelopmentPhase.IDEATION,
+        phase=HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
         fenced=False,
         transitions=(),
     )
     assert "started" in _development_summary(running)
     assert "running" in _development_summary(running)
-    assert "ideation" in _ACTIVE_DEVELOPMENT_PHASES
+    assert "hypothesis_creation" in _ACTIVE_DEVELOPMENT_PHASES
 
     paused = HypothesisDevelopmentOutcome(
         workspace_id=WORKSPACE,
@@ -439,10 +439,13 @@ def test_paused_development_message_points_to_needs_input() -> None:
 
     message = reply.respond(WORKSPACE, chat_id)
 
-    assert message is not None
-    assert "needs input" in message.body
-    assert "needs-input" in message.body
-    assert "finished (failed)" not in message.body
+    assert message is None
+    assert not any(
+        item.role is MessageRole.ASSISTANT
+        and item.execution_id is not None
+        and "needs input" in item.body
+        for item in chat.list_messages(WORKSPACE, chat_id)
+    )
 
 
 class AnchorOrderingRuntime(FakeDevelopmentRuntime):
@@ -525,13 +528,11 @@ def test_paused_workflow_still_emits_done_after_anchor() -> None:
 
     message = reply.respond(WORKSPACE, chat_id)
 
-    assert message is not None
+    assert message is None
     frames = broker.read(WORKSPACE, chat_id)
     assert frames[0].event == PROVIDER_DELTA
     assert frames[0].data.get("start") is True
     assert frames[1].event == CHAT_MESSAGE
     assert _frame_message(frames[1])["kind"] == "workflow"
-    assert frames[-2].event == CHAT_MESSAGE
-    assert "needs input" in _frame_message(frames[-2])["body"]
     assert frames[-1].event == PROVIDER_DELTA
     assert frames[-1].data.get("done") is True

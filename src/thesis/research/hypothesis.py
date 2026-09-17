@@ -86,7 +86,7 @@ NonEmptyText = Annotated[
 ]
 ShortText = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=256),
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=4_096),
 ]
 
 

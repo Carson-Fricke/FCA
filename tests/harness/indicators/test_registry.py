@@ -165,3 +165,20 @@ def test_custom_registry_accepts_private_extensions() -> None:
     assert isinstance(indicator, _CustomIndicator)
     assert registry.names() == ("custom_test",)
     assert "custom_test" not in DEFAULT_REGISTRY.names()
+
+
+def test_default_registry_is_immutable_but_private_registries_are_open() -> None:
+    assert DEFAULT_REGISTRY.frozen is True
+    with pytest.raises(IndicatorConfigurationError, match="immutable"):
+        DEFAULT_REGISTRY.register(
+            IndicatorSpec("custom_test", "Private extension.", (), _CustomIndicator)
+        )
+
+    private = IndicatorRegistry()
+    assert private.frozen is False
+    private.register(
+        IndicatorSpec("custom_test", "Private extension.", (), _CustomIndicator)
+    )
+    private.freeze()
+    with pytest.raises(IndicatorConfigurationError, match="immutable"):
+        private.register(indicator_spec("sma"))

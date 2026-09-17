@@ -136,15 +136,15 @@ def _validate_event_extras(
     """Enforce the per-kind payload contract for sub-agent events."""
     if event_type is ExecutionEventType.SUB_AGENT_PROGRESS:
         kind = None if extra is None else extra.get("kind")
-        if kind not in {"thinking", "tool"}:
+        if kind not in {"activity", "thinking", "tool"}:
             raise SubAgentContractError(
-                "progress events require kind 'thinking' or 'tool'"
+                "progress events require kind 'activity', 'thinking', or 'tool'"
             )
-        if kind == "thinking":
+        if kind in {"activity", "thinking"}:
             text = None if extra is None else extra.get("text")
             if not isinstance(text, str) or not text.strip():
                 raise SubAgentContractError(
-                    "thinking progress events require non-empty text"
+                    f"{kind} progress events require non-empty text"
                 )
         elif extra is None or not ("toolCall" in extra or "toolResult" in extra):
             raise SubAgentContractError(

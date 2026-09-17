@@ -5,12 +5,15 @@ distinct Thesis roles.  This module publishes one immutable, versioned
 :class:`~thesis.agent.skills.ThesisSkill` per phase and registers them into the
 :class:`~thesis.agent.skills.SkillRegistry` alongside ``harness-mcp``:
 
-* ``hypothesis-authoring`` -- form a falsifiable hypothesis with an explicit
-  disagreement against market pricing and testable falsifiers.
+* ``hypothesis-authoring`` -- turn the operator's intuition into a statistical
+  model of the assets involved, estimated on historical data, with Layer A
+  falsifiers that double as Layer B monitors.
 * ``falsification-planning`` -- design the falsifier trials and the
   negative/placebo controls that separate signal from noise.
-* ``falsification-rca`` -- diagnose why a falsification trial failed without
-  mutating the premise or the engine.
+* ``falsification-rca`` -- diagnose why a failed harness run (currently the
+  strategy backtest) went wrong without mutating the premise or the engine.
+  Falsification-trial failures are evaluated agent-first in the trials prose,
+  not by this skill.
 * ``strategy-authoring`` -- implement a strategy whose exit criteria are
   falsifier re-checks and whose sizing is explicit.
 
@@ -30,16 +33,24 @@ HYPOTHESIS_AUTHORING_SKILL_ID = "hypothesis-authoring"
 FALSIFICATION_PLANNING_SKILL_ID = "falsification-planning"
 FALSIFICATION_RCA_SKILL_ID = "falsification-rca"
 STRATEGY_AUTHORING_SKILL_ID = "strategy-authoring"
-HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.0.0"
+HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.2.0"
 
 _HYPOTHESIS_AUTHORING = (
-    "Author a falsifiable market hypothesis. State the claim, the explicit "
-    "disagreement with current market pricing that makes the edge tradable, the "
-    "risk factor, the horizon, and the universe. Provide at least one "
-    "falsifier with an observable metric, a condition, a threshold, and the "
-    "test that produces the observation. If the market prices the claim "
-    "fairly, there is no trade: the disagreement field must justify why the "
-    "price is wrong."
+    "Turn the operator's intuition about a trading opportunity into one "
+    "statistical model of the assets involved and decide, from historical "
+    "data, whether a regularity matching the intuition exists. Propose the "
+    "model yourself (assets, estimator, sampling frequency, windows, sample "
+    "period) instead of asking which statistics to use; never propose a "
+    "forward-looking experiment. State the claim as the regularity the model "
+    "predicts, the disagreement as what a no-structure null predicts instead, "
+    "the risk factor, the horizon, and the universe. Provide falsifiers with an "
+    "observable statistic, a condition, a threshold, and the computation that "
+    "produces it. The model source must separate fit(context), which estimates "
+    "numeric parameters once on history, from observe(fit, context), which "
+    "applies the frozen fit. A fired falsifier refutes the claim on history "
+    "(Layer A); the same observe function on a trailing window becomes the "
+    "strategy's Layer B monitor. Sizing, costs, and execution belong to "
+    "strategy design."
 )
 
 _FALSIFICATION_PLANNING = (
@@ -50,19 +61,25 @@ _FALSIFICATION_PLANNING = (
 )
 
 _FALSIFICATION_RCA = (
-    "Diagnose why a falsification trial failed. Separate data, harness, "
+    "Diagnose why a recorded harness run failed. Separate data, harness, "
     "implementation, strategy, and market-regime causes using the recorded "
-    "run artifacts. Cite supporting and disconfirming observations, record "
-    "uncertainty, and propose discriminating follow-up tests. Never mutate the "
-    "premise or the engine to convert a failure into a pass."
+    "run artifacts and the exact failure message. Cite supporting and "
+    "disconfirming observations, record uncertainty, and propose discriminating "
+    "follow-up tests. Never mutate the premise or the engine to convert a "
+    "failure into a pass."
 )
 
 _STRATEGY_AUTHORING = (
     "Implement the surviving hypothesis as a strategy whose declared exit "
     "criteria are falsifier re-checks, not profit targets. Make sizing and "
-    "risk limits explicit. The strategy is a falsification instrument: an "
-    "exit means the trade's micro-hypothesis was falsified, and PnL is only a "
-    "guardrail."
+    "risk limits explicit. Reference the surviving workspace research model "
+    "and indicator hashes rather than copying their definitions into the "
+    "strategy. Load the frozen fit and never call fit again or estimate "
+    "replacement parameters. Publish each Layer B observation under the exact "
+    "falsifier observable with context.publish_metric(name, value). A falsifier "
+    "hit must flatten positions and prevent new entries. The strategy is a "
+    "falsification instrument: an exit means the trade's micro-hypothesis was "
+    "falsified, and PnL is only a guardrail."
 )
 
 HYPOTHESIS_DEVELOPMENT_SKILLS: tuple[ThesisSkill, ...] = (

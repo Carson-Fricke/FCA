@@ -275,3 +275,71 @@ def test_node_event_stream_emits_only_the_node_scope(
     assert response.text.count("event: sub_agent.") == 2
     assert '"subAgentId":"agent-b"' in response.text
     assert '"subAgentId":"agent-c"' not in response.text
+
+
+def test_hypothesis_creation_message_schedules_a_conversation_turn(
+    client: TestClient, service: ChatService, launch: Any
+) -> None:
+    _, execution = _execution(service, launch)
+    _seed(
+        service,
+        execution,
+        "creator",
+        None,
+        accepts_input=True,
+        phase="hypothesis_creation",
+        role="Thesis hypothesis-creation orchestrator",
+    )
+    calls: list[tuple[Any, Any]] = []
+
+    class _Runtime:
+        def resume_hypothesis_development(self, request: Any, *, chat: Any) -> None:
+            calls.append((request, chat))
+
+    client.app.state.workflow_runtime = _Runtime()
+    base = f"/v1/workspaces/{WORKSPACE}/executions/{execution.execution_id}"
+    response = client.post(
+        base + "/sub_agents/creator/messages",
+        headers=HEADERS,
+        json={"actor_id": "operator", "body": "The disagreement is slow diffusion."},
+    )
+
+    assert response.status_code == 200
+    assert calls
+    request, chat = calls[0]
+    assert request.execution_id == execution.execution_id
+    assert chat is service
+
+
+def test_verdict_message_schedules_the_same_conversation_turn(
+    client: TestClient, service: ChatService, launch: Any
+) -> None:
+    _, execution = _execution(service, launch)
+    _seed(
+        service,
+        execution,
+        "verdict",
+        None,
+        accepts_input=True,
+        phase="verdict",
+        role="Thesis research verdict orchestrator",
+    )
+    calls: list[tuple[Any, Any]] = []
+
+    class _Runtime:
+        def resume_hypothesis_development(self, request: Any, *, chat: Any) -> None:
+            calls.append((request, chat))
+
+    client.app.state.workflow_runtime = _Runtime()
+    base = f"/v1/workspaces/{WORKSPACE}/executions/{execution.execution_id}"
+    response = client.post(
+        base + "/sub_agents/verdict/messages",
+        headers=HEADERS,
+        json={"actor_id": "operator", "body": "check off"},
+    )
+
+    assert response.status_code == 200
+    assert calls
+    request, chat = calls[0]
+    assert request.execution_id == execution.execution_id
+    assert chat is service

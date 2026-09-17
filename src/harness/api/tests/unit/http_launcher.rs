@@ -7,9 +7,14 @@ struct StubRunner;
 
 impl BacktestRunner for StubRunner {
     fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert(
+            "backtest.json".to_string(),
+            b"{\"status\":\"completed\"}".to_vec(),
+        );
         Ok(RunOutcome {
             completed: true,
-            artifact_json: b"{\"status\":\"completed\"}".to_vec(),
+            artifacts,
         })
     }
 }
@@ -31,7 +36,7 @@ fn launch_record_joins_sorted_strategy_ids() {
         &config(),
         &RunOutcome {
             completed: true,
-            artifact_json: vec![],
+            artifacts: BTreeMap::new(),
         },
     );
     assert_eq!(record.strategy_id, "a,b");
@@ -59,5 +64,23 @@ fn in_process_launcher_stores_a_run_and_succeeds() {
     assert_eq!(
         jobs.get("run-1").map(|job| job.state),
         Some(super::super::store::JobState::Succeeded)
+    );
+}
+
+#[test]
+fn artifact_metrics_flattens_custom_numeric_observations() {
+    let mut artifacts = BTreeMap::new();
+    artifacts.insert(
+        "metrics.json".to_string(),
+        br#"{"equity":{"total_return":"0.1"},"execution":{"fill_count":2},"custom":{"rolling_corr_60d_median":"0.73"}}"#.to_vec(),
+    );
+
+    let metrics = artifact_metrics(&artifacts);
+
+    assert_eq!(metrics.get("total_return").map(String::as_str), Some("0.1"));
+    assert_eq!(metrics.get("fill_count").map(String::as_str), Some("2"));
+    assert_eq!(
+        metrics.get("rolling_corr_60d_median").map(String::as_str),
+        Some("0.73")
     );
 }

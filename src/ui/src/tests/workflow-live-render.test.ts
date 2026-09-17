@@ -1,9 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({
-	subscribers: [] as Array<(frame: { id: string | null; event: string; data: Record<string, unknown> }) => void>,
+	subscribers: [] as Array<(item: Record<string, unknown>) => void>,
 	anchor: {
 		message_id: 'msg-wf',
 		chat_id: 'chat-1',
@@ -49,22 +48,36 @@ vi.mock('$lib/api', () => ({
 	conversationTitleFrom: (body: string) => body,
 	createChat: vi.fn(),
 	deleteChat: vi.fn(),
+	getExecution: vi.fn(async () => null),
 	listChats: vi.fn(async () => [chatThread('chat-1'), chatThread('chat-2')]),
-	listMessages: vi.fn(async (_workspaceId: string, chatId: string) =>
-		chatId === 'chat-2' ? [fixture.anchor] : []
-	),
-	postMessage: vi.fn()
+	listExecutionSubAgents: vi.fn(async () => []),
+	listNodeEvents: vi.fn(async () => []),
+	postMessage: vi.fn(),
+	postNodeMessage: vi.fn()
 }));
 
 vi.mock('$lib/sse', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/sse')>();
-	class FakeChatEventStream {
-		async start(onFrame: (frame: { id: string | null; event: string; data: Record<string, unknown> }) => void) {
-			fixture.subscribers.push(onFrame);
+	class FakeTimelineStream {
+		async start(onItem: (item: Record<string, unknown>) => void) {
+			fixture.subscribers.push(onItem);
 		}
 		stop(): void {}
 	}
-	return { ...actual, ChatEventStream: FakeChatEventStream };
+	class FakeExecutionEventStream {
+		async start(): Promise<void> {}
+		stop(): void {}
+	}
+	class FakeChatEventStream {
+		async start(): Promise<void> {}
+		stop(): void {}
+	}
+	return {
+		...actual,
+		TimelineStream: FakeTimelineStream,
+		ExecutionEventStream: FakeExecutionEventStream,
+		ChatEventStream: FakeChatEventStream
+	};
 });
 
 import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
@@ -74,20 +87,41 @@ import type { ChatMessage } from '$lib/types';
 
 const anchor = fixture.anchor as unknown as ChatMessage;
 
+function timelineItem(seq: number) {
+	return {
+		id: `message:${fixture.anchor.message_id}`,
+		chatId: 'chat-1',
+		workspaceId: 'ws-1',
+		kind: 'message',
+		seq,
+		ts: '2026-01-01T00:00:01Z',
+		payload: fixture.anchor
+	};
+}
+
+function timelineMessageItem(message: ChatMessage, seq: number) {
+	return {
+		id: `message:${message.message_id}`,
+		chatId: message.chat_id,
+		workspaceId: message.workspace_id,
+		kind: 'message',
+		seq,
+		ts: message.created_at,
+		payload: message
+	};
+}
+
 beforeEach(() => {
 	fixture.subscribers.length = 0;
 });
 
 describe('workflow anchor rendering', () => {
-	it('renders a kind=workflow item as the WorkflowCard with enter/link affordances', async () => {
+	it('renders a kind=workflow item as the WorkflowCard', async () => {
 		render(ChatTranscript, { props: { messages: [anchor], workspaceId: 'ws-1' } });
 
 		expect(await screen.findByTestId('workflow-card')).toBeInTheDocument();
-		expect(screen.getByTestId('workflow-open-full')).toHaveAttribute(
-			'href',
-			'/w/ws-1/workflows/exec-1'
-		);
 		expect(screen.getByTestId('workflow-card-status')).toHaveTextContent('running');
+		expect(screen.getByTestId('workflow-card-body')).toBeInTheDocument();
 	});
 
 	it('dedupes repeated anchor frames by message id', () => {
@@ -96,55 +130,41 @@ describe('workflow anchor rendering', () => {
 	});
 });
 
-describe('Copilot live workflow rendering', () => {
-	it('appends a live chat.message workflow frame and renders the card', async () => {
+describe('Copilot live timeline rendering', () => {
+	it('renders a workflow card pushed over the unified timeline stream', async () => {
 		render(CopilotPanel, {
 			props: { workspaceId: 'ws-1', onExpand: vi.fn(), onClose: vi.fn() }
 		});
 		await waitFor(() => expect(fixture.subscribers.length).toBeGreaterThan(0));
 
-		const onFrame = fixture.subscribers.at(-1);
-		onFrame?.({ id: null, event: 'chat.message', data: { message: fixture.anchor } });
+		fixture.subscribers.at(-1)?.(timelineItem(1));
 
 		expect(await screen.findByTestId('workflow-card')).toBeInTheDocument();
 		expect(screen.getByTestId('workflow-card-body')).toBeInTheDocument();
 	});
 
-	it('clears the streaming indicator when done arrives', async () => {
+	it('clears the active timeline and shows a frontend-only draft on new conversation', async () => {
 		render(CopilotPanel, {
 			props: { workspaceId: 'ws-1', onExpand: vi.fn(), onClose: vi.fn() }
 		});
 		await waitFor(() => expect(fixture.subscribers.length).toBeGreaterThan(0));
-		const onFrame = fixture.subscribers.at(-1);
 
-		onFrame?.({ id: null, event: 'provider.delta', data: { delta: { messageId: 's1', start: true } } });
-		expect(await screen.findByTestId('copilot-streaming-reply')).toBeInTheDocument();
+		const previous = {
+			...anchor,
+			message_id: 'old-message',
+			kind: 'message' as const,
+			role: 'assistant' as const,
+			body: 'old conversation text'
+		};
+		fixture.subscribers.at(-1)?.(timelineMessageItem(previous, 1));
+		expect(await screen.findByText('old conversation text')).toBeInTheDocument();
 
-		onFrame?.({ id: null, event: 'provider.delta', data: { delta: { messageId: 's1', text: 'hi' } } });
-		await tick();
-		onFrame?.({ id: null, event: 'provider.delta', data: { delta: { messageId: 's1', done: true } } });
+		await fireEvent.click(screen.getByTestId('copilot-new-conversation'));
 
-		await waitFor(() =>
-			expect(screen.queryByTestId('copilot-streaming-reply')).toBeNull()
+		expect(screen.queryByText('old conversation text')).toBeNull();
+		await fireEvent.click(screen.getByTestId('copilot-history'));
+		expect(screen.getAllByTestId('copilot-history-item')[0]).toHaveTextContent(
+			'New conversation'
 		);
-	});
-
-	it('retains the card when navigating away and back re-fetches the transcript', async () => {
-		render(CopilotPanel, {
-			props: { workspaceId: 'ws-1', onExpand: vi.fn(), onClose: vi.fn() }
-		});
-		await screen.findByTestId('copilot-history');
-
-		await fireEvent.click(screen.getByTestId('copilot-history'));
-		(await screen.findAllByTestId('copilot-history-item'))[1].click();
-		expect(await screen.findByTestId('workflow-card')).toBeInTheDocument();
-
-		await fireEvent.click(screen.getByTestId('copilot-history'));
-		(await screen.findAllByTestId('copilot-history-item'))[0].click();
-		await waitFor(() => expect(screen.queryByTestId('workflow-card')).toBeNull());
-
-		await fireEvent.click(screen.getByTestId('copilot-history'));
-		(await screen.findAllByTestId('copilot-history-item'))[1].click();
-		expect(await screen.findByTestId('workflow-card')).toBeInTheDocument();
 	});
 });

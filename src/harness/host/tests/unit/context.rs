@@ -64,3 +64,45 @@ fn native_state_store_round_trips_values() {
         );
     });
 }
+
+#[test]
+fn native_context_publishes_only_finite_non_reserved_metrics() {
+    Python::attach(|py| {
+        let (context, _, _, _) = build_context(
+            py,
+            vec!["SPY".to_string()],
+            0,
+            "research".to_string(),
+            PyDecimal::from_i128(1000),
+            1729,
+        )
+        .expect("context");
+        let bound = context.bind(py);
+        bound
+            .call_method1("publish_metric", ("rolling_corr_60d_median", 0.73))
+            .expect("publish");
+        bound
+            .call_method1("publish_metric", ("rolling_corr_60d_median", 0.81))
+            .expect("replace");
+
+        assert_eq!(
+            bound
+                .borrow()
+                .published_metrics()
+                .get("rolling_corr_60d_median"),
+            Some(&"0.81".to_string())
+        );
+        assert!(bound
+            .call_method1("publish_metric", ("total_return", 1.0))
+            .is_err());
+        assert!(bound
+            .call_method1("publish_metric", ("not finite", 1.0))
+            .is_err());
+        assert!(bound
+            .call_method1("publish_metric", ("boolean_metric", true))
+            .is_err());
+        assert!(bound
+            .call_method1("publish_metric", ("infinite_metric", f64::INFINITY))
+            .is_err());
+    });
+}

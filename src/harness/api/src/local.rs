@@ -22,6 +22,7 @@ use backtest::sweeps::runner::{
 use backtest::sweeps::spec::{SweepMode, SweepSpec};
 use backtest::sweeps::RunStatus as SweepRunStatus;
 
+use crate::lake_ensure::LakeEnsureClient;
 use mcp::store::{JobRepository, JobState, RunCatalogRecord, RunStatus, RunStore};
 
 /// Local backtest submitter that runs the native engine and records the run.
@@ -107,7 +108,35 @@ fn run_background_backtest(
             return;
         }
     };
-    match host::backtest::run_backtest_config(&configuration, Some(output_dir.as_path()), None) {
+    let env_lake_dir = std::env::var("HARNESS_DATA_DIR")
+        .or_else(|_| std::env::var("LAKE_LOCAL_DATA_DIR"))
+        .ok()
+        .map(PathBuf::from);
+    let default_lake = PathBuf::from(".local").join("market-lake");
+    let candidate_lake = env_lake_dir.or_else(|| {
+        if default_lake.is_dir() {
+            Some(default_lake)
+        } else {
+            None
+        }
+    });
+    if let Err(message) = ensure_lake_data(&configuration) {
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert(
+            "error.json".to_string(),
+            serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+        );
+        let record =
+            RunCatalogRecord::new(&run_id, RunStatus::Failed, strategy_id(&configuration));
+        let _ = run_store.put(record, artifacts);
+        fail_job(&jobs, &run_id, started, message);
+        return;
+    }
+    match host::backtest::run_backtest_config(
+        &configuration,
+        Some(output_dir.as_path()),
+        candidate_lake.as_deref(),
+    ) {
         Ok((outcome, _artifact_path)) => {
             // Persist the configuration that produced the run beside the result
             // set so the run is reproducible and the document is retrievable.
@@ -158,6 +187,43 @@ fn run_background_backtest(
     }
 }
 
+/// Ensure every configured symbol is fetched into the local lake before a run.
+///
+/// The market-lake process owns provider credentials and the actual fetch; the
+/// harness only asks for the run window's symbols. A missing token or an empty
+/// symbol set leaves the existing synthetic/lake behavior unchanged.
+fn ensure_lake_data(configuration: &BacktestConfig) -> Result<(), String> {
+    if configuration.symbols.is_empty() {
+        return Ok(());
+    }
+    let Some(client) = LakeEnsureClient::from_env() else {
+        return Ok(());
+    };
+    let start = date_string(configuration.start_ns);
+    let end = date_string(configuration.end_ns.saturating_sub(1));
+    for symbol in &configuration.symbols {
+        let (asset_class, lake_symbol) = lake_asset_class(symbol);
+        for data_type in ["trade", "quote"] {
+            client.ensure(asset_class, data_type, &lake_symbol, &start, &end)?;
+        }
+    }
+    Ok(())
+}
+
+fn lake_asset_class(symbol: &str) -> (&'static str, String) {
+    match marketdata::crypto_pair(symbol) {
+        Some(pair) => ("crypto", pair),
+        None => ("equity", symbol.trim().to_uppercase()),
+    }
+}
+
+fn date_string(nanos: i64) -> String {
+    let seconds = nanos.div_euclid(1_000_000_000);
+    chrono::DateTime::from_timestamp(seconds, 0)
+        .map(|value| value.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
+}
+
 fn fail_job(jobs: &Arc<dyn JobRepository>, run_id: &str, started: DateTime<Utc>, message: String) {
     let mut job = mcp::store::JobRecord::new(run_id, JobState::Failed, started, Utc::now());
     job.error_message = Some(message);
@@ -190,39 +256,9 @@ fn headline_metrics(
     artifacts: &BTreeMap<String, Vec<u8>>,
     configuration: &BacktestConfig,
 ) -> BTreeMap<String, String> {
-    let mut metrics = BTreeMap::new();
+    let mut metrics = crate::http::launcher::artifact_metrics(artifacts);
     metrics.insert("strategy_id".to_string(), strategy_id(configuration));
-    let Some(payload) = artifacts.get("metrics.json") else {
-        return metrics;
-    };
-    let Ok(document) = serde_json::from_slice::<Value>(payload) else {
-        return metrics;
-    };
-    let equity = document.get("equity");
-    let execution = document.get("execution");
-    for (key, section) in [
-        ("total_return", equity),
-        ("max_drawdown", equity),
-        ("cagr", equity),
-        ("fill_count", execution),
-        ("fees_total", execution),
-    ] {
-        if let Some(value) = section.and_then(|section| section.get(key)) {
-            if let Some(text) = scalar_string(value) {
-                metrics.insert(key.to_string(), text);
-            }
-        }
-    }
     metrics
-}
-
-fn scalar_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        Value::Bool(flag) => Some(flag.to_string()),
-        _ => None,
-    }
 }
 
 /// Local sweep submitter backed by the native sweeps runner.

@@ -32,6 +32,7 @@ clap = { version = "4.5", features = ["derive"] }
 backtest = { path = "../backtest" }
 host = { path = "../host" }
 live = { path = "../live" }
+marketdata = { path = "../marketdata" }
 mcp = { path = "../mcp" }
 hex = "0.4"
 num = { path = "../num" }

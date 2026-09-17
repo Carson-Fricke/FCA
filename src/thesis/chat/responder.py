@@ -352,9 +352,7 @@ def _research_ideas(message: ChatMessage) -> str | None:
 _ACTIVE_DEVELOPMENT_PHASES = frozenset(
     {
         "requested",
-        "ideation",
-        "hypothesis",
-        "falsification_plan",
+        "hypothesis_creation",
         "falsification_trials",
         "rca",
         "verdict",
@@ -520,6 +518,17 @@ class ChatReplyService:
             outcome = runtime.execute_hypothesis_development(
                 request, chat=self.chat_service
             )
+            if outcome.phase.value == "paused":
+                # The workflow anchor/card and node needs-input event are the
+                # durable UI surface for a pause. Do not append a duplicate
+                # root assistant message after the workflow card.
+                self.broker.publish(
+                    workspace_id,
+                    chat_id,
+                    PROVIDER_DELTA,
+                    {"messageId": stream_id, "done": True},
+                )
+                return None
             body = (
                 _sanitize(_development_summary(outcome))
                 or "Hypothesis development finished."

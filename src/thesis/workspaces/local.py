@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
@@ -42,11 +43,29 @@ WORKSPACE_DIRECTORIES = (
     "investigations",
     "strategies",
     "experiments",
+    "indicators",
+    "models",
     "backtests",
     "uploads",
     "activations",
 )
 _WORKSPACE_ID = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
+
+
+def default_workspace_root(environ: Mapping[str, str] | None = None) -> Path:
+    """Resolve the durable workspace root shared by local and serve runs.
+
+    ``THESIS_WORKSPACE_ROOT`` wins when set; otherwise the operating system's
+    local app-data directory is used so the same root serves every run mode.
+    """
+    values = os.environ if environ is None else environ
+    override = (values.get("THESIS_WORKSPACE_ROOT") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    base = (values.get("LOCALAPPDATA") or values.get("XDG_DATA_HOME") or "").strip()
+    if not base:
+        base = str(Path.home() / ".local" / "share")
+    return Path(base) / "FCA" / "thesis-workspaces"
 
 
 def _workspace_id(value: str) -> str:
@@ -147,6 +166,8 @@ written to this repository.
 - `investigations/`: objectives, decisions, and finding indexes
 - `strategies/`: strategy source and tests
 - `experiments/`: contracts, analysis, and evidence claims
+- `indicators/`: workspace-authored, content-addressed indicator definitions
+- `models/`: workspace-authored statistical research models
 - `backtests/`: manifests, metrics, traces, and reports
 - `uploads/`: hashed user evidence and provenance metadata
 - `activations/`: bundles, consent references, and outcomes
@@ -393,4 +414,5 @@ __all__ = [
     "WorkspaceNotFoundError",
     "WorkspacePathError",
     "WorkspaceRepositoryError",
+    "default_workspace_root",
 ]

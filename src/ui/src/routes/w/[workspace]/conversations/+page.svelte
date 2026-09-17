@@ -1,15 +1,9 @@
 <script lang="ts">
-	import { goto, replaceState } from '$app/navigation';
+	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
-	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
-	import ChatStarters from '$lib/components/chat/ChatStarters.svelte';
-	import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
+	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import CleoPlanPanel from '$lib/components/chat/CleoPlanPanel.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
-	import StreamingReply from '$lib/components/chat/StreamingReply.svelte';
-	import WorkflowCard from '$lib/components/chat/WorkflowCard.svelte';
-	import WorkflowScope from '$lib/components/chat/WorkflowScope.svelte';
-	import WorkflowTimeline from '$lib/components/chat/WorkflowTimeline.svelte';
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import {
 		confirmConsent,
@@ -20,25 +14,15 @@
 		getExecution,
 		getWorkspaceState,
 		listChats,
-		listMessages,
-		postMessage,
-		replayExecutionEvents
+		postMessage
 	} from '$lib/api';
-	import { apiBaseUrl, fixtureMode } from '$lib/api';
-	import { ExecutionEventStream, LocalCursorStore, executionEventOf } from '$lib/sse';
-	import { ChatStreamController, appendMessage } from '$lib/chat-stream.svelte';
-	import { derivePhases } from '$lib/subagent';
-	import { WorkflowScopeController } from '$lib/workflow-scope.svelte';
+	import { TimelineController } from '$lib/timeline.svelte';
 	import { notify } from '$lib/workspace.svelte';
 	import type {
-		ChatMessage,
 		ChatThread,
 		ConsentProposal,
-		EvidenceItem,
-		ExecutionEvent,
 		SteeringPercolationTarget,
 		WorkflowExecutionRecord,
-		WorkflowPhase,
 		WorkspaceStateData
 	} from '$lib/types';
 	import type { PageData } from './$types';
@@ -49,9 +33,7 @@
 
 	let chats = $state<ChatThread[]>([]);
 	let chatId = $state<string | null>(null);
-	let messages = $state<ChatMessage[]>([]);
 	let execution = $state<WorkflowExecutionRecord | null>(null);
-	let events = $state<ExecutionEvent[]>([]);
 	let percolations = $state<Record<string, SteeringPercolationTarget[]>>({});
 	let proposal = $state<ConsentProposal | null>(null);
 	let consentBusy = $state(false);
@@ -61,79 +43,37 @@
 	let drafting = $state(false);
 	/** The conversation queued for modal delete confirmation. */
 	let deleteTarget = $state<ChatThread | null>(null);
-	let cursorStore = new LocalCursorStore();
-	let stream: ExecutionEventStream | null = null;
-	const chatStream = new ChatStreamController({
-		workspaceId: () => workspaceId,
-		onMessage: (message) => {
-			messages = appendMessage(messages, message);
-		}
-	});
-
-	/** In-pane nested sub-agent scope, hosted in the conversation pane. */
-	const scopeController = new WorkflowScopeController(page.params.workspace ?? '', 'conversation');
-	let attachedExecutionId = $state('');
+	const timeline = new TimelineController();
+	const messages = $derived(timeline.messages);
+	const events = $derived(timeline.events);
 
 	const activeChat = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
+	const DRAFT_CHAT_ID = '__draft_conversation__';
+	function draftChat(): ChatThread {
+		return {
+			chat_id: DRAFT_CHAT_ID,
+			workspace_id: workspaceId,
+			title: 'New conversation',
+			state: 'active',
+			kind: 'chat',
+			owner_actor_id: 'local-operator',
+			created_at: new Date().toISOString(),
+			updated_at: null,
+			investigation_ids: [],
+			strategy_ids: []
+		};
+	}
+	const visibleChats = $derived(drafting ? [draftChat(), ...chats] : chats);
+	const selectedChat = $derived(drafting ? draftChat() : activeChat);
 	const activeExecutionId = $derived(execution?.execution_id ?? null);
-	/** A persisted/live workflow anchor already renders its own card. */
-	const hasWorkflowAnchor = $derived(messages.some((message) => message.kind === 'workflow'));
-	const executionHref = $derived(
-		activeExecutionId ? `/w/${workspaceId}/workflows/${activeExecutionId}` : null
-	);
 	const cleoPlan = $derived(stateData?.cleo ?? null);
-	const evidence = $derived(stateData?.evidence ?? []);
-	/** True once the operator entered a workflow/orchestrator/sub-agent. */
-	const scoped = $derived(scopeController.scope.segments.length > 1);
-	const phases = $derived.by((): WorkflowPhase[] => {
-		const derived = derivePhases(scopeController.rootEvents);
-		if (derived.length || !execution?.phase) return derived;
-		return [{ name: execution.phase, status: 'active' }];
-	});
-
-	// Attach the scope controller to the active execution so entering a sub-agent
-	// and restoring a persisted scope both work in-pane.
-	$effect(() => {
-		const exec = execution;
-		if (!exec) {
-			scopeController.detach();
-			attachedExecutionId = '';
-			return;
-		}
-		if (exec.execution_id === attachedExecutionId) return;
-		attachedExecutionId = exec.execution_id;
-		scopeController.attach(exec.execution_id, exec, {
-			chatId: exec.chat_id,
-			rootLabel: activeChat?.title ?? 'Conversation',
-			scope: page.url.searchParams.get('scope'),
-			hash: page.url.hash
-		});
-	});
-
-	$effect(() => {
-		return () => scopeController.detach();
-	});
-
-	/** Enter the current phase orchestrator from the workflow card. */
-	function enterPhase(phase: string, options: { readOnly: boolean }): void {
-		scopeController.enterWorkflow();
-		scopeController.enterOrchestrator(phase, options.readOnly);
-	}
-
-	/** Reflect the in-pane scope path in the conversation URL. */
-	function syncScope(scope: string): void {
-		const url = new URL(page.url);
-		if (scope) url.searchParams.set('scope', scope);
-		else url.searchParams.delete('scope');
-		replaceState(url, {});
-	}
 
 	$effect(() => {
 		let cancelled = false;
 		listChats(workspaceId).then((items) => {
 			if (cancelled) return;
 			chats = items;
-			if (!chatId) {
+			if (!drafting && !chatId) {
 				const requested = page.url.searchParams.get('chat');
 				chatId = requested && items.some((c) => c.chat_id === requested)
 					? requested
@@ -151,15 +91,12 @@
 		};
 	});
 
-	// Load the selected chat's snapshot: messages, execution, and the durable
-	// event replay from the persisted cursor.
+	// Load the selected chat's unified timeline and its workflow execution.
 	$effect(() => {
 		const id = chatId;
 		if (!id) {
-			messages = [];
 			execution = null;
-			events = [];
-			chatStream.stop();
+			timeline.stop();
 			return;
 		}
 		let cancelled = false;
@@ -167,68 +104,23 @@
 		if (requested !== id) {
 			replaceState(`/w/${workspaceId}/conversations?chat=${id}`, {});
 		}
-		// Reset synchronously and merge the snapshot back in with dedupe, so a
-		// live `chat.message` frame that lands while the list is in flight is
-		// never clobbered by `messages = items`.
-		messages = [];
-		listMessages(workspaceId, id).then((items) => {
-			if (cancelled) return;
-			for (const item of items) messages = appendMessage(messages, item);
-		});
-		chatStream.start(id);
+		timeline.start(workspaceId, id);
 		getExecution(workspaceId, id).then((exec) => {
-			if (cancelled) return;
-			execution = exec;
-			if (exec) {
-				replayExecutionEvents(workspaceId, exec.execution_id, 0).then((replay) => {
-					if (!cancelled) events = replay;
-				});
-				startStream(exec.execution_id);
-			} else {
-				stopStream();
-			}
+			if (!cancelled) execution = exec;
 		});
 		return () => {
 			cancelled = true;
-			chatStream.stop();
+			timeline.stop();
 		};
 	});
 
-	function startStream(executionId: string): void {
-		stopStream();
-		if (fixtureMode) {
-			// Fixtures feed the initial snapshot; the SSE client itself is real
-			// code and runs against the API in real-fetch mode.
-			return;
-		}
-		stream = new ExecutionEventStream({
-			baseUrl: apiBaseUrl,
-			workspaceId,
-			executionId,
-			cursorStore
-		});
-		void stream.start((frame) => {
-			const event = executionEventOf(frame);
-			if (event && !events.some((e) => e.eventId === event.eventId)) {
-				events = [...events, event];
-			}
-		});
-	}
-
-	function stopStream(): void {
-		stream?.stop();
-		stream = null;
-	}
-
 	/** Start a draft conversation; it persists only when the first message is sent. */
 	function newConversation(): void {
-		stopStream();
+		timeline.reset();
 		drafting = true;
 		deleteTarget = null;
 		chatId = null;
-		messages = [];
 		execution = null;
-		events = [];
 		replaceState(`/w/${workspaceId}/conversations`, {});
 	}
 
@@ -237,11 +129,9 @@
 			await deleteChat(workspaceId, id);
 			chats = chats.filter((chat) => chat.chat_id !== id);
 			if (chatId === id) {
-				stopStream();
+				timeline.stop();
 				chatId = chats[0]?.chat_id ?? null;
-				messages = [];
 				execution = null;
-				events = [];
 				if (!chatId) drafting = false;
 				replaceState(
 					chatId
@@ -281,7 +171,6 @@
 			// Post before selecting so the new thread is durable when the
 			// selection effect reloads the message list.
 			const result = await postMessage(workspaceId, id, input);
-			messages = [...messages, result.message];
 			if (result.percolated.length) {
 				percolations = { ...percolations, [result.message.message_id]: result.percolated };
 			}
@@ -318,23 +207,21 @@
 		}
 	}
 
-	/** Workspace evidence deep-links mentioned in a message body. Unused in
-	 * the transcript since evidence scoping moved to sandboxed subagent
-	 * views; kept for the workspace-state projection. */
-	function evidenceFor(messageId: string): EvidenceItem[] {
-		const message = messages.find((m) => m.message_id === messageId);
-		if (!message) return [];
-		return evidence.filter((item) => {
-			if (item.kind === 'backtest') {
-				return /bt-\d+/.test(message.body) && message.body.includes(item.title.match(/bt-\d+/)?.[0] ?? '∅');
-			}
-			return message.body.includes(item.reference) || message.body.includes(item.title);
-		});
+	/** Reflect the in-pane scope path in the conversation URL. */
+	function syncScope(scope: string): void {
+		const url = new URL(page.url);
+		const current = url.searchParams.get('scope') ?? '';
+		if (current === scope) return;
+		if (scope) url.searchParams.set('scope', scope);
+		else url.searchParams.delete('scope');
+		replaceState(url, {});
 	}
 
-	$effect(() => {
-		return () => stopStream();
-	});
+	function switchChat(id: string): void {
+		chatId = id;
+		drafting = false;
+		deleteTarget = null;
+	}
 </script>
 
 <svelte:head><title>Conversations — Thesis</title></svelte:head>
@@ -358,19 +245,17 @@
 			</button>
 		</div>
 		<ul class="min-h-0 flex-1 space-y-1 overflow-y-auto p-2" data-testid="conversation-list">
-			{#each chats as chat (chat.chat_id)}
+			{#each visibleChats as chat (chat.chat_id)}
 				<li class="group relative">
 					<button
 						type="button"
 						class="w-full rounded-lg px-3 py-2 pr-9 text-left transition
-							{chat.chat_id === chatId
+							{((drafting && chat.chat_id === DRAFT_CHAT_ID) ||
+							chat.chat_id === chatId)
 							? 'border border-accent/40 bg-accent/10'
 							: 'border border-transparent hover:bg-surface-800/60'}"
-						onclick={() => {
-							chatId = chat.chat_id;
-							drafting = false;
-							deleteTarget = null;
-						}}
+						onclick={() =>
+							chat.chat_id === DRAFT_CHAT_ID ? newConversation() : switchChat(chat.chat_id)}
 						data-testid="conversation-item"
 						data-chat={chat.chat_id}
 					>
@@ -381,6 +266,7 @@
 							{chat.kind === 'investigation' ? 'investigation' : 'chat'} · {chat.updated_at?.slice(0, 10) ?? chat.created_at.slice(0, 10)}
 						</p>
 					</button>
+					{#if chat.chat_id !== DRAFT_CHAT_ID}
 					<button
 						type="button"
 						class="absolute top-2 right-2 hidden rounded p-1 text-slate-500 transition group-hover:block hover:text-loss"
@@ -406,6 +292,7 @@
 							<path d="M10 11v6M14 11v6" />
 						</svg>
 					</button>
+					{/if}
 				</li>
 			{:else}
 				<li class="px-3 py-6 text-center text-xs text-slate-500">
@@ -419,10 +306,10 @@
 	</section>
 
 	<section class="flex min-w-0 flex-1 flex-col rounded-xl border border-surface-700 bg-surface-900">
-		{#if activeChat}
+		{#if selectedChat}
 			<header class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
-				<h1 class="truncate text-sm font-semibold text-slate-800">{activeChat.title}</h1>
-				{#if activeChat.kind === 'investigation'}
+				<h1 class="truncate text-sm font-semibold text-slate-800">{selectedChat.title}</h1>
+				{#if selectedChat.kind === 'investigation'}
 					<span class="rounded-full border border-accent/40 px-2 py-0.5 font-mono text-[10px] text-accent">
 						investigation
 					</span>
@@ -434,86 +321,29 @@
 					</span>
 				{/if}
 			</header>
-
-			<div class="min-h-0 flex-1 overflow-y-auto p-4" data-testid="transcript-scroll">
-				{#if scoped}
-					<WorkflowScope
-						controller={scopeController}
-						{workspaceId}
-						{execution}
-						{phases}
-						rootLabel={activeChat?.title ?? 'Conversation'}
-						fullPageHref={activeExecutionId
-							? `/w/${workspaceId}/workflows/${activeExecutionId}`
-							: null}
-						autoAttach={false}
-						onScopeChange={syncScope}
-					/>
-				{:else}
-					<ChatTranscript
-						{messages}
-						{workspaceId}
-						{percolations}
-						{proposal}
-						onConfirmConsent={confirmProposal}
-						onRejectConsent={() => {
-							proposal = null;
-							notify('Consent proposal rejected');
-						}}
-						{consentBusy}
-						{execution}
-						{phases}
-						fullPageHref={executionHref}
-						onEnterPhase={enterPhase}
-					/>
-					<StreamingReply
-						active={chatStream.active}
-						text={chatStream.streamingText}
-						reasoning={chatStream.streamingReasoning}
-						testId="streaming-reply"
-					/>
-					{#if execution && !hasWorkflowAnchor}
-						<div class="mt-3">
-							<WorkflowCard
-								{execution}
-								{phases}
-								status={execution.state}
-								summary={execution.phase
-									? `Current phase ${execution.phase}`
-									: 'Awaiting phase transitions'}
-								fullPageHref={executionHref}
-								onEnterPhase={enterPhase}
-							/>
-						</div>
-					{/if}
-				{/if}
-			</div>
-
-			<div class="border-t border-surface-700 p-3">
-				<WorkflowTimeline events={events} />
-			</div>
-		{:else}
-			<div class="flex flex-1 flex-col items-center justify-center gap-4 p-6">
-				<EmptyState
-					title={drafting ? 'New conversation' : 'No conversation selected'}
-					hint={drafting
-						? 'Pick a starter below or send your own message.'
-						: 'Start a chat from the copilot or ask the agent to draft a strategy.'}
-				/>
-				<div class="w-full max-w-md">
-					<ChatStarters
-						onSelect={(prompt) =>
-							send({ body: prompt, attachmentIds: [], steeringIntent: null })}
-						disabled={busy}
-					/>
-				</div>
-			</div>
 		{/if}
 
-		<ChatComposer
-			onSubmit={send}
-			{activeExecutionId}
+		<ChatSurface
+			{workspaceId}
+			{chatId}
+			{messages}
+			{events}
+			{execution}
+			{percolations}
+			{proposal}
+			onConfirmConsent={confirmProposal}
+			onRejectConsent={() => {
+				proposal = null;
+				notify('Consent proposal rejected');
+			}}
+			{consentBusy}
 			{busy}
+			onSend={send}
+			onScopeChange={syncScope}
+			hostId="conversation"
+			rootLabel={selectedChat?.title ?? 'Conversation'}
+			initialScope={page.url.searchParams.get('scope')}
+			initialHash={page.url.hash}
 		/>
 	</section>
 

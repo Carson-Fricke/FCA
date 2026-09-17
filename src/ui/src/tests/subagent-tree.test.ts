@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildTranscriptItems,
-	deriveGates,
+	derivePhaseSteps,
 	derivePhases,
 	deriveSubAgentTree,
 	mergeEvents
@@ -85,29 +85,6 @@ describe('deriveSubAgentTree', () => {
 	});
 });
 
-describe('deriveGates', () => {
-	it('renders a blocked reason and folds in the resolution', () => {
-		const blocked = event(
-			'workflow.gate.blocked',
-			{ gateId: 'gate-1', phase: 'activation', reason: 'Capital bound exceeds policy' },
-			1
-		);
-		const [gate] = deriveGates([blocked]);
-		expect(gate.status).toBe('blocked');
-		expect(gate.reason).toBe('Capital bound exceeds policy');
-
-		const resolved = event(
-			'workflow.gate.resolved',
-			{ gateId: 'gate-1', phase: 'activation', resolution: 'verdict', verdict: 'return', note: 'tighten' },
-			2
-		);
-		const [after] = deriveGates([blocked, resolved]);
-		expect(after.status).toBe('resolved');
-		expect(after.resolution?.kind).toBe('verdict');
-		expect(after.resolution?.verdict).toBe('return');
-	});
-});
-
 describe('derivePhases', () => {
 	it('marks earlier phases done and the latest active', () => {
 		const phases = derivePhases([
@@ -115,8 +92,8 @@ describe('derivePhases', () => {
 			event('workflow.started', { phase: 'research' }, 2)
 		]);
 		expect(phases).toEqual([
-			{ name: 'plan', status: 'done' },
-			{ name: 'research', status: 'active' }
+			{ name: 'plan', status: 'done', attempts: 1 },
+			{ name: 'research', status: 'active', attempts: 1 }
 		]);
 	});
 
@@ -127,15 +104,74 @@ describe('derivePhases', () => {
 		]);
 		expect(phases.every((phase) => phase.status === 'done')).toBe(true);
 	});
+
+	it('keeps declared but unvisited phases pending', () => {
+		const phases = derivePhases([
+			event('workflow.launched', { workflow: { phases: ['requested', 'plan', 'optional_rca', 'report'] } }, 1),
+			event('workflow.started', {}, 2),
+			event('workflow.phase', { phase: 'plan' }, 3),
+			event('workflow.phase', { phase: 'report' }, 4)
+		]);
+		expect(phases).toEqual([
+			{ name: 'plan', status: 'done', attempts: 1 },
+			{ name: 'optional_rca', status: 'pending', attempts: 0 },
+			{ name: 'report', status: 'active', attempts: 1 }
+		]);
+	});
+
+	it('counts repeated visits without duplicating a phase', () => {
+		const phases = derivePhases([
+			event('workflow.started', { phase: 'strategy_design' }, 1),
+			event('workflow.phase', { phase: 'strategy_backtesting' }, 2),
+			event('workflow.phase', { phase: 'strategy_rca' }, 3),
+			event('workflow.phase', { phase: 'strategy_design' }, 4)
+		]);
+		expect(phases).toEqual([
+			{ name: 'strategy_design', status: 'active', attempts: 2 },
+			{ name: 'strategy_backtesting', status: 'done', attempts: 1 },
+			{ name: 'strategy_rca', status: 'done', attempts: 1 }
+		]);
+	});
+});
+
+describe('derivePhaseSteps', () => {
+	it('lists top-level phase orchestrators in spawn order with completion state', () => {
+		const events = [
+			event(
+				'sub_agent.spawned',
+				{ subAgentId: 'sub-a', parentSubAgentId: null, phase: 'ideation', role: 'A', acceptsInput: true },
+				1
+			),
+			event(
+				'sub_agent.completed',
+				{ subAgentId: 'sub-a', parentSubAgentId: null, phase: 'ideation', role: 'A', frozen: true, status: 'completed' },
+				2
+			),
+			event(
+				'sub_agent.spawned',
+				{ subAgentId: 'sub-b', parentSubAgentId: null, phase: 'hypothesis', role: 'B' },
+				3
+			),
+			event(
+				'sub_agent.spawned',
+				{ subAgentId: 'sub-c', parentSubAgentId: 'sub-b', phase: 'hypothesis', role: 'C' },
+				4
+			)
+		];
+		const steps = derivePhaseSteps(deriveSubAgentTree(events));
+		expect(steps).toEqual([
+			{ name: 'ideation', status: 'done' },
+			{ name: 'hypothesis', status: 'active' }
+		]);
+	});
 });
 
 describe('buildTranscriptItems + mergeEvents', () => {
 	it('routes events onto the kind discriminator and dedupes by id', () => {
 		const tool = event('tool.result', { subAgentId: 'sub-1' }, 1);
-		const gate = event('workflow.gate.blocked', { gateId: 'g' }, 2);
-		const spawn = event('sub_agent.spawned', { subAgentId: 'sub-1' }, 3);
-		const kinds = buildTranscriptItems([tool, gate, spawn]).map((item) => item.kind);
-		expect(kinds).toEqual(['tool', 'gate', 'sub_agent']);
-		expect(mergeEvents([tool], [tool, gate]).map((e) => e.eventId)).toEqual(['evt-1', 'evt-2']);
+		const spawn = event('sub_agent.spawned', { subAgentId: 'sub-1' }, 2);
+		const kinds = buildTranscriptItems([tool, spawn]).map((item) => item.kind);
+		expect(kinds).toEqual(['tool', 'sub_agent']);
+		expect(mergeEvents([tool], [tool, spawn]).map((e) => e.eventId)).toEqual(['evt-1', 'evt-2']);
 	});
 });

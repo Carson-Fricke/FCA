@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import json
 import tempfile
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 
 from thesis.agent.harness_tools import (
     HARNESS_TOOL_NAMES,
@@ -27,6 +28,8 @@ from thesis.agent.harness_tools import (
 from thesis.agent.router import ModelProfile, ModelProvider, Role, RolePolicy
 from thesis.agent.skills import SkillRegistry
 from thesis.integrations.mcp import HarnessMcpClient
+from thesis.research.indicators import IndicatorStore
+from thesis.research.models import ResearchModelStore
 from thesis.workflows.backtests import (
     BacktestMode,
     BacktestRunError,
@@ -43,6 +46,8 @@ from thesis.workflows.runtime import (
 _LOCAL_PROFILE_ID = "local-openrouter"
 _LOCAL_POLICY_VERSION = "1.0.0"
 _ROLES: tuple[Role, ...] = ("primary", "coding", "critique", "research")
+_PENDING_STATES = frozenset({"queued", "submitted", "pending", "running"})
+_SUCCESS_STATES = frozenset({"succeeded", "completed", "success", "complete"})
 
 
 class McpBacktestRunner:
@@ -59,18 +64,94 @@ class McpBacktestRunner:
         *,
         mode: BacktestMode = "local",
         metadata: Mapping[str, object] | None = None,
+        poll_attempts: int = 200,
+        poll_interval_seconds: float = 0.05,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if mode not in ("local", "remote"):
             raise ValueError("mode must be 'local' or 'remote'")
         self._harness_tools = harness_tools
         self._mode: BacktestMode = mode
         self._metadata = dict(metadata or {})
+        if poll_attempts < 1:
+            raise ValueError("poll_attempts must be positive")
+        if poll_interval_seconds < 0:
+            raise ValueError("poll_interval_seconds must be non-negative")
+        if not callable(sleep):
+            raise TypeError("sleep must be callable")
+        self._poll_attempts = poll_attempts
+        self._poll_interval_seconds = poll_interval_seconds
+        self._sleep = sleep
 
     def run(self, request: BacktestRunRequest) -> BacktestRunResult:
         """Launch one harness backtest and map its structured result."""
         path = _materialize_configuration(request.bundle.harness_configuration)
-        result = self._harness_tools.call_tool("run_backtest", {"config_path": path})
-        return self._result(request.run_id, result)
+        launched = self._harness_tools.call_tool("run_backtest", {"config_path": path})
+        if not launched.ok:
+            detail = (
+                launched.text
+                or ("" if launched.failure is None else launched.failure.message)
+                or "harness backtest launch failed"
+            )
+            raise BacktestRunError(detail)
+        return self._resolve(request.run_id, launched)
+
+    def _resolve(
+        self, requested_run_id: str, launched: HarnessToolResult
+    ) -> BacktestRunResult:
+        structured = dict(launched.structured)
+        run_id = _first_text(structured, "run_id", "job_id") or requested_run_id
+        state = _first_text(structured, "status", "state") or (
+            "succeeded" if structured.get("exit_code") == 0 else "failed"
+        )
+        if state.casefold() in _PENDING_STATES:
+            for _ in range(self._poll_attempts):
+                status = self._harness_tools.call_tool(
+                    "get_backtest_status", {"job_id": run_id}
+                )
+                if not status.ok:
+                    raise BacktestRunError(
+                        status.text or "backtest status query failed"
+                    )
+                state = _first_text(status.structured, "status", "state") or state
+                if state.casefold() not in _PENDING_STATES:
+                    break
+                self._sleep(self._poll_interval_seconds)
+            else:
+                raise BacktestRunError(
+                    f"backtest {run_id!r} did not reach a terminal state"
+                )
+        if structured.get("metrics") is None:
+            run = self._harness_tools.call_tool("get_run", {"run_id": run_id})
+            if not run.ok:
+                raise BacktestRunError(run.text or "backtest result query failed")
+            structured.update(run.structured)
+        if structured.get("result_artifacts", structured.get("artifacts")) is None:
+            artifacts = self._harness_tools.call_tool(
+                "list_artifacts", {"run_id": run_id}
+            )
+            if artifacts.ok:
+                structured["result_artifacts"] = artifacts.structured.get("artifacts")
+        if state.casefold() not in _SUCCESS_STATES and not _first_text(
+            structured, "error", "error_message", "reason"
+        ):
+            status = self._harness_tools.call_tool(
+                "get_backtest_status", {"job_id": run_id}
+            )
+            if status.ok:
+                detail = _first_text(
+                    status.structured, "error_message", "error", "reason"
+                )
+                if detail:
+                    structured["error"] = detail
+        structured["state"] = state
+        resolved = HarnessToolResult(
+            tool=launched.tool,
+            ok=True,
+            structured=structured,
+            text=launched.text,
+        )
+        return self._result(run_id, resolved)
 
     def _result(self, run_id: str, result: HarnessToolResult) -> BacktestRunResult:
         structured = dict(result.structured)
@@ -87,6 +168,7 @@ class McpBacktestRunner:
             result_artifacts=structured.get(
                 "result_artifacts", structured.get("artifacts")
             ),
+            error=_first_text(structured, "error", "error_message", "reason"),
         )
 
 
@@ -99,6 +181,8 @@ def build_local_workflow_runtime(
     runner: BacktestRunner | None = None,
     backtest_mode: BacktestMode = "local",
     metadata: Mapping[str, object] | None = None,
+    research_model_store: ResearchModelStore | None = None,
+    indicator_store: IndicatorStore | None = None,
 ) -> WorkflowRuntime:
     """Compose the local workflow runtime over one OpenRouter model profile.
 
@@ -149,6 +233,8 @@ def build_local_workflow_runtime(
         harness_tools=harness_tools,
         backtest_mode=backtest_mode,
         metadata=metadata,
+        research_model_store=research_model_store,
+        indicator_store=indicator_store,
     )
 
 

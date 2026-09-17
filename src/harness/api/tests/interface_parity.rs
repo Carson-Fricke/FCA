@@ -39,9 +39,11 @@ impl BacktestRunner for StubRunner {
             "{{\"manifest\":{{\"run_id\":\"{}\"}},\"status\":\"completed\"}}",
             configuration.run_id
         );
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert("backtest.json".to_string(), body.into_bytes());
         Ok(RunOutcome {
             completed: true,
-            artifact_json: body.into_bytes(),
+            artifacts,
         })
     }
 }

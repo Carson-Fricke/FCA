@@ -15,7 +15,16 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,9 +49,34 @@ from thesis.http.streaming import (
 
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 
+#: Phases whose nodes are durable, multi-turn conversations.
+_CONVERSATIONAL_PHASES = frozenset({"hypothesis_creation", "verdict"})
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _resume_sub_agent_turn(app: object, workspace_id: str, execution_id: str) -> None:
+    """Run one more conversational phase turn for the paused execution.
+
+    The node message was already persisted; this rebuilds the runnable request
+    from the durable execution and re-enters the conversation.  Failures are
+    swallowed here because they are surfaced on the execution event stream.
+    """
+    runtime = getattr(app, "state", None)
+    runtime = getattr(runtime, "workflow_runtime", None)
+    chat_service = getattr(getattr(app, "state", None), "chat_service", None)
+    if runtime is None or not isinstance(chat_service, ChatService):
+        return
+    try:
+        from thesis.workflows.hypothesis_development import HypothesisDevelopmentRequest
+
+        execution = chat_service.get_execution(workspace_id, execution_id)
+        request = HypothesisDevelopmentRequest.from_execution(chat_service, execution)
+        runtime.resume_hypothesis_development(request, chat=chat_service)
+    except Exception:  # noqa: BLE001 - best-effort continuation
+        return
 
 
 async def _default_sleeper(seconds: float) -> None:
@@ -57,10 +91,15 @@ class SubAgentHTTPModel(BaseModel):
 
 
 class SubAgentMessageRequest(SubAgentHTTPModel):
-    """One user input message addressed to a sub-agent node."""
+    """One user input message addressed to a sub-agent node.
+
+    ``metadata`` is optional structured context (for example a gate
+    resolution); ordinary conversational turns leave it empty.
+    """
 
     actor_id: str = Field(min_length=1, max_length=128)
     body: str = Field(min_length=1, max_length=32_768)
+    metadata: dict[str, object] | None = None
 
 
 def _load_tree(
@@ -231,6 +270,8 @@ def create_sub_agent_router(
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         node_path: Annotated[str, Path()],
         request: SubAgentMessageRequest,
+        http_request: Request,
+        background_tasks: BackgroundTasks,
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         """Append an input message to the single conversation for one node."""
@@ -269,7 +310,11 @@ def create_sub_agent_router(
             raise _service_error(error) from error
         # On-demand nodes keep accepting input for the whole phase; a node that
         # was answering an explicit request (``needs_input``) flips back off.
-        stays_open = node.accepts_input and node.status != STATUS_NEEDS_INPUT
+        # Conversational phase nodes keep accepting input for every turn until
+        # their phase is finalized.
+        stays_open = node.phase in _CONVERSATIONAL_PHASES or (
+            node.accepts_input and node.status != STATUS_NEEDS_INPUT
+        )
         append_sub_agent_event(
             chat_service.event_store,
             execution_id=execution_id,
@@ -288,6 +333,13 @@ def create_sub_agent_router(
                 "text": "user input received",
             },
         )
+        if node.phase in _CONVERSATIONAL_PHASES:
+            background_tasks.add_task(
+                _resume_sub_agent_turn,
+                http_request.app,
+                workspace_id,
+                execution_id,
+            )
         result = message.as_dict()
         result["subAgentId"] = node.sub_agent_id
         return result

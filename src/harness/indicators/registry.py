@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import time, timedelta
 from enum import StrEnum
-from typing import Final
+from typing import Final, Self
 
 from harness.core.symbols import Symbol, canonical_symbol
 from harness.data.bars import interval_delta
@@ -156,13 +156,26 @@ def _validate_value(param: IndicatorParam, value: object) -> object:
 class IndicatorRegistry:
     """A name-to-spec registry with typed parameter validation."""
 
-    __slots__ = ("_specs",)
+    __slots__ = ("_frozen", "_specs")
 
-    def __init__(self) -> None:
+    def __init__(self, *, frozen: bool = False) -> None:
         self._specs: dict[str, IndicatorSpec] = {}
+        self._frozen = frozen
+
+    @property
+    def frozen(self) -> bool:
+        """Return whether registrations are permanently closed."""
+        return self._frozen
+
+    def freeze(self) -> Self:
+        """Permanently close registration and return this registry."""
+        self._frozen = True
+        return self
 
     def register(self, spec: IndicatorSpec) -> None:
         """Register one spec, rejecting duplicate names."""
+        if self._frozen:
+            raise IndicatorConfigurationError("indicator registry is immutable")
         if not isinstance(spec, IndicatorSpec):
             raise TypeError("spec must be an IndicatorSpec")
         if spec.name in self._specs:
@@ -288,7 +301,7 @@ def _build_default_registry() -> IndicatorRegistry:
             IndicatorParam("period", IndicatorParamKind.INTEGER),
         )
     )
-    return registry
+    return registry.freeze()
 
 
 DEFAULT_REGISTRY: Final = _build_default_registry()

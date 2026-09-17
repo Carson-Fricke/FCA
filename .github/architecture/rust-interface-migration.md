@@ -12,7 +12,7 @@ matching/fills, fees, portfolio, risk, results, sweeps, and the backtest runtime
 User-authored strategies, indicators, and screener programs remain Python. The
 Rust engine drives them through the PyO3 plugin host in `host`; the
 host owns the strategy context natively (clock, universe, books, orders, state,
-seeded random, emissions, and logging) and duck-types it to the documented
+seeded random, emissions, logging, and finite named metric publication) and duck-types it to the documented
 `harness.strategy.contracts.StrategyContext` protocol, so strategies run
 unmodified without importing an engine. Strategies and indicators keep
 authoring against `src/harness/strategy/**`, `src/harness/indicators/**`, and
@@ -51,7 +51,9 @@ built; it never falls back to a deleted Python implementation.
 
 ### Backtest lake data (--data-dir)
 
-`backtest-job --data-dir <dir>` reads a local Hive-partitioned Parquet lake through `marketdata::LocalLakeReader` and drives the native engine over the real data instead of the synthetic fixture. The canonical parity test is unchanged.
+`backtest-job --data-dir <dir>` reads a local Hive-partitioned Parquet lake through `marketdata::LocalLakeReader` and drives the native engine over the real data instead of the synthetic fixture. Symbols shaped like a crypto pair (`BTC-USD`) additionally read their `BASE/QUOTE` crypto partition and are re-keyed to the configured dashed symbol. The canonical parity test is unchanged.
+
+Before a local run, the harness API asks the market-lake ensure contract (`LAKE_API_URL`, `LAKE_API__BEARER_TOKEN`) to fetch every configured symbol/data-type for the run window, then polls coverage to a terminal status. The lake owns provider credentials and the fetch; the harness never reads them. A symbol set the lake has not ingested before is thus fetched on demand rather than failing preflight with a missing-symbol error.
 
 ## Parity definition
 
@@ -72,8 +74,13 @@ surface and the market-data views the surviving products consume:
   the callback contract, the sandbox lint, and the reference fixture. The
   engine-bound context and binding were deleted; the native Rust context
   replaces them.
-* `harness.indicators` and `harness.screening` — user indicator and screener
-  kernels and their process-isolated sandbox.
+* `harness.indicators` — the immutable global registry and tick-native built-in
+  kernels. Private mutable registries remain available for tests and injected
+  extensions, but workspace publication never mutates the global registry.
+* `harness.research` — the no-order adapter and restricted namespace for
+  workspace statistical models and workspace indicator functions. Source
+  receives plain event/series mappings and returns finite numeric outputs.
+* `harness.screening` — user screener kernels and their process-isolated sandbox.
 * `harness.data` — the point-in-time views and option filters retained for the
   plugin surface and the thesis product: bars, history, listing events, the
   option contract universe (`DteFilter`, `StrikeFilter`, `MoneynessFilter`),

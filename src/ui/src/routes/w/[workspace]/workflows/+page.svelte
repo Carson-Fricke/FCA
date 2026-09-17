@@ -51,7 +51,7 @@
 			{#each rows as row (row.execution.execution_id)}
 				<li>
 					<a
-						href="/w/{workspaceId}/workflows/{row.execution.execution_id}"
+						href="/w/{workspaceId}/conversations?chat={row.chat.chat_id}"
 						class="flex items-center gap-3 rounded-xl border border-surface-700 bg-surface-900 p-3 transition hover:border-accent/40"
 						data-testid="workflow-index-row"
 					>

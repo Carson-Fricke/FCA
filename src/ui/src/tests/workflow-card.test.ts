@@ -47,13 +47,38 @@ describe('WorkflowCard', () => {
 		expect(onEnterPhase).toHaveBeenLastCalledWith('research', { readOnly: false });
 	});
 
-	it('exposes a full-page link', () => {
+	it('surfaces a phase that is waiting on operator input', () => {
 		render(WorkflowCard, {
-			props: { execution, phases, status: 'running', fullPageHref: '/w/alpha-lab/workflows/exec-1' }
+			props: { execution, phases, status: 'running', attentionPhases: ['research'] }
 		});
-		expect(screen.getByTestId('workflow-open-full')).toHaveAttribute(
-			'href',
-			'/w/alpha-lab/workflows/exec-1'
+
+		expect(screen.getByTestId('workflow-card-needs-input')).toHaveTextContent(
+			'Input needed for research'
 		);
+		expect(screen.getByText('research')).toHaveAttribute('data-attention', 'true');
+		expect(screen.getByText('plan')).toHaveAttribute('data-attention', 'false');
+	});
+
+	it('marks completed, live, and future phases distinctly', () => {
+		render(WorkflowCard, { props: { execution, phases, status: 'running' } });
+
+		expect(screen.getByText('plan')).toHaveAttribute('data-status', 'done');
+		expect(screen.getByText('research')).toHaveAttribute('data-status', 'active');
+		expect(screen.getByTestId('phase-liveness')).toBeInTheDocument();
+		expect(screen.getByText('report')).toHaveAttribute('data-status', 'pending');
+		expect(screen.getByText('report')).toBeDisabled();
+	});
+
+	it('shows the current loop attempt without duplicating the phase', () => {
+		render(WorkflowCard, {
+			props: {
+				execution,
+				phases: [{ name: 'strategy_design', status: 'active', attempts: 3 }],
+				status: 'running'
+			}
+		});
+
+		expect(screen.getAllByTestId('phase-step')).toHaveLength(1);
+		expect(screen.getByText(/attempt 3/)).toBeInTheDocument();
 	});
 });

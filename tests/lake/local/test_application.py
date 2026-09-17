@@ -6,7 +6,13 @@ from fastapi.testclient import TestClient
 
 from lake.catalog.models import CoverageRecord, CoverageStatus
 from lake.contracts import AssetClass, DataType
-from lake.local import LocalCatalogRepository, LocalLayout, create_local_app
+from lake.local import (
+    LocalCatalogRepository,
+    LocalEnsureLauncher,
+    LocalLayout,
+    create_local_app,
+)
+from lake.providers.alpaca.records import NormalizedQuote, NormalizedTrade
 from lake.storage.parquet import LocalFilesystemStore, ParquetWriter
 
 
@@ -194,7 +200,13 @@ def test_local_api_ensure_returns_202_and_authenticated_polling_for_missing_data
 ) -> None:
     layout = LocalLayout(tmp_path / "local")
 
-    with TestClient(create_local_app(layout=layout, bearer_token="token")) as client:
+    with TestClient(
+        create_local_app(
+            layout=layout,
+            bearer_token="token",
+            job_launcher=lambda job: None,
+        )
+    ) as client:
         response = client.post(
             "/v1/catalog/ensure",
             json={
@@ -218,3 +230,79 @@ def test_local_api_ensure_returns_202_and_authenticated_polling_for_missing_data
     assert polled.status_code == 200
     assert polled.json()["state"] == "queued"
     assert unauthenticated.status_code == 401
+
+
+def test_local_app_installs_the_on_demand_ensure_launcher(tmp_path) -> None:
+    layout = LocalLayout(tmp_path / "local")
+
+    app = create_local_app(layout=layout, bearer_token="token")
+
+    assert isinstance(app.state.job_launcher, LocalEnsureLauncher)
+
+
+class _FakeEquityProvider:
+    async def fetch_trades(self, symbols, start, end, *, max_records=None):
+        del start, end, max_records
+        return (
+            NormalizedTrade(
+                timestamp=datetime(2024, 1, 19, 14, 31, tzinfo=UTC),
+                symbol=symbols,
+                trade_id=1,
+                exchange="XNAS",
+                price=Decimal("190.12"),
+                size=10,
+                conditions=("@",),
+                tape="C",
+                update=None,
+            ),
+        )
+
+    async def fetch_quotes(self, symbols, start, end, *, max_records=None):
+        del start, end, max_records
+        return (
+            NormalizedQuote(
+                timestamp=datetime(2024, 1, 19, 14, 31, tzinfo=UTC),
+                symbol=symbols,
+                bid_exchange="XNAS",
+                bid_price=Decimal("190.11"),
+                bid_size=10,
+                ask_exchange="XNAS",
+                ask_price=Decimal("190.13"),
+                ask_size=20,
+                conditions=(),
+                tape="C",
+            ),
+        )
+
+
+def test_local_ensure_fetches_a_symbol_it_has_never_ingested(tmp_path) -> None:
+    layout = LocalLayout(tmp_path / "local")
+    credentials = {
+        "LAKE_PROVIDER__API_KEY": "fake-key",
+        "LAKE_PROVIDER__API_SECRET": "fake-secret",
+    }
+    launcher = LocalEnsureLauncher(
+        layout,
+        environ=credentials,
+        equity_provider=_FakeEquityProvider(),
+    )
+
+    with TestClient(
+        create_local_app(layout=layout, bearer_token="token", job_launcher=launcher)
+    ) as client:
+        response = client.post(
+            "/v1/catalog/ensure",
+            json={
+                "asset_class": "equity",
+                "data_type": "trade",
+                "symbol": "GLD",
+                "start_date": "2024-01-19",
+                "end_date": "2024-01-19",
+            },
+            headers={"Authorization": "Bearer token"},
+        )
+
+    assert response.status_code == 200
+    assert all(entry["status"] == "complete" for entry in response.json()["entries"])
+    records = LocalCatalogRepository(layout.catalog).list(symbol="GLD")
+    assert {record.status for record in records} == {CoverageStatus.COMPLETE}

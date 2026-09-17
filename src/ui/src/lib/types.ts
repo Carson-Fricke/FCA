@@ -172,6 +172,7 @@ export interface PostMessageResult {
 export type ExecutionEventType =
 	| 'workflow.launched'
 	| 'workflow.started'
+	| 'workflow.phase'
 	| 'workflow.paused'
 	| 'workflow.steered'
 	| 'workflow.stopped'
@@ -206,6 +207,23 @@ export interface ExecutionEvent {
 	occurredAt: string;
 	payload: Record<string, unknown>;
 	workspaceId: string;
+}
+
+/**
+ * One item on the unified per-chat Cosmos timeline. Messages, execution
+ * events, and execution state changes all share one ordered log; `threadId`
+ * routes an item to the root agent or one sub-agent.
+ */
+export interface TimelineItem {
+	id: string;
+	chatId: string;
+	workspaceId: string;
+	kind: 'message' | 'event' | 'execution' | 'chat' | 'counter' | string;
+	seq: number;
+	ts: string;
+	executionId?: string;
+	threadId?: string;
+	payload: Record<string, unknown>;
 }
 
 export interface WorkflowExecutionRecord {
@@ -297,6 +315,7 @@ export interface WorkflowGate {
 export interface WorkflowPhase {
 	name: string;
 	status: 'done' | 'active' | 'pending';
+	attempts?: number;
 }
 
 /** Reference to an execution node: the root execution or one sub-agent. */

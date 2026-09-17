@@ -123,6 +123,16 @@ class StrategyContext(Protocol):
         """Emit one structured signal through the injected sink."""
         ...
 
+    def publish_metric(self, name: str, value: int | float) -> None:
+        """Publish one finite numeric run metric under a stable name.
+
+        Metric names are run outputs, not indicator registrations. Repeated
+        publication replaces the previous value, so a live strategy may
+        publish an updated trailing-window observation while a research model
+        normally publishes its final estimate during teardown.
+        """
+        ...
+
 
 class Strategy:
     """Base class for one mode-independent strategy implementation.

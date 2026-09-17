@@ -82,7 +82,7 @@ pub use replay::{
     ParquetFileReader, ParquetReader, ReplayFingerprints, ReplayStream, StaticReader,
 };
 pub use security_master::{SecurityMasterView, SecuritySnapshot};
-pub use symbol::{canonical_osi_symbol, canonical_symbol, is_osi_symbol};
+pub use symbol::{canonical_osi_symbol, canonical_symbol, crypto_pair, is_osi_symbol};
 pub use time::{Date, DateTime, Nanos};
 pub use universe_view::{
     EquityListingUniverse, MemberKind, OptionContractUniverse, UniverseComposition, UniverseMember,

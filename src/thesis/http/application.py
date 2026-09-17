@@ -14,6 +14,7 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from secrets import compare_digest
 from typing import TYPE_CHECKING, Annotated
 
@@ -59,6 +60,7 @@ from thesis.http.streaming import (
     create_streaming_router,
 )
 from thesis.http.sub_agents import create_sub_agent_router
+from thesis.http.timeline import create_timeline_router
 from thesis.http.workspaces import (
     WorkspaceDataBundle,
     create_workspaces_router,
@@ -71,6 +73,8 @@ from thesis.screening.service import ScreenerService
 
 if TYPE_CHECKING:
     from thesis.backtests import BacktestRunCoordinator
+    from thesis.cosmos.timeline import CosmosTimeline
+    from thesis.http.workspaces import WorkspaceStore
     from thesis.integrations.mcp import HarnessMcpClient
     from thesis.workflows.runtime import WorkflowRuntime
 
@@ -313,6 +317,7 @@ def create_app(
     session_store: SessionStore | None = None,
     session_workspace_id: str | None = None,
     session_clock: Callable[[], datetime] | None = None,
+    timeline: CosmosTimeline | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
@@ -470,6 +475,11 @@ def create_app(
         application.state.strategy_service = workspace_data.strategies
         if workspace_data.harness is not None:
             application.state.harness_boundary = workspace_data.harness
+        if chat_service is not None:
+            for workspace in workspace_data.workspaces.list_workspaces():
+                workspace_id = workspace.get("id")
+                if isinstance(workspace_id, str) and workspace_id:
+                    chat_service.stop_active_executions(workspace_id)
     if screener_service is not None:
         application.state.screener_service = screener_service
     if workflow_runtime is not None:
@@ -540,6 +550,11 @@ def create_app(
             sleeper=stream_sleeper,
             max_poll_cycles=stream_max_poll_cycles,
         ),
+        create_timeline_router(
+            poll_interval_seconds=min(stream_poll_interval_seconds, 0.5),
+            sleeper=stream_sleeper,
+            max_poll_cycles=stream_max_poll_cycles,
+        ),
         create_workspaces_router(),
         create_backtest_router(),
         create_harness_router(),
@@ -590,6 +605,12 @@ def create_app(
     for router in routers:
         api_application.include_router(router, dependencies=auth_dependency)
 
+    if timeline is not None:
+        # Serve the same timeline from both the root app and the /api sub-app,
+        # since the mounted sub-app has its own state namespace.
+        application.state.timeline = timeline
+        api_application.state.timeline = timeline
+
     if auth_router is not None:
         api_application.include_router(auth_router)
 
@@ -609,6 +630,63 @@ def create_app(
 
     application.mount("/api", api_application)
     return application
+
+
+def durable_chat_service(*, workspace_root: str | Path | None = None) -> ChatService:
+    """Compose the one durable chat service shared by local and serve runs.
+
+    When ``THESIS_STORAGE_ACCOUNT_NAME`` is configured, records are written to
+    each workspace's provisioned blob container with a managed identity;
+    otherwise they persist as atomic JSON documents under the workspace root's
+    ``chat`` directory.  Both stores consume the same record format, so the
+    local and workspace run modes share one persistence contract.
+    """
+    account = _environment_value("THESIS_STORAGE_ACCOUNT_NAME")
+    if account is not None:
+        from azure.identity import DefaultAzureCredential
+        from azure.storage.blob import BlobServiceClient
+
+        from thesis.chat.azure import AzureBlobChatPersistence
+
+        prefix = _environment_value("THESIS_WORKSPACE_CONTAINER_PREFIX") or "thesis-ws-"
+        blob_service = BlobServiceClient(
+            account_url=f"https://{account}.blob.core.windows.net",
+            credential=DefaultAzureCredential(),
+        )
+        return ChatService(
+            persistence=AzureBlobChatPersistence(blob_service, container_prefix=prefix)
+        )
+    from thesis.chat.persistence import FileChatPersistence
+    from thesis.workspaces.local import default_workspace_root
+
+    root = (
+        Path(workspace_root) if workspace_root is not None else default_workspace_root()
+    )
+    return ChatService(persistence=FileChatPersistence(root / "chat"))
+
+
+def serving_workspace_store() -> WorkspaceStore | None:
+    """Compose the workspace catalog shared by local and workspace runs.
+
+    With ``THESIS_STORAGE_ACCOUNT_NAME`` configured (always true in the
+    deployed Container App) workspaces are blob containers on that account,
+    addressed with the runtime managed identity.  Without it, ``None`` lets the
+    caller fall back to the filesystem catalog under the workspace root.
+    """
+    account = _environment_value("THESIS_STORAGE_ACCOUNT_NAME")
+    if account is None:
+        return None
+    from azure.identity import DefaultAzureCredential
+    from azure.storage.blob import BlobServiceClient
+
+    from thesis.http.workspaces import azure_workspace_store
+
+    prefix = _environment_value("THESIS_WORKSPACE_CONTAINER_PREFIX") or "thesis-ws-"
+    blob_service = BlobServiceClient(
+        account_url=f"https://{account}.blob.core.windows.net",
+        credential=DefaultAzureCredential(),
+    )
+    return azure_workspace_store(blob_service, container_prefix=prefix)
 
 
 def serving_app_from_environment() -> FastAPI:
@@ -639,11 +717,22 @@ def serving_app_from_environment() -> FastAPI:
             "authentication is not configured; set THESIS_API__BEARER_TOKEN "
             "or both THESIS_API__ENTRA_TENANT_ID and THESIS_API__ENTRA_AUDIENCE"
         )
+    from thesis.cosmos.stack import open_cosmos_chat_stack
+    from thesis.http.workspaces import build_local_workspace_data
+
+    chat_service, timeline = open_cosmos_chat_stack()
+    workspace_data = build_local_workspace_data(
+        chat_service=chat_service,
+        workspace_store=serving_workspace_store(),
+    )
     return create_app(
         bearer_token=bearer_token,
         entra_tenant_id=tenant_id,
         entra_audience=audience,
         entra_role=role,
+        chat_service=chat_service,
+        workspace_data=workspace_data,
+        timeline=timeline,
     )
 
 

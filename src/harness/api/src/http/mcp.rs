@@ -19,6 +19,8 @@ use mcp::server::{error_response, McpServer, PARSE_ERROR};
 use mcp::tools::{Boundary, ContextError, HarnessToolsContext};
 use serde_json::{json, Value};
 
+use crate::local::NativeBacktestSubmitter;
+
 use super::models::error_body;
 use super::state::AppState;
 use super::store::{JobRepository, RunStore};
@@ -38,6 +40,10 @@ pub fn compose_local_server(
 ) -> Result<Arc<McpServer>, ContextError> {
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
+    context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(
+        run_store.clone(),
+        job_repository.clone(),
+    )));
     context.run_store = Some(run_store);
     context.job_repository = Some(job_repository);
     let context = context.validate()?;

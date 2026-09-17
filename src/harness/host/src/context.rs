@@ -19,9 +19,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use backtest::backtest::engine_core::EngineOrder;
 use num::PyDecimal;
-use pyo3::exceptions::{PyKeyError, PyTypeError};
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyBool, PyDict, PyList};
+
+const RESERVED_METRIC_NAMES: &[&str] = &[
+    "cagr",
+    "fees_total",
+    "fill_count",
+    "max_drawdown",
+    "slippage_total",
+    "strategy_id",
+    "total_return",
+];
 
 /// Build a Python `decimal.Decimal` from one native decimal.
 pub(crate) fn py_decimal<'py>(py: Python<'py>, value: PyDecimal) -> PyResult<Bound<'py, PyAny>> {
@@ -586,6 +596,7 @@ pub struct PyEngineContext {
     emissions: Py<PyEmissions>,
     #[pyo3(get)]
     book_id: String,
+    published_metrics: RefCell<BTreeMap<String, String>>,
 }
 
 impl PyEngineContext {
@@ -593,6 +604,12 @@ impl PyEngineContext {
     #[must_use]
     pub fn books_handle(&self) -> &Py<PyBooks> {
         &self.books
+    }
+
+    /// Return the latest value published under every custom metric name.
+    #[must_use]
+    pub fn published_metrics(&self) -> BTreeMap<String, String> {
+        self.published_metrics.borrow().clone()
     }
 }
 
@@ -624,6 +641,48 @@ impl PyEngineContext {
             .borrow()
             .record(name, fields, values)
     }
+
+    /// Publish one finite numeric run metric.
+    fn publish_metric(&self, name: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        if !valid_metric_name(name) {
+            return Err(PyValueError::new_err(
+                "metric name must match ^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            ));
+        }
+        if RESERVED_METRIC_NAMES.contains(&name) {
+            return Err(PyValueError::new_err(format!(
+                "metric name {name:?} is reserved by the harness"
+            )));
+        }
+        if value.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err(
+                "metric value must be numeric, not bool",
+            ));
+        }
+        let number = value
+            .extract::<f64>()
+            .map_err(|_| PyTypeError::new_err("metric value must be numeric"))?;
+        if !number.is_finite() {
+            return Err(PyValueError::new_err("metric value must be finite"));
+        }
+        self.published_metrics
+            .borrow_mut()
+            .insert(name.to_string(), number.to_string());
+        Ok(())
+    }
+}
+
+fn valid_metric_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    name.len() <= 128
+        && first.is_ascii_alphanumeric()
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '.' | '_' | ':' | '@' | '/' | '-')
+        })
 }
 
 /// One Python object rendered as a portable JSON value.
@@ -746,6 +805,7 @@ pub fn build_context(
             log,
             emissions,
             book_id,
+            published_metrics: RefCell::new(BTreeMap::new()),
         },
     )?;
     Ok((context, clock, orders, books))

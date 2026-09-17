@@ -6,16 +6,25 @@
 	 */
 	let {
 		acceptsInput,
+		phase = '',
 		busy = false,
 		onSubmit = () => {}
 	}: {
 		acceptsInput: boolean;
+		phase?: string;
 		busy?: boolean;
 		onSubmit?: (body: string) => void;
 	} = $props();
 
 	let body = $state('');
 	const canSend = $derived(acceptsInput && body.trim().length > 0 && !busy);
+	const placeholder = $derived(
+		phase === 'verdict'
+			? 'Say "check off" to apply the verdict, or "circle back" to revise the hypothesis...'
+			: phase === 'hypothesis_creation'
+				? 'Confirm to approve hypothesis (e.g. "approved"), or message feedback to revise...'
+				: 'Message this sub-agent...'
+	);
 
 	function send(): void {
 		if (!canSend) return;
@@ -29,7 +38,7 @@
 		<div class="flex items-end gap-2">
 			<textarea
 				class="max-h-28 min-h-9 flex-1 resize-y rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-1.5 text-sm text-slate-800 outline-none placeholder:text-slate-500 focus:border-accent/50"
-				placeholder="Message this sub-agent…"
+				{placeholder}
 				bind:value={body}
 				disabled={busy}
 				data-testid="sub-agent-composer-input"

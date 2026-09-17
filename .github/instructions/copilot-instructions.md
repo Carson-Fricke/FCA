@@ -127,3 +127,15 @@ or bootstrapping the environment.
 - Reconcile CLEO and run its full validation/export checklist once per wave,
   immediately before commit or handoff.
 - Do not start work beyond the user-approved wave count.
+
+## Workflow Interaction & Gates Policy
+
+- NEVER use workflow gates, gate tools, or gate events (`workflow.gate.*`). All
+  workflow gates, gate resolution schemas, and gate cards are permanently
+  removed and prohibited.
+- Any operator clarification, review, step validation, or approval blockage
+  MUST route conversationally through `_emit_orchestrator_text` and
+  `SUB_AGENT_NEEDS_INPUT` (`_Fenced`), using the exact same conversational
+  message pattern as hypothesis creation.
+- The operator always responds via standard chat input.
+
