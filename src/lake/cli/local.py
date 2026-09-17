@@ -38,7 +38,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_data_dir(api)
 
     ingest = commands.add_parser(
-        "ingest", help="fetch one bounded Alpaca equity session"
+        "ingest", help="fetch one closed Alpaca equity session"
     )
     ingest.add_argument(
         "--symbol", help="configured equity symbol; defaults to the first soak symbol"
@@ -47,12 +47,6 @@ def _parser() -> argparse.ArgumentParser:
         "--session-date",
         type=date.fromisoformat,
         help="closed XNYS session date; defaults to the latest closed session",
-    )
-    ingest.add_argument(
-        "--max-records",
-        type=int,
-        default=100,
-        help="maximum Alpaca records fetched per data type (default: 100)",
     )
     _add_data_dir(ingest)
 
@@ -88,7 +82,6 @@ def main(
                     layout=layout,
                     symbol=arguments.symbol,
                     session_date=arguments.session_date,
-                    max_records=arguments.max_records,
                     environ=environment,
                 )
             )

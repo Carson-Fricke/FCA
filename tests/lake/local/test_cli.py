@@ -14,7 +14,7 @@ def test_documented_smoke_command_is_stable() -> None:
     instructions = (
         repository / ".github" / "instructions" / "market-lake-local.instructions.md"
     ).read_text(encoding="utf-8")
-    command = "uv run lake local ingest --symbol AAPL --max-records 100"
+    command = "uv run lake local ingest --symbol AAPL"
 
     assert command in documentation
     assert command in instructions
@@ -64,14 +64,14 @@ def test_api_command_never_attempts_azure_authentication(
     assert started["port"] == 8000
 
 
-def test_ingest_command_passes_the_documented_bound_and_prints_json(
+def test_ingest_command_forwards_arguments_and_prints_json(
     monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ) -> None:
     received: dict[str, object] = {}
 
     async def ingest(**kwargs: object) -> dict[str, object]:
         received.update(kwargs)
-        return {"bounded_records_per_data_type": kwargs["max_records"], "ok": True}
+        return {"ok": True}
 
     monkeypatch.setattr(local, "run_local_ingest", ingest)
 
@@ -80,8 +80,6 @@ def test_ingest_command_passes_the_documented_bound_and_prints_json(
             "ingest",
             "--symbol",
             "AAPL",
-            "--max-records",
-            "100",
             "--data-dir",
             str(tmp_path / "local"),
         ],
@@ -93,11 +91,8 @@ def test_ingest_command_passes_the_documented_bound_and_prints_json(
 
     assert result == 0
     assert received["symbol"] == "AAPL"
-    assert received["max_records"] == 100
-    assert json.loads(capsys.readouterr().out) == {
-        "bounded_records_per_data_type": 100,
-        "ok": True,
-    }
+    assert "max_records" not in received
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
 
 
 def test_reset_requires_confirmation_and_removes_only_local_state(

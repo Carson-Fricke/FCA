@@ -135,13 +135,13 @@ fixture.
 
 ## Local Market Lake
 
-The supported workstation mode uses local files and real bounded Alpaca data;
-it does not require Docker, Azure CLI, Azure resources, or Azure credentials:
+The supported workstation mode uses local files and real Alpaca data; it does
+not require Docker, Azure CLI, Azure resources, or Azure credentials:
 
 ```powershell
 uv sync --python 3.12 --extra dev
 uv run lake local api --host 127.0.0.1 --port 8000
-uv run lake local ingest --symbol AAPL --max-records 100
+uv run lake local ingest --symbol AAPL
 uv run lake local reset --yes
 ```
 

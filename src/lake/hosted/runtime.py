@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Coroutine, Mapping
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from azure.data.tables import TableClient
@@ -29,14 +29,12 @@ from lake.ingestion.azure import AzureAtomicIngestCommitter
 from lake.ingestion.equities.transaction import EquityIngestTransaction
 from lake.ingestion.leased import LeasedAtomicIngestCommitter
 from lake.providers.alpaca import AlpacaClient
-from lake.providers.alpaca.records import NormalizedQuote, NormalizedTrade
 from lake.storage.azure import AzureBlobSasIssuer, AzureBlobStore
 from lake.storage.leases import AzureBlobLeaseProvider
 
 _DEFAULT_STORAGE_CONTAINER = "lake"
 _DEFAULT_COVERAGE_TABLE = "coverage"
 _DEFAULT_JOBS_TABLE = "jobs"
-_DEFAULT_MAX_RECORDS = 1_000
 
 
 class HostedEnsureError(RuntimeError):
@@ -45,49 +43,6 @@ class HostedEnsureError(RuntimeError):
 
 def _environment_value(environ: Mapping[str, str], name: str) -> str:
     return (environ.get(name) or "").strip()
-
-
-def ingest_max_records(environ: Mapping[str, str] | None = None) -> int:
-    """Return the bounded record count shared by hosted ingest callers."""
-    source = os.environ if environ is None else environ
-    raw_value = source.get("LAKE_INGEST_MAX_RECORDS")
-    if raw_value is None:
-        return _DEFAULT_MAX_RECORDS
-    try:
-        value = int(raw_value)
-    except ValueError as error:
-        raise HostedEnsureError("LAKE_INGEST_MAX_RECORDS must be an integer") from error
-    if not 1 <= value <= 100_000:
-        raise HostedEnsureError("LAKE_INGEST_MAX_RECORDS must be between 1 and 100000")
-    return value
-
-
-class BoundedAlpacaClient:
-    """Expose the transaction client contract with an explicit fetch bound."""
-
-    def __init__(self, client: AlpacaClient, max_records: int) -> None:
-        self._client = client
-        self._max_records = max_records
-
-    async def get_trades(
-        self,
-        symbol: str,
-        start: date | datetime | str,
-        end: date | datetime | str,
-    ) -> tuple[NormalizedTrade, ...]:
-        return await self._client.get_trades(
-            symbol, start, end, max_records=self._max_records
-        )
-
-    async def get_quotes(
-        self,
-        symbol: str,
-        start: date | datetime | str,
-        end: date | datetime | str,
-    ) -> tuple[NormalizedQuote, ...]:
-        return await self._client.get_quotes(
-            symbol, start, end, max_records=self._max_records
-        )
 
 
 class HostedRuntime:
@@ -244,7 +199,7 @@ class HostedRuntime:
         client = AlpacaClient.from_settings(self.settings.provider)
         try:
             transaction = EquityIngestTransaction(
-                client=BoundedAlpacaClient(client, ingest_max_records()),
+                client=client,
                 committer=self._committer(),
             )
             for session in sessions:
@@ -288,9 +243,7 @@ def hosted_overrides(*, environ: Mapping[str, str] | None = None) -> dict[str, A
 
 
 __all__ = [
-    "BoundedAlpacaClient",
     "HostedEnsureError",
     "HostedRuntime",
     "hosted_overrides",
-    "ingest_max_records",
 ]

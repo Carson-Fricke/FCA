@@ -33,11 +33,6 @@ param keyVaultUri string
 @minLength(3)
 param storageAccountName string
 
-@description('Maximum Alpaca records fetched per data type for one bounded ingest execution.')
-@minValue(1)
-@maxValue(100000)
-param ingestMaxRecords int = 1000
-
 @description('Full resource ID of the runtime user-assigned managed identity.')
 @minLength(1)
 param runtimeIdentityResourceId string
@@ -183,10 +178,6 @@ var baseRuntimeEnvironment = [
   {
     name: 'LAKE_COVERAGE_TABLE'
     value: 'coverage'
-  }
-  {
-    name: 'LAKE_INGEST_MAX_RECORDS'
-    value: string(ingestMaxRecords)
   }
 ]
 var providerEnvironment = concat(baseRuntimeEnvironment, [

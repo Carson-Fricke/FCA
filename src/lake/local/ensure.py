@@ -47,14 +47,12 @@ class LocalEnsureLauncher:
         *,
         environ: Mapping[str, str] | None = None,
         now: datetime | None = None,
-        max_records: int | None = None,
         equity_provider: AlpacaEquityProvider | None = None,
         crypto_provider: AlpacaCryptoProvider | None = None,
     ) -> None:
         self._layout = layout
         self._environ = environ
         self._now = now
-        self._max_records = max_records
         self._equity_provider = equity_provider
         self._crypto_provider = crypto_provider
 
@@ -66,7 +64,6 @@ class LocalEnsureLauncher:
                 symbols=[request.symbol],
                 start_date=request.start_date,
                 end_date=request.end_date,
-                max_records=self._max_records,
                 provider=self._equity_provider,
                 environ=self._environ,
                 now=self._now,
@@ -78,7 +75,6 @@ class LocalEnsureLauncher:
                 pairs=[request.symbol],
                 start_date=request.start_date,
                 end_date=request.end_date,
-                max_records=self._max_records,
                 provider=self._crypto_provider,
                 environ=self._environ,
                 now=self._now,

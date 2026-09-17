@@ -118,10 +118,10 @@ After all three names exist, deploy the Bicep composition. Confirm that:
 - Environment variables use `secretRef`; no resolved value appears in ARM,
   Container Apps configuration output, GitHub logs, or task evidence.
 
-Run the bounded `lake ingest` provider request and persistence path only after
-references report healthy. The scheduled job defaults to 1,000 records per
-data type and marks the resulting symbol-day coverage as partial; increase
-`LAKE_INGEST_MAX_RECORDS` only with an explicit memory and cost review.
+Run the `lake ingest` provider request and persistence path only after
+references report healthy. The lake paginates the fetch internally up to its own
+per-fetch record budget, so there is no `LAKE_INGEST_MAX_RECORDS` setting to
+raise; changing the internal budget requires an explicit memory and cost review.
 Record status, object path, row count, and timing, but never provider responses
 that may contain account information or any credential value.
 

@@ -12,23 +12,22 @@ from lake.coverage.application import EnsureJob, EnsureSpec
 from lake.local import LocalCatalogRepository, LocalIngestError, LocalLayout
 from lake.local.ensure import LocalEnsureLauncher
 from lake.local.ingest import run_local_backfill, run_local_ingest
+from lake.providers.alpaca import FetchedRecords
 from lake.providers.alpaca.records import NormalizedQuote, NormalizedTrade
 
 
 class FakeAlpaca:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, int | None]] = []
+        self.calls: list[tuple[str, str]] = []
 
     async def fetch_trades(
         self,
         symbols: str,
         start: date | datetime | str,
         end: date | datetime | str,
-        *,
-        max_records: int | None = None,
     ) -> Sequence[NormalizedTrade]:
         del start, end
-        self.calls.append(("trade", symbols, max_records))
+        self.calls.append(("trade", symbols))
         return (
             NormalizedTrade(
                 timestamp=datetime(2024, 1, 19, 14, 31, tzinfo=UTC),
@@ -48,11 +47,9 @@ class FakeAlpaca:
         symbols: str,
         start: date | datetime | str,
         end: date | datetime | str,
-        *,
-        max_records: int | None = None,
     ) -> Sequence[NormalizedQuote]:
         del start, end
-        self.calls.append(("quote", symbols, max_records))
+        self.calls.append(("quote", symbols))
         return (
             NormalizedQuote(
                 timestamp=datetime(2024, 1, 19, 14, 31, tzinfo=UTC),
@@ -76,7 +73,7 @@ def _credentials() -> dict[str, str]:
     }
 
 
-def test_bounded_fake_alpaca_ingest_persists_parquet_and_catalog(tmp_path) -> None:
+def test_fake_alpaca_ingest_persists_parquet_and_catalog(tmp_path) -> None:
     layout = LocalLayout(tmp_path / "local")
     provider = FakeAlpaca()
 
@@ -85,26 +82,24 @@ def test_bounded_fake_alpaca_ingest_persists_parquet_and_catalog(tmp_path) -> No
             layout=layout,
             symbol="aapl",
             session_date=date(2024, 1, 19),
-            max_records=100,
             provider=provider,
             environ=_credentials(),
             now=datetime(2024, 1, 22, tzinfo=UTC),
         )
     )
 
-    assert provider.calls == [("trade", "AAPL", 100), ("quote", "AAPL", 100)]
-    assert result["bounded_records_per_data_type"] == 100
+    assert provider.calls == [("trade", "AAPL"), ("quote", "AAPL")]
     assert result["symbol"] == "AAPL"
     assert result["session_date"] == "2024-01-19"
     assert result["coverage"] == [
-        {"data_type": "trade", "rows": 1, "status": "partial"},
-        {"data_type": "quote", "rows": 1, "status": "partial"},
+        {"data_type": "trade", "rows": 1, "status": "complete"},
+        {"data_type": "quote", "rows": 1, "status": "complete"},
     ]
     catalog = LocalCatalogRepository(layout.catalog)
     records = catalog.list(symbol="AAPL")
     assert [record.status for record in records] == [
-        CoverageStatus.PARTIAL,
-        CoverageStatus.PARTIAL,
+        CoverageStatus.COMPLETE,
+        CoverageStatus.COMPLETE,
     ]
     assert [record.data_type for record in records] == [DataType.QUOTE, DataType.TRADE]
     for record in records:
@@ -132,24 +127,6 @@ def test_missing_credentials_fail_before_provider_or_state_use(tmp_path) -> None
     assert not layout.root.exists()
 
 
-def test_ingest_rejects_unbounded_counts(tmp_path) -> None:
-    layout = LocalLayout(tmp_path / "local")
-    provider = FakeAlpaca()
-
-    with pytest.raises(ValueError, match="between 1 and 10000"):
-        asyncio.run(
-            run_local_ingest(
-                layout=layout,
-                max_records=100_000,
-                provider=provider,
-                environ=_credentials(),
-                now=datetime(2024, 1, 22, tzinfo=UTC),
-            )
-        )
-
-    assert provider.calls == []
-
-
 def test_ingest_accepts_symbols_outside_the_configured_universe(tmp_path) -> None:
     layout = LocalLayout(tmp_path / "local")
     provider = FakeAlpaca()
@@ -165,7 +142,7 @@ def test_ingest_accepts_symbols_outside_the_configured_universe(tmp_path) -> Non
         )
     )
 
-    assert provider.calls == [("trade", "MSFT", 100), ("quote", "MSFT", 100)]
+    assert provider.calls == [("trade", "MSFT"), ("quote", "MSFT")]
     assert result["symbol"] == "MSFT"
 
 
@@ -176,10 +153,8 @@ def test_fake_provider_failure_is_persisted_but_returns_a_clear_error(tmp_path) 
             symbols: str,
             start: date | datetime | str,
             end: date | datetime | str,
-            *,
-            max_records: int | None = None,
         ) -> Sequence[NormalizedQuote]:
-            del symbols, start, end, max_records
+            del symbols, start, end
             raise RuntimeError("provider unavailable")
 
     layout = LocalLayout(tmp_path / "local")
@@ -221,7 +196,7 @@ def test_backfill_fetches_arbitrary_symbol_once_and_resumes(tmp_path) -> None:
         )
     )
 
-    assert provider.calls == [("trade", "MSFT", 100_000), ("quote", "MSFT", 100_000)]
+    assert provider.calls == [("trade", "MSFT"), ("quote", "MSFT")]
     assert first["symbols"] == ["MSFT"]
     assert first["sessions"] == [
         {
@@ -251,6 +226,38 @@ def test_backfill_fetches_arbitrary_symbol_once_and_resumes(tmp_path) -> None:
     assert len(provider.calls) == 2
 
 
+def test_truncated_fetch_is_recorded_partial(tmp_path) -> None:
+    class TruncatingAlpaca(FakeAlpaca):
+        async def fetch_trades(self, symbols, start, end):
+            return FetchedRecords(
+                await super().fetch_trades(symbols, start, end), truncated=True
+            )
+
+    layout = LocalLayout(tmp_path / "local")
+
+    result = asyncio.run(
+        run_local_ingest(
+            layout=layout,
+            symbol="AAPL",
+            session_date=date(2024, 1, 19),
+            provider=TruncatingAlpaca(),
+            environ=_credentials(),
+            now=datetime(2024, 1, 22, tzinfo=UTC),
+        )
+    )
+
+    assert result["coverage"] == [
+        {"data_type": "trade", "rows": 1, "status": "partial"},
+        {"data_type": "quote", "rows": 1, "status": "complete"},
+    ]
+    statuses = {
+        record.data_type: record.status
+        for record in LocalCatalogRepository(layout.catalog).list(symbol="AAPL")
+    }
+    assert statuses[DataType.TRADE] is CoverageStatus.PARTIAL
+    assert statuses[DataType.QUOTE] is CoverageStatus.COMPLETE
+
+
 def test_local_ensure_launcher_fetches_the_requested_symbol(tmp_path) -> None:
     layout = LocalLayout(tmp_path / "local")
     provider = FakeAlpaca()
@@ -271,6 +278,6 @@ def test_local_ensure_launcher_fetches_the_requested_symbol(tmp_path) -> None:
 
     asyncio.run(launcher(job))
 
-    assert provider.calls == [("trade", "GLD", 100_000), ("quote", "GLD", 100_000)]
+    assert provider.calls == [("trade", "GLD"), ("quote", "GLD")]
     records = LocalCatalogRepository(layout.catalog).list(symbol="GLD")
     assert {record.status for record in records} == {CoverageStatus.COMPLETE}

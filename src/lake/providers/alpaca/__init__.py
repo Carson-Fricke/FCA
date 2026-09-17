@@ -6,6 +6,7 @@ from lake.providers.alpaca.client import (
     AlpacaProtocolError,
     AsyncResponse,
     AsyncTransport,
+    FetchedRecords,
 )
 from lake.providers.alpaca.records import (
     CryptoQuote,
@@ -30,6 +31,7 @@ __all__ = [
     "AsyncTransport",
     "CryptoQuote",
     "CryptoTrade",
+    "FetchedRecords",
     "NormalizedCryptoQuote",
     "NormalizedCryptoTrade",
     "NormalizedOptionQuote",

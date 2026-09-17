@@ -7,7 +7,6 @@ import asyncio
 import json
 import os
 from collections.abc import Sequence
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 from azure.data.tables import TableClient
@@ -16,7 +15,6 @@ from azure.identity import DefaultAzureCredential
 from lake.catalog import AzureTableCatalogRepository
 from lake.configuration import load_settings, load_universes
 from lake.coverage import CoverageSession, equity_sessions
-from lake.hosted.runtime import BoundedAlpacaClient, ingest_max_records
 from lake.ingestion.azure import AzureAtomicIngestCommitter
 from lake.ingestion.equities.transaction import EquityIngestTransaction
 from lake.ingestion.leased import LeasedAtomicIngestCommitter
@@ -33,7 +31,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lake ingest",
         description="Run the market-lake ingest process.",
-        epilog="Fetches and persists one bounded Alpaca equity session.",
+        epilog="Fetches and persists one Alpaca equity session.",
     )
     parser.add_argument(
         "--symbol",
@@ -48,7 +46,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run one bounded, real-provider equity ingest operation."""
+    """Run one real-provider equity ingest operation."""
     arguments = _parser().parse_args(argv)
     result = asyncio.run(
         run_ingest(symbol=arguments.symbol, session_date=arguments.session_date)
@@ -79,8 +77,7 @@ async def run_ingest(
         )
 
     now = datetime.now(UTC)
-    max_records = ingest_max_records()
-    session = replace(_select_session(session_date, now), is_partial=True)
+    session = _select_session(session_date, now)
     storage_account = os.environ.get("LAKE_STORAGE_ACCOUNT_NAME")
     if not storage_account:
         raise RuntimeError("LAKE_STORAGE_ACCOUNT_NAME is required for Azure ingest")
@@ -113,7 +110,7 @@ async def run_ingest(
     client = AlpacaClient.from_settings(settings.provider)
     try:
         transaction = EquityIngestTransaction(
-            client=BoundedAlpacaClient(client, max_records),
+            client=client,
             committer=committer,
         )
         ingest_result = await transaction.run(selected_symbol, session)
@@ -135,7 +132,6 @@ async def run_ingest(
         ],
         "session_date": ingest_result.session_date.isoformat(),
         "symbol": ingest_result.symbol,
-        "bounded_records_per_data_type": max_records,
     }
 
 

@@ -91,8 +91,9 @@ identify why each symbol is in the representative set.
 The owned tests use both injection points requested for this sweep:
 
 - A fake provider returns records, an empty response, and an HTTP error. The
-  test verifies one call per normalized symbol, `max_records=1`, safe error
-  codes, and the supplemental-data recommendation.
+  test verifies one call per normalized symbol with no provider record bound
+  (the probe applies its own `max_records=1` slice), safe error codes, and the
+  supplemental-data recommendation.
 - A fake transport is injected into the existing `AlpacaClient`. The test
   verifies the stock history path, SIP/raw parameters, the fixed limits, and
   the absence of credential headers.

@@ -64,6 +64,37 @@ class AsyncTransport(Protocol):
 RecordT = TypeVar("RecordT")
 OptionRecordT = TypeVar("OptionRecordT", NormalizedOptionTrade, NormalizedOptionQuote)
 
+#: Alpaca's per-page ceilings. Page sizing is the lake's implementation detail:
+#: callers request a window and the client paginates internally.
+_PAGE_SIZE = 10_000
+_OPTION_PAGE_SIZE = 1_000
+#: Internal per-fetch record budget. The lake bounds one session fetch here
+#: instead of exposing a record cap on its caller-facing surfaces.
+_MAX_RECORDS_PER_FETCH = 100_000
+
+
+class FetchedRecords(tuple):
+    """Fetched records that also report whether the fetch was truncated.
+
+    A tuple subclass, so callers that treat a fetch result as a plain sequence
+    (equality, iteration, indexing, slicing) are unaffected.  ``truncated`` is
+    true when the internal per-fetch budget stopped the fetch before the
+    provider cursor was exhausted; callers persist those sessions as partial
+    so a later ensure repairs them.
+    """
+
+    truncated: bool = False
+
+    def __new__(
+        cls,
+        records: Iterable[object] = (),
+        *,
+        truncated: bool = False,
+    ) -> FetchedRecords:
+        instance = super().__new__(cls, records)
+        instance.truncated = truncated
+        return instance
+
 
 class AlpacaHTTPError(RuntimeError):
     """A non-successful Alpaca response after the retry policy is exhausted."""
@@ -190,13 +221,11 @@ class AlpacaClient:
         *,
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
-        limit: int = 10_000,
-        max_records: int | None = None,
-    ) -> tuple[NormalizedTrade, ...]:
-        """Fetch trades, optionally stopping after a bounded record count."""
+        limit: int = _PAGE_SIZE,
+    ) -> FetchedRecords:
+        """Fetch trades, paginating the whole window on the client's own policy."""
         symbol_list = _normalize_symbols(symbols)
         _validate_query_options(feed, adjustment, limit)
-        _validate_max_records(max_records)
         pages = await self._fetch_many(
             symbol_list,
             data_type="trades",
@@ -206,9 +235,11 @@ class AlpacaClient:
             adjustment=adjustment,
             limit=limit,
             parser=_normalize_trade,
-            max_records=max_records,
         )
-        return tuple(record for page in pages for record in page)
+        return FetchedRecords(
+            (record for page in pages for record in page),
+            truncated=any(page.truncated for page in pages),
+        )
 
     async def fetch_quotes(
         self,
@@ -218,13 +249,11 @@ class AlpacaClient:
         *,
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
-        limit: int = 10_000,
-        max_records: int | None = None,
-    ) -> tuple[NormalizedQuote, ...]:
-        """Fetch quotes, optionally stopping after a bounded record count."""
+        limit: int = _PAGE_SIZE,
+    ) -> FetchedRecords:
+        """Fetch quotes, paginating the whole window on the client's own policy."""
         symbol_list = _normalize_symbols(symbols)
         _validate_query_options(feed, adjustment, limit)
-        _validate_max_records(max_records)
         pages = await self._fetch_many(
             symbol_list,
             data_type="quotes",
@@ -234,9 +263,11 @@ class AlpacaClient:
             adjustment=adjustment,
             limit=limit,
             parser=_normalize_quote,
-            max_records=max_records,
         )
-        return tuple(record for page in pages for record in page)
+        return FetchedRecords(
+            (record for page in pages for record in page),
+            truncated=any(page.truncated for page in pages),
+        )
 
     async def get_trades(
         self,
@@ -246,9 +277,8 @@ class AlpacaClient:
         *,
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
-        limit: int = 10_000,
-        max_records: int | None = None,
-    ) -> tuple[NormalizedTrade, ...]:
+        limit: int = _PAGE_SIZE,
+    ) -> FetchedRecords:
         """Fetch trades for one symbol."""
         return await self.fetch_trades(
             symbol,
@@ -257,7 +287,6 @@ class AlpacaClient:
             feed=feed,
             adjustment=adjustment,
             limit=limit,
-            max_records=max_records,
         )
 
     async def get_quotes(
@@ -268,9 +297,8 @@ class AlpacaClient:
         *,
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
-        limit: int = 10_000,
-        max_records: int | None = None,
-    ) -> tuple[NormalizedQuote, ...]:
+        limit: int = _PAGE_SIZE,
+    ) -> FetchedRecords:
         """Fetch quotes for one symbol."""
         return await self.fetch_quotes(
             symbol,
@@ -279,7 +307,6 @@ class AlpacaClient:
             feed=feed,
             adjustment=adjustment,
             limit=limit,
-            max_records=max_records,
         )
 
     async def fetch_option_trades(
@@ -289,7 +316,7 @@ class AlpacaClient:
         end: date | datetime | str,
         *,
         feed: Literal["opra"] = "opra",
-        limit: int = 1_000,
+        limit: int = _OPTION_PAGE_SIZE,
     ) -> tuple[NormalizedOptionTrade, ...]:
         """Fetch historical OPRA trades for selected option contracts."""
         contract_list = _normalize_contracts(contracts)
@@ -311,7 +338,7 @@ class AlpacaClient:
         end: date | datetime | str,
         *,
         feed: Literal["opra"] = "opra",
-        limit: int = 1_000,
+        limit: int = _OPTION_PAGE_SIZE,
     ) -> tuple[NormalizedOptionQuote, ...]:
         """Fetch historical OPRA quotes for selected option contracts."""
         contract_list = _normalize_contracts(contracts)
@@ -333,7 +360,7 @@ class AlpacaClient:
         end: date | datetime | str,
         *,
         feed: Literal["opra"] = "opra",
-        limit: int = 1_000,
+        limit: int = _OPTION_PAGE_SIZE,
     ) -> tuple[NormalizedOptionTrade, ...]:
         """Fetch historical OPRA trades for selected contracts."""
         return await self.fetch_option_trades(
@@ -347,7 +374,7 @@ class AlpacaClient:
         end: date | datetime | str,
         *,
         feed: Literal["opra"] = "opra",
-        limit: int = 1_000,
+        limit: int = _OPTION_PAGE_SIZE,
     ) -> tuple[NormalizedOptionQuote, ...]:
         """Fetch historical OPRA quotes for selected contracts."""
         return await self.fetch_option_quotes(
@@ -360,8 +387,8 @@ class AlpacaClient:
         start: date | datetime | str,
         end: date | datetime | str,
         *,
-        limit: int = 10_000,
-    ) -> tuple[NormalizedCryptoTrade, ...]:
+        limit: int = _PAGE_SIZE,
+    ) -> FetchedRecords:
         """Fetch historical trades for configured crypto pairs."""
         pair_list = _normalize_crypto_pairs(pairs)
         _validate_limit(limit)
@@ -374,7 +401,10 @@ class AlpacaClient:
             market="crypto",
             parser=_normalize_crypto_trade,
         )
-        return tuple(record for page in pages for record in page)
+        return FetchedRecords(
+            (record for page in pages for record in page),
+            truncated=any(page.truncated for page in pages),
+        )
 
     async def fetch_crypto_quotes(
         self,
@@ -382,8 +412,8 @@ class AlpacaClient:
         start: date | datetime | str,
         end: date | datetime | str,
         *,
-        limit: int = 10_000,
-    ) -> tuple[NormalizedCryptoQuote, ...]:
+        limit: int = _PAGE_SIZE,
+    ) -> FetchedRecords:
         """Fetch historical quotes for configured crypto pairs."""
         pair_list = _normalize_crypto_pairs(pairs)
         _validate_limit(limit)
@@ -396,7 +426,10 @@ class AlpacaClient:
             market="crypto",
             parser=_normalize_crypto_quote,
         )
-        return tuple(record for page in pages for record in page)
+        return FetchedRecords(
+            (record for page in pages for record in page),
+            truncated=any(page.truncated for page in pages),
+        )
 
     async def get_crypto_trades(
         self,
@@ -404,8 +437,8 @@ class AlpacaClient:
         start: date | datetime | str,
         end: date | datetime | str,
         *,
-        limit: int = 10_000,
-    ) -> tuple[NormalizedCryptoTrade, ...]:
+        limit: int = _PAGE_SIZE,
+    ) -> FetchedRecords:
         """Fetch historical trades for one crypto pair."""
         return await self.fetch_crypto_trades(pair, start, end, limit=limit)
 
@@ -415,8 +448,8 @@ class AlpacaClient:
         start: date | datetime | str,
         end: date | datetime | str,
         *,
-        limit: int = 10_000,
-    ) -> tuple[NormalizedCryptoQuote, ...]:
+        limit: int = _PAGE_SIZE,
+    ) -> FetchedRecords:
         """Fetch historical quotes for one crypto pair."""
         return await self.fetch_crypto_quotes(pair, start, end, limit=limit)
 
@@ -432,8 +465,7 @@ class AlpacaClient:
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
         parser: Callable[[Mapping[str, object], str], RecordT],
-        max_records: int | None = None,
-    ) -> list[list[RecordT]]:
+    ) -> list[FetchedRecords]:
         tasks = [
             asyncio.create_task(
                 self._fetch_symbol(
@@ -446,7 +478,6 @@ class AlpacaClient:
                     feed=feed,
                     adjustment=adjustment,
                     parser=parser,
-                    max_records=max_records,
                 )
             )
             for symbol in symbols
@@ -475,8 +506,7 @@ class AlpacaClient:
         feed: Literal["sip"],
         adjustment: Literal["raw"],
         parser: Callable[[Mapping[str, object], str], RecordT],
-        max_records: int | None = None,
-    ) -> list[RecordT]:
+    ) -> FetchedRecords:
         page_token: str | None = None
         seen_tokens: set[str] = set()
         records: list[RecordT] = []
@@ -501,16 +531,17 @@ class AlpacaClient:
                 path = f"/v2/stocks/{data_type}"
             response = await self._request(path, params)
             payload = response.json()
-            rows, next_page_token = _page_rows(payload, data_type, symbol)
-            if max_records is not None:
-                rows = rows[: max_records - len(records)]
+            raw_rows, next_page_token = _page_rows(payload, data_type, symbol)
+            remaining = _MAX_RECORDS_PER_FETCH - len(records)
+            rows = raw_rows[:remaining]
+            dropped = len(raw_rows) > remaining
             records.extend(parser(row, symbol) for row in rows)
 
-            if max_records is not None and len(records) >= max_records:
-                return records
+            if dropped or (len(records) >= _MAX_RECORDS_PER_FETCH and next_page_token):
+                return FetchedRecords(records, truncated=True)
 
             if not next_page_token:
-                return records
+                return FetchedRecords(records, truncated=False)
             if next_page_token in seen_tokens:
                 raise AlpacaProtocolError(
                     f"repeated Alpaca {data_type} page token for {symbol!r}"
@@ -685,15 +716,6 @@ def _validate_limit(limit: int) -> None:
         or not 1 <= limit <= 10_000
     ):
         raise ValueError("limit must be an integer from 1 through 10000")
-
-
-def _validate_max_records(max_records: int | None) -> None:
-    if max_records is not None and (
-        not isinstance(max_records, int)
-        or isinstance(max_records, bool)
-        or not 1 <= max_records <= 100_000
-    ):
-        raise ValueError("max_records must be an integer from 1 through 100000")
 
 
 def _validate_option_query_options(feed: str, limit: int) -> None:
@@ -1033,6 +1055,7 @@ __all__ = [
     "AlpacaProtocolError",
     "AsyncResponse",
     "AsyncTransport",
+    "FetchedRecords",
     "NormalizedOptionQuote",
     "NormalizedOptionTrade",
     "NormalizedCryptoQuote",

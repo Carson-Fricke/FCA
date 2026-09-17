@@ -18,7 +18,6 @@ param allowPublicNetworkAccess = true
 param enableExternalApiIngress = false
 param ingestCronExpression = '0 1 * * *'
 param ingestReplicaTimeoutSeconds = 3600
-param ingestMaxRecords = 1000
 // Crypto compute stays absent in dev until the always-on trader is enabled explicitly.
 param enableCryptoTrader = false
 // Dev traders consume the paper credential pair only; live is enabled per environment.

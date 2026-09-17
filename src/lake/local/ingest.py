@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 
@@ -25,10 +24,6 @@ from lake.providers.alpaca.records import (
 from lake.storage.parquet import LocalFilesystemStore
 
 _DEFAULT_LOOKBACK_DAYS = 31
-#: Per-data-type record bound for a full historical session fetch. Sessions
-#: that exceed the bound are persisted as partial so a later ensure repairs
-#: them instead of silently sealing an incomplete session.
-_DEFAULT_SESSION_RECORD_CAP = 100_000
 
 
 class LocalIngestError(RuntimeError):
@@ -43,8 +38,6 @@ class AlpacaEquityProvider(Protocol):
         symbols: str,
         start: date | datetime | str,
         end: date | datetime | str,
-        *,
-        max_records: int | None = None,
     ) -> Sequence[NormalizedTrade]: ...
 
     async def fetch_quotes(
@@ -52,8 +45,6 @@ class AlpacaEquityProvider(Protocol):
         symbols: str,
         start: date | datetime | str,
         end: date | datetime | str,
-        *,
-        max_records: int | None = None,
     ) -> Sequence[NormalizedQuote]: ...
 
 
@@ -65,8 +56,6 @@ class AlpacaCryptoProvider(Protocol):
         pairs: str,
         start: date | datetime | str,
         end: date | datetime | str,
-        *,
-        limit: int = 10_000,
     ) -> Sequence[NormalizedCryptoTrade]: ...
 
     async def fetch_crypto_quotes(
@@ -74,8 +63,6 @@ class AlpacaCryptoProvider(Protocol):
         pairs: str,
         start: date | datetime | str,
         end: date | datetime | str,
-        *,
-        limit: int = 10_000,
     ) -> Sequence[NormalizedCryptoQuote]: ...
 
 
@@ -102,10 +89,15 @@ class LocalIngestCommitter:
         self._catalog.upsert_many(coverage)
 
 
-class _BoundedEquityProvider:
-    def __init__(self, provider: AlpacaEquityProvider, max_records: int) -> None:
+class _EquityProviderAdapter:
+    """Expose the transaction's ``get_*`` seam over the provider ``fetch_*`` seam.
+
+    The adapter applies no record bound: pagination and page sizing are the
+    Alpaca client's internal policy, so callers only ever request a window.
+    """
+
+    def __init__(self, provider: AlpacaEquityProvider) -> None:
         self._provider = provider
-        self._max_records = max_records
 
     async def get_trades(
         self,
@@ -113,9 +105,7 @@ class _BoundedEquityProvider:
         start: date | datetime | str,
         end: date | datetime | str,
     ) -> Sequence[NormalizedTrade]:
-        return await self._provider.fetch_trades(
-            symbol, start, end, max_records=self._max_records
-        )
+        return await self._provider.fetch_trades(symbol, start, end)
 
     async def get_quotes(
         self,
@@ -123,15 +113,14 @@ class _BoundedEquityProvider:
         start: date | datetime | str,
         end: date | datetime | str,
     ) -> Sequence[NormalizedQuote]:
-        return await self._provider.fetch_quotes(
-            symbol, start, end, max_records=self._max_records
-        )
+        return await self._provider.fetch_quotes(symbol, start, end)
 
 
-class _BoundedCryptoProvider:
-    def __init__(self, provider: AlpacaCryptoProvider, max_records: int) -> None:
+class _CryptoProviderAdapter:
+    """Expose the transaction's crypto seam without leaking a record limit."""
+
+    def __init__(self, provider: AlpacaCryptoProvider) -> None:
         self._provider = provider
-        self._max_records = max_records
 
     async def get_crypto_trades(
         self,
@@ -139,9 +128,7 @@ class _BoundedCryptoProvider:
         start: date | datetime | str,
         end: date | datetime | str,
     ) -> Sequence[NormalizedCryptoTrade]:
-        return await self._provider.fetch_crypto_trades(
-            pair, start, end, limit=self._max_records
-        )
+        return await self._provider.fetch_crypto_trades(pair, start, end)
 
     async def get_crypto_quotes(
         self,
@@ -149,9 +136,7 @@ class _BoundedCryptoProvider:
         start: date | datetime | str,
         end: date | datetime | str,
     ) -> Sequence[NormalizedCryptoQuote]:
-        return await self._provider.fetch_crypto_quotes(
-            pair, start, end, limit=self._max_records
-        )
+        return await self._provider.fetch_crypto_quotes(pair, start, end)
 
 
 async def run_local_ingest(
@@ -159,14 +144,11 @@ async def run_local_ingest(
     layout: LocalLayout,
     symbol: str | None = None,
     session_date: date | None = None,
-    max_records: int = 100,
     provider: AlpacaEquityProvider | None = None,
     environ: Mapping[str, str] | None = None,
     now: datetime | None = None,
 ) -> dict[str, object]:
     """Fetch one closed equity session from Alpaca into deterministic local state."""
-    if isinstance(max_records, bool) or not 1 <= max_records <= 10_000:
-        raise ValueError("max_records must be between 1 and 10000")
     settings = load_settings(environ=environ)
     universes = load_universes(environ=environ)
     if settings.provider.api_key is None or settings.provider.api_secret is None:
@@ -179,8 +161,7 @@ async def run_local_ingest(
         universes.equities.soak.symbols[0] if symbol is None else symbol.strip().upper()
     )
     current_time = datetime.now(UTC) if now is None else _utc(now)
-    # A record bound can truncate either dataset, so bounded ingests are partial.
-    session = replace(_select_session(session_date, current_time), is_partial=True)
+    session = _select_session(session_date, current_time)
     layout.initialize()
     catalog = LocalCatalogRepository(layout.catalog)
     committer = LocalIngestCommitter(
@@ -195,7 +176,7 @@ async def run_local_ingest(
         alpaca = provider
     try:
         result = await EquityIngestTransaction(
-            client=_BoundedEquityProvider(alpaca, max_records),
+            client=_EquityProviderAdapter(alpaca),
             committer=committer,
         ).run(selected_symbol, session)
     finally:
@@ -209,7 +190,6 @@ async def run_local_ingest(
         detail = failed[0].error_message or "provider request failed"
         raise LocalIngestError(f"Alpaca ingest failed: {detail}")
     return {
-        "bounded_records_per_data_type": max_records,
         "catalog": str(layout.catalog),
         "coverage": [
             {
@@ -235,7 +215,6 @@ async def run_local_backfill(
     symbols: Sequence[str],
     start_date: date,
     end_date: date,
-    max_records: int | None = None,
     provider: AlpacaEquityProvider | None = None,
     environ: Mapping[str, str] | None = None,
     now: datetime | None = None,
@@ -247,7 +226,6 @@ async def run_local_backfill(
     Sessions with terminal coverage for every requested data type are skipped,
     so a repeated ensure resumes from the catalog instead of refetching.
     """
-    cap = _session_record_cap(max_records)
     normalized = _normalize_symbols(symbols)
     if end_date < start_date:
         raise ValueError("start_date must be on or before end_date")
@@ -282,7 +260,7 @@ async def run_local_backfill(
                 if _session_is_terminal(complete, symbol, session.session_date):
                     continue
                 result = await EquityIngestTransaction(
-                    client=_BoundedEquityProvider(alpaca, cap),
+                    client=_EquityProviderAdapter(alpaca),
                     committer=committer,
                 ).run(symbol, session)
                 _remember(complete, result.coverage)
@@ -323,13 +301,11 @@ async def run_local_crypto_backfill(
     pairs: Sequence[str],
     start_date: date,
     end_date: date,
-    max_records: int | None = None,
     provider: AlpacaCryptoProvider | None = None,
     environ: Mapping[str, str] | None = None,
     now: datetime | None = None,
 ) -> dict[str, object]:
     """Fetch every UTC day a crypto pair set still misses from Alpaca."""
-    cap = _session_record_cap(max_records)
     normalized = _normalize_pairs(pairs)
     if end_date < start_date:
         raise ValueError("start_date must be on or before end_date")
@@ -364,7 +340,7 @@ async def run_local_crypto_backfill(
                 if _session_is_terminal(complete, pair, session.session_date):
                     continue
                 result = await CryptoIngestTransaction(
-                    client=_BoundedCryptoProvider(alpaca, cap),
+                    client=_CryptoProviderAdapter(alpaca),
                     committer=committer,
                 ).run(pair, session)
                 _remember(complete, result.coverage)
@@ -398,18 +374,6 @@ async def run_local_crypto_backfill(
         "sessions": fetched,
         "symbols": list(normalized),
     }
-
-
-def _session_record_cap(max_records: int | None) -> int:
-    if max_records is None:
-        return _DEFAULT_SESSION_RECORD_CAP
-    if (
-        isinstance(max_records, bool)
-        or not isinstance(max_records, int)
-        or not 1 <= max_records <= 100_000
-    ):
-        raise ValueError("max_records must be between 1 and 100000")
-    return max_records
 
 
 def _normalize_symbols(symbols: Iterable[str]) -> tuple[str, ...]:

@@ -143,28 +143,28 @@ print(nbbo_spread(files.files).fetchall())
 Supply the bearer value through runtime secret handling in real applications;
 do not commit it or hard-code it in source.
 
-## Bounded Real-Alpaca Smoke
+## Real-Alpaca Smoke
 
 With the real Alpaca variables set, run one configured equity session. The
 default is the latest closed XNYS session and the first soak symbol (`AAPL`).
-This exact smoke caps each of trades and quotes at 100 records:
+The lake paginates the fetch internally, so there is no record-count flag:
 
 ```text
-uv run lake local ingest --symbol AAPL --max-records 100
+uv run lake local ingest --symbol AAPL
 ```
 
 To make the request reproducible, provide a closed trading date:
 
 ```text
-uv run lake local ingest --symbol AAPL --session-date 2026-09-01 --max-records 100
+uv run lake local ingest --symbol AAPL --session-date 2026-09-01
 ```
 
-The command emits one JSON object containing `symbol`, `session_date`, the hard
-per-data-type bound, coverage summaries, catalog path, and deterministic object
-paths. It returns nonzero when credentials are absent, Alpaca rejects the
-request, provider data is malformed, or local persistence fails. Because the
-record cap may truncate either dataset, local smoke coverage is intentionally
-recorded as `partial`, never misrepresented as a complete session.
+The command emits one JSON object containing `symbol`, `session_date`, coverage
+summaries, catalog path, and deterministic object paths. It returns nonzero when
+credentials are absent, Alpaca rejects the request, provider data is malformed,
+or local persistence fails. Coverage reflects the session window the lake
+observed: a closed session is recorded as `complete`, while a still-open or
+erroring fetch is recorded honestly as `partial` or `error`.
 
 With the API running, inspect the persisted coverage using the date printed by
 the ingest result. PowerShell:

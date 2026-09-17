@@ -241,8 +241,8 @@ def test_local_app_installs_the_on_demand_ensure_launcher(tmp_path) -> None:
 
 
 class _FakeEquityProvider:
-    async def fetch_trades(self, symbols, start, end, *, max_records=None):
-        del start, end, max_records
+    async def fetch_trades(self, symbols, start, end):
+        del start, end
         return (
             NormalizedTrade(
                 timestamp=datetime(2024, 1, 19, 14, 31, tzinfo=UTC),
@@ -257,8 +257,8 @@ class _FakeEquityProvider:
             ),
         )
 
-    async def fetch_quotes(self, symbols, start, end, *, max_records=None):
-        del start, end, max_records
+    async def fetch_quotes(self, symbols, start, end):
+        del start, end
         return (
             NormalizedQuote(
                 timestamp=datetime(2024, 1, 19, 14, 31, tzinfo=UTC),

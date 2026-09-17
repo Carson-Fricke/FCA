@@ -129,6 +129,10 @@ class CryptoIngestTransaction:
             )
             for data_type, result in zip(selected_types, results, strict=True)
         }
+        truncated = {
+            data_type: _truncated(result)
+            for data_type, result in zip(selected_types, results, strict=True)
+        }
         try:
             staged, metadata = self._stage(
                 canonical_symbol,
@@ -152,6 +156,7 @@ class CryptoIngestTransaction:
                 data_type,
                 metadata[data_type],
                 len(records[data_type]),
+                truncated[data_type],
             )
             for data_type in selected_types
         )
@@ -227,14 +232,14 @@ class CryptoIngestTransaction:
         data_type: DataType,
         metadata: ParquetMetadata,
         row_count: int,
+        truncated: bool,
     ) -> CoverageRecord:
-        status = (
-            CoverageStatus.PARTIAL
-            if session.is_partial
-            else CoverageStatus.COMPLETE
-            if row_count
-            else CoverageStatus.EMPTY
-        )
+        if session.is_partial or truncated:
+            status = CoverageStatus.PARTIAL
+        elif row_count:
+            status = CoverageStatus.COMPLETE
+        else:
+            status = CoverageStatus.EMPTY
         return CoverageRecord(
             asset_class=AssetClass.CRYPTO,
             data_type=data_type,
@@ -444,6 +449,11 @@ def _fetch_error(
 def _error_message(error: BaseException) -> str:
     detail = str(error).strip()
     return type(error).__name__ if not detail else f"{type(error).__name__}: {detail}"
+
+
+def _truncated(result: object) -> bool:
+    """Return whether a fetch result was truncated by the client's budget."""
+    return bool(getattr(result, "truncated", False))
 
 
 def _now_utc() -> datetime:

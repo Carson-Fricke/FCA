@@ -14,9 +14,12 @@ from lake.providers.alpaca import (
     AlpacaClient,
     AlpacaHTTPError,
     AlpacaProtocolError,
+    FetchedRecords,
+    NormalizedCryptoTrade,
     NormalizedQuote,
     NormalizedTrade,
 )
+from lake.providers.alpaca import client as alpaca_client
 
 ROOT = Path(__file__).parents[4]
 EQUITY_FIXTURES = ROOT / "tests" / "fixtures" / "equities" / "alpaca"
@@ -273,7 +276,53 @@ def test_quotes_are_normalized_to_the_t021_field_contract() -> None:
     assert len(transport.calls) == 1
 
 
-def test_stock_fetch_can_stop_at_a_bounded_record_count() -> None:
+def test_crypto_trades_paginate_without_a_caller_supplied_limit() -> None:
+    transport = FakeTransport(
+        [
+            FakeResponse(
+                {
+                    "trades": {
+                        "BTC/USD": [
+                            {"t": "2024-01-01T00:00:00Z", "p": "42000", "s": "0.5"}
+                        ]
+                    },
+                    "next_page_token": "p2",
+                }
+            ),
+            FakeResponse(
+                {
+                    "trades": {
+                        "BTC/USD": [
+                            {"t": "2024-01-01T00:00:01Z", "p": "42001", "s": "0.25"}
+                        ]
+                    },
+                    "next_page_token": None,
+                }
+            ),
+        ]
+    )
+
+    async def exercise() -> tuple[NormalizedCryptoTrade, ...]:
+        async with AlpacaClient(transport=transport) as client:
+            return await client.fetch_crypto_trades(
+                "BTC/USD",
+                date(2024, 1, 1),
+                date(2024, 1, 2),
+            )
+
+    trades = _run(exercise())
+
+    assert [trade.price for trade in trades] == [Decimal("42000"), Decimal("42001")]
+    assert all(isinstance(trade, NormalizedCryptoTrade) for trade in trades)
+    assert len(transport.calls) == 2
+    assert transport.calls[0]["params"]["limit"] == 10_000
+    assert transport.calls[1]["params"]["page_token"] == "p2"
+
+
+def test_fetch_reports_truncation_when_the_internal_budget_is_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alpaca_client, "_MAX_RECORDS_PER_FETCH", 1)
     transport = FakeTransport(
         [
             FakeResponse(
@@ -284,26 +333,55 @@ def test_stock_fetch_can_stop_at_a_bounded_record_count() -> None:
                             _trade(2, "2024-01-19T14:30:01Z"),
                         ]
                     },
-                    "next_page_token": "unused",
+                    "next_page_token": "p2",
                 }
             )
         ]
     )
 
-    async def exercise() -> tuple[NormalizedTrade, ...]:
+    async def exercise() -> FetchedRecords:
         async with AlpacaClient(transport=transport) as client:
             return await client.fetch_trades(
-                "AAPL",
-                date(2024, 1, 19),
-                date(2024, 1, 20),
-                limit=100,
-                max_records=1,
+                "AAPL", date(2024, 1, 19), date(2024, 1, 20)
             )
 
     trades = _run(exercise())
 
     assert [trade.trade_id for trade in trades] == [1]
+    assert trades.truncated is True
     assert len(transport.calls) == 1
+
+
+def test_fetch_is_not_truncated_when_the_window_is_exhausted_at_the_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alpaca_client, "_MAX_RECORDS_PER_FETCH", 2)
+    transport = FakeTransport(
+        [
+            FakeResponse(
+                {
+                    "trades": {
+                        "AAPL": [
+                            _trade(1, "2024-01-19T14:30:00Z"),
+                            _trade(2, "2024-01-19T14:30:01Z"),
+                        ]
+                    },
+                    "next_page_token": None,
+                }
+            )
+        ]
+    )
+
+    async def exercise() -> FetchedRecords:
+        async with AlpacaClient(transport=transport) as client:
+            return await client.fetch_trades(
+                "AAPL", date(2024, 1, 19), date(2024, 1, 20)
+            )
+
+    trades = _run(exercise())
+
+    assert [trade.trade_id for trade in trades] == [1, 2]
+    assert trades.truncated is False
 
 
 def test_multiple_symbols_are_bounded_and_settings_are_applied() -> None:

@@ -54,9 +54,8 @@ class AlpacaHistoryProvider(Protocol):
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
         limit: int = 10_000,
-        max_records: int | None = None,
     ) -> Sequence[TimestampedRecord]:
-        """Fetch bounded historical trades for one symbol."""
+        """Fetch historical trades for one symbol."""
 
     async def get_quotes(
         self,
@@ -67,9 +66,8 @@ class AlpacaHistoryProvider(Protocol):
         feed: Literal["sip"] = "sip",
         adjustment: Literal["raw"] = "raw",
         limit: int = 10_000,
-        max_records: int | None = None,
     ) -> Sequence[TimestampedRecord]:
-        """Fetch bounded historical quotes for one symbol."""
+        """Fetch historical quotes for one symbol."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,7 +328,6 @@ async def _probe_one(
                     feed=config.feed,
                     adjustment=config.adjustment,
                     limit=config.limit,
-                    max_records=config.max_records,
                 )
             )[: config.max_records]
         )

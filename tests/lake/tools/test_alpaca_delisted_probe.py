@@ -35,7 +35,6 @@ class FakeProvider:
         feed: str = "sip",
         adjustment: str = "raw",
         limit: int = 10_000,
-        max_records: int | None = None,
     ) -> Sequence[FakeRecord]:
         self.calls.append(
             {
@@ -45,7 +44,6 @@ class FakeProvider:
                 "feed": feed,
                 "adjustment": adjustment,
                 "limit": limit,
-                "max_records": max_records,
             }
         )
         outcome = self.outcomes[symbol]
@@ -62,7 +60,6 @@ class FakeProvider:
         feed: str = "sip",
         adjustment: str = "raw",
         limit: int = 10_000,
-        max_records: int | None = None,
     ) -> Sequence[FakeRecord]:
         return await self.get_trades(
             symbol,
@@ -71,7 +68,6 @@ class FakeProvider:
             feed=feed,
             adjustment=adjustment,
             limit=limit,
-            max_records=max_records,
         )
 
 
@@ -155,7 +151,8 @@ def test_fake_provider_is_bounded_safe_and_recommends_supplemental_data() -> Non
     result_by_symbol = {result.symbol: result for result in report.results}
 
     assert [call["symbol"] for call in provider.calls] == ["EMPTY", "ERROR", "FOUND"]
-    assert all(call["max_records"] == 1 for call in provider.calls)
+    assert all("max_records" not in call for call in provider.calls)
+    assert all(call["limit"] == config.limit for call in provider.calls)
     assert result_by_symbol["FOUND"].record_count == 1
     assert result_by_symbol["FOUND"].first_timestamp == "2024-01-02T15:00:00Z"
     assert result_by_symbol["EMPTY"].status == "empty"
