@@ -9,7 +9,12 @@ transition; this package owns how an agent runs, calls tools, and requests
 completion.
 """
 
-from thesis.agent.runtime.child_runner import ChildRunner, RegistryFactory
+from thesis.agent.runtime.child_runner import (
+    ChildRunner,
+    NodeTurnError,
+    NodeTurnRunner,
+    RegistryFactory,
+)
 from thesis.agent.runtime.context import ToolContext, ToolContextError
 from thesis.agent.runtime.control import (
     CONTROL_TOOL_NAMES,
@@ -41,6 +46,20 @@ from thesis.agent.runtime.datum import (
     datum_from_result,
     normalize_datums,
 )
+from thesis.agent.runtime.delivery import (
+    DELIVERY_KEY_FIELD,
+    ROOT_ANCHOR_ID,
+    Anchor,
+    DeliveryError,
+    DeliveryReceipt,
+    DeliveryService,
+    NodeInputNotAccepted,
+    NodeInputNotFound,
+    NodeInputReceipt,
+    NodeInputService,
+    delivery_key,
+    find_delivered,
+)
 from thesis.agent.runtime.lifecycle import (
     SubAgentLifecycle,
     SubAgentLifecycleError,
@@ -48,6 +67,14 @@ from thesis.agent.runtime.lifecycle import (
 from thesis.agent.runtime.notify import SubAgentNotifier, TurnScheduler
 from thesis.agent.runtime.policy import (
     DEFAULT_ROOT_BUDGET_CEILING,
+    HUMAN_ONLY_ACTOR_KINDS,
+    AnsweringActor,
+    NodeOperatorPolicy,
+    OperatorActorKind,
+    OperatorPolicyDecision,
+    OperatorPolicyDenied,
+    OperatorPolicyError,
+    OperatorPolicyRegistry,
     RolePolicySpec,
     SpawnAuthorization,
     SpawnDenial,
@@ -102,8 +129,13 @@ __all__ = [
     "CONTROL_TOOL_NAMES",
     "CONTROL_TOOL_SPECS",
     "DEFAULT_MAX_TOOL_ITERATIONS",
+    "DELIVERY_KEY_FIELD",
     "HYPOTHESIS_DEVELOPMENT_WORKFLOW",
+    "HUMAN_ONLY_ACTOR_KINDS",
+    "ROOT_ANCHOR_ID",
     "AgentSession",
+    "Anchor",
+    "AnsweringActor",
     "AwaitResult",
     "ChildRunner",
     "ChatSubAgentNode",
@@ -117,7 +149,12 @@ __all__ = [
     "ControlToolSpec",
     "Datum",
     "DatumType",
+    "DeliveryError",
+    "DeliveryReceipt",
+    "DeliveryService",
     "datum_from_result",
+    "delivery_key",
+    "find_delivered",
     "normalize_datums",
     "DEFAULT_CONSTRUCTION_ATTEMPTS",
     "DEFAULT_MAX_CHILDREN",
@@ -125,7 +162,19 @@ __all__ = [
     "DEFAULT_REPAIR_TURNS",
     "DEFAULT_ROOT_BUDGET_CEILING",
     "InMemorySubAgentStore",
+    "NodeInputNotAccepted",
+    "NodeInputNotFound",
+    "NodeInputReceipt",
+    "NodeInputService",
+    "NodeOperatorPolicy",
+    "NodeTurnError",
+    "NodeTurnRunner",
+    "OperatorActorKind",
     "OperatorInputRequest",
+    "OperatorPolicyDecision",
+    "OperatorPolicyDenied",
+    "OperatorPolicyError",
+    "OperatorPolicyRegistry",
     "PersistenceSubAgentStore",
     "PhaseCompletionProtocol",
     "RegisteredTool",
