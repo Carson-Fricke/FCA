@@ -27,9 +27,17 @@ from thesis.agent.router import (
     Role,
     RolePolicy,
 )
+from thesis.agent.runtime.datum import DatumType
+from thesis.agent.runtime.delivery import NodeInputService, TurnScheduler
 from thesis.agent.runtime.lifecycle import (
     SubAgentLifecycle,
     SubAgentLifecycleError,
+)
+from thesis.agent.runtime.policy import (
+    AnsweringActor,
+    OperatorActorKind,
+    OperatorPolicyDenied,
+    OperatorPolicyRegistry,
 )
 from thesis.agent.runtime.specs import (
     DEFAULT_MAX_CHILDREN,
@@ -37,6 +45,7 @@ from thesis.agent.runtime.specs import (
     SubAgentSpec,
 )
 from thesis.agent.runtime.store import PersistenceSubAgentStore
+from thesis.agent.runtime.tree import project_chat_sub_agents
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContext, SubagentContextFactory
 from thesis.chat.contracts import (
@@ -50,7 +59,6 @@ from thesis.chat.contracts import (
 )
 from thesis.chat.service import ChatService
 from thesis.execution.events import ExecutionEventType
-from thesis.execution.sub_agents import SubAgentTree
 from thesis.experiments.ledger import AttemptLedger
 from thesis.persistence import CommandJournal
 from thesis.research.hypothesis import (
@@ -88,6 +96,7 @@ from thesis.workflows.hypothesis_development import (
     check_verdict_advances,
     transition_phase,
 )
+from thesis.workflows.research_models import ResearchModelRunner
 
 WORKSPACE = "workspace-demo"
 OWNER = "owner-1"
@@ -358,6 +367,7 @@ def _kit(
     research_runner: object | None = None,
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_children: int = DEFAULT_MAX_CHILDREN,
+    turn_scheduler: TurnScheduler | None = None,
 ) -> _Kit:
     clock = _clock()
     id_factory = _id_factory()
@@ -436,13 +446,18 @@ def _kit(
         clock=clock,
         id_factory=id_factory,
         experiment_id="experiment-1",
-        research_runner=research_runner,
+        research_runner=(
+            cast("ResearchModelRunner", research_runner)
+            if research_runner is not None
+            else None
+        ),
         subagent_lifecycle=SubAgentLifecycle(
             chat,
             store=PersistenceSubAgentStore(chat.persistence),
             max_depth=max_depth,
             max_children=max_children,
         ),
+        turn_scheduler=turn_scheduler,
     )
     return _Kit(
         workflow=workflow,
@@ -495,36 +510,69 @@ def _creation_node_id(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
     return _phase_node_id(kit, request, "hypothesis_creation")
 
 
-def _latest_input_phase(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
-    needs_input = _events_by_type(
-        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+def _operator_questions(kit: _Kit, request: HypothesisDevelopmentRequest) -> list[Any]:
+    """Return the operator questions delivered on the unified delivery path."""
+    return [
+        message
+        for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
+        if message.execution_id == request.execution_id
+        and message.data is not None
+        and message.data.get("kind") == "operator_question"
+    ]
+
+
+def _question_node_id(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
+    questions = _operator_questions(kit, request)
+    assert questions, "no operator question was delivered"
+    return str(questions[-1].data["subAgentId"])
+
+
+def _node_record(kit: _Kit, sub_agent_id: str) -> SubAgentRecord:
+    record = PersistenceSubAgentStore(kit.chat.persistence).get_sub_agent(
+        WORKSPACE, sub_agent_id
     )
-    return str(needs_input[-1].payload["phase"])
+    assert record is not None, f"no durable sub-agent record for {sub_agent_id}"
+    return record
+
+
+def _latest_input_phase(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
+    questions = _operator_questions(kit, request)
+    assert questions, "no operator question was delivered"
+    return str(questions[-1].data["phase"])
 
 
 def _answer_current_pause(
     kit: _Kit, request: HypothesisDevelopmentRequest, *, body: str | None = None
 ) -> HypothesisDevelopmentOutcome:
+    """Answer the latest pause through the unified node-input path.
+
+    The answering actor is the authenticated human operator; the node's
+    operator policy adjudicates the answer, and the scheduled node turn is
+    exactly one workflow resume.
+    """
     phase = _latest_input_phase(kit, request)
-    if body is None:
-        body = "check off" if phase == "verdict" else "confirm"
-    node_id = _phase_node_id(kit, request, phase)
-    kit.chat.create_message(
+    resolved = body or ("check off" if phase == "verdict" else "confirm")
+    outcomes: list[HypothesisDevelopmentOutcome] = []
+    service = NodeInputService(
+        chat=kit.chat,
+        store=PersistenceSubAgentStore(kit.chat.persistence),
+        policies=OperatorPolicyRegistry(),
+        schedule=lambda _ws, _chat_id, _node: outcomes.append(
+            kit.workflow.resume(request)
+        ),
+    )
+    receipt = service.accept(
         WORKSPACE,
         request.chat_id,
-        actor_id=OWNER,
-        body=body,
-        role=MessageRole.USER,
-        kind=TranscriptItemKind.SUB_AGENT,
-        execution_id=request.execution_id,
-        data={
-            "executionId": request.execution_id,
-            "parentSubAgentId": None,
-            "phase": phase,
-            "subAgentId": node_id,
-        },
+        _question_node_id(kit, request),
+        body=resolved,
+        actor=AnsweringActor(actor_id=OWNER, kind=OperatorActorKind.HUMAN_OPERATOR),
     )
-    return kit.workflow.resume(request)
+    assert receipt.duplicate is False
+    assert receipt.scheduled is True
+    assert receipt.decision.actor.kind is OperatorActorKind.HUMAN_OPERATOR
+    assert len(outcomes) == 1
+    return outcomes[-1]
 
 
 def _prompt_with(kit: _Kit, marker: str) -> str:
@@ -645,12 +693,13 @@ def test_first_creation_turn_requires_explicit_confirmation(tmp_path: Path) -> N
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.state is WorkflowExecutionState.PAUSED
-    needs_input = _events_by_type(
-        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
-    )
-    question = str(needs_input[-1].payload["question"])
+    questions = _operator_questions(kit, request)
+    question = str(questions[-1].data["question"])
     assert "hypothesis" in question.lower()
-    assert needs_input[-1].payload["ready"] is True
+    assert questions[-1].data["ready"] is True
+    node = _node_record(kit, str(questions[-1].data["subAgentId"]))
+    assert node.status is SubAgentStatus.NEEDS_INPUT
+    assert node.accepts_input is True
 
 
 def test_structured_finalization_emits_only_concise_summary(tmp_path: Path) -> None:
@@ -848,14 +897,15 @@ def test_verdict_review_returns_refuted_premise_to_hypothesis(tmp_path: Path) ->
         == []
     )
     verdict_questions = [
-        event
-        for event in _events_by_type(
-            kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
-        )
-        if event.payload.get("phase") == "verdict"
+        message
+        for message in _operator_questions(kit, request)
+        if message.data.get("phase") == "verdict"
     ]
     assert verdict_questions
-    assert verdict_questions[-1].payload["acceptsInput"] is True
+    # The verdict pause was answered through the unified node-input path, so
+    # the node's lifecycle record closed after the answer resumed the turn.
+    verdict_node = _node_record(kit, str(verdict_questions[-1].data["subAgentId"]))
+    assert verdict_node.status is SubAgentStatus.COMPLETED
     handoffs = [
         message
         for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
@@ -872,25 +922,19 @@ def test_verdict_review_returns_refuted_premise_to_hypothesis(tmp_path: Path) ->
         if event.payload["phase"] == "hypothesis_creation"
     ]
     assert len(hypothesis_nodes) == 1
-    hypothesis_needs_input = [
-        event
-        for event in _events_by_type(
-            kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
-        )
-        if event.payload.get("phase") == "hypothesis_creation"
+    hypothesis_questions = [
+        message
+        for message in _operator_questions(kit, request)
+        if message.data.get("phase") == "hypothesis_creation"
     ]
-    assert len(hypothesis_needs_input) == 2
-    assert "attempt 2" in hypothesis_needs_input[-1].payload["question"]
-    assert hypothesis_needs_input[-1].payload["acceptsInput"] is True
-    hypothesis_outputs = [
-        event
-        for event in _events_by_type(
-            kit, request.execution_id, ExecutionEventType.SUB_AGENT_OUTPUT
-        )
-        if event.payload.get("phase") == "hypothesis_creation"
-    ]
-    latest_output = str(hypothesis_outputs[-1].payload["artifact"]["content"])
-    assert "attempt 2" in latest_output
+    assert len(hypothesis_questions) == 2
+    assert "attempt 2" in str(hypothesis_questions[-1].data["question"])
+    hypothesis_node = _node_record(
+        kit, str(hypothesis_questions[-1].data["subAgentId"])
+    )
+    assert hypothesis_node.accepts_input is True
+    latest_review = str(hypothesis_questions[-1].body)
+    assert "attempt 2" in latest_review
 
 
 def test_strategy_design_gate_requires_falsifier_exit_criteria(
@@ -1029,11 +1073,9 @@ def test_data_validity_failure_pauses_as_execution_problem_without_verdict_refut
 
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     assert outcome.verdict is None
-    needs_input = _events_by_type(
-        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
-    )
-    assert len(needs_input) >= 1
-    assert "falsifier" in str(needs_input[-1].payload.get("question", ""))
+    questions = _operator_questions(kit, request)
+    assert len(questions) >= 1
+    assert "falsifier" in str(questions[-1].data.get("question", ""))
 
 
 def test_hypothesis_loop_pauses_after_five_refuted_attempts(tmp_path: Path) -> None:
@@ -1730,20 +1772,148 @@ def test_unfalsifiable_hypothesis_marks_orchestrator_as_needing_input(
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     assert outcome.detail is not None
     assert "falsifier" in outcome.detail
-    needs_input = _events_by_type(
-        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+    questions = _operator_questions(kit, request)
+    assert questions
+    assert str(questions[-1].data["question"])
+    node_id = str(questions[-1].data["subAgentId"])
+    record = _node_record(kit, node_id)
+    assert record.accepts_input is True
+    assert record.status is SubAgentStatus.NEEDS_INPUT
+    tree = project_chat_sub_agents(
+        PersistenceSubAgentStore(kit.chat.persistence).list_sub_agents(WORKSPACE),
+        workspace_id=WORKSPACE,
+        chat_id=request.chat_id,
     )
-    assert needs_input
-    assert needs_input[-1].payload["acceptsInput"] is True
-    assert needs_input[-1].payload["question"]
-    tree = SubAgentTree.from_events(
-        request.execution_id,
-        kit.workflow.observe(WORKSPACE, request.execution_id).events,
-    )
-    orchestrator = tree.get(cast(str, needs_input[-1].payload["subAgentId"]))
+    orchestrator = tree.get(node_id)
     assert orchestrator is not None
     assert orchestrator.accepts_input is True
     assert orchestrator.status == "needs_input"
+
+
+def test_operator_requests_are_node_turns_on_the_phase_node(tmp_path: Path) -> None:
+    scheduled: list[tuple[str, str, str]] = []
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+        turn_scheduler=lambda ws, chat_id, node: scheduled.append((ws, chat_id, node)),
+    )
+    request = _request(kit)
+
+    outcome = kit.workflow.run(request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+    # No workflow code emits the superseded needs-input event.
+    assert (
+        _events_by_type(
+            kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+        )
+        == []
+    )
+    questions = _operator_questions(kit, request)
+    assert len(questions) == 1
+    message = questions[-1]
+    node_id = _creation_node_id(kit, request)
+    assert message.data["subAgentId"] == node_id
+    assert message.data["datumType"] == DatumType.OPERATOR_QUESTION.value
+    assert message.role is MessageRole.ASSISTANT
+    assert message.kind is TranscriptItemKind.SUB_AGENT
+    assert message.execution_id == request.execution_id
+    # The delivery scheduled exactly one node turn at the phase node's anchor.
+    assert scheduled == [(WORKSPACE, request.chat_id, node_id)]
+    record = _node_record(kit, node_id)
+    assert record.status is SubAgentStatus.NEEDS_INPUT
+    assert record.accepts_input is True
+
+
+def test_operator_answers_start_exactly_one_node_turn(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[
+            {
+                "message": "What is the disagreement with market pricing?",
+                "advance": False,
+            },
+            {"message": "Tell me more about the horizon.", "advance": False},
+        ],
+        results=[],
+        prepend_ready=False,
+    )
+    request = _request(kit)
+    first = kit.workflow.run(request)
+    assert first.phase is HypothesisDevelopmentPhase.PAUSED
+
+    resumes: list[HypothesisDevelopmentOutcome] = []
+    service = NodeInputService(
+        chat=kit.chat,
+        store=PersistenceSubAgentStore(kit.chat.persistence),
+        policies=OperatorPolicyRegistry(),
+        schedule=lambda _ws, _chat_id, _node: resumes.append(
+            kit.workflow.resume(request)
+        ),
+    )
+    actor = AnsweringActor(actor_id=OWNER, kind=OperatorActorKind.HUMAN_OPERATOR)
+    node_id = _question_node_id(kit, request)
+    receipt = service.accept(
+        WORKSPACE,
+        request.chat_id,
+        node_id,
+        body="The market underreacts to slow information diffusion.",
+        actor=actor,
+        idempotency_key="operator-answer-1",
+    )
+    assert receipt.duplicate is False
+    assert receipt.scheduled is True
+    assert receipt.decision.actor.kind is OperatorActorKind.HUMAN_OPERATOR
+    assert len(resumes) == 1
+
+    # A retried answer is idempotent: no duplicate message, no second turn.
+    retried = service.accept(
+        WORKSPACE,
+        request.chat_id,
+        node_id,
+        body="The market underreacts to slow information diffusion.",
+        actor=actor,
+        idempotency_key="operator-answer-1",
+    )
+    assert retried.duplicate is True
+    assert retried.scheduled is False
+    assert len(resumes) == 1
+
+
+def test_operator_policy_gates_who_may_answer_a_phase_node(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+    outcome = kit.workflow.run(request)
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+
+    service = NodeInputService(
+        chat=kit.chat,
+        store=PersistenceSubAgentStore(kit.chat.persistence),
+        policies=OperatorPolicyRegistry(),
+        schedule=lambda _ws, _chat_id, _node: None,
+    )
+    with pytest.raises(OperatorPolicyDenied):
+        service.accept(
+            WORKSPACE,
+            request.chat_id,
+            _question_node_id(kit, request),
+            body="confirm",
+            actor=AnsweringActor(actor_id="agent-1", kind=OperatorActorKind.AGENT),
+        )
+    # The human operator remains authorized under the human-only default.
+    receipt = service.accept(
+        WORKSPACE,
+        request.chat_id,
+        _question_node_id(kit, request),
+        body="confirm",
+        actor=AnsweringActor(actor_id=OWNER, kind=OperatorActorKind.HUMAN_OPERATOR),
+    )
+    assert receipt.decision.allowed is True
 
 
 def test_launch_appends_a_workflow_anchor_transcript_item(tmp_path: Path) -> None:
@@ -1861,15 +2031,13 @@ def test_non_json_hypothesis_output_repairs_then_pauses_for_input(
     event_types = {event.event_type for event in events}
     assert ExecutionEventType.WORKFLOW_FAILED not in event_types
     assert ExecutionEventType.WORKFLOW_PAUSED in event_types
-    needs_input = [
-        event
-        for event in events
-        if event.event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT
-    ]
     # Confirmation is always explicit; malformed finalization opens a second pause.
-    assert len(needs_input) == 2
-    assert needs_input[-1].payload["acceptsInput"] is True
-    assert needs_input[-1].payload["question"]
+    questions = _operator_questions(kit, request)
+    assert len(questions) == 2
+    assert questions[-1].data["question"]
+    node = _node_record(kit, str(questions[-1].data["subAgentId"]))
+    assert node.accepts_input is True
+    assert node.status is SubAgentStatus.NEEDS_INPUT
 
 
 def test_non_json_output_reinvokes_the_model_with_error_and_schema(
@@ -1973,10 +2141,8 @@ def test_unresolved_model_run_pauses_instead_of_falsifying_every_trial(
     assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
     assert _latest_input_phase(kit, request) == "falsification_trials"
     assert len(research_runner.requests) == 1
-    trials = _events_by_type(
-        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
-    )
-    assert "terminal state" in str(trials[-1].payload.get("question", ""))
+    questions = _operator_questions(kit, request)
+    assert "terminal state" in str(questions[-1].data.get("question", ""))
 
 
 def test_long_horizon_and_crlf_newlines_finalize_successfully(tmp_path: Path) -> None:

@@ -16,6 +16,13 @@ from typing import NoReturn
 
 from thesis.agent.context import PromptContext, assemble_context
 from thesis.agent.router import InvocationResult, ModelRouter, Role
+from thesis.agent.runtime.datum import DatumType, datum_from_result
+from thesis.agent.runtime.delivery import (
+    Anchor,
+    DeliveryReceipt,
+    DeliveryService,
+    TurnScheduler,
+)
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.agent.subagents import SubagentContextFactory
@@ -25,6 +32,7 @@ from thesis.chat.contracts import (
     RecordNotFound,
     SubAgentKind,
     SubAgentRecord,
+    SubAgentStatus,
     TranscriptItemKind,
     WorkflowDefinition,
     WorkflowExecution,
@@ -209,6 +217,7 @@ class HypothesisDevelopmentWorkflow:
         knowledge_cutoff: datetime | None = None,
         subagent_mcp_tools: Mapping[str, tuple[str, ...]] | None = None,
         subagent_lifecycle: SubAgentLifecycle | None = None,
+        turn_scheduler: TurnScheduler | None = None,
     ) -> None:
         self._chat = chat
         self._router = router
@@ -260,6 +269,7 @@ class HypothesisDevelopmentWorkflow:
             for family, tools in dict(subagent_mcp_tools or {}).items()
         }
         self._subagent_lifecycle = subagent_lifecycle
+        self._delivery = DeliveryService(chat, schedule=turn_scheduler, clock=clock)
         self._active_orchestrators: dict[str, _ActiveSubAgent] = {}
         self._paused_states: dict[str, HypothesisDevelopmentState] = {}
         self._workflow_nodes: dict[str, str] = {}
@@ -488,11 +498,12 @@ class HypothesisDevelopmentWorkflow:
     ) -> HypothesisDevelopmentOutcome:
         """Run one more hypothesis-creation turn after operator input.
 
-        Called when the operator sends a message to the hypothesis-creation
-        node.  ``run`` was a single synchronous pass; this continuation re-runs
-        one turn against the durable conversation and, once the operator
-        supplies enough information, lets the model judge whether to advance,
-        and then runs the remaining phases.
+        Called as the node turn scheduled by the unified delivery path when
+        the operator answers a paused phase node.  ``run`` was a single
+        synchronous pass; this continuation re-runs one turn against the
+        durable conversation and, once the operator supplies enough
+        information, lets the model judge whether to advance, and then runs
+        the remaining phases.
         """
         self._chat.get_execution(request.workspace_id, request.execution_id)
         paused_state = self._paused_states.get(request.execution_id)
@@ -830,21 +841,13 @@ class HypothesisDevelopmentWorkflow:
             "",
             question,
         ]
-        self._emit_orchestrator_text(request, "\n".join(lines))
-        self._append_sub_agent(
+        self._deliver_operator_request(
             request,
-            ExecutionEventType.SUB_AGENT_NEEDS_INPUT,
-            sub_agent_id=active.sub_agent_id,
-            parent_sub_agent_id=None,
-            phase=_VERDICT,
-            role=active.role,
-            context=active.context,
-            accepts_input=True,
-            extra={
-                "kind": "verdict_review",
-                "question": question,
-                "verdict": verdict.outcome,
-            },
+            active,
+            "\n".join(lines),
+            question=question,
+            verdict=verdict.outcome,
+            pause_kind="verdict_review",
         )
         return question
 
@@ -905,20 +908,12 @@ class HypothesisDevelopmentWorkflow:
                 "more operator context to refine the proposal"
             ),
         )
-        self._emit_orchestrator_text(request, f"{text}\n\n{question}")
-        self._append_sub_agent(
+        self._deliver_operator_request(
             request,
-            ExecutionEventType.SUB_AGENT_NEEDS_INPUT,
-            sub_agent_id=active.sub_agent_id,
-            parent_sub_agent_id=None,
-            phase=active.phase,
-            role=active.role,
-            context=active.context,
-            accepts_input=True,
-            extra={
-                "question": question,
-                "ready": reply.advance and not revision_turn,
-            },
+            active,
+            f"{text}\n\n{question}",
+            question=question,
+            ready=reply.advance and not revision_turn,
         )
         raise _Fenced(question, state)
 
@@ -1064,12 +1059,21 @@ class HypothesisDevelopmentWorkflow:
                 or payload.get("parentSubAgentId") != node_id
             ):
                 continue
-            active = _ActiveSubAgent(
-                sub_agent_id=str(payload["subAgentId"]),
+            family, default_role = _PHASE_ORCHESTRATORS[_HYPOTHESIS_CREATION]
+            tools = self._subagent_mcp_tools.get(family, ())
+            role = str(payload.get("role") or default_role)
+            sub_agent_id = str(payload["subAgentId"])
+            self._reopen_phase_node(
+                request,
+                sub_agent_id,
                 phase=_HYPOTHESIS_CREATION,
-                role=str(
-                    payload.get("role") or "Thesis hypothesis-creation orchestrator"
-                ),
+                role=role,
+                tools=tools,
+            )
+            active = _ActiveSubAgent(
+                sub_agent_id=sub_agent_id,
+                phase=_HYPOTHESIS_CREATION,
+                role=role,
                 context=SubAgentContextSpec(),
             )
             self._active_orchestrators[request.execution_id] = active
@@ -1089,16 +1093,18 @@ class HypothesisDevelopmentWorkflow:
             if (
                 not isinstance(data, Mapping)
                 or str(data.get("subAgentId")) != sub_agent_id
-                or message.role not in {MessageRole.USER, MessageRole.SYSTEM}
+                or message.role
+                not in {MessageRole.USER, MessageRole.SYSTEM, MessageRole.ASSISTANT}
             ):
                 continue
-            turns.append(
-                (
-                    message.created_at.timestamp(),
-                    "user" if message.role is MessageRole.USER else "system",
-                    message.body,
-                )
+            role = (
+                "user"
+                if message.role is MessageRole.USER
+                else "system"
+                if message.role is MessageRole.SYSTEM
+                else "assistant"
             )
+            turns.append((message.created_at.timestamp(), role, message.body))
         for event in self._chat.replay_events(
             request.workspace_id, request.execution_id
         ).events:
@@ -1131,6 +1137,101 @@ class HypothesisDevelopmentWorkflow:
                 "kind": "artifact",
             },
         )
+
+    def _deliver_node_turn(
+        self,
+        request: HypothesisDevelopmentRequest,
+        active: _ActiveSubAgent,
+        body: str,
+        *,
+        question: str | None = None,
+        **fields: object,
+    ) -> DeliveryReceipt:
+        """Deliver one node-authored turn at the phase node's own anchor.
+
+        This is the unified delivery path: the operator-facing text is
+        persisted as the phase node's assistant turn at the node's anchor and
+        one turn is scheduled there.  A re-delivered datum resolves to the
+        durable message instead of duplicating the turn.
+        """
+        payload: dict[str, object] = {
+            "kind": "operator_question",
+            "phase": active.phase.value,
+            "turn": "assistant",
+        }
+        if question is not None:
+            payload["question"] = question
+        payload.update(fields)
+        # The delivery key identifies the pause occurrence, not the question
+        # text: two cycles can pause with the same authored request, and each
+        # must deliver its own turn.
+        sequence = self._operator_request_sequence(request)
+        payload["sequence"] = sequence
+        datum = datum_from_result(
+            DatumType.OPERATOR_QUESTION.value,
+            ok=True,
+            structured=dict(payload),
+            text=body,
+        )
+        return self._delivery.deliver(
+            Anchor(
+                request.workspace_id,
+                request.chat_id,
+                sub_agent_id=active.sub_agent_id,
+            ),
+            datum,
+            body=body,
+            role=MessageRole.ASSISTANT,
+            kind=TranscriptItemKind.SUB_AGENT,
+            data=payload,
+            execution_id=request.execution_id,
+            actor_id=_WORKFLOW_ACTOR,
+            idempotency_key=f"operator-request-{request.execution_id}-{sequence}",
+        )
+
+    def _operator_request_sequence(self, request: HypothesisDevelopmentRequest) -> int:
+        """Return the retry-stable sequence number for the next operator request.
+
+        The sequence is the number of operator questions already delivered for
+        the execution plus one, so a retried pause resolves to the key of the
+        message it already delivered instead of duplicating the turn.
+        """
+        return (
+            sum(
+                1
+                for message in self._chat.list_messages(
+                    request.workspace_id, request.chat_id
+                )
+                if message.execution_id == request.execution_id
+                and message.data is not None
+                and message.data.get("kind") == "operator_question"
+            )
+            + 1
+        )
+
+    def _deliver_operator_request(
+        self,
+        request: HypothesisDevelopmentRequest,
+        active: _ActiveSubAgent | None,
+        body: str,
+        *,
+        question: str | None = None,
+        **fields: object,
+    ) -> None:
+        """Deliver one operator request as a node turn and open the node.
+
+        The phase node's durable record enters ``needs_input`` so the unified
+        node-input path accepts exactly one operator answer under the node's
+        operator policy; the answer re-enters the workflow through the same
+        delivery path the runtime already provides.
+        """
+        if active is None:
+            return
+        if self._subagent_lifecycle is not None:
+            self._subagent_lifecycle.request_input(
+                request.workspace_id, active.sub_agent_id
+            )
+        self._deliver_node_turn(request, active, body, question=question, **fields)
 
     # -- phases ------------------------------------------------------------
 
@@ -1688,13 +1789,21 @@ class HypothesisDevelopmentWorkflow:
         detail: str,
     ) -> HypothesisDevelopmentState:
         """Stop a loop that exhausted its auditable attempt budget."""
+        active = self._active_orchestrators.get(request.execution_id)
         message = self._operator_question(
             request,
             state,
-            active=self._active_orchestrators.get(request.execution_id),
+            active=active,
             purpose=purpose,
             detail=detail,
         )
+        if active is not None:
+            self._deliver_node_turn(
+                request,
+                active,
+                message,
+                question=message,
+            )
         raise _PhaseFailure(message, state)
 
     def _design(
@@ -2362,10 +2471,19 @@ class HypothesisDevelopmentWorkflow:
                 continue
             family, default_role = _PHASE_ORCHESTRATORS[phase]
             tools = self._subagent_mcp_tools.get(family, ())
-            active = _ActiveSubAgent(
-                sub_agent_id=str(payload["subAgentId"]),
+            role = str(payload.get("role") or default_role)
+            sub_agent_id = str(payload["subAgentId"])
+            self._reopen_phase_node(
+                request,
+                sub_agent_id,
                 phase=phase,
-                role=str(payload.get("role") or default_role),
+                role=role,
+                tools=tools,
+            )
+            active = _ActiveSubAgent(
+                sub_agent_id=sub_agent_id,
+                phase=phase,
+                role=role,
                 context=SubAgentContextSpec(
                     knowledge_cutoff=None,
                     mcp_enabled=bool(tools),
@@ -2376,6 +2494,51 @@ class HypothesisDevelopmentWorkflow:
             return active
         self._spawn_orchestrator(request, phase)
         return self._active_orchestrators[request.execution_id]
+
+    def _reopen_phase_node(
+        self,
+        request: HypothesisDevelopmentRequest,
+        sub_agent_id: str,
+        *,
+        phase: HypothesisDevelopmentPhase,
+        role: str,
+        tools: tuple[str, ...],
+    ) -> None:
+        """Reopen a reused phase node whose lifecycle record went terminal.
+
+        Re-entering a phase reuses the node's durable conversation, but the
+        node's lifecycle record was closed when the phase last exited.  The
+        record is reset through the same spawn command contract — the depth,
+        children, and budget guards re-run, while the identity, parent, and
+        transcript are preserved — so the unified node-input path sees a live
+        node for the new attempt.
+        """
+        if self._subagent_lifecycle is None:
+            return
+        record = self._subagent_lifecycle.get(request.workspace_id, sub_agent_id)
+        if record is None or record.status not in {
+            SubAgentStatus.COMPLETED,
+            SubAgentStatus.FAILED,
+            SubAgentStatus.CANCELLED,
+        }:
+            return
+        self._subagent_lifecycle.spawn(
+            request.workspace_id,
+            request.chat_id,
+            spec=SubAgentSpec(
+                role=role,
+                kind=(
+                    SubAgentKind.CONVERSATION
+                    if phase in {_HYPOTHESIS_CREATION, _VERDICT}
+                    else SubAgentKind.ONE_SHOT
+                ),
+                allowed_tools=tuple(tools),
+            ),
+            actor_id=_WORKFLOW_ACTOR,
+            parent_sub_agent_id=self._workflow_node_id(request),
+            workflow_execution_id=request.execution_id,
+            sub_agent_id=sub_agent_id,
+        )
 
     def _finish_orchestrator(
         self,
@@ -2643,19 +2806,12 @@ class HypothesisDevelopmentWorkflow:
             purpose=purpose,
             detail=detail,
         )
-        self._emit_orchestrator_text(request, question)
-        if resolved is not None:
-            self._append_sub_agent(
-                request,
-                ExecutionEventType.SUB_AGENT_NEEDS_INPUT,
-                sub_agent_id=resolved.sub_agent_id,
-                parent_sub_agent_id=None,
-                phase=resolved.phase,
-                role=resolved.role,
-                context=resolved.context,
-                accepts_input=True,
-                extra={"question": question},
-            )
+        self._deliver_operator_request(
+            request,
+            resolved,
+            question,
+            question=question,
+        )
         raise _Fenced(question, state)
 
     def _operator_question(
@@ -2801,22 +2957,14 @@ class HypothesisDevelopmentWorkflow:
             purpose="recover from unparseable structured model output",
             detail=str(error),
         )
-        if active is not None:
-            self._append_sub_agent(
-                request,
-                ExecutionEventType.SUB_AGENT_NEEDS_INPUT,
-                sub_agent_id=active.sub_agent_id,
-                parent_sub_agent_id=None,
-                phase=active.phase,
-                role=active.role,
-                context=active.context,
-                accepts_input=True,
-                extra={
-                    "kind": "compose",
-                    "question": question,
-                    "reason": str(error),
-                },
-            )
+        self._deliver_operator_request(
+            request,
+            active,
+            question,
+            question=question,
+            reason=str(error),
+            pause_kind="compose",
+        )
         return self._pause(request, state, _Fenced(f"{question} ({error})", state))
 
     def _pause(
