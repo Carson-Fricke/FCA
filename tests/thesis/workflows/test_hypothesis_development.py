@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
@@ -27,10 +27,24 @@ from thesis.agent.router import (
     Role,
     RolePolicy,
 )
+from thesis.agent.runtime.lifecycle import (
+    SubAgentLifecycle,
+    SubAgentLifecycleError,
+)
+from thesis.agent.runtime.specs import (
+    DEFAULT_MAX_CHILDREN,
+    DEFAULT_MAX_DEPTH,
+    SubAgentSpec,
+)
+from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContext, SubagentContextFactory
 from thesis.chat.contracts import (
+    WORKFLOW_NODE_ROLE,
     MessageRole,
+    SubAgentKind,
+    SubAgentRecord,
+    SubAgentStatus,
     TranscriptItemKind,
     WorkflowExecutionState,
 )
@@ -51,6 +65,7 @@ from thesis.workflows.backtests import (
     BacktestRunError,
     BacktestRunRequest,
     BacktestRunResult,
+    BacktestRunTimeout,
 )
 from thesis.workflows.hypothesis_development import (
     HYPOTHESIS_DEVELOPMENT_PHASES,
@@ -340,6 +355,9 @@ def _kit(
     exit_criteria: list[dict[str, object]] | None = None,
     prepend_ready: bool = True,
     insert_strategy_success: bool = True,
+    research_runner: object | None = None,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    max_children: int = DEFAULT_MAX_CHILDREN,
 ) -> _Kit:
     clock = _clock()
     id_factory = _id_factory()
@@ -418,6 +436,13 @@ def _kit(
         clock=clock,
         id_factory=id_factory,
         experiment_id="experiment-1",
+        research_runner=research_runner,
+        subagent_lifecycle=SubAgentLifecycle(
+            chat,
+            store=PersistenceSubAgentStore(chat.persistence),
+            max_depth=max_depth,
+            max_children=max_children,
+        ),
     )
     return _Kit(
         workflow=workflow,
@@ -435,19 +460,35 @@ def _request(kit: _Kit, ideas: str = IDEAS):
     chat_id = kit.chat.create_chat(
         WORKSPACE, title="hypothesis chat", owner_actor_id=OWNER
     ).chat_id
-    return kit.workflow.launch(WORKSPACE, chat_id, actor_id=OWNER, ideas=ideas)
+    trigger = kit.chat.create_message(WORKSPACE, chat_id, actor_id=OWNER, body=ideas)
+    return kit.workflow.launch(
+        WORKSPACE,
+        chat_id,
+        actor_id=OWNER,
+        ideas=ideas,
+        trigger_message_id=trigger.message_id,
+    )
 
 
 def _phase_node_id(kit: _Kit, request: HypothesisDevelopmentRequest, phase: str) -> str:
     for event in reversed(kit.workflow.observe(WORKSPACE, request.execution_id).events):
         if event.event_type is not ExecutionEventType.SUB_AGENT_SPAWNED:
             continue
-        if (
-            event.payload.get("phase") == phase
-            and event.payload.get("parentSubAgentId") is None
-        ):
+        if event.payload.get("phase") == phase:
             return str(event.payload["subAgentId"])
     raise AssertionError(f"no {phase} node was spawned")
+
+
+def _workflow_node(kit: _Kit, request: HypothesisDevelopmentRequest) -> SubAgentRecord:
+    for record in PersistenceSubAgentStore(kit.chat.persistence).list_sub_agents(
+        WORKSPACE
+    ):
+        if (
+            record.workflow_execution_id == request.execution_id
+            and record.role == WORKFLOW_NODE_ROLE
+        ):
+            return record
+    raise AssertionError("no durable workflow node was created")
 
 
 def _creation_node_id(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
@@ -550,6 +591,22 @@ def test_hypothesis_development_end_to_end(tmp_path: Path) -> None:
     assert execution.state is WorkflowExecutionState.COMPLETED
     assert execution.phase == "completed"
     assert len(kit.runner.requests) == 3
+    # The strategy bundle materializes the universe and the replay window so a
+    # cold backtest fetches and replays the declared symbols instead of falling
+    # back to the harness's two-day synthetic default.
+    model_request = kit.runner.requests[0]
+    assert model_request.run_id.startswith(f"falsify-{request.execution_id}-")
+    assert model_request.run_id.endswith("-model")
+    strategy_request = kit.runner.requests[1]
+    assert strategy_request.run_id.startswith(f"strategy-test-{request.execution_id}-")
+    strategy_config = cast(
+        "Mapping[str, object]", strategy_request.bundle.harness_configuration
+    )
+    strategy_data = cast("Mapping[str, object]", strategy_config["data"])
+    assert list(cast("Sequence[object]", strategy_data["symbols"])) == ["SPY"]
+    assert strategy_config["start"] == "2024-01-01T00:00:00Z"
+    assert str(strategy_config["end"]).endswith("T00:00:00Z")
+    assert kit.runner.requests[2].run_id.startswith(f"optimize-{request.execution_id}-")
 
     stored = kit.store.load("momentum-breakout")
     assert stored.status is HypothesisStatus.SUPPORTED
@@ -562,6 +619,12 @@ def test_hypothesis_development_end_to_end(tmp_path: Path) -> None:
     assert outcome.as_dict()["researchModel"]["evidenceArtifact"] == (
         outcome.research_model_artifact
     )
+    records = PersistenceSubAgentStore(kit.chat.persistence).list_sub_agents(WORKSPACE)
+    assert records
+    assert all(
+        record.workflow_execution_id == request.execution_id for record in records
+    )
+    assert all(record.status.value in {"completed", "failed"} for record in records)
     assert outcome.strategy_bundle is not None
     assert outcome.research_model_reference.key in outcome.strategy_bundle.dependencies
     assert kit.ledger.entries()
@@ -1290,7 +1353,9 @@ def _events_by_type(
     return [event for event in events if event.event_type is event_type]
 
 
-def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
+def test_phase_orchestrators_are_children_of_the_workflow_node(
+    tmp_path: Path,
+) -> None:
     kit = _kit(
         tmp_path,
         payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
@@ -1303,10 +1368,14 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
     spawned = _events_by_type(
         kit, request.execution_id, ExecutionEventType.SUB_AGENT_SPAWNED
     )
-    top_level = [
-        event for event in spawned if event.payload["parentSubAgentId"] is None
+    node_events = [
+        event for event in spawned if event.payload["role"] == WORKFLOW_NODE_ROLE
     ]
-    assert [event.payload["phase"] for event in top_level] == [
+    assert len(node_events) == 1
+    node_id = str(node_events[0].payload["subAgentId"])
+    assert node_events[0].payload["parentSubAgentId"] is None
+    phases = [event for event in spawned if event.payload["role"] != WORKFLOW_NODE_ROLE]
+    assert [event.payload["phase"] for event in phases] == [
         "hypothesis_creation",
         "falsification_trials",
         "verdict",
@@ -1314,8 +1383,9 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
         "strategy_backtesting",
         "optimization",
     ]
-    for event in top_level:
+    for event in phases:
         assert event.payload["subAgentId"]
+        assert event.payload["parentSubAgentId"] == node_id
         expected_input = event.payload["phase"] in {"hypothesis_creation", "verdict"}
         assert event.payload["acceptsInput"] is expected_input
         context = cast("dict[str, Any]", event.payload["context"])
@@ -1334,7 +1404,7 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
     ]
     assert activities
     assert {event.payload["subAgentId"] for event in activities} <= {
-        event.payload["subAgentId"] for event in top_level
+        event.payload["subAgentId"] for event in phases
     }
     assert all(
         "Produce the FINAL hypothesis" not in str(event.payload.get("text"))
@@ -1348,8 +1418,8 @@ def test_phase_orchestrators_are_top_level_sub_agents(tmp_path: Path) -> None:
         kit, request.execution_id, ExecutionEventType.SUB_AGENT_COMPLETED
     )
     assert {event.payload["subAgentId"] for event in completed} == {
-        event.payload["subAgentId"] for event in top_level
-    }
+        event.payload["subAgentId"] for event in phases
+    } | {node_id}
 
 
 def test_every_phase_orchestrator_records_its_task_and_summary(tmp_path: Path) -> None:
@@ -1367,7 +1437,7 @@ def test_every_phase_orchestrator_records_its_task_and_summary(tmp_path: Path) -
         event
         for event in events
         if event.event_type is ExecutionEventType.SUB_AGENT_SPAWNED
-        and event.payload["parentSubAgentId"] is None
+        and event.payload["parentSubAgentId"] is not None
     ]
     assert spawned
     for spawn in spawned:
@@ -1550,6 +1620,13 @@ def test_creation_turn_prompt_builds_a_statistical_model_on_history(
     assert "Structure of one asset's price action" in turn_prompt
     assert "Options and volatility" in turn_prompt
     assert "negative control" in turn_prompt
+    # Math is authored as LaTeX for the KaTeX renderer.
+    assert "Render every mathematical expression as LaTeX" in turn_prompt
+    assert "inline math as \\(...\\)" in turn_prompt
+    # A bare `$` collides with currency, so math never uses it.
+    assert "never use a bare $ for math" in turn_prompt
+    # Accepting the proposal must not echo the proposed model back to the operator.
+    assert "do not restate or re-summarize" in turn_prompt
     assert "Return a single JSON object" in turn_prompt
     assert '"advance": boolean' in turn_prompt
 
@@ -1574,6 +1651,7 @@ def test_finalize_prompt_requests_the_model_specification(tmp_path: Path) -> Non
     assert "- falsifiers: the Layer A falsifiers" in finalize_prompt
     assert "double as Layer B monitors" in finalize_prompt
     assert "- body: Markdown with the full model specification" in finalize_prompt
+    assert "Render every mathematical expression as LaTeX" in finalize_prompt
     assert "- model (required)" in finalize_prompt
     assert "Never encode an indicator as a strategy" in finalize_prompt
     assert "Omit sizing" in finalize_prompt
@@ -1861,6 +1939,46 @@ def test_launch_is_deterministic_and_never_calls_the_model(tmp_path: Path) -> No
     assert execution.trigger_message_id == request.trigger_message_id
 
 
+class _TimingOutResearchRunner:
+    """A research-model port whose run has not reached a terminal state."""
+
+    def __init__(self) -> None:
+        self.requests: list[object] = []
+
+    def run(self, request: object) -> object:
+        self.requests.append(request)
+        raise BacktestRunTimeout(
+            "study 'falsify-execution-1-model' did not reach a terminal state "
+            "within 3900s"
+        )
+
+
+def test_unresolved_model_run_pauses_instead_of_falsifying_every_trial(
+    tmp_path: Path,
+) -> None:
+    research_runner = _TimingOutResearchRunner()
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope()],
+        results=[],
+        research_runner=research_runner,
+    )
+    request = _request(kit)
+
+    outcome = _run(kit, request)
+
+    # The run is still executing, so every trial is unresolved rather than
+    # refuted: the workflow pauses for the operator instead of stamping T01-T11
+    # as failed with no observation.
+    assert outcome.phase is HypothesisDevelopmentPhase.PAUSED
+    assert _latest_input_phase(kit, request) == "falsification_trials"
+    assert len(research_runner.requests) == 1
+    trials = _events_by_type(
+        kit, request.execution_id, ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+    )
+    assert "terminal state" in str(trials[-1].payload.get("question", ""))
+
+
 def test_long_horizon_and_crlf_newlines_finalize_successfully(tmp_path: Path) -> None:
     envelope = _hypothesis_envelope()
     long_horizon = (
@@ -1884,3 +2002,265 @@ def test_long_horizon_and_crlf_newlines_finalize_successfully(tmp_path: Path) ->
     assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
     assert outcome.hypothesis is not None
     assert outcome.hypothesis.front_matter.horizon.startswith("Synchronized 5-minute")
+
+
+def test_workflow_node_is_durable_and_owns_every_phase_agent(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    node = _workflow_node(kit, request)
+    assert node.parent_sub_agent_id is None
+    assert node.workflow_execution_id == request.execution_id
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
+    records = PersistenceSubAgentStore(kit.chat.persistence).list_sub_agents(WORKSPACE)
+    phases = [record for record in records if record.role != WORKFLOW_NODE_ROLE]
+    assert phases
+    assert all(record.parent_sub_agent_id == node.sub_agent_id for record in phases)
+    lifecycle = SubAgentLifecycle(
+        kit.chat, store=PersistenceSubAgentStore(kit.chat.persistence)
+    )
+    stored = lifecycle.workflow_node(WORKSPACE, request.execution_id)
+    assert stored is not None
+    assert stored.sub_agent_id == node.sub_agent_id
+    assert stored.status is SubAgentStatus.COMPLETED
+
+
+def test_node_launched_execution_is_owned_by_its_anchor(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    chat_id = kit.chat.create_chat(
+        WORKSPACE, title="anchored chat", owner_actor_id=OWNER
+    ).chat_id
+    lifecycle = SubAgentLifecycle(
+        kit.chat, store=PersistenceSubAgentStore(kit.chat.persistence)
+    )
+    anchor = lifecycle.spawn(
+        WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="research", kind=SubAgentKind.CONVERSATION),
+        actor_id=OWNER,
+    )
+    trigger = kit.chat.create_message(WORKSPACE, chat_id, actor_id=OWNER, body=IDEAS)
+
+    request = kit.workflow.launch(
+        WORKSPACE,
+        chat_id,
+        actor_id=OWNER,
+        ideas=IDEAS,
+        trigger_message_id=trigger.message_id,
+        anchor_sub_agent_id=anchor.sub_agent_id,
+    )
+
+    node = _workflow_node(kit, request)
+    assert node.parent_sub_agent_id == anchor.sub_agent_id
+    assert kit.chat.list_executions(WORKSPACE) == ()
+    assert kit.chat.list_node_executions(WORKSPACE, anchor.sub_agent_id) == (
+        kit.chat.get_execution(WORKSPACE, request.execution_id),
+    )
+    assert (
+        kit.chat.execution_anchor(WORKSPACE, request.execution_id)
+        == anchor.sub_agent_id
+    )
+    anchors = [
+        message
+        for message in kit.chat.list_messages(WORKSPACE, chat_id)
+        if message.kind is TranscriptItemKind.WORKFLOW
+    ]
+    assert len(anchors) == 1
+    assert anchors[0].data is not None
+    assert anchors[0].data["subAgentId"] == anchor.sub_agent_id
+
+    outcome = _run(kit, request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.COMPLETED
+    records = PersistenceSubAgentStore(kit.chat.persistence).list_sub_agents(WORKSPACE)
+    phases = [
+        record
+        for record in records
+        if record.role != WORKFLOW_NODE_ROLE
+        and record.workflow_execution_id == request.execution_id
+    ]
+    assert phases
+    assert all(record.parent_sub_agent_id == node.sub_agent_id for record in phases)
+
+
+def test_workflow_node_guards_reject_over_deep_crowded_and_over_budget_agents(
+    tmp_path: Path,
+) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+    chat_id = kit.chat.create_chat(
+        WORKSPACE, title="guarded chat", owner_actor_id=OWNER
+    ).chat_id
+    store = PersistenceSubAgentStore(kit.chat.persistence)
+    lifecycle = SubAgentLifecycle(kit.chat, store=store)
+    anchor = lifecycle.spawn(
+        WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="research", kind=SubAgentKind.CONVERSATION),
+        actor_id=OWNER,
+    )
+    trigger = kit.chat.create_message(WORKSPACE, chat_id, actor_id=OWNER, body=IDEAS)
+    request = kit.workflow.launch(
+        WORKSPACE,
+        chat_id,
+        actor_id=OWNER,
+        ideas=IDEAS,
+        trigger_message_id=trigger.message_id,
+        anchor_sub_agent_id=anchor.sub_agent_id,
+    )
+    node = _workflow_node(kit, request)
+
+    depth_guarded = SubAgentLifecycle(kit.chat, store=store, max_depth=1)
+    with pytest.raises(SubAgentLifecycleError, match="depth"):
+        depth_guarded.spawn(
+            WORKSPACE,
+            chat_id,
+            spec=SubAgentSpec(role="phase"),
+            actor_id=OWNER,
+            parent_sub_agent_id=node.sub_agent_id,
+        )
+    budget_guarded = SubAgentLifecycle(kit.chat, store=store, max_depth=4)
+    with pytest.raises(SubAgentLifecycleError, match="budget"):
+        budget_guarded.spawn(
+            WORKSPACE,
+            chat_id,
+            spec=SubAgentSpec(role="phase", delegated_budget=1),
+            actor_id=OWNER,
+            parent_sub_agent_id=node.sub_agent_id,
+        )
+    children_guarded = SubAgentLifecycle(
+        kit.chat, store=store, max_depth=4, max_children=1
+    )
+    children_guarded.spawn(
+        WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="phase"),
+        actor_id=OWNER,
+        parent_sub_agent_id=node.sub_agent_id,
+    )
+    with pytest.raises(SubAgentLifecycleError, match="active children"):
+        children_guarded.spawn(
+            WORKSPACE,
+            chat_id,
+            spec=SubAgentSpec(role="phase"),
+            actor_id=OWNER,
+            parent_sub_agent_id=node.sub_agent_id,
+        )
+
+
+def test_depth_guarded_phase_spawn_fails_without_orphans(tmp_path: Path) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[], max_depth=1)
+    chat_id = kit.chat.create_chat(
+        WORKSPACE, title="shallow chat", owner_actor_id=OWNER
+    ).chat_id
+    store = PersistenceSubAgentStore(kit.chat.persistence)
+    lifecycle = SubAgentLifecycle(kit.chat, store=store)
+    anchor = lifecycle.spawn(
+        WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="research", kind=SubAgentKind.CONVERSATION),
+        actor_id=OWNER,
+    )
+    trigger = kit.chat.create_message(WORKSPACE, chat_id, actor_id=OWNER, body=IDEAS)
+    request = kit.workflow.launch(
+        WORKSPACE,
+        chat_id,
+        actor_id=OWNER,
+        ideas=IDEAS,
+        trigger_message_id=trigger.message_id,
+        anchor_sub_agent_id=anchor.sub_agent_id,
+    )
+
+    outcome = kit.workflow.run(request)
+
+    assert outcome.phase is HypothesisDevelopmentPhase.FAILED
+    node = _workflow_node(kit, request)
+    assert node.status is SubAgentStatus.FAILED
+    records = store.list_sub_agents(WORKSPACE)
+    assert {record.sub_agent_id for record in records} == {
+        anchor.sub_agent_id,
+        node.sub_agent_id,
+    }
+
+
+def test_launch_requires_the_requesting_message_and_never_synthesizes_one(
+    tmp_path: Path,
+) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+    chat_id = kit.chat.create_chat(
+        WORKSPACE, title="no trigger", owner_actor_id=OWNER
+    ).chat_id
+
+    with pytest.raises(HypothesisDevelopmentIntakeError, match="trigger_message_id"):
+        kit.workflow.launch(WORKSPACE, chat_id, actor_id=OWNER, ideas=IDEAS)
+
+    assert kit.chat.list_executions(WORKSPACE) == ()
+    assert kit.chat.list_messages(WORKSPACE, chat_id) == ()
+
+
+def test_launch_binds_to_the_requesting_message_without_a_duplicate(
+    tmp_path: Path,
+) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+    chat_id = kit.chat.create_chat(
+        WORKSPACE, title="bound trigger", owner_actor_id=OWNER
+    ).chat_id
+    trigger = kit.chat.create_message(WORKSPACE, chat_id, actor_id=OWNER, body=IDEAS)
+
+    request = kit.workflow.launch(
+        WORKSPACE,
+        chat_id,
+        actor_id=OWNER,
+        ideas=IDEAS,
+        trigger_message_id=trigger.message_id,
+    )
+
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    assert execution.trigger_message_id == trigger.message_id
+    user_messages = [
+        message
+        for message in kit.chat.list_messages(WORKSPACE, chat_id)
+        if message.role is MessageRole.USER
+    ]
+    assert [message.message_id for message in user_messages] == [trigger.message_id]
+
+
+def test_resumed_phase_reuses_the_same_workflow_node(tmp_path: Path) -> None:
+    kit = _kit(
+        tmp_path,
+        payloads=[_hypothesis_envelope(), _plan_envelope(), _design_envelope()],
+        results=[("completed", {"sharpe": 1.5}), ("completed", {"sharpe": 1.2})],
+    )
+    request = _request(kit)
+
+    first = kit.workflow.run(request)
+    assert first.phase is HypothesisDevelopmentPhase.PAUSED
+    second = _answer_current_pause(kit, request)
+    assert second.phase is HypothesisDevelopmentPhase.PAUSED
+    assert _latest_input_phase(kit, request) == "verdict"
+
+    node = _workflow_node(kit, request)
+    final = _answer_current_pause(kit, request)
+
+    assert final.phase is HypothesisDevelopmentPhase.COMPLETED
+    records = PersistenceSubAgentStore(kit.chat.persistence).list_sub_agents(WORKSPACE)
+    assert len([record for record in records if record.role == WORKFLOW_NODE_ROLE]) == 1
+    verdict_spawns = [
+        event
+        for event in _events_by_type(
+            kit, request.execution_id, ExecutionEventType.SUB_AGENT_SPAWNED
+        )
+        if event.payload["phase"] == "verdict"
+    ]
+    assert len(verdict_spawns) == 1
+    assert verdict_spawns[0].payload["parentSubAgentId"] == node.sub_agent_id

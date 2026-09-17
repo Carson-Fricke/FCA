@@ -15,6 +15,12 @@ from thesis.chat import (
     ToolJobState,
     TranscriptItemKind,
     WorkflowDefinition,
+    WorkflowExecutionState,
+)
+from thesis.chat.contracts import (
+    WORKFLOW_NODE_ROLE,
+    SubAgentKind,
+    SubAgentRecord,
 )
 from thesis.execution.events import ActorScope, ExecutionEventType
 
@@ -306,3 +312,101 @@ def test_event_store_limit_returns_cursor_for_next_reconnect_page() -> None:
 
     assert first.has_more is True
     assert second.events[0].cursor == first.next_cursor + 1
+
+
+def _workflow_node(
+    service: ChatService,
+    chat_id: str,
+    *,
+    sub_agent_id: str,
+    execution_id: str,
+    parent_sub_agent_id: str | None,
+) -> SubAgentRecord:
+    record = SubAgentRecord(
+        workspace_id="workspace-a",
+        created_at=NOW,
+        created_by="operator",
+        sub_agent_id=sub_agent_id,
+        chat_id=chat_id,
+        role=WORKFLOW_NODE_ROLE,
+        kind=SubAgentKind.ONE_SHOT,
+        parent_sub_agent_id=parent_sub_agent_id,
+        workflow_execution_id=execution_id,
+        updated_at=NOW,
+    )
+    return service.persistence.save(record)
+
+
+def test_node_launched_executions_are_owned_by_their_node() -> None:
+    service = _service()
+    chat = service.create_chat(
+        "workspace-a", title="Research", owner_actor_id="operator"
+    )
+    root = service.launch_workflow(
+        "workspace-a",
+        chat.chat_id,
+        workflow=WORKFLOW,
+        actor_id="operator",
+        body="Root idea.",
+    )
+    anchored = service.launch_workflow(
+        "workspace-a",
+        chat.chat_id,
+        workflow=WORKFLOW,
+        actor_id="operator",
+        body="Node idea.",
+    )
+    _workflow_node(
+        service,
+        chat.chat_id,
+        sub_agent_id="subagent-node",
+        execution_id=anchored.execution_id,
+        parent_sub_agent_id="subagent-anchor",
+    )
+
+    assert service.list_executions("workspace-a") == (root,)
+    assert service.list_node_executions("workspace-a", "subagent-anchor") == (anchored,)
+    assert service.list_node_executions("workspace-a", "subagent-other") == ()
+    assert service.execution_anchor("workspace-a", anchored.execution_id) == (
+        "subagent-anchor"
+    )
+    assert service.execution_anchor("workspace-a", root.execution_id) is None
+
+
+def test_stop_active_executions_still_covers_node_launched_executions() -> None:
+    service = _service()
+    chat = service.create_chat(
+        "workspace-a", title="Research", owner_actor_id="operator"
+    )
+    root = service.launch_workflow(
+        "workspace-a",
+        chat.chat_id,
+        workflow=WORKFLOW,
+        actor_id="operator",
+        body="Root idea.",
+    )
+    anchored = service.launch_workflow(
+        "workspace-a",
+        chat.chat_id,
+        workflow=WORKFLOW,
+        actor_id="operator",
+        body="Node idea.",
+    )
+    _workflow_node(
+        service,
+        chat.chat_id,
+        sub_agent_id="subagent-node",
+        execution_id=anchored.execution_id,
+        parent_sub_agent_id="subagent-anchor",
+    )
+
+    stopped = service.stop_active_executions("workspace-a")
+
+    assert {execution.execution_id for execution in stopped} == {
+        root.execution_id,
+        anchored.execution_id,
+    }
+    assert (
+        service.get_execution("workspace-a", anchored.execution_id).state
+        is WorkflowExecutionState.STOPPED
+    )

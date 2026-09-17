@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Protocol, TypeVar, cast
 
 from thesis.chat.contracts import (
+    WORKFLOW_NODE_ROLE,
     AgentInvocation,
     Attachment,
     AttachmentState,
@@ -839,7 +840,44 @@ class ChatService:
         return self._require(WorkflowExecution, workspace_id, execution_id)
 
     def list_executions(self, workspace_id: str) -> tuple[WorkflowExecution, ...]:
-        return self._list(WorkflowExecution, workspace_id)
+        """Return the chat-level executions: only those launched by the chat.
+
+        An execution launched by a sub-agent belongs to that node and is
+        excluded here; use :meth:`list_node_executions` to find it under its
+        anchor.
+        """
+        anchors = self._execution_anchors(workspace_id)
+        return tuple(
+            execution
+            for execution in self._list(WorkflowExecution, workspace_id)
+            if anchors.get(execution.execution_id) is None
+        )
+
+    def list_node_executions(
+        self, workspace_id: str, sub_agent_id: str
+    ) -> tuple[WorkflowExecution, ...]:
+        """Return the executions owned by one sub-agent anchor."""
+        anchors = self._execution_anchors(workspace_id)
+        return tuple(
+            execution
+            for execution in self._list(WorkflowExecution, workspace_id)
+            if anchors.get(execution.execution_id) == sub_agent_id
+        )
+
+    def execution_anchor(self, workspace_id: str, execution_id: str) -> str | None:
+        """Return the anchor that launched an execution, or ``None`` for a chat."""
+        self.get_execution(workspace_id, execution_id)
+        return self._execution_anchors(workspace_id).get(execution_id)
+
+    def _execution_anchors(self, workspace_id: str) -> dict[str, str | None]:
+        anchors: dict[str, str | None] = {}
+        for record in self._list(SubAgentRecord, workspace_id):
+            if (
+                record.role == WORKFLOW_NODE_ROLE
+                and record.workflow_execution_id is not None
+            ):
+                anchors[record.workflow_execution_id] = record.parent_sub_agent_id
+        return anchors
 
     def stop_active_executions(
         self, workspace_id: str, *, actor_id: str = "thesis-startup"
@@ -853,7 +891,7 @@ class ChatService:
         """
         active = tuple(
             execution
-            for execution in self.list_executions(workspace_id)
+            for execution in self._list(WorkflowExecution, workspace_id)
             if execution.state
             in {WorkflowExecutionState.QUEUED, WorkflowExecutionState.RUNNING}
         )

@@ -21,6 +21,7 @@ from thesis.agent.runtime.specs import (
 )
 from thesis.agent.runtime.store import SubAgentStore
 from thesis.chat.contracts import (
+    WORKFLOW_NODE_ROLE,
     ChatContractError,
     SubAgentKind,
     SubAgentRecord,
@@ -98,6 +99,18 @@ class SubAgentLifecycle:
             depth += 1
             current = self.get(workspace_id, current.parent_sub_agent_id)
         return depth
+
+    def workflow_node(
+        self, workspace_id: str, execution_id: str
+    ) -> SubAgentRecord | None:
+        """Return the durable workflow node owning one execution's phase agents."""
+        for record in self._store.list_sub_agents(workspace_id):
+            if (
+                record.workflow_execution_id == execution_id
+                and record.role == WORKFLOW_NODE_ROLE
+            ):
+                return record
+        return None
 
     def spawn(
         self,

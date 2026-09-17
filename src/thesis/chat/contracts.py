@@ -114,6 +114,12 @@ class SubAgentKind(StrEnum):
     ONE_SHOT = "one_shot"
 
 
+#: Durable role of the workflow-node record that owns one execution's phase
+#: agents.  The node is a ``SubAgentRecord``, so the existing depth, children,
+#: and budget guards apply to the phase agents spawned beneath it.
+WORKFLOW_NODE_ROLE = "workflow-node"
+
+
 class SubAgentStatus(StrEnum):
     """Lifecycle status projected for one durable sub-agent."""
 
@@ -838,6 +844,7 @@ __all__ = [
     "SubAgentKind",
     "SubAgentRecord",
     "SubAgentStatus",
+    "WORKFLOW_NODE_ROLE",
     "ToolJob",
     "ToolJobState",
     "TranscriptItemKind",

@@ -173,11 +173,7 @@ def control_registered_tools(
             parent_sub_agent_id=context.sub_agent_id,
             workflow_execution_id=context.workflow_execution_id,
             phase_attempt_id=context.phase_attempt_id,
-            idempotency_key=(
-                None
-                if context.idempotency_key is None
-                else f"{context.idempotency_key}:spawn"
-            ),
+            idempotency_key=context.idempotency_key,
         )
         if on_spawn is not None:
             on_spawn(result.sub_agent, task)

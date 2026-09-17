@@ -16,10 +16,15 @@ from typing import NoReturn
 
 from thesis.agent.context import PromptContext, assemble_context
 from thesis.agent.router import InvocationResult, ModelRouter, Role
+from thesis.agent.runtime.lifecycle import SubAgentLifecycle
+from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.contracts import (
+    WORKFLOW_NODE_ROLE,
     MessageRole,
     RecordNotFound,
+    SubAgentKind,
+    SubAgentRecord,
     TranscriptItemKind,
     WorkflowDefinition,
     WorkflowExecution,
@@ -61,6 +66,7 @@ from thesis.workflows.backtests import (
     BacktestRunner,
     BacktestRunRequest,
     BacktestRunResult,
+    BacktestRunTimeout,
     HarnessError,
 )
 from thesis.workflows.research_models import (
@@ -68,6 +74,7 @@ from thesis.workflows.research_models import (
     ResearchModelRunner,
     ResearchModelRunRequest,
     ResearchModelRunResult,
+    study_window,
 )
 
 from .composers import (
@@ -201,6 +208,7 @@ class HypothesisDevelopmentWorkflow:
         max_compose_repairs: int = DEFAULT_MAX_COMPOSE_REPAIRS,
         knowledge_cutoff: datetime | None = None,
         subagent_mcp_tools: Mapping[str, tuple[str, ...]] | None = None,
+        subagent_lifecycle: SubAgentLifecycle | None = None,
     ) -> None:
         self._chat = chat
         self._router = router
@@ -251,8 +259,10 @@ class HypothesisDevelopmentWorkflow:
             family: tuple(tools)
             for family, tools in dict(subagent_mcp_tools or {}).items()
         }
+        self._subagent_lifecycle = subagent_lifecycle
         self._active_orchestrators: dict[str, _ActiveSubAgent] = {}
         self._paused_states: dict[str, HypothesisDevelopmentState] = {}
+        self._workflow_nodes: dict[str, str] = {}
 
     @property
     def definition(self) -> WorkflowDefinition:
@@ -271,36 +281,46 @@ class HypothesisDevelopmentWorkflow:
         *,
         actor_id: str,
         ideas: str,
-        investigation_id: str | None = None,
         trigger_message_id: str | None = None,
+        investigation_id: str | None = None,
+        anchor_sub_agent_id: str | None = None,
     ) -> HypothesisDevelopmentRequest:
-        """Persist the chat trigger and return the runnable request.
+        """Bind the execution to the requesting message and open its node.
 
-        When ``trigger_message_id`` is supplied the execution binds to the
-        operator's existing message instead of creating a duplicate trigger.
+        Every launch binds to the operator's existing message; there is no
+        synthetic-trigger fallback.  The execution's durable workflow node is
+        parented to the caller's anchor, so the chain is launching agent →
+        workflow node → phase agents.
         """
         try:
             _text(ideas, "ideas", max_length=8_192)
         except WorkflowError as error:
             raise HypothesisDevelopmentIntakeError(str(error)) from error
-        if trigger_message_id is None:
-            execution = self._chat.launch_workflow(
-                workspace_id,
-                chat_id,
-                workflow=self.definition,
-                actor_id=actor_id,
-                body=ideas,
-                investigation_id=investigation_id,
-            )
-        else:
-            execution = self._chat.launch_workflow(
-                workspace_id,
-                chat_id,
-                workflow=self.definition,
-                actor_id=actor_id,
-                message_id=trigger_message_id,
-                investigation_id=investigation_id,
-            )
+        try:
+            _text(trigger_message_id, "trigger_message_id", max_length=256)
+        except WorkflowError as error:
+            raise HypothesisDevelopmentIntakeError(str(error)) from error
+        if anchor_sub_agent_id is not None:
+            _text(anchor_sub_agent_id, "anchor_sub_agent_id", max_length=256)
+        execution = self._chat.launch_workflow(
+            workspace_id,
+            chat_id,
+            workflow=self.definition,
+            actor_id=actor_id,
+            message_id=trigger_message_id,
+            investigation_id=investigation_id,
+        )
+        request = HypothesisDevelopmentRequest(
+            workspace_id=workspace_id,
+            chat_id=chat_id,
+            execution_id=execution.execution_id,
+            trigger_message_id=execution.trigger_message_id,
+            requested_by=actor_id,
+            ideas=ideas,
+            intent_epoch=execution.intent_epoch,
+            created_at=execution.created_at,
+        )
+        self._create_workflow_node(request, anchor_sub_agent_id)
         self._chat.create_message(
             workspace_id,
             chat_id,
@@ -312,6 +332,7 @@ class HypothesisDevelopmentWorkflow:
                 "currentPhase": execution.phase,
                 "executionId": execution.execution_id,
                 "status": execution.state.value,
+                "subAgentId": anchor_sub_agent_id,
                 "title": self.definition.title,
                 "phases": list(self.definition.phases),
                 "version": execution.workflow_version,
@@ -319,16 +340,58 @@ class HypothesisDevelopmentWorkflow:
             },
             execution_id=execution.execution_id,
         )
-        return HypothesisDevelopmentRequest(
-            workspace_id=workspace_id,
-            chat_id=chat_id,
-            execution_id=execution.execution_id,
-            trigger_message_id=execution.trigger_message_id,
-            requested_by=actor_id,
-            ideas=ideas,
-            intent_epoch=execution.intent_epoch,
-            created_at=execution.created_at,
+        return request
+
+    def _create_workflow_node(
+        self,
+        request: HypothesisDevelopmentRequest,
+        anchor_sub_agent_id: str | None,
+    ) -> SubAgentRecord | None:
+        """Create the execution's durable node as a child of the launching anchor."""
+        if self._subagent_lifecycle is None:
+            return None
+        node = self._subagent_lifecycle.spawn(
+            request.workspace_id,
+            request.chat_id,
+            spec=SubAgentSpec(
+                role=WORKFLOW_NODE_ROLE,
+                kind=SubAgentKind.ONE_SHOT,
+            ),
+            actor_id=_WORKFLOW_ACTOR,
+            parent_sub_agent_id=anchor_sub_agent_id,
+            workflow_execution_id=request.execution_id,
         )
+        self._workflow_nodes[request.execution_id] = node.sub_agent_id
+        append_sub_agent_event(
+            self._chat.event_store,
+            execution_id=request.execution_id,
+            workspace_id=request.workspace_id,
+            event_type=ExecutionEventType.SUB_AGENT_SPAWNED,
+            occurred_at=self._clock(),
+            sub_agent_id=node.sub_agent_id,
+            parent_sub_agent_id=anchor_sub_agent_id,
+            phase=_REQUESTED.value,
+            role=WORKFLOW_NODE_ROLE,
+            context=SubAgentContextSpec(),
+            accepts_input=False,
+            intent_epoch=request.intent_epoch,
+        )
+        return node
+
+    def _workflow_node_id(self, request: HypothesisDevelopmentRequest) -> str | None:
+        """Resolve the durable workflow node owning this execution's phases."""
+        cached = self._workflow_nodes.get(request.execution_id)
+        if cached is not None:
+            return cached
+        if self._subagent_lifecycle is None:
+            return None
+        node = self._subagent_lifecycle.workflow_node(
+            request.workspace_id, request.execution_id
+        )
+        if node is None:
+            return None
+        self._workflow_nodes[request.execution_id] = node.sub_agent_id
+        return node.sub_agent_id
 
     def steer(
         self,
@@ -989,6 +1052,7 @@ class HypothesisDevelopmentWorkflow:
         active = self._active_orchestrators.get(request.execution_id)
         if active is not None:
             return active
+        node_id = self._workflow_node_id(request)
         for event in reversed(
             self._chat.replay_events(request.workspace_id, request.execution_id).events
         ):
@@ -997,7 +1061,7 @@ class HypothesisDevelopmentWorkflow:
             payload = event.payload
             if (
                 payload.get("phase") != _HYPOTHESIS_CREATION.value
-                or payload.get("parentSubAgentId") is not None
+                or payload.get("parentSubAgentId") != node_id
             ):
                 continue
             active = _ActiveSubAgent(
@@ -1239,14 +1303,40 @@ class HypothesisDevelopmentWorkflow:
         fitted_reference = state.fitted_model_reference
         model_run: ResearchModelRunResult | None = None
         model_error: str | None = None
+        # Scope the run id to the hypothesis revision so a revised model never
+        # adopts or overwrites the previous revision's run.
+        model_run_id = (
+            f"falsify-{request.execution_id}-{document.content_sha256[:12]}-model"
+        )
         if any(test.test_id not in retained for test in plan.tests):
             try:
                 model_run = self._run_research_model(
                     request,
                     state,
                     model=state.draft.model,
-                    correlation_id=f"falsify-{request.execution_id}-model",
+                    correlation_id=model_run_id,
                     label="layer-a-model",
+                )
+            except BacktestRunTimeout as error:
+                # The run has not finished, so no falsifier has an observation
+                # yet. Pause for the operator instead of recording a false
+                # refutation for every planned test.
+                self._append_attempt(
+                    request,
+                    state,
+                    AttemptKind.ABORTED_JOB,
+                    "layer A research model run is still executing",
+                    {"error": str(error)},
+                )
+                self._request_operator_input(
+                    request,
+                    state,
+                    purpose="wait for the Layer A research model run to finish",
+                    detail=(
+                        "the falsification model run has not reached a terminal state "
+                        f"yet ({error}); its market-data backfill or replay may still "
+                        "be running, so no falsifier can be evaluated"
+                    ),
                 )
             except (BacktestRunError, HarnessError, ValueError) as error:
                 model_error = str(error)
@@ -1266,7 +1356,7 @@ class HypothesisDevelopmentWorkflow:
                     FalsificationTrial(
                         test_id=test.test_id,
                         falsifier_id=test.falsifier_id,
-                        run_id=f"falsify-{request.execution_id}-model",
+                        run_id=model_run_id,
                         digest=_digest({"error": model_error}),
                         run_state="failed",
                         observed=None,
@@ -1484,6 +1574,9 @@ class HypothesisDevelopmentWorkflow:
                 "from implementation, strategy, or market-regime defects. Return a "
                 "concrete revision handoff for the strategy-design agent.",
                 "Set falsifierId to strategy_backtest and choose a concise failureClass.",
+                "In the rationale and follow-ups, render any mathematics as LaTeX for "
+                "KaTeX: inline math as \\(...\\) and display equations as \\[...\\] "
+                "on their own line. Never use a bare $ for math.",
                 f"Strategy attempt: {state.strategy_cycles}",
                 f"Backtest result: {json.dumps(result.as_dict(), default=str, sort_keys=True)}",
                 f"Backtest metadata: {json.dumps(dict(result.metadata), default=str, sort_keys=True)}",
@@ -1685,19 +1778,34 @@ class HypothesisDevelopmentWorkflow:
                 first_instance.get("parameters"), Mapping
             ):
                 strategy_parameters = dict(first_instance["parameters"])
+        # The harness reads symbols and the replay window from the strategy
+        # configuration itself, so materialize both instead of relying on the
+        # design agent to declare them (an absent window would otherwise fall
+        # back to the harness's two-day synthetic default).
+        strategy_configuration = dict(draft.content.harness_configuration)
+        strategy_symbols = list(document.front_matter.universe)
+        declared_data = strategy_configuration.get("data")
+        strategy_data = (
+            dict(declared_data) if isinstance(declared_data, Mapping) else {}
+        )
+        strategy_data["symbols"] = strategy_symbols
+        window_start, window_end = study_window(strategy_configuration)
         draft = replace(
             draft,
             content=replace(
                 draft.content,
                 harness_configuration={
-                    **dict(draft.content.harness_configuration),
+                    **strategy_configuration,
+                    "data": strategy_data,
+                    "start": window_start,
+                    "end": window_end,
                     "strategy_instances": [
                         {
                             "implementation": "harness.strategy.adapter:StrategyBundleAdapter",
                             "instance_id": draft.content.strategy_id,
                             "bundle_hash": "0" * 64,
                             "capital_fraction": "1.0",
-                            "symbols": list(document.front_matter.universe),
+                            "symbols": strategy_symbols,
                             "parameters": {
                                 "strategy_source": dict(draft.content.source),
                                 "strategy_entrypoint": draft.content.entrypoint,
@@ -1760,7 +1868,11 @@ class HypothesisDevelopmentWorkflow:
             request,
             state,
             bundle=bundle,
-            correlation_id=f"optimize-{request.execution_id}",
+            # Scope the run id to the bundle revision so a revised strategy
+            # never adopts or overwrites the previous revision's run.
+            correlation_id=(
+                f"optimize-{request.execution_id}-{bundle.bundle_sha256[:12]}"
+            ),
             label="optimization",
         )
         state = replace(state, optimization_backtest=result)
@@ -2162,7 +2274,11 @@ class HypothesisDevelopmentWorkflow:
             event_type=event_type,
             occurred_at=self._clock(),
             sub_agent_id=sub_agent_id,
-            parent_sub_agent_id=parent_sub_agent_id,
+            parent_sub_agent_id=(
+                self._workflow_node_id(request)
+                if parent_sub_agent_id is None
+                else parent_sub_agent_id
+            ),
             phase=(
                 phase.value if isinstance(phase, HypothesisDevelopmentPhase) else phase
             ),
@@ -2183,7 +2299,32 @@ class HypothesisDevelopmentWorkflow:
         context = SubAgentContextSpec(
             knowledge_cutoff=None, mcp_enabled=bool(tools), mcp_tools=tools
         )
+        conversational = phase in {_HYPOTHESIS_CREATION, _VERDICT}
+        node_id = self._workflow_node_id(request)
         sub_agent_id = self._id_factory("subagent")
+        if self._subagent_lifecycle is not None:
+            # Every sub-agent creation passes through the same durable spawn
+            # command contract the chat control tool uses; the event stream is
+            # only the projection the UI reads.  Phase agents are children of
+            # the execution's workflow node, so the depth, children, and budget
+            # guards apply to them.
+            record = self._subagent_lifecycle.spawn(
+                request.workspace_id,
+                request.chat_id,
+                spec=SubAgentSpec(
+                    role=label,
+                    kind=(
+                        SubAgentKind.CONVERSATION
+                        if conversational
+                        else SubAgentKind.ONE_SHOT
+                    ),
+                    allowed_tools=tuple(tools),
+                ),
+                actor_id=_WORKFLOW_ACTOR,
+                parent_sub_agent_id=node_id,
+                workflow_execution_id=request.execution_id,
+            )
+            sub_agent_id = record.sub_agent_id
         self._append_sub_agent(
             request,
             ExecutionEventType.SUB_AGENT_SPAWNED,
@@ -2192,7 +2333,7 @@ class HypothesisDevelopmentWorkflow:
             phase=phase,
             role=label,
             context=context,
-            accepts_input=phase in {_HYPOTHESIS_CREATION, _VERDICT},
+            accepts_input=conversational,
         )
         self._active_orchestrators[request.execution_id] = _ActiveSubAgent(
             sub_agent_id=sub_agent_id,
@@ -2207,6 +2348,7 @@ class HypothesisDevelopmentWorkflow:
         phase: HypothesisDevelopmentPhase,
     ) -> _ActiveSubAgent:
         """Reopen one phase's durable conversation node, creating it once."""
+        node_id = self._workflow_node_id(request)
         for event in reversed(
             self._chat.replay_events(request.workspace_id, request.execution_id).events
         ):
@@ -2215,7 +2357,7 @@ class HypothesisDevelopmentWorkflow:
             payload = event.payload
             if (
                 payload.get("phase") != phase.value
-                or payload.get("parentSubAgentId") is not None
+                or payload.get("parentSubAgentId") != node_id
             ):
                 continue
             family, default_role = _PHASE_ORCHESTRATORS[phase]
@@ -2290,6 +2432,19 @@ class HypothesisDevelopmentWorkflow:
             accepts_input=False,
             extra=extra,
         )
+        if self._subagent_lifecycle is not None:
+            if status == STATUS_COMPLETED:
+                self._subagent_lifecycle.complete(
+                    request.workspace_id,
+                    active.sub_agent_id,
+                    result=(None if summary is None else {"summary": summary}),
+                )
+            else:
+                self._subagent_lifecycle.fail(
+                    request.workspace_id,
+                    active.sub_agent_id,
+                    result=None if detail is None else {"failure": detail},
+                )
 
     def _phase_summary(
         self, state: HypothesisDevelopmentState, phase: HypothesisDevelopmentPhase
@@ -2536,8 +2691,10 @@ class HypothesisDevelopmentWorkflow:
                 "Write exactly one concise, natural request addressed to the "
                 "operator. Include the concrete reason, say what you need from "
                 "them, and do not mention internal step names, schemas, or that "
-                "you are a model. Reply with the request text only: no quotes, "
-                "no JSON, no code fences.",
+                "you are a model. If you reference any mathematics, render it as "
+                "LaTeX for KaTeX: inline math as \\(...\\) and display equations "
+                "as \\[...\\] on their own line, never with a bare $. Reply with "
+                "the request text only: no quotes, no JSON, no code fences.",
             ]
         )
         try:
@@ -2879,4 +3036,47 @@ class HypothesisDevelopmentWorkflow:
                 intent_epoch=updated.intent_epoch,
                 event_id=self._id_factory("event"),
             )
+        )
+        self._finish_workflow_node(request, final_state)
+
+    def _finish_workflow_node(
+        self,
+        request: HypothesisDevelopmentRequest,
+        final_state: WorkflowExecutionState,
+    ) -> None:
+        """Close the execution's durable workflow node when the run ends."""
+        if self._subagent_lifecycle is None:
+            return
+        node_id = self._workflow_node_id(request)
+        if node_id is None:
+            return
+        record = self._subagent_lifecycle.get(request.workspace_id, node_id)
+        if record is None:
+            return
+        completed = final_state is WorkflowExecutionState.COMPLETED
+        if completed:
+            self._subagent_lifecycle.complete(request.workspace_id, node_id)
+        else:
+            self._subagent_lifecycle.fail(request.workspace_id, node_id)
+        append_sub_agent_event(
+            self._chat.event_store,
+            execution_id=request.execution_id,
+            workspace_id=request.workspace_id,
+            event_type=(
+                ExecutionEventType.SUB_AGENT_COMPLETED
+                if completed
+                else ExecutionEventType.SUB_AGENT_FAILED
+            ),
+            occurred_at=self._clock(),
+            sub_agent_id=node_id,
+            parent_sub_agent_id=record.parent_sub_agent_id,
+            phase=_REQUESTED.value,
+            role=WORKFLOW_NODE_ROLE,
+            context=SubAgentContextSpec(),
+            accepts_input=False,
+            intent_epoch=request.intent_epoch,
+            extra={
+                "frozen": True,
+                "status": STATUS_COMPLETED if completed else STATUS_FAILED,
+            },
         )

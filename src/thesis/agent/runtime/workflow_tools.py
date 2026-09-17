@@ -62,6 +62,7 @@ class WorkflowLauncher(Protocol):
         ideas: str,
         investigation_id: str | None = None,
         trigger_message_id: str | None = None,
+        anchor_sub_agent_id: str | None = None,
     ) -> Mapping[str, object]:
         """Launch and run one falsification-first hypothesis-development run."""
 
@@ -104,18 +105,33 @@ def workflow_registered_tools(
             not isinstance(investigation_id, str) or not investigation_id.strip()
         ):
             return _failure("investigation_id must be non-empty text when set")
-        result = launcher.start_hypothesis_development(
-            workspace_id=context.workspace_id,
-            chat_id=context.chat_id,
-            actor_id=context.actor_id,
-            ideas=idea.strip(),
-            investigation_id=(
-                None if investigation_id is None else investigation_id.strip()
-            ),
-            # Anchor the execution on the operator message that requested it so
-            # the launch never writes a second, duplicate trigger message.
-            trigger_message_id=context.trigger_message_id,
-        )
+        if context.sub_agent_id is None:
+            result = launcher.start_hypothesis_development(
+                workspace_id=context.workspace_id,
+                chat_id=context.chat_id,
+                actor_id=context.actor_id,
+                ideas=idea.strip(),
+                investigation_id=(
+                    None if investigation_id is None else investigation_id.strip()
+                ),
+                # Anchor the execution on the operator message that requested it
+                # so the launch never writes a second, duplicate trigger message.
+                trigger_message_id=context.trigger_message_id,
+            )
+        else:
+            # The caller's anchor decides where the execution belongs: the root
+            # chat for the top-level agent, the caller's node for a sub-agent.
+            result = launcher.start_hypothesis_development(
+                workspace_id=context.workspace_id,
+                chat_id=context.chat_id,
+                actor_id=context.actor_id,
+                ideas=idea.strip(),
+                investigation_id=(
+                    None if investigation_id is None else investigation_id.strip()
+                ),
+                trigger_message_id=context.trigger_message_id,
+                anchor_sub_agent_id=context.sub_agent_id,
+            )
         structured = dict(result)
         return ToolExecution(
             ok=True,
