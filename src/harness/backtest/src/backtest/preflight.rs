@@ -1,4 +1,4 @@
-//! Data-source resolution and runnability preflight for backtest runs.
+﻿//! Data-source resolution and runnability preflight for backtest runs.
 //!
 //! Port of `harness.runtime.backtest.preflight`. The local Parquet lake reader
 //! lives in the Rust data layer (another epic), so the staged resolver handles
@@ -21,7 +21,7 @@ pub fn preflight_data(
     configuration: &BacktestConfig,
     fixture: &ReplayFixture,
 ) -> Result<DataPreflight, BacktestError> {
-    if !configuration.is_backtest() {
+    if !configuration.is_replay() {
         return Err(BacktestError::Configuration(
             "configuration must be a validated BacktestConfig".to_string(),
         ));
@@ -97,7 +97,7 @@ pub fn resolve_data_source(
     data_source: Option<&ReplayFixture>,
     options: Option<&SyntheticDataOptions>,
 ) -> Result<ReplayFixture, BacktestError> {
-    if !configuration.is_backtest() {
+    if !configuration.is_replay() {
         return Err(BacktestError::Configuration(
             "configuration must be a validated BacktestConfig".to_string(),
         ));

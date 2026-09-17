@@ -225,7 +225,7 @@ fn host_to_backtest(error: HostError) -> BacktestError {
     BacktestError::StrategyExecution(error.to_string())
 }
 
-fn market_to_python<'py>(
+pub(crate) fn market_to_python<'py>(
     py: Python<'py>,
     event: &EngineMarket,
 ) -> Result<Bound<'py, PyAny>, HostError> {

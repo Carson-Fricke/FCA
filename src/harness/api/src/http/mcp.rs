@@ -19,7 +19,7 @@ use mcp::server::{error_response, McpServer, PARSE_ERROR};
 use mcp::tools::{Boundary, ContextError, HarnessToolsContext};
 use serde_json::{json, Value};
 
-use crate::local::NativeBacktestSubmitter;
+use crate::local::{NativeBacktestSubmitter, NativeStudySubmitter};
 
 use super::models::error_body;
 use super::state::AppState;
@@ -41,6 +41,10 @@ pub fn compose_local_server(
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
     context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(
+        run_store.clone(),
+        job_repository.clone(),
+    )));
+    context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(
         run_store.clone(),
         job_repository.clone(),
     )));

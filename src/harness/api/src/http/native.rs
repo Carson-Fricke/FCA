@@ -46,9 +46,18 @@ impl BacktestRunner for NativeBacktestRunner {
                 .join("harness-api-native")
                 .join(&native.run_id),
         };
-        let (outcome, _artifact_path) =
-            host::backtest::run_backtest_config(&native, Some(directory.as_path()), None)
-                .map_err(|error| error.to_string())?;
+        let (outcome, _artifact_path) = match configuration
+            .document
+            .get("shell")
+            .and_then(Value::as_str)
+        {
+            Some("study") => {
+                host::study::run_study_config(&native, Some(directory.as_path()), None)
+                    .map_err(|error| error.to_string())?
+            }
+            _ => host::backtest::run_backtest_config(&native, Some(directory.as_path()), None)
+                .map_err(|error| error.to_string())?,
+        };
         let mut artifacts = BTreeMap::new();
         collect_artifacts(&directory, &directory, &mut artifacts);
         Ok(RunOutcome {

@@ -317,6 +317,32 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
     BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
 }
 
+/// Load and validate one study configuration document (shell `study`).
+///
+/// A study reuses the replay configuration shape but declares the `study`
+/// shell, so it is never confused with a backtest. The strategy-instance list
+/// names platform study programs rather than user strategies.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when the document is missing a `study` shell,
+/// carries an invalid window, or cannot be read.
+pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJobError> {
+    let text = std::fs::read_to_string(config_path)
+        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
+    if shell != "study" {
+        return Err(BacktestJobError::WrongShell(shell));
+    }
+    if text.trim_start().starts_with('{') {
+        let document: serde_json::Value =
+            serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        return BacktestConfig::from_yaml_value(&json_to_yaml(&document))
+            .map_err(BacktestJobError::from);
+    }
+    BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
+}
+
 fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
     match value {
         serde_json::Value::Null => YamlValue::Null,
@@ -481,6 +507,45 @@ pub fn run_native_job_with_data_dir(
     strategies: Vec<StrategyInstance>,
     data_dir: Option<&Path>,
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
+    let outcome = run_native_engine_outcome(configuration, engine_options, strategies, data_dir)?;
+    let artifact_path = write_run_artifacts(
+        configuration,
+        &outcome,
+        output_dir,
+        "backtests",
+        "backtest.json",
+    )?;
+    Ok((outcome, artifact_path))
+}
+
+/// Run one native study job: the replay driven by study programs with no order
+/// execution. Writes the canonical `study.json` artifact and returns the outcome
+/// with its path.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when the configuration, fixture, engine, or
+/// artifact write fails.
+pub fn run_native_study_job_with_data_dir(
+    configuration: &BacktestConfig,
+    engine_options: &EngineOptions,
+    output_dir: Option<&Path>,
+    programs: Vec<StrategyInstance>,
+    data_dir: Option<&Path>,
+) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
+    let outcome = run_native_engine_outcome(configuration, engine_options, programs, data_dir)?;
+    let artifact_path =
+        write_run_artifacts(configuration, &outcome, output_dir, "studies", "study.json")?;
+    Ok((outcome, artifact_path))
+}
+
+/// Drive the native engine for one job over a lake directory or synthetic fixture.
+fn run_native_engine_outcome(
+    configuration: &BacktestConfig,
+    engine_options: &EngineOptions,
+    strategies: Vec<StrategyInstance>,
+    data_dir: Option<&Path>,
+) -> Result<BacktestOutcome, BacktestJobError> {
     let synthetic_options = if data_dir.is_some() {
         lake_scale_options()
     } else {
@@ -495,7 +560,7 @@ pub fn run_native_job_with_data_dir(
     };
     let preflight = preflight_data(configuration, &fixture)?;
     let manifest = build_default_manifest(configuration, &fixture, &preflight)?;
-    let outcome = run_native_engine(
+    Ok(run_native_engine(
         configuration,
         &fixture,
         &preflight,
@@ -503,23 +568,33 @@ pub fn run_native_job_with_data_dir(
         engine_options,
         strategies,
         &synthetic_options,
-    )?;
+    )?)
+}
+
+/// Write the canonical artifact and complete result set for one native outcome.
+fn write_run_artifacts(
+    configuration: &BacktestConfig,
+    outcome: &BacktestOutcome,
+    output_dir: Option<&Path>,
+    default_subdir: &str,
+    artifact_name: &str,
+) -> Result<PathBuf, BacktestJobError> {
     let directory = output_dir.map_or_else(
         || {
             PathBuf::from(".local")
-                .join("backtests")
+                .join(default_subdir)
                 .join(&configuration.run_id)
         },
         Path::to_path_buf,
     );
     std::fs::create_dir_all(&directory).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-    let artifact_path = directory.join("backtest.json");
+    let artifact_path = directory.join(artifact_name);
     let mut payload = outcome.artifact_json().into_bytes();
     payload.push(b'\n');
     std::fs::write(&artifact_path, payload)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
-    write_native_results(&directory, configuration, &outcome)?;
-    Ok((outcome, artifact_path))
+    write_native_results(&directory, configuration, outcome)?;
+    Ok(artifact_path)
 }
 
 /// Write the complete result set for one native engine run.

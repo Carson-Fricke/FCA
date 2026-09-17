@@ -38,7 +38,7 @@ pub mod local;
 pub mod mcp_cli;
 pub mod native;
 
-pub use native::NativeBacktestJobRunner;
+pub use native::{NativeBacktestJobRunner, NativeStudyJobRunner};
 
 /// Root help/`about` text for the `harness` facade.
 ///
@@ -78,6 +78,9 @@ pub enum HarnessCommand {
     /// Run one deterministic backtest job.
     #[command(name = "backtest-job")]
     BacktestJob(BacktestJobArgs),
+    /// Run one deterministic study job (replay for indicators and models).
+    #[command(name = "study-job")]
+    StudyJob(StudyJobArgs),
     /// Run one supervised paper or shadow trading session to completion.
     #[command(name = "trader")]
     Trader(TraderArgs),
@@ -103,6 +106,28 @@ pub struct BacktestJobArgs {
 
     /// Directory for the canonical run artifact document. Defaults to
     /// `.local/backtests/<run_id>`.
+    #[arg(long = "output-dir", value_name = "PATH")]
+    pub output_dir: Option<PathBuf>,
+}
+
+/// Options for `harness study-job` / the `study-job` entry point.
+///
+/// A study reuses the replay window and data options but runs platform study
+/// programs with no order execution and writes a `study.json` artifact.
+#[derive(Debug, Clone, Default, Args)]
+pub struct StudyJobArgs {
+    /// Path to a typed study configuration document.
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
+    /// Optional local Parquet lake directory
+    /// (date=/asset_class=/data_type=/SYMBOL.parquet). Omit for the
+    /// deterministic synthetic benchmark fixture.
+    #[arg(long = "data-dir", value_name = "PATH")]
+    pub data_dir: Option<PathBuf>,
+
+    /// Directory for the canonical study artifact document. Defaults to
+    /// `.local/studies/<run_id>`.
     #[arg(long = "output-dir", value_name = "PATH")]
     pub output_dir: Option<PathBuf>,
 }
@@ -187,6 +212,19 @@ pub struct BacktestJobCli {
     /// The shared backtest job options.
     #[command(flatten)]
     pub args: BacktestJobArgs,
+}
+
+/// Standalone `study-job` entry point.
+#[derive(Debug, Parser)]
+#[command(
+    name = "study-job",
+    about = "Run one deterministic study job (replay for indicators and models).",
+    disable_help_subcommand = true
+)]
+pub struct StudyJobCli {
+    /// The shared study job options.
+    #[command(flatten)]
+    pub args: StudyJobArgs,
 }
 
 /// The canonical summary the Python `backtest-job` prints after a run.
@@ -282,6 +320,29 @@ impl BacktestJobRunner for UnportedBacktestJobRunner {
     }
 }
 
+/// Execution seam between the parsed `study-job` surface and the study engine.
+///
+/// The native study path implements this trait; a study runs platform study
+/// programs with no order execution and writes a `study.json` artifact.
+pub trait StudyJobRunner {
+    /// Run one study for the already-validated command arguments.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BacktestJobError`] when the study cannot complete the run.
+    fn run(&self, args: &StudyJobArgs) -> Result<BacktestRunSummary, BacktestJobError>;
+}
+
+/// Always-failing study runner double used to test CLI error handling.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UnportedStudyJobRunner;
+
+impl StudyJobRunner for UnportedStudyJobRunner {
+    fn run(&self, _args: &StudyJobArgs) -> Result<BacktestRunSummary, BacktestJobError> {
+        Err(BacktestJobError::EngineNotPorted)
+    }
+}
+
 /// The channel and exit code of one command invocation.
 ///
 /// Encodes the Typer behavior precisely: help and success write stdout and
@@ -343,14 +404,25 @@ pub fn root_help() -> String {
 /// `runner` is the injected backtest engine seam; the `api`, `mcp`, and
 /// `trader` groups return their process requests for the binary to execute.
 #[must_use]
-pub fn run(cli: HarnessCli, runner: &dyn BacktestJobRunner) -> CommandResult {
+pub fn run(
+    cli: HarnessCli,
+    runner: &dyn BacktestJobRunner,
+    study_runner: &dyn StudyJobRunner,
+) -> CommandResult {
     match cli.command {
         None => CommandResult::Help(root_help()),
         Some(HarnessCommand::BacktestJob(args)) => execute_backtest_job(&args, runner),
+        Some(HarnessCommand::StudyJob(args)) => execute_study_job(&args, study_runner),
         Some(HarnessCommand::Api(args)) => CommandResult::ServeApi(args),
         Some(HarnessCommand::Trader(args)) => CommandResult::RunTrader(args),
         Some(HarnessCommand::Mcp(args)) => CommandResult::ServeMcp(args),
     }
+}
+
+/// Dispatch the standalone `study-job` entry point.
+#[must_use]
+pub fn run_study_job(cli: StudyJobCli, runner: &dyn StudyJobRunner) -> CommandResult {
+    execute_study_job(&cli.args, runner)
 }
 
 /// Dispatch the standalone `backtest-job` entry point.
@@ -404,6 +476,54 @@ pub fn execute_backtest_job(
         Err(error) => CommandResult::Failed {
             stdout: String::new(),
             stderr: format!("Backtest failed: {error}"),
+        },
+    }
+}
+
+/// Validate and execute one study job.
+///
+/// A missing `--config` and a configuration whose `shell` is not `study` both
+/// exit `2`; an engine failure exits `1` after printing the summary.
+#[must_use]
+pub fn execute_study_job(
+    args: &StudyJobArgs,
+    runner: &dyn StudyJobRunner,
+) -> CommandResult {
+    let Some(config) = args.config.as_deref() else {
+        return CommandResult::UsageError(
+            "A study configuration is required: study-job --config <path>".to_string(),
+        );
+    };
+
+    let shell = match configuration_shell(config) {
+        Ok(shell) => shell,
+        Err(error) => {
+            return CommandResult::UsageError(format!(
+                "configuration could not be loaded: {error}"
+            ));
+        }
+    };
+    if shell != "study" {
+        return CommandResult::UsageError(format!(
+            "configuration shell must be 'study', not '{shell}'"
+        ));
+    }
+
+    match runner.run(args) {
+        Ok(summary) => {
+            let stdout = summary.stdout_lines().join("\n");
+            if summary.status != "completed" {
+                let reason = summary.reason.unwrap_or_else(|| summary.status.clone());
+                return CommandResult::Failed {
+                    stdout,
+                    stderr: format!("reason: {reason}"),
+                };
+            }
+            CommandResult::Completed { stdout }
+        }
+        Err(error) => CommandResult::Failed {
+            stdout: String::new(),
+            stderr: format!("Study failed: {error}"),
         },
     }
 }

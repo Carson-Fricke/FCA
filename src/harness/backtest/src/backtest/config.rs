@@ -275,6 +275,15 @@ impl BacktestConfig {
         self.shell == "backtest"
     }
 
+    /// Whether the configuration drives a replay shell (backtest or study).
+    ///
+    /// A study reuses the deterministic replay substrate with no order
+    /// execution, so the data preflight accepts it exactly like a backtest.
+    #[must_use]
+    pub fn is_replay(&self) -> bool {
+        self.shell == "backtest" || self.shell == "study"
+    }
+
     /// The domain-separated canonical configuration hash.
     #[must_use]
     pub fn configuration_hash(&self) -> String {
@@ -425,9 +434,9 @@ impl BacktestConfig {
             BacktestError::Configuration("configuration root must be a mapping".to_string())
         })?;
         let shell = string_field(root, "shell")?;
-        if shell != "backtest" {
+        if shell != "backtest" && shell != "study" {
             return Err(BacktestError::Configuration(format!(
-                "configuration shell must be 'backtest', not '{shell}'"
+                "configuration shell must be 'backtest' or 'study', not '{shell}'"
             )));
         }
         let run_id = string_field(root, "run_id")?;

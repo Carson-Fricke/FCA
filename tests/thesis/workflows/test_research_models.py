@@ -112,7 +112,7 @@ def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
     config = cast("Mapping[str, object]", request.bundle.harness_configuration)
     instances = cast("Sequence[Mapping[str, object]]", config["strategy_instances"])
     assert instances[0]["implementation"] == (
-        "harness.research.adapter:ResearchModelAdapter"
+        "harness.research.study:ResearchModelProgram"
     )
     parameters = cast("Mapping[str, object]", instances[0]["parameters"])
     assert parameters["model_source"] == model.source

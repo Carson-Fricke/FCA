@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 #[derive(Default)]
 struct RecordingRunner {
@@ -52,7 +52,7 @@ fn root_help_lists_process_groups() {
 #[test]
 fn bare_harness_shows_root_help() {
     let cli = HarnessCli::try_parse_from(["harness"]).expect("parse");
-    let result = run(cli, &UnportedBacktestJobRunner);
+    let result = run(cli, &UnportedBacktestJobRunner, &UnportedStudyJobRunner);
     match result {
         CommandResult::Help(help) => assert!(help.contains("backtest-job")),
         other => panic!("expected help, got {other:?}"),
@@ -83,7 +83,7 @@ fn backtest_job_parses_every_flag() {
 #[test]
 fn backtest_job_requires_a_configuration() {
     let cli = HarnessCli::try_parse_from(["harness", "backtest-job"]).expect("parse");
-    let result = run(cli, &UnportedBacktestJobRunner);
+    let result = run(cli, &UnportedBacktestJobRunner, &UnportedStudyJobRunner);
     match result {
         CommandResult::UsageError(ref message) => {
             assert_eq!(result.exit_code(), 2);
@@ -103,7 +103,7 @@ fn backtest_job_rejects_a_non_backtest_shell() {
         path.to_str().expect("utf8 path"),
     ])
     .expect("parse");
-    let result = run(cli, &UnportedBacktestJobRunner);
+    let result = run(cli, &UnportedBacktestJobRunner, &UnportedStudyJobRunner);
     match result {
         CommandResult::UsageError(ref message) => {
             assert_eq!(result.exit_code(), 2);
@@ -131,7 +131,7 @@ fn backtest_job_drives_the_injected_runner() {
         "out",
     ])
     .expect("parse");
-    let result = run(cli, &runner);
+    let result = run(cli, &runner, &UnportedStudyJobRunner);
     match result {
         CommandResult::Completed { ref stdout } => {
             assert_eq!(result.exit_code(), 0);
@@ -157,7 +157,7 @@ fn backtest_job_reports_engine_failure_with_exit_one() {
         path.to_str().expect("utf8 path"),
     ])
     .expect("parse");
-    let result = run(cli, &UnportedBacktestJobRunner);
+    let result = run(cli, &UnportedBacktestJobRunner, &UnportedStudyJobRunner);
     match result {
         CommandResult::Failed { ref stderr, .. } => {
             assert_eq!(result.exit_code(), 1);
@@ -199,7 +199,7 @@ fn standalone_backtest_job_dispatches() {
 #[test]
 fn trader_dispatches_to_the_supervision_runner() {
     let cli = HarnessCli::try_parse_from(["harness", "trader"]).expect("parse");
-    match run(cli, &UnportedBacktestJobRunner) {
+    match run(cli, &UnportedBacktestJobRunner, &UnportedStudyJobRunner) {
         CommandResult::RunTrader(args) => {
             assert_eq!(args.config, PathBuf::from("config/harness/trader.yaml"));
             assert!(args.command.is_none());
@@ -211,7 +211,7 @@ fn trader_dispatches_to_the_supervision_runner() {
 #[test]
 fn api_and_mcp_dispatch_to_their_servers() {
     let api = HarnessCli::try_parse_from(["harness", "api"]).expect("parse");
-    match run(api, &UnportedBacktestJobRunner) {
+    match run(api, &UnportedBacktestJobRunner, &UnportedStudyJobRunner) {
         CommandResult::ServeApi(args) => assert!(args.config.is_none()),
         other => panic!("expected api serve, got {other:?}"),
     }
@@ -226,7 +226,7 @@ fn api_and_mcp_dispatch_to_their_servers() {
         "--enable-trader",
     ])
     .expect("parse");
-    match run(mcp, &UnportedBacktestJobRunner) {
+    match run(mcp, &UnportedBacktestJobRunner, &UnportedStudyJobRunner) {
         CommandResult::ServeMcp(args) => {
             assert_eq!(args.mode, "remote");
             assert!(args.enable_trader);

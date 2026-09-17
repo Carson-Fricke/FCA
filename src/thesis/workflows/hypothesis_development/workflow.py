@@ -599,7 +599,9 @@ class HypothesisDevelopmentWorkflow:
         except Exception:  # noqa: BLE001 - an unavailable model is not a decision
             return None
         action = document.get("action")
-        return action if action in {"check_off", "circle_back"} else None
+        if isinstance(action, str) and action in {"check_off", "circle_back"}:
+            return action
+        return None
 
     def _run_after_creation(
         self,

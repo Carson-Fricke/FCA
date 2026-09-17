@@ -85,6 +85,7 @@ TOOL_GET_RUN = "get_run"
 TOOL_LIST_ARTIFACTS = "list_artifacts"
 TOOL_READ_ARTIFACT = "read_artifact"
 TOOL_RUN_SWEEP = "run_sweep"
+TOOL_RUN_STUDY = "run_study"
 TOOL_LAUNCH_TRADER = "launch_trader"
 
 
@@ -980,6 +981,7 @@ __all__ = [
     "TOOL_LIST_ARTIFACTS",
     "TOOL_READ_ARTIFACT",
     "TOOL_RUN_BACKTEST",
+    "TOOL_RUN_STUDY",
     "TOOL_RUN_SWEEP",
     "EnvironmentHarnessTokenSource",
     "HarnessMcpAuthError",

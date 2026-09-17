@@ -16,7 +16,10 @@ use std::path::PathBuf;
 
 use backtest::backtest::engine_core::BacktestOutcome;
 
-use crate::{BacktestJobArgs, BacktestJobError, BacktestJobRunner, BacktestRunSummary};
+use crate::{
+    BacktestJobArgs, BacktestJobError, BacktestJobRunner, BacktestRunSummary, StudyJobArgs,
+    StudyJobRunner,
+};
 
 /// Run `backtest-job` through the native Rust engine and Python strategy host.
 #[derive(Debug, Clone, Copy, Default)]
@@ -31,6 +34,29 @@ impl BacktestJobRunner for NativeBacktestJobRunner {
         };
         let (outcome, artifact_path) = host::backtest::run_backtest_job_with_data_dir(
             config,
+            args.output_dir.as_deref(),
+            args.data_dir.as_deref(),
+        )
+        .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+        Ok(summary_from_outcome(&outcome, artifact_path))
+    }
+}
+
+/// Run `study-job` through the native Rust engine and Python study host.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NativeStudyJobRunner;
+
+impl StudyJobRunner for NativeStudyJobRunner {
+    fn run(&self, args: &StudyJobArgs) -> Result<BacktestRunSummary, BacktestJobError> {
+        let Some(config) = args.config.as_deref() else {
+            return Err(BacktestJobError::Engine(
+                "A study configuration is required: study-job --config <path>".to_string(),
+            ));
+        };
+        let configuration = backtest::backtest::job::load_study_config(config)
+            .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+        let (outcome, artifact_path) = host::study::run_study_config(
+            &configuration,
             args.output_dir.as_deref(),
             args.data_dir.as_deref(),
         )

@@ -78,6 +78,156 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
     }
 }
 
+/// Local study submitter that runs the native engine study path and records it.
+pub struct NativeStudySubmitter {
+    run_store: Arc<dyn RunStore>,
+    jobs: Arc<dyn JobRepository>,
+}
+
+impl NativeStudySubmitter {
+    /// Compose a submitter over the shared durable store.
+    #[must_use]
+    pub fn new(run_store: Arc<dyn RunStore>, jobs: Arc<dyn JobRepository>) -> Self {
+        Self { run_store, jobs }
+    }
+}
+
+impl mcp::tools::StudySubmitter for NativeStudySubmitter {
+    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String> {
+        let configuration = backtest::backtest::job::load_study_config(Path::new(config_path))
+            .map_err(|error| error.to_string())?;
+        let run_id = configuration.run_id.clone();
+        let started = Utc::now();
+        self.jobs.upsert(mcp::store::JobRecord::new(
+            &run_id,
+            JobState::Running,
+            started,
+            started,
+        ));
+        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
+            std::env::temp_dir().join("harness-mcp-studies").join(&run_id)
+        });
+        let run_store = self.run_store.clone();
+        let jobs = self.jobs.clone();
+        let config_path = config_path.to_string();
+        let background_run_id = run_id.clone();
+        let _handle = std::thread::spawn(move || {
+            run_background_study(
+                run_store,
+                jobs,
+                background_run_id,
+                config_path,
+                output_dir,
+                started,
+            );
+        });
+        Ok(json!({
+            "boundary": "local",
+            "study_id": run_id,
+            "state": "running",
+            "kind": "study",
+        }))
+    }
+}
+
+/// Run one study on a detached worker and persist its complete result set.
+fn run_background_study(
+    run_store: Arc<dyn RunStore>,
+    jobs: Arc<dyn JobRepository>,
+    run_id: String,
+    config_path: String,
+    output_dir: PathBuf,
+    started: DateTime<Utc>,
+) {
+    let configuration =
+        match backtest::backtest::job::load_study_config(Path::new(&config_path)) {
+            Ok(configuration) => configuration,
+            Err(error) => {
+                let message = error.to_string();
+                let mut artifacts = BTreeMap::new();
+                artifacts.insert(
+                    "error.json".to_string(),
+                    serde_json::to_vec(&json!({"error": message}))
+                        .unwrap_or_else(|_| b"{}".to_vec()),
+                );
+                let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
+                let _ = run_store.put(record, artifacts);
+                fail_job(&jobs, &run_id, started, message);
+                return;
+            }
+        };
+    let env_lake_dir = std::env::var("HARNESS_DATA_DIR")
+        .or_else(|_| std::env::var("LAKE_LOCAL_DATA_DIR"))
+        .ok()
+        .map(PathBuf::from);
+    let default_lake = PathBuf::from(".local").join("market-lake");
+    let candidate_lake = env_lake_dir.or_else(|| {
+        if default_lake.is_dir() {
+            Some(default_lake)
+        } else {
+            None
+        }
+    });
+    if let Err(message) = ensure_lake_data(&configuration) {
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert(
+            "error.json".to_string(),
+            serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+        );
+        let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
+        let _ = run_store.put(record, artifacts);
+        fail_job(&jobs, &run_id, started, message);
+        return;
+    }
+    match host::study::run_study_config(
+        &configuration,
+        Some(output_dir.as_path()),
+        candidate_lake.as_deref(),
+    ) {
+        Ok((outcome, _artifact_path)) => {
+            if let Ok(text) = fs::read(&config_path) {
+                let _ = fs::write(output_dir.join("config.yaml"), text);
+            }
+            let mut artifacts = BTreeMap::new();
+            collect_artifacts(&output_dir, &output_dir, &mut artifacts);
+            if artifacts.is_empty() {
+                artifacts.insert(
+                    "study.json".to_string(),
+                    outcome.artifact_json().into_bytes(),
+                );
+            }
+            let mut record =
+                RunCatalogRecord::new(&run_id, run_status(outcome.completed()), "study");
+            record.configuration_digest = Some(configuration.configuration_hash());
+            record.metrics = headline_metrics(&artifacts, &configuration);
+            if let Err(error) = run_store.put(record, artifacts) {
+                fail_job(&jobs, &run_id, started, error.to_string());
+                return;
+            }
+            let mut job = mcp::store::JobRecord::new(
+                &run_id,
+                job_state(outcome.completed()),
+                started,
+                Utc::now(),
+            );
+            job.error_message = outcome.reason.clone();
+            jobs.upsert(job);
+        }
+        Err(error) => {
+            let message = error.to_string();
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert(
+                "error.json".to_string(),
+                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+            );
+            let mut record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
+            record.configuration_digest = Some(configuration.configuration_hash());
+            let _ = run_store.put(record, artifacts);
+            fail_job(&jobs, &run_id, started, message);
+        }
+    }
+}
+
 /// Run one backtest on a detached worker and persist its complete result set.
 ///
 /// Every file the native engine writes under `output_dir` is registered with the

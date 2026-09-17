@@ -41,6 +41,7 @@ from thesis.integrations.mcp import (
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
     TOOL_RUN_BACKTEST,
+    TOOL_RUN_STUDY,
     TOOL_RUN_SWEEP,
     HarnessMcpAuthError,
     HarnessMcpBoundary,
@@ -60,6 +61,7 @@ from thesis.integrations.mcp import (
 #: The harness MCP tools the Thesis agent may discover and call.
 HARNESS_TOOL_NAMES: tuple[str, ...] = (
     TOOL_RUN_BACKTEST,
+    TOOL_RUN_STUDY,
     TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_GET_BACKTEST_STATUS,
     TOOL_GET_RUN,
@@ -194,6 +196,26 @@ class HarnessToolResult:
 @dataclass(frozen=True, slots=True)
 class RunBacktestArgs:
     """Typed arguments for ``run_backtest``."""
+
+    config_path: str
+    workspace: str | None = None
+
+    def __post_init__(self) -> None:
+        _required_text(self.config_path, "config_path")
+        if self.workspace is not None:
+            _required_text(self.workspace, "workspace")
+
+    def to_arguments(self) -> dict[str, object]:
+        """Return the MCP ``tools/call`` arguments for this request."""
+        arguments: dict[str, object] = {"config_path": self.config_path}
+        if self.workspace is not None:
+            arguments["workspace"] = self.workspace
+        return arguments
+
+
+@dataclass(frozen=True, slots=True)
+class RunStudyArgs:
+    """Typed arguments for ``run_study``."""
 
     config_path: str
     workspace: str | None = None
@@ -369,6 +391,10 @@ class HarnessToolProvider:
     def run_backtest(self, args: RunBacktestArgs) -> HarnessToolResult:
         """Call ``run_backtest`` with typed arguments."""
         return self.call_tool(TOOL_RUN_BACKTEST, args.to_arguments())
+
+    def run_study(self, args: RunStudyArgs) -> HarnessToolResult:
+        """Call ``run_study`` with typed arguments."""
+        return self.call_tool(TOOL_RUN_STUDY, args.to_arguments())
 
     def backtest_config_template(self) -> HarnessToolResult:
         """Call ``backtest_config_template`` for a starter configuration."""
@@ -609,6 +635,7 @@ __all__ = [
     "ListArtifactsArgs",
     "ReadArtifactArgs",
     "RunBacktestArgs",
+    "RunStudyArgs",
     "RunSweepArgs",
     "harness_mcp_skill",
     "harness_mcp_skill_ref",

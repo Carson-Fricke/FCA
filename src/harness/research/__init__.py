@@ -6,17 +6,18 @@ adapter is the only component that bridges model outputs into a backtest run's
 custom metric channel.
 """
 
-from harness.research.adapter import ResearchModelAdapter, ResearchModelMonitor
+from harness.research.adapter import ResearchModelMonitor
 from harness.research.programs import (
     ResearchProgramError,
     evaluate_indicator,
     fit_model,
     observe_model,
 )
+from harness.research.study import ResearchModelProgram
 
 __all__ = [
-    "ResearchModelAdapter",
     "ResearchModelMonitor",
+    "ResearchModelProgram",
     "ResearchProgramError",
     "evaluate_indicator",
     "fit_model",

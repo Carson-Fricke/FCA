@@ -131,20 +131,20 @@ fn native_submitter_persists_research_model_custom_metrics() {
     fs::create_dir_all(&root).expect("dir");
     let run_store: Arc<dyn RunStore> = Arc::new(FileSystemRunStore::new(&root));
     let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
-    let submitter = NativeBacktestSubmitter::new(run_store.clone(), jobs.clone());
+    let submitter = NativeStudySubmitter::new(run_store.clone(), jobs.clone());
     let config_path = root.join("research.json");
     let model_source = "def fit(context):\n    return {'baseline': 0.5}\n\ndef observe(fit, context):\n    return {'trade_observations': context['indicators']['workspace_trade_count'], 'global_sma': context['indicators']['spy_sma']['value']}\n";
     let indicator_source =
         "def calculate(context, parameters):\n    return len(context['trades'])\n";
     let document = json!({
         "schema_version": 1,
-        "shell": "backtest",
+        "shell": "study",
         "run_id": "workspace-research-metric",
         "seed": 1729,
         "data": {"symbols": ["SPY"]},
         "strategy_instances": [{
             "instance_id": "research-model",
-            "implementation": "harness.research.adapter:ResearchModelAdapter",
+            "implementation": "harness.research.study:ResearchModelProgram",
             "bundle_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "capital_fraction": "1.0",
             "symbols": ["SPY"],
@@ -181,13 +181,13 @@ fn native_submitter_persists_research_model_custom_metrics() {
     )
     .expect("write config");
     let output_dir = root.join("output");
-    let payload = mcp::tools::BacktestSubmitter::submit(
+    let payload = mcp::tools::StudySubmitter::submit(
         &submitter,
         config_path.to_str().expect("config path"),
         Some(output_dir.to_str().expect("output dir")),
     )
     .expect("submit");
-    let run_id = payload["run_id"].as_str().expect("run id");
+    let run_id = payload["study_id"].as_str().expect("study id");
     assert_eq!(poll_terminal(&jobs, run_id), JobState::Succeeded);
 
     let record = run_store.get(run_id).expect("run row");

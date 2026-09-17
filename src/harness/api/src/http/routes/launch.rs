@@ -1,4 +1,4 @@
-//! Authenticated backtest launch and job polling routes.
+﻿//! Authenticated backtest launch and job polling routes.
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -18,13 +18,45 @@ pub fn launch_router() -> Router<AppState> {
     Router::new()
         .route("/v1/backtests/jobs", post(launch_job))
         .route("/v1/backtests/jobs/{job_id}", get(job_status))
+        .route("/v1/studies/jobs", post(launch_study_job))
 }
 
 async fn launch_job(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
-    let configuration = state.configuration_parser.parse(&body).map_err(|error| {
-        ApiError::validation_error("the submitted document is not a valid backtest configuration")
-            .with_details(json!(error.to_string()))
+    launch_with_shell(&state, &body, "backtest", "/v1/backtests/jobs").await
+}
+
+async fn launch_study_job(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    launch_with_shell(&state, &body, "study", "/v1/studies/jobs").await
+}
+
+async fn launch_with_shell(
+    state: &AppState,
+    body: &[u8],
+    expected_shell: &str,
+    location_prefix: &str,
+) -> Result<Response, ApiError> {
+    let configuration = state.configuration_parser.parse(body).map_err(|error| {
+        ApiError::validation_error(&format!(
+            "the submitted document is not a valid {expected_shell} configuration"
+        ))
+        .with_details(json!(error.to_string()))
     })?;
+    let shell = configuration
+        .document
+        .get("shell")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if shell != expected_shell {
+        return Err(ApiError::validation_error(&format!(
+            "the submitted document is not a valid {expected_shell} configuration"
+        ))
+        .with_details(json!(format!(
+            "configuration shell must be '{expected_shell}', not '{shell}'"
+        ))));
+    }
     let job_id = configuration.run_id.clone();
     let now = state.clock.now();
     state
@@ -52,7 +84,7 @@ async fn launch_job(State(state): State<AppState>, body: Bytes) -> Result<Respon
         job_id: record.job_id.clone(),
         state: record.state,
     };
-    let location = HeaderValue::from_str(&format!("/v1/backtests/jobs/{job_id}"))
+    let location = HeaderValue::from_str(&format!("{location_prefix}/{job_id}"))
         .map_err(|_| ApiError::validation_error("job_id is not a valid header value"))?;
     let mut http = (StatusCode::ACCEPTED, Json(response)).into_response();
     http.headers_mut().insert(header::LOCATION, location);

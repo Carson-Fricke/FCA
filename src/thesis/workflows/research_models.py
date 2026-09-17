@@ -217,13 +217,13 @@ def _adapter_bundle(
         symbols = ["SPY"]
         data["symbols"] = symbols
     configuration["symbols"] = list(data["symbols"])
-    configuration["shell"] = "backtest"
+    configuration["shell"] = "study"
     configuration["run_id"] = request.run_id
     configuration["strategy_instances"] = [
         {
             "bundle_hash": model.content_sha256,
             "capital_fraction": "1.0",
-            "implementation": "harness.research.adapter:ResearchModelAdapter",
+            "implementation": "harness.research.study:ResearchModelProgram",
             "instance_id": _instance_id(model.model_id),
             "parameters": dict(runtime_configuration),
             "symbols": list(data["symbols"]),

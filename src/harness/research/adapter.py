@@ -19,7 +19,6 @@ from harness.research.programs import (
     fit_model,
     observe_model,
 )
-from harness.strategy import Strategy, StrategyContext
 
 
 class ResearchModelMonitor:
@@ -177,72 +176,6 @@ class ResearchModelMonitor:
         }
 
 
-class ResearchModelAdapter(Strategy):
-    """Bridge deterministic replay into model metrics without model order access."""
-
-    def __init__(
-        self,
-        *,
-        model_source: str,
-        model_fit_entrypoint: str = "fit",
-        model_observe_entrypoint: str = "observe",
-        fit: Mapping[str, float] | None = None,
-        indicators: Sequence[Mapping[str, object]] = (),
-        model_id: str | None = None,
-        outputs: Sequence[str] = (),
-        **_extra: object,
-    ) -> None:
-        self._monitor = ResearchModelMonitor(
-            model_source=model_source,
-            model_fit_entrypoint=model_fit_entrypoint,
-            model_observe_entrypoint=model_observe_entrypoint,
-            fit=fit,
-            indicators=indicators,
-            model_id=model_id,
-            outputs=outputs,
-        )
-
-    def on_start(self, context: StrategyContext) -> None:
-        del context
-
-    def on_quote(self, event: QuoteEvent) -> None:
-        self._monitor.on_quote(event)
-
-    def on_trade(self, event: TradeEvent) -> None:
-        self._monitor.on_trade(event)
-
-    def on_stop(self, context: StrategyContext) -> None:
-        try:
-            fitted = self._monitor.fit()
-        except Exception:
-            # Model fitting failure should be recorded cleanly as evidence,
-            # not crash the harness backtest execution.
-            context.publish_metric("sample_valid", 0.0)
-            context.publish_metric("fit.sample_valid", 0.0)
-            context.publish_metric("data_ok", 0.0)
-            context.publish_metric("fit.data_ok", 0.0)
-            context.publish_metric("fit.failed", 1.0)
-            for name in self._monitor._outputs:
-                if name not in ("sample_valid", "data_ok"):
-                    context.publish_metric(name, 0.0)
-            return
-
-        for name, value in fitted.items():
-            context.publish_metric(f"fit.{name}", value)
-
-        try:
-            observations = self._monitor.observe()
-        except Exception:
-            context.publish_metric("observe.failed", 1.0)
-            for name in self._monitor._outputs:
-                if name not in fitted:
-                    context.publish_metric(name, 0.0)
-            return
-
-        for name, value in observations.items():
-            context.publish_metric(name, value)
-
-
 def _mapping(value: object) -> dict[str, object]:
     if value is None:
         return {}
@@ -268,4 +201,4 @@ def _stored_number(value: object) -> float:
     return float(value)
 
 
-__all__ = ["ResearchModelAdapter", "ResearchModelMonitor"]
+__all__ = ["ResearchModelMonitor"]

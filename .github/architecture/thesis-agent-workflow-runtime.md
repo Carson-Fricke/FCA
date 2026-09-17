@@ -41,11 +41,23 @@ The `hypothesis_development` workflow is now a nested package
 (strategy development, autonomous discovery, and the standalone RCA loop) and
 their tests were removed.
 
-Still to implement: the harness `run_study` MCP tool and removal of
-`ResearchModelAdapter(Strategy)`; and wiring the workflow acceptance gates
-through `PhaseCompletionProtocol` and `request_phase_completion`, which changes
-the current "gate failure pauses immediately" behavior and therefore lands
-together with the matching phase-test updates.
+The harness `run_study` tool is implemented across the Rust workspace and the
+Python bridge:
+
+- `run_study` is a capability-gated MCP tool with a `StudySubmitter` boundary,
+  a remote `POST /v1/studies/jobs` route, and a `harness study-job` entrypoint
+  that writes a `study.json` artifact with the `study` shell;
+- the native engine gained a study execution mode (`host::study::PyStudyRuntime`)
+  that reuses the replay substrate and returns no orders, so a study never
+  submits an order and is never recorded as a backtest;
+- `ResearchModelAdapter(Strategy)` was removed and replaced by the platform
+  `ResearchModelProgram`, whose only context interaction is `publish_metric`;
+- Thesis now calls `run_study` through `McpStudyRunner`, and its research-model
+  bundle declares the `study` shell and the study program implementation.
+
+Still to implement: wiring conversation-phase gate failures through durable
+repair turns, which changes the current "gate failure pauses immediately"
+behavior and therefore lands together with the matching phase-test updates.
 
 ## Overview
 

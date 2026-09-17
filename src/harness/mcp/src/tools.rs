@@ -33,10 +33,13 @@ pub const TOOL_READ_ARTIFACT: &str = "read_artifact";
 pub const TOOL_RUN_SWEEP: &str = "run_sweep";
 /// Tool name for the capability-gated trader launch.
 pub const TOOL_LAUNCH_TRADER: &str = "launch_trader";
+/// Tool name for the study runner.
+pub const TOOL_RUN_STUDY: &str = "run_study";
 
 const LAUNCH_ROUTE: &str = "/v1/backtests/jobs";
 const JOB_STATUS_ROUTE: &str = "/v1/backtests/jobs";
 const RUN_ROUTE: &str = "/v1/backtests/runs";
+const STUDY_LAUNCH_ROUTE: &str = "/v1/studies/jobs";
 const IDENTIFIER_MAX: usize = 128;
 
 /// Canonical starter configuration embedded at build time so an agent can
@@ -146,6 +149,8 @@ pub struct ToolCapabilities {
     pub artifacts: bool,
     /// Publish `run_sweep`.
     pub sweeps: bool,
+    /// Publish `run_study`.
+    pub study: bool,
     /// Publish `launch_trader` (opt-in).
     pub trader: bool,
 }
@@ -157,6 +162,7 @@ impl Default for ToolCapabilities {
             backtest_status: true,
             artifacts: true,
             sweeps: true,
+            study: true,
             trader: false,
         }
     }
@@ -171,6 +177,7 @@ impl ToolCapabilities {
             "backtest_status": self.backtest_status,
             "artifacts": self.artifacts,
             "sweeps": self.sweeps,
+            "study": self.study,
             "trader": self.trader,
         })
     }
@@ -249,6 +256,16 @@ pub trait BacktestSubmitter: Send + Sync {
     fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
 }
 
+/// Injected local study surface for one study configuration document path.
+pub trait StudySubmitter: Send + Sync {
+    /// Run one study and return its study summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a reason string when the study cannot be completed.
+    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
+}
+
 /// Loads and validates one configuration document as a JSON payload.
 pub trait ConfigurationLoader: Send + Sync {
     /// Load one configuration path into the JSON launch body.
@@ -302,6 +319,8 @@ pub struct HarnessToolsContext {
     pub sweep_submitter: Option<Arc<dyn SweepSubmitter>>,
     /// Local backtest submitter.
     pub backtest_submitter: Option<Arc<dyn BacktestSubmitter>>,
+    /// Local study submitter.
+    pub study_submitter: Option<Arc<dyn StudySubmitter>>,
     /// Durable local results store, queried in `local` mode.
     pub run_store: Option<Arc<dyn RunStore>>,
     /// Durable local job repository, queried in `local` mode.
@@ -324,6 +343,7 @@ impl HarnessToolsContext {
             runner: None,
             sweep_submitter: None,
             backtest_submitter: None,
+            study_submitter: None,
             run_store: None,
             job_repository: None,
             configuration_loader: Arc::new(JsonFileConfigurationLoader),
@@ -543,6 +563,43 @@ impl HarnessTools {
         ];
         tail.extend(workspace_arguments(arguments)?);
         self.invoke_process(&tail, "backtest-job")
+    }
+
+    /// Run one study through the selected local or remote boundary.
+    ///
+    /// A study is a deterministic replay with no order execution: it fits and
+    /// observes a research model and resolves indicators, publishing metrics
+    /// without ever submitting orders. It is recorded as a study, never as a
+    /// backtest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolExecutionError`] when the boundary fails.
+    pub fn run_study(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
+        let config_path = resolve_config(arguments)?;
+        if self.context.mode == Boundary::Remote {
+            return self.launch_remote_study(&config_path);
+        }
+        if let Some(submitter) = &self.context.study_submitter {
+            let workspace = workspace_option(arguments)?;
+            return submitter
+                .submit(&config_path, workspace.as_deref())
+                .map_err(|error| {
+                    ToolExecutionError::new(format!(
+                        "the local study runner could not complete the study: {error}"
+                    ))
+                });
+        }
+        let mut tail = vec![
+            "study-job".to_string(),
+            "--config".to_string(),
+            config_path,
+        ];
+        tail.extend(workspace_arguments(arguments)?);
+        self.invoke_process(&tail, "study-job")
     }
 
     /// Return the embedded starter backtest configuration document.
@@ -849,6 +906,67 @@ impl HarnessTools {
         }))
     }
 
+    fn launch_remote_study(&self, config_path: &str) -> Result<Value, ToolExecutionError> {
+        let payload = self
+            .context
+            .configuration_loader
+            .load_json(config_path)
+            .map_err(|error| {
+                ToolExecutionError::new(format!(
+                    "could not load the study configuration '{config_path}': {error}"
+                ))
+            })?;
+        let url = self.remote_url(STUDY_LAUNCH_ROUTE)?;
+        let response = self.dispatch_remote_post(&url, &payload)?;
+        let status_code = response.status_code;
+        if status_code == 401 || status_code == 403 {
+            return Err(credential_rejected(status_code));
+        }
+        if status_code == 404 || status_code == 501 {
+            return Err(ToolExecutionError::new(format!(
+                "the remote harness API does not implement study launch (HTTP {status_code})"
+            )));
+        }
+        if !(200..300).contains(&status_code) {
+            return Err(ToolExecutionError::new(format!(
+                "remote study launch failed (HTTP {status_code})"
+            )));
+        }
+        let job_id = response
+            .body
+            .get("job_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ToolExecutionError::new(
+                    "remote harness study response requires a non-empty 'job_id' string",
+                )
+            })?;
+        let state = response
+            .body
+            .get("state")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ToolExecutionError::new(
+                    "remote harness study response requires a non-empty 'state' string",
+                )
+            })?;
+        let location = response
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("location"))
+            .map(|(_, value)| value.clone());
+        Ok(json!({
+            "boundary": "remote",
+            "job_id": job_id,
+            "state": state,
+            "location": location,
+        }))
+    }
+
     fn remote_get(&self, url: &str, not_found_message: &str) -> Result<Value, ToolExecutionError> {
         let response = self.dispatch_remote_get(url)?;
         match response.status_code {
@@ -993,6 +1111,18 @@ fn text_property() -> Value {
     json!({"type": "string", "minLength": 1, "maxLength": IDENTIFIER_MAX})
 }
 
+fn workspace_option(arguments: &Map<String, Value>) -> Result<Option<String>, ToolExecutionError> {
+    match arguments.get("workspace") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(workspace)) if !workspace.trim().is_empty() => {
+            Ok(Some(workspace.clone()))
+        }
+        Some(_) => Err(ToolExecutionError::new(
+            "workspace must be a non-empty string",
+        )),
+    }
+}
+
 /// Build the capability-filtered tool catalog for one composition.
 ///
 /// # Errors
@@ -1037,6 +1167,44 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             }),
             "backtest",
             move |arguments| handler.run_backtest(arguments),
+        ));
+    }
+    if capabilities.study {
+        let handler = tools.clone();
+        candidates.push(Tool::new(
+            TOOL_RUN_STUDY,
+            "Run one deterministic study: a local 'harness study-job' process, or a \
+             bearer-authenticated POST to the remote harness API returning {job_id, state}. \
+             A study replays history to fit and observe a research model and resolve \
+             indicators with no order execution; it is never recorded as a backtest. \
+             config_path must reference an existing, readable study configuration document; \
+             do not guess paths.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "anyOf": [
+                    {"required": ["config_path"]},
+                    {"required": ["config"]}
+                ],
+                "properties": {
+                    "config_path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Path to an existing study configuration document."
+                    },
+                    "config": {
+                        "type": "object",
+                        "description": "An inline study configuration document, used when no config file exists."
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Local output directory passed as --output-dir; ignored when the remote API executes the launch."
+                    }
+                }
+            }),
+            "study",
+            move |arguments| handler.run_study(arguments),
         ));
     }
     if capabilities.backtest {

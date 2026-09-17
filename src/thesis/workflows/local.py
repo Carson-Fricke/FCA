@@ -37,6 +37,10 @@ from thesis.workflows.backtests import (
     BacktestRunRequest,
     BacktestRunResult,
 )
+from thesis.workflows.research_models import (
+    BacktestResearchModelRunner,
+    ResearchModelRunner,
+)
 from thesis.workflows.runtime import (
     WorkflowRuntime,
     WorkflowRuntimeError,
@@ -172,6 +176,28 @@ class McpBacktestRunner:
         )
 
 
+class McpStudyRunner(McpBacktestRunner):
+    """Adapt the harness ``run_study`` MCP tool to the backtest port.
+
+    A study is a deterministic replay with no order execution, used to run
+    research models and indicators. It is recorded as a study, never as a
+    backtest.
+    """
+
+    def run(self, request: BacktestRunRequest) -> BacktestRunResult:
+        """Launch one harness study and map its structured result."""
+        path = _materialize_configuration(request.bundle.harness_configuration)
+        launched = self._harness_tools.call_tool("run_study", {"config_path": path})
+        if not launched.ok:
+            detail = (
+                launched.text
+                or ("" if launched.failure is None else launched.failure.message)
+                or "harness study launch failed"
+            )
+            raise BacktestRunError(detail)
+        return self._resolve(request.run_id, launched)
+
+
 def build_local_workflow_runtime(
     *,
     model_provider: ModelProvider,
@@ -206,6 +232,15 @@ def build_local_workflow_runtime(
         raise WorkflowRuntimeError(
             "provide a backtest runner or a harness tool provider"
         )
+    resolved_research_runner: ResearchModelRunner | None = (
+        None
+        if harness_tools is None
+        else BacktestResearchModelRunner(
+            McpStudyRunner(harness_tools, mode=backtest_mode, metadata=metadata),
+            models=research_model_store,
+            indicators=indicator_store,
+        )
+    )
     model_profiles = {
         _LOCAL_PROFILE_ID: ModelProfile(
             profile_id=_LOCAL_PROFILE_ID,
@@ -235,6 +270,7 @@ def build_local_workflow_runtime(
         metadata=metadata,
         research_model_store=research_model_store,
         indicator_store=indicator_store,
+        research_runner=resolved_research_runner,
     )
 
 

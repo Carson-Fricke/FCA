@@ -120,9 +120,9 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
             .get("shell")
             .and_then(Value::as_str)
             .ok_or_else(|| ConfigurationError("configuration has no 'shell' key".to_string()))?;
-        if shell != "backtest" {
+        if shell != "backtest" && shell != "study" {
             return Err(ConfigurationError(format!(
-                "configuration shell must be 'backtest', not '{shell}'"
+                "configuration shell must be 'backtest' or 'study', not '{shell}'"
             )));
         }
 

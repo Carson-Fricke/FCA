@@ -31,6 +31,7 @@ pub mod python;
 pub mod reference;
 pub mod screener;
 pub mod strategy;
+pub mod study;
 
 pub use binding::StrategyBinding;
 pub use context::{PyBooks, PyClock, PyEmissions, PyEngineContext, PyLog, PyOrders, PyStateStore};
