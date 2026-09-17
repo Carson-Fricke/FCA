@@ -13,7 +13,7 @@ from thesis.chat import (
     InMemoryChatStreamBroker,
 )
 from thesis.chat.contracts import MessageRole
-from thesis.chat.responder import ReplyChunk
+from thesis.chat.responder import ReplyChunk, ReplyProvider
 
 WORKSPACE = "workspace-a"
 
@@ -33,6 +33,105 @@ def _reasoning_provider(reasoning: str, answer: str):
         yield answer
 
     return stream
+
+
+def test_provider_factory_receives_the_turn_history() -> None:
+    service = ChatService()
+    broker = InMemoryChatStreamBroker()
+    chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
+    service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="Hi")
+    captured: dict[str, object] = {}
+    captured_history: list[ChatMessage] = []
+
+    def factory(
+        workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
+    ) -> ReplyProvider:
+        captured["workspace_id"] = workspace_id
+        captured["chat_id"] = chat_id
+        captured_history.extend(history)
+        return _reply_provider("ok")
+
+    reply = ChatReplyService(
+        chat_service=service,
+        broker=broker,
+        provider=lambda history: iter(()),
+        provider_factory=factory,
+    )
+
+    message = reply.respond(WORKSPACE, chat.chat_id)
+
+    assert message is not None
+    assert captured["workspace_id"] == WORKSPACE
+    assert captured["chat_id"] == chat.chat_id
+    assert [item.role for item in captured_history] == [MessageRole.USER]
+
+
+def test_node_turn_never_enters_the_top_level_history() -> None:
+    service = ChatService()
+    broker = InMemoryChatStreamBroker()
+    chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
+    service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="root")
+    service.create_message(
+        WORKSPACE,
+        chat.chat_id,
+        actor_id="research-agent",
+        body="node-only",
+        role=MessageRole.USER,
+        data={"subAgentId": "node-1"},
+    )
+    captured: list[ChatMessage] = []
+
+    def factory(
+        workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
+    ) -> ReplyProvider:
+        del workspace_id, chat_id
+        captured.extend(history)
+        return _reply_provider("ok")
+
+    reply = ChatReplyService(
+        chat_service=service,
+        broker=broker,
+        provider=lambda history: iter(()),
+        provider_factory=factory,
+    )
+
+    reply.respond(WORKSPACE, chat.chat_id)
+
+    assert [message.body for message in captured] == ["root"]
+
+
+def test_root_turn_never_enters_a_node_history() -> None:
+    service = ChatService()
+    broker = InMemoryChatStreamBroker()
+    chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
+    service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="root")
+    service.create_message(
+        WORKSPACE,
+        chat.chat_id,
+        actor_id="research-agent",
+        body="node-only",
+        role=MessageRole.USER,
+        data={"subAgentId": "node-1"},
+    )
+    captured: list[ChatMessage] = []
+
+    def factory(
+        workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
+    ) -> ReplyProvider:
+        del workspace_id, chat_id
+        captured.extend(history)
+        return _reply_provider("ok")
+
+    reply = ChatReplyService(
+        chat_service=service,
+        broker=broker,
+        provider=lambda history: iter(()),
+        provider_factory=factory,
+    )
+
+    reply.respond(WORKSPACE, chat.chat_id, sub_agent_id="node-1")
+
+    assert [message.body for message in captured] == ["node-only"]
 
 
 def test_reply_streams_deltas_and_persists_assistant_message() -> None:

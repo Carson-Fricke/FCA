@@ -37,6 +37,15 @@ class BacktestRunError(RuntimeError):
     """Raised when a backtest run request or result is not usable."""
 
 
+class BacktestRunTimeout(BacktestRunError):
+    """Raised when a run has not reached a terminal state before the deadline.
+
+    The run may still be executing - for example a first-time market-data
+    backfill - so callers can re-check the deterministic run id instead of
+    recording a false failure.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class BacktestRunRequest:
     """The deterministic input handed to an injected backtest runner."""
@@ -234,6 +243,7 @@ __all__ = [
     "BacktestRunError",
     "BacktestRunRequest",
     "BacktestRunResult",
+    "BacktestRunTimeout",
     "BacktestRunner",
     "HarnessBacktestRunner",
     "HarnessError",

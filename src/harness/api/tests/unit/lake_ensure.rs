@@ -2,33 +2,76 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn terminal_statuses_cover_success_empty_and_delisted() {
-    assert!(is_terminal_status("complete"));
-    assert!(is_terminal_status("empty"));
-    assert!(is_terminal_status("delisted"));
-    assert!(!is_terminal_status("missing"));
-    assert!(!is_terminal_status("partial"));
-    assert!(!is_terminal_status("error"));
-}
-
-#[test]
-fn coverage_is_terminal_only_when_every_entry_is_terminal() {
-    let covered = json!({
+fn an_open_session_is_satisfied_even_though_it_is_partial() {
+    let entries = json!({
         "entries": [
             {"status": "complete"},
             {"status": "empty"},
+            {"status": "delisted"},
+            {"status": "partial", "is_partial": true},
         ]
     });
-    assert!(coverage_is_terminal(&covered));
+    assert!(coverage_is_satisfied(&entries));
+    assert!(coverage_incompleteness(&entries).is_none());
+}
 
-    let pending = json!({
+#[test]
+fn a_closed_partial_session_is_an_incompleteness_failure() {
+    let entries = json!({
         "entries": [
             {"status": "complete"},
-            {"status": "missing"},
+            {
+                "status": "partial",
+                "is_partial": false,
+                "symbol": "IWM",
+                "data_type": "trade",
+                "session_date": "2024-01-02",
+            },
         ]
     });
-    assert!(!coverage_is_terminal(&pending));
+    assert!(!coverage_is_satisfied(&entries));
+    let message = coverage_incompleteness(&entries).expect("partial must be reported");
+    assert!(message.contains("IWM"));
+    assert!(message.contains("2024-01-02"));
+    assert!(message.contains("partial"));
+}
 
-    assert!(!coverage_is_terminal(&json!({"job_id": "ensure-1"})));
-    assert!(!coverage_is_terminal(&json!({"entries": []})));
+#[test]
+fn an_error_session_is_an_incompleteness_failure() {
+    let entries = json!({
+        "entries": [
+            {
+                "status": "error",
+                "is_partial": false,
+                "symbol": "IWM",
+                "data_type": "quote",
+                "session_date": "2024-01-02",
+                "error_message": "provider rejected the window",
+            },
+        ]
+    });
+    assert!(!coverage_is_satisfied(&entries));
+    let message = coverage_incompleteness(&entries).expect("an error session must be reported");
+    assert!(message.contains("IWM"));
+    assert!(message.contains("provider rejected the window"));
+}
+
+#[test]
+fn missing_sessions_are_polled_rather_than_failed() {
+    let entries = json!({
+        "entries": [
+            {"status": "complete"},
+            {"status": "missing", "is_partial": false},
+        ]
+    });
+    assert!(!coverage_is_satisfied(&entries));
+    assert!(coverage_incompleteness(&entries).is_none());
+    assert!(!coverage_is_satisfied(&json!({"job_id": "ensure-1"})));
+    assert!(!coverage_is_satisfied(&json!({"entries": []})));
+}
+
+#[test]
+fn ensure_timeout_allows_a_full_lake_backfill() {
+    assert!(DEFAULT_ENSURE_TIMEOUT_SECONDS >= 3_600);
+    assert!(MAX_ENSURE_RANGE_DAYS > 0);
 }

@@ -17,9 +17,9 @@ claim Azure identity, storage, queue, lease, or deployment validation.
 - Require `LAKE_API__BEARER_TOKEN` for the local API. Never include its value in
   logs or test snapshots.
 - Keep the real smoke to a single closed session. The lake pages each fetch
-  internally, so there is no record-count flag: callers request a symbol window
-  and the lake decides page sizing. Automated tests must use injected fake
-  providers and must never call Alpaca or Azure.
+  until the provider cursor is exhausted, so there is no record-count flag:
+  callers request a symbol window and receive it complete. Automated tests must
+  use injected fake providers and must never call Alpaca or Azure.
 - Leave `LAKE_LOCAL_DATA_DIR` unset to use ignored `.local/market-lake`, or pass
   one dedicated empty path consistently. Never add the ownership marker by hand.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import cast
 
 from thesis.research.indicators import (
@@ -20,6 +21,7 @@ from thesis.workflows.backtests import (
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
     ResearchModelRunRequest,
+    study_window,
 )
 
 
@@ -110,6 +112,10 @@ def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
     request = backtests.requests[0]
     assert request.workspace_id == "workspace-one"
     config = cast("Mapping[str, object]", request.bundle.harness_configuration)
+    # The study carries an explicit window so the harness never falls back to
+    # its two-day synthetic default.
+    assert config["start"] == "2024-01-01T00:00:00Z"
+    assert str(config["end"]).endswith("T00:00:00Z")
     instances = cast("Sequence[Mapping[str, object]]", config["strategy_instances"])
     assert instances[0]["implementation"] == (
         "harness.research.study:ResearchModelProgram"
@@ -166,3 +172,38 @@ def test_runner_falls_back_to_request_universe_when_configuration_omits_symbols(
     assert list(cast("Sequence[object]", data["symbols"])) == ["MSTR", "IBIT"]
     instances = cast("Sequence[Mapping[str, object]]", config["strategy_instances"])
     assert list(cast("Sequence[object]", instances[0]["symbols"])) == ["MSTR", "IBIT"]
+
+
+def test_study_window_defaults_to_the_closed_session_history() -> None:
+    start, end = study_window({}, now=datetime(2026, 9, 17, 15, 30, tzinfo=UTC))
+
+    # The default window excludes the current day so only closed sessions are
+    # ensured; an open or not-yet-open session can never satisfy an ensure.
+    assert start == "2024-01-01T00:00:00Z"
+    assert end == "2026-09-17T00:00:00Z"
+
+
+def test_study_window_normalizes_declared_dates_to_exclusive_midnights() -> None:
+    start, end = study_window({"start_date": "2024-01-11", "end_date": "2024-03-01"})
+
+    assert start == "2024-01-11T00:00:00Z"
+    assert end == "2024-03-02T00:00:00Z"
+
+
+def test_study_window_honours_canonical_rfc3339_bounds() -> None:
+    start, end = study_window(
+        {"start": "2023-05-01T00:00:00Z", "end": "2024-06-01T00:00:00Z"}
+    )
+
+    assert start == "2023-05-01T00:00:00Z"
+    assert end == "2024-06-01T00:00:00Z"
+
+
+def test_study_window_ignores_sentinel_dates() -> None:
+    start, end = study_window(
+        {"dataStart": "latest_complete_historical_session"},
+        now=datetime(2026, 9, 17, tzinfo=UTC),
+    )
+
+    assert start == "2024-01-01T00:00:00Z"
+    assert end == "2026-09-17T00:00:00Z"

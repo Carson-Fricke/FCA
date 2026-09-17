@@ -8,11 +8,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from thesis.agent.harness_tools import (
-    HARNESS_TOOL_NAMES,
-    open_harness_mcp_composition,
-    open_harness_tool_provider,
-)
+from thesis.agent.runtime.policy import OperatorPolicyRegistry
 from thesis.chat import AzureBlobChatPersistence
 from thesis.chat.persistence import FileChatPersistence
 from thesis.http.application import (
@@ -20,7 +16,6 @@ from thesis.http.application import (
     durable_chat_service,
     serving_workspace_store,
 )
-from thesis.integrations.mcp import HarnessMcpTopology
 from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
 from thesis.providers.transports import DEFAULT_SYSTEM_PROMPT
 from thesis.workspaces.azure_catalog import AzureWorkspaceCatalogStore
@@ -112,23 +107,6 @@ class _RecordingTransport:
         return 200, self._body
 
 
-class _CatalogHandler:
-    def handle(self, request: object) -> dict[str, object] | None:
-        if not isinstance(request, Mapping):
-            raise TypeError("request must be a mapping")
-        message = dict(request)
-        if message.get("method") == "tools/list":
-            result: dict[str, object] = {
-                "tools": [
-                    {"name": name, "description": "", "inputSchema": {"type": "object"}}
-                    for name in HARNESS_TOOL_NAMES
-                ]
-            }
-        else:
-            result = {}
-        return {"jsonrpc": "2.0", "id": message.get("id"), "result": result}
-
-
 def _completion_body(text: str) -> str:
     return json.dumps(
         {
@@ -163,25 +141,6 @@ def _compose_reply(app, transport: _RecordingTransport) -> str:
     return str(transport.calls[0]["messages"][0]["content"])
 
 
-def test_create_app_composes_tool_aware_reply_service() -> None:
-    transport = _RecordingTransport(_completion_body("Hi"))
-    tools = open_harness_tool_provider(
-        HarnessMcpTopology(thesis_location="local", harness_location="local"),
-        in_process_handler=_CatalogHandler(),
-    )
-
-    app = create_app(
-        bearer_token=TOKEN,
-        model_provider=_model_provider(transport),
-        harness_tool_provider=tools,
-    )
-    system = _compose_reply(app, transport)
-
-    assert "tools" in transport.calls[0]
-    assert system != DEFAULT_SYSTEM_PROMPT
-    assert "harness" in system.lower()
-
-
 def test_create_app_composes_plain_reply_service_without_tools() -> None:
     transport = _RecordingTransport(_completion_body("Hi"))
 
@@ -192,23 +151,19 @@ def test_create_app_composes_plain_reply_service_without_tools() -> None:
     assert system == DEFAULT_SYSTEM_PROMPT
 
 
-def test_create_app_derives_the_tool_provider_from_a_shared_client() -> None:
-    transport = _RecordingTransport(_completion_body("Hi"))
-    composition = open_harness_mcp_composition(
-        HarnessMcpTopology(thesis_location="local", harness_location="local"),
-        in_process_handler=_CatalogHandler(),
-    )
+def test_create_app_exposes_the_human_only_operator_policy() -> None:
+    app = create_app(bearer_token=TOKEN)
 
-    app = create_app(
-        bearer_token=TOKEN,
-        model_provider=_model_provider(transport),
-        harness_client=composition.client,
-    )
-    system = _compose_reply(app, transport)
+    assert isinstance(app.state.operator_policies, OperatorPolicyRegistry)
 
-    assert "tools" in transport.calls[0]
-    assert system != DEFAULT_SYSTEM_PROMPT
-    assert "harness" in system.lower()
+
+def test_create_app_exposes_an_injected_node_turn_scheduler() -> None:
+    def schedule(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
+        del workspace_id, chat_id, sub_agent_id
+
+    app = create_app(bearer_token=TOKEN, sub_agent_turn=schedule)
+
+    assert app.state.sub_agent_turn is schedule
 
 
 def test_retired_validation_routes_are_absent() -> None:

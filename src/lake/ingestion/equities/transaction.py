@@ -129,8 +129,6 @@ class EquityIngestTransaction:
             metadata,
             trade_rows=len(trades),
             quote_rows=len(quotes),
-            trade_truncated=_truncated(trade_result),
-            quote_truncated=_truncated(quote_result),
         )
         self._committer.commit(objects=staged, coverage=coverage)
         return EquityIngestResult(
@@ -183,11 +181,9 @@ class EquityIngestTransaction:
         *,
         trade_rows: int,
         quote_rows: int,
-        trade_truncated: bool,
-        quote_truncated: bool,
     ) -> tuple[CoverageRecord, CoverageRecord]:
-        trade_status = _coverage_status(session.is_partial, trade_truncated, trade_rows)
-        quote_status = _coverage_status(session.is_partial, quote_truncated, quote_rows)
+        trade_status = _coverage_status(session.is_partial, trade_rows)
+        quote_status = _coverage_status(session.is_partial, quote_rows)
         return (
             _coverage_record(
                 symbol, session, DataType.TRADE, trade_status, metadata[0]
@@ -271,20 +267,13 @@ def _error_message(error: BaseException) -> str:
     return type(error).__name__ if not detail else f"{type(error).__name__}: {detail}"
 
 
-def _truncated(result: object) -> bool:
-    """Return whether a fetch result was truncated by the client's budget."""
-    return bool(getattr(result, "truncated", False))
-
-
-def _coverage_status(
-    session_partial: bool, truncated: bool, rows: int
-) -> CoverageStatus:
+def _coverage_status(session_partial: bool, rows: int) -> CoverageStatus:
     """Return the coverage status for one data type.
 
-    A truncated fetch is partial even for a closed session so a later ensure
-    repairs the missing tail instead of sealing an incomplete day.
+    A closed session with rows is complete and a closed session with none is
+    empty; only a session that is still trading is partial.
     """
-    if session_partial or truncated:
+    if session_partial:
         return CoverageStatus.PARTIAL
     return CoverageStatus.COMPLETE if rows else CoverageStatus.EMPTY
 

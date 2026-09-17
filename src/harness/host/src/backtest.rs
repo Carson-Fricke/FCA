@@ -419,9 +419,12 @@ pub fn run_backtest_config(
     ),
     HostError,
 > {
+    // A previous run may have panicked while holding the lock; the guard only
+    // serializes runs, so recover the guard instead of poisoning every future
+    // embedded-Python run.
     let _python_owner = crate::python::PYTHON_ENGINE_LOCK
         .lock()
-        .map_err(|_| HostError::Invalid("embedded Python engine lock is poisoned".to_string()))?;
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let instances = build_strategy_instances(configuration)?;
     backtest::backtest::job::run_native_job_with_data_dir(
         configuration,

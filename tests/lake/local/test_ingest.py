@@ -12,7 +12,6 @@ from lake.coverage.application import EnsureJob, EnsureSpec
 from lake.local import LocalCatalogRepository, LocalIngestError, LocalLayout
 from lake.local.ensure import LocalEnsureLauncher
 from lake.local.ingest import run_local_backfill, run_local_ingest
-from lake.providers.alpaca import FetchedRecords
 from lake.providers.alpaca.records import NormalizedQuote, NormalizedTrade
 
 
@@ -226,36 +225,14 @@ def test_backfill_fetches_arbitrary_symbol_once_and_resumes(tmp_path) -> None:
     assert len(provider.calls) == 2
 
 
-def test_truncated_fetch_is_recorded_partial(tmp_path) -> None:
-    class TruncatingAlpaca(FakeAlpaca):
-        async def fetch_trades(self, symbols, start, end):
-            return FetchedRecords(
-                await super().fetch_trades(symbols, start, end), truncated=True
-            )
+def test_coverage_status_is_partial_only_for_an_open_session() -> None:
+    from lake.ingestion.equities.transaction import _coverage_status
 
-    layout = LocalLayout(tmp_path / "local")
-
-    result = asyncio.run(
-        run_local_ingest(
-            layout=layout,
-            symbol="AAPL",
-            session_date=date(2024, 1, 19),
-            provider=TruncatingAlpaca(),
-            environ=_credentials(),
-            now=datetime(2024, 1, 22, tzinfo=UTC),
-        )
-    )
-
-    assert result["coverage"] == [
-        {"data_type": "trade", "rows": 1, "status": "partial"},
-        {"data_type": "quote", "rows": 1, "status": "complete"},
-    ]
-    statuses = {
-        record.data_type: record.status
-        for record in LocalCatalogRepository(layout.catalog).list(symbol="AAPL")
-    }
-    assert statuses[DataType.TRADE] is CoverageStatus.PARTIAL
-    assert statuses[DataType.QUOTE] is CoverageStatus.COMPLETE
+    # A completed fetch of a closed session is complete however large it was;
+    # only a session that is still trading is partial.
+    assert _coverage_status(True, 10) is CoverageStatus.PARTIAL
+    assert _coverage_status(False, 10) is CoverageStatus.COMPLETE
+    assert _coverage_status(False, 0) is CoverageStatus.EMPTY
 
 
 def test_local_ensure_launcher_fetches_the_requested_symbol(tmp_path) -> None:

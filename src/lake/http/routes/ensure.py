@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import inspect
 import json
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from threading import Event, Thread
 from typing import Annotated, Any, Literal, cast
@@ -244,16 +244,29 @@ async def _ensure_option(
 
     job_id = _option_job_id(request, selection.symbols)
     existing = job_repository.get(job_id)
-    if existing is not None:
+    if existing is not None and existing.state in {JobState.QUEUED, JobState.RUNNING}:
         return _accepted_response(existing)
+    created_at = existing.created_at if existing is not None else as_of
     record = job_repository.upsert(
         JobRecord(
             job_id=job_id,
-            state=JobState.QUEUED,
-            created_at=as_of,
+            state=JobState.RUNNING,
+            created_at=created_at,
             updated_at=as_of,
         )
     )
+
+    def finalize(error: Exception | None) -> None:
+        job_repository.upsert(
+            JobRecord(
+                job_id=job_id,
+                state=JobState.FAILED if error is not None else JobState.COMPLETE,
+                created_at=created_at,
+                updated_at=as_of,
+                error_message=None if error is None else str(error),
+            )
+        )
+
     try:
         completed = await _invoke_option_launcher(
             launcher,
@@ -262,13 +275,14 @@ async def _ensure_option(
             gaps=report.gap_plan().gaps,
             symbols=tuple(dict.fromkeys(gap.symbol for gap in report.gap_plan().gaps)),
             timeout=wait_deadline_seconds,
+            on_complete=finalize,
         )
     except Exception as error:
         record = job_repository.upsert(
             JobRecord(
-                job_id=record.job_id,
+                job_id=job_id,
                 state=JobState.FAILED,
-                created_at=record.created_at,
+                created_at=created_at,
                 updated_at=as_of,
                 error_message=str(error),
             )
@@ -298,9 +312,12 @@ async def _invoke_option_launcher(
     gaps: tuple[SessionCoverage, ...],
     symbols: tuple[str, ...],
     timeout: float,
+    on_complete: Callable[[Exception | None], None] | None = None,
 ) -> bool:
     """Invoke the existing launcher with the option request as its job input."""
     if not symbols:
+        if on_complete is not None:
+            on_complete(None)
         return True
     completed = Event()
     errors: list[Exception] = []
@@ -325,7 +342,11 @@ async def _invoke_option_launcher(
         except Exception as error:
             errors.append(error)
         finally:
-            completed.set()
+            try:
+                if on_complete is not None:
+                    on_complete(errors[0] if errors else None)
+            finally:
+                completed.set()
 
     Thread(target=run, daemon=True).start()
     if not await asyncio.to_thread(completed.wait, timeout):

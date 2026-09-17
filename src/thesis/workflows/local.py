@@ -36,6 +36,7 @@ from thesis.workflows.backtests import (
     BacktestRunner,
     BacktestRunRequest,
     BacktestRunResult,
+    BacktestRunTimeout,
 )
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
@@ -53,6 +54,13 @@ _ROLES: tuple[Role, ...] = ("primary", "coding", "critique", "research")
 _PENDING_STATES = frozenset({"queued", "submitted", "pending", "running"})
 _SUCCESS_STATES = frozenset({"succeeded", "completed", "success", "complete"})
 
+#: Wall-clock budget for one launched run. A first-time study can spend many
+#: minutes in on-demand market-data ensure before the engine starts, so the
+#: deadline must outlast the harness's own ensure timeout (one hour) with slack.
+_DEFAULT_POLL_DEADLINE_SECONDS = 3_900.0
+_DEFAULT_POLL_INITIAL_INTERVAL_SECONDS = 0.25
+_DEFAULT_POLL_MAX_INTERVAL_SECONDS = 5.0
+
 
 class McpBacktestRunner:
     """Adapt the harness ``run_backtest`` MCP tool to the backtest port.
@@ -60,7 +68,19 @@ class McpBacktestRunner:
     An inline ``harness_configuration`` mapping is materialized to a temporary
     JSON document before the call; a string configuration is treated as an
     existing on-disk path and passed through unchanged.
+
+    A deterministic run id is resolved against the harness job store first: a
+    pending job is joined (a resumed execution polls the run already in flight
+    instead of launching a duplicate). Terminal jobs are relaunched, because a
+    run id is reused across revision cycles and a succeeded job may describe a
+    superseded model or strategy. Polling uses wall-clock backoff up to
+    ``poll_deadline_seconds`` and raises
+    :class:`~thesis.workflows.backtests.BacktestRunTimeout` when the run is
+    still executing, so callers can distinguish "not done yet" from a failure.
     """
+
+    _runner_label = "backtest"
+    _launch_tool = "run_backtest"
 
     def __init__(
         self,
@@ -68,8 +88,9 @@ class McpBacktestRunner:
         *,
         mode: BacktestMode = "local",
         metadata: Mapping[str, object] | None = None,
-        poll_attempts: int = 200,
-        poll_interval_seconds: float = 0.05,
+        poll_deadline_seconds: float = _DEFAULT_POLL_DEADLINE_SECONDS,
+        poll_interval_seconds: float = _DEFAULT_POLL_INITIAL_INTERVAL_SECONDS,
+        poll_max_interval_seconds: float = _DEFAULT_POLL_MAX_INTERVAL_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if mode not in ("local", "remote"):
@@ -77,58 +98,78 @@ class McpBacktestRunner:
         self._harness_tools = harness_tools
         self._mode: BacktestMode = mode
         self._metadata = dict(metadata or {})
-        if poll_attempts < 1:
-            raise ValueError("poll_attempts must be positive")
+        if poll_deadline_seconds <= 0:
+            raise ValueError("poll_deadline_seconds must be positive")
         if poll_interval_seconds < 0:
             raise ValueError("poll_interval_seconds must be non-negative")
+        if poll_max_interval_seconds < poll_interval_seconds:
+            raise ValueError(
+                "poll_max_interval_seconds must be at least poll_interval_seconds"
+            )
         if not callable(sleep):
             raise TypeError("sleep must be callable")
-        self._poll_attempts = poll_attempts
+        self._poll_deadline_seconds = poll_deadline_seconds
         self._poll_interval_seconds = poll_interval_seconds
+        self._poll_max_interval_seconds = poll_max_interval_seconds
         self._sleep = sleep
 
     def run(self, request: BacktestRunRequest) -> BacktestRunResult:
-        """Launch one harness backtest and map its structured result."""
+        """Join or launch one harness run and map its structured result."""
+        reusable = self._existing_run(request.run_id)
+        if reusable is not None:
+            return self._resolve(request.run_id, reusable)
         path = _materialize_configuration(request.bundle.harness_configuration)
-        launched = self._harness_tools.call_tool("run_backtest", {"config_path": path})
+        launched = self._harness_tools.call_tool(
+            self._launch_tool, {"config_path": path}
+        )
         if not launched.ok:
             detail = (
                 launched.text
                 or ("" if launched.failure is None else launched.failure.message)
-                or "harness backtest launch failed"
+                or f"harness {self._runner_label} launch failed"
             )
             raise BacktestRunError(detail)
         return self._resolve(request.run_id, launched)
+
+    def _existing_run(self, run_id: str) -> HarnessToolResult | None:
+        """Return a still-pending harness job for one deterministic run id.
+
+        Only in-flight jobs are joined: run ids are scoped to the hypothesis or
+        strategy revision, so a resumed execution joins the run already
+        executing instead of launching a duplicate. A terminal job is
+        relaunched so a revised artifact is always re-executed.
+        """
+        try:
+            status = self._harness_tools.call_tool(
+                "get_backtest_status", {"job_id": run_id}
+            )
+        except Exception:  # noqa: BLE001 - a status probe is best-effort
+            return None
+        if not status.ok:
+            return None
+        state = (_first_text(status.structured, "status", "state") or "").casefold()
+        if state in _PENDING_STATES:
+            return status
+        return None
 
     def _resolve(
         self, requested_run_id: str, launched: HarnessToolResult
     ) -> BacktestRunResult:
         structured = dict(launched.structured)
-        run_id = _first_text(structured, "run_id", "job_id") or requested_run_id
+        run_id = (
+            _first_text(structured, "run_id", "study_id", "job_id") or requested_run_id
+        )
         state = _first_text(structured, "status", "state") or (
             "succeeded" if structured.get("exit_code") == 0 else "failed"
         )
         if state.casefold() in _PENDING_STATES:
-            for _ in range(self._poll_attempts):
-                status = self._harness_tools.call_tool(
-                    "get_backtest_status", {"job_id": run_id}
-                )
-                if not status.ok:
-                    raise BacktestRunError(
-                        status.text or "backtest status query failed"
-                    )
-                state = _first_text(status.structured, "status", "state") or state
-                if state.casefold() not in _PENDING_STATES:
-                    break
-                self._sleep(self._poll_interval_seconds)
-            else:
-                raise BacktestRunError(
-                    f"backtest {run_id!r} did not reach a terminal state"
-                )
+            state = self._poll_terminal(run_id, state)
         if structured.get("metrics") is None:
             run = self._harness_tools.call_tool("get_run", {"run_id": run_id})
             if not run.ok:
-                raise BacktestRunError(run.text or "backtest result query failed")
+                raise BacktestRunError(
+                    run.text or f"{self._runner_label} result query failed"
+                )
             structured.update(run.structured)
         if structured.get("result_artifacts", structured.get("artifacts")) is None:
             artifacts = self._harness_tools.call_tool(
@@ -157,6 +198,30 @@ class McpBacktestRunner:
         )
         return self._result(run_id, resolved)
 
+    def _poll_terminal(self, run_id: str, state: str) -> str:
+        """Poll one pending job until it is terminal or the deadline passes."""
+        deadline = time.monotonic() + self._poll_deadline_seconds
+        interval = self._poll_interval_seconds
+        while True:
+            status = self._harness_tools.call_tool(
+                "get_backtest_status", {"job_id": run_id}
+            )
+            if not status.ok:
+                raise BacktestRunError(
+                    status.text or f"{self._runner_label} status query failed"
+                )
+            state = _first_text(status.structured, "status", "state") or state
+            if state.casefold() not in _PENDING_STATES:
+                return state
+            if time.monotonic() >= deadline:
+                raise BacktestRunTimeout(
+                    f"{self._runner_label} {run_id!r} did not reach a terminal state "
+                    f"within {self._poll_deadline_seconds:g}s"
+                )
+            self._sleep(interval)
+            if interval > 0:
+                interval = min(interval * 2, self._poll_max_interval_seconds)
+
     def _result(self, run_id: str, result: HarnessToolResult) -> BacktestRunResult:
         structured = dict(result.structured)
         job_id = _first_text(structured, "run_id", "job_id") or run_id
@@ -184,18 +249,8 @@ class McpStudyRunner(McpBacktestRunner):
     backtest.
     """
 
-    def run(self, request: BacktestRunRequest) -> BacktestRunResult:
-        """Launch one harness study and map its structured result."""
-        path = _materialize_configuration(request.bundle.harness_configuration)
-        launched = self._harness_tools.call_tool("run_study", {"config_path": path})
-        if not launched.ok:
-            detail = (
-                launched.text
-                or ("" if launched.failure is None else launched.failure.message)
-                or "harness study launch failed"
-            )
-            raise BacktestRunError(detail)
-        return self._resolve(request.run_id, launched)
+    _runner_label = "study"
+    _launch_tool = "run_study"
 
 
 def build_local_workflow_runtime(
@@ -311,5 +366,6 @@ def _first_text(values: Mapping[str, object], *keys: str) -> str | None:
 
 __all__ = [
     "McpBacktestRunner",
+    "McpStudyRunner",
     "build_local_workflow_runtime",
 ]

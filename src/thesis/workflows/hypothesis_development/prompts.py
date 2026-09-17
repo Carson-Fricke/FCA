@@ -77,6 +77,21 @@ _CREATION_MISSION = (
 )
 
 
+#: Every operator-facing surface renders KaTeX, so math must be authored as
+#: LaTeX rather than plain text or fenced code. The `\(...\)` and `\[...\]`
+#: delimiters are used instead of `$` because a bare `$` collides with currency
+#: and dollar-denominated numbers.
+_LATEX_INSTRUCTION = (
+    "Render every mathematical expression as LaTeX for KaTeX. Write inline math "
+    "as \\(...\\) and display equations as \\[...\\] on their own line. Use "
+    "LaTeX for all symbols, operators, subscripts, fractions, Greek letters and "
+    "statistics, such as \\(\\beta\\), \\(\\sigma\\), \\(\\rho\\), \\(R^2\\), "
+    "\\(\\alpha\\) and \\(\\frac{a}{b}\\). Never wrap plain numbers or "
+    "currency amounts in math delimiters, never use a bare $ for math, and "
+    "never place math inside a fenced code block."
+)
+
+
 #: The two falsification layers the model serves.
 _CREATION_LAYERS = (
     "Layer A (this pipeline, on history): the model cannot be fit, the fitted "
@@ -154,6 +169,7 @@ _CREATION_TURN_INSTRUCTIONS = (
     "5. Say which observables double as Layer B monitors and on what trailing "
     "window. Sizing, costs, borrow, financing, execution and portfolio "
     "construction belong to strategy design; do not ask about them now.",
+    _LATEX_INSTRUCTION,
     "Return a single JSON object with exactly {message, advance}. The message "
     "is concise operator-facing prose: lead with the proposed model, not with "
     "questions. Format the message in clear Markdown with bullet-point lists "
@@ -168,8 +184,10 @@ _CREATION_TURN_INSTRUCTIONS = (
     "readiness only and the workflow always waits for operator input. On later "
     "turns, judge whether the operator's latest prose confirms the proposal: set "
     "advance true for clear acceptance in any wording, or false when the operator "
-    "provides feedback, asks a question, or remains ambiguous. The exact response "
-    "schema is:",
+    "provides feedback, asks a question, or remains ambiguous. When advance is true "
+    "because the operator has accepted the proposal, do not restate or re-summarize "
+    "the model: reply with one short sentence acknowledging the acceptance and "
+    "confirming you are finalizing the same model. The exact response schema is:",
     _CREATION_TURN_SCHEMA,
 )
 
@@ -196,7 +214,8 @@ _CREATION_FINALIZE_INSTRUCTIONS = (
     "which falsifiers double as Layer B monitors and on what trailing window.",
     "- body: Markdown with the full model specification: variables and "
     "transformations, the estimator, the expected estimates versus the null, "
-    "the negative controls, the Layer B monitoring rule and known limitations.",
+    "the negative controls, the Layer B monitoring rule and known limitations. "
+    + _LATEX_INSTRUCTION,
     "- model (required): a statistical research model, NOT a strategy. Include "
     "modelId, semantic version, description, source defining "
     "fit(context) -> dict[str, number] and observe(fit, context) -> "
@@ -321,6 +340,7 @@ def _falsification_turn_prompt(
         [
             "",
             "Format your response in clean Markdown with appropriate headers and bullet points.",
+            _LATEX_INSTRUCTION,
             "Lead directly with your empirical takeaways; do not output raw JSON or code blocks.",
         ]
     )

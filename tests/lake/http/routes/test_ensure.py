@@ -174,7 +174,9 @@ def test_option_ensure_uses_selected_osi_contracts_and_stable_authenticated_job(
     assert first.status_code == 202
     assert second.status_code == 202
     assert first.json() == second.json()
-    assert len(launched) == 1
+    # The first option ensure completed without satisfying coverage, so the
+    # second supersedes it and relaunches the launcher.
+    assert len(launched) == 2
     assert launched[0].request.symbol == symbol
     assert [gap.symbol for gap in launched[0].gaps] == [symbol]
     assert launched[0].job_id == first.json()["job_id"] + f"-{symbol}"
@@ -197,9 +199,11 @@ def test_missing_ensure_persists_stable_job_invokes_launcher_and_polls() -> None
     assert first.status_code == 202
     assert second.status_code == 202
     assert first.json() == second.json()
-    assert first.json()["state"] == "queued"
+    # The launcher finished but did not satisfy coverage, so the record is
+    # terminal and the next ensure supersedes it to repair the period.
+    assert first.json()["state"] == "complete"
     assert first.headers["location"] == f"/v1/jobs/{first.json()['job_id']}"
-    assert len(launched) == 1
+    assert len(launched) == 2
     assert launched[0].job_id == ensure_job_id(EnsureRequest.model_validate(body))
     assert len(launched[0].gaps) == 2
 
@@ -207,7 +211,7 @@ def test_missing_ensure_persists_stable_job_invokes_launcher_and_polls() -> None
     assert polled.status_code == 200
     assert polled.json() == {
         "job_id": first.json()["job_id"],
-        "state": "queued",
+        "state": "complete",
         "created_at": "2024-01-22T12:00:00Z",
         "updated_at": "2024-01-22T12:00:00Z",
         "error_message": None,
@@ -235,9 +239,9 @@ def test_crypto_ensure_uses_utc_days_and_the_equity_job_contract() -> None:
     assert first.status_code == 202
     assert second.status_code == 202
     assert first.json() == second.json()
-    assert first.json()["state"] == "queued"
+    assert first.json()["state"] == "complete"
     assert first.headers["location"] == f"/v1/jobs/{first.json()['job_id']}"
-    assert len(launched) == 1
+    assert len(launched) == 2
     assert launched[0].request.asset_class is AssetClass.CRYPTO
     assert launched[0].request.symbol == "BTC/USD"
     assert [gap.session_date.isoformat() for gap in launched[0].gaps] == [
@@ -252,7 +256,7 @@ def test_crypto_ensure_uses_utc_days_and_the_equity_job_contract() -> None:
         "missing",
         "partial",
     ]
-    assert _get(client, first.json()["job_id"]).json()["state"] == "queued"
+    assert _get(client, first.json()["job_id"]).json()["state"] == "complete"
 
 
 @pytest.mark.parametrize(
@@ -323,11 +327,11 @@ def test_terminal_job_with_unsatisfied_coverage_is_superseded_and_relaunched() -
 
     assert response.status_code == 202
     assert response.json()["job_id"] == ensure_job_id(spec)
-    assert response.json()["state"] == "queued"
+    assert response.json()["state"] == "complete"
     assert len(launched) == 1
     assert [gap.state for gap in launched[0].gaps] == ["error"]
     polled = _get(client, ensure_job_id(spec))
-    assert polled.json()["state"] == "queued"
+    assert polled.json()["state"] == "complete"
     assert polled.json()["error_message"] is None
 
 

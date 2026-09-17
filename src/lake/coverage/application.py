@@ -129,10 +129,12 @@ async def ensure_coverage(
 ) -> CoverageReport | JobRecord:
     """Return satisfied coverage or launch one stable asynchronous job.
 
-    A persisted job record short-circuits repeated calls while it is still
-    in flight. A terminal record whose coverage remains unsatisfied is
-    superseded and the work is relaunched, so re-ensuring the same spec
-    repairs sessions that ended in error or partial states.
+    A persisted job record short-circuits repeated calls while it is still in
+    flight. A terminal record whose coverage remains unsatisfied is superseded
+    and the work is relaunched, so re-ensuring the same spec repairs sessions
+    that ended in error or partial states. The record is marked running while
+    the launcher works and reaches a terminal state (``complete`` or ``failed``)
+    as soon as it returns, even when the HTTP caller's wait deadline expires.
     """
     report = requested_coverage(
         catalog,
@@ -149,14 +151,27 @@ async def ensure_coverage(
     if existing is not None and existing.state in _IN_FLIGHT_JOB_STATES:
         return existing
 
+    created_at = existing.created_at if existing is not None else as_of
     record = jobs.upsert(
         JobRecord(
             job_id=job_id,
-            state=JobState.QUEUED,
-            created_at=existing.created_at if existing is not None else as_of,
+            state=JobState.RUNNING,
+            created_at=created_at,
             updated_at=as_of,
         )
     )
+
+    def finalize(error: Exception | None) -> None:
+        jobs.upsert(
+            JobRecord(
+                job_id=job_id,
+                state=JobState.FAILED if error is not None else JobState.COMPLETE,
+                created_at=created_at,
+                updated_at=as_of,
+                error_message=None if error is None else str(error),
+            )
+        )
+
     job = EnsureJob(job_id=job_id, request=spec, gaps=report.gap_plan().gaps)
     completed = False
     try:
@@ -164,13 +179,14 @@ async def ensure_coverage(
             launcher,
             job,
             timeout=wait_deadline_seconds,
+            on_complete=finalize,
         )
     except Exception as error:
         record = jobs.upsert(
             JobRecord(
-                job_id=record.job_id,
+                job_id=job_id,
                 state=JobState.FAILED,
-                created_at=record.created_at,
+                created_at=created_at,
                 updated_at=as_of,
                 error_message=str(error),
             )
@@ -211,7 +227,14 @@ async def _invoke_launcher(
     job: EnsureJob,
     *,
     timeout: float,
+    on_complete: Callable[[Exception | None], None] | None = None,
 ) -> bool:
+    """Run one ensure launcher and report whether it finished before the wait.
+
+    ``on_complete`` runs on the worker thread as soon as the launcher returns -
+    including after the HTTP caller's wait deadline has expired - so the job
+    record always reaches a terminal state.
+    """
     completed = Event()
     errors: list[Exception] = []
 
@@ -223,7 +246,11 @@ async def _invoke_launcher(
         except Exception as error:
             errors.append(error)
         finally:
-            completed.set()
+            try:
+                if on_complete is not None:
+                    on_complete(errors[0] if errors else None)
+            finally:
+                completed.set()
 
     Thread(target=run, daemon=True).start()
     if not await asyncio.to_thread(completed.wait, timeout):

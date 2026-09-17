@@ -119,9 +119,10 @@ After all three names exist, deploy the Bicep composition. Confirm that:
   Container Apps configuration output, GitHub logs, or task evidence.
 
 Run the `lake ingest` provider request and persistence path only after
-references report healthy. The lake paginates the fetch internally up to its own
-per-fetch record budget, so there is no `LAKE_INGEST_MAX_RECORDS` setting to
-raise; changing the internal budget requires an explicit memory and cost review.
+references report healthy. The lake paginates each fetch internally until the
+provider cursor is exhausted, so there is no `LAKE_INGEST_MAX_RECORDS` setting
+to raise; a full-depth session is bounded only by provider paging and the
+storage cap.
 Record status, object path, row count, and timing, but never provider responses
 that may contain account information or any credential value.
 

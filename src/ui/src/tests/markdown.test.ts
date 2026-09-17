@@ -31,6 +31,41 @@ describe('renderMarkdown', () => {
 		expect(html).toContain('<pre>');
 		expect(html).toContain('x = 1');
 	});
+
+	it('renders inline LaTeX math with KaTeX', () => {
+		const html = renderMarkdown('The excess return \\(r_i - r_f\\) is the risk premium.');
+		expect(html).toContain('class="katex"');
+		expect(html).toContain('katex-html');
+	});
+
+	it('renders display LaTeX math from brackets with KaTeX', () => {
+		const html = renderMarkdown('\\[\\beta = \\frac{\\sigma_{im}}{\\sigma_m^2}\\]');
+		expect(html).toContain('katex-display');
+		expect(html).toContain('class="katex"');
+	});
+
+	it('still renders display LaTeX math from double dollars with KaTeX', () => {
+		const html = renderMarkdown('$$\\beta = \\frac{\\sigma_{im}}{\\sigma_m^2}$$');
+		expect(html).toContain('katex-display');
+		expect(html).toContain('class="katex"');
+	});
+
+	it('does not treat currency or trailing-letter numbers as math', () => {
+		// A bare `$` used for currency must never open a math span, otherwise it
+		// desyncs with the next `$` and swallows real math (the `$95$th` bug).
+		const html = renderMarkdown(
+			'rolling 60-session fits and $1,560 bars, with a one-sided 95% bound when \\(\\lambda\\leq0\\).'
+		);
+		expect(html).toContain('$1,560');
+		expect(html).toContain('95%');
+		expect(html).not.toContain('katex-error');
+		expect(html).toContain('class="katex"');
+	});
+
+	it('does not throw on malformed LaTeX and reports the error inline', () => {
+		const html = renderMarkdown('A broken expression \\(\\frac{1}{\\) here.');
+		expect(html).toContain('katex');
+	});
 });
 
 describe('stabilizeStreamingMarkdown', () => {

@@ -14,12 +14,10 @@ from lake.providers.alpaca import (
     AlpacaClient,
     AlpacaHTTPError,
     AlpacaProtocolError,
-    FetchedRecords,
     NormalizedCryptoTrade,
     NormalizedQuote,
     NormalizedTrade,
 )
-from lake.providers.alpaca import client as alpaca_client
 
 ROOT = Path(__file__).parents[4]
 EQUITY_FIXTURES = ROOT / "tests" / "fixtures" / "equities" / "alpaca"
@@ -319,60 +317,33 @@ def test_crypto_trades_paginate_without_a_caller_supplied_limit() -> None:
     assert transport.calls[1]["params"]["page_token"] == "p2"
 
 
-def test_fetch_reports_truncation_when_the_internal_budget_is_reached(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(alpaca_client, "_MAX_RECORDS_PER_FETCH", 1)
+def test_fetch_pages_until_the_provider_cursor_is_exhausted() -> None:
+    # A window that is larger than a single provider page must be fetched in
+    # full: ensure guarantees the period is complete, not truncated.
     transport = FakeTransport(
         [
             FakeResponse(
                 {
-                    "trades": {
-                        "AAPL": [
-                            _trade(1, "2024-01-19T14:30:00Z"),
-                            _trade(2, "2024-01-19T14:30:01Z"),
-                        ]
-                    },
+                    "trades": {"AAPL": [_trade(1, "2024-01-19T14:30:00Z")]},
                     "next_page_token": "p2",
                 }
-            )
-        ]
-    )
-
-    async def exercise() -> FetchedRecords:
-        async with AlpacaClient(transport=transport) as client:
-            return await client.fetch_trades(
-                "AAPL", date(2024, 1, 19), date(2024, 1, 20)
-            )
-
-    trades = _run(exercise())
-
-    assert [trade.trade_id for trade in trades] == [1]
-    assert trades.truncated is True
-    assert len(transport.calls) == 1
-
-
-def test_fetch_is_not_truncated_when_the_window_is_exhausted_at_the_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(alpaca_client, "_MAX_RECORDS_PER_FETCH", 2)
-    transport = FakeTransport(
-        [
+            ),
             FakeResponse(
                 {
-                    "trades": {
-                        "AAPL": [
-                            _trade(1, "2024-01-19T14:30:00Z"),
-                            _trade(2, "2024-01-19T14:30:01Z"),
-                        ]
-                    },
+                    "trades": {"AAPL": [_trade(2, "2024-01-19T14:30:01Z")]},
+                    "next_page_token": "p3",
+                }
+            ),
+            FakeResponse(
+                {
+                    "trades": {"AAPL": [_trade(3, "2024-01-19T14:30:02Z")]},
                     "next_page_token": None,
                 }
-            )
+            ),
         ]
     )
 
-    async def exercise() -> FetchedRecords:
+    async def exercise() -> tuple[NormalizedTrade, ...]:
         async with AlpacaClient(transport=transport) as client:
             return await client.fetch_trades(
                 "AAPL", date(2024, 1, 19), date(2024, 1, 20)
@@ -380,8 +351,10 @@ def test_fetch_is_not_truncated_when_the_window_is_exhausted_at_the_budget(
 
     trades = _run(exercise())
 
-    assert [trade.trade_id for trade in trades] == [1, 2]
-    assert trades.truncated is False
+    assert [trade.trade_id for trade in trades] == [1, 2, 3]
+    assert len(transport.calls) == 3
+    assert transport.calls[1]["params"]["page_token"] == "p2"
+    assert transport.calls[2]["params"]["page_token"] == "p3"
 
 
 def test_multiple_symbols_are_bounded_and_settings_are_applied() -> None:

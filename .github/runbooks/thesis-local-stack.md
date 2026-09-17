@@ -71,7 +71,7 @@ provider into streamed conversation replies: when `OPENROUTER_API_KEY` is
 present, a new user message streams an assistant reply over
 `GET /v1/workspaces/{ws}/chats/{chat}/events/stream`; without it, chat stays a
 durable message surface with no reply. `THESIS_MODEL` overrides the model
-(default `openai/gpt-4o-mini`).
+(default `z-ai/glm-5.3-flash`).
 
 ### Azure AI Foundry (preflight)
 

@@ -226,9 +226,9 @@ def test_local_api_ensure_returns_202_and_authenticated_polling_for_missing_data
 
     assert response.status_code == 202
     assert response.headers["location"].startswith("/v1/jobs/ensure-")
-    assert response.json()["state"] == "queued"
+    assert response.json()["state"] == "complete"
     assert polled.status_code == 200
-    assert polled.json()["state"] == "queued"
+    assert polled.json()["state"] == "complete"
     assert unauthenticated.status_code == 401
 
 

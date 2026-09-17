@@ -204,11 +204,11 @@ state file entry count, and the price assumptions block from
 `config/lake/soak-aapl-spy.yaml` including its retrieval date.
 
 Known fidelity limits for T050 to carry forward: the ingest fetch is now
-paginated internally by the lake up to an internal per-fetch record budget
-rather than a configurable `LAKE_INGEST_MAX_RECORDS` cap, so recorded rows and
-bytes are full-depth up to that internal budget. The
-`estimate.assumed_bytes_per_session` values in the config are the
-order-of-magnitude planning numbers for sessions that exceed it and should be
-replaced by real full-depth measurements once the internal budget is raised. If
+paginated internally by the lake until the provider cursor is exhausted rather
+than a configurable `LAKE_INGEST_MAX_RECORDS` cap, so recorded rows and
+bytes are full-depth. The
+`estimate.assumed_bytes_per_session` values in the config are
+order-of-magnitude planning numbers and should be
+replaced by real full-depth measurements once a full soak runs. If
 the soak configuration or price assumptions change, re-run the dry-run
 projection rather than amending historical summaries.

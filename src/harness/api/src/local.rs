@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -22,8 +23,11 @@ use backtest::sweeps::runner::{
 use backtest::sweeps::spec::{SweepMode, SweepSpec};
 use backtest::sweeps::RunStatus as SweepRunStatus;
 
-use crate::lake_ensure::LakeEnsureClient;
+use crate::lake_ensure::{LakeEnsureClient, MAX_ENSURE_RANGE_DAYS};
 use mcp::store::{JobRepository, JobState, RunCatalogRecord, RunStatus, RunStore};
+
+/// Nanoseconds in one UTC day, used to split ensure requests into lake ranges.
+const NANOS_PER_DAY: i64 = 86_400 * 1_000_000_000;
 
 /// Local backtest submitter that runs the native engine and records the run.
 pub struct NativeBacktestSubmitter {
@@ -105,7 +109,9 @@ impl mcp::tools::StudySubmitter for NativeStudySubmitter {
             started,
         ));
         let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
-            std::env::temp_dir().join("harness-mcp-studies").join(&run_id)
+            std::env::temp_dir()
+                .join("harness-mcp-studies")
+                .join(&run_id)
         });
         let run_store = self.run_store.clone();
         let jobs = self.jobs.clone();
@@ -139,23 +145,55 @@ fn run_background_study(
     output_dir: PathBuf,
     started: DateTime<Utc>,
 ) {
-    let configuration =
-        match backtest::backtest::job::load_study_config(Path::new(&config_path)) {
-            Ok(configuration) => configuration,
-            Err(error) => {
-                let message = error.to_string();
-                let mut artifacts = BTreeMap::new();
-                artifacts.insert(
-                    "error.json".to_string(),
-                    serde_json::to_vec(&json!({"error": message}))
-                        .unwrap_or_else(|_| b"{}".to_vec()),
-                );
-                let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
-                let _ = run_store.put(record, artifacts);
-                fail_job(&jobs, &run_id, started, message);
-                return;
-            }
-        };
+    let guard = BackgroundJobGuard::new(jobs.clone(), &run_id, started);
+    let outcome = catch_unwind(AssertUnwindSafe({
+        let run_store = run_store.clone();
+        let jobs = jobs.clone();
+        let run_id = run_id.clone();
+        let config_path = config_path.clone();
+        let output_dir = output_dir.clone();
+        move || {
+            run_background_study_inner(run_store, jobs, run_id, config_path, output_dir, started);
+        }
+    }));
+    if let Err(payload) = outcome {
+        fail_job(
+            &jobs,
+            &run_id,
+            started,
+            format!(
+                "the background study panicked: {}",
+                panic_message(payload.as_ref())
+            ),
+        );
+    }
+    drop(guard);
+}
+
+/// The study body. Every exit path writes a terminal job record.
+fn run_background_study_inner(
+    run_store: Arc<dyn RunStore>,
+    jobs: Arc<dyn JobRepository>,
+    run_id: String,
+    config_path: String,
+    output_dir: PathBuf,
+    started: DateTime<Utc>,
+) {
+    let configuration = match backtest::backtest::job::load_study_config(Path::new(&config_path)) {
+        Ok(configuration) => configuration,
+        Err(error) => {
+            let message = error.to_string();
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert(
+                "error.json".to_string(),
+                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+            );
+            let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
+            let _ = run_store.put(record, artifacts);
+            fail_job(&jobs, &run_id, started, message);
+            return;
+        }
+    };
     let env_lake_dir = std::env::var("HARNESS_DATA_DIR")
         .or_else(|_| std::env::var("LAKE_LOCAL_DATA_DIR"))
         .ok()
@@ -242,6 +280,47 @@ fn run_background_backtest(
     output_dir: PathBuf,
     started: DateTime<Utc>,
 ) {
+    let guard = BackgroundJobGuard::new(jobs.clone(), &run_id, started);
+    let outcome = catch_unwind(AssertUnwindSafe({
+        let run_store = run_store.clone();
+        let jobs = jobs.clone();
+        let run_id = run_id.clone();
+        let config_path = config_path.clone();
+        let output_dir = output_dir.clone();
+        move || {
+            run_background_backtest_inner(
+                run_store,
+                jobs,
+                run_id,
+                config_path,
+                output_dir,
+                started,
+            );
+        }
+    }));
+    if let Err(payload) = outcome {
+        fail_job(
+            &jobs,
+            &run_id,
+            started,
+            format!(
+                "the background backtest panicked: {}",
+                panic_message(payload.as_ref())
+            ),
+        );
+    }
+    drop(guard);
+}
+
+/// The backtest body. Every exit path writes a terminal job record.
+fn run_background_backtest_inner(
+    run_store: Arc<dyn RunStore>,
+    jobs: Arc<dyn JobRepository>,
+    run_id: String,
+    config_path: String,
+    output_dir: PathBuf,
+    started: DateTime<Utc>,
+) {
     let configuration = match backtest::backtest::job::load_backtest_config(Path::new(&config_path))
     {
         Ok(configuration) => configuration,
@@ -276,8 +355,7 @@ fn run_background_backtest(
             "error.json".to_string(),
             serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
         );
-        let record =
-            RunCatalogRecord::new(&run_id, RunStatus::Failed, strategy_id(&configuration));
+        let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, strategy_id(&configuration));
         let _ = run_store.put(record, artifacts);
         fail_job(&jobs, &run_id, started, message);
         return;
@@ -341,7 +419,9 @@ fn run_background_backtest(
 ///
 /// The market-lake process owns provider credentials and the actual fetch; the
 /// harness only asks for the run window's symbols. A missing token or an empty
-/// symbol set leaves the existing synthetic/lake behavior unchanged.
+/// symbol set leaves the existing synthetic/lake behavior unchanged. Windows
+/// longer than the lake's per-request range limit are split into consecutive
+/// ranges so a full-history research window is ensured in order.
 fn ensure_lake_data(configuration: &BacktestConfig) -> Result<(), String> {
     if configuration.symbols.is_empty() {
         return Ok(());
@@ -349,15 +429,69 @@ fn ensure_lake_data(configuration: &BacktestConfig) -> Result<(), String> {
     let Some(client) = LakeEnsureClient::from_env() else {
         return Ok(());
     };
-    let start = date_string(configuration.start_ns);
-    let end = date_string(configuration.end_ns.saturating_sub(1));
-    for symbol in &configuration.symbols {
-        let (asset_class, lake_symbol) = lake_asset_class(symbol);
-        for data_type in ["trade", "quote"] {
-            client.ensure(asset_class, data_type, &lake_symbol, &start, &end)?;
+    let chunk_span = MAX_ENSURE_RANGE_DAYS * NANOS_PER_DAY;
+    let mut chunk_start = configuration.start_ns;
+    while chunk_start < configuration.end_ns {
+        let chunk_end = chunk_start
+            .saturating_add(chunk_span)
+            .min(configuration.end_ns);
+        let start = date_string(chunk_start);
+        let end = date_string(chunk_end.saturating_sub(1));
+        for symbol in &configuration.symbols {
+            let (asset_class, lake_symbol) = lake_asset_class(symbol);
+            for data_type in ["trade", "quote"] {
+                client.ensure(asset_class, data_type, &lake_symbol, &start, &end)?;
+            }
         }
+        chunk_start = chunk_end;
     }
     Ok(())
+}
+
+/// Mark one background job failed when its worker exits without a terminal
+/// record: an early return that forgot to record a state, or a panic.
+struct BackgroundJobGuard {
+    jobs: Arc<dyn JobRepository>,
+    run_id: String,
+    started: DateTime<Utc>,
+}
+
+impl BackgroundJobGuard {
+    fn new(jobs: Arc<dyn JobRepository>, run_id: &str, started: DateTime<Utc>) -> Self {
+        Self {
+            jobs,
+            run_id: run_id.to_string(),
+            started,
+        }
+    }
+}
+
+impl Drop for BackgroundJobGuard {
+    fn drop(&mut self) {
+        let in_flight = self
+            .jobs
+            .get(&self.run_id)
+            .is_some_and(|record| matches!(record.state, JobState::Queued | JobState::Running));
+        if in_flight {
+            fail_job(
+                &self.jobs,
+                &self.run_id,
+                self.started,
+                "the background run ended without recording a terminal state".to_string(),
+            );
+        }
+    }
+}
+
+/// Render one panic payload as a message safe to persist on a job record.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "unknown panic".to_string()
 }
 
 fn lake_asset_class(symbol: &str) -> (&'static str, String) {

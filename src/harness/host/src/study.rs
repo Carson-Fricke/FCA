@@ -21,7 +21,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::backtest::{market_to_python, parameters_from_json};
-use crate::context::{PyEngineContext, build_context};
+use crate::context::{build_context, PyEngineContext};
 use crate::error::HostError;
 use crate::python::{default_search_paths, install_marketdata_shim, install_search_paths};
 
@@ -46,7 +46,9 @@ impl PyStudyRuntime {
         parameters: BTreeMap<String, serde_json::Value>,
     ) -> Result<Self, HostError> {
         let (module, class) = implementation.rsplit_once(':').ok_or_else(|| {
-            HostError::Python("study program implementation must use module:Class syntax".to_string())
+            HostError::Python(
+                "study program implementation must use module:Class syntax".to_string(),
+            )
         })?;
         let mut search_paths = Vec::new();
         if let Some(root) = crate::python::workspace_root() {
@@ -141,11 +143,9 @@ impl StrategyRuntime for PyStudyRuntime {
     }
 
     fn published_metrics(&self) -> BTreeMap<String, String> {
-        self.context
-            .as_ref()
-            .map_or_else(BTreeMap::new, |context| {
-                Python::attach(|py| context.bind(py).borrow().published_metrics())
-            })
+        self.context.as_ref().map_or_else(BTreeMap::new, |context| {
+            Python::attach(|py| context.bind(py).borrow().published_metrics())
+        })
     }
 }
 
@@ -163,8 +163,10 @@ pub fn build_study_instances(
 ) -> Result<Vec<StrategyInstance>, HostError> {
     let mut instances = Vec::new();
     for configured in &configuration.strategy_instances {
-        let runtime =
-            PyStudyRuntime::new(&configured.implementation, parameters_from_json(&configured.parameters))?;
+        let runtime = PyStudyRuntime::new(
+            &configured.implementation,
+            parameters_from_json(&configured.parameters),
+        )?;
         instances.push(StrategyInstance {
             instance_id: configured.instance_id.clone(),
             runtime: Box::new(runtime),
@@ -184,9 +186,12 @@ pub fn run_study_config(
     output_dir: Option<&Path>,
     data_dir: Option<&Path>,
 ) -> Result<(BacktestOutcome, PathBuf), HostError> {
+    // A previous run may have panicked while holding the lock; the guard only
+    // serializes runs, so recover the guard instead of poisoning every future
+    // embedded-Python run.
     let _python_owner = crate::python::PYTHON_ENGINE_LOCK
         .lock()
-        .map_err(|_| HostError::Invalid("embedded Python engine lock is poisoned".to_string()))?;
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let instances = build_study_instances(configuration)?;
     run_native_study_job_with_data_dir(
         configuration,

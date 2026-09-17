@@ -176,7 +176,10 @@ implement the UI and does not modify any backend contract.
   the last `id` and reconnects with `Last-Event-ID`. Ephemeral frames (chat
   message events, `provider.delta`) have no `id` and are deduplicated by
   message ID (or tool call id); they are never replayed after reconnect.
-  Assistant and reasoning text render as sanitized Markdown. Harness tool
+  Assistant and reasoning text render as sanitized Markdown, with LaTeX math
+  (`\(...\)` inline, `\[...\]` display) rendered to KaTeX and the result passed
+  through the same sanitizer. A bare `$` is never treated as math so currency
+  and dollar-denominated numbers render as plain text. Harness tool
   outcomes are persisted as ordered `tool`-role chat messages at the position
   they ran and render through a tool-name-to-component registry with a generic
   fallback, so any harness MCP tool can supply a custom in-chat card without

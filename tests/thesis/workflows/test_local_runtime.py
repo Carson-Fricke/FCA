@@ -32,7 +32,8 @@ from thesis.workflows import (
     WorkflowRuntimeError,
     build_local_workflow_runtime,
 )
-from thesis.workflows.backtests import BacktestRunError
+from thesis.workflows.backtests import BacktestRunError, BacktestRunTimeout
+from thesis.workflows.local import McpStudyRunner
 
 
 class FakeModelProvider:
@@ -64,46 +65,80 @@ class FakeRunner:
 
 
 class FakeHarnessTools:
-    """Minimal harness tool provider returning one canned structured result."""
+    """Minimal harness tool provider returning one canned structured result.
 
-    def __init__(self, result: HarnessToolResult) -> None:
+    The runner probes ``get_backtest_status`` first to join an existing run, so
+    the probe answers "not found" unless a status result is supplied.
+    """
+
+    def __init__(
+        self, result: HarnessToolResult, *, status: HarnessToolResult | None = None
+    ) -> None:
         self._result = result
+        self._status = status or HarnessToolResult(
+            tool="get_backtest_status",
+            ok=False,
+            failure=HarnessToolFailure(
+                kind="tool",
+                message="backtest job 'run-model' does not exist",
+                tool="get_backtest_status",
+            ),
+        )
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     def call_tool(
         self, name: str, arguments: Mapping[str, object] | None = None
     ) -> HarnessToolResult:
         self.calls.append((name, dict(arguments or {})))
+        if name == "get_backtest_status":
+            return self._status
         return self._result
 
 
 class SequencedHarnessTools:
     """Return one result per expected MCP operation."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, existing: str = "missing") -> None:
         self.calls: list[str] = []
         self.status_calls = 0
+        self._existing = existing
 
     def call_tool(
         self, name: str, arguments: Mapping[str, object] | None = None
     ) -> HarnessToolResult:
         del arguments
         self.calls.append(name)
-        if name == "run_backtest":
-            return HarnessToolResult(
-                tool=name,
-                ok=True,
-                structured={"run_id": "run-model", "state": "running"},
-            )
         if name == "get_backtest_status":
             self.status_calls += 1
+            if self.status_calls == 1:
+                if self._existing == "missing":
+                    return HarnessToolResult(
+                        tool=name,
+                        ok=False,
+                        failure=HarnessToolFailure(
+                            kind="tool",
+                            message="backtest job 'run-model' does not exist",
+                            tool=name,
+                        ),
+                    )
+                return HarnessToolResult(
+                    tool=name,
+                    ok=True,
+                    structured={"job_id": "run-model", "state": self._existing},
+                )
             return HarnessToolResult(
                 tool=name,
                 ok=True,
                 structured={
                     "job_id": "run-model",
-                    "state": "running" if self.status_calls == 1 else "succeeded",
+                    "state": "running" if self.status_calls == 2 else "succeeded",
                 },
+            )
+        if name == "run_backtest":
+            return HarnessToolResult(
+                tool=name,
+                ok=True,
+                structured={"run_id": "run-model", "state": "running"},
             )
         if name == "get_run":
             return HarnessToolResult(
@@ -120,6 +155,32 @@ class SequencedHarnessTools:
                 tool=name,
                 ok=True,
                 structured={"artifacts": [{"name": "metrics.json"}]},
+            )
+        raise AssertionError(name)
+
+
+class AlwaysRunningHarnessTools:
+    """Report one job that never reaches a terminal state."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def call_tool(
+        self, name: str, arguments: Mapping[str, object] | None = None
+    ) -> HarnessToolResult:
+        del arguments
+        self.calls.append(name)
+        if name == "run_backtest":
+            return HarnessToolResult(
+                tool=name,
+                ok=True,
+                structured={"run_id": "run-model", "state": "running"},
+            )
+        if name == "get_backtest_status":
+            return HarnessToolResult(
+                tool=name,
+                ok=True,
+                structured={"job_id": "run-model", "state": "running"},
             )
         raise AssertionError(name)
 
@@ -223,11 +284,91 @@ def test_mcp_backtest_runner_maps_structured_result() -> None:
     assert mapped.metrics == {"sharpe": 1.2}
     assert mapped.manifest == {"manifestId": "manifest-1"}
     assert mapped.result_artifacts == [{"uri": "runs/run-9/fills.csv"}]
-    assert tools.calls[0][0] == "run_backtest"
-    config_path = tools.calls[0][1]["config_path"]
+    assert tools.calls[0][0] == "get_backtest_status"
+    assert tools.calls[1][0] == "run_backtest"
+    config_path = tools.calls[1][1]["config_path"]
     assert isinstance(config_path, str) and config_path
     with open(config_path, encoding="utf-8") as handle:
         assert json.load(handle) == {"seed": 7, "symbols": ["SPY"]}
+
+
+def test_mcp_study_runner_dispatches_the_study_tool() -> None:
+    result = HarnessToolResult(
+        tool="run_study",
+        ok=True,
+        structured={
+            "run_id": "run-study",
+            "status": "completed",
+            "metrics": {"custom": {"fit.beta": "0.5"}},
+        },
+    )
+    tools = FakeHarnessTools(result)
+    runner = McpStudyRunner(cast(HarnessToolProvider, tools))
+
+    mapped = runner.run(
+        BacktestRunRequest(
+            run_id="run-study",
+            workspace_id="workspace-demo",
+            bundle=_bundle(),
+            workflow_execution_id="execution-1",
+            experiment_id="experiment-1",
+        )
+    )
+
+    assert mapped.job_id == "run-study"
+    assert mapped.state == "completed"
+    assert tools.calls[0][0] == "get_backtest_status"
+    assert tools.calls[1][0] == "run_study"
+
+
+def test_local_api_composes_a_study_backed_research_runner() -> None:
+    from pathlib import Path
+
+    script = (
+        Path(__file__).resolve().parents[3]
+        / "scripts"
+        / "local"
+        / "thesis_local_api.py"
+    )
+    source = script.read_text(encoding="utf-8")
+
+    assert "McpStudyRunner(" in source
+    assert "BacktestResearchModelRunner(" in source
+    assert "research_runner=research_runner" in source
+
+
+def test_local_api_grants_the_coordinator_control_tools() -> None:
+    from pathlib import Path
+
+    script = (
+        Path(__file__).resolve().parents[3]
+        / "scripts"
+        / "local"
+        / "thesis_local_api.py"
+    )
+    source = script.read_text(encoding="utf-8")
+
+    allowed = source.split("_AGENT_ALLOWED_TOOLS", 1)[1].split(")", 1)[0]
+    assert "HARNESS_TOOL_NAMES" in allowed
+    assert "THESIS_TOOL_NAMES" in allowed
+
+
+def test_local_api_spawns_phase_agents_from_the_workflow_state_machine() -> None:
+    from pathlib import Path
+
+    script = (
+        Path(__file__).resolve().parents[3]
+        / "scripts"
+        / "local"
+        / "thesis_local_api.py"
+    )
+    source = script.read_text(encoding="utf-8")
+
+    assert "subagent_lifecycle=subagent_lifecycle" in source
+    assert (
+        "_development_runtime(\n            model_provider, harness_tools, lifecycle\n        )"
+        in source
+    )
 
 
 def test_mcp_backtest_runner_defaults_state_from_exit_code() -> None:
@@ -299,9 +440,78 @@ def test_mcp_runner_polls_then_reads_custom_metrics_and_artifacts() -> None:
     assert result.metrics == {"rolling_corr_60d_median": "0.73"}
     assert result.result_artifacts == [{"name": "metrics.json"}]
     assert tools.calls == [
+        "get_backtest_status",
         "run_backtest",
         "get_backtest_status",
         "get_backtest_status",
         "get_run",
         "list_artifacts",
     ]
+
+
+def test_mcp_runner_joins_an_existing_pending_job_without_launching() -> None:
+    tools = SequencedHarnessTools(existing="running")
+    runner = McpBacktestRunner(
+        cast(HarnessToolProvider, tools),
+        poll_interval_seconds=0,
+        sleep=lambda _: None,
+    )
+
+    result = runner.run(
+        BacktestRunRequest(
+            run_id="run-model",
+            workspace_id="workspace-demo",
+            bundle=_bundle(),
+            workflow_execution_id="execution-1",
+            experiment_id="experiment-1",
+        )
+    )
+
+    assert result.state == "complete"
+    assert "run_backtest" not in tools.calls
+    assert tools.calls[0] == "get_backtest_status"
+
+
+def test_mcp_runner_relaunches_a_terminal_job_so_revisions_re_execute() -> None:
+    tools = SequencedHarnessTools(existing="succeeded")
+    runner = McpBacktestRunner(
+        cast(HarnessToolProvider, tools),
+        poll_interval_seconds=0,
+        sleep=lambda _: None,
+    )
+
+    result = runner.run(
+        BacktestRunRequest(
+            run_id="run-model",
+            workspace_id="workspace-demo",
+            bundle=_bundle(),
+            workflow_execution_id="execution-1",
+            experiment_id="experiment-1",
+        )
+    )
+
+    # A succeeded job may describe a superseded artifact, so it is relaunched
+    # rather than adopted.
+    assert result.state == "complete"
+    assert "run_backtest" in tools.calls
+
+
+def test_mcp_runner_raises_a_timeout_for_a_still_running_job() -> None:
+    tools = AlwaysRunningHarnessTools()
+    runner = McpBacktestRunner(
+        cast(HarnessToolProvider, tools),
+        poll_deadline_seconds=0.001,
+        poll_interval_seconds=0,
+        sleep=lambda _: None,
+    )
+
+    with pytest.raises(BacktestRunTimeout, match="did not reach a terminal state"):
+        runner.run(
+            BacktestRunRequest(
+                run_id="run-model",
+                workspace_id="workspace-demo",
+                bundle=_bundle(),
+                workflow_execution_id="execution-1",
+                experiment_id="experiment-1",
+            )
+        )

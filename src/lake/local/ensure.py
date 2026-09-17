@@ -1,4 +1,4 @@
-"""On-demand local ensure execution backed by bounded Alpaca fetches.
+"""On-demand local ensure execution backed by complete Alpaca fetches.
 
 The local market-lake API previously installed a no-op ensure launcher, so a
 coverage request for symbols that had never been ingested could never be

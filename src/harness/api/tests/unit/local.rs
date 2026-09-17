@@ -65,6 +65,9 @@ fn poll_terminal(jobs: &Arc<dyn JobRepository>, job_id: &str) -> JobState {
     for _ in 0..600 {
         if let Some(record) = jobs.get(job_id) {
             if matches!(record.state, JobState::Succeeded | JobState::Failed) {
+                if record.state == JobState::Failed {
+                    eprintln!("job {job_id} failed: {:?}", record.error_message);
+                }
                 return record.state;
             }
         }
@@ -235,4 +238,64 @@ fn crypto_symbols_map_to_lake_pairs_and_equities_stay_equity() {
 fn date_string_formats_whole_utc_days() {
     // 2024-01-02T00:00:00Z
     assert_eq!(date_string(1_704_153_600_000_000_000), "2024-01-02");
+}
+
+#[test]
+fn background_job_guard_fails_a_job_left_in_flight() {
+    let root = std::env::temp_dir().join(format!(
+        "harness-job-guard-{}-{}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
+    let started = Utc::now();
+    jobs.upsert(mcp::store::JobRecord::new(
+        "guard-job",
+        JobState::Running,
+        started,
+        started,
+    ));
+
+    drop(BackgroundJobGuard::new(jobs.clone(), "guard-job", started));
+
+    let record = jobs.get("guard-job").expect("record");
+    assert_eq!(record.state, JobState::Failed);
+    assert!(record.error_message.is_some());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn background_job_guard_leaves_a_terminal_job_alone() {
+    let root = std::env::temp_dir().join(format!(
+        "harness-job-guard-terminal-{}-{}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
+    let started = Utc::now();
+    jobs.upsert(mcp::store::JobRecord::new(
+        "guard-job",
+        JobState::Succeeded,
+        started,
+        started,
+    ));
+
+    drop(BackgroundJobGuard::new(jobs.clone(), "guard-job", started));
+
+    let record = jobs.get("guard-job").expect("record");
+    assert_eq!(record.state, JobState::Succeeded);
+    assert!(record.error_message.is_none());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn panic_payloads_render_as_messages() {
+    let static_message: Box<dyn std::any::Any + Send> = Box::new("static boom");
+    assert_eq!(panic_message(static_message.as_ref()), "static boom");
+    let owned: Box<dyn std::any::Any + Send> = Box::new("owned boom".to_string());
+    assert_eq!(panic_message(owned.as_ref()), "owned boom");
+    let opaque: Box<dyn std::any::Any + Send> = Box::new(7_u32);
+    assert_eq!(panic_message(opaque.as_ref()), "unknown panic");
 }

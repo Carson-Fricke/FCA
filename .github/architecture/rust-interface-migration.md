@@ -53,7 +53,7 @@ built; it never falls back to a deleted Python implementation.
 
 `backtest-job --data-dir <dir>` reads a local Hive-partitioned Parquet lake through `marketdata::LocalLakeReader` and drives the native engine over the real data instead of the synthetic fixture. Symbols shaped like a crypto pair (`BTC-USD`) additionally read their `BASE/QUOTE` crypto partition and are re-keyed to the configured dashed symbol. The canonical parity test is unchanged.
 
-Before a local run, the harness API asks the market-lake ensure contract (`LAKE_API_URL`, `LAKE_API__BEARER_TOKEN`) to fetch every configured symbol/data-type for the run window, then polls coverage to a terminal status. The lake owns provider credentials and the fetch; the harness never reads them. A symbol set the lake has not ingested before is thus fetched on demand rather than failing preflight with a missing-symbol error.
+Before a local run, the harness API asks the market-lake ensure contract (`LAKE_API_URL`, `LAKE_API__BEARER_TOKEN`) to fetch every configured symbol/data-type for the run window, then polls coverage to a terminal status. The lake pages each fetch until the provider cursor is exhausted, so a closed session is complete rather than truncated, and the harness splits long windows into lake-sized ranges and fails fast when a closed session is left `partial` or errored. The lake owns provider credentials and the fetch; the harness never reads them. A symbol set the lake has not ingested before is thus fetched on demand rather than failing preflight with a missing-symbol error.
 
 ## Parity definition
 

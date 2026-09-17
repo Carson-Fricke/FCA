@@ -1,4 +1,5 @@
 <script lang="ts">
+	import 'katex/dist/katex.min.css';
 	import { renderMarkdown } from '$lib/markdown';
 
 	let {
@@ -111,5 +112,16 @@
 	}
 	.markdown-body :global(*:last-child) {
 		margin-bottom: 0;
+	}
+	.markdown-body :global(.katex) {
+		font-size: 1em;
+	}
+	.markdown-body :global(.katex-display) {
+		margin: 0.5rem 0;
+		overflow-x: auto;
+		overflow-y: hidden;
+	}
+	.markdown-body :global(.katex-error) {
+		color: var(--color-slate-500);
 	}
 </style>

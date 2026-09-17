@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -29,14 +28,10 @@ from thesis.activation.consent import (
     revoke,
 )
 from thesis.agent.context import UntrustedData, assemble_context
-from thesis.agent.harness_tools import (
-    HARNESS_TOOL_NAMES,
-    HarnessToolProvider,
-)
+from thesis.agent.harness_tools import HARNESS_TOOL_NAMES
 from thesis.agent.residency import OperationAuditRecord
 from thesis.agent.router import ModelProfile, ModelRouter, RolePolicy
 from thesis.agent.skills import SkillRegistry
-from thesis.agent.tool_dispatch import HarnessToolDispatcher
 from thesis.artifacts.importer import (
     ArtifactImporter,
     ArtifactImportError,
@@ -47,7 +42,6 @@ from thesis.artifacts.importer import (
 from thesis.execution.checkpoints import CheckpointStore, MemoryCheckpointStorage
 from thesis.execution.events import ExecutionEvent, InMemoryExecutionEventStore
 from thesis.execution.queue import ExecutionQueue, FencingError, MemoryExecutionStorage
-from thesis.integrations.mcp import HarnessMcpClient
 from thesis.operations import (
     BackupIntegrityError,
     BoundaryCheck,
@@ -269,20 +263,7 @@ class _RecordingGit:
         return "f" * 40
 
 
-class _NoopTransport:
-    """Structural MCP transport that is never exchanged with in these tests."""
-
-    def exchange(self, request: Mapping[str, object]) -> Mapping[str, object]:
-        raise AssertionError("denied tool calls must not reach the transport")
-
-    def notify(self, request: Mapping[str, object]) -> None:
-        raise AssertionError("denied tool calls must not reach the transport")
-
-    def close(self) -> None:
-        return None
-
-
-def _dispatcher() -> HarnessToolDispatcher:
+def _router() -> ModelRouter:
     profile = ModelProfile(
         profile_id="coding-profile",
         version="1.0.0",
@@ -295,15 +276,13 @@ def _dispatcher() -> HarnessToolDispatcher:
         model_profile="coding-profile",
         allowed_tools=("run_backtest",),
     )
-    router = ModelRouter(
+    return ModelRouter(
         role_policies={"coding": policy},
         model_profiles={"coding-profile": profile},
         providers={},
         skills=SkillRegistry(),
         bundle_hashes={"policy": _ZERO_DIGEST},
     )
-    provider = HarnessToolProvider(HarnessMcpClient(_NoopTransport()))
-    return HarnessToolDispatcher(router, provider)
 
 
 def _foundry_profile() -> FoundryProviderProfile:
@@ -571,17 +550,15 @@ def test_foundry_invoker_redacts_credential() -> None:
 
 
 def test_confused_deputy_tool_denied_by_role_policy() -> None:
-    dispatcher = _dispatcher()
-    assert "run_backtest" in dispatcher.allowed_tools("coding")
-    result = dispatcher.dispatch("coding", "launch_trader")
-    assert result.ok is False
-    assert result.failure is not None
-    assert result.failure.kind == "denied"
+    allowed = _router().resolve("coding").allowed_tools
+    assert "run_backtest" in allowed
     assert "launch_trader" in HARNESS_TOOL_NAMES
+    with pytest.raises(ConfusedDeputyError):
+        assert_tool_permitted("launch_trader", allowed_tools=allowed)
 
 
 def test_assert_tool_permitted_rejects_outside_allowlist() -> None:
-    allowed = _dispatcher().allowed_tools("coding")
+    allowed = _router().resolve("coding").allowed_tools
     assert_tool_permitted("run_backtest", allowed_tools=allowed)
     with pytest.raises(ConfusedDeputyError):
         assert_tool_permitted("launch_trader", allowed_tools=allowed)

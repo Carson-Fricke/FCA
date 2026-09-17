@@ -1,4 +1,4 @@
-"""Bounded Alpaca ingestion composed over local filesystem adapters."""
+"""Alpaca ingestion composed over local filesystem adapters."""
 
 from __future__ import annotations
 

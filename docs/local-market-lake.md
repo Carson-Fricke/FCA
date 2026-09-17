@@ -230,7 +230,7 @@ refuses an existing non-empty unmarked directory, which protects an accidental
 | Non-empty directory not created by local mode | Correct `LAKE_LOCAL_DATA_DIR` or choose a new empty directory. Do not add the marker manually. |
 | Local catalog is invalid | Stop the API, preserve the tree if diagnosis matters, then run `lake local reset --yes` and ingest again. |
 | Port already in use | Stop the old process or select another `--port`, then use that port for smoke URLs. |
-| Query reports incomplete coverage | Bounded smoke records are intentionally partial. Ingest/query only claims complete coverage when an untruncated workflow supplies it. |
+| Query reports incomplete coverage | A session that is still trading is `partial`; a closed session is `complete` or `empty`. A closed session that stays incomplete means an ingest was interrupted, so re-run the ensure for that window. |
 
 ## Local Versus Azure
 
