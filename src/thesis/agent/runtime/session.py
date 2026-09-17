@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Protocol
 
+from thesis.agent.runtime.datum import Datum, normalize_datums
 from thesis.agent.runtime.store import SubAgentStore
 from thesis.chat.contracts import (
     AgentInvocation,
@@ -52,13 +53,19 @@ class CompletionProvider(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ToolExecution:
-    """The typed outcome of one dispatched tool call."""
+    """The typed outcome of one dispatched tool call.
+
+    ``datums`` carries the typed values the tool returned.  When it is empty the
+    session derives one generic datum from ``structured``/``text``/``failure``,
+    typed by the tool name, so every tool result is renderable.
+    """
 
     ok: bool
     structured: Mapping[str, object] = field(default_factory=dict)
     text: str = ""
     failure: Mapping[str, object] | None = None
     terminal: bool = False
+    datums: tuple[Datum, ...] = ()
 
     def as_content(self) -> str:
         payload: dict[str, object] = {
@@ -92,18 +99,45 @@ class RegisteredTool:
 
 
 class SessionToolRegistry:
-    """A default-deny catalog of tools available to one session."""
+    """A default-deny catalog of tools available to one session.
 
-    def __init__(self, tools: Sequence[RegisteredTool] = ()) -> None:
+    ``policy`` is the effective allowed-tool policy for the calling sub-agent.
+    When supplied, only permitted tools are advertised and a request for any
+    other tool is rejected before its handler runs; the registry still knows the
+    full catalog so the same instance can serve several policies.
+    """
+
+    def __init__(
+        self,
+        tools: Sequence[RegisteredTool] = (),
+        *,
+        policy: Sequence[str] | None = None,
+    ) -> None:
         self._tools: dict[str, RegisteredTool] = {}
         for tool in tools:
             self.register(tool)
+        self._policy: frozenset[str] | None = (
+            None if policy is None else frozenset(policy)
+        )
+
+    @property
+    def policy(self) -> tuple[str, ...] | None:
+        """Return the effective allowed-tool policy, or ``None`` for all."""
+        if self._policy is None:
+            return None
+        return tuple(sorted(self._policy))
 
     def register(self, tool: RegisteredTool) -> None:
         self._tools[tool.name] = tool
 
+    def permits(self, name: str) -> bool:
+        """Return whether the effective policy allows ``name``."""
+        return self._policy is None or name in self._policy
+
     def catalog(self) -> tuple[Mapping[str, object], ...]:
-        return tuple(tool.spec for tool in self._tools.values())
+        return tuple(
+            tool.spec for tool in self._tools.values() if self.permits(tool.name)
+        )
 
     def dispatch(self, name: str, arguments: Mapping[str, object]) -> ToolExecution:
         tool = self._tools.get(name)
@@ -111,6 +145,15 @@ class SessionToolRegistry:
             return ToolExecution(
                 ok=False,
                 failure={"kind": "unknown_tool", "message": f"unknown tool: {name}"},
+            )
+        if not self.permits(name):
+            return ToolExecution(
+                ok=False,
+                failure={
+                    "kind": "denied",
+                    "message": f"tool is not permitted by the effective policy: {name}",
+                    "tool": name,
+                },
             )
         try:
             return tool.handler(arguments)
@@ -130,6 +173,7 @@ class SessionTurn:
     tool_name: str | None = None
     tool_call_id: str | None = None
     invocation_id: str | None = None
+    datums: tuple[Datum, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +340,14 @@ class AgentSession:
                         tool_name=call.name,
                         tool_call_id=call.id,
                         invocation_id=tool_invocation_id,
+                        datums=normalize_datums(
+                            execution.datums,
+                            fallback_type=call.name,
+                            ok=execution.ok,
+                            structured=execution.structured,
+                            text=execution.text,
+                            failure=execution.failure,
+                        ),
                     )
                 )
                 if execution.terminal:

@@ -14,7 +14,6 @@ composition boundary.
 
 from __future__ import annotations
 
-import json
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -63,6 +62,7 @@ class ToolResultChunk:
     structured: Mapping[str, object] = field(default_factory=dict)
     text: str = ""
     failure: Mapping[str, object] | None = None
+    datum_type: str | None = None
 
 
 #: Observes one tool result before it is persisted and may enrich it.
@@ -88,9 +88,6 @@ ReplyProvider = Callable[
 _HISTORY_ROLES = frozenset(
     (MessageRole.USER, MessageRole.ASSISTANT, MessageRole.SYSTEM)
 )
-
-#: The explicit structured trigger that requests a hypothesis-development run.
-_DEVELOPMENT_WORKFLOW_TRIGGER = "hypothesis-development"
 
 
 class DevelopmentRuntime(Protocol):
@@ -157,197 +154,6 @@ def launch_hypothesis_development(
     return request, outcome
 
 
-def _development_trigger(message: ChatMessage) -> str | None:
-    """Return the ideas when a message is an explicit development trigger.
-
-    Only a user message carrying the exact structured JSON envelope
-    ``{"workflow": "hypothesis-development", "ideas": "<ideas>"}`` triggers the
-    falsification-first pipeline.  There is no natural-language inference.
-    """
-    if message.role is not MessageRole.USER:
-        return None
-    text = message.body.strip()
-    if not text.startswith("{"):
-        return None
-    try:
-        document = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(document, dict):
-        return None
-    if document.get("workflow") != _DEVELOPMENT_WORKFLOW_TRIGGER:
-        return None
-    ideas = document.get("ideas")
-    if not isinstance(ideas, str) or not ideas.strip():
-        return None
-    return ideas.strip()
-
-
-#: Phrasings that explicitly frame a message as an idea to research.
-_RESEARCH_IDEA_FRAMING = (
-    "i have an idea",
-    "i've got an idea",
-    "i have a theory",
-    "i've got a theory",
-    "my theory",
-    "my hypothesis",
-    "a hypothesis",
-    "the hypothesis",
-    "here's an idea",
-    "here is an idea",
-    "here's a theory",
-    "here is a theory",
-    "trade idea",
-    "trading idea",
-    "strategy idea",
-    "research idea",
-    "market idea",
-    "investment idea",
-    "an edge",
-    "the edge",
-    "what if",
-    "let's research",
-    "lets research",
-    "research the",
-    "explore the",
-    "investigate the",
-    "test the hypothesis",
-    "test the theory",
-    "test the idea",
-    "develop a hypothesis",
-    "develop a strategy",
-    "build a hypothesis",
-    "falsify",
-    "falsification",
-)
-
-#: Imperative openers that request research directly.
-_RESEARCH_IDEA_OPENERS = (
-    "research ",
-    "explore ",
-    "investigate ",
-    "falsify ",
-    "validate ",
-    "backtest ",
-)
-
-#: Causal or predictive cues describing a market mechanism worth testing.
-_CAUSAL_CLAIM_CUES = (
-    "predicts",
-    "predict",
-    "because",
-    "due to",
-    "leads to",
-    "lead to",
-    "drives",
-    "driven by",
-    "causes",
-    "caused by",
-    "underreact",
-    "overreact",
-    "mispric",
-    "mean reversion",
-    "mean-revert",
-    "tends to",
-    "tend to",
-    "correlat",
-    "outperform",
-    "underperform",
-    "alpha",
-    "has an edge",
-    "have an edge",
-)
-
-#: Words that anchor a claim to a tradable market subject.
-_MARKET_SUBJECTS = (
-    "market",
-    "stock",
-    "equit",
-    "price",
-    "return",
-    "volatil",
-    "vix",
-    "spy",
-    "qqq",
-    "option",
-    "future",
-    "bond",
-    "yield",
-    "rate",
-    "momentum",
-    "trend",
-    "sector",
-    "earnings",
-    "spread",
-    "commodit",
-    "currency",
-    "dollar",
-    "index",
-    "ticker",
-    "asset",
-)
-
-_INTERROGATIVE_PREFIXES = (
-    "what",
-    "why",
-    "how",
-    "when",
-    "where",
-    "who",
-    "which",
-    "is",
-    "are",
-    "was",
-    "were",
-    "does",
-    "do",
-    "did",
-    "can",
-    "could",
-    "should",
-    "would",
-    "will",
-    "may",
-    "might",
-)
-
-
-def _looks_like_question(lowered: str) -> bool:
-    """Return whether a lower-cased message reads as an ordinary question."""
-    stripped = lowered.strip()
-    if stripped.endswith("?"):
-        return True
-    first = stripped.split(maxsplit=1)[0] if stripped else ""
-    return first in _INTERROGATIVE_PREFIXES
-
-
-def _research_ideas(message: ChatMessage) -> str | None:
-    """Return the ideas when a plain-language message asks to research one.
-
-    This is a conservative, deterministic predicate: it launches the
-    falsification-first pipeline only for messages that clearly frame a
-    tradable idea, theory, edge, or hypothesis.  Ordinary questions, greetings,
-    and status requests never match and continue to the model reply provider.
-    """
-    if message.role is not MessageRole.USER:
-        return None
-    text = message.body.strip()
-    if not text:
-        return None
-    lowered = text.lower()
-    if any(marker in lowered for marker in _RESEARCH_IDEA_FRAMING):
-        return text
-    if lowered.startswith(_RESEARCH_IDEA_OPENERS):
-        return text
-    if _looks_like_question(lowered):
-        return None
-    if any(cue in lowered for cue in _CAUSAL_CLAIM_CUES) and any(
-        subject in lowered for subject in _MARKET_SUBJECTS
-    ):
-        return text
-    return None
-
-
 #: Active (non-terminal) hypothesis-development phases, by wire value.
 _ACTIVE_DEVELOPMENT_PHASES = frozenset(
     {
@@ -362,7 +168,7 @@ _ACTIVE_DEVELOPMENT_PHASES = frozenset(
 )
 
 
-def _development_summary(outcome: HypothesisDevelopmentOutcome) -> str:
+def development_summary(outcome: HypothesisDevelopmentOutcome) -> str:
     """Return the assistant summary for one hypothesis-development execution.
 
     A running or paused execution is reported as started/running or
@@ -410,7 +216,7 @@ def _sanitize(text: str) -> str:
 
 def _tool_result_data(chunk: ToolResultChunk) -> dict[str, object]:
     """Return the canonical UI payload for one streamed tool outcome."""
-    return {
+    payload: dict[str, object] = {
         "callId": chunk.call_id,
         "failure": None if chunk.failure is None else dict(chunk.failure),
         "ok": chunk.ok,
@@ -419,25 +225,29 @@ def _tool_result_data(chunk: ToolResultChunk) -> dict[str, object]:
         "text": chunk.text,
         "tool": chunk.tool,
     }
+    if chunk.datum_type is not None:
+        payload["datumType"] = chunk.datum_type
+    return payload
 
 
 @dataclass(slots=True)
 class ChatReplyService:
     """Generate and stream one assistant reply per user message.
 
-    A user message carrying the explicit structured development trigger, or a
-    plain-language research idea, is executed as a falsification-first
-    hypothesis-development run instead of a model reply; the finished verdict
-    is persisted as an assistant message and the existing execution events are
-    emitted by the launched workflow.  Without a development runtime the trigger
-    is acknowledged with an error delta and nothing is persisted, so the surface
-    fails closed.  Every other message goes to the ordinary reply provider, so
-    normal Q&A is never hijacked.
+    Every user message goes to the injected :data:`ReplyProvider`; a workflow is
+    started only through the ``start_workflow`` tool the provider exposes, never
+    by a chat-message protocol.  The provider streams text, reasoning, and tool
+    outcomes, and this service persists the assistant message and each tool
+    result in the order they ran.  The optional ``development_runtime`` remains
+    available to the composition for building the workflow-launch tool.
     """
 
     chat_service: ChatService
     broker: InMemoryChatStreamBroker
     provider: ReplyProvider
+    provider_factory: (
+        Callable[[str, str, Sequence[ChatMessage]], ReplyProvider] | None
+    ) = None
     actor_id: str = "thesis-agent"
     max_history: int = 40
     id_factory: Callable[[], str] = field(default=_stream_id)
@@ -458,123 +268,7 @@ class ChatReplyService:
         )[-self.max_history :]
         if not history:
             return None
-        trigger_ideas = _development_trigger(history[-1])
-        if trigger_ideas is None:
-            trigger_ideas = _research_ideas(history[-1])
-        if trigger_ideas is not None:
-            return self._respond_with_development(
-                workspace_id,
-                chat_id,
-                trigger_ideas,
-                trigger_message_id=history[-1].message_id,
-            )
         return self._respond_with_provider(workspace_id, chat_id, history)
-
-    def _respond_with_development(
-        self,
-        workspace_id: str,
-        chat_id: str,
-        ideas: str,
-        *,
-        trigger_message_id: str | None = None,
-    ) -> ChatMessage | None:
-        """Launch and execute the hypothesis pipeline, then persist its verdict.
-
-        The launch persists the durable ``kind=WORKFLOW``/``role=SYSTEM`` anchor
-        and its execution *before* the long model run.  The anchor is published
-        immediately as a live ``chat.message`` frame so connected panes render
-        the workflow card without a reload; only then does the run execute, and
-        its assistant summary plus a terminal ``done`` delta follow once the run
-        completes, fails, or pauses for operator input.
-        """
-        stream_id = self.id_factory()
-        self._start_delta(workspace_id, chat_id, stream_id)
-        runtime = self.development_runtime
-        if runtime is None:
-            self._error_delta(
-                workspace_id,
-                chat_id,
-                stream_id,
-                "workflow runtime is not configured",
-            )
-            return None
-        try:
-            workflow = runtime.build_hypothesis_development(chat=self.chat_service)
-            request = workflow.launch(
-                workspace_id,
-                chat_id,
-                actor_id=self.actor_id,
-                ideas=ideas,
-                trigger_message_id=trigger_message_id,
-            )
-            anchor = self._workflow_anchor(workspace_id, chat_id, request.execution_id)
-            if anchor is not None:
-                self.broker.publish(
-                    workspace_id,
-                    chat_id,
-                    CHAT_MESSAGE,
-                    {"message": anchor.as_dict()},
-                )
-            outcome = runtime.execute_hypothesis_development(
-                request, chat=self.chat_service
-            )
-            if outcome.phase.value == "paused":
-                # The workflow anchor/card and node needs-input event are the
-                # durable UI surface for a pause. Do not append a duplicate
-                # root assistant message after the workflow card.
-                self.broker.publish(
-                    workspace_id,
-                    chat_id,
-                    PROVIDER_DELTA,
-                    {"messageId": stream_id, "done": True},
-                )
-                return None
-            body = (
-                _sanitize(_development_summary(outcome))
-                or "Hypothesis development finished."
-            )
-            message = self.chat_service.create_message(
-                workspace_id,
-                chat_id,
-                actor_id=self.actor_id,
-                body=body,
-                role=MessageRole.ASSISTANT,
-                execution_id=outcome.execution_id,
-            )
-        except Exception as error:  # fail closed at the task boundary
-            self._error_delta(workspace_id, chat_id, stream_id, str(error))
-            return None
-        self.broker.publish(
-            workspace_id, chat_id, CHAT_MESSAGE, {"message": message.as_dict()}
-        )
-        self.broker.publish(
-            workspace_id,
-            chat_id,
-            PROVIDER_DELTA,
-            {
-                "messageId": stream_id,
-                "messageIdFinal": message.message_id,
-                "done": True,
-            },
-        )
-        return message
-
-    def _workflow_anchor(
-        self, workspace_id: str, chat_id: str, execution_id: str
-    ) -> ChatMessage | None:
-        """Return the chat-owned ``kind=WORKFLOW`` anchor for one execution.
-
-        The anchor is persisted by the workflow's ``launch`` and read back here
-        (chronologically last, in case an execution is relaunched) so the live
-        stream frames the same durable message the reload snapshot serves.
-        """
-        for message in reversed(self.chat_service.list_messages(workspace_id, chat_id)):
-            if (
-                message.kind is TranscriptItemKind.WORKFLOW
-                and message.execution_id == execution_id
-            ):
-                return message
-        return None
 
     def _respond_with_provider(
         self, workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
@@ -584,8 +278,13 @@ class ChatReplyService:
         self._start_delta(workspace_id, chat_id, stream_id)
         answer_chunks: list[str] = []
         reasoning_chunks: list[str] = []
+        provider = (
+            self.provider
+            if self.provider_factory is None
+            else self.provider_factory(workspace_id, chat_id, history)
+        )
         try:
-            for chunk in self.provider(history):
+            for chunk in provider(history):
                 if isinstance(chunk, ToolResultChunk):
                     chunk = self._observe_tool_result(workspace_id, chat_id, chunk)
                     tool_message = self.chat_service.create_message(
@@ -721,5 +420,6 @@ __all__ = [
     "ReplyProvider",
     "ToolResultChunk",
     "ToolResultObserver",
+    "development_summary",
     "launch_hypothesis_development",
 ]

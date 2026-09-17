@@ -336,6 +336,11 @@ export interface ToolResultFailure {
 
 export interface ToolResult {
 	tool: string;
+	/**
+	 * Persisted datum type selecting the canonical renderer; omitted when
+	 * unset. Harness tools may instead fall back to their own tool name.
+	 */
+	datumType?: string | null;
 	callId: string | null;
 	ok: boolean;
 	summary: string;

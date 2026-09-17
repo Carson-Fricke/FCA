@@ -28,6 +28,31 @@ describe('toolResultComponent', () => {
 	});
 });
 
+describe('toolResultComponent datum-type resolution', () => {
+	it('resolves a well-known datum type to the generic card today', () => {
+		expect(TOOL_RESULT_RENDERERS['workflow_execution']).toBe(GenericToolCard);
+		expect(toolResultComponent('some_harness_tool', 'workflow_execution')).toBe(GenericToolCard);
+	});
+
+	it('keeps the harness tool-name fallback when no datum type is set', () => {
+		expect(toolResultComponent('run_backtest')).toBe(BacktestToolCard);
+		expect(toolResultComponent('run_backtest', null)).toBe(BacktestToolCard);
+	});
+
+	it('resolves a datum type that equals a tool name via the datum type path', () => {
+		expect(toolResultComponent('not_a_real_tool', 'run_backtest')).toBe(BacktestToolCard);
+		expect(toolResultComponent('run_backtest', 'run_backtest')).toBe(BacktestToolCard);
+	});
+
+	it('prefers the datum type over a known tool name', () => {
+		expect(toolResultComponent('list_artifacts', 'run_backtest')).toBe(BacktestToolCard);
+	});
+
+	it('falls back to the generic card for an unknown datum type and unknown tool', () => {
+		expect(toolResultComponent('not_a_real_tool', 'not_a_real_datum_type')).toBe(GenericToolCard);
+	});
+});
+
 describe('safe record helpers', () => {
 	const source: Record<string, unknown> = {
 		name: 'run-1',

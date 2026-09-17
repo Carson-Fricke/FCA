@@ -4,7 +4,7 @@
 
 	let { result, workspaceId }: { result: ToolResult; workspaceId: string } = $props();
 
-	const Card = $derived(toolResultComponent(result.tool));
+	const Card = $derived(toolResultComponent(result.tool, result.datumType));
 </script>
 
 <div

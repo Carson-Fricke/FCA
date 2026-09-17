@@ -70,3 +70,46 @@ describe('ChatTranscript tool-result placement', () => {
 		expect(card).toHaveAttribute('data-tool', 'run_backtest');
 	});
 });
+
+describe('ChatTranscript tool-result datum-type routing', () => {
+	function renderTool(result: ToolResult) {
+		return render(ChatTranscript, {
+			props: {
+				messages: [
+					message({
+						message_id: 'm2',
+						role: 'tool',
+						actor_id: 'thesis-agent',
+						body: result.summary,
+						tool_result: result
+					})
+				],
+				workspaceId: 'w1',
+				onConfirmConsent: vi.fn(),
+				onRejectConsent: vi.fn()
+			}
+		});
+	}
+
+	it('routes a declared datum type to its renderer instead of the tool name', async () => {
+		renderTool({ ...toolResult, datumType: 'workflow_execution' });
+		await tick();
+
+		expect(screen.getByTestId('generic-tool-card')).toBeInTheDocument();
+		expect(screen.queryByTestId('backtest-tool-card')).toBeNull();
+	});
+
+	it('resolves a datum type that equals a tool name through the datum type path', async () => {
+		renderTool({ ...toolResult, tool: 'not_a_real_tool', datumType: 'run_backtest' });
+		await tick();
+
+		expect(screen.getByTestId('backtest-tool-card')).toBeInTheDocument();
+	});
+
+	it('falls back to the generic card for unknown datum types and tools', async () => {
+		renderTool({ ...toolResult, tool: 'not_a_real_tool', datumType: 'not_a_real_datum_type' });
+		await tick();
+
+		expect(screen.getByTestId('generic-tool-card')).toBeInTheDocument();
+	});
+});
