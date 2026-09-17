@@ -9,7 +9,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::{
@@ -25,8 +24,6 @@ use crate::backtest::{market_to_python, parameters_from_json};
 use crate::context::{PyEngineContext, build_context};
 use crate::error::HostError;
 use crate::python::{default_search_paths, install_marketdata_shim, install_search_paths};
-
-static PYTHON_STUDY_LOCK: Mutex<()> = Mutex::new(());
 
 /// A Python study program driven through the native engine plugin seam.
 pub struct PyStudyRuntime {
@@ -187,9 +184,9 @@ pub fn run_study_config(
     output_dir: Option<&Path>,
     data_dir: Option<&Path>,
 ) -> Result<(BacktestOutcome, PathBuf), HostError> {
-    let _python_owner = PYTHON_STUDY_LOCK
+    let _python_owner = crate::python::PYTHON_ENGINE_LOCK
         .lock()
-        .map_err(|_| HostError::Invalid("embedded Python study lock is poisoned".to_string()))?;
+        .map_err(|_| HostError::Invalid("embedded Python engine lock is poisoned".to_string()))?;
     let instances = build_study_instances(configuration)?;
     run_native_study_job_with_data_dir(
         configuration,

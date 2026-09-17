@@ -10,7 +10,6 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 use backtest::backtest::engine_core::{
     EngineFill, EngineMarket, EngineOrder, StrategyRuntime, StrategyStart,
@@ -22,8 +21,6 @@ use pyo3::types::PyDict;
 use crate::context::{build_context, PyBooks, PyClock, PyEngineContext, PyOrders};
 use crate::error::HostError;
 use crate::python::{default_search_paths, install_marketdata_shim, install_search_paths};
-
-static PYTHON_BACKTEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// A Python strategy driven through the native engine plugin seam.
 pub struct PyStrategyRuntime {
@@ -422,9 +419,9 @@ pub fn run_backtest_config(
     ),
     HostError,
 > {
-    let _python_owner = PYTHON_BACKTEST_LOCK
+    let _python_owner = crate::python::PYTHON_ENGINE_LOCK
         .lock()
-        .map_err(|_| HostError::Invalid("embedded Python backtest lock is poisoned".to_string()))?;
+        .map_err(|_| HostError::Invalid("embedded Python engine lock is poisoned".to_string()))?;
     let instances = build_strategy_instances(configuration)?;
     backtest::backtest::job::run_native_job_with_data_dir(
         configuration,

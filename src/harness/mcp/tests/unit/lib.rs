@@ -176,6 +176,7 @@ fn ping_and_tools_list_work() {
         names,
         vec![
             TOOL_RUN_BACKTEST,
+            "run_study",
             TOOL_BACKTEST_CONFIG_TEMPLATE,
             TOOL_BACKTEST_STATUS,
             TOOL_GET_RUN,

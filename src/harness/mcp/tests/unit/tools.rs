@@ -27,6 +27,7 @@ fn default_catalog_is_capability_filtered() {
         catalog.names(),
         vec![
             "run_backtest",
+            "run_study",
             "backtest_config_template",
             "get_backtest_status",
             "get_run",

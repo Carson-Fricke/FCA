@@ -6,10 +6,19 @@
 //! per-callback GIL acquisition.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule, PyTuple};
 use serde_json::Value as JsonValue;
+
+/// Serializes every embedded-Python engine run in this process.
+///
+/// The interpreter, the `harness.data` shim, and the first user-code imports are
+/// process-global. Concurrent engine runs can otherwise race the first import of
+/// a shared module and observe it partially initialized, so every engine entry
+/// point acquires this single lock for the duration of one run.
+pub static PYTHON_ENGINE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Insert search paths at the front of `sys.path` in order.
 ///
