@@ -54,7 +54,6 @@ def _client(
     repository: InMemoryCatalogRepository,
     *,
     as_of: datetime,
-    max_range_days: int = 366,
     contracts: InMemoryContractRepository | None = None,
     front_sets: InMemoryDailyFrontSetRepository | None = None,
 ) -> TestClient:
@@ -62,7 +61,6 @@ def _client(
         create_app(
             bearer_token=TOKEN,
             catalog_repository=repository,
-            catalog_max_range_days=max_range_days,
             coverage_clock=lambda: as_of,
         )
     )
@@ -360,16 +358,6 @@ def test_option_underlying_coverage_uses_the_persisted_daily_front_set() -> None
         ),
         (
             {
-                "asset_class": "equity",
-                "data_type": "trade",
-                "symbol": "AAPL",
-                "start_date": "2024-01-01",
-                "end_date": "2024-01-03",
-            },
-            "range_too_large",
-        ),
-        (
-            {
                 "asset_class": "option",
                 "data_type": "trade",
                 "symbol": "AAPL",
@@ -390,13 +378,12 @@ def test_option_underlying_coverage_uses_the_persisted_daily_front_set() -> None
         ),
     ],
 )
-def test_coverage_endpoint_rejects_invalid_or_unbounded_requests(
+def test_coverage_endpoint_rejects_invalid_requests(
     params: dict[str, str], expected_code: str
 ) -> None:
     client = _client(
         InMemoryCatalogRepository(),
         as_of=datetime(2024, 1, 5, tzinfo=UTC),
-        max_range_days=2,
     )
 
     response = _get(client, **params)

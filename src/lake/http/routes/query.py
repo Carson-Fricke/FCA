@@ -17,7 +17,6 @@ from lake.coverage import SessionCoverage
 from lake.coverage.application import CoverageRequestError, EnsureSpec
 from lake.http.models import EnsureRequest, StrictModel, Symbol
 from lake.http.routes.catalog import (
-    get_catalog_max_range_days,
     get_catalog_repository,
     get_coverage_as_of,
     get_option_contract_repository,
@@ -235,7 +234,6 @@ def create_query_router() -> APIRouter:
         front_set_repository: Annotated[
             DailyFrontSetRepository | None, Depends(get_option_front_set_repository)
         ],
-        max_range_days: Annotated[int, Depends(get_catalog_max_range_days)],
         as_of: Annotated[datetime, Depends(get_coverage_as_of)],
         sas_issuer: Annotated[SasIssuer | None, Depends(get_query_sas_issuer)],
         ensure_callback: Annotated[
@@ -253,7 +251,6 @@ def create_query_router() -> APIRouter:
                     catalog=catalog,
                     contract_repository=contract_repository,
                     front_set_repository=front_set_repository,
-                    max_range_days=max_range_days,
                     as_of=as_of,
                     sas_issuer=sas_issuer,
                     ensure_callback=ensure_callback,
@@ -288,7 +285,6 @@ def create_query_router() -> APIRouter:
             result = await execute_query(
                 spec,
                 catalog,
-                max_range_days=max_range_days,
                 as_of=as_of,
                 ensure_callback=callback,
                 bounded_query=bounded_query,
@@ -335,7 +331,6 @@ async def _query_options(
     catalog: CatalogRepository,
     contract_repository: ContractRepository | None,
     front_set_repository: DailyFrontSetRepository | None,
-    max_range_days: int,
     as_of: datetime,
     sas_issuer: SasIssuer | None,
     ensure_callback: EnsureCallback | None,
@@ -348,7 +343,6 @@ async def _query_options(
         request,
         contract_repository=contract_repository,
         front_set_repository=front_set_repository,
-        max_range_days=max_range_days,
         as_of=as_of,
     )
     usable = tuple(
@@ -388,7 +382,6 @@ async def _query_options(
             request,
             contract_repository=contract_repository,
             front_set_repository=front_set_repository,
-            max_range_days=max_range_days,
             as_of=as_of,
         )
         usable = tuple(

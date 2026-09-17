@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import inspect
 import json
-import sys
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from threading import Event, Thread
@@ -42,11 +41,6 @@ from lake.http.routes.catalog import (
     option_coverage,
     option_coverage_response,
 )
-
-# Ensure requests are unbounded: one request may cover any window, including
-# full history. The shared option planner still requires a cap argument, so
-# ensure passes one that can never bind.
-_UNBOUNDED_MAX_RANGE_DAYS = sys.maxsize
 
 
 class EnsureAcceptedResponse(StrictModel):
@@ -237,7 +231,6 @@ async def _ensure_option(
         request,
         contract_repository=contract_repository,
         front_set_repository=front_set_repository,
-        max_range_days=_UNBOUNDED_MAX_RANGE_DAYS,
         as_of=as_of,
     )
     if all(entry.is_terminal for entry in report.entries):
@@ -295,7 +288,6 @@ async def _ensure_option(
             request,
             contract_repository=contract_repository,
             front_set_repository=front_set_repository,
-            max_range_days=_UNBOUNDED_MAX_RANGE_DAYS,
             as_of=as_of,
         )
         if all(entry.is_terminal for entry in refreshed.entries):

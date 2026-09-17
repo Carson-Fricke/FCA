@@ -70,7 +70,6 @@ def _client(
     issuer: SasIssuer | None = None,
     *,
     ensure_callback: EnsureCallback | None = None,
-    max_range_days: int = 366,
     query_file_root: Path | None = None,
     sql_max_scan_bytes: int | None = None,
     sql_max_result_bytes: int | None = None,
@@ -79,7 +78,6 @@ def _client(
         create_app(
             bearer_token=TOKEN,
             catalog_repository=catalog,
-            catalog_max_range_days=max_range_days,
             coverage_clock=lambda: AS_OF,
             sas_issuer=issuer,
             ensure_callback=ensure_callback,
@@ -429,7 +427,7 @@ def test_requested_ensure_returns_pending_complete_files_without_sas_for_gaps() 
     assert len(issuer.paths) == 1
 
 
-def test_file_query_rejects_bounds_and_malformed_complete_catalog_paths() -> None:
+def test_file_query_rejects_malformed_complete_catalog_paths() -> None:
     issuer = RecordingSasIssuer()
     catalog = InMemoryCatalogRepository(
         [
@@ -439,16 +437,13 @@ def test_file_query_rejects_bounds_and_malformed_complete_catalog_paths() -> Non
             )
         ]
     )
-    client = _client(catalog, issuer, max_range_days=1)
+    client = _client(catalog, issuer)
 
-    too_large = _post(client, _request())
     malformed = _post(
-        _client(catalog, issuer),
+        client,
         _request(start_date="2024-01-18", end_date="2024-01-18"),
     )
 
-    assert too_large.status_code == 422
-    assert too_large.json()["error"]["code"] == "range_too_large"
     assert malformed.status_code == 409
     assert malformed.json()["error"]["code"] == "coverage_incomplete"
     assert issuer.paths == []

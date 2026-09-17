@@ -160,14 +160,6 @@ def get_option_front_set_repository(
     return cast(DailyFrontSetRepository | None, repository)
 
 
-def get_catalog_max_range_days(request: Request) -> int:
-    """Resolve the configured inclusive date-range limit."""
-    value = getattr(request.app.state, "catalog_max_range_days", 366)
-    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        raise RuntimeError("catalog_max_range_days must be a positive integer")
-    return value
-
-
 def get_coverage_as_of(request: Request) -> datetime:
     """Resolve the clock used to identify a currently open session."""
     clock = getattr(request.app.state, "coverage_clock", _utc_now)
@@ -235,7 +227,6 @@ def create_catalog_router() -> APIRouter:
         front_set_repository: Annotated[
             DailyFrontSetRepository | None, Depends(get_option_front_set_repository)
         ],
-        max_range_days: Annotated[int, Depends(get_catalog_max_range_days)],
         as_of: Annotated[datetime, Depends(get_coverage_as_of)],
     ) -> CatalogCoverageResponse | OptionCatalogCoverageResponse:
         """Return computed coverage statuses without starting ingest work."""
@@ -246,7 +237,6 @@ def create_catalog_router() -> APIRouter:
                     request,
                     contract_repository=contract_repository,
                     front_set_repository=front_set_repository,
-                    max_range_days=max_range_days,
                     as_of=as_of,
                 )
                 return option_coverage_response(report, request.data_type, selection)
@@ -264,7 +254,6 @@ def create_catalog_router() -> APIRouter:
                     start_date=request.start_date,
                     end_date=request.end_date,
                 ),
-                max_range_days=max_range_days,
                 as_of=as_of,
                 operation="catalog",
             )
@@ -333,22 +322,11 @@ def option_coverage(
     *,
     contract_repository: ContractRepository | None,
     front_set_repository: DailyFrontSetRepository | None,
-    max_range_days: int,
     as_of: datetime,
 ) -> tuple[CoverageReport, OptionRequestSelection]:
     """Calculate option coverage against XNYS sessions and OSI partitions."""
     start = request.start_date
     end = request.end_date
-    requested_days = (end - start).days + 1
-    if requested_days > max_range_days:
-        raise CoverageRequestError(
-            "range_too_large",
-            "requested date range exceeds the catalog limit",
-            details={
-                "max_range_days": max_range_days,
-                "requested_range_days": requested_days,
-            },
-        )
     sessions = sessions_for(AssetClass.EQUITY, start, end, as_of=as_of)
     selection = resolve_option_selection(
         request,
@@ -598,7 +576,6 @@ __all__ = [
     "OptionRequestLike",
     "OptionRequestSelection",
     "create_catalog_router",
-    "get_catalog_max_range_days",
     "get_catalog_repository",
     "get_option_contract_repository",
     "get_option_front_set_repository",

@@ -83,27 +83,14 @@ def requested_coverage(
     catalog: CatalogRepository,
     spec: EnsureSpec,
     *,
-    max_range_days: int | None = None,
     as_of: datetime,
     operation: str,
 ) -> CoverageReport:
     """Validate and calculate one coverage request.
 
-    Callers that keep bounded protection (catalog and query) pass
-    ``max_range_days``; ensure requests omit it so one request can cover any
-    window, including full history.
+    The request covers any window, including full history: ensure exists to
+    make a period complete, and no date-range cap bounds it.
     """
-    if max_range_days is not None:
-        requested_days = (spec.end_date - spec.start_date).days + 1
-        if requested_days > max_range_days:
-            raise CoverageRequestError(
-                "range_too_large",
-                f"requested date range exceeds the {operation} limit",
-                details={
-                    "max_range_days": max_range_days,
-                    "requested_range_days": requested_days,
-                },
-            )
     if spec.asset_class not in {AssetClass.EQUITY, AssetClass.CRYPTO}:
         subject = "coverage" if operation == "catalog" else operation
         raise CoverageRequestError(

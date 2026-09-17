@@ -51,7 +51,6 @@ def _client(
     jobs: InMemoryJobRepository | None = None,
     *,
     launcher: EnsureJobLauncher | None = None,
-    max_range_days: int = 366,
     wait_deadline_seconds: int | float = 1,
 ) -> TestClient:
     return TestClient(
@@ -60,7 +59,6 @@ def _client(
             catalog_repository=catalog,
             job_repository=jobs,
             job_launcher=launcher,
-            catalog_max_range_days=max_range_days,
             ensure_wait_deadline_seconds=wait_deadline_seconds,
             coverage_clock=lambda: AS_OF,
         )
@@ -281,11 +279,11 @@ def test_ensure_rejects_unsupported_requests(
     assert response.json()["error"]["code"] == expected_code
 
 
-def test_ensure_accepts_a_range_beyond_the_catalog_cap() -> None:
+def test_ensure_accepts_a_range_beyond_the_former_catalog_cap() -> None:
     catalog = InMemoryCatalogRepository()
     jobs = InMemoryJobRepository()
     launched: list[EnsureJob] = []
-    client = _client(catalog, jobs, launcher=launched.append, max_range_days=366)
+    client = _client(catalog, jobs, launcher=launched.append)
 
     response = _post(
         client,

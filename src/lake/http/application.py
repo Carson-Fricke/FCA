@@ -68,7 +68,6 @@ def create_app(
     front_set_repository: DailyFrontSetRepository | None = None,
     job_repository: JobRepository | None = None,
     job_launcher: EnsureJobLauncher | None = None,
-    catalog_max_range_days: int | None = None,
     ensure_wait_deadline_seconds: int | float | None = None,
     coverage_clock: Callable[[], datetime] | None = None,
     sas_issuer: SasIssuer | None = None,
@@ -140,11 +139,6 @@ def create_app(
         settings.api.sql.authorized_force_override_default
         if authorized_force_override is None
         else authorized_force_override
-    )
-    application.state.catalog_max_range_days = (
-        settings.api.catalog.max_range_days
-        if catalog_max_range_days is None
-        else catalog_max_range_days
     )
     application.state.ensure_wait_deadline_seconds = (
         settings.api.ensure_wait_deadline_seconds

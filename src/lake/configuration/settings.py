@@ -130,10 +130,6 @@ class IngestSettings(_StrictModel):
     queue: QueueSettings
 
 
-class CatalogSettings(_StrictModel):
-    max_range_days: PositiveInteger
-
-
 class SasSettings(_StrictModel):
     ttl_seconds: Annotated[int, Field(gt=0, le=86_400)]
     read_only: Literal[True]
@@ -181,7 +177,6 @@ class AuthSettings(_StrictModel):
 
 class ApiSettings(_StrictModel):
     ensure_wait_deadline_seconds: PositiveInteger
-    catalog: CatalogSettings
     sas: SasSettings
     sql: SqlSettings
     auth: AuthSettings = Field(default_factory=AuthSettings)

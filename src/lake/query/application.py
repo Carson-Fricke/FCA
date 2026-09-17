@@ -97,14 +97,13 @@ async def execute_query(
     spec: QuerySpec,
     catalog: CatalogRepository,
     *,
-    max_range_days: int,
     as_of: datetime,
     ensure_callback: EnsureCallback | None,
     bounded_query: BoundedDuckDBQuery | None,
     force_authorized: bool,
 ) -> FileQueryResult | SqlQueryResult:
     """Ensure, classify, and execute one file or bounded SQL query."""
-    report = _coverage_report(spec, catalog, max_range_days, as_of)
+    report = _coverage_report(spec, catalog, as_of)
     usable, incomplete = _classify_files(report, spec)
     if incomplete and not spec.ensure:
         raise _incomplete_error(incomplete, ensure_requested=False)
@@ -132,7 +131,7 @@ async def execute_query(
                 "coverage ensure failed",
                 details={"error": str(error)},
             ) from error
-        report = _coverage_report(spec, catalog, max_range_days, as_of)
+        report = _coverage_report(spec, catalog, as_of)
         usable, incomplete = _classify_files(report, spec)
         if incomplete:
             if spec.mode == "sql":
@@ -162,7 +161,6 @@ async def execute_query(
 def _coverage_report(
     spec: QuerySpec,
     catalog: CatalogRepository,
-    max_range_days: int,
     as_of: datetime,
 ) -> CoverageReport:
     return requested_coverage(
@@ -173,7 +171,6 @@ def _coverage_report(
             symbol=spec.symbol,
         ),
         spec,
-        max_range_days=max_range_days,
         as_of=as_of,
         operation="query",
     )

@@ -47,8 +47,6 @@ ingest:
 
 api:
   ensure_wait_deadline_seconds: 20
-  catalog:
-    max_range_days: 366
   sas:
     ttl_seconds: 900
     read_only: true
