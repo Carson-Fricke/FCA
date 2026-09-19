@@ -12,7 +12,7 @@
  * The merge is pure and network-free so the ordering contract is unit-testable.
  */
 
-import { parseToolResult, type SubAgentTreeNode } from './subagent';
+import { isWorkflowNodeRole, parseToolResult, type SubAgentTreeNode } from './subagent';
 import type {
 	ChatMessage,
 	ExecutionEvent,
@@ -248,6 +248,7 @@ export function buildNodeEntries({
 	}
 
 	for (const child of children) {
+		if (isWorkflowNodeRole(child.node.role)) continue;
 		const anchor = spawnAnchor(child);
 		entries.push({
 			kind: 'sub-agent',

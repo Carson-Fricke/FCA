@@ -16,12 +16,9 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 
 ## Session Lifecycle And Handoff
 
-- Run `cleo briefing --json` once at session start, alongside the repository
-  discovery commands. It restores the last handoff, current task focus, next
-  tasks, blockers, and a BRAIN memory digest in one call.
 - Focus the session with `cleo start <task-id>` when picking up work, and clear
   it with `cleo stop` when done. Do not leave a completed task focused;
-  `cleo current` and briefings otherwise report stale focus.
+  `cleo current` otherwise reports stale focus.
 - Orient on a task with `cleo focus <task-id>` — a single envelope holding
   identity, scope, blockers, ready wave, attached docs, and BRAIN context
   (about 1 500 tokens) that replaces roughly eight separate calls. Use
@@ -34,21 +31,20 @@ These are project-scoped operating rules for CLEO `v2026.8.9`. Read them before 
 - Before ending a session or before context compaction, run `cleo memory
   precompact-flush` to flush in-flight observations and checkpoint the WAL.
 - End working sessions with `cleo safestop --reason <text> --handoff` so the
-  next session's briefing has a handoff to restore. Use `--no-session-end` to
-  write the handoff without ending the session, or `cleo session suspend` to
-  pause a session that will resume in a different context window.
+  next session has a handoff to restore. Use `--no-session-end` to write the
+  handoff without ending the session, or `cleo session suspend` to pause a
+  session that will resume in a different context window.
 - After significant BRAIN writes at session end, run `cleo memory consolidate`
   (idempotent) and `cleo refresh-memory` so `.cleo/memory-bridge.md` reflects
   current learnings and decisions.
-- Session-end hygiene runs per session. It does not replace the wave-level
-  Validation Checklist, which still runs once per reconciliation batch.
+- Session-end hygiene runs per session. It does not replace the Validation
+  Checklist, which runs once after a batch of task-state changes.
 
-## Fast Lookups: BRAIN And Nexus
+## Fast Lookups: BRAIN
 
-The local CLEO fork makes BRAIN semantic memory and the nexus code graph
-fully functional. Consult them BEFORE re-deriving knowledge the hard way —
-these read-only commands are safe for every agent and subagent, including
-subagents doing focused task work.
+The local CLEO fork makes BRAIN semantic memory fully functional. Consult it
+BEFORE re-deriving knowledge the hard way — these read-only commands are safe
+for every agent and subagent, including subagents doing focused task work.
 
 - Search durable knowledge first: `cleo memory find "<query>"` (BM25 across
   observations/decisions/learnings/patterns), `cleo memory search-hybrid
@@ -57,28 +53,11 @@ subagents doing focused task work.
   ruff/ty-only rule, uv-only verification, wave ownership policy, and the
   SQLite-repair policy.
 - Trace a symbol's knowledge: `cleo memory code-memories-for-code <symbol>`
-  lists memories anchored to code, and `cleo graph context <symbol>` shows the
-  graph neighborhood. Graph node IDs are prefixed — use `decision:D001`, not
-  `D001`, in `memory related|context|trace`; bare IDs silently return empty.
-- Check code structure before structural changes: `cleo graph search <name>`,
-  `cleo graph resolve <symbol>`, `cleo graph deps <symbol>` (callers/callees),
-  and `cleo graph impact <symbol>` for blast radius before moving or renaming
-  public symbols. `cleo graph clusters|flows|hot-paths` summarize architecture;
-  `cleo graph discover` is the quick structural overview. Re-index after large
-  refactor waves with `cleo graph sync` (add `--incremental` for small edits).
-- Session context: `cleo briefing` (session start) already includes a BRAIN
-  digest; `cleo memory digest --json` and `cleo memory recent --since 24h`
-  give focused memory recaps mid-session.
-- JIT budget: at most three BRAIN or nexus lookups per task phase. If the
-  budget is exhausted and context is still missing, report the task prompt as
-  underspecified instead of re-deriving knowledge with open-ended grep sweeps.
-- Blast radius is mandatory before structural moves: run `cleo graph impact
-  <symbol>` before renaming or relocating any public symbol. HIGH/CRITICAL
-  findings stop the change and surface as integration findings.
-- Trust requires freshness: if `cleo graph status` or `cleo nexus status`
-  reports a high stale-file count, nexus results are untrustworthy — run
-  `cleo graph sync --incremental` before relying on impact/context answers,
-  or say that `git grep` was used as ground truth instead.
+  lists memories anchored to code. Memory node IDs are prefixed — use
+  `decision:D001`, not `D001`, in `memory related|context|trace`; bare IDs
+  silently return empty.
+- `cleo memory digest --json` and `cleo memory recent --since 24h` give
+  focused memory recaps mid-session.
 - Write-backs are covered by the Session Lifecycle section above: observe
   durable discoveries (`cleo memory observe`), store architectural decisions
   (`cleo memory decision-store`), and keep embeddings current with
@@ -145,12 +124,7 @@ subagents doing focused task work.
 
 ## Inspect Before Mutating
 
-- Start with `cleo status --json`, `cleo list --json --limit 100`, `cleo tree T001 --withDeps`, and `git status --short --branch`.
-- Compare task status with tracked implementation files and Git history. Do not mark planned service work done based on a markdown plan.
-- Use `cleo show <id> --full --json` when acceptance criteria, evidence, notes, or verification matter. The default projection omits these fields.
-- An active CLEO session may exist even when `cleo current --json` has no focused task. `cleo add` and `cleo add-batch` require an active session.
-- Use `cleo --help` or `cleo <command> --help`; `cleo help` is not a command. `cleo tree` requires a root ID, and its dependency flag is spelled `--withDeps`.
-- `cleo list` defaults to a short page, so always provide a limit large enough to reconcile the complete project.
+- Check `git status` before making mutations.
 
 ## Hierarchy And Batches
 
@@ -188,8 +162,8 @@ subagents doing focused task work.
 
 - Use `cleo complete`, not `cleo update --status done`.
 - NEVER complete multiple tasks with separate `cleo complete` invocations. When
-  a wave (or any set of tasks) has more than one task to close, bulk-complete it
-  in a single SQLite transaction with
+  more than one task must be closed, bulk-complete the set in a single SQLite
+  transaction with
   `scripts/cleo-bulk-complete.ps1 -ManifestPath <manifest.json>` (one `sqlite3`
   call, one commit, ADR-051 `verification_json` evidence preserved). Reserve
   single `cleo complete` for a lone task. A per-task loop costs O(N x ~25 s
@@ -208,7 +182,6 @@ subagents doing focused task work.
 - This repository configures `audit.command` in `.cleo/project-context.json` to run `.github/scripts/validate-cleo-export.mjs`. Use `tool:audit` as repeatable QA evidence for portable export changes.
 - For a pre-existing task that demonstrably predates evidence bindings, use an explicit audited `--waive-ac ... --waive-reason ...` only when repository evidence independently proves completion.
 - Completing the final pending child can auto-complete its epic or saga. Add planned siblings before completing a placeholder child, or immediately verify parent status, lifecycle, verification, and timestamps.
-- `cleo complete` may warn that `task/<id>` does not exist during worktree integration. This warning does not negate a successful task-state mutation when no task branch was expected.
 
 ## Verification Commands And Evidence
 
@@ -229,34 +202,27 @@ subagents doing focused task work.
 
 ## Architecture Documentation
 
-- Treat `.github/architecture/*.md` as the source of truth for repository
-  structure, package boundaries, product responsibilities, and deployment
-  shape.
 - Update the affected architecture document in the same task whenever a task
   adds, removes, renames, or repurposes a package or capability directory, or
   changes public facades, entrypoints, dependency direction, or deployment
-  shape.
+  shape. Architecture reads are optional reference, not required orientation.
 - Keep architecture documentation factual and current; do not describe planned
   behavior as implemented, and update the `## Status` section when a planned
   capability is implemented.
-- Architecture-documentation changes for a wave are integration-owned unless
-  the wave explicitly assigns that file.
+- Architecture-documentation changes are integration-owned unless a task
+  explicitly assigns that file.
 
 ## Verification Budget And Batching
 
-- Treat one user-approved implementation wave as one CLEO reconciliation
-  batch. Define task IDs and non-overlapping file ownership before fan-out.
 - Run repository discovery commands once per session. Repeat them only when the
   repository root, branch, CLEO session, or task graph changed externally.
 - Subagents run focused tests plus focused Ruff and ty checks for their owned
   behavior. They do not run the complete repository suite, mutate CLEO, or
   write final verification records.
-- After all subagents finish, freeze edits and run `cleo graph sync
-  --incremental` and `cleo nexus refresh-bridge` (integration-owned) so nexus
-  impact, context, and bridge lookups reflect the wave's changes. Then run
-  repository-wide lock, Ruff, format, ty, pytest, Bicep, and workflow checks
-  once as applicable. A second full run is permitted only after fixing a
-  failure from the first integration run.
+- After all subagents finish, freeze edits and run repository-wide lock, Ruff,
+  format, ty, pytest, Bicep, and workflow checks once as applicable. A second
+  full run is permitted only after fixing a failure from the first integration
+  run.
 - If a suite hangs or times out, do not rerun it unchanged. Isolate the hanging
   test with a hard timeout, fix the cause, then run one final full suite.
 - Keep completed task evidence immutable when later work increases the global

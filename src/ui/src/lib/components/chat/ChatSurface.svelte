@@ -10,6 +10,7 @@
 	import { WorkflowScopeController } from '$lib/workflow-scope.svelte';
 	import { buildNodeEntries } from '$lib/transcript';
 	import {
+		derivePhaseSteps,
 		derivePhases,
 		executionEvents,
 		projectExecution
@@ -187,14 +188,36 @@
 	const isNodeScope = $derived(active?.kind === 'sub_agent');
 
 	const phases = $derived.by(() => {
-		// The launch contract declares the complete phase sequence. Lifecycle
-		// events mark earlier phases done without hiding work that has not started.
+		// The launch contract declares the complete phase sequence; lifecycle
+		// events mark earlier phases done without hiding work that has not
+		// started. Durable phase nodes are authoritative for their own status,
+		// so the stepper still reflects a restart with no events loaded.
 		const derived = derivePhases(controller.rootEvents);
-		if (derived.length || !effectiveExecution?.phase) return derived;
+		const byName = new Map(derived.map((phase) => [phase.name, phase]));
+		for (const step of derivePhaseSteps(controller.tree, effectiveExecution?.execution_id)) {
+			const existing = byName.get(step.name);
+			byName.set(step.name, {
+				name: step.name,
+				status: step.status === 'pending' ? (existing?.status ?? 'pending') : step.status
+			});
+		}
+		const merged = [...byName.values()];
+		if (merged.length || !effectiveExecution?.phase) return merged;
 		return [{ name: effectiveExecution.phase, status: 'active' as const }];
 	});
 
-	const hasWorkflowAnchor = $derived(messages.some((message) => message.kind === 'workflow'));
+	// The launch renders as the workflow card in the transcript, either as the
+	// legacy `kind=workflow` anchor or as the `start_workflow` tool result whose
+	// datum type is `workflow_execution`; the fallback live card renders only
+	// when neither representation is present.
+	const hasWorkflowAnchor = $derived(
+		messages.some(
+			(message) =>
+				message.kind === 'workflow' ||
+				(message.role === 'tool' &&
+					message.tool_result?.datumType === 'workflow_execution')
+		)
+	);
 
 	/** Phases whose agent is blocked on operator input, surfaced on the card. */
 	const attentionPhases = $derived.by(() => {
@@ -212,11 +235,21 @@
 	});
 
 	const composerNode = $derived(isNodeScope ? controller.subAgentById(active!.id) : null);
-	const nodePending = $derived(
-		composerNode?.status === 'spawned' ||
-			composerNode?.status === 'running' ||
-			composerNode?.status === 'progress'
-	);
+	// The node scope shows the typing indicator only while a reply is actually
+	// owed: a running agent that has already answered is idle, not busy.
+	const nodePending = $derived.by(() => {
+		const node = composerNode;
+		if (!node) return false;
+		const scoped = messages.filter(
+			(message) =>
+				message.kind === 'sub_agent' &&
+				String(message.data?.subAgentId ?? '') === node.subAgentId
+		);
+		if (!scoped.length) {
+			return node.status === 'spawned';
+		}
+		return scoped[scoped.length - 1].role === 'user';
+	});
 	const showNodeComposer = $derived(
 		isNodeScope && composerNode?.acceptsInput === true && active?.readOnly !== true
 	);
@@ -229,13 +262,27 @@
 			messages: messages.filter(
 				(message) =>
 					message.kind === 'sub_agent' &&
-					(message.role === 'user' || message.role === 'system') &&
-					String(message.data?.subAgentId ?? '') === segment.id
+					String(message.data?.subAgentId ?? '') === segment.id &&
+					(message.role === 'user' ||
+						message.role === 'system' ||
+						message.role === 'tool' ||
+						// Agent-authored replies are durable assistant messages on
+						// the node's own transcript; only the tool-call envelope
+						// placeholder is hidden (its tool result already renders).
+						(message.role === 'assistant' && !isToolCallPlaceholder(message)))
 			),
 			events,
 			children: controller.childrenOf(segment.id)
 		});
 	});
+
+	function isToolCallPlaceholder(message: ChatMessage): boolean {
+		const data = message.data ?? {};
+		return (
+			Array.isArray(data.toolCalls) &&
+			message.body.startsWith('Requested tool call(s):')
+		);
+	}
 
 	function enterPhase(phase: string, options: { readOnly: boolean }): void {
 		void controller.enterPhase(phase, options.readOnly);

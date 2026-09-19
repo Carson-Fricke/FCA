@@ -9,10 +9,9 @@ technical layer. Preserve the product roots under `src/lake` and `src/harness`;
 do not create a generic shared package without at least two real consumers and
 a stable contract.
 
-Read the architecture documents under `.github/architecture/` as the source of
-truth for the current repository map, product boundaries, capability tables,
-and deployment shape. Extend the existing documented structure consistently
-rather than introducing a parallel taxonomy.
+Extend the existing documented structure consistently rather than introducing
+a parallel taxonomy. Reading the architecture documents is optional reference,
+not a required orientation step.
 
 ## Canonical Commands
 

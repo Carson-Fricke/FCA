@@ -27,7 +27,6 @@ from thesis.chat import (
     MessageRole,
     MessageState,
     RecordNotFound,
-    WorkflowDefinition,
 )
 
 
@@ -86,19 +85,6 @@ class UploadAttachmentRequest(ChatHTTPModel):
 class ScanAttachmentRequest(ChatHTTPModel):
     available: bool
     error_message: str | None = Field(default=None, max_length=2_048)
-
-
-class WorkflowRequest(ChatHTTPModel):
-    workflow_id: str = Field(min_length=1, max_length=128)
-    workflow_version: str = Field(min_length=1, max_length=64)
-    title: str = Field(min_length=1, max_length=256)
-    phases: tuple[str, ...] = ()
-    actor_id: str = Field(min_length=1, max_length=128)
-    body: str | None = Field(default=None, max_length=32_768)
-    message_id: str | None = None
-    investigation_id: str | None = None
-    strategy_ids: tuple[str, ...] = ()
-    experiment_ids: tuple[str, ...] = ()
 
 
 class SteerWorkflowRequest(ChatHTTPModel):
@@ -463,34 +449,6 @@ def create_chat_router() -> APIRouter:
             raise _service_error(error) from error
         return investigation.as_dict()
 
-    @router.post("/chats/{chat_id}/workflows")
-    async def launch_workflow(
-        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
-        request: WorkflowRequest,
-        chat_service: Annotated[ChatService, Depends(get_chat_service)],
-    ) -> dict[str, object]:
-        try:
-            execution = chat_service.launch_workflow(
-                workspace_id,
-                chat_id,
-                workflow=WorkflowDefinition(
-                    workflow_id=request.workflow_id,
-                    version=request.workflow_version,
-                    title=request.title,
-                    phases=request.phases,
-                ),
-                actor_id=request.actor_id,
-                body=request.body,
-                message_id=request.message_id,
-                investigation_id=request.investigation_id,
-                strategy_ids=request.strategy_ids,
-                experiment_ids=request.experiment_ids,
-            )
-        except Exception as error:
-            raise _service_error(error) from error
-        return execution.as_dict()
-
     @router.post(
         "/executions/{execution_id}/steer",
         deprecated=True,
@@ -683,7 +641,6 @@ __all__ = [
     "SubmitToolJobRequest",
     "ToolResultRequest",
     "UploadAttachmentRequest",
-    "WorkflowRequest",
     "create_chat_router",
     "get_chat_service",
 ]

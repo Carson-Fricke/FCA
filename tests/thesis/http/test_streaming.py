@@ -112,7 +112,12 @@ def test_stream_resumes_from_last_event_id(
     initial = _parse_frames(_read_stream(client, url))
     assert [frame["id"] for frame in _machine_frames(initial)] == ["1", "2", "3"]
 
-    service.pause_workflow(WORKSPACE, execution.execution_id, actor_id="worker")
+    service.steer_workflow(
+        WORKSPACE,
+        execution.execution_id,
+        actor_id="worker",
+        body="Use lower fees.",
+    )
 
     resumed = _parse_frames(
         _read_stream(client, url, headers={**AUTH, "Last-Event-ID": "3"})

@@ -33,6 +33,8 @@ class ChatSubAgentNode:
     kind: str
     status: str
     parent_sub_agent_id: str | None
+    workflow_execution_id: str | None
+    phase: str | None
     accepts_input: bool
     allowed_tools: tuple[str, ...]
     delegated_budget: int
@@ -53,6 +55,8 @@ class ChatSubAgentNode:
             "kind": self.kind,
             "status": self.status,
             "parentSubAgentId": self.parent_sub_agent_id,
+            "workflowExecutionId": self.workflow_execution_id,
+            "phase": self.phase,
             "acceptsInput": self.accepts_input,
             "allowedTools": list(self.allowed_tools),
             "delegatedBudget": self.delegated_budget,
@@ -83,6 +87,23 @@ class ChatSubAgentTree:
     def ids(self) -> frozenset[str]:
         """Return every node id in the tree."""
         return frozenset(self.nodes)
+
+    def subtree_ids(self, sub_agent_id: str) -> frozenset[str]:
+        """Return one node's id plus every descendant id."""
+        if sub_agent_id not in self.nodes:
+            return frozenset()
+        by_parent: dict[str | None, list[str]] = {}
+        for node in self.nodes.values():
+            by_parent.setdefault(node.parent_sub_agent_id, []).append(node.sub_agent_id)
+        collected: set[str] = set()
+        frontier = [sub_agent_id]
+        while frontier:
+            current = frontier.pop()
+            if current in collected:
+                continue
+            collected.add(current)
+            frontier.extend(by_parent.get(current, ()))
+        return frozenset(collected)
 
     def as_dict(self) -> dict[str, object]:
         """Return the canonical, JSON-ready tree."""
@@ -131,6 +152,8 @@ def project_chat_sub_agents(
             kind=record.kind.value,
             status=record.status.value,
             parent_sub_agent_id=record.parent_sub_agent_id,
+            workflow_execution_id=record.workflow_execution_id,
+            phase=record.phase,
             accepts_input=record.accepts_input,
             allowed_tools=tuple(record.allowed_tools),
             delegated_budget=record.delegated_budget,

@@ -6,6 +6,9 @@ import SweepToolCard from './SweepToolCard.svelte';
 import RunToolCard from './RunToolCard.svelte';
 import JobToolCard from './JobToolCard.svelte';
 import ArtifactsToolCard from './ArtifactsToolCard.svelte';
+import OperatorQuestionCard from './OperatorQuestionCard.svelte';
+import WorkflowOutcomeCard from './WorkflowOutcomeCard.svelte';
+import WorkflowExecutionCard from './WorkflowExecutionCard.svelte';
 
 export interface ToolResultCardProps {
 	result: ToolResult;
@@ -22,12 +25,13 @@ export interface ToolResultCardProps {
  * `datumType` (backward compatibility).
  */
 export const TOOL_RESULT_RENDERERS: Record<string, Component<ToolResultCardProps>> = {
-	// Well-known datum types; generic cards until dedicated ones exist.
+	// Well-known datum types; unregistered ones fall back to the generic card.
 	tool_result: GenericToolCard,
-	workflow_execution: GenericToolCard,
+	workflow_execution: WorkflowExecutionCard,
+	workflow_outcome: WorkflowOutcomeCard,
 	sub_agent_handle: GenericToolCard,
 	sub_agent_status: GenericToolCard,
-	operator_question: GenericToolCard,
+	operator_question: OperatorQuestionCard,
 	// Harness tool names, doubling as their implicit datum types.
 	run_backtest: BacktestToolCard,
 	run_sweep: SweepToolCard,

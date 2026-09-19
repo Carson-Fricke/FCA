@@ -287,6 +287,12 @@ export interface SubAgentNode {
 	context: SubAgentContext;
 	/** Whether this node accepts operator input (`POST {node}/messages`). */
 	acceptsInput: boolean;
+	/**
+	 * The workflow execution owning this node's activity, or `null` for a node
+	 * spawned directly from chat. A node without an execution has no activity
+	 * log, so the UI never requests events for it.
+	 */
+	workflowExecutionId: string | null;
 }
 
 export type GateStatus = 'blocked' | 'resolved';

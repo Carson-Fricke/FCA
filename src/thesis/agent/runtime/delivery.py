@@ -206,12 +206,16 @@ class DeliveryService:
         actor_id: str = "thesis-runtime",
         idempotency_key: str | None = None,
         tool_result: Mapping[str, object] | None = None,
+        schedule: bool = True,
     ) -> DeliveryReceipt:
         """Persist ``datum`` at ``anchor`` and schedule one turn there.
 
         A re-delivered datum resolves to the durable message already carrying
         its idempotency key; it neither duplicates the message nor schedules a
-        second turn.
+        second turn.  ``schedule=False`` persists a datum that cannot yet
+        produce a runnable turn -- an operator question before any answer
+        exists -- so nothing is dispatched until the answer's own accept path
+        schedules the turn; the receipt reports ``scheduled=False``.
         """
         key = (
             delivery_key(anchor, datum)
@@ -237,12 +241,12 @@ class DeliveryService:
             body=body or _default_body(datum),
             role=role,
             kind=kind,
-            tool_result=tool_result,
+            tool_result=payload if tool_result is None else tool_result,
             data=payload,
             execution_id=execution_id,
         )
-        scheduled = self._schedule is not None
-        if self._schedule is not None:
+        scheduled = schedule and self._schedule is not None
+        if schedule and self._schedule is not None:
             self._schedule(anchor.workspace_id, anchor.chat_id, anchor.schedule_id)
         return DeliveryReceipt(
             message=message,
@@ -252,9 +256,15 @@ class DeliveryService:
         )
 
     def deliver_child_result(
-        self, anchor: Anchor, child: SubAgentRecord
+        self, anchor: Anchor, child: SubAgentRecord, *, schedule: bool = True
     ) -> DeliveryReceipt:
-        """Deliver a child's terminal (or current) result to its anchor."""
+        """Deliver a child's terminal (or current) result to its anchor.
+
+        ``schedule=False`` records the result without waking the anchor: a phase
+        agent's parent is the workflow node, which is a record rather than a
+        conversation, so its continuation is the engine reaction that already
+        ran in the completing tool call.
+        """
         text = (
             f"Sub-agent {child.role} ({child.sub_agent_id}) ended: "
             f"{child.status.value}."
@@ -281,6 +291,7 @@ class DeliveryService:
                 "resultRef": child.result_ref,
             },
             execution_id=child.workflow_execution_id,
+            schedule=schedule,
         )
 
 
@@ -334,6 +345,22 @@ class NodeInputService:
     def policies(self) -> OperatorPolicyRegistry:
         """Return the active operator policy registry."""
         return self._policies
+
+    def request_input(
+        self,
+        workspace_id: str,
+        sub_agent_id: str,
+    ) -> SubAgentRecord:
+        """Open one node's input state so an answer may resume it.
+
+        This is the one pause path: the question's state lives on the asking
+        node, and the same node's answer path (:meth:`accept`) consumes the
+        input and returns the node to ``running``.
+        """
+        record = self._store.get_sub_agent(workspace_id, sub_agent_id)
+        if record is None:
+            raise NodeInputNotFound(f"sub-agent was not found: {sub_agent_id}")
+        return self._lifecycle.request_input(workspace_id, sub_agent_id)
 
     def accept(
         self,

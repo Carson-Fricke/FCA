@@ -143,32 +143,6 @@
 						<span class="font-mono text-[10px] text-slate-500">{entry.spawn.phase}</span>
 					{/if}
 				</header>
-				<div class="mt-1.5 flex flex-wrap gap-1.5">
-					{#if entry.spawn.isolated}
-						<span
-							class="rounded-full border border-accent/40 px-2 py-0.5 font-mono text-[10px] text-accent"
-							data-testid="scope-spawn-fresh"
-						>
-							fresh context
-						</span>
-					{/if}
-					{#if entry.spawn.knowledgeCutoff}
-						<span
-							class="rounded-full border border-warn/40 px-2 py-0.5 font-mono text-[10px] text-warn"
-							data-testid="scope-spawn-cutoff"
-						>
-							cutoff {entry.spawn.knowledgeCutoff}
-						</span>
-					{/if}
-					{#if entry.spawn.mcpTools.length}
-						<span
-							class="rounded-full border border-surface-600 px-2 py-0.5 font-mono text-[10px] text-slate-500"
-							data-testid="scope-spawn-mcp"
-						>
-							MCP: {entry.spawn.mcpTools.length} tools
-						</span>
-					{/if}
-				</div>
 			</section>
 		{:else if entry.kind === 'assistant'}
 			<article

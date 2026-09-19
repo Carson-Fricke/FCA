@@ -31,16 +31,17 @@ rule for which text is model-generated, which is deterministic, and why.
 
 ## Where model generation is wired
 
-`_operator_question` is now the only author of operator requests. It is used
-for:
+Operator requests are now authored by the asking phase agent through the wrapped
+`request_workflow_input` tool; the engine never authors or relays one. The former
+engine callers and what covers them now:
 
-| Caller | Reason supplied |
+| Former caller | Now |
 | --- | --- |
-| `_transition_checked` | a phase gate failure (for example evidence not bound) |
-| `_pause_for_compose` | unparseable structured model output |
-| `_hypothesis_creation` | review/confirm the proposed or revised model |
-| `_emit_verdict_review` / `_resume_verdict` | apply or circle back the verdict |
-| `_stop_for_cycle_budget` | an exhausted hypothesis or strategy revision budget |
+| `_transition_checked` | the phase agent's own completion-contract repair via the tool result |
+| `_pause_for_compose` | the phase agent re-derives and retries the completion in-turn |
+| `_hypothesis_creation` | the creation phase agent asks with `request_workflow_input` |
+| `_emit_verdict_review` / `_resume_verdict` | the verdict phase agent asks, then advances via `request_phase_completion` |
+| `_stop_for_cycle_budget` | the phase agent reports the exhausted budget in its completion or question |
 
 The falsification trials prose is authored by the research sub-agent from the
 typed trial results, including each run's state and failure detail.

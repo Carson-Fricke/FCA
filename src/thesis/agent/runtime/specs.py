@@ -55,6 +55,7 @@ class SubAgentSpec:
     role: str
     kind: SubAgentKind = SubAgentKind.CONVERSATION
     spec_version: str = "1.0.0"
+    phase: str | None = None
     allowed_tools: tuple[str, ...] = ()
     input_contract_ref: str | None = None
     completion_contract_ref: str | None = None
@@ -71,7 +72,7 @@ class SubAgentSpec:
                 raise ChatContractError(
                     "kind must be 'conversation' or 'one_shot'"
                 ) from error
-        for name in ("input_contract_ref", "completion_contract_ref"):
+        for name in ("input_contract_ref", "completion_contract_ref", "phase"):
             value = getattr(self, name)
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise ChatContractError(f"{name} must be non-empty when set")

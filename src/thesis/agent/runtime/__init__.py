@@ -36,6 +36,7 @@ from thesis.agent.runtime.control import (
 )
 from thesis.agent.runtime.control_tools import (
     CONTROL_CHAT_TOOL_NAMES,
+    CONTROL_NODE_TOOL_NAMES,
     ControlToolRuntime,
     SpawnObserver,
     control_registered_tools,
@@ -64,6 +65,7 @@ from thesis.agent.runtime.delivery import (
 from thesis.agent.runtime.lifecycle import (
     SubAgentLifecycle,
     SubAgentLifecycleError,
+    reconcile_stranded_sub_agents,
 )
 from thesis.agent.runtime.policy import (
     DEFAULT_ROOT_BUDGET_CEILING,
@@ -126,6 +128,7 @@ from thesis.agent.runtime.workflow_tools import (
 
 __all__ = [
     "CONTROL_CHAT_TOOL_NAMES",
+    "CONTROL_NODE_TOOL_NAMES",
     "CONTROL_TOOL_NAMES",
     "CONTROL_TOOL_SPECS",
     "DEFAULT_MAX_TOOL_ITERATIONS",
@@ -212,6 +215,7 @@ __all__ = [
     "control_registered_tools",
     "harness_registered_tools",
     "project_chat_sub_agents",
+    "reconcile_stranded_sub_agents",
     "set_result_ref",
     "workflow_registered_tools",
 ]

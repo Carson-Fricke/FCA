@@ -6,7 +6,7 @@
  * payloads carry the node identity (`subAgentId`, `parentSubAgentId`,
  * `phase`, `role`), the sandbox `context`, and whether the node
  * `acceptsInput`. The UI never invents nodes: every node here is sourced from
- * at least one event (or an explicit REST `listExecutionSubAgents` row).
+ * at least one event (or an explicit REST `listChatSubAgents` row).
  *
  * These functions are pure so the transcript and tree rendering are testable
  * with mocked event streams, independent of the network.
@@ -29,6 +29,18 @@ export interface SubAgentTreeNode {
 	node: SubAgentNode;
 	events: ExecutionEvent[];
 	children: SubAgentTreeNode[];
+}
+
+/**
+ * Reserved durable role of the workflow execution's own node record. The node
+ * exists to own the execution and apply guards; it is an implementation record,
+ * never a user-facing agent, so the UI hides it everywhere.
+ */
+export const WORKFLOW_NODE_ROLE = 'workflow-node';
+
+/** Whether a node role names the ephemeral workflow-node implementation record. */
+export function isWorkflowNodeRole(role: string | null | undefined): boolean {
+	return role === WORKFLOW_NODE_ROLE;
 }
 
 /** Read a payload field, falling back to the event's top level. */
@@ -115,7 +127,8 @@ function nodeFrom(
 		status: status === 'running' && previous ? previous.status : status,
 		context: hasContext(event) ? context : (previous?.context ?? context),
 		acceptsInput:
-			booleanField(event, 'acceptsInput') ?? previous?.acceptsInput ?? false
+			booleanField(event, 'acceptsInput') ?? previous?.acceptsInput ?? false,
+		workflowExecutionId: previous?.workflowExecutionId ?? event.executionId
 	};
 }
 
@@ -130,8 +143,14 @@ function hasContext(event: ExecutionEvent): boolean {
  * carry a `subAgentId` are attributed to that node even when they are not
  * `sub_agent.*` (for example a tool result produced inside the node).
  *
- * `known` seeds nodes from `listExecutionSubAgents` so a freshly listed node
+ * `known` seeds nodes from `listChatSubAgents` so a freshly listed node
  * renders before its spawn event replays.
+ *
+ * A `role: "workflow-node"` record is an execution implementation detail, not
+ * a user-facing agent. It is dropped from the tree, and its children (the
+ * workflow's phase agents) are re-parented to the node's own parent — the
+ * anchor that launched the workflow — so phase navigation and back always land
+ * on a real agent.
  */
 export function deriveSubAgentTree(
 	events: ExecutionEvent[],
@@ -139,13 +158,18 @@ export function deriveSubAgentTree(
 ): SubAgentTreeNode[] {
 	const nodes = new Map<string, SubAgentNode>();
 	const attributed = new Map<string, ExecutionEvent[]>();
+	const hidden = new Set<string>();
 
-	for (const node of known) nodes.set(node.subAgentId, { ...node });
+	for (const node of known) {
+		if (isWorkflowNodeRole(node.role)) hidden.add(node.subAgentId);
+		nodes.set(node.subAgentId, { ...node });
+	}
 
 	const ordered = [...events].sort((a, b) => a.cursor - b.cursor);
 	for (const event of ordered) {
 		const subAgentId = eventSubAgentId(event);
 		if (!subAgentId) continue;
+		if (isWorkflowNodeRole(stringField(event, 'role'))) hidden.add(subAgentId);
 		if (isSubAgentEvent(event.eventType)) {
 			const next = nodeFrom(event, nodes.get(subAgentId));
 			if (next) nodes.set(subAgentId, next);
@@ -159,13 +183,29 @@ export function deriveSubAgentTree(
 				role: stringField(event, 'role') ?? 'sub-agent',
 				status: 'running',
 				context: contextFor(event),
-				acceptsInput: booleanField(event, 'acceptsInput') ?? false
+				acceptsInput: booleanField(event, 'acceptsInput') ?? false,
+				workflowExecutionId: event.executionId
 			});
 		}
 		const bucket = attributed.get(subAgentId) ?? [];
 		bucket.push(event);
 		attributed.set(subAgentId, bucket);
 	}
+
+	// Re-anchor every node whose parent is a hidden implementation record to the
+	// nearest visible ancestor, then remove the hidden records entirely.
+	for (const [id, node] of nodes) {
+		let parent = node.parentSubAgentId;
+		const seen = new Set<string>([id]);
+		while (parent && hidden.has(parent) && !seen.has(parent)) {
+			seen.add(parent);
+			parent = nodes.get(parent)?.parentSubAgentId ?? null;
+		}
+		if (parent !== node.parentSubAgentId) {
+			nodes.set(id, { ...node, parentSubAgentId: parent });
+		}
+	}
+	for (const id of hidden) nodes.delete(id);
 
 	const treeNodes = new Map<string, SubAgentTreeNode>();
 	for (const node of nodes.values()) {
@@ -332,25 +372,39 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 /**
  * Derive the phase stepper from the phase orchestrator sub-agents.
  *
- * A workflow's phases are the top-level sub-agents it spawns, in spawn order.
- * Driving the stepper from the tree rather than `workflow.*` events keeps every
- * completed phase visible and clickable and never invents a phase (such as the
- * pre-orchestration `requested` phase) that has no sub-agent to drill into.
+ * A workflow's phases are the sub-agents the hidden workflow node spawns. The
+ * derivation walks the whole tree (phase agents may be re-parented under the
+ * launching anchor) and gives each phase the status of its earliest agent, so a
+ * helper spawned inside a phase can never shadow the phase agent's own node.
+ * Passing an `executionId` keeps the stepper scoped to one execution's phases.
  */
-export function derivePhaseSteps(nodes: SubAgentTreeNode[]): WorkflowPhase[] {
-	const ordered = nodes
-		.filter((node) => node.node.parentSubAgentId === null && node.node.phase.length > 0)
-		.map((node) => {
-			const spawn = node.events.find((event) => event.eventType === 'sub_agent.spawned');
-			return {
-				phase: node.node.phase,
-				status: node.node.status,
-				cursor: spawn?.cursor ?? Number.MAX_SAFE_INTEGER
-			};
-		})
-		.sort((a, b) => a.cursor - b.cursor);
+export function derivePhaseSteps(
+	nodes: SubAgentTreeNode[],
+	executionId?: string | null
+): WorkflowPhase[] {
+	const collected: { phase: string; status: SubAgentStatus; cursor: number }[] = [];
+	const visit = (list: SubAgentTreeNode[]): void => {
+		for (const node of list) {
+			if (
+				!isWorkflowNodeRole(node.node.role) &&
+				node.node.phase.length > 0 &&
+				(!executionId || node.node.workflowExecutionId === executionId)
+			) {
+				const spawn = node.events.find((event) => event.eventType === 'sub_agent.spawned');
+				collected.push({
+					phase: node.node.phase,
+					status: node.node.status,
+					cursor: spawn?.cursor ?? Number.MAX_SAFE_INTEGER
+				});
+			}
+			visit(node.children);
+		}
+	};
+	visit(nodes);
+	collected.sort((a, b) => a.cursor - b.cursor);
 	const byPhase = new Map<string, WorkflowPhase>();
-	for (const item of ordered) {
+	for (const item of collected) {
+		if (byPhase.has(item.phase)) continue;
 		byPhase.set(item.phase, {
 			name: item.phase,
 			status: item.status === 'completed' ? 'done' : 'active'

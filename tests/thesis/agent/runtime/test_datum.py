@@ -61,7 +61,9 @@ def test_normalize_datums_keeps_declared_datums() -> None:
         datum_from_result(DatumType.OPERATOR_QUESTION.value, ok=True),
     )
 
-    assert normalize_datums(declared, fallback_type="spawn_sub_agent", ok=True) == declared
+    assert (
+        normalize_datums(declared, fallback_type="spawn_sub_agent", ok=True) == declared
+    )
 
 
 class _FakeProvider:
@@ -132,9 +134,7 @@ def test_one_tool_call_may_project_several_typed_datums() -> None:
     provider = _FakeProvider(
         [
             _completion(
-                tool_calls=(
-                    ToolCall(id="c1", name="start_workflow", arguments="{}"),
-                )
+                tool_calls=(ToolCall(id="c1", name="start_workflow", arguments="{}"),)
             ),
             _completion(content="done"),
         ]
@@ -180,9 +180,7 @@ def test_undeclared_datums_fall_back_to_the_tool_name() -> None:
     provider = _FakeProvider(
         [
             _completion(
-                tool_calls=(
-                    ToolCall(id="c9", name="run_backtest", arguments="{}"),
-                )
+                tool_calls=(ToolCall(id="c9", name="run_backtest", arguments="{}"),)
             ),
             _completion(content="done"),
         ]

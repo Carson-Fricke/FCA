@@ -24,7 +24,12 @@ from thesis.workflows.evidence import (
     EvidenceReportError,
     build_evidence_report,
 )
-from thesis.workflows.hypothesis_development import (
+from thesis.workflows.local import (
+    McpBacktestRunner,
+    McpStudyRunner,
+    build_local_workflow_runtime,
+)
+from thesis.workflows.registry.hypothesis_development import (
     HYPOTHESIS_DEVELOPMENT_PHASES,
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
     VERDICT_INCONCLUSIVE,
@@ -41,7 +46,6 @@ from thesis.workflows.hypothesis_development import (
     HypothesisDevelopmentPhase,
     HypothesisDevelopmentRequest,
     HypothesisDevelopmentState,
-    HypothesisDevelopmentWorkflow,
     HypothesisDraft,
     JsonDevelopmentHypothesisComposer,
     JsonFalsificationPlanner,
@@ -52,11 +56,6 @@ from thesis.workflows.hypothesis_development import (
     RcaDiagnosis,
     StrategyContent,
     StrategyDesignDraft,
-)
-from thesis.workflows.local import (
-    McpBacktestRunner,
-    McpStudyRunner,
-    build_local_workflow_runtime,
 )
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
@@ -88,7 +87,6 @@ __all__ = [
     "HypothesisDevelopmentPhase",
     "HypothesisDevelopmentRequest",
     "HypothesisDevelopmentState",
-    "HypothesisDevelopmentWorkflow",
     "HypothesisDraft",
     "JsonDevelopmentHypothesisComposer",
     "JsonFalsificationPlanner",

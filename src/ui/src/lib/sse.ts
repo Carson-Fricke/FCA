@@ -52,6 +52,8 @@ export interface ExecutionStreamOptions {
 	baseUrl: string;
 	workspaceId: string;
 	executionId: string;
+	/** The owning chat; set to stream a node's activity on the durable surface. */
+	chatId?: string | null;
 	cursorStore?: CursorStore;
 	fetchImpl?: typeof fetch;
 	reconnectDelayMs?: number;
@@ -152,16 +154,29 @@ export class ExecutionEventStream {
 	async start(onFrame: FrameHandler): Promise<void> {
 		const url = this.options.streamPath
 			? this.options.streamPath(this.options.workspaceId, this.options.executionId)
-			: nodeStreamUrl(this.options.baseUrl, this.options.workspaceId, this.options.executionId, {
-					subAgentId: this.options.subAgentId,
-					includeDescendants: this.options.includeDescendants
-				});
+			: this.options.chatId && this.options.subAgentId
+				? chatNodeStreamUrl(
+						this.options.baseUrl,
+						this.options.workspaceId,
+						this.options.chatId,
+						this.options.subAgentId
+					)
+				: nodeStreamUrl(this.options.baseUrl, this.options.workspaceId, this.options.executionId, {
+						subAgentId: this.options.subAgentId,
+						includeDescendants: this.options.includeDescendants
+					});
 		while (!this.closed) {
 			try {
 				const headers: Record<string, string> = { Accept: 'text/event-stream' };
 				if (this.cursor > 0) headers['Last-Event-ID'] = String(this.cursor);
 				const response = await this.fetchImpl(url, { headers });
 				if (this.closed) return;
+				if (response.status === 404 || response.status === 409) {
+					// The stream does not exist (for example a chat-spawned node
+					// without a workflow execution): stop reconnecting instead of
+					// spinning against the API.
+					return;
+				}
 				if (!response.ok || !response.body) {
 					await delay(this.reconnectDelayMs);
 					continue;
@@ -264,6 +279,21 @@ export function nodeStreamUrl(
 		: '';
 	const query = options.includeDescendants ? '?include_descendants=true' : '';
 	return `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}${node}/events/stream${query}`;
+}
+
+/**
+ * URL for the chat node activity stream. A node without an execution
+ * (spawned directly from chat) has no activity stream, so callers guard
+ * before subscribing.
+ */
+export function chatNodeStreamUrl(
+	baseUrl: string,
+	workspaceId: string,
+	chatId: string,
+	subAgentId: string
+): string {
+	const base = baseUrl.replace(/\/+$/, '');
+	return `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/sub_agents/${encodeURIComponent(subAgentId)}/events/stream`;
 }
 
 export function chatStreamUrl(baseUrl: string, workspaceId: string, chatId: string): string {

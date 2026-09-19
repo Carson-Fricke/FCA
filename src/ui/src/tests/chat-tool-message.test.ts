@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import ChatTranscript from '$lib/components/chat/ChatTranscript.svelte';
-import type { ChatMessage, ToolResult } from '$lib/types';
+import type { ChatMessage, ToolResult, WorkflowExecutionRecord } from '$lib/types';
 
 function message(overrides: Partial<ChatMessage>): ChatMessage {
 	return {
@@ -91,11 +91,12 @@ describe('ChatTranscript tool-result datum-type routing', () => {
 		});
 	}
 
-	it('routes a declared datum type to its renderer instead of the tool name', async () => {
+	it('routes a workflow launch datum to the workflow card instead of a tool card', async () => {
 		renderTool({ ...toolResult, datumType: 'workflow_execution' });
 		await tick();
 
-		expect(screen.getByTestId('generic-tool-card')).toBeInTheDocument();
+		expect(screen.getByTestId('workflow-card')).toBeInTheDocument();
+		expect(screen.queryByTestId('generic-tool-card')).toBeNull();
 		expect(screen.queryByTestId('backtest-tool-card')).toBeNull();
 	});
 
@@ -111,5 +112,87 @@ describe('ChatTranscript tool-result datum-type routing', () => {
 		await tick();
 
 		expect(screen.getByTestId('generic-tool-card')).toBeInTheDocument();
+	});
+});
+
+describe('ChatTranscript live workflow routing', () => {
+	it('renders the registry workflow card with live phases and navigation', async () => {
+		const liveExecution: WorkflowExecutionRecord = {
+			execution_id: 'exec-42',
+			chat_id: 'c1',
+			trigger_message_id: 'm1',
+			workflow_id: 'hypothesis-development',
+			workflow_version: '1.0.0',
+			requested_by: 'operator',
+			state: 'running',
+			phase: 'falsification_trials',
+			intent_epoch: 0,
+			steering_message_ids: [],
+			created_at: '2026-01-01T00:00:00Z'
+		};
+		const workflowResult: ToolResult = {
+			...toolResult,
+			tool: 'start_workflow',
+			datumType: 'workflow_execution',
+			summary: 'Hypothesis development started.',
+			structured: {
+				executionId: 'exec-42',
+				workflowId: 'hypothesis-development',
+				phase: 'hypothesis_creation',
+				state: 'running'
+			}
+		};
+		const onEnterPhase = vi.fn();
+
+		const { container } = render(ChatTranscript, {
+			props: {
+				messages: [
+					message({
+						message_id: 'm2',
+						role: 'tool',
+						actor_id: 'thesis-agent',
+						body: workflowResult.summary,
+						tool_result: workflowResult
+					})
+				],
+				workspaceId: 'w1',
+				execution: liveExecution,
+				phases: [
+					{ name: 'hypothesis_creation', status: 'done' },
+					{ name: 'falsification_trials', status: 'active' }
+				],
+				attentionPhases: ['falsification_trials'],
+				onEnterPhase
+			}
+		});
+		await tick();
+
+		// One route: the registry renderer renders the card through the tool
+		// result wrapper, exactly like every other surface.
+		const wrapper = screen.getByTestId('tool-result-card');
+		expect(wrapper).toHaveAttribute('data-tool', 'start_workflow');
+		const card = container.querySelector('[data-testid="workflow-card"]');
+		expect(card).not.toBeNull();
+		expect(card).toHaveAttribute('data-execution', 'exec-42');
+
+		// Liveness survives the registry route: live attention, active-phase
+		// pulse, and phase navigation all come from the transcript context.
+		expect(screen.getByTestId('workflow-card-needs-input')).toHaveTextContent(
+			'falsification_trials'
+		);
+		expect(screen.getByTestId('phase-liveness')).toBeInTheDocument();
+		const steps = screen.getAllByTestId('phase-step');
+		expect(steps.map((step) => step.getAttribute('data-phase'))).toEqual([
+			'hypothesis_creation',
+			'falsification_trials'
+		]);
+		await fireEvent.click(steps[0]);
+		expect(onEnterPhase).toHaveBeenCalledWith('hypothesis_creation', {
+			readOnly: true
+		});
+		await fireEvent.click(steps[1]);
+		expect(onEnterPhase).toHaveBeenCalledWith('falsification_trials', {
+			readOnly: false
+		});
 	});
 });

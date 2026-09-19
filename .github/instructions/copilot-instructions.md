@@ -65,21 +65,11 @@ or bootstrapping the environment.
 
 ## Architecture Documentation
 
-- Treat `.github/architecture/*.md` as the source of truth for repository
-  structure, package boundaries, product responsibilities, and deployment
-  shape. Read the relevant architecture document before structural or
-  cross-package work.
-- Follow `.github/instructions/repository-organization.instructions.md`
-  together with the architecture documents; the instruction file covers
-  package shape, and the architecture documents own the current map and
-  boundaries.
-- Update architecture documentation in the same change whenever work does any
-  of the following:
-  - Adds, removes, renames, or repurposes a package or capability directory.
-  - Changes public facades, entrypoints, dependency direction, or product
-    boundaries.
-  - Adds or changes deployment, workflow, storage, or runtime shape described
-    by the architecture documents.
+- Update the affected architecture document in the same change whenever work
+  adds, removes, renames, or repurposes a package or capability directory, or
+  changes public facades, entrypoints, dependency direction, deployment, or
+  runtime shape. Architecture reads are optional reference, not required
+  orientation.
 - Keep architecture updates factual and current. Update the `## Status`
   section when a planned capability becomes implemented. Do not describe
   planned behavior as implemented, and do not leave stale package or
@@ -92,29 +82,21 @@ or bootstrapping the environment.
 
 - Work only within the task's assigned files and behavior.
 - Run focused tests and focused Ruff and ty checks only.
-- Orient before exploring: start from `cleo focus <task-id>` (one envelope
-  replacing about eight orientation calls), then use the Fast Lookups commands
-  from `.github/instructions/cleo.instructions.md` — `cleo memory find` /
-  `decision-find` for prior knowledge, `cleo graph search` / `impact` /
-  `deps` for code structure and blast radius. Budget at most three BRAIN or
-  nexus lookups per task phase; past that, report the task prompt as
-  underspecified instead of re-deriving context by grep. These read-only
-  BRAIN and nexus queries are safe for subagents and cheaper than re-deriving
-  context. Run `cleo graph impact <symbol>` before renaming or moving any
-  public symbol; HIGH/CRITICAL blast-radius findings stop the change.
+- Check BRAIN for prior knowledge with `cleo memory find "<topic>"` before
+  exploring, then read files directly.
 - Do not run the complete repository suite unless acting as the integration
   owner.
 - Use the Canonical Commands table above instead of ad-hoc interpreter or
   script invocation.
-- Treat architecture-documentation updates for the current wave as
-  integration-owned unless the wave explicitly assigns that documentation.
+- Treat architecture-documentation updates as integration-owned unless a task
+  explicitly assigns that documentation.
 - Do not modify another task's verification record or mutate CLEO task state.
 - Treat failures in files concurrently owned by another agent as integration
   findings, not final failures for the current task.
 
 ## Integration Work
 
-- Wait until every agent in the wave has stopped editing, then freeze the wave.
+- Wait until every agent has stopped editing, then freeze.
 - Run `uv lock --check`, repository-wide Ruff lint and format checks, ty, and
   pytest once. Run applicable Bicep and workflow checks in the same integration
   pass.
@@ -123,10 +105,10 @@ or bootstrapping the environment.
 - If a test run hangs or times out, isolate the hanging test with a hard timeout
   before changing code. Do not rerun the unchanged full suite.
 - Keep completed task evidence unchanged when later tasks add tests. Record
-  focused task evidence separately from one shared wave integration artifact.
-- Reconcile CLEO and run its full validation/export checklist once per wave,
+  focused task evidence separately from one shared integration artifact.
+- Reconcile CLEO and run its full validation/export checklist once per batch,
   immediately before commit or handoff.
-- Do not start work beyond the user-approved wave count.
+- Do not start work beyond the approved scope.
 
 ## Workflow Interaction & Gates Policy
 

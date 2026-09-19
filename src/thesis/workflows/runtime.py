@@ -36,6 +36,7 @@ from thesis.agent.router import (
     Role,
     RolePolicy,
 )
+from thesis.agent.runtime.delivery import TurnScheduler
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContextFactory
@@ -52,16 +53,18 @@ from thesis.workflows.backtests import (
     BacktestRunner,
     HarnessBacktestRunner,
 )
-from thesis.workflows.hypothesis_development import (
+from thesis.workflows.core.workflow import Workflow
+from thesis.workflows.registry.hypothesis_development import (
     DEFAULT_MAX_RCA_CYCLES,
     FalsificationPlanner,
     HypothesisDevelopmentOutcome,
     HypothesisDevelopmentRequest,
-    HypothesisDevelopmentWorkflow,
+    HypothesisDevelopmentState,
     RcaComposer,
     StrategyDesigner,
+    build_hypothesis_development_workflow,
 )
-from thesis.workflows.hypothesis_development import (
+from thesis.workflows.registry.hypothesis_development import (
     HypothesisComposer as DevelopmentHypothesisComposer,
 )
 from thesis.workflows.research_models import (
@@ -163,6 +166,7 @@ def build_workflow_runtime(
     backtest_mode: BacktestMode = "local",
     metadata: Mapping[str, object] | None = None,
     subagent_lifecycle: SubAgentLifecycle | None = None,
+    turn_scheduler: TurnScheduler | None = None,
     clock: Callable[[], datetime] = _utc_now,
     id_factory: Callable[[str], str] = _new_id,
     invocation_id_factory: Callable[[], str] | None = None,
@@ -229,20 +233,21 @@ def build_workflow_runtime(
         validator=strategy_validator,
         hypothesis_store=hypothesis_store,
         subagent_lifecycle=subagent_lifecycle,
+        turn_scheduler=turn_scheduler,
         clock=clock,
         id_factory=id_factory,
     )
 
 
 class WorkflowRuntime:
-    """Holder that builds and executes Thesis workflows over composed ports.
+    """The slim composition root: composed ports plus workflow facades.
 
     The runtime owns the composed :class:`ModelRouter` and
-    :class:`BacktestRunner`.  Each builder pairs them with an injected
-    :class:`ChatService` (plus the workflow-specific validator, composer,
-    journal, and importer ports) and returns a runnable workflow.  The matching
-    ``execute_*`` helpers run an already-launched request through a freshly
-    composed workflow.
+    :class:`BacktestRunner` and exposes them to every workflow.  The
+    hypothesis-named ``build_*``/``execute_*`` members below are compatibility
+    facades over the concrete package assembled under
+    ``thesis.workflows.registry.hypothesis_development``; the workflow's spec,
+    executors, and state machine live there, not here.
     """
 
     def __init__(
@@ -255,6 +260,7 @@ class WorkflowRuntime:
         validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
         subagent_lifecycle: SubAgentLifecycle | None = None,
+        turn_scheduler: TurnScheduler | None = None,
         clock: Callable[[], datetime] = _utc_now,
         id_factory: Callable[[str], str] = _new_id,
     ) -> None:
@@ -282,12 +288,9 @@ class WorkflowRuntime:
         self._validator = validator
         self._hypothesis_store = hypothesis_store
         self._subagent_lifecycle = subagent_lifecycle
+        self._turn_scheduler = turn_scheduler
         self._clock = clock
         self._id_factory = id_factory
-        # Keep an in-process paused workflow alive so a conversational phase can
-        # resume with the complete state produced before its operator review.
-        # A process restart does not claim to reconstruct this state.
-        self._hypothesis_workflows: dict[str, HypothesisDevelopmentWorkflow] = {}
 
     @property
     def router(self) -> ModelRouter:
@@ -327,7 +330,11 @@ class WorkflowRuntime:
         coding_role: Role = "coding",
         experiment_id: str | None = None,
         max_rca_cycles: int = DEFAULT_MAX_RCA_CYCLES,
-    ) -> HypothesisDevelopmentWorkflow:
+    ) -> Workflow[
+        HypothesisDevelopmentRequest,
+        HypothesisDevelopmentState,
+        HypothesisDevelopmentOutcome,
+    ]:
         """Compose the falsification-first hypothesis-development workflow."""
         resolved_validator = validator if validator is not None else self._validator
         if resolved_validator is None:
@@ -338,7 +345,7 @@ class WorkflowRuntime:
         resolved_store = (
             hypothesis_store if hypothesis_store is not None else self._hypothesis_store
         )
-        return HypothesisDevelopmentWorkflow(
+        return build_hypothesis_development_workflow(
             chat=chat,
             router=self._router,
             runner=self._runner,
@@ -360,75 +367,8 @@ class WorkflowRuntime:
             experiment_id=experiment_id,
             max_rca_cycles=max_rca_cycles,
             subagent_lifecycle=self._subagent_lifecycle,
+            turn_scheduler=self._turn_scheduler,
         )
-
-    def execute_hypothesis_development(
-        self,
-        request: HypothesisDevelopmentRequest,
-        *,
-        chat: ChatService,
-        validator: StrategySandboxValidator | None = None,
-        hypothesis_store: HypothesisStore | None = None,
-        composer: DevelopmentHypothesisComposer | None = None,
-        planner: FalsificationPlanner | None = None,
-        rca_composer: RcaComposer | None = None,
-        designer: StrategyDesigner | None = None,
-        ledger: AttemptLedger | None = None,
-        subagent_factory: SubagentContextFactory | None = None,
-        journal: CommandJournal | None = None,
-        research_role: Role = "research",
-        critique_role: Role = "critique",
-        coding_role: Role = "coding",
-        experiment_id: str | None = None,
-        max_rca_cycles: int = DEFAULT_MAX_RCA_CYCLES,
-    ) -> HypothesisDevelopmentOutcome:
-        """Run one launched hypothesis-development request to completion."""
-        workflow = self.build_hypothesis_development(
-            chat=chat,
-            validator=validator,
-            hypothesis_store=hypothesis_store,
-            composer=composer,
-            planner=planner,
-            rca_composer=rca_composer,
-            designer=designer,
-            ledger=ledger,
-            subagent_factory=subagent_factory,
-            journal=journal,
-            research_role=research_role,
-            critique_role=critique_role,
-            coding_role=coding_role,
-            experiment_id=experiment_id,
-            max_rca_cycles=max_rca_cycles,
-        )
-        self._hypothesis_workflows[request.execution_id] = workflow
-        outcome = workflow.run(request)
-        if outcome.phase.value in {"completed", "failed"}:
-            self._hypothesis_workflows.pop(request.execution_id, None)
-        return outcome
-
-    def resume_hypothesis_development(
-        self,
-        request: HypothesisDevelopmentRequest,
-        *,
-        chat: ChatService,
-    ) -> HypothesisDevelopmentOutcome:
-        """Run one more hypothesis-creation turn for a resumed execution.
-
-        Called when an operator message arrives for the paused
-        hypothesis-creation node.  The runtime rebuilds the workflow over the
-        same composed ports and re-enters the conversation; the durable
-        transcript is the state, so no checkpoint is required.
-        """
-        workflow = self._hypothesis_workflows.get(request.execution_id)
-        if workflow is None:
-            raise WorkflowRuntimeError(
-                "paused hypothesis development state is unavailable; "
-                "restart resume is not supported yet"
-            )
-        outcome = workflow.resume(request)
-        if outcome.phase.value in {"completed", "failed"}:
-            self._hypothesis_workflows.pop(request.execution_id, None)
-        return outcome
 
 
 __all__ = [

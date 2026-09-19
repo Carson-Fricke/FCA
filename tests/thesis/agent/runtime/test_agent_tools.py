@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -14,13 +14,23 @@ from thesis.agent.harness_tools import (
 )
 from thesis.agent.runtime.child_runner import ChildRunner
 from thesis.agent.runtime.context import ToolContext, ToolContextError
+from thesis.agent.runtime.control import (
+    TOOL_REQUEST_PHASE_COMPLETION,
+    TOOL_REQUEST_SUB_AGENT_COMPLETION,
+    ControlToolService,
+)
 from thesis.agent.runtime.control_tools import (
+    CONTROL_NODE_TOOL_NAMES,
     ControlToolRuntime,
     control_registered_tools,
 )
+from thesis.agent.runtime.datum import DatumType
+from thesis.agent.runtime.delivery import DeliveryService, NodeInputService
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
     DEFAULT_ROOT_BUDGET_CEILING,
+    AnsweringActor,
+    OperatorActorKind,
     RolePolicySpec,
     SpawnAuthorization,
     SpawnDenial,
@@ -29,29 +39,41 @@ from thesis.agent.runtime.policy import (
 from thesis.agent.runtime.registry import THESIS_TOOL_NAMES, build_session_registry
 from thesis.agent.runtime.session import SessionToolRegistry
 from thesis.agent.runtime.specs import SubAgentSpec
-from thesis.agent.runtime.store import InMemorySubAgentStore
+from thesis.agent.runtime.store import InMemorySubAgentStore, PersistenceSubAgentStore
 from thesis.agent.runtime.workflow_tools import (
     WorkflowLauncher,
     workflow_registered_tools,
 )
 from thesis.agent.session_reply import SessionReplyProvider
-from thesis.chat.contracts import MessageRole, TranscriptItemKind
-from thesis.chat.responder import ReplyChunk, ToolResultChunk
+from thesis.chat.contracts import (
+    MessageRole,
+    SubAgentKind,
+    SubAgentStatus,
+    TranscriptItemKind,
+)
+from thesis.chat.responder import ChatReplyService, ReplyChunk, ToolResultChunk
 from thesis.chat.service import ChatService, InMemoryChatPersistence
+from thesis.chat.streaming import InMemoryChatStreamBroker
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
 from thesis.providers.invocations import ModelCompletion, ToolCall
+from thesis.workflows.core.registry import WorkflowRegistration, WorkflowRegistry
+from thesis.workflows.core.spec import WorkflowContext
+from thesis.workflows.registry import register_hypothesis_development
 
 _WORKSPACE = "ws-test"
 _CHAT = "chat-1"
 _ACTOR = "operator-1"
 
 
-def _context(*, allowed: Sequence[str] = ()) -> ToolContext:
+def _context(
+    *, allowed: Sequence[str] = (), sub_agent_id: str | None = None
+) -> ToolContext:
     return ToolContext(
         workspace_id=_WORKSPACE,
         chat_id=_CHAT,
         conversation_id=_CHAT,
         actor_id=_ACTOR,
+        sub_agent_id=sub_agent_id,
         allowed_tools=tuple(allowed),
     )
 
@@ -103,6 +125,7 @@ class _ControlStub:
         spec: SubAgentSpec,
         actor_id: str,
         conversation_id: str,
+        prompt: str,
         parent_sub_agent_id: str | None = None,
         workflow_execution_id: str | None = None,
         phase_attempt_id: str | None = None,
@@ -139,28 +162,48 @@ class _ControlStub:
         )
 
 
+class _RecordingRegistry(WorkflowRegistry):
+    """A registry that records the ids the tool resolved."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.resolved: list[str] = []
+
+    def resolve(self, workflow_id: str) -> WorkflowRegistration[Any, Any, Any]:
+        self.resolved.append(workflow_id)
+        return super().resolve(workflow_id)
+
+
 class _Launcher:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self._registry = _RecordingRegistry()
+        register_hypothesis_development(self._registry, execute=self._execute)
 
-    def start_hypothesis_development(
+    @property
+    def workflows(self) -> WorkflowRegistry:
+        return self._registry
+
+    @property
+    def resolved(self) -> list[str]:
+        return self._registry.resolved
+
+    def _execute(
         self,
+        context: WorkflowContext,
         *,
-        workspace_id: str,
-        chat_id: str,
-        actor_id: str,
         ideas: str,
         investigation_id: str | None = None,
-        trigger_message_id: str | None = None,
     ) -> Mapping[str, object]:
         self.calls.append(
             {
-                "workspace_id": workspace_id,
-                "chat_id": chat_id,
-                "actor_id": actor_id,
+                "workspace_id": context.workspace_id,
+                "chat_id": context.chat_id,
+                "actor_id": context.actor_id,
                 "ideas": ideas,
                 "investigation_id": investigation_id,
-                "trigger_message_id": trigger_message_id,
+                "trigger_message_id": context.trigger_message_id,
+                "anchor_sub_agent_id": context.anchor_sub_agent_id,
             }
         )
         return {"executionId": "exec-1", "phase": "requested", "summary": "started"}
@@ -193,7 +236,7 @@ def test_tool_context_rejects_blank_identity_and_sorts_policy() -> None:
 
 def test_registry_merges_harness_control_and_workflow_tools() -> None:
     registry = build_session_registry(
-        context=_context(),
+        context=_context(sub_agent_id="sa-1"),
         harness_tools=cast(HarnessToolProvider, _HarnessProvider(("run_backtest",))),
         control=cast(ControlToolRuntime, _ControlStub()),
         workflow=cast(WorkflowLauncher, _Launcher()),
@@ -202,6 +245,25 @@ def test_registry_merges_harness_control_and_workflow_tools() -> None:
     names = _tool_names(registry)
     assert "run_backtest" in names
     assert set(THESIS_TOOL_NAMES) <= names
+
+
+def test_completion_tools_are_offered_only_to_node_scopes() -> None:
+    root = {
+        tool.name
+        for tool in control_registered_tools(
+            cast(ControlToolRuntime, _ControlStub()), _context()
+        )
+    }
+    node = {
+        tool.name
+        for tool in control_registered_tools(
+            cast(ControlToolRuntime, _ControlStub()),
+            _context(sub_agent_id="sa-1"),
+        )
+    }
+
+    assert set(CONTROL_NODE_TOOL_NAMES).isdisjoint(root)
+    assert set(CONTROL_NODE_TOOL_NAMES) <= node
 
 
 def test_registry_policy_denies_tools_outside_the_policy() -> None:
@@ -235,6 +297,20 @@ def test_workflow_tool_launches_with_trusted_context() -> None:
     assert launcher.calls[0]["chat_id"] == _CHAT
     assert launcher.calls[0]["actor_id"] == _ACTOR
     assert launcher.calls[0]["ideas"] == "MSTR leads IBIT"
+
+
+def test_workflow_tool_resolves_the_workflow_through_the_registry() -> None:
+    """Dispatch is a registry lookup, not an id equality or named method."""
+    launcher = _Launcher()
+    (tool,) = workflow_registered_tools(cast(WorkflowLauncher, launcher), _context())
+
+    execution = tool.handler(
+        {"workflow": "hypothesis-development", "idea": "MSTR leads IBIT"}
+    )
+
+    assert execution.ok is True
+    assert launcher.resolved == ["hypothesis-development"]
+    assert launcher.workflows.ids() == ("hypothesis-development",)
 
 
 def test_workflow_tool_anchors_on_the_requesting_message() -> None:
@@ -417,45 +493,276 @@ def test_spawn_tool_applies_the_policy_to_the_child_spec() -> None:
     assert authorization["droppedTools"] == ["launch_trader"]
 
 
-def test_top_level_chat_can_request_operator_input() -> None:
-    published: list[tuple[str, str, str, str]] = []
-    tools = {
-        tool.name: tool
-        for tool in control_registered_tools(
-            cast(ControlToolRuntime, _ControlStub()),
-            _context(allowed=("request_operator_input",)),
-            publish_operator_question=lambda workspace, chat, message, reason: (
-                published.append((workspace, chat, message, reason))
-                or {"messageId": "message-1", "kind": "operator_question"}
+def test_top_level_operator_question_renders_as_the_tool_result_only() -> None:
+    chat = ChatService(persistence=InMemoryChatPersistence())
+    thread = chat.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
+    chat.create_message(_WORKSPACE, thread.chat_id, actor_id=_ACTOR, body="go")
+    store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(chat, store=store)
+    service = ControlToolService(
+        lifecycle=lifecycle,
+        store=store,
+        inputs=NodeInputService(chat=chat, store=store),
+        delivery=DeliveryService(chat),
+    )
+    registry = build_session_registry(
+        context=_context(allowed=("request_operator_input",)),
+        control=service,
+    )
+    provider = _FakeProvider(
+        [
+            _completion(
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="request_operator_input",
+                        arguments=(
+                            '{"message": "Which investigation should I link?", '
+                            '"reason": "ambiguous"}'
+                        ),
+                    ),
+                )
             ),
-        )
-    }
+        ]
+    )
 
-    execution = tools["request_operator_input"].handler(
-        {"message": "Which investigation should I link?", "reason": "ambiguous"}
+    def provider_factory(
+        workspace_id: str, chat_id: str, history: Sequence[ProviderChatMessage]
+    ) -> SessionReplyProvider:
+        del history
+        return SessionReplyProvider(
+            workspace_id=workspace_id,
+            chat_id=chat_id,
+            conversation_id=chat_id,
+            provider=provider,
+            registry=registry,
+        )
+
+    reply = ChatReplyService(
+        chat_service=chat,
+        broker=InMemoryChatStreamBroker(),
+        provider=lambda history: iter(()),
+        provider_factory=provider_factory,
+    )
+
+    reply.respond(_WORKSPACE, thread.chat_id)
+
+    # The operator question renders as the request_operator_input tool result
+    # at the root anchor; no operator-question chat message is ever written.
+    stored = chat.list_messages(_WORKSPACE, thread.chat_id)
+    tool_messages = [message for message in stored if message.role is MessageRole.TOOL]
+    assert len(tool_messages) == 1
+    tool_result = tool_messages[0].tool_result
+    assert tool_result is not None
+    assert tool_result["datumType"] == DatumType.OPERATOR_QUESTION.value
+    assert tool_result["structured"] == {
+        "subAgentId": None,
+        "question": "Which investigation should I link?",
+        "reason": "ambiguous",
+    }
+    assert all(message.role is not MessageRole.ASSISTANT for message in stored)
+    assert not any(
+        message.data is not None and message.data.get("kind") == "operator_question"
+        for message in stored
+    )
+
+
+def test_sub_agent_completion_tools_deliver_the_result_to_the_caller() -> None:
+    chat = ChatService(persistence=InMemoryChatPersistence())
+    thread = chat.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
+    chat_id = thread.chat_id
+    store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(chat, store=store)
+    parent = lifecycle.spawn(
+        _WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="lead", kind=SubAgentKind.CONVERSATION),
+        actor_id=_ACTOR,
+    )
+    child = lifecycle.spawn(
+        _WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="research", kind=SubAgentKind.CONVERSATION),
+        actor_id=_ACTOR,
+        parent_sub_agent_id=parent.sub_agent_id,
+    )
+    scheduled: list[str] = []
+    service = ControlToolService(
+        lifecycle=lifecycle,
+        store=store,
+        inputs=NodeInputService(chat=chat, store=store),
+        delivery=DeliveryService(
+            chat, schedule=lambda ws, c, node: scheduled.append(node)
+        ),
+    )
+    context = ToolContext(
+        workspace_id=_WORKSPACE,
+        chat_id=chat_id,
+        conversation_id=child.sub_agent_id,
+        actor_id=_ACTOR,
+        sub_agent_id=child.sub_agent_id,
+        parent_sub_agent_id=parent.sub_agent_id,
+        allowed_tools=CONTROL_NODE_TOOL_NAMES,
+    )
+    tools = {tool.name: tool for tool in control_registered_tools(service, context)}
+    assert TOOL_REQUEST_SUB_AGENT_COMPLETION in tools
+    assert TOOL_REQUEST_PHASE_COMPLETION in tools
+
+    execution = tools[TOOL_REQUEST_SUB_AGENT_COMPLETION].handler(
+        {
+            "completion": {"verdict": "supported"},
+            # A model argument can never redirect the completion to another node.
+            "sub_agent_id": parent.sub_agent_id,
+        }
     )
 
     assert execution.ok is True
     assert execution.terminal is True
-    assert published == [
-        (_WORKSPACE, _CHAT, "Which investigation should I link?", "ambiguous")
+    assert execution.structured["subAgentId"] == child.sub_agent_id
+    completed = lifecycle.get(_WORKSPACE, child.sub_agent_id)
+    assert completed is not None
+    assert completed.status is SubAgentStatus.COMPLETED
+    assert completed.result == {"verdict": "supported", "intentEpoch": 0}
+    caller_still_live = lifecycle.get(_WORKSPACE, parent.sub_agent_id)
+    assert caller_still_live is not None
+    assert caller_still_live.status is SubAgentStatus.PENDING
+
+    delivered = [
+        message
+        for message in chat.list_messages(_WORKSPACE, chat_id)
+        if message.data is not None
+        and message.data.get("childSubAgentId") == child.sub_agent_id
     ]
+    assert len(delivered) == 1
+    assert delivered[0].data is not None
+    assert delivered[0].data["subAgentId"] == parent.sub_agent_id
+    assert delivered[0].data["result"] == {"verdict": "supported", "intentEpoch": 0}
+    assert scheduled == [parent.sub_agent_id]
 
 
-def test_top_level_chat_without_a_question_surface_fails_closed() -> None:
-    tools = {
-        tool.name: tool
-        for tool in control_registered_tools(
-            cast(ControlToolRuntime, _ControlStub()),
-            _context(allowed=("request_operator_input",)),
-        )
-    }
+def test_phase_completion_tool_marks_the_phase_node_terminal() -> None:
+    chat = ChatService(persistence=InMemoryChatPersistence())
+    thread = chat.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
+    chat_id = thread.chat_id
+    store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(chat, store=store)
+    node = lifecycle.spawn(
+        _WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="workflow-node", kind=SubAgentKind.ONE_SHOT),
+        actor_id=_ACTOR,
+    )
+    phase = lifecycle.spawn(
+        _WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(
+            role="falsification", kind=SubAgentKind.ONE_SHOT, phase="falsification"
+        ),
+        actor_id=_ACTOR,
+        parent_sub_agent_id=node.sub_agent_id,
+    )
+    scheduled: list[str] = []
+    service = ControlToolService(
+        lifecycle=lifecycle,
+        store=store,
+        inputs=NodeInputService(chat=chat, store=store),
+        delivery=DeliveryService(
+            chat, schedule=lambda ws, c, node: scheduled.append(node)
+        ),
+    )
+    context = ToolContext(
+        workspace_id=_WORKSPACE,
+        chat_id=chat_id,
+        conversation_id=phase.sub_agent_id,
+        actor_id=_ACTOR,
+        sub_agent_id=phase.sub_agent_id,
+        parent_sub_agent_id=node.sub_agent_id,
+        allowed_tools=CONTROL_NODE_TOOL_NAMES,
+    )
+    tools = {tool.name: tool for tool in control_registered_tools(service, context)}
 
-    execution = tools["request_operator_input"].handler({"message": "hello?"})
+    execution = tools[TOOL_REQUEST_PHASE_COMPLETION].handler(
+        {"completion": {"advance": True}}
+    )
 
-    assert execution.ok is False
-    assert execution.failure is not None
-    assert execution.failure["kind"] == "tool"
+    assert execution.ok is True
+    assert execution.terminal is True
+    completed = lifecycle.get(_WORKSPACE, phase.sub_agent_id)
+    assert completed is not None
+    assert completed.status is SubAgentStatus.COMPLETED
+    assert completed.result == {"advance": True, "intentEpoch": 0}
+    # A phase agent's parent is the workflow node: the completion is recorded
+    # there but never schedules a turn, because no agent owns that record.
+    assert scheduled == []
+
+
+def test_child_runner_leaves_a_paused_child_for_the_operator_answer() -> None:
+    chat = ChatService(persistence=InMemoryChatPersistence())
+    thread = chat.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
+    chat_id = thread.chat_id
+    store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(chat, store=store)
+    child = lifecycle.spawn(
+        _WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(
+            role="research",
+            kind=SubAgentKind.ONE_SHOT,
+            allowed_tools=("request_operator_input",),
+        ),
+        actor_id=_ACTOR,
+    )
+    service = ControlToolService(
+        lifecycle=lifecycle,
+        store=store,
+        inputs=NodeInputService(chat=chat, store=store),
+        delivery=DeliveryService(chat),
+    )
+    provider = _FakeProvider(
+        [
+            _completion(
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="request_operator_input",
+                        arguments='{"message": "Approve the model?"}',
+                    ),
+                )
+            ),
+        ]
+    )
+    runner = ChildRunner(
+        chat=chat,
+        store=store,
+        lifecycle=lifecycle,
+        provider=provider,
+        registry_factory=lambda context: build_session_registry(
+            context=context, control=service
+        ),
+    )
+
+    paused = runner.run(child, "do the thing")
+
+    assert paused.status is SubAgentStatus.NEEDS_INPUT
+    assert paused.accepts_input is True
+    assert not any(
+        message.data is not None and message.data.get("kind") == "child_result"
+        for message in chat.list_messages(_WORKSPACE, chat_id)
+    )
+
+    inputs = NodeInputService(chat=chat, store=store)
+    receipt = inputs.accept(
+        _WORKSPACE,
+        chat_id,
+        child.sub_agent_id,
+        body="approved",
+        actor=AnsweringActor(actor_id=_ACTOR, kind=OperatorActorKind.HUMAN_OPERATOR),
+    )
+
+    assert receipt.scheduled is False
+    resumed = lifecycle.get(_WORKSPACE, child.sub_agent_id)
+    assert resumed is not None
+    assert resumed.status is SubAgentStatus.RUNNING
 
 
 class _FakeProvider:

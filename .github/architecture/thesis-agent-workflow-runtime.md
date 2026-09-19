@@ -751,8 +751,8 @@ chat listing MUST NOT include executions launched by its sub-agents.
 
 - Rationale: execution ownership and card placement must agree, or a
   node-launched execution can never match root-launched parity.
-- Verification: a node-launched execution is retrievable and resumable under the
-  node, and is absent from the chat-level list.
+- Verification: a node-launched execution is retrievable and continuable under
+  the node, and is absent from the chat-level list.
 
 **REQ-022: Durable workflow node.** Every workflow execution MUST have a durable
 workflow-node record created by, and parented to, the launching anchor. Phase
@@ -765,25 +765,161 @@ guards apply to phase agents.
 - Verification: a phase agent's durable record resolves to the workflow node, and
   the guards reject an over-deep or over-budget phase spawn.
 
-**REQ-023: Per-node operator policy.** Answering a node's question MUST be
+**REQ-023: Agent-first transitions.** A phase transition MUST be requested by
+that phase's executor — a sub-agent, or deterministic phase code where the phase
+is deterministic — through the tools its allowed structure exposes. The engine
+MUST validate the request against the transition table and apply it; the engine
+MUST NOT pause or resume an execution for operator input, and there MUST NOT be a
+workflow-level resume path. A completion request MUST stamp the intent epoch it
+was derived from, and a request stamped with an epoch that has since advanced
+MUST be rejected in-turn so the executor re-derives.
+
+- Rationale: the executor owns the conversation; the engine owns legality and
+  routing. The epoch is a read-stamp for delayed or replayed artifacts, not a
+  gate on conversations.
+- Verification: a phase asks for operator input and completes without fencing;
+  the operator's answer drives the phase turn that requests the transition; a
+  stale-epoch request is rejected and re-derived.
+
+**REQ-024: Per-node operator policy.** Answering a node's question MUST be
 governed by a per-node operator policy that can authorize the human operator, a
 parent agent, or another agent. The default MUST be human-only. The answering
 actor MUST be derived from the authenticated session and MUST NOT be accepted from
-model arguments or the request body.
+model arguments or the request body. The operator gate MUST be prompted, not
+structurally enforced: the phase prompt instructs the executor to request operator
+input where the structure requires it, and the engine trusts the prompt rather
+than gating the transition.
 
 - Rationale: autonomy becomes a policy change rather than a structural change,
-  and attribution stays trustworthy.
+  attribution stays trustworthy, and a model that ignores its prompts fails
+  visibly instead of being silently distrusted.
 - Verification: a node whose policy is human-only rejects an agent answer; a node
-  whose policy authorizes a parent accepts one with provenance.
+  whose policy authorizes a parent accepts one with provenance; a transition
+  after an operator answer carries the authenticated actor.
 
-**REQ-024: Single delivery path.** Delivering a datum to a conversation MUST use
+**REQ-025: Single delivery path.** Delivering a datum to a conversation MUST use
 one path parameterized by anchor: persist the datum at the anchor, then schedule a
 turn at that anchor. Delivery MUST be durable before it is scheduled and MUST be
-idempotent under retry. A parent-bound result MUST NOT be delivered only through
-an execution event.
+idempotent under retry. A delivery MAY persist without scheduling when the
+continuation has exactly one scheduling point (the accepted operator answer). A
+parent-bound result MUST NOT be delivered only through an execution event.
 
-- Rationale: one mechanism for roots and nodes; no second-class delivery.
-- Verification: a retried delivery does not duplicate the datum or the turn.
+- Rationale: one mechanism for roots and nodes; no second-class delivery and no
+  redundant scheduled turn.
+- Verification: a retried delivery does not duplicate the datum or the turn; one
+  launch → question → answer schedules exactly one turn.
+
+**REQ-026: One general workflow implementation.** A workflow MUST be a
+`WorkflowSpec`: an id, a version, an ordered set of phases, the allowed
+transitions between them, a per-phase seed (the prompt that prepares that
+phase's agent) and validator (its completion contract), the piping between
+phases, and the workflow-start handoff adapter. The general implementation
+(spec, builder, registry, machine, delivery plumbing, and handoff and completion
+application) MUST live under `workflows/core/` and MUST contain no
+workflow-specific behavior or contract. A phase agent owns its turns and
+advances the workflow only by calling the completion tool; a deterministic phase
+may declare an executor instead of an agent seed.
+
+- Rationale: one engine, many workflows; the hypothesis workflow is a
+  configuration of the engine, not the engine itself.
+- Verification: a second workflow can be registered and executed with no edits to
+  `workflows/core/`.
+
+**REQ-027: Builder and registry.** A `WorkflowBuilder` MUST assemble a spec from
+its parts and validate it (a phase declares a seed or an executor, `on_complete`
+names a declared transition target, every transition is in the table, terminal
+phases exist). A `WorkflowRegistry` MUST resolve a workflow id to its spec, and
+the workflow tool MUST dispatch by registry lookup rather than a named
+per-workflow method. `execute` MUST be the single generic entry point.
+
+- Rationale: construction and dispatch are data, not code branches.
+- Verification: an unknown id is rejected by the registry; adding a workflow
+  requires only registration.
+
+**REQ-028: Handoffs are explicit and transcripts are private.** Cross-phase data
+movement MUST flow only through the accepted completion contract and the declared
+piping adapters; an agent MUST NOT read another agent's transcript. The
+workflow-start adapter threads the caller's message into the first phase.
+Continuation MUST rely on the durable transcript plus the artifacts it
+references; there MUST NOT be a workflow state codec, checkpoint store, or
+execution-level resume path.
+
+- Rationale: a phase's inputs are explicit in its seed, and durability is the
+  conversation itself.
+- Verification: a fresh workflow object reseeds the next phase from the accepted
+  contract and referenced artifacts alone.
+
+**REQ-029: Concrete workflows are self-contained packages.** Each concrete
+workflow MUST live under `workflows/registry/<workflow-id>/` with its phases,
+contracts, gates, prompts, seeds, and phase modules, and MUST NOT be imported by
+another workflow.
+
+- Rationale: partitioning makes workflows independently replaceable and keeps
+  `core/` stable.
+- Verification: the hypothesis workflow imports nothing from
+  `workflows/registry/**` other than its own package.
+
+**REQ-030: Spawning is prompting.** Creating an agent and giving it its first
+prompt MUST be one durable operation: the spawn creates the record and delivers
+the first prompt at the agent's own anchor, and that delivery is what schedules
+the agent's own turn. There MUST NOT be a path that creates an agent and then
+separately schedules its first turn, and the workflow MUST NOT call a scheduler
+to start an agent.
+
+- Rationale: "prompted" and "started" are the same act; splitting them leaves a
+  window in which an agent exists with nothing to do.
+- Verification: an agent whose prompt is delivered is scheduled exactly once;
+  no workflow code calls a turn scheduler.
+
+**REQ-031: Deterministic phases request transitions too.** A phase MAY declare
+`kind=deterministic` with an executor. When the engine enters such a phase it
+MUST call the executor for a contract and validate that contract exactly as an
+agent completion (validator, required fields, target); an invalid contract is
+an engine error, and a valid one advances and cascades through consecutive
+deterministic phases. A phase MUST declare either a seed or an executor, and a
+deterministic phase MUST declare an executor; the builder MUST reject
+violations.
+
+- Rationale: a phase's executor may be an agent invocation or deterministic
+  code; both request the same contract-shaped transition.
+- Verification: a deterministic phase's contract is validated and applied with
+  no agent and no model call; a deterministic phase without an executor is
+  rejected at build time.
+
+**REQ-032: One turn worker per node.** Turns for a node MUST be serialized by a
+single worker per node. A wake that arrives while a turn is running MUST
+coalesce into exactly one follow-up turn — never a concurrent turn on the same
+node, never a dropped wake — and the running turn MUST drain new inbound
+messages between model iterations so the model sees the latest data without
+restarting the turn. A text-only turn for a one-shot child MUST complete the
+node with its answer and deliver it to the caller; a conversation agent MUST
+accept input while it runs; a phase agent MUST complete only through the
+completion tool.
+
+- Rationale: the transcript is the mailbox; replay plus coalescing preserves all
+  work, and draining keeps latency low without discarding anything.
+- Verification: concurrent wakes produce one running turn and one follow-up
+  that sees them all; a message arriving mid-turn is visible to the next model
+  iteration.
+
+**REQ-033: Asynchronous results and bounded await.** A child's terminal result
+MUST be delivered at its caller's anchor and schedule the caller's turn, except
+when the caller is a workflow node — a durable record that MUST never be
+scheduled or turned. `await_sub_agent` MUST wait for the child for a bounded
+time and return its status and result; on timeout it MUST return the current
+state rather than blocking indefinitely.
+
+- Rationale: waiting is optional because delivery wakes the caller; the tool is
+  named await, so it must actually wait when called.
+- Verification: a completed child wakes its caller without an await; an await
+  returns the terminal result when the child finishes inside the window and the
+  current state at the timeout.
+
+Anti-patterns observed during this migration — turn drivers, engine-side model
+calls, sibling-transcript reads, re-embedding conversations in seeds,
+prose-only configuration fields, delivered tool messages without envelopes,
+silently invented entities, and a second launch entry point — are catalogued in
+the authoring guide `thesis-workflow-authoring-guide`.
 
 ## Target Package Layout
 
@@ -823,73 +959,84 @@ src/thesis/agent/
   context.py
 
 src/thesis/workflows/
-  core/
+  core/                    # the general workflow implementation
     __init__.py
-    phase.py            # AgentSpec, PhaseKind, PhaseSpec, PhaseRegistry
-    machine.py          # transitions and PhaseTransition
-    state.py            # common workflow state/replay
-    gate.py             # deterministic acceptance protocol/outcomes
-    checkpoint.py       # pause/resume integration
-    runner.py           # generic state-machine runner
-    events.py           # workflow event projections
-  hypothesis_development/
-    __init__.py         # public facade
-    workflow.py         # thin phase registry and state-machine wiring
-    request.py
-    state.py
-    artifacts.py
-    ledger.py
-    phases/
-      creation.py
-      trials.py
-      verdict.py
-      design.py
-      backtesting.py
-      strategy_rca.py
-      optimization.py
-    contracts/
-      creation.py
-      hypothesis.py
-      plan.py
-      trials.py
-      verdict.py
-      strategy.py
-      rca.py
-    gates/
-      falsifiability.py
-      research_model.py
-      plan.py
-      evidence.py
-      strategy.py
-    prompts/
-      creation.py
-      falsification.py
-      strategy.py
-      rca.py
-    loops/
-      premise.py
-      strategy.py
-  strategy_development/
-    phases/
-    contracts/
-    gates/
-    prompts/
-  discovery/
-    phases/
-    contracts/
-    gates/
-    prompts/
-  rca/
-    phases/
-    contracts/
-    gates/
-    prompts/
+    spec.py                # WorkflowSpec, PhaseSpec, TransitionRequest, WorkflowContext
+    workflow.py            # the general Workflow object: prepare, completion, pipes
+    phase.py               # AgentSpec, PhaseKind, PhaseSpec, seeds and validators
+    builder.py             # WorkflowBuilder: phases, seeds, validators, transitions, piping
+    registry.py            # WorkflowRegistry: workflow id -> WorkflowSpec
+    machine.py             # transitions and PhaseTransition
+    state.py               # common workflow state/replay
+    gate.py                # deterministic acceptance protocol/outcomes
+    delivery.py            # node turn delivery and operator-question plumbing
+    events.py              # workflow event projections
+  registry/                # concrete workflows, one package per workflow id
+    __init__.py            # registers every concrete workflow with the registry
+    hypothesis_development/
+      __init__.py          # spec assembly and public facade
+      spec.py              # phases, allowed transitions, seeds, piping, handoff
+      request.py
+      state.py
+      artifacts.py
+      ledger.py
+      phases/
+        creation.py
+        trials.py
+        verdict.py
+        design.py
+        backtesting.py
+        strategy_rca.py
+        optimization.py
+      contracts/
+        creation.py
+        hypothesis.py
+        plan.py
+        trials.py
+        verdict.py
+        strategy.py
+        rca.py
+      gates/
+        falsifiability.py
+        research_model.py
+        plan.py
+        evidence.py
+        strategy.py
+      prompts/
+        creation.py
+        falsification.py
+        strategy.py
+        rca.py
+      loops/
+        premise.py
+        strategy.py
+    strategy_development/
+      phases/
+      contracts/
+      gates/
+      prompts/
+    discovery/
+      phases/
+      contracts/
+      gates/
+      prompts/
+    rca/
+      phases/
+      contracts/
+      gates/
+      prompts/
   runtime.py            # slim composition root
 ```
 
+The tree above is the target. Concrete workflows MUST live under
+`workflows/registry/<workflow-id>/` and MUST be resolved by id through
+`core/registry.py`; no workflow-specific behavior or contract may live in
+`core/`. The tool surface resolves a requested workflow id to its spec and calls
+the generic `execute`.
+
 `src/thesis/execution/sub_agents.py` SHOULD become a temporary compatibility
-facade over `thesis.agent.subagents`. `src/thesis/execution/checkpoints.py`
-remains the snapshot substrate. The execution event log remains the streaming
+facade over `thesis.agent.subagents`. `src/thesis/execution/checkpoints.py` is no
+longer part of the workflow runtime. The execution event log remains the streaming
 and projection mechanism, while first-class invocation and sub-agent stores are
 their own durable sources of truth.
 
@@ -917,7 +1064,7 @@ end-to-end suites.
 - Implement `spawn_sub_agent`, `await_sub_agent`,
   `request_sub_agent_completion`, and `request_operator_input`.
 - Route both chat and workflow phase spawning through the same command handler.
-- Add depth, child-count, budget-inheritance, authorization, and resume tests.
+- Add depth, child-count, budget-inheritance, and authorization tests.
 
 ### Wave 4: Harness Research Tool
 

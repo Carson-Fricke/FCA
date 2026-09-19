@@ -689,31 +689,31 @@ export function replayExecutionEvents(
 }
 
 // ---------------------------------------------------------------------------
-// Nested sub-agent nodes: REST tree, node events, and node messages.
+// Chat-scoped sub-agent nodes: durable tree, node activity, node input.
 //
-// Contract (backend in parallel): a workspace execution exposes its
-// sub-agents at `…/executions/{exec}/sub_agents`, nested under their parent
-// at `…/sub_agents/{a}/sub_agents`. Node events are read at
-// `{node}/events?after_cursor=&include_descendants=` (own by default) and
-// streamed at `{node}/events/stream`. Messages post to `{node}/messages`,
-// and only when the node declares `accepts_input`.
+// Contract (backend `thesis.http.chat_sub_agents`): a chat exposes its durable
+// sub-agent tree at `…/chats/{chat}/sub_agents` (a pure projection of durable
+// records that survives a restart). Node activity replays at
+// `{node}/events?after_cursor=&include_descendants=` and streams at
+// `{node}/events/stream`. Operator input posts to `{node}/messages` — the
+// answering actor is derived from the authenticated session, never the body,
+// and only nodes that accept input accept a post.
 // ---------------------------------------------------------------------------
 
-/** The base path for an execution or one of its sub-agent nodes. */
-export function executionNodeBase(
+/** The base path for a chat and one of its sub-agent nodes. */
+export function chatNodeBase(
 	workspaceId: string,
-	executionId: string,
+	chatId: string,
 	node?: ExecutionNodeRef | null
 ): string {
-	const exec = `/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}`;
-	if (!node || node.kind === 'execution') return exec;
-	return `${exec}/sub_agents/${encodeURIComponent(node.id)}`;
+	const chat = `/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}`;
+	if (!node || node.kind === 'execution') return chat;
+	return `${chat}/sub_agents/${encodeURIComponent(node.id)}`;
 }
 
 /**
- * Normalize the backend's snake_case sub-agent record to the camelCase UI
- * contract. The hierarchy route serializes `SubAgentNode.as_dict()`, so the
- * field names differ from the transport type the UI consumes.
+ * Normalize the backend's durable sub-agent node to the camelCase UI
+ * contract. The chat-scoped tree serializes `ChatSubAgentNode.as_dict()`.
  */
 function toSubAgentNode(raw: Record<string, unknown>): SubAgentNode {
 	const context = (raw.context as SubAgentNode['context'] | undefined) ?? {
@@ -728,40 +728,43 @@ function toSubAgentNode(raw: Record<string, unknown>): SubAgentNode {
 			| null,
 		phase: String(raw.phase ?? ''),
 		role: String(raw.role ?? ''),
-		status: String(raw.status ?? 'running') as SubAgentNode['status'],
+		status: String(raw.status ?? 'pending') as SubAgentNode['status'],
 		acceptsInput: Boolean(raw.acceptsInput ?? raw.accepts_input ?? false),
-		context
+		context,
+		workflowExecutionId: (raw.workflowExecutionId ??
+			raw.workflow_execution_id ??
+			null) as string | null
 	};
 }
 
 /**
- * List one execution node's direct sub-agents. Omit `parentSubAgentId` for
- * the root execution's children; provide it to read a nested node's children.
+ * List the chat's durable sub-agent tree as a flat node list (every node,
+ * parent-linked). This is the durable ownership view: it survives restarts
+ * and includes children spawned directly from chat. The execution's hidden
+ * workflow-node record is included here so the tree projection can re-anchor
+ * its children; it is never surfaced by the projection.
  */
-export function listExecutionSubAgents(
+export function listChatSubAgents(
 	workspaceId: string,
-	executionId: string,
-	options: { parentSubAgentId?: string | null } = {}
+	chatId: string
 ): Promise<SubAgentNode[]> {
-	const parent = options.parentSubAgentId
-		? ({ kind: 'sub_agent', id: options.parentSubAgentId } as ExecutionNodeRef)
-		: null;
 	if (fixtureMode) return wait(5).then(() => []);
-	return apiFetch<{ items: Record<string, unknown>[] }>(
-		`${executionNodeBase(workspaceId, executionId, parent)}/sub_agents`
-	).then((r) => r.items.map(toSubAgentNode));
+	return apiFetch<{
+		roots: Record<string, unknown>[];
+		items: Record<string, unknown>[];
+	}>(`${chatNodeBase(workspaceId, chatId)}/sub_agents`).then((r) =>
+		r.items.map(toSubAgentNode)
+	);
 }
 
-/** Read one page of an execution node's durable events. */
-export function listNodeEvents(
+/** Read one page of an execution's own activity (the execution itself). */
+export function listExecutionEvents(
 	workspaceId: string,
 	executionId: string,
-	node: ExecutionNodeRef,
-	options: { afterCursor?: number; includeDescendants?: boolean } = {}
+	options: { afterCursor?: number } = {}
 ): Promise<ExecutionEvent[]> {
 	const afterCursor = options.afterCursor ?? 0;
-	const descendants = options.includeDescendants ? '&include_descendants=true' : '';
-	const path = `${executionNodeBase(workspaceId, executionId, node)}/events?after_cursor=${afterCursor}${descendants}`;
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}/events?after_cursor=${afterCursor}`;
 	if (fixtureMode) {
 		return wait(5).then(() => {
 			const doc = fixtures.executionEvents[executionId];
@@ -772,50 +775,70 @@ export function listNodeEvents(
 	return apiFetch<{ events: ExecutionEvent[] }>(path).then((r) => r.events);
 }
 
+/**
+ * Read one page of a chat node's activity. Node activity lives on the
+ * execution's event log, attributed to the node by its durable record.
+ */
+export function listNodeEvents(
+	workspaceId: string,
+	chatId: string,
+	node: ExecutionNodeRef,
+	options: { afterCursor?: number; includeDescendants?: boolean } = {}
+): Promise<ExecutionEvent[]> {
+	const afterCursor = options.afterCursor ?? 0;
+	const descendants = options.includeDescendants ? '&include_descendants=true' : '';
+	const path = `${chatNodeBase(workspaceId, chatId, node)}/events?after_cursor=${afterCursor}${descendants}`;
+	if (fixtureMode) {
+		return wait(5).then(() => {
+			const doc = fixtures.executionEvents[chatId];
+			const items = doc ? doc.items : [];
+			return plain(items).filter((e) => e.cursor > afterCursor);
+		});
+	}
+	return apiFetch<{ events: ExecutionEvent[] }>(path).then((r) => r.events);
+}
+
 export interface PostNodeMessageInput {
 	body: string;
+	/** Deprecated: the answering actor is derived from the authenticated session. */
 	actorId?: string;
 	/** Structured payload for gate resolutions and other control messages. */
 	metadata?: Record<string, unknown>;
 }
 
 /**
- * Post a message to an execution node. The caller must only invoke this when
- * the node's `acceptsInput` is true; the backend rejects input to a node that
- * does not accept it.
+ * Post operator input to a chat-scoped node. The caller must only invoke this
+ * when the node's `acceptsInput` is true; the backend rejects input to a node
+ * that does not accept it, and derives the actor from the session.
  */
 export function postNodeMessage(
 	workspaceId: string,
-	executionId: string,
+	chatId: string,
 	node: ExecutionNodeRef,
 	input: PostNodeMessageInput
 ): Promise<ChatMessage> {
-	const path = `${executionNodeBase(workspaceId, executionId, node)}/messages`;
+	const path = `${chatNodeBase(workspaceId, chatId, node)}/messages`;
 	if (fixtureMode) {
 		return wait(10).then(() => ({
 			message_id: `msg-node-${store.nextId++}`,
 			chat_id: '',
 			workspace_id: workspaceId,
-			actor_id: input.actorId ?? localActorId,
+			actor_id: localActorId,
 			role: 'user' as const,
 			body: input.body,
 			state: 'accepted',
 			attachment_ids: [],
 			created_at: new Date().toISOString(),
 			updated_at: null,
-			execution_id: executionId,
+			execution_id: null,
 			intent_epoch: 0,
 			kind: 'sub_agent' as const,
-			data: { subAgentId: node.id, executionId }
+			data: { subAgentId: node.id }
 		}));
 	}
 	return apiFetch<ChatMessage & { subAgentId?: string }>(path, {
 		method: 'POST',
-		body: JSON.stringify({
-			actor_id: input.actorId ?? localActorId,
-			body: input.body,
-			metadata: input.metadata ?? {}
-		})
+		body: JSON.stringify({ body: input.body })
 	}).then((raw) => ({
 		...raw,
 		kind: 'sub_agent' as const,

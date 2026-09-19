@@ -92,6 +92,8 @@ class InvestigationState(StrEnum):
 class WorkflowExecutionState(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
+    # Retained to decode historical execution rows. Nothing writes it: the
+    # workflow engine no longer pauses an execution for operator input.
     PAUSED = "paused"
     STOPPED = "stopped"
     CANCELLED = "cancelled"
@@ -643,6 +645,7 @@ class SubAgentRecord(WorkspaceRecord):
     spawned_by_invocation_id: str | None = None
     workflow_execution_id: str | None = None
     phase_attempt_id: str | None = None
+    phase: str | None = None
     spec_version: str = "1.0.0"
     kind: SubAgentKind = SubAgentKind.CONVERSATION
     allowed_tools: tuple[str, ...] = ()
@@ -664,6 +667,7 @@ class SubAgentRecord(WorkspaceRecord):
             "spawned_by_invocation_id",
             "workflow_execution_id",
             "phase_attempt_id",
+            "phase",
             "input_contract_ref",
             "completion_contract_ref",
             "result_ref",

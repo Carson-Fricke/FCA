@@ -15,10 +15,12 @@ Env:
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import threading
-from collections.abc import Sequence
+import time
+from collections.abc import Mapping, Sequence
 
 import uvicorn
 
@@ -44,9 +46,13 @@ from thesis.agent.router import (  # noqa: E402
     Role,
     RolePolicy,
 )
-from thesis.agent.runtime.child_runner import ChildRunner, NodeTurnRunner  # noqa: E402
+from thesis.agent.runtime.child_runner import NodeTurnRunner  # noqa: E402
 from thesis.agent.runtime.context import ToolContext  # noqa: E402
 from thesis.agent.runtime.control import ControlToolService  # noqa: E402
+from thesis.agent.runtime.delivery import (  # noqa: E402
+    DeliveryService,
+    NodeInputService,
+)
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle  # noqa: E402
 from thesis.agent.runtime.policy import (  # noqa: E402
     OperatorPolicyRegistry,
@@ -57,17 +63,20 @@ from thesis.agent.runtime.registry import (  # noqa: E402
     build_session_registry,
 )
 from thesis.agent.runtime.store import PersistenceSubAgentStore  # noqa: E402
+from thesis.agent.runtime.turns import NodeTurnCoordinator  # noqa: E402
 from thesis.agent.session_reply import SessionReplyProvider  # noqa: E402
 from thesis.agent.skills import SkillRegistry  # noqa: E402
 from thesis.agent.tool_dispatch import with_harness_mcp  # noqa: E402
 from thesis.chat.contracts import (  # noqa: E402
+    WORKFLOW_NODE_ROLE,
     ChatMessage,
     MessageRole,
+    RecordNotFound,
     SubAgentRecord,
-    TranscriptItemKind,
+    WorkflowExecutionState,
 )
 from thesis.chat.responder import ChatReplyService  # noqa: E402
-from thesis.chat.streaming import CHAT_MESSAGE, InMemoryChatStreamBroker  # noqa: E402
+from thesis.chat.streaming import InMemoryChatStreamBroker  # noqa: E402
 from thesis.chat.workflow_launcher import RuntimeWorkflowLauncher  # noqa: E402
 from thesis.cosmos.stack import open_cosmos_chat_stack  # noqa: E402
 from thesis.http.application import (  # noqa: E402
@@ -103,6 +112,9 @@ from thesis.strategies.validation import (  # noqa: E402
     StrategyValidationResult,
 )
 from thesis.workflows.local import McpBacktestRunner, McpStudyRunner  # noqa: E402
+from thesis.workflows.registry.hypothesis_development import (  # noqa: E402
+    HypothesisDevelopmentRequest,
+)
 from thesis.workflows.research_models import (  # noqa: E402
     BacktestResearchModelRunner,
 )
@@ -111,6 +123,12 @@ from thesis.workspaces.local import (  # noqa: E402
     LocalWorkspaceProvider,
     default_workspace_root,
 )
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+LOGGER = logging.getLogger("thesis.local_api")
 
 WORKSPACE_ROOT = str(default_workspace_root())
 HARNESS_BASE_URL = "http://127.0.0.1:8001"
@@ -223,6 +241,64 @@ class _StructuralStrategyValidator:
         )
 
 
+class _LoggingControlToolService(ControlToolService):
+    """Control surface that logs operator-input and transition decisions."""
+
+    def request_operator_input(self, workspace_id, sub_agent_id, *, message, reason=""):  # noqa: ANN001, ANN201
+        request = super().request_operator_input(
+            workspace_id, sub_agent_id, message=message, reason=reason
+        )
+        LOGGER.info(
+            "operator.input.request node=%s reason=%s",
+            sub_agent_id,
+            reason or "-",
+        )
+        return request
+
+    def complete_phase(self, workspace_id, sub_agent_id, *, completion):  # noqa: ANN001, ANN201
+        LOGGER.info("transition.request kind=phase node=%s", sub_agent_id)
+        try:
+            record = super().complete_phase(
+                workspace_id, sub_agent_id, completion=completion
+            )
+        except Exception as error:
+            LOGGER.warning(
+                "transition.reject kind=phase node=%s error=%s", sub_agent_id, error
+            )
+            raise
+        LOGGER.info(
+            "transition.accept kind=phase node=%s status=%s",
+            sub_agent_id,
+            record.status.value,
+        )
+        return record
+
+    def complete_sub_agent(self, workspace_id, sub_agent_id, *, result):  # noqa: ANN001, ANN201
+        LOGGER.info("transition.request kind=sub_agent node=%s", sub_agent_id)
+        try:
+            record = super().complete_sub_agent(
+                workspace_id, sub_agent_id, result=result
+            )
+        except Exception as error:
+            LOGGER.warning(
+                "transition.reject kind=sub_agent node=%s error=%s", sub_agent_id, error
+            )
+            raise
+        LOGGER.info(
+            "transition.accept kind=sub_agent node=%s status=%s",
+            sub_agent_id,
+            record.status.value,
+        )
+        return record
+
+
+def _execution_epoch(workspace_id: str, execution_id: str) -> int | None:
+    try:
+        return chat_service.get_execution(workspace_id, execution_id).intent_epoch
+    except RecordNotFound:
+        return None
+
+
 def _development_runtime(
     model_provider: OpenRouterProvider,
     harness_tools: HarnessToolProvider,
@@ -275,6 +351,7 @@ def _development_runtime(
         strategy_validator=_StructuralStrategyValidator(),
         hypothesis_store=WorkspaceHypothesisStore(WORKSPACE_ROOT),
         subagent_lifecycle=subagent_lifecycle,
+        turn_scheduler=_schedule_chat_turn,
     )
 
 
@@ -311,68 +388,67 @@ def _trigger_message_id(history: Sequence[ChatMessage]) -> str | None:
     return None
 
 
-def _publish_operator_question(
-    workspace_id: str, chat_id: str, message: str, reason: str
-) -> dict[str, object]:
-    """Publish an operator question durably and end the coordinator turn."""
-    body = message if not reason else f"{message}\n\n({reason})"
-    created = chat_service.create_message(
-        workspace_id,
-        chat_id,
-        actor_id="thesis-agent",
-        body=body,
-        role=MessageRole.ASSISTANT,
-        data={"kind": "operator_question", "reason": reason},
-    )
-    return {
-        "messageId": created.message_id,
-        "kind": "operator_question",
-        "message": message,
-        "reason": reason,
-    }
-
-
-def _publish_workflow_anchor(
-    workspace_id: str, chat_id: str, execution_id: str
-) -> None:
-    """Publish the durable workflow anchor to the live chat stream."""
+def _log_node_trigger(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
+    """Log the operator answer that drives a node turn, when one is present."""
     for message in reversed(chat_service.list_messages(workspace_id, chat_id)):
-        if (
-            message.kind is TranscriptItemKind.WORKFLOW
-            and message.execution_id == execution_id
-        ):
-            chat_stream_broker.publish(
-                workspace_id,
-                chat_id,
-                CHAT_MESSAGE,
-                {"message": message.as_dict()},
-            )
+        data = message.data or {}
+        if str(data.get("subAgentId")) != sub_agent_id:
+            continue
+        if message.role is MessageRole.USER:
+            if data.get("kind") == "operator_input":
+                LOGGER.info(
+                    "operator.input.answer node=%s actor=%s",
+                    sub_agent_id,
+                    message.actor_id,
+                )
             return
+
+
+def _run_root_turn(service, workspace_id: str, chat_id: str) -> None:  # noqa: ANN001
+    LOGGER.info("turn.start anchor=root")
+    started = time.monotonic()
+    try:
+        service.respond(workspace_id, chat_id)
+    finally:
+        LOGGER.info(
+            "turn.end anchor=root duration_ms=%d",
+            int((time.monotonic() - started) * 1000),
+        )
 
 
 def _schedule_chat_turn(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
     """Run one scheduled turn at the root chat or at one node anchor.
 
     The empty sub-agent id is the root anchor: the top-level reply service
-    answers.  A node anchor runs the T333 node-turn runner over that node's own
+    answers.  An anchor owned by a workflow execution re-enters the deterministic
+    workflow through the runtime, so an operator answer at a phase node or a
+    completion delivered to the execution's workflow node drives the next phase.
+    Every other node anchor runs the T333 node-turn runner over that node's own
     anchored transcript, so a node delivery never leaks into the root prompt.
     """
     if sub_agent_id:
-        runner = node_turn_runner
-        if runner is None:
+        record = (
+            None
+            if subagent_store is None
+            else subagent_store.get_sub_agent(workspace_id, sub_agent_id)
+        )
+        if record is not None and record.role == WORKFLOW_NODE_ROLE:
+            LOGGER.info("delivery.skip workflow node anchor=%s", sub_agent_id)
             return
-        threading.Thread(
-            target=runner.run,
-            args=(workspace_id, chat_id, sub_agent_id),
-            daemon=True,
-        ).start()
+        coordinator = node_turn_coordinator
+        if coordinator is None:
+            return
+        LOGGER.info("delivery.schedule anchor=%s", sub_agent_id)
+        _log_node_trigger(workspace_id, chat_id, sub_agent_id)
+        coordinator.schedule(workspace_id, chat_id, sub_agent_id)
         return
     service = reply_service
     if service is None:
         return
+    LOGGER.info("delivery.schedule anchor=root")
     threading.Thread(
-        target=service.respond,
-        args=(workspace_id, chat_id),
+        target=_run_root_turn,
+        args=(service, workspace_id, chat_id),
         daemon=True,
     ).start()
 
@@ -381,8 +457,18 @@ def _schedule_chat_turn(workspace_id: str, chat_id: str, sub_agent_id: str) -> N
 # a durable message surface with no reply, rather than failing every send.
 reply_service = None
 node_turn_runner = None
+node_turn_coordinator = None
 workflow_runtime = None
 harness_tools = None
+subagent_store: PersistenceSubAgentStore | None = None
+_TERMINAL_EXECUTION_STATES = frozenset(
+    {
+        WorkflowExecutionState.COMPLETED,
+        WorkflowExecutionState.FAILED,
+        WorkflowExecutionState.STOPPED,
+        WorkflowExecutionState.CANCELLED,
+    }
+)
 if os.environ.get("OPENROUTER_API_KEY"):
     model_name = os.environ.get("THESIS_MODEL", "z-ai/glm-5.3-flash")
     provider_profile = OpenRouterProfile(
@@ -406,7 +492,30 @@ if os.environ.get("OPENROUTER_API_KEY"):
         max_depth=spawn_policy.max_depth,
         max_children=spawn_policy.max_children,
     )
-    control_service = ControlToolService(lifecycle=lifecycle, store=subagent_store)
+
+    def _apply_phase_completion(
+        workspace_id: str,
+        record: SubAgentRecord,
+        completion: Mapping[str, object],
+    ) -> Mapping[str, object] | None:
+        """Apply one phase agent's completion through the workflow object."""
+        if workflow_runtime is None or record.workflow_execution_id is None:
+            return None
+        execution = chat_service.get_execution(
+            workspace_id, record.workflow_execution_id
+        )
+        request = HypothesisDevelopmentRequest.from_execution(chat_service, execution)
+        workflow = workflow_runtime.build_hypothesis_development(chat=chat_service)
+        return workflow.apply_phase_completion(request, record.sub_agent_id, completion)
+
+    control_service = _LoggingControlToolService(
+        lifecycle=lifecycle,
+        store=subagent_store,
+        inputs=NodeInputService(chat=chat_service, store=subagent_store),
+        delivery=DeliveryService(chat_service, schedule=_schedule_chat_turn),
+        execution_epochs=_execution_epoch,
+        phase_completions=_apply_phase_completion,
+    )
     if harness_tools is not None:
         workflow_runtime = _development_runtime(
             model_provider, harness_tools, lifecycle
@@ -417,17 +526,9 @@ if os.environ.get("OPENROUTER_API_KEY"):
         else RuntimeWorkflowLauncher(
             workflow_runtime,
             chat_service,
-            publish_anchor=_publish_workflow_anchor,
             turn_scheduler=_schedule_chat_turn,
         )
     )
-    child_runner_holder: dict[str, ChildRunner] = {}
-
-    def _run_child(child: SubAgentRecord, task: str) -> None:
-        runner = child_runner_holder.get("runner")
-        if runner is None:
-            return
-        threading.Thread(target=runner.run, args=(child, task), daemon=True).start()
 
     def _registry_for(context: ToolContext):
         return build_session_registry(
@@ -435,25 +536,33 @@ if os.environ.get("OPENROUTER_API_KEY"):
             harness_tools=harness_tools,
             control=control_service,
             workflow=launcher,
-            on_spawn=_run_child,
             spawn_policy=spawn_policy,
-            publish_operator_question=_publish_operator_question,
         )
 
-    child_runner = ChildRunner(
-        chat=chat_service,
-        store=subagent_store,
-        lifecycle=lifecycle,
-        provider=model_provider,
-        registry_factory=_registry_for,
-        schedule=_schedule_chat_turn,
-    )
-    child_runner_holder["runner"] = child_runner
+    def _fail_phase_execution(record: SubAgentRecord, error: Exception) -> None:
+        """Fail the owning workflow execution after a phase-agent fault."""
+        if workflow_runtime is None or record.workflow_execution_id is None:
+            return
+        execution = chat_service.get_execution(
+            record.workspace_id, record.workflow_execution_id
+        )
+        request = HypothesisDevelopmentRequest.from_execution(chat_service, execution)
+        workflow = workflow_runtime.build_hypothesis_development(chat=chat_service)
+        workflow.fail_execution(request, reason=str(error) or type(error).__name__)
+
     node_turn_runner = NodeTurnRunner(
         chat=chat_service,
         store=subagent_store,
         provider=model_provider,
         registry_factory=_registry_for,
+        lifecycle=lifecycle,
+        on_fault=_fail_phase_execution,
+        delivery=DeliveryService(chat_service, schedule=_schedule_chat_turn),
+    )
+    node_turn_coordinator = NodeTurnCoordinator(
+        runner=node_turn_runner,
+        chat=chat_service,
+        store=subagent_store,
     )
 
     def _provider_for(workspace_id: str, chat_id: str, history: Sequence[ChatMessage]):

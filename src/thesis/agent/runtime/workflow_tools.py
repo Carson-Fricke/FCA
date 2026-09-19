@@ -1,10 +1,11 @@
 """The workflow-launch control tool.
 
 Starting a workflow is a model tool call, not a chat-message protocol.  The
-model supplies the research idea; the runtime resolves the workspace, chat, and
-actor from trusted session context, launches the deterministic workflow through
-the injected launcher, and returns the execution handle as a durable tool
-result.  The workflow, never the model, owns phase transitions.
+model supplies the workflow id and the research idea; the runtime resolves the
+workspace, chat, actor, trigger message, and caller anchor from trusted session
+context, resolves the requested workflow id through the engine registry, and
+launches it through the registered execute entry point.  The workflow, never
+the model, owns phase transitions.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ from typing import Protocol
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.datum import DatumType, datum_from_result
 from thesis.agent.runtime.session import RegisteredTool, ToolExecution
+from thesis.workflows.core.registry import UnknownWorkflowError, WorkflowRegistry
+from thesis.workflows.core.spec import WorkflowContext
 
 #: The generic workflow-launch tool.  ``workflow`` selects the workflow.
 TOOL_START_WORKFLOW = "start_workflow"
@@ -24,47 +27,40 @@ HYPOTHESIS_DEVELOPMENT_WORKFLOW = "hypothesis-development"
 
 WORKFLOW_TOOL_NAMES: tuple[str, ...] = (TOOL_START_WORKFLOW,)
 
-_START_WORKFLOW_SCHEMA: dict[str, object] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["workflow", "idea"],
-    "properties": {
-        "workflow": {
-            "type": "string",
-            "enum": [HYPOTHESIS_DEVELOPMENT_WORKFLOW],
-            "description": "The workflow to start.",
+
+def _start_workflow_schema(workflow_ids: tuple[str, ...]) -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["workflow", "idea"],
+        "properties": {
+            "workflow": {
+                "type": "string",
+                "enum": list(workflow_ids),
+                "description": "The workflow to start.",
+            },
+            "idea": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "The research idea, hypothesis, or edge to develop and falsify."
+                ),
+            },
+            "investigation_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional investigation to link the execution to.",
+            },
         },
-        "idea": {
-            "type": "string",
-            "minLength": 1,
-            "description": (
-                "The research idea, hypothesis, or edge to develop and falsify."
-            ),
-        },
-        "investigation_id": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Optional investigation to link the execution to.",
-        },
-    },
-}
+    }
 
 
 class WorkflowLauncher(Protocol):
     """Launches one deterministic workflow from trusted context."""
 
-    def start_hypothesis_development(
-        self,
-        *,
-        workspace_id: str,
-        chat_id: str,
-        actor_id: str,
-        ideas: str,
-        investigation_id: str | None = None,
-        trigger_message_id: str | None = None,
-        anchor_sub_agent_id: str | None = None,
-    ) -> Mapping[str, object]:
-        """Launch and run one falsification-first hypothesis-development run."""
+    @property
+    def workflows(self) -> WorkflowRegistry:
+        """Return the registry that resolves a workflow id to its spec."""
 
 
 def _function_tool(
@@ -95,8 +91,12 @@ def workflow_registered_tools(
 
     def handle_start_workflow(arguments: Mapping[str, object]) -> ToolExecution:
         workflow = arguments.get("workflow")
-        if workflow != HYPOTHESIS_DEVELOPMENT_WORKFLOW:
+        if not isinstance(workflow, str) or not workflow.strip():
             return _failure(f"unknown workflow: {workflow!r}")
+        try:
+            registration = launcher.workflows.resolve(workflow.strip())
+        except UnknownWorkflowError as error:
+            return _failure(str(error))
         idea = arguments.get("idea")
         if not isinstance(idea, str) or not idea.strip():
             return _failure("idea must be non-empty text")
@@ -105,33 +105,25 @@ def workflow_registered_tools(
             not isinstance(investigation_id, str) or not investigation_id.strip()
         ):
             return _failure("investigation_id must be non-empty text when set")
-        if context.sub_agent_id is None:
-            result = launcher.start_hypothesis_development(
-                workspace_id=context.workspace_id,
-                chat_id=context.chat_id,
-                actor_id=context.actor_id,
-                ideas=idea.strip(),
-                investigation_id=(
-                    None if investigation_id is None else investigation_id.strip()
-                ),
-                # Anchor the execution on the operator message that requested it
-                # so the launch never writes a second, duplicate trigger message.
-                trigger_message_id=context.trigger_message_id,
-            )
-        else:
-            # The caller's anchor decides where the execution belongs: the root
-            # chat for the top-level agent, the caller's node for a sub-agent.
-            result = launcher.start_hypothesis_development(
-                workspace_id=context.workspace_id,
-                chat_id=context.chat_id,
-                actor_id=context.actor_id,
-                ideas=idea.strip(),
-                investigation_id=(
-                    None if investigation_id is None else investigation_id.strip()
-                ),
-                trigger_message_id=context.trigger_message_id,
-                anchor_sub_agent_id=context.sub_agent_id,
-            )
+        # The caller's anchor decides where the execution belongs: the root
+        # chat for the top-level agent, the caller's node for a sub-agent.  The
+        # trigger is the operator message that requested the launch, so the
+        # launch never writes a second, duplicate trigger message.
+        execution_context = WorkflowContext(
+            workspace_id=context.workspace_id,
+            chat_id=context.chat_id,
+            actor_id=context.actor_id,
+            trigger_message_id=context.trigger_message_id,
+            intent_epoch=context.intent_epoch,
+            anchor_sub_agent_id=context.sub_agent_id,
+        )
+        result = registration.execute(
+            execution_context,
+            ideas=idea.strip(),
+            investigation_id=(
+                None if investigation_id is None else investigation_id.strip()
+            ),
+        )
         structured = dict(result)
         return ToolExecution(
             ok=True,
@@ -151,8 +143,13 @@ def workflow_registered_tools(
         TOOL_START_WORKFLOW,
         "Start a deterministic research workflow. Starting a workflow is only "
         "possible through this tool. The runtime supplies the workspace and "
-        "chat; you supply the workflow id and the idea.",
-        _START_WORKFLOW_SCHEMA,
+        "chat; you supply the workflow id and the idea. Launching hands the "
+        "work to the workflow: it runs detached, routes its own phases and "
+        "data, and reports back as its own configuration dictates. After it "
+        "returns, reply with "
+        "one short sentence saying you started it; do not perform its work, do "
+        "not gather its inputs, and do not relay its requests.",
+        _start_workflow_schema(launcher.workflows.ids()),
     )
     return (RegisteredTool(spec=spec, handler=handle_start_workflow),)
 

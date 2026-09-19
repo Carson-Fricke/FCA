@@ -15,8 +15,8 @@ from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.control_tools import (
     CONTROL_CHAT_TOOL_NAMES,
+    CONTROL_NODE_TOOL_NAMES,
     ControlToolRuntime,
-    OperatorQuestionPublisher,
     SpawnObserver,
     control_registered_tools,
 )
@@ -33,8 +33,16 @@ from thesis.agent.runtime.workflow_tools import (
 )
 
 #: The static Thesis-owned tool names: control tools plus workflow launch.
+#: The completion tools are policy-visible so a node can inherit them, while
+#: the catalog only advertises them in a sub-agent/phase scope.
 THESIS_TOOL_NAMES: tuple[str, ...] = tuple(
-    sorted({*CONTROL_CHAT_TOOL_NAMES, *WORKFLOW_TOOL_NAMES})
+    sorted(
+        {
+            *CONTROL_CHAT_TOOL_NAMES,
+            *CONTROL_NODE_TOOL_NAMES,
+            *WORKFLOW_TOOL_NAMES,
+        }
+    )
 )
 
 
@@ -94,7 +102,6 @@ def build_session_registry(
     workflow: WorkflowLauncher | None = None,
     on_spawn: SpawnObserver | None = None,
     spawn_policy: SpawnPolicy | None = None,
-    publish_operator_question: OperatorQuestionPublisher | None = None,
 ) -> SessionToolRegistry:
     """Compose the merged, policy-scoped catalog for one session context."""
     tools: list[RegisteredTool] = []
@@ -107,7 +114,6 @@ def build_session_registry(
                 context,
                 on_spawn=on_spawn,
                 policy=spawn_policy,
-                publish_operator_question=publish_operator_question,
             )
         )
     if workflow is not None:

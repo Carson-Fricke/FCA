@@ -1,4 +1,6 @@
+import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
+import ScopeTranscript from '$lib/components/chat/ScopeTranscript.svelte';
 import { buildNodeEntries, outputText } from '$lib/transcript';
 import type { SubAgentTreeNode } from '$lib/subagent';
 import type { ChatMessage, ExecutionEvent, SubAgentNode, ToolResult } from '$lib/types';
@@ -67,6 +69,7 @@ function node(overrides: Partial<SubAgentNode> = {}): SubAgentNode {
 		status: 'running',
 		context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
 		acceptsInput: false,
+		workflowExecutionId: 'exec-1',
 		...overrides
 	};
 }
@@ -225,5 +228,35 @@ describe('buildNodeEntries', () => {
 		expect(questions).toHaveLength(2);
 		expect(questions[0].kind === 'assistant' && questions[0].text).toBe(question);
 		expect(questions[1].kind === 'assistant' && questions[1].text).toBe(question);
+	});
+});
+
+describe('ScopeTranscript workflow rendering', () => {
+	it('renders a node-scope workflow_execution datum as the workflow card', () => {
+		const workflowResult: ToolResult = {
+			tool: 'start_workflow',
+			datumType: 'workflow_execution',
+			callId: 'call-workflow',
+			ok: true,
+			summary: 'Hypothesis development started.',
+			structured: {
+				executionId: 'exec-42',
+				workflowId: 'hypothesis-development',
+				phase: 'requested',
+				state: 'running'
+			},
+			text: '',
+			failure: null
+		};
+		const entries = buildNodeEntries({
+			messages: [],
+			events: [event('tool.result', { subAgentId: 'sub-1', toolResult: workflowResult }, 1)]
+		});
+
+		render(ScopeTranscript, { props: { entries, workspaceId: 'alpha-lab' } });
+
+		expect(screen.getByTestId('workflow-card')).toBeInTheDocument();
+		expect(screen.getByText('hypothesis-development')).toBeInTheDocument();
+		expect(screen.queryByTestId('generic-tool-card')).not.toBeInTheDocument();
 	});
 });

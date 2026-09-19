@@ -19,12 +19,13 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from thesis.agent.runtime.datum import tool_result_payload
 from thesis.chat.contracts import ChatMessage, MessageRole, TranscriptItemKind
 from thesis.chat.service import ChatService
 from thesis.chat.streaming import CHAT_MESSAGE, PROVIDER_DELTA, InMemoryChatStreamBroker
 
 if TYPE_CHECKING:
-    from thesis.workflows.hypothesis_development import (
+    from thesis.workflows.registry.hypothesis_development import (
         HypothesisDevelopmentOutcome,
         HypothesisDevelopmentRequest,
     )
@@ -86,7 +87,7 @@ ReplyProvider = Callable[
 ]
 
 _HISTORY_ROLES = frozenset(
-    (MessageRole.USER, MessageRole.ASSISTANT, MessageRole.SYSTEM)
+    (MessageRole.USER, MessageRole.ASSISTANT, MessageRole.SYSTEM, MessageRole.TOOL)
 )
 
 
@@ -109,14 +110,6 @@ class DevelopmentRuntime(Protocol):
         self, *, chat: ChatService
     ) -> LaunchableDevelopmentWorkflow:
         """Compose the hypothesis-development workflow over the runtime ports."""
-
-    def execute_hypothesis_development(
-        self,
-        request: HypothesisDevelopmentRequest,
-        *,
-        chat: ChatService,
-    ) -> HypothesisDevelopmentOutcome:
-        """Run one launched hypothesis-development request to completion."""
 
 
 class LaunchableDevelopmentWorkflow(Protocol):
@@ -152,22 +145,15 @@ _ACTIVE_DEVELOPMENT_PHASES = frozenset(
 def development_summary(outcome: HypothesisDevelopmentOutcome) -> str:
     """Return the assistant summary for one hypothesis-development execution.
 
-    A running or paused execution is reported as started/running or
-    needs-input; only a genuine terminal failure is phrased as a failure, and a
-    model-format compose problem is never described as "finished (failed)"
-    because it pauses the workflow instead.
+    A running execution is reported as started/running; only a genuine terminal
+    failure is phrased as a failure, and a model-format compose problem is
+    delivered as an operator request instead of ending the run.
     """
     phase = outcome.phase.value
     execution_id = outcome.execution_id
     if phase in _ACTIVE_DEVELOPMENT_PHASES:
         return (
             f"Hypothesis development {execution_id} started and is running ({phase})."
-        )
-    if phase == "paused":
-        question = (outcome.detail or "").strip() or "operator input is required"
-        return (
-            f"Hypothesis development {execution_id} is paused and needs input: "
-            f"{question} Answer the workflow's needs-input request to continue."
         )
     if phase == "failed":
         reason = (outcome.detail or "").strip() or "an infrastructure error"
@@ -197,18 +183,16 @@ def _sanitize(text: str) -> str:
 
 def _tool_result_data(chunk: ToolResultChunk) -> dict[str, object]:
     """Return the canonical UI payload for one streamed tool outcome."""
-    payload: dict[str, object] = {
-        "callId": chunk.call_id,
-        "failure": None if chunk.failure is None else dict(chunk.failure),
-        "ok": chunk.ok,
-        "structured": dict(chunk.structured),
-        "summary": chunk.summary,
-        "text": chunk.text,
-        "tool": chunk.tool,
-    }
-    if chunk.datum_type is not None:
-        payload["datumType"] = chunk.datum_type
-    return payload
+    return tool_result_payload(
+        call_id=chunk.call_id,
+        ok=chunk.ok,
+        failure=chunk.failure,
+        structured=chunk.structured,
+        summary=chunk.summary,
+        text=chunk.text,
+        tool=chunk.tool,
+        datum_type=chunk.datum_type,
+    )
 
 
 @dataclass(slots=True)

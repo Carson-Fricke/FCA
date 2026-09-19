@@ -183,7 +183,7 @@ The UI and API use **workspace**, not project, for the primary user boundary.
 | Workspace | A durable, isolated strategy-family repository. Thesis cannot operate outside a selected workspace. |
 | Chat | A persistent conversational thread within a workspace. A workspace can contain many chats. |
 | Investigation | A durable research objective that can span chats, strategies, experiments, and workflow executions. |
-| Workflow execution | One end-to-end autonomous invocation launched from chat using a versioned workflow definition. It can pause, resume, and be steered. |
+| Workflow execution | One end-to-end autonomous invocation launched from chat using a versioned workflow definition. It is steered conversationally: a phase agent asks the operator when it needs direction. |
 | Experiment | One evaluation protocol, potentially including a parameter sweep or many backtest jobs. |
 | Experiment contract | The pre-result record of what an experiment is intended to test and how its evidence will be interpreted. |
 | Backtest job | One deterministic invocation of the quant-harness backtest runner. |
@@ -398,7 +398,7 @@ Workflow executions are owned by the anchor that launched them, and each executi
 has a durable workflow-node record parented to that anchor which owns its phase
 agents. Node input is governed by a per-node operator policy whose default is
 human-only, so future autonomous orchestration is a policy change rather than a
-structural one. The normative requirements are REQ-018 through REQ-024 in
+structural one. The normative requirements are REQ-018 through REQ-033 in
 `thesis-agent-workflow-runtime.md`, with the accepted design record at
 `thesis-chat-surface-and-subagent-anchoring-v1`.
 
@@ -1307,7 +1307,7 @@ The Thesis UI should eventually provide:
   search, unread/running state, and investigation linkage;
 - drag-and-drop file uploads with provenance and scan status;
 - streamed assistant messages and concise execution events;
-- custom workflow phase timelines with pause, resume, steer, stop, and cancel;
+- custom workflow phase timelines with steer, stop, and cancel;
 - tool and backtest job status, including results that finish after steering;
 - ordered cursor-based reconnect/replay with duplicate suppression and visible
   message/upload retry states;
@@ -1571,7 +1571,8 @@ Decisions recorded after this list was authored are tracked in the accepted desi
 records; conversation anchoring, datum rendering, anchor-owned executions,
 workflow-node ownership, and per-node operator policy were settled in
 `thesis-chat-surface-and-subagent-anchoring-v1` and are specified as REQ-018
-through REQ-024 in `thesis-agent-workflow-runtime.md`.
+through REQ-033 in `thesis-agent-workflow-runtime.md`. The working rules for
+authoring workflows are in `thesis-workflow-authoring-guide`.
 
 - Exact primary, coding, research, critique, and RCA models and providers.
 - The default anti-overfitting protocol by asset class and horizon.

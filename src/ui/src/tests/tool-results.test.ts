@@ -12,6 +12,8 @@ import {
 } from '$lib/components/chat/tool-results/registry';
 import GenericToolCard from '$lib/components/chat/tool-results/GenericToolCard.svelte';
 import BacktestToolCard from '$lib/components/chat/tool-results/BacktestToolCard.svelte';
+import OperatorQuestionCard from '$lib/components/chat/tool-results/OperatorQuestionCard.svelte';
+import WorkflowExecutionCard from '$lib/components/chat/tool-results/WorkflowExecutionCard.svelte';
 
 describe('toolResultComponent', () => {
 	it('maps run_backtest to the backtest card', () => {
@@ -29,9 +31,11 @@ describe('toolResultComponent', () => {
 });
 
 describe('toolResultComponent datum-type resolution', () => {
-	it('resolves a well-known datum type to the generic card today', () => {
-		expect(TOOL_RESULT_RENDERERS['workflow_execution']).toBe(GenericToolCard);
-		expect(toolResultComponent('some_harness_tool', 'workflow_execution')).toBe(GenericToolCard);
+	it('resolves workflow_execution to the workflow card adapter', () => {
+		expect(TOOL_RESULT_RENDERERS['workflow_execution']).toBe(WorkflowExecutionCard);
+		expect(toolResultComponent('some_harness_tool', 'workflow_execution')).toBe(
+			WorkflowExecutionCard
+		);
 	});
 
 	it('keeps the harness tool-name fallback when no datum type is set', () => {
@@ -50,6 +54,15 @@ describe('toolResultComponent datum-type resolution', () => {
 
 	it('falls back to the generic card for an unknown datum type and unknown tool', () => {
 		expect(toolResultComponent('not_a_real_tool', 'not_a_real_datum_type')).toBe(GenericToolCard);
+	});
+});
+
+describe('toolResultComponent operator request', () => {
+	it('resolves operator_question to the orange request box', () => {
+		expect(TOOL_RESULT_RENDERERS['operator_question']).toBe(OperatorQuestionCard);
+		expect(toolResultComponent('request_operator_input', 'operator_question')).toBe(
+			OperatorQuestionCard
+		);
 	});
 });
 

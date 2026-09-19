@@ -3,9 +3,9 @@
 Sub-agents are attached to a chat, not to a workflow execution, so this router
 serves the durable ownership view: it projects the first-class
 :class:`~thesis.chat.contracts.SubAgentRecord` store into a nested tree and
-exposes list, read, children, and operator-input routes.  Because the tree is a
-pure function of durable records, a process restart reconstructs exactly the
-same nodes.
+exposes list, read, children, operator-input, and operator-cancel routes.
+Because the tree is a pure function of durable records, a process restart
+reconstructs exactly the same nodes.
 
 The execution-scoped router in :mod:`thesis.http.sub_agents` remains the
 event-log projection used for streaming a workflow's sub-agent activity; this
@@ -23,11 +23,23 @@ present the endpoint fails closed and reports exactly what is missing.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    status,
+)
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from thesis.agent.runtime.delivery import (
@@ -36,6 +48,7 @@ from thesis.agent.runtime.delivery import (
     NodeInputService,
     TurnScheduler,
 )
+from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
     AnsweringActor,
     OperatorActorKind,
@@ -43,9 +56,29 @@ from thesis.agent.runtime.policy import (
     OperatorPolicyRegistry,
 )
 from thesis.agent.runtime.store import PersistenceSubAgentStore
-from thesis.agent.runtime.tree import ChatSubAgentTree, project_chat_sub_agents
-from thesis.chat import ChatService
+from thesis.agent.runtime.tree import (
+    ChatSubAgentTree,
+    project_chat_sub_agents,
+)
+from thesis.chat import ChatService, RecordNotFound, WorkflowExecutionState
 from thesis.http.chat import _service_error, get_chat_service
+from thesis.http.streaming import (
+    TEXT_EVENT_STREAM_MEDIA_TYPE,
+    StreamSleeper,
+    _resume_cursor,
+)
+
+DEFAULT_POLL_INTERVAL_SECONDS = 1.0
+
+#: Execution states that no longer have live work to stop.
+_TERMINAL_EXECUTION_STATES = frozenset(
+    {
+        WorkflowExecutionState.COMPLETED,
+        WorkflowExecutionState.FAILED,
+        WorkflowExecutionState.STOPPED,
+        WorkflowExecutionState.CANCELLED,
+    }
+)
 
 #: ``app.state`` key holding the callable that runs one more node turn; the
 #: callable receives ``(workspace_id, chat_id, sub_agent_id)``.
@@ -150,10 +183,88 @@ class ChatSubAgentMessageRequest(BaseModel):
     body: str = Field(min_length=1, max_length=32_768)
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+async def _default_sleeper(seconds: float) -> None:
+    if seconds > 0:
+        await asyncio.sleep(seconds)
+
+
+def _node_not_executable() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "sub_agent_without_execution",
+            "message": ("sub-agent has no workflow execution; it has no activity log"),
+        },
+    )
+
+
+def _stop_node_execution(
+    chat_service: ChatService,
+    workspace_id: str,
+    execution_id: str | None,
+    *,
+    actor_id: str,
+) -> str | None:
+    """Stop a node's execution when it still has live work, else ``None``.
+
+    A node without an execution, or one whose execution is absent or already
+    terminal, has nothing left to stop; the operator cancel still succeeds so
+    the affordance is idempotent.
+    """
+    if execution_id is None:
+        return None
+    try:
+        execution = chat_service.get_execution(workspace_id, execution_id)
+    except RecordNotFound:
+        return None
+    if execution.state in _TERMINAL_EXECUTION_STATES:
+        return None
+    chat_service.stop_workflow(workspace_id, execution_id, actor_id=actor_id)
+    return execution_id
+
+
+async def _node_event_stream(
+    chat_service: ChatService,
+    *,
+    workspace_id: str,
+    execution_id: str,
+    node_ids: frozenset[str],
+    after_cursor: int,
+    wait: StreamSleeper,
+    poll_interval_seconds: float,
+    max_poll_cycles: int | None,
+) -> AsyncIterator[str]:
+    """Tail the execution stream, yielding only frames for the node scope."""
+    from thesis.http.streaming import format_execution_event
+
+    cursor = after_cursor
+    cycles = 0
+    while True:
+        replay = chat_service.replay_events(
+            workspace_id, execution_id, after_cursor=cursor
+        )
+        for event in replay:
+            cursor = event.cursor
+            sub_agent_id = event.payload.get("subAgentId")
+            if isinstance(sub_agent_id, str) and sub_agent_id in node_ids:
+                yield format_execution_event(event)
+        cycles += 1
+        if max_poll_cycles is not None and cycles >= max_poll_cycles:
+            return
+        await wait(poll_interval_seconds)
+
+
 def create_chat_sub_agent_router(
     *,
     actor_resolver: ActorResolver | None = None,
     operator_policies: OperatorPolicyRegistry | None = None,
+    poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
+    sleeper: StreamSleeper | None = None,
+    max_poll_cycles: int | None = None,
 ) -> APIRouter:
     """Create the durable, chat-scoped sub-agent router.
 
@@ -166,6 +277,7 @@ def create_chat_sub_agent_router(
         prefix="/v1/workspaces/{workspace_id}/chats/{chat_id}",
         tags=["sub-agents"],
     )
+    wait = sleeper if sleeper is not None else _default_sleeper
 
     def _tree(
         workspace_id: str, chat_id: str, chat_service: ChatService
@@ -224,6 +336,87 @@ def create_chat_sub_agent_router(
             raise _not_found()
         return {"items": [child.as_dict() for child in node.children]}
 
+    @router.get("/sub_agents/{sub_agent_id}/events")
+    async def replay_chat_sub_agent_events(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        sub_agent_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+        after_cursor: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=1, le=1_000)] = None,
+        include_descendants: Annotated[bool, Query()] = False,
+    ) -> dict[str, object]:
+        """Replay one node's activity, preserving the execution cursor."""
+        from thesis.execution.sub_agents import filter_replay
+
+        try:
+            _, tree = _tree(workspace_id, chat_id, chat_service)
+            node = tree.get(sub_agent_id)
+            if node is None:
+                raise _not_found()
+            if node.workflow_execution_id is None:
+                raise _node_not_executable()
+            page = chat_service.replay_events(
+                workspace_id, node.workflow_execution_id, after_cursor=after_cursor
+            )
+        except HTTPException:
+            raise
+        except Exception as error:
+            raise _service_error(error) from error
+        scope = (
+            tree.subtree_ids(sub_agent_id)
+            if include_descendants
+            else frozenset({sub_agent_id})
+        )
+        return filter_replay(page, scope, limit=limit).as_dict()
+
+    @router.get("/sub_agents/{sub_agent_id}/events/stream")
+    async def stream_chat_sub_agent_events(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        sub_agent_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+        after_cursor: Annotated[int, Query(ge=0)] = 0,
+        include_descendants: Annotated[bool, Query()] = False,
+        last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+    ) -> StreamingResponse:
+        """Stream one node's activity as SSE frames with a resumable cursor."""
+        try:
+            _, tree = _tree(workspace_id, chat_id, chat_service)
+            node = tree.get(sub_agent_id)
+            if node is None:
+                raise _not_found()
+            if node.workflow_execution_id is None:
+                raise _node_not_executable()
+        except HTTPException:
+            raise
+        except Exception as error:
+            raise _service_error(error) from error
+        resume = _resume_cursor(last_event_id, after_cursor)
+        scope = (
+            tree.subtree_ids(sub_agent_id)
+            if include_descendants
+            else frozenset({sub_agent_id})
+        )
+        return StreamingResponse(
+            _node_event_stream(
+                chat_service,
+                workspace_id=workspace_id,
+                execution_id=node.workflow_execution_id,
+                node_ids=scope,
+                after_cursor=resume,
+                wait=wait,
+                poll_interval_seconds=poll_interval_seconds,
+                max_poll_cycles=max_poll_cycles,
+            ),
+            media_type=TEXT_EVENT_STREAM_MEDIA_TYPE,
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @router.post("/sub_agents/{sub_agent_id}/messages")
     async def post_chat_sub_agent_message(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -278,6 +471,49 @@ def create_chat_sub_agent_router(
         result["subAgentId"] = sub_agent_id
         result["operatorPolicy"] = receipt.decision.as_dict()
         return result
+
+    @router.post("/sub_agents/{sub_agent_id}/cancel")
+    async def cancel_chat_sub_agent(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        sub_agent_id: Annotated[str, Path(min_length=1, max_length=128)],
+        http_request: Request,
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    ) -> dict[str, object]:
+        """Cancel one node and its descendants, then stop its execution.
+
+        The cancelling operator is the authenticated principal the application
+        exposes to this router, never a body-supplied actor; a request whose
+        principal is not exposed fails closed exactly like the message route.
+        Already-terminal nodes and descendants are left untouched and are not
+        reported as cancelled, so the affordance is idempotent.
+        """
+        principal = authenticated_principal(http_request, actor_resolver)
+        if principal is None:
+            raise _actor_identity_unavailable()
+        actor_id = authenticated_actor_id(principal)
+        lifecycle = SubAgentLifecycle(chat_service, store=_store_for(chat_service))
+        record = lifecycle.get(workspace_id, sub_agent_id)
+        if record is None or record.chat_id != chat_id:
+            raise _not_found()
+        try:
+            cancelled = lifecycle.cancel_subtree(workspace_id, sub_agent_id)
+            stopped_execution_id = _stop_node_execution(
+                chat_service,
+                workspace_id,
+                record.workflow_execution_id,
+                actor_id=actor_id,
+            )
+        except HTTPException:
+            raise
+        except Exception as error:
+            raise _service_error(error) from error
+        return {
+            "subAgentId": sub_agent_id,
+            "chatId": chat_id,
+            "cancelledSubAgentIds": list(cancelled),
+            "stoppedExecutionId": stopped_execution_id,
+        }
 
     return router
 

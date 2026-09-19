@@ -18,7 +18,6 @@ from thesis.http.chat import (
     SubmitToolJobRequest,
     ToolResultRequest,
     UploadAttachmentRequest,
-    WorkflowRequest,
     create_chat_router,
     get_chat_service,
 )
@@ -39,7 +38,6 @@ __all__ = [
     "SubmitToolJobRequest",
     "ToolResultRequest",
     "UploadAttachmentRequest",
-    "WorkflowRequest",
     "create_app",
     "create_chat_router",
     "create_streaming_router",

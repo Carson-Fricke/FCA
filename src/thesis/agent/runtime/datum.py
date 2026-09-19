@@ -26,16 +26,51 @@ class DatumType(StrEnum):
     TOOL_RESULT = "tool_result"
     #: A workflow execution handle or state change.
     WORKFLOW_EXECUTION = "workflow_execution"
+    #: A workflow's terminal outcome: execution id, status, and final phase.
+    WORKFLOW_OUTCOME = "workflow_outcome"
     #: A newly created sub-agent handle.
     SUB_AGENT_HANDLE = "sub_agent_handle"
     #: A sub-agent's current state or terminal result.
     SUB_AGENT_STATUS = "sub_agent_status"
     #: An operator question published by an agent.
     OPERATOR_QUESTION = "operator_question"
+    #: The first prompt delivered to a newly spawned agent.
+    AGENT_PROMPT = "agent_prompt"
 
 
 def _text(value: object) -> str:
     return value if isinstance(value, str) else ""
+
+
+def tool_result_payload(
+    *,
+    call_id: str | None,
+    ok: object,
+    failure: object,
+    structured: object,
+    summary: object,
+    text: object,
+    tool: str | None,
+    datum_type: str | None = None,
+) -> dict[str, object]:
+    """Return the canonical durable payload for one tool outcome.
+
+    Both the chat reply path and the node turn runner build their tool-result
+    messages through this function so the stored shape is identical on every
+    anchor.
+    """
+    payload: dict[str, object] = {
+        "callId": call_id,
+        "failure": dict(failure) if isinstance(failure, Mapping) else None,
+        "ok": ok,
+        "structured": dict(structured) if isinstance(structured, Mapping) else {},
+        "summary": summary,
+        "text": text,
+        "tool": tool,
+    }
+    if datum_type is not None:
+        payload["datumType"] = datum_type
+    return payload
 
 
 @dataclass(frozen=True, slots=True)

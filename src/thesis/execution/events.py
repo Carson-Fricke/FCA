@@ -27,6 +27,8 @@ class ExecutionEventType(StrEnum):
     WORKFLOW_LAUNCHED = "workflow.launched"
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_PHASE = "workflow.phase"
+    # Retained to decode historical execution events. Nothing appends it: the
+    # workflow engine no longer pauses an execution for operator input.
     WORKFLOW_PAUSED = "workflow.paused"
     WORKFLOW_STEERED = "workflow.steered"
     WORKFLOW_STOPPED = "workflow.stopped"

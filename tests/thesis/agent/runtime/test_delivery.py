@@ -7,6 +7,12 @@ from collections.abc import Mapping, Sequence
 import pytest
 
 from thesis.agent.runtime.child_runner import NodeTurnRunner
+from thesis.agent.runtime.context import ToolContext
+from thesis.agent.runtime.control import (
+    TOOL_REQUEST_OPERATOR_INPUT,
+    ControlToolService,
+)
+from thesis.agent.runtime.control_tools import control_registered_tools
 from thesis.agent.runtime.datum import DatumType, datum_from_result
 from thesis.agent.runtime.delivery import (
     DELIVERY_KEY_FIELD,
@@ -35,6 +41,7 @@ from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.chat.contracts import (
     MessageRole,
     SubAgentKind,
+    SubAgentStatus,
     TranscriptItemKind,
 )
 from thesis.chat.service import ChatService, InMemoryChatPersistence
@@ -149,6 +156,33 @@ def test_delivery_to_a_node_persists_once_and_schedules_once() -> None:
     assert second.scheduled is False
     assert second.message.message_id == first.message.message_id
     assert scheduled == [(_WORKSPACE, chat_id, node)]
+    assert len(_node_scoped(chat, chat_id, node)) == 1
+
+
+def test_delivery_without_schedule_persists_a_durable_question_only() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    node = _spawn(lifecycle, chat_id)
+    scheduled: list[tuple[str, str, str]] = []
+    service = DeliveryService(
+        chat,
+        schedule=lambda workspace, chat, node_id: scheduled.append(
+            (workspace, chat, node_id)
+        ),
+    )
+    datum = datum_from_result(
+        DatumType.OPERATOR_QUESTION.value,
+        ok=True,
+        structured={"kind": "operator_question"},
+        text="What do you think?",
+    )
+
+    receipt = service.deliver(Anchor(_WORKSPACE, chat_id, node), datum, schedule=False)
+
+    # The question is durable, but no turn is dispatched: only its accepted
+    # answer may schedule one.
+    assert receipt.duplicate is False
+    assert receipt.scheduled is False
+    assert scheduled == []
     assert len(_node_scoped(chat, chat_id, node)) == 1
 
 
@@ -385,13 +419,264 @@ def test_node_turn_runner_persists_the_transcript() -> None:
         if message.role is MessageRole.TOOL
         and message.kind is TranscriptItemKind.SUB_AGENT
     ]
-    assert [message.body for message in assistant] == ["node answer"]
+    assert [message.body for message in assistant] == [
+        "Requested tool call(s): probe",
+        "node answer",
+    ]
+    assert assistant[0].data is not None
+    assert assistant[0].data["toolCalls"] == [
+        {
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "probe", "arguments": "{}"},
+        }
+    ]
     assert len(tools) == 1
     assert tools[0].data is not None
     assert tools[0].data["toolCallId"] == "call-1"
     assert tools[0].data["datumType"] == "probe"
     assert captured[0].sub_agent_id == node
     assert captured[0].trigger_message_id == input_message.message_id
+
+
+def test_node_turn_runner_completes_a_one_shot_child_and_delivers_the_result() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    caller = _spawn(lifecycle, chat_id, role="chat-agent")
+    child = _spawn(
+        lifecycle,
+        chat_id,
+        role="calculator",
+        kind=SubAgentKind.ONE_SHOT,
+        parent_sub_agent_id=caller,
+    )
+    runner = NodeTurnRunner(
+        chat=chat,
+        store=store,
+        provider=_FakeProvider([_completion(content="19")]),
+        registry_factory=lambda context: SessionToolRegistry([]),
+        lifecycle=lifecycle,
+        delivery=DeliveryService(chat, schedule=lambda workspace, chat, node: None),
+    )
+
+    runner.run(_WORKSPACE, chat_id, child)
+
+    completed = lifecycle.get(_WORKSPACE, child)
+    assert completed is not None
+    assert completed.status is SubAgentStatus.COMPLETED
+    assert completed.result == {"summary": "19"}
+    delivered = [
+        message
+        for message in _node_scoped(chat, chat_id, caller)
+        if (message.data or {}).get("kind") == "child_result"
+    ]
+    assert delivered
+
+
+def test_operator_request_is_a_flag_at_the_asking_node_and_accepts_a_reply() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    asking = _spawn(lifecycle, chat_id, kind=SubAgentKind.ONE_SHOT)
+    sibling = _spawn(lifecycle, chat_id, role="sibling", kind=SubAgentKind.ONE_SHOT)
+    lifecycle.start(_WORKSPACE, asking)
+    lifecycle.start(_WORKSPACE, sibling)
+    scheduled: list[str] = []
+    service = ControlToolService(
+        lifecycle=lifecycle,
+        store=store,
+        inputs=NodeInputService(
+            chat=chat,
+            store=store,
+            # The request path consults no operator policy: a registry that
+            # would deny every answer still lets the node ask.
+            policies=OperatorPolicyRegistry(
+                default=NodeOperatorPolicy(allowed_actor_kinds=frozenset())
+            ),
+            schedule=lambda workspace, chat_id, node: scheduled.append(node),
+        ),
+        delivery=DeliveryService(chat),
+    )
+    provider = _FakeProvider(
+        [
+            _completion(
+                tool_calls=(
+                    ToolCall(
+                        id="call-1",
+                        name=TOOL_REQUEST_OPERATOR_INPUT,
+                        arguments=(
+                            '{"message": "Approve the model?", "reason": "review"}'
+                        ),
+                    ),
+                )
+            ),
+            _completion(content="resumed after the reply"),
+        ]
+    )
+    context = ToolContext(
+        workspace_id=_WORKSPACE,
+        chat_id=chat_id,
+        conversation_id=asking,
+        actor_id=_ACTOR,
+        sub_agent_id=asking,
+        allowed_tools=(TOOL_REQUEST_OPERATOR_INPUT,),
+    )
+    registry = SessionToolRegistry(control_registered_tools(service, context))
+    runner = NodeTurnRunner(
+        chat=chat,
+        store=store,
+        provider=provider,
+        registry_factory=lambda context: registry,
+    )
+
+    runner.run(_WORKSPACE, chat_id, asking)
+
+    waiting = lifecycle.get(_WORKSPACE, asking)
+    assert waiting is not None
+    assert waiting.status is SubAgentStatus.NEEDS_INPUT
+    assert waiting.accepts_input is True
+    untouched = lifecycle.get(_WORKSPACE, sibling)
+    assert untouched is not None
+    assert untouched.status is SubAgentStatus.RUNNING
+    assert untouched.accepts_input is False
+    # Asking is a flag and a request only: it schedules no turn anywhere.
+    assert scheduled == []
+
+    # The request renders at the asking node as its own tool turn carrying the
+    # message and reason; no sibling anchor receives anything.
+    request_turns = [
+        message
+        for message in _node_scoped(chat, chat_id, asking)
+        if message.role is MessageRole.TOOL
+    ]
+    assert len(request_turns) == 1
+    tool_result = request_turns[0].tool_result
+    assert tool_result is not None
+    assert tool_result["structured"] == {
+        "subAgentId": asking,
+        "question": "Approve the model?",
+        "reason": "review",
+    }
+    assert request_turns[0].data is not None
+    assert request_turns[0].data["datumType"] == DatumType.OPERATOR_QUESTION.value
+    assert _node_scoped(chat, chat_id, sibling) == []
+
+    # The reply path is the only resume, and a human answer needs no policy or
+    # approval configuration.
+    receipt = NodeInputService(
+        chat=chat,
+        store=store,
+        schedule=lambda workspace, chat_id, node: scheduled.append(node),
+    ).accept(
+        _WORKSPACE,
+        chat_id,
+        asking,
+        body="approved",
+        actor=AnsweringActor(_ACTOR, OperatorActorKind.HUMAN_OPERATOR),
+    )
+    assert receipt.scheduled is True
+    assert scheduled == [asking]
+    resumed = lifecycle.get(_WORKSPACE, asking)
+    assert resumed is not None
+    assert resumed.status is SubAgentStatus.RUNNING
+
+    runner.run(_WORKSPACE, chat_id, asking)
+
+    assistant = [
+        message
+        for message in _node_scoped(chat, chat_id, asking)
+        if message.role is MessageRole.ASSISTANT
+    ]
+    assert [message.body for message in assistant] == [
+        "Requested tool call(s): request_operator_input",
+        "resumed after the reply",
+    ]
+
+
+def test_operator_answer_drives_the_phase_turn_to_request_phase_completion() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    node = _spawn(lifecycle, chat_id, role="workflow-node", kind=SubAgentKind.ONE_SHOT)
+    phase = _spawn(
+        lifecycle, chat_id, kind=SubAgentKind.ONE_SHOT, parent_sub_agent_id=node
+    )
+    lifecycle.start(_WORKSPACE, phase)
+    service = ControlToolService(
+        lifecycle=lifecycle,
+        store=store,
+        inputs=NodeInputService(chat=chat, store=store),
+        delivery=DeliveryService(chat),
+    )
+
+    def registry_factory(context: ToolContext) -> SessionToolRegistry:
+        return SessionToolRegistry(control_registered_tools(service, context))
+
+    asking = _FakeProvider(
+        [
+            _completion(
+                tool_calls=(
+                    ToolCall(
+                        id="ask-1",
+                        name=TOOL_REQUEST_OPERATOR_INPUT,
+                        arguments='{"message": "Approve the contract?"}',
+                    ),
+                )
+            ),
+        ]
+    )
+    NodeTurnRunner(
+        chat=chat,
+        store=store,
+        provider=asking,
+        registry_factory=registry_factory,
+    ).run(_WORKSPACE, chat_id, phase)
+    waiting = lifecycle.get(_WORKSPACE, phase)
+    assert waiting is not None
+    assert waiting.status is SubAgentStatus.NEEDS_INPUT
+    assert waiting.accepts_input is True
+
+    completing = _FakeProvider(
+        [
+            _completion(
+                tool_calls=(
+                    ToolCall(
+                        id="done-1",
+                        name="request_phase_completion",
+                        arguments='{"completion": {"advance": true}}',
+                    ),
+                )
+            ),
+        ]
+    )
+    runner = NodeTurnRunner(
+        chat=chat,
+        store=store,
+        provider=completing,
+        registry_factory=registry_factory,
+    )
+    driven: list[str] = []
+
+    def schedule(workspace_id: str, chat: str, node_id: str) -> None:
+        driven.append(node_id)
+        runner.run(workspace_id, chat, node_id)
+
+    receipt = NodeInputService(chat=chat, store=store, schedule=schedule).accept(
+        _WORKSPACE,
+        chat_id,
+        phase,
+        body="approved",
+        actor=AnsweringActor(_ACTOR, OperatorActorKind.HUMAN_OPERATOR),
+    )
+
+    assert receipt.scheduled is True
+    assert driven == [phase]
+    completed = lifecycle.get(_WORKSPACE, phase)
+    assert completed is not None
+    assert completed.status is SubAgentStatus.COMPLETED
+    assert completed.result == {"advance": True, "intentEpoch": 0}
+    deliveries = [
+        message
+        for message in _node_scoped(chat, chat_id, node)
+        if message.data is not None and message.data.get("kind") == "child_result"
+    ]
+    assert len(deliveries) == 1
+    assert deliveries[0].data["childSubAgentId"] == phase
 
 
 def test_re_delivered_result_does_not_duplicate_a_node_turn() -> None:

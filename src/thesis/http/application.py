@@ -32,6 +32,7 @@ from thesis.agent.harness_tools import (
     HarnessToolResult,
     open_harness_tool_provider,
 )
+from thesis.agent.runtime import reconcile_stranded_sub_agents
 from thesis.agent.runtime.policy import OperatorPolicyRegistry
 from thesis.auth.session import OperatorSessionService
 from thesis.auth.workspace_access import WorkspaceAuthorizer
@@ -60,7 +61,6 @@ from thesis.http.streaming import (
     StreamSleeper,
     create_streaming_router,
 )
-from thesis.http.sub_agents import create_sub_agent_router
 from thesis.http.timeline import create_timeline_router
 from thesis.http.workspaces import (
     WorkspaceDataBundle,
@@ -505,7 +505,12 @@ def create_app(
             for workspace in workspace_data.workspaces.list_workspaces():
                 workspace_id = workspace.get("id")
                 if isinstance(workspace_id, str) and workspace_id:
+                    # Stop stranded executions, then reconcile the durable
+                    # sub-agent records that were waiting on them: a restart
+                    # has no worker for either, so both must reach a terminal
+                    # state before the process serves requests.
                     chat_service.stop_active_executions(workspace_id)
+                    reconcile_stranded_sub_agents(chat_service, workspace_id)
     if screener_service is not None:
         application.state.screener_service = screener_service
     if workflow_runtime is not None:
@@ -571,12 +576,11 @@ def create_app(
             provider_delta_source=provider_delta_source,
             max_poll_cycles=stream_max_poll_cycles,
         ),
-        create_sub_agent_router(
+        create_chat_sub_agent_router(
             poll_interval_seconds=stream_poll_interval_seconds,
             sleeper=stream_sleeper,
             max_poll_cycles=stream_max_poll_cycles,
         ),
-        create_chat_sub_agent_router(),
         create_timeline_router(
             poll_interval_seconds=min(stream_poll_interval_seconds, 0.5),
             sleeper=stream_sleeper,

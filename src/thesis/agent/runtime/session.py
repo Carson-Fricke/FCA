@@ -174,6 +174,7 @@ class SessionTurn:
     tool_call_id: str | None = None
     invocation_id: str | None = None
     datums: tuple[Datum, ...] = ()
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,13 +244,31 @@ class AgentSession:
         self._clock = clock
         self._id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid.uuid4().hex}")
 
-    def run(self, messages: Sequence[ProviderChatMessage]) -> SessionResult:
-        """Run to text completion, terminal control tool, or the iteration cap."""
+    def run(
+        self,
+        messages: Sequence[ProviderChatMessage],
+        *,
+        before_model_call: Callable[[], Sequence[ProviderChatMessage]] | None = None,
+    ) -> SessionResult:
+        """Run to text completion, terminal control tool, or the iteration cap.
+
+        ``before_model_call`` drains messages that arrived after the turn began
+        into the live conversation between model iterations, so the model sees
+        the latest inbound data without restarting the turn.  It may only
+        return ``user``-role messages: the loop point is always after a tool
+        result, so appending user turns there keeps tool-call pairing valid.
+        """
         working = list(messages)
         turns: list[SessionTurn] = []
         catalog = self._registry.catalog()
         reasoning_parts: list[str] = []
         for _ in range(self._max_tool_iterations):
+            if before_model_call is not None:
+                fresh = [
+                    message for message in before_model_call() if message.role == "user"
+                ]
+                if fresh:
+                    working.extend(fresh)
             model_invocation_id = self._record_invocation(
                 kind=AgentInvocationKind.MODEL,
                 state=AgentInvocationState.STARTED,
@@ -294,6 +313,7 @@ class AgentSession:
                     role="assistant",
                     content=completion.content,
                     invocation_id=model_invocation_id,
+                    tool_calls=completion.tool_calls,
                 )
             )
             for call in completion.tool_calls:

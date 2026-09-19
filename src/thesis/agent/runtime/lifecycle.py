@@ -10,7 +10,7 @@ equally durable and recoverable.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from types import MappingProxyType
 
@@ -19,13 +19,15 @@ from thesis.agent.runtime.specs import (
     DEFAULT_MAX_DEPTH,
     SubAgentSpec,
 )
-from thesis.agent.runtime.store import SubAgentStore
+from thesis.agent.runtime.store import PersistenceSubAgentStore, SubAgentStore
 from thesis.chat.contracts import (
     WORKFLOW_NODE_ROLE,
     ChatContractError,
+    RecordNotFound,
     SubAgentKind,
     SubAgentRecord,
     SubAgentStatus,
+    WorkflowExecutionState,
     replace_record,
 )
 from thesis.chat.service import ChatService
@@ -35,6 +37,15 @@ _TERMINAL_STATUSES = frozenset(
         SubAgentStatus.COMPLETED,
         SubAgentStatus.FAILED,
         SubAgentStatus.CANCELLED,
+    }
+)
+
+#: Statuses that occupy a concurrency slot.  ``NEEDS_INPUT`` is deliberately
+#: absent: a node paused for operator review is not doing work.
+_IN_FLIGHT_STATUSES = frozenset(
+    {
+        SubAgentStatus.PENDING,
+        SubAgentStatus.RUNNING,
     }
 )
 
@@ -49,6 +60,33 @@ def _utc_now() -> datetime:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex}"
+
+
+def _subtree_order(
+    records: Iterable[SubAgentRecord], root_ids: Iterable[str]
+) -> list[str]:
+    """Return the given roots and their descendants in deterministic tree order.
+
+    Unknown roots are skipped and a parent cycle cannot loop forever, so the
+    sweep is total even over damaged records.
+    """
+    children: dict[str | None, list[str]] = {}
+    known: set[str] = set()
+    for record in records:
+        known.add(record.sub_agent_id)
+        children.setdefault(record.parent_sub_agent_id, []).append(record.sub_agent_id)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    stack = [root for root in root_ids if root in known]
+    stack.reverse()
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        ordered.append(current)
+        stack.extend(reversed(children.get(current, ())))
+    return ordered
 
 
 class SubAgentLifecycle:
@@ -125,7 +163,15 @@ class SubAgentLifecycle:
         phase_attempt_id: str | None = None,
         sub_agent_id: str | None = None,
     ) -> SubAgentRecord:
-        """Create one durable child after enforcing every deterministic guard."""
+        """Create one durable child after enforcing every deterministic guard.
+
+        The active-children cap counts only in-flight statuses (``pending`` and
+        ``running``).  A node paused for operator review (``needs_input``) is
+        not doing work, so it does not hold a slot; the trade-off is that a
+        chat may hold several paused nodes at the same level, but the
+        nesting-depth guard still bounds the tree and each paused node must be
+        resumed or cancelled before its conversation can grow any further.
+        """
         parent = (
             None
             if parent_sub_agent_id is None
@@ -133,6 +179,8 @@ class SubAgentLifecycle:
         )
         if parent_sub_agent_id is not None and parent is None:
             raise SubAgentLifecycleError("parent sub-agent does not exist")
+        if parent is not None and parent.chat_id != chat_id:
+            raise SubAgentLifecycleError("parent sub-agent belongs to another chat")
         if parent is not None:
             depth = self.depth(workspace_id, parent.sub_agent_id) + 1
             if depth > self._max_depth:
@@ -143,11 +191,19 @@ class SubAgentLifecycle:
                 raise SubAgentLifecycleError(
                     "child delegated budget exceeds the parent's delegated budget"
                 )
-        siblings = self.children(workspace_id, parent_sub_agent_id)
-        active = [
-            record for record in siblings if record.status not in _TERMINAL_STATUSES
+        # The concurrency guard is per conversation: a chat owns its own budget of
+        # in-flight agents, and work stranded in another chat can never block this
+        # one.  Only pending/running children hold a slot; a child paused for
+        # operator review does not, so pausing never blocks new work.
+        siblings = (
+            record
+            for record in self.children(workspace_id, parent_sub_agent_id)
+            if record.chat_id == chat_id
+        )
+        in_flight = [
+            record for record in siblings if record.status in _IN_FLIGHT_STATUSES
         ]
-        if len(active) >= self._max_children:
+        if len(in_flight) >= self._max_children:
             raise SubAgentLifecycleError(
                 f"maximum of {self._max_children} active children reached"
             )
@@ -163,11 +219,12 @@ class SubAgentLifecycle:
             spawned_by_invocation_id=spawned_by_invocation_id,
             workflow_execution_id=workflow_execution_id,
             phase_attempt_id=phase_attempt_id,
+            phase=spec.phase,
             spec_version=spec.spec_version,
             kind=spec.kind,
             allowed_tools=spec.allowed_tools,
             status=SubAgentStatus.PENDING,
-            accepts_input=False,
+            accepts_input=spec.kind is SubAgentKind.CONVERSATION,
             input_contract_ref=spec.input_contract_ref,
             completion_contract_ref=spec.completion_contract_ref,
             delegated_budget=spec.delegated_budget,
@@ -176,11 +233,13 @@ class SubAgentLifecycle:
         return self._store.save_sub_agent(record)
 
     def start(self, workspace_id: str, sub_agent_id: str) -> SubAgentRecord:
+        record = self.get(workspace_id, sub_agent_id)
+        accepts_input = record is not None and record.kind is SubAgentKind.CONVERSATION
         return self._update(
             workspace_id,
             sub_agent_id,
             status=SubAgentStatus.RUNNING,
-            accepts_input=False,
+            accepts_input=accepts_input,
         )
 
     def request_input(
@@ -247,6 +306,93 @@ class SubAgentLifecycle:
             accepts_input=False,
         )
 
+    def cancel_subtree(self, workspace_id: str, sub_agent_id: str) -> tuple[str, ...]:
+        """Cancel one node and every non-terminal descendant of it.
+
+        The affordance is idempotent and history-preserving: terminal records
+        (for example an already-completed child) are left exactly as they are,
+        and only records that actually transitioned to ``cancelled`` are
+        returned, in root-first tree order.
+        """
+        records = self._store.list_sub_agents(workspace_id)
+        if self.get(workspace_id, sub_agent_id) is None:
+            raise SubAgentLifecycleError("sub-agent does not exist")
+        cancelled: list[str] = []
+        for node_id in _subtree_order(records, (sub_agent_id,)):
+            record = self.get(workspace_id, node_id)
+            if record is None or record.status in _TERMINAL_STATUSES:
+                continue
+            self.cancel(workspace_id, node_id)
+            cancelled.append(node_id)
+        return tuple(cancelled)
+
+    def reconcile_stranded(self, workspace_id: str) -> tuple[str, ...]:
+        """Cancel durable records stranded by a process restart.
+
+        This is a platform-owned reconciliation, not an agent command: it
+        writes the terminal ``cancelled`` status directly through the store
+        instead of routing every record through :meth:`cancel` and its guards.
+        Startup recovery must be total and idempotent — it must not fail on a
+        damaged record, it must be safe to rerun after a crash mid-sweep, and
+        it must never rewrite a record that already reached a terminal status.
+
+        A non-terminal record is stranded when either:
+
+        * it is a workflow node whose execution is not running (the execution
+          was just stopped at startup, is paused with no worker left to resume
+          it, already reached a terminal state, or no longer exists), or
+        * its chat no longer resolves to a chat in the workspace.
+
+        Descendants of a stranded node are cancelled with it.  A running
+        execution's records are left untouched.
+        """
+        records = self._store.list_sub_agents(workspace_id)
+        roots: list[str] = []
+        for record in records:
+            if record.status in _TERMINAL_STATUSES:
+                continue
+            stranded = not self._chat_exists(workspace_id, record.chat_id)
+            if (
+                not stranded
+                and record.role == WORKFLOW_NODE_ROLE
+                and record.workflow_execution_id is not None
+            ):
+                stranded = not self._execution_running(
+                    workspace_id, record.workflow_execution_id
+                )
+            if stranded:
+                roots.append(record.sub_agent_id)
+        now = self._clock()
+        by_id = {record.sub_agent_id: record for record in records}
+        cancelled: list[str] = []
+        for node_id in _subtree_order(records, roots):
+            record = by_id[node_id]
+            if record.status in _TERMINAL_STATUSES:
+                continue
+            updated = replace_record(
+                record,
+                status=SubAgentStatus.CANCELLED,
+                accepts_input=False,
+                updated_at=now,
+            )
+            self._store.save_sub_agent(updated)
+            cancelled.append(node_id)
+        return tuple(cancelled)
+
+    def _chat_exists(self, workspace_id: str, chat_id: str) -> bool:
+        try:
+            self._chat.get_chat(workspace_id, chat_id)
+        except RecordNotFound:
+            return False
+        return True
+
+    def _execution_running(self, workspace_id: str, execution_id: str) -> bool:
+        try:
+            execution = self._chat.get_execution(workspace_id, execution_id)
+        except RecordNotFound:
+            return False
+        return execution.state is WorkflowExecutionState.RUNNING
+
     def accepts_unsolicited_input(self, record: SubAgentRecord) -> bool:
         """Return whether an operator may send a message without being asked.
 
@@ -297,7 +443,32 @@ class SubAgentLifecycle:
         return self._store.save_sub_agent(updated)
 
 
+def reconcile_stranded_sub_agents(
+    chat: ChatService,
+    workspace_id: str,
+    *,
+    store: SubAgentStore | None = None,
+    clock: Callable[[], datetime] = _utc_now,
+) -> tuple[str, ...]:
+    """Cancel durable sub-agents stranded by a restart, for one workspace.
+
+    Platform-owned entry point for :meth:`SubAgentLifecycle.reconcile_stranded`.
+    Compose it at startup next to ``ChatService.stop_active_executions`` so a
+    restarted process leaves no non-terminal record behind for work it cannot
+    run.  Returns the ids that transitioned to ``cancelled``.
+    """
+    lifecycle = SubAgentLifecycle(
+        chat,
+        store=store
+        if store is not None
+        else PersistenceSubAgentStore(chat.persistence),
+        clock=clock,
+    )
+    return lifecycle.reconcile_stranded(workspace_id)
+
+
 __all__ = [
     "SubAgentLifecycle",
     "SubAgentLifecycleError",
+    "reconcile_stranded_sub_agents",
 ]

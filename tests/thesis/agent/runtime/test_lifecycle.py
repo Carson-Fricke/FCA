@@ -98,6 +98,45 @@ def test_active_child_cap_is_enforced() -> None:
         )
 
 
+def test_paused_child_does_not_hold_a_concurrency_slot() -> None:
+    chat = _chat()
+    lifecycle = _lifecycle(chat, max_children=1)
+    root = lifecycle.spawn(
+        _WORKSPACE, "chat-1", spec=SubAgentSpec(role="research"), actor_id=_ACTOR
+    )
+    waiting = lifecycle.spawn(
+        _WORKSPACE,
+        "chat-1",
+        spec=SubAgentSpec(role="research"),
+        actor_id=_ACTOR,
+        parent_sub_agent_id=root.sub_agent_id,
+    )
+    lifecycle.start(_WORKSPACE, waiting.sub_agent_id)
+    paused = lifecycle.request_input(_WORKSPACE, waiting.sub_agent_id)
+    assert paused.status is SubAgentStatus.NEEDS_INPUT
+
+    # A node paused for operator review is not in flight, so a new child can
+    # take the slot even though the cap is one.
+    replacement = lifecycle.spawn(
+        _WORKSPACE,
+        "chat-1",
+        spec=SubAgentSpec(role="research"),
+        actor_id=_ACTOR,
+        parent_sub_agent_id=root.sub_agent_id,
+    )
+    assert replacement.status is SubAgentStatus.PENDING
+
+    # The pending replacement now holds the slot and blocks the next spawn.
+    with pytest.raises(SubAgentLifecycleError, match="maximum of 1"):
+        lifecycle.spawn(
+            _WORKSPACE,
+            "chat-1",
+            spec=SubAgentSpec(role="research"),
+            actor_id=_ACTOR,
+            parent_sub_agent_id=root.sub_agent_id,
+        )
+
+
 def test_delegated_budget_cannot_exceed_parent() -> None:
     chat = _chat()
     lifecycle = _lifecycle(chat, max_children=8)

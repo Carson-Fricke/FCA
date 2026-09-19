@@ -31,7 +31,12 @@ def _optional_text(value: object, name: str) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class ToolContext:
-    """Immutable, runtime-owned attribution for one tool invocation."""
+    """Immutable, runtime-owned attribution for one tool invocation.
+
+    ``intent_epoch`` is the owning execution's epoch at the moment the context
+    was built; the completion tools stamp it into their request so the engine
+    can reject a stale transition and the agent can re-derive the contract.
+    """
 
     workspace_id: str
     chat_id: str
@@ -46,6 +51,7 @@ class ToolContext:
     tool_invocation_id: str | None = None
     idempotency_key: str | None = None
     allowed_tools: tuple[str, ...] = ()
+    intent_epoch: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -73,6 +79,8 @@ class ToolContext:
         for tool in tools:
             _require_text(tool, "allowed_tools entry")
         object.__setattr__(self, "allowed_tools", tuple(sorted(tools)))
+        if self.intent_epoch < 0:
+            raise ToolContextError("intent_epoch must not be negative")
 
     def permits(self, tool_name: str) -> bool:
         """Return whether the effective policy allows ``tool_name``."""
@@ -94,6 +102,7 @@ class ToolContext:
             tool_invocation_id=self.tool_invocation_id,
             idempotency_key=self.idempotency_key,
             allowed_tools=allowed_tools,
+            intent_epoch=self.intent_epoch,
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -111,6 +120,7 @@ class ToolContext:
             "modelInvocationId": self.model_invocation_id,
             "toolInvocationId": self.tool_invocation_id,
             "idempotencyKey": self.idempotency_key,
+            "intentEpoch": self.intent_epoch,
         }
 
 

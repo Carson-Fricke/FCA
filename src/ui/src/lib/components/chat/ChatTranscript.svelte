@@ -4,6 +4,7 @@
 	import ThinkingAccordion from './ThinkingAccordion.svelte';
 	import ToolResultCard from './ToolResultCard.svelte';
 	import WorkflowCard from './WorkflowCard.svelte';
+	import { setWorkflowLiveView } from './workflow-live-view';
 	import { derivePhases, executionEvents, projectExecution } from '$lib/subagent';
 	import type {
 		ChatMessage,
@@ -59,6 +60,17 @@
 
 	const isUser = (role: string) => role === 'user';
 	const rootMessages = $derived(messages.filter((message) => message.kind !== 'sub_agent'));
+
+	// The registry-selected workflow renderer reads this context, so a tool
+	// result's `workflow_execution` datum renders through the same card as the
+	// legacy `kind=workflow` item while keeping the live execution, phases,
+	// attention state, and phase navigation.
+	setWorkflowLiveView(() => ({
+		execution,
+		phases,
+		attentionPhases,
+		onEnterPhase
+	}));
 
 	/** The live execution when it matches the anchor, else a minimal record. */
 	function anchorExecution(message: ChatMessage): WorkflowExecutionRecord | null {

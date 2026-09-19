@@ -1,0 +1,213 @@
+"""Workflow specification and execution-context contracts.
+
+A workflow is data: an id, a version, a title, an ordered set of phases, the
+allowed transitions between them, a phase executor per phase, and the piping
+between phases.  The engine assembles and validates that
+data through :class:`~thesis.workflows.core.builder.WorkflowBuilder` and
+resolves it by id through
+:class:`~thesis.workflows.core.registry.WorkflowRegistry`.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
+
+from thesis.workflows.core.phase import (
+    HandoffContext,
+    PhaseExecutor,
+    PhaseKind,
+    PhaseSeed,
+    PhaseSpec,
+    PhaseValidator,
+    WorkflowSpecError,
+)
+
+if TYPE_CHECKING:
+    from thesis.agent.runtime.delivery import DeliveryService, TurnScheduler
+
+__all__ = [
+    "HandoffContext",
+    "PipingFunction",
+    "PhaseSpec",
+    "StartHandoff",
+    "TransitionRequest",
+    "WorkflowContext",
+    "WorkflowSpec",
+    "WorkflowSpecError",
+]
+
+
+#: A piping function moves typed state across one declared transition.
+type PipingFunction[StateT] = Callable[[StateT], StateT]
+
+
+#: The workflow-start adapter: thread the caller message into the first phase.
+#: Returning text overrides the first phase's seed prompt; ``None`` keeps the
+#: phase's declared seed.
+type StartHandoff[WorkflowT, RequestT] = Callable[
+    [WorkflowT, RequestT, HandoffContext], str | None
+]
+
+
+@dataclass(frozen=True, slots=True)
+class TransitionRequest[PhaseT]:
+    """One executor's request to move the workflow to another phase.
+
+    The request carries the target phase, the phase contract payload the
+    executor produced, and the intent epoch it derived the request from.  The
+    engine validates the target against the transition table and stamps the
+    epoch onto the recorded transition.
+    """
+
+    target_phase: PhaseT
+    completion: Mapping[str, object] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    intent_epoch: int = 0
+
+    def __post_init__(self) -> None:
+        if self.intent_epoch < 0:
+            raise WorkflowSpecError("intent_epoch must not be negative")
+        object.__setattr__(
+            self,
+            "completion",
+            MappingProxyType(
+                {str(key): value for key, value in self.completion.items()}
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowContext:
+    """The trusted per-execution context the engine plumbing operates on.
+
+    Workspace, chat, execution, anchor, and actor identity are supplied by the
+    runtime, never by a model.  The delivery and scheduler are the composed
+    ports for the run; they stay optional so the context can also describe a
+    launch before the execution exists.
+    """
+
+    workspace_id: str
+    chat_id: str
+    actor_id: str
+    execution_id: str | None = None
+    trigger_message_id: str | None = None
+    intent_epoch: int = 0
+    anchor_sub_agent_id: str | None = None
+    delivery: DeliveryService | None = None
+    scheduler: TurnScheduler | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowSpec[WorkflowT, RequestT, StateT]:
+    """The assembled, validated definition of one workflow."""
+
+    workflow_id: str
+    version: str
+    title: str
+    phases: tuple[PhaseSpec[WorkflowT, RequestT, StateT], ...]
+    transitions: Mapping[str, frozenset[str]]
+    piping: Mapping[tuple[str, str], PipingFunction[StateT]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    start_handoff: StartHandoff[Any, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.workflow_id, str) or not self.workflow_id.strip():
+            raise WorkflowSpecError("workflow_id must be non-empty text")
+        object.__setattr__(self, "workflow_id", self.workflow_id.strip())
+        object.__setattr__(
+            self,
+            "transitions",
+            MappingProxyType(
+                {
+                    str(phase): frozenset(str(target) for target in targets)
+                    for phase, targets in self.transitions.items()
+                }
+            ),
+        )
+        object.__setattr__(
+            self,
+            "piping",
+            MappingProxyType(
+                {
+                    (str(source), str(target)): pipe
+                    for (source, target), pipe in self.piping.items()
+                }
+            ),
+        )
+
+    @property
+    def phase_specs(self) -> Mapping[str, PhaseSpec[WorkflowT, RequestT, StateT]]:
+        """Return the declared spec for every phase, by name."""
+        return MappingProxyType({phase.phase: phase for phase in self.phases})
+
+    @property
+    def phase_names(self) -> tuple[str, ...]:
+        """Return the declared phase names in order."""
+        return tuple(phase.phase for phase in self.phases)
+
+    @property
+    def terminal_phases(self) -> tuple[str, ...]:
+        """Return the declared terminal phase names."""
+        return tuple(phase.phase for phase in self.phases if phase.terminal)
+
+    @property
+    def executors(self) -> Mapping[str, PhaseExecutor[WorkflowT, RequestT, StateT]]:
+        """Return the executor for every phase that declares one, by name.
+
+        An agent phase has a seed instead; only deterministic phases (and
+        legacy configurations) declare an executor.
+        """
+        resolved: dict[str, PhaseExecutor[WorkflowT, RequestT, StateT]] = {}
+        for phase in self.phases:
+            executor = phase.executor
+            if executor is not None:
+                resolved[phase.phase] = executor
+        return MappingProxyType(resolved)
+
+    @property
+    def phase_kinds(self) -> Mapping[str, PhaseKind]:
+        """Return the declared phase kind for every phase, by name."""
+        return MappingProxyType({phase.phase: phase.kind for phase in self.phases})
+
+    @property
+    def seeds(
+        self,
+    ) -> Mapping[str, PhaseSeed[WorkflowT, RequestT, StateT]]:
+        """Return the prompt builder for every phase that declares one."""
+        return MappingProxyType(
+            {phase.phase: phase.seed for phase in self.phases if phase.seed is not None}
+        )
+
+    @property
+    def validators(self) -> Mapping[str, PhaseValidator]:
+        """Return the contract validator for every phase that declares one."""
+        return MappingProxyType(
+            {
+                phase.phase: phase.validate
+                for phase in self.phases
+                if phase.validate is not None
+            }
+        )
+
+    @property
+    def on_complete(self) -> Mapping[str, str]:
+        """Return the declared deterministic target for single-target phases."""
+        return MappingProxyType(
+            {
+                phase.phase: phase.on_complete
+                for phase in self.phases
+                if phase.on_complete is not None
+            }
+        )
+
+    @property
+    def required(self) -> Mapping[str, tuple[str, ...]]:
+        """Return the required completion-contract fields for every phase."""
+        return MappingProxyType(
+            {phase.phase: phase.required for phase in self.phases if phase.required}
+        )

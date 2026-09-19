@@ -16,7 +16,8 @@ import { untrack } from 'svelte';
 import {
 	apiBaseUrl,
 	fixtureMode,
-	listExecutionSubAgents,
+	listChatSubAgents,
+	listExecutionEvents,
 	listNodeEvents,
 	postNodeMessage
 } from './api';
@@ -29,6 +30,7 @@ import {
 import {
 	deriveSubAgentTree,
 	executionNodeRef,
+	isWorkflowNodeRole,
 	mergeEvents,
 	nodeEvents,
 	subAgentNodeRef,
@@ -39,6 +41,7 @@ import {
 	parseScope,
 	scopeFromHash,
 	scopeStorageKey,
+	serializeScope,
 	ScopeController,
 	type ScopeSegment
 } from './scope.svelte';
@@ -53,6 +56,8 @@ import type {
 function mergeNodes(existing: SubAgentNode[], incoming: SubAgentNode[]): SubAgentNode[] {
 	const byId = new Map<string, SubAgentNode>();
 	for (const node of existing) byId.set(node.subAgentId, node);
+	// Hidden workflow-node records are kept so the tree projection can
+	// re-anchor their phase agents; the projection never surfaces them.
 	for (const node of incoming) byId.set(node.subAgentId, node);
 	return [...byId.values()];
 }
@@ -79,7 +84,7 @@ export class WorkflowScopeController {
 	execution = $state<WorkflowExecutionRecord | null>(null);
 	/** Root execution own events. */
 	rootEvents = $state<ExecutionEvent[]>([]);
-	/** Nodes discovered from REST listings, merged with stream-derived nodes. */
+	/** Nodes discovered from the durable chat-scoped tree. */
 	knownNodes = $state<SubAgentNode[]>([]);
 	/** Own events per sub-agent node, loaded lazily. */
 	nodeEventCache = $state<Record<string, ExecutionEvent[]>>({});
@@ -91,6 +96,7 @@ export class WorkflowScopeController {
 
 	#workspaceId: string;
 	#executionId = '';
+	#chatId: string | null = null;
 	#hostId: string;
 	#cursorStore = new LocalCursorStore();
 	#subscriptions = new Map<string, ExecutionEventStream>();
@@ -139,6 +145,7 @@ export class WorkflowScopeController {
 		this.detach();
 		this.#executionId = executionId;
 		const attachedExecutionId = executionId;
+		this.#chatId = options.chatId ?? execution?.chat_id ?? null;
 		this.execution = execution;
 		this.rootEvents = [];
 		this.knownNodes = [];
@@ -162,9 +169,7 @@ export class WorkflowScopeController {
 
 		let eventsReady = Promise.resolve();
 		if (!options.externalEvents) {
-			eventsReady = listNodeEvents(this.#workspaceId, executionId, executionNodeRef(executionId), {
-				includeDescendants: false
-			})
+			eventsReady = listExecutionEvents(this.#workspaceId, executionId, {})
 				.then((events) => {
 					if (this.#executionId !== attachedExecutionId) return;
 					this.rootEvents = mergeEvents(this.rootEvents, events);
@@ -175,17 +180,27 @@ export class WorkflowScopeController {
 				});
 		}
 
-		const nodesReady = listExecutionSubAgents(this.#workspaceId, executionId)
-			.then((nodes) => {
-				if (this.#executionId !== attachedExecutionId) return;
-				this.knownNodes = mergeNodes(this.knownNodes, nodes);
-			})
-			.catch(() => undefined);
+		let nodesLoaded = false;
+		const nodesReady = this.#chatId
+			? listChatSubAgents(this.#workspaceId, this.#chatId)
+					.then((nodes) => {
+						if (this.#executionId !== attachedExecutionId) return;
+						this.knownNodes = mergeNodes(this.knownNodes, nodes);
+						nodesLoaded = true;
+					})
+					.catch(() => undefined)
+			: Promise.resolve();
 
-		this.#initialLoad = Promise.all([eventsReady, nodesReady]).then(() => undefined);
+		// The scope is normalized only once the durable tree is known, so a
+		// persisted segment that names a hidden workflow node (or a node this
+		// chat does not own) is dropped instead of being restored and queried.
+		this.#initialLoad = Promise.all([eventsReady, nodesReady]).then(() => {
+			if (this.#executionId !== attachedExecutionId) return;
+			if (nodesLoaded) this.normalizeScope();
+			this.restoreActiveSubscription();
+		});
 
 		if (!options.externalEvents) this.#subscribe(executionNodeRef(executionId));
-		this.restoreActiveSubscription();
 	}
 
 	detach(): void {
@@ -203,66 +218,122 @@ export class WorkflowScopeController {
 	/**
 	 * Enter the sub-agent that governs a phase.
 	 *
-	 * The real phase orchestrator is located in the projected tree so the
-	 * operator drills straight into the actual node (its messages, events, and
-	 * composer target). The tree is awaited first so a click that races the
+	 * The phase agent is located in the projected tree (it may sit under the
+	 * launching anchor now that the implementation record is hidden) so the
+	 * operator drills straight into the actual agent — never the hidden
+	 * workflow node. The tree is awaited first so a click that races the
 	 * initial load still resolves to the real node instead of a placeholder.
 	 */
 	async enterPhase(phase: string, readOnly = false): Promise<void> {
 		await this.ensureLoaded();
-		const node =
-			this.tree.find((candidate) => candidate.node.phase === phase)?.node ??
-			this.latestOrchestrator();
+		const node = this.findPhaseNode(phase);
 		if (!node) return;
 		this.enterSubAgent(node);
 		if (readOnly) this.scope.updateActive({ readOnly: true });
 	}
 
-	/**
-	 * The most recently spawned top-level phase orchestrator, used when the
-	 * requested phase has no sub-agent of its own (for example the
-	 * pre-orchestration `requested` phase).
-	 */
-	private latestOrchestrator(): SubAgentNode | null {
-		let best: { node: SubAgentNode; cursor: number } | null = null;
-		for (const treeNode of this.tree) {
-			if (treeNode.node.parentSubAgentId !== null) continue;
-			const spawn = treeNode.events.find((event) => event.eventType === 'sub_agent.spawned');
-			const cursor = spawn?.cursor ?? 0;
-			if (best === null || cursor >= best.cursor) {
-				best = { node: treeNode.node, cursor };
+	/** The phase agent for one phase name, scoped to this execution. */
+	private findPhaseNode(phase: string): SubAgentNode | null {
+		const matches: SubAgentNode[] = [];
+		const visit = (nodes: SubAgentTreeNode[]): void => {
+			for (const item of nodes) {
+				if (!isWorkflowNodeRole(item.node.role) && item.node.phase === phase) {
+					matches.push(item.node);
+				}
+				visit(item.children);
 			}
-		}
-		return best?.node ?? null;
+		};
+		visit(this.tree);
+		if (!this.#executionId) return matches[0] ?? null;
+		return (
+			matches.find((node) => node.workflowExecutionId === this.#executionId) ?? null
+		);
 	}
 
-	/** Enter one sub-agent node, subscribing and lazily loading its events. */
+	/**
+	 * Enter one sub-agent node, subscribing and lazily loading its events.
+	 *
+	 * The full visible ancestor chain is projected into the scope path, so a
+	 * phase agent always has its anchor beneath it and Back returns there. When
+	 * the chain already shares a prefix with the scope the path is truncated to
+	 * that prefix, so sibling nodes switch in place instead of accumulating.
+	 * Hidden workflow-node records are never entered.
+	 */
 	enterSubAgent(node: SubAgentNode): void {
-		// Truncate to the node's parent when it is already in scope, so sibling
-		// sub-agents switch in place instead of accumulating on the path. A
-		// root-level phase agent truncates to the conversation root.
-		const parentIndex = node.parentSubAgentId
-			? this.scope.segments.findIndex(
-					(segment) => segment.kind === 'sub_agent' && segment.id === node.parentSubAgentId
-				)
-			: this.scope.segments.findIndex((segment) => segment.kind === 'conversation');
-		if (parentIndex !== -1 && parentIndex < this.scope.segments.length - 1) {
-			const removed = this.scope.segments.slice(parentIndex + 1);
-			this.scope.navigateTo(parentIndex);
-			for (const segment of removed) {
-				if (segment.kind === 'sub_agent') {
-					this.#unsubscribe(this.#subscriptionKey(subAgentNodeRef(segment.id)));
-				}
+		if (isWorkflowNodeRole(node.role)) return;
+		const chain = [...this.ancestorsOf(node), node];
+		let keepIndex = this.scope.segments.findIndex(
+			(segment) => segment.kind === 'conversation'
+		);
+		if (keepIndex === -1) keepIndex = 0;
+		let start = 0;
+		for (let index = 0; index < chain.length - 1; index += 1) {
+			const found = this.scope.segments.findIndex(
+				(segment) => segment.kind === 'sub_agent' && segment.id === chain[index].subAgentId
+			);
+			if (found !== -1) {
+				keepIndex = found;
+				start = index + 1;
 			}
 		}
-		this.scope.push({
+		if (keepIndex < this.scope.segments.length - 1) this.navigateTo(keepIndex);
+		for (let index = start; index < chain.length; index += 1) {
+			this.scope.push(this.segmentFor(chain[index]));
+		}
+		this.loadNode(node.subAgentId);
+	}
+
+	/** The visible ancestors of a node, outermost first. */
+	private ancestorsOf(node: SubAgentNode): SubAgentNode[] {
+		const chain: SubAgentNode[] = [];
+		const seen = new Set<string>([node.subAgentId]);
+		let parentId = node.parentSubAgentId;
+		while (parentId && !seen.has(parentId)) {
+			seen.add(parentId);
+			const parent = this.subAgentById(parentId);
+			if (!parent || isWorkflowNodeRole(parent.role)) break;
+			chain.unshift(parent);
+			parentId = parent.parentSubAgentId;
+		}
+		return chain;
+	}
+
+	private segmentFor(node: SubAgentNode): ScopeSegment {
+		return {
 			kind: 'sub_agent',
 			id: node.subAgentId,
 			label: node.role || node.subAgentId,
 			role: node.role,
 			phase: node.phase
-		});
-		this.loadNode(node.subAgentId);
+		};
+	}
+
+	/**
+	 * Drop scope segments that name a hidden workflow node or a node this chat
+	 * does not own, and re-seat surviving segments on their full ancestor path.
+	 * A stale deep link can never leave the operator inside an implementation
+	 * record or orphaned under a node that no longer exists.
+	 */
+	private normalizeScope(): void {
+		const segments = this.scope.segments;
+		if (!segments.length) return;
+		const rebuilt: ScopeSegment[] = [segments[0]];
+		for (const segment of segments.slice(1)) {
+			if (segment.kind !== 'sub_agent') continue;
+			const node = this.subAgentById(segment.id);
+			if (!node || isWorkflowNodeRole(node.role)) break;
+			for (const item of [...this.ancestorsOf(node), node]) {
+				if (
+					rebuilt.some(
+						(candidate) => candidate.kind === 'sub_agent' && candidate.id === item.subAgentId
+					)
+				) {
+					continue;
+				}
+				rebuilt.push(this.segmentFor(item));
+			}
+		}
+		if (serializeScope(rebuilt) !== serializeScope(segments)) this.scope.reset(rebuilt);
 	}
 
 	back(): void {
@@ -295,12 +366,19 @@ export class WorkflowScopeController {
 		// keeps one SSE connection per execution instead of one per visited node,
 		// which matters because browsers cap concurrent connections per origin.
 		if (this.nodeEventCache[subAgentId]) return;
-		const executionId = this.#executionId;
-		listNodeEvents(this.#workspaceId, executionId, subAgentNodeRef(subAgentId), {
+		// Never request activity for a hidden implementation record, a node the
+		// rendered tree does not contain, or a node without a workflow execution
+		// (chat-spawned helpers have no activity log): the backend answers 404
+		// or 409 for those, and no such request may ever be issued.
+		const node = this.subAgentById(subAgentId);
+		if (!node || isWorkflowNodeRole(node.role) || !node.workflowExecutionId) return;
+		const chatId = this.#chatId;
+		if (!chatId) return;
+		listNodeEvents(this.#workspaceId, chatId, subAgentNodeRef(subAgentId), {
 			includeDescendants: false
 		})
 			.then((events) => {
-				if (this.#executionId !== executionId) return;
+				if (this.#chatId !== chatId) return;
 				this.nodeEventCache = {
 					...this.nodeEventCache,
 					[subAgentId]: mergeEvents(this.nodeEventCache[subAgentId] ?? [], events)
@@ -321,18 +399,9 @@ export class WorkflowScopeController {
 		return this.expanded[subAgentId] === true;
 	}
 
-	/** Lazy-load a node's direct children from REST. */
+	/** The durable tree already carries every node; nothing to lazy-load. */
 	loadChildren(subAgentId: string): void {
 		this.loadNode(subAgentId);
-		const executionId = this.#executionId;
-		listExecutionSubAgents(this.#workspaceId, executionId, {
-			parentSubAgentId: subAgentId
-		})
-			.then((nodes) => {
-				if (this.#executionId !== executionId) return;
-				this.knownNodes = mergeNodes(this.knownNodes, nodes);
-			})
-			.catch(() => undefined);
 	}
 
 	childrenOf(subAgentId: string): SubAgentTreeNode[] {
@@ -341,7 +410,11 @@ export class WorkflowScopeController {
 	}
 
 	subAgentById(id: string): SubAgentNode | null {
-		return findNode(this.tree, id)?.node ?? this.knownNodes.find((n) => n.subAgentId === id) ?? null;
+		const found =
+			findNode(this.tree, id)?.node ??
+			this.knownNodes.find((node) => node.subAgentId === id) ??
+			null;
+		return found && isWorkflowNodeRole(found.role) ? null : found;
 	}
 
 	eventsForSubAgent(id: string): ExecutionEvent[] {
@@ -352,12 +425,20 @@ export class WorkflowScopeController {
 
 	/** Submit operator input to a node that accepts it. */
 	async submit(node: SubAgentNode, body: string): Promise<ChatMessage | null> {
-		if (!node.acceptsInput || !body.trim()) return null;
+		const chatId = this.#chatId;
+		if (
+			isWorkflowNodeRole(node.role) ||
+			!node.acceptsInput ||
+			!body.trim() ||
+			!chatId
+		) {
+			return null;
+		}
 		this.busy = true;
 		try {
 			return await postNodeMessage(
 				this.#workspaceId,
-				this.#executionId,
+				chatId,
 				this.nodeRefFor(node.subAgentId),
 				{ body: body.trim() }
 			);
@@ -385,6 +466,7 @@ export class WorkflowScopeController {
 			baseUrl: apiBaseUrl,
 			workspaceId: this.#workspaceId,
 			executionId: this.#executionId,
+			chatId: this.#chatId,
 			cursorStore: this.#readonlyCursorStore,
 			cursorKey: `${this.#executionId}:${key}`,
 			subAgentId: node.kind === 'sub_agent' ? node.id : null,

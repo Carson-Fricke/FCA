@@ -25,6 +25,7 @@ from thesis.chat.contracts import (
     RecordLinks,
     RecordNotFound,
     SubAgentRecord,
+    SubAgentStatus,
     ToolJob,
     ToolJobState,
     TranscriptItemKind,
@@ -59,7 +60,14 @@ _STEERABLE_EXECUTION_STATES = frozenset(
     {
         WorkflowExecutionState.QUEUED,
         WorkflowExecutionState.RUNNING,
-        WorkflowExecutionState.PAUSED,
+    }
+)
+
+_TERMINAL_SUB_AGENT_STATUSES = frozenset(
+    {
+        SubAgentStatus.COMPLETED,
+        SubAgentStatus.FAILED,
+        SubAgentStatus.CANCELLED,
     }
 )
 
@@ -257,9 +265,13 @@ class ChatService:
 
         Deletion cascades to the chat's messages and attachments and to any
         workflow executions and tool jobs launched from it, so the workspace
-        retains no orphaned references to the conversation.
+        retains no orphaned references to the conversation.  The chat's
+        durable sub-agent forest is cancelled first, so a deleted conversation
+        frees its own concurrency budget and no background node turn keeps
+        working for a chat that no longer exists.
         """
         self.get_chat(workspace_id, chat_id)
+        self._cancel_chat_sub_agents(workspace_id, chat_id)
         for message in self._list(ChatMessage, workspace_id):
             if message.chat_id == chat_id:
                 self._delete(ChatMessage, workspace_id, message.message_id)
@@ -293,6 +305,51 @@ class ChatService:
         for execution in executions:
             self._delete(WorkflowExecution, workspace_id, execution.execution_id)
         self._delete(ChatThread, workspace_id, chat_id)
+
+    def _cancel_chat_sub_agents(
+        self, workspace_id: str, chat_id: str
+    ) -> tuple[str, ...]:
+        """Cancel one chat's durable sub-agent forest, descendants included.
+
+        Records are cancelled, never deleted: a background node turn reads the
+        durable status as its cooperative cancellation fence, so removing the
+        record would remove the fence while the turn is still in flight.
+        Terminal records are left untouched.
+        """
+        records = self._list(SubAgentRecord, workspace_id)
+        roots = [record.sub_agent_id for record in records if record.chat_id == chat_id]
+        children: dict[str | None, list[str]] = {}
+        for record in records:
+            children.setdefault(record.parent_sub_agent_id, []).append(
+                record.sub_agent_id
+            )
+        order: list[str] = []
+        seen: set[str] = set()
+        stack = list(reversed(roots))
+        while stack:
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            order.append(current)
+            stack.extend(reversed(children.get(current, ())))
+        by_id = {record.sub_agent_id: record for record in records}
+        now = self._now()
+        cancelled: list[str] = []
+        for node_id in order:
+            record = by_id[node_id]
+            if record.status in _TERMINAL_SUB_AGENT_STATUSES:
+                continue
+            self._save(
+                replace_record(
+                    record,
+                    status=SubAgentStatus.CANCELLED,
+                    accepts_input=False,
+                    updated_at=now,
+                )
+            )
+            cancelled.append(node_id)
+        return tuple(cancelled)
 
     def create_investigation(
         self,
@@ -1053,10 +1110,7 @@ class ChatService:
         execution = self.get_execution(workspace_id, execution_id)
         if execution.state is WorkflowExecutionState.RUNNING:
             return execution
-        if execution.state not in {
-            WorkflowExecutionState.QUEUED,
-            WorkflowExecutionState.PAUSED,
-        }:
+        if execution.state is not WorkflowExecutionState.QUEUED:
             raise InvalidLifecycleTransition(
                 f"execution cannot start while {execution.state.value}"
             )
@@ -1085,31 +1139,6 @@ class ChatService:
         return self._save(
             replace_record(execution, phase=phase, updated_at=self._now())
         )
-
-    def pause_workflow(
-        self, workspace_id: str, execution_id: str, *, actor_id: str
-    ) -> WorkflowExecution:
-        execution = self.get_execution(workspace_id, execution_id)
-        if execution.state is WorkflowExecutionState.PAUSED:
-            return execution
-        if execution.state is not WorkflowExecutionState.RUNNING:
-            raise InvalidLifecycleTransition(
-                f"execution cannot pause while {execution.state.value}"
-            )
-        updated = self._save(
-            replace_record(
-                execution, state=WorkflowExecutionState.PAUSED, updated_at=self._now()
-            )
-        )
-        self._append_event(
-            updated,
-            ExecutionEventType.WORKFLOW_PAUSED,
-            correlation_id=updated.execution_id,
-            actor_id=actor_id,
-            actor_scope=ActorScope.USER,
-            payload={"state": updated.state.value},
-        )
-        return updated
 
     def cancel_workflow(
         self, workspace_id: str, execution_id: str, *, actor_id: str

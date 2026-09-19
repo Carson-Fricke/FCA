@@ -8,19 +8,37 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import OperatorPolicyRegistry
-from thesis.chat import AzureBlobChatPersistence
+from thesis.agent.runtime.specs import SubAgentSpec
+from thesis.agent.runtime.store import PersistenceSubAgentStore
+from thesis.chat import (
+    AzureBlobChatPersistence,
+    ChatService,
+    InMemoryChatPersistence,
+    SubAgentStatus,
+    WorkflowDefinition,
+    WorkflowExecutionState,
+)
+from thesis.chat.contracts import WORKFLOW_NODE_ROLE
 from thesis.chat.persistence import FileChatPersistence
 from thesis.http.application import (
     create_app,
     durable_chat_service,
     serving_workspace_store,
 )
+from thesis.http.workspaces import build_local_workspace_data
 from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
 from thesis.providers.transports import DEFAULT_SYSTEM_PROMPT
 from thesis.workspaces.azure_catalog import AzureWorkspaceCatalogStore
 
 TOKEN = "thesis-test-token"
+WORKFLOW = WorkflowDefinition(
+    workflow_id="strategy-development",
+    version="1.0.0",
+    title="Strategy development",
+    phases=("understand", "implement"),
+)
 
 
 def test_health_is_public_and_auth_check_requires_token() -> None:
@@ -233,3 +251,58 @@ def test_serving_workspace_store_uses_azure_blobs_when_configured(monkeypatch) -
 
     assert isinstance(store, AzureWorkspaceCatalogStore)
     assert store.container_prefix == "thesis-ws-"
+
+
+def test_startup_reconciliation_cancels_stranded_sub_agents() -> None:
+    chat = ChatService(persistence=InMemoryChatPersistence())
+    bundle = build_local_workspace_data(chat_service=chat)
+    workspace_id = str(bundle.workspaces.create_workspace("Alpha Lab")["id"])
+    chat_id = chat.create_chat(
+        workspace_id, title="Research", owner_actor_id="operator"
+    ).chat_id
+    store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(chat, store=store)
+    node = lifecycle.spawn(
+        workspace_id,
+        chat_id,
+        spec=SubAgentSpec(role=WORKFLOW_NODE_ROLE),
+        actor_id="operator",
+        workflow_execution_id="execution-stranded",
+    )
+
+    create_app(bearer_token=TOKEN, chat_service=chat, workspace_data=bundle)
+
+    stored = store.get_sub_agent(workspace_id, node.sub_agent_id)
+    assert stored is not None and stored.status is SubAgentStatus.CANCELLED
+
+
+def test_startup_reconciliation_stops_executions_then_cancels_their_nodes() -> None:
+    chat = ChatService(persistence=InMemoryChatPersistence())
+    bundle = build_local_workspace_data(chat_service=chat)
+    workspace_id = str(bundle.workspaces.create_workspace("Beta Lab")["id"])
+    chat_id = chat.create_chat(
+        workspace_id, title="Research", owner_actor_id="operator"
+    ).chat_id
+    execution = chat.launch_workflow(
+        workspace_id,
+        chat_id,
+        workflow=WORKFLOW,
+        actor_id="operator",
+        body="Build and test the strategy.",
+    )
+    store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(chat, store=store)
+    node = lifecycle.spawn(
+        workspace_id,
+        chat_id,
+        spec=SubAgentSpec(role=WORKFLOW_NODE_ROLE),
+        actor_id="operator",
+        workflow_execution_id=execution.execution_id,
+    )
+
+    create_app(bearer_token=TOKEN, chat_service=chat, workspace_data=bundle)
+
+    stopped = chat.get_execution(workspace_id, execution.execution_id)
+    assert stopped.state is WorkflowExecutionState.STOPPED
+    stored = store.get_sub_agent(workspace_id, node.sub_agent_id)
+    assert stored is not None and stored.status is SubAgentStatus.CANCELLED

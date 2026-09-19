@@ -77,7 +77,8 @@ describe('deriveSubAgentTree', () => {
 				role: 'Auditor',
 				status: 'spawned',
 				context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
-				acceptsInput: true
+				acceptsInput: true,
+				workflowExecutionId: 'exec-1'
 			}
 		]);
 		expect(roots).toHaveLength(1);
@@ -163,6 +164,95 @@ describe('derivePhaseSteps', () => {
 			{ name: 'ideation', status: 'done' },
 			{ name: 'hypothesis', status: 'active' }
 		]);
+	});
+});
+
+describe('workflow-node records', () => {
+	function workflowEvents(): ExecutionEvent[] {
+		return [
+			event(
+				'sub_agent.spawned',
+				{ subAgentId: 'anchor-1', parentSubAgentId: null, phase: '', role: 'Anchor', acceptsInput: true },
+				0
+			),
+			event(
+				'sub_agent.spawned',
+				{
+					subAgentId: 'wf-1',
+					parentSubAgentId: 'anchor-1',
+					phase: 'requested',
+					role: 'workflow-node',
+					acceptsInput: false
+				},
+				1
+			),
+			event(
+				'sub_agent.spawned',
+				{ subAgentId: 'phase-1', parentSubAgentId: 'wf-1', phase: 'ideation', role: 'Ideation' },
+				2
+			),
+			event(
+				'sub_agent.spawned',
+				{ subAgentId: 'helper-1', parentSubAgentId: 'phase-1', phase: 'ideation', role: 'Researcher' },
+				3
+			)
+		];
+	}
+
+	it('hides the event-derived workflow node and re-parents its phase agent to the anchor', () => {
+		const roots = deriveSubAgentTree(workflowEvents());
+		expect(roots.map((node) => node.node.subAgentId)).toEqual(['anchor-1']);
+		const phase = roots[0].children[0];
+		expect(phase.node.subAgentId).toBe('phase-1');
+		expect(phase.node.parentSubAgentId).toBe('anchor-1');
+		expect(phase.children.map((node) => node.node.subAgentId)).toEqual(['helper-1']);
+	});
+
+	it('hides the durable workflow node and re-parents its phase agent to the anchor', () => {
+		const roots = deriveSubAgentTree([], [
+			{
+				subAgentId: 'anchor-1',
+				parentSubAgentId: null,
+				phase: '',
+				role: 'Anchor',
+				status: 'running',
+				context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+				acceptsInput: true,
+				workflowExecutionId: 'exec-1'
+			},
+			{
+				subAgentId: 'wf-1',
+				parentSubAgentId: 'anchor-1',
+				phase: 'requested',
+				role: 'workflow-node',
+				status: 'running',
+				context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+				acceptsInput: false,
+				workflowExecutionId: 'exec-1'
+			},
+			{
+				subAgentId: 'phase-1',
+				parentSubAgentId: 'wf-1',
+				phase: 'ideation',
+				role: 'Ideation',
+				status: 'running',
+				context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+				acceptsInput: false,
+				workflowExecutionId: 'exec-1'
+			}
+		]);
+		expect(roots.map((node) => node.node.subAgentId)).toEqual(['anchor-1']);
+		expect(roots[0].children.map((node) => node.node.subAgentId)).toEqual(['phase-1']);
+		expect(roots[0].children[0].node.parentSubAgentId).toBe('anchor-1');
+	});
+
+	it('lists phase agents — never the workflow node or its requested phase', () => {
+		const steps = derivePhaseSteps(deriveSubAgentTree(workflowEvents()), 'exec-1');
+		expect(steps).toEqual([{ name: 'ideation', status: 'active' }]);
+	});
+
+	it('scopes phase steps to one execution when an execution id is given', () => {
+		expect(derivePhaseSteps(deriveSubAgentTree(workflowEvents()), 'exec-2')).toEqual([]);
 	});
 });
 

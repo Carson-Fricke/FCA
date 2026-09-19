@@ -9,7 +9,8 @@ const knownNode = {
 	role: 'Researcher',
 	status: 'needs_input',
 	acceptsInput: true,
-	context: { isolated: true, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } }
+	context: { isolated: true, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+	workflowExecutionId: 'exec-1'
 };
 
 const toolResult = {
@@ -44,13 +45,15 @@ function event(
 }
 
 const postNodeMessage = vi.hoisted(() => vi.fn());
-const listExecutionSubAgents = vi.hoisted(() => vi.fn());
+const listChatSubAgents = vi.hoisted(() => vi.fn());
+const listExecutionEvents = vi.hoisted(() => vi.fn());
 const listNodeEvents = vi.hoisted(() => vi.fn());
 
 vi.mock('$lib/api', () => ({
 	apiBaseUrl: 'http://api.test',
 	fixtureMode: false,
-	listExecutionSubAgents,
+	listChatSubAgents,
+	listExecutionEvents,
 	listNodeEvents,
 	postNodeMessage
 }));
@@ -114,25 +117,23 @@ function renderSurface() {
 
 describe('ChatSurface drill-in', () => {
 	it('enters a phase sub-agent, renders its transcript, posts to it, then backs out', async () => {
-		listExecutionSubAgents.mockImplementation(
+		listChatSubAgents.mockResolvedValue([knownNode]);
+		listExecutionEvents.mockResolvedValue([
+			event('workflow.started', { phase: 'research' }, 1)
+		]);
+		listNodeEvents.mockImplementation(
 			async (
 				_ws: string,
-				_exec: string,
-				options: { parentSubAgentId?: string | null } = {}
-			) => (options.parentSubAgentId ? [] : [knownNode])
-		);
-		listNodeEvents.mockImplementation(
-			async (_ws: string, _exec: string, node: { kind: string; id: string }) =>
-				node.kind === 'execution'
-					? [event('workflow.started', { phase: 'research' }, 1)]
-					: [event('tool.result', { subAgentId: 'sub-1', toolResult }, 2)]
+				_chat: string,
+				node: { kind: string; id: string }
+			) => (node.kind === 'sub_agent' ? [event('tool.result', { subAgentId: 'sub-1', toolResult }, 2)] : [])
 		);
 		postNodeMessage.mockResolvedValue({ ...anchor, message_id: 'msg-node-1' });
 		window.localStorage.clear();
 
 		renderSurface();
 		await waitFor(() => expect(screen.getByTestId('workflow-card')).toBeInTheDocument());
-		await waitFor(() => expect(listExecutionSubAgents).toHaveBeenCalled());
+		await waitFor(() => expect(listChatSubAgents).toHaveBeenCalled());
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		await fireEvent.click(screen.getByTestId('workflow-card-body'));
@@ -148,7 +149,7 @@ describe('ChatSurface drill-in', () => {
 		await waitFor(() =>
 			expect(postNodeMessage).toHaveBeenCalledWith(
 				'alpha-lab',
-				'exec-1',
+				'chat-1',
 				expect.objectContaining({ kind: 'sub_agent', id: 'sub-1' }),
 				{ body: 'please continue' }
 			)
@@ -166,7 +167,8 @@ describe('ChatSurface drill-in', () => {
 	});
 
 	it('keeps the root composer available while a workflow scope is active', async () => {
-		listExecutionSubAgents.mockResolvedValue([]);
+		listChatSubAgents.mockResolvedValue([]);
+		listExecutionEvents.mockResolvedValue([]);
 		listNodeEvents.mockResolvedValue([]);
 		window.localStorage.clear();
 
@@ -176,7 +178,8 @@ describe('ChatSurface drill-in', () => {
 	});
 
 	it('does not leak an active execution across separately updating conversations', async () => {
-		listExecutionSubAgents.mockResolvedValue([]);
+		listChatSubAgents.mockResolvedValue([]);
+		listExecutionEvents.mockResolvedValue([]);
 		listNodeEvents.mockResolvedValue([]);
 		window.localStorage.clear();
 		const newerAnchor = {
@@ -206,7 +209,7 @@ describe('ChatSurface drill-in', () => {
 		});
 
 		await waitFor(() =>
-			expect(listExecutionSubAgents).toHaveBeenCalledWith('alpha-lab', 'exec-2')
+			expect(listChatSubAgents).toHaveBeenCalledWith('alpha-lab', 'chat-2')
 		);
 		const cards = await screen.findAllByTestId('workflow-card');
 		expect(cards).toHaveLength(1);
@@ -220,9 +223,9 @@ describe('ChatSurface drill-in', () => {
 		const oldNodes = new Promise<typeof knownNode[]>((resolve) => {
 			resolveOld = resolve;
 		});
-		listExecutionSubAgents.mockImplementation(
-			async (_workspaceId: string, executionId: string) =>
-				executionId === 'exec-1' ? oldNodes : []
+		listChatSubAgents.mockImplementation(
+			async (_workspaceId: string, chatId: string) =>
+				chatId === 'chat-1' ? oldNodes : []
 		);
 		const controller = new WorkflowScopeController('alpha-lab', 'async-switch');
 		controller.attach('exec-1', execution, { externalEvents: true });
@@ -239,7 +242,8 @@ describe('ChatSurface drill-in', () => {
 	});
 
 	it('does not surface sub-agent replies in the root transcript', async () => {
-		listExecutionSubAgents.mockResolvedValue([]);
+		listChatSubAgents.mockResolvedValue([]);
+		listExecutionEvents.mockResolvedValue([]);
 		listNodeEvents.mockResolvedValue([]);
 		window.localStorage.clear();
 
@@ -269,13 +273,8 @@ describe('ChatSurface drill-in', () => {
 	});
 
 	it('drills in from a live workflow anchor before the execution record is fetched', async () => {
-		listExecutionSubAgents.mockImplementation(
-			async (
-				_ws: string,
-				_exec: string,
-				options: { parentSubAgentId?: string | null } = {}
-			) => (options.parentSubAgentId ? [] : [knownNode])
-		);
+		listChatSubAgents.mockResolvedValue([knownNode]);
+		listExecutionEvents.mockResolvedValue([]);
 		listNodeEvents.mockResolvedValue([]);
 		postNodeMessage.mockResolvedValue({ ...anchor, message_id: 'msg-node-2' });
 		window.localStorage.clear();
@@ -291,7 +290,7 @@ describe('ChatSurface drill-in', () => {
 			}
 		});
 
-		await waitFor(() => expect(listExecutionSubAgents).toHaveBeenCalled());
+		await waitFor(() => expect(listChatSubAgents).toHaveBeenCalled());
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await fireEvent.click(screen.getByTestId('workflow-card-body'));
 
@@ -308,7 +307,8 @@ describe('ChatSurface drill-in', () => {
 			role: 'Ideation',
 			status: 'completed',
 			acceptsInput: false,
-			context: { isolated: true, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } }
+			context: { isolated: true, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+			workflowExecutionId: 'exec-1'
 		};
 		const nodeB = {
 			subAgentId: 'sub-b',
@@ -317,22 +317,19 @@ describe('ChatSurface drill-in', () => {
 			role: 'Hypothesis',
 			status: 'running',
 			acceptsInput: false,
-			context: { isolated: true, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } }
+			context: { isolated: true, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+			workflowExecutionId: 'exec-1'
 		};
-		listExecutionSubAgents.mockResolvedValue([nodeA, nodeB]);
-		listNodeEvents.mockImplementation(
-			async (_ws: string, _exec: string, node: { kind: string }) =>
-				node.kind === 'execution'
-					? [
-							event('workflow.launched', { workflow: { phases: ['requested', 'ideation', 'hypothesis', 'report'] } }, 1),
-							event('workflow.started', {}, 2),
-							event('sub_agent.spawned', { subAgentId: 'sub-a', parentSubAgentId: null, phase: 'ideation', role: 'Ideation' }, 3),
-							event('sub_agent.completed', { subAgentId: 'sub-a', parentSubAgentId: null, phase: 'ideation', role: 'Ideation', frozen: true, status: 'completed' }, 4),
-							event('workflow.phase', { phase: 'hypothesis' }, 5),
-							event('sub_agent.spawned', { subAgentId: 'sub-b', parentSubAgentId: null, phase: 'hypothesis', role: 'Hypothesis' }, 6)
-						]
-					: []
-		);
+		listChatSubAgents.mockResolvedValue([nodeA, nodeB]);
+		listExecutionEvents.mockResolvedValue([
+			event('workflow.launched', { workflow: { phases: ['requested', 'ideation', 'hypothesis', 'report'] } }, 1),
+			event('workflow.started', {}, 2),
+			event('sub_agent.spawned', { subAgentId: 'sub-a', parentSubAgentId: null, phase: 'ideation', role: 'Ideation' }, 3),
+			event('sub_agent.completed', { subAgentId: 'sub-a', parentSubAgentId: null, phase: 'ideation', role: 'Ideation', frozen: true, status: 'completed' }, 4),
+			event('workflow.phase', { phase: 'hypothesis' }, 5),
+			event('sub_agent.spawned', { subAgentId: 'sub-b', parentSubAgentId: null, phase: 'hypothesis', role: 'Hypothesis' }, 6)
+		]);
+		listNodeEvents.mockResolvedValue([]);
 		window.localStorage.clear();
 
 		renderSurface();
@@ -347,8 +344,9 @@ describe('ChatSurface drill-in', () => {
 		expect(screen.queryByTestId('sub-agent-composer')).toBeNull();
 	});
 
-	it('drills into a phase from externally-ingested timeline events', async () => {
-		listExecutionSubAgents.mockResolvedValue([knownNode]);
+it('drills into a phase from externally-ingested timeline events', async () => {
+		listChatSubAgents.mockResolvedValue([knownNode]);
+		listExecutionEvents.mockResolvedValue([]);
 		listNodeEvents.mockResolvedValue([]);
 		window.localStorage.clear();
 		const spawn = event(
@@ -381,5 +379,134 @@ describe('ChatSurface drill-in', () => {
 
 		await waitFor(() => expect(screen.getByTestId('scope-transcript')).toBeInTheDocument());
 		expect(screen.getAllByTestId('scope-crumb')).toHaveLength(2);
+	});
+
+	it('hides the workflow node and enters the phase agent, then backs out to the anchor', async () => {
+		const anchorNode = {
+			subAgentId: 'anchor-1',
+			parentSubAgentId: null,
+			phase: '',
+			role: 'Researcher',
+			status: 'running',
+			acceptsInput: true,
+			context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+			workflowExecutionId: 'exec-1'
+		};
+		const workflowNode = {
+			subAgentId: 'wf-1',
+			parentSubAgentId: 'anchor-1',
+			phase: 'requested',
+			role: 'workflow-node',
+			status: 'spawned',
+			acceptsInput: false,
+			context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+			workflowExecutionId: 'exec-1'
+		};
+		const phaseAgent = {
+			subAgentId: 'phase-1',
+			parentSubAgentId: 'wf-1',
+			phase: 'research',
+			role: 'Phase researcher',
+			status: 'running',
+			acceptsInput: false,
+			context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+			workflowExecutionId: 'exec-1'
+		};
+		listChatSubAgents.mockResolvedValue([anchorNode, workflowNode, phaseAgent]);
+		listExecutionEvents.mockResolvedValue([]);
+		listNodeEvents.mockResolvedValue([]);
+		window.localStorage.clear();
+
+		renderSurface();
+		await waitFor(() => expect(screen.getByTestId('workflow-card')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByTestId('phase-step')).toHaveLength(1));
+		expect(screen.getByTestId('phase-step')).toHaveAttribute('data-phase', 'research');
+		expect(screen.queryByText('requested')).toBeNull();
+		expect(screen.queryByText('workflow-node')).toBeNull();
+
+		await fireEvent.click(screen.getByTestId('phase-step'));
+		await waitFor(() => expect(screen.getByTestId('scope-transcript')).toBeInTheDocument());
+		expect(screen.getAllByTestId('scope-crumb')).toHaveLength(3);
+		expect(listNodeEvents).toHaveBeenCalledWith(
+			'alpha-lab',
+			'chat-1',
+			{ kind: 'sub_agent', id: 'phase-1' },
+			{ includeDescendants: false }
+		);
+		expect(listNodeEvents).not.toHaveBeenCalledWith(
+			'alpha-lab',
+			'chat-1',
+			expect.objectContaining({ id: 'wf-1' }),
+			expect.anything()
+		);
+
+		await fireEvent.click(screen.getByTestId('scope-back'));
+		await waitFor(() => expect(screen.getAllByTestId('scope-crumb')).toHaveLength(2));
+		expect(screen.getAllByTestId('scope-crumb')[1]).toHaveTextContent('Researcher');
+		expect(screen.getByTestId('chat-surface')).not.toHaveTextContent('workflow-node');
+	});
+
+	it('does not change the selection when a workflow launch arrives', async () => {
+		const anchorNode = {
+			subAgentId: 'anchor-1',
+			parentSubAgentId: null,
+			phase: '',
+			role: 'Researcher',
+			status: 'running',
+			acceptsInput: true,
+			context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+			workflowExecutionId: 'exec-1'
+		};
+		const workflowNode = {
+			subAgentId: 'wf-1',
+			parentSubAgentId: 'anchor-1',
+			phase: 'requested',
+			role: 'workflow-node',
+			status: 'spawned',
+			acceptsInput: false,
+			context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+			workflowExecutionId: 'exec-1'
+		};
+		const phaseAgent = {
+			subAgentId: 'phase-1',
+			parentSubAgentId: 'wf-1',
+			phase: 'research',
+			role: 'Phase researcher',
+			status: 'running',
+			acceptsInput: false,
+			context: { isolated: false, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } },
+			workflowExecutionId: 'exec-1'
+		};
+		listChatSubAgents.mockResolvedValue([anchorNode, workflowNode, phaseAgent]);
+		listExecutionEvents.mockResolvedValue([]);
+		listNodeEvents.mockResolvedValue([]);
+		window.localStorage.clear();
+
+		const view = render(ChatSurface, {
+			props: {
+				workspaceId: 'alpha-lab',
+				chatId: 'chat-1',
+				messages: [],
+				execution: null,
+				onSend: vi.fn(),
+				hostId: 'launch-selection'
+			}
+		});
+		expect(screen.queryByTestId('scope-stack')).toBeNull();
+
+		await view.rerender({
+			messages: [anchor],
+			initialScope: 'conversation:chat-1/sub_agent:anchor-1'
+		});
+
+		await waitFor(() => expect(screen.getAllByTestId('scope-crumb')).toHaveLength(2));
+		expect(screen.getByTestId('scope-stack')).toHaveAttribute('data-depth', '2');
+		expect(screen.queryByText('workflow-node')).toBeNull();
+		expect(listNodeEvents).not.toHaveBeenCalledWith(
+			'alpha-lab',
+			'chat-1',
+			expect.objectContaining({ id: 'wf-1' }),
+			expect.anything()
+		);
 	});
 });

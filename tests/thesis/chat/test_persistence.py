@@ -5,11 +5,15 @@ from pathlib import Path
 
 import pytest
 
+from thesis.agent.runtime.lifecycle import SubAgentLifecycle
+from thesis.agent.runtime.specs import SubAgentSpec
+from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.chat import (
     ChatService,
     FileChatPersistence,
     MessageRole,
     RecordNotFound,
+    SubAgentStatus,
     TranscriptItemKind,
     WorkflowDefinition,
 )
@@ -189,6 +193,48 @@ def test_delete_cancels_active_workflow_before_cascading(tmp_path: Path) -> None
     assert ExecutionEventType.WORKFLOW_CANCELLED in event_types
     with pytest.raises(RecordNotFound):
         service.get_execution("workspace-a", execution.execution_id)
+
+
+def test_delete_cancels_the_chats_sub_agents_and_spares_other_chats(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    first = service.create_chat("workspace-a", title="First", owner_actor_id="operator")
+    second = service.create_chat(
+        "workspace-a", title="Second", owner_actor_id="operator"
+    )
+    store = PersistenceSubAgentStore(service.persistence)
+    lifecycle = SubAgentLifecycle(service, store=store)
+    node = lifecycle.spawn(
+        "workspace-a",
+        first.chat_id,
+        spec=SubAgentSpec(role="research"),
+        actor_id="operator",
+    )
+    child = lifecycle.spawn(
+        "workspace-a",
+        first.chat_id,
+        spec=SubAgentSpec(role="research"),
+        actor_id="operator",
+        parent_sub_agent_id=node.sub_agent_id,
+    )
+    other = lifecycle.spawn(
+        "workspace-a",
+        second.chat_id,
+        spec=SubAgentSpec(role="research"),
+        actor_id="operator",
+    )
+
+    service.delete_chat("workspace-a", first.chat_id)
+
+    stored_node = store.get_sub_agent("workspace-a", node.sub_agent_id)
+    stored_child = store.get_sub_agent("workspace-a", child.sub_agent_id)
+    stored_other = store.get_sub_agent("workspace-a", other.sub_agent_id)
+    # Cancelled, not deleted: the durable status is the cancellation fence a
+    # background node turn reads, so it must survive the chat removal.
+    assert stored_node is not None and stored_node.status is SubAgentStatus.CANCELLED
+    assert stored_child is not None and stored_child.status is SubAgentStatus.CANCELLED
+    assert stored_other is not None and stored_other.status is SubAgentStatus.PENDING
 
 
 def test_independent_chat_workflows_start_without_a_shared_queue(

@@ -50,7 +50,8 @@ vi.mock('$lib/api', () => ({
 	deleteChat: vi.fn(),
 	getExecution: vi.fn(async () => null),
 	listChats: vi.fn(async () => [chatThread('chat-1'), chatThread('chat-2')]),
-	listExecutionSubAgents: vi.fn(async () => []),
+	listChatSubAgents: vi.fn(async () => []),
+	listExecutionEvents: vi.fn(async () => []),
 	listNodeEvents: vi.fn(async () => []),
 	postMessage: vi.fn(),
 	postNodeMessage: vi.fn()

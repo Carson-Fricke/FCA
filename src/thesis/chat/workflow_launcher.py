@@ -27,9 +27,15 @@ from thesis.agent.runtime.delivery import Anchor, DeliveryService, TurnScheduler
 from thesis.chat.contracts import RecordNotFound
 from thesis.chat.responder import DevelopmentRuntime, development_summary
 from thesis.chat.service import ChatService
+from thesis.workflows.core.registry import WorkflowRegistry
+from thesis.workflows.core.spec import WorkflowContext
+from thesis.workflows.registry import (
+    HYPOTHESIS_DEVELOPMENT_WORKFLOW_ID,
+    build_workflow_registry,
+)
 
 if TYPE_CHECKING:
-    from thesis.workflows.hypothesis_development import (
+    from thesis.workflows.registry.hypothesis_development import (
         HypothesisDevelopmentOutcome,
         HypothesisDevelopmentRequest,
     )
@@ -39,6 +45,15 @@ AnchorPublisher = Callable[[str, str, str], None]
 
 #: Runs one zero-argument callable out of band.
 Detach = Callable[[Callable[[], None]], None]
+
+#: Phase values that legitimately wake the parent model.
+#:
+#: Only a terminal outcome wakes the parent by default.  A workflow that pauses
+#: for operator review surfaces that through its own node and does not prompt
+#: the parent; asking the parent to react to a non-terminal phase would let it
+#: start the same work again.  A workflow that does want a non-terminal wake
+#: injects a wider set through ``wake_phases``.
+DEFAULT_WAKE_PHASES: frozenset[str] = frozenset({"completed", "failed"})
 
 #: The initial phase of a freshly launched execution, before the detached run
 #: advances it.
@@ -66,6 +81,9 @@ class AnchoredWorkflowLaunch(Protocol):
     ) -> HypothesisDevelopmentRequest:
         """Persist the chat trigger and return the runnable request."""
 
+    def prepare_phase(self, request: HypothesisDevelopmentRequest) -> str | None:
+        """Spawn and seed the current phase's agent without running a turn."""
+
 
 class RuntimeWorkflowLauncher:
     """Adapt the workflow-development runtime to the workflow-launch tool."""
@@ -75,16 +93,45 @@ class RuntimeWorkflowLauncher:
         runtime: DevelopmentRuntime,
         chat: ChatService,
         *,
-        publish_anchor: AnchorPublisher | None = None,
         detach: Detach | None = None,
         turn_scheduler: TurnScheduler | None = None,
         delivery: DeliveryService | None = None,
+        wake_phases: frozenset[str] | None = None,
+        registry: WorkflowRegistry | None = None,
     ) -> None:
         self._runtime = runtime
         self._chat = chat
-        self._publish_anchor = publish_anchor
         self._detach = detach or _daemon_thread
         self._delivery = delivery or DeliveryService(chat, schedule=turn_scheduler)
+        self._wake_phases = (
+            DEFAULT_WAKE_PHASES if wake_phases is None else frozenset(wake_phases)
+        )
+        # Dispatch is registry lookup: the generic execute below resolves the
+        # requested id and hands off to the registration's execute entry point.
+        self._registry = (
+            registry
+            if registry is not None
+            else build_workflow_registry(hypothesis_execute=self._launch_hypothesis)
+        )
+
+    @property
+    def workflows(self) -> WorkflowRegistry:
+        """Return the registry resolving workflow ids to their registrations."""
+        return self._registry
+
+    def execute(
+        self,
+        workflow_id: str,
+        context: WorkflowContext,
+        *,
+        ideas: str,
+        investigation_id: str | None = None,
+    ) -> Mapping[str, object]:
+        """Resolve ``workflow_id`` and launch it through its registration."""
+        registration = self._registry.resolve(workflow_id)
+        return registration.execute(
+            context, ideas=ideas, investigation_id=investigation_id
+        )
 
     def start_hypothesis_development(
         self,
@@ -96,6 +143,27 @@ class RuntimeWorkflowLauncher:
         investigation_id: str | None = None,
         trigger_message_id: str | None = None,
         anchor_sub_agent_id: str | None = None,
+    ) -> Mapping[str, object]:
+        """Launch one hypothesis-development execution and return its handle."""
+        return self.execute(
+            HYPOTHESIS_DEVELOPMENT_WORKFLOW_ID,
+            WorkflowContext(
+                workspace_id=workspace_id,
+                chat_id=chat_id,
+                actor_id=actor_id,
+                trigger_message_id=trigger_message_id,
+                anchor_sub_agent_id=anchor_sub_agent_id,
+            ),
+            ideas=ideas,
+            investigation_id=investigation_id,
+        )
+
+    def _launch_hypothesis(
+        self,
+        context: WorkflowContext,
+        *,
+        ideas: str,
+        investigation_id: str | None = None,
     ) -> Mapping[str, object]:
         """Launch one hypothesis-development execution and return its handle.
 
@@ -109,6 +177,9 @@ class RuntimeWorkflowLauncher:
         handle; the workflow's outcome is delivered at the caller's anchor as a
         durable ``workflow_execution`` datum once the detached run returns.
         """
+        workspace_id = context.workspace_id
+        chat_id = context.chat_id
+        trigger_message_id = context.trigger_message_id
         if trigger_message_id is None or not trigger_message_id.strip():
             raise ValueError(
                 "a workflow launch requires the requesting message; no synthetic "
@@ -133,15 +204,13 @@ class RuntimeWorkflowLauncher:
         request = workflow.launch(
             workspace_id,
             chat_id,
-            actor_id=actor_id,
+            actor_id=context.actor_id,
             ideas=ideas,
             investigation_id=resolved_investigation,
             trigger_message_id=trigger_message_id,
-            anchor_sub_agent_id=anchor_sub_agent_id,
+            anchor_sub_agent_id=context.anchor_sub_agent_id,
         )
-        if self._publish_anchor is not None:
-            self._publish_anchor(workspace_id, chat_id, request.execution_id)
-        anchor = Anchor(workspace_id, chat_id, sub_agent_id=anchor_sub_agent_id)
+        anchor = Anchor(workspace_id, chat_id, sub_agent_id=context.anchor_sub_agent_id)
         self._detach(lambda: self._finish(request, anchor))
         return {
             "executionId": request.execution_id,
@@ -159,20 +228,27 @@ class RuntimeWorkflowLauncher:
         request: HypothesisDevelopmentRequest,
         anchor: Anchor,
     ) -> None:
-        """Run the detached execution and deliver its outcome at the anchor."""
+        """Run the detached execution and deliver its outcome at the anchor.
+
+        A non-terminal outcome (for example ``paused``) is deliberately not
+        delivered: the workflow's own node is the operator surface for that, and
+        waking the parent model there invites it to launch the work again.
+        """
         try:
-            outcome = self._runtime.execute_hypothesis_development(
-                request, chat=self._chat
+            workflow = cast(
+                AnchoredWorkflowLaunch,
+                self._runtime.build_hypothesis_development(chat=self._chat),
             )
+            workflow.prepare_phase(request)
         except Exception as error:  # noqa: BLE001 - a launch fault is delivered
             message = str(error) or type(error).__name__
             datum = datum_from_result(
-                DatumType.WORKFLOW_EXECUTION.value,
+                DatumType.WORKFLOW_OUTCOME.value,
                 ok=False,
                 structured={
                     "executionId": request.execution_id,
-                    "phase": "failed",
-                    "verdict": None,
+                    "status": "failed",
+                    "phase": _LAUNCHED_PHASE,
                 },
                 text=(
                     f"Hypothesis development {request.execution_id} failed: {message}."
@@ -180,7 +256,7 @@ class RuntimeWorkflowLauncher:
                 failure={"kind": "workflow", "message": message},
             )
         else:
-            datum = self._outcome_datum(outcome)
+            return
         self._delivery.deliver(
             anchor,
             datum,
@@ -192,10 +268,13 @@ class RuntimeWorkflowLauncher:
         """Project one workflow outcome into its delivered datum."""
         verdict = outcome.verdict
         return datum_from_result(
-            DatumType.WORKFLOW_EXECUTION.value,
+            DatumType.WORKFLOW_OUTCOME.value,
             ok=outcome.phase.value != "failed",
             structured={
                 "executionId": outcome.execution_id,
+                "status": (
+                    "failed" if outcome.phase.value == "failed" else "completed"
+                ),
                 "phase": outcome.phase.value,
                 "verdict": (
                     None
