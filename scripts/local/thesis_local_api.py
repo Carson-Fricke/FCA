@@ -493,6 +493,9 @@ if os.environ.get("OPENROUTER_API_KEY"):
         lifecycle=lifecycle,
         policies=operator_policies,
         on_fault=_fail_phase_execution,
+        on_turn_error=lambda error: print(
+            f"TURN ERROR: {error[2]!r}", file=sys.stderr, flush=True
+        ),
     )
 
     control_service = _LoggingControlToolService(

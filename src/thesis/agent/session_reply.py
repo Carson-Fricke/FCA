@@ -68,6 +68,11 @@ def _seed_messages(
     for message in history:
         role = _role_name(message.role)
         body = message.body.strip()
+        if role == "tool":
+            # Root tool results lack their assistant tool-call envelope, so
+            # replaying them would make the provider reject the request.
+            # The assistant's summary already reflects what happened.
+            continue
         if role in _CHAT_ROLES and body:
             messages.append(ProviderChatMessage(role=role, content=body))
     return messages

@@ -658,6 +658,11 @@ class Conversation:
             )
             if message.role in _HISTORY_ROLES and _owns_anchor(message, None)
         )[-service.max_history :]
+        _LOGGER.info(
+            "DIAG _run_reply_turn: history=%d last_role=%s",
+            len(history),
+            history[-1].role.value if history else "none",
+        )
         if not history:
             return None
         stream_id = service.next_stream_id()
@@ -668,9 +673,11 @@ class Conversation:
         answer_chunks: list[str] = []
         reasoning_chunks: list[str] = []
         try:
-            for chunk in service.reply_for(
+            reply_chunks = service.reply_for(
                 self._anchor.workspace_id, self._anchor.chat_id, history
-            ):
+            )
+            _LOGGER.info("DIAG _run_reply_turn: reply_for returned %r", reply_chunks)
+            for chunk in reply_chunks:
                 if isinstance(chunk, ToolResultChunk):
                     chunk = service.observe_tool_result(
                         self._anchor.workspace_id, self._anchor.chat_id, chunk
@@ -701,6 +708,7 @@ class Conversation:
                 answer_chunks.append(text)
                 sink.text(stream_id, text)
         except Exception as error:  # fail closed at the task boundary
+            _LOGGER.info("DIAG _run_reply_turn EXCEPTION: %r", error, exc_info=True)
             sink.failed(stream_id, str(error))
             return None
         body = _sanitize("".join(answer_chunks))
