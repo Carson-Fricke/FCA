@@ -2,6 +2,7 @@
 
 from thesis.chat.azure import AzureBlobChatPersistence
 from thesis.chat.contracts import (
+    RECORD_ANCHOR_ROLES,
     AgentInvocation,
     AgentInvocationKind,
     AgentInvocationState,
@@ -32,7 +33,7 @@ from thesis.chat.contracts import (
     replace_record,
 )
 from thesis.chat.persistence import FileChatPersistence
-from thesis.chat.responder import ChatReplyService, ReplyChunk, ReplyProvider
+from thesis.chat.responder import ReplyChunk, ReplyProvider
 from thesis.chat.service import ChatPersistence, ChatService, InMemoryChatPersistence
 from thesis.chat.streaming import (
     CHAT_MESSAGE,
@@ -52,7 +53,6 @@ __all__ = [
     "ChatContractError",
     "ChatMessage",
     "ChatPersistence",
-    "ChatReplyService",
     "ChatService",
     "ChatState",
     "ChatStreamFrame",
@@ -67,6 +67,7 @@ __all__ = [
     "MessageRole",
     "MessageState",
     "PROVIDER_DELTA",
+    "RECORD_ANCHOR_ROLES",
     "RecordLinks",
     "RecordNotFound",
     "ReplyChunk",

@@ -17,7 +17,8 @@ from thesis.agent.runtime.control_tools import (
     CONTROL_NODE_TOOL_NAMES,
     control_registered_tools,
 )
-from thesis.agent.runtime.delivery import DeliveryService, NodeInputService
+from thesis.agent.runtime.conversation import Conversations
+from thesis.agent.runtime.delivery import NodeInputService
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import AnsweringActor, OperatorActorKind
 from thesis.agent.runtime.specs import SubAgentSpec
@@ -87,17 +88,17 @@ def test_reset_epoch_restores_budgets() -> None:
     assert protocol.submit({"claim": "x"}, _construct).accepted
 
 
-def _service() -> tuple[ControlToolService, SubAgentLifecycle, ChatService]:
+def _service(
+    **conversations_fields,
+) -> tuple[ControlToolService, SubAgentLifecycle, ChatService]:
     chat = ChatService(persistence=InMemoryChatPersistence())
     chat.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
     store = PersistenceSubAgentStore(chat.persistence)
     lifecycle = SubAgentLifecycle(chat, store=store)
-    service = ControlToolService(
-        lifecycle=lifecycle,
-        store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(chat),
+    conversations = Conversations(
+        chat=chat, store=store, lifecycle=lifecycle, **conversations_fields
     )
+    service = ControlToolService(conversations=conversations)
     return service, lifecycle, chat
 
 
@@ -179,10 +180,7 @@ def test_stale_epoch_completion_is_rejected_in_turn() -> None:
         workflow_execution_id=execution.execution_id,
     )
     service = ControlToolService(
-        lifecycle=lifecycle,
-        store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(chat),
+        conversations=Conversations(chat=chat, store=store, lifecycle=lifecycle),
         execution_epochs=lambda _workspace, _execution: 2,
     )
 
@@ -314,14 +312,15 @@ def test_await_sub_agent_waits_for_a_child_to_finish() -> None:
         lifecycle.complete(_WORKSPACE, child.sub_agent_id, result={"summary": "24"})
 
     service = ControlToolService(
-        lifecycle=lifecycle,
-        store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(chat),
-        sleep=sleep,
-        monotonic=lambda: 0.0,
-        await_timeout_seconds=5.0,
-        poll_interval_seconds=0.01,
+        conversations=Conversations(
+            chat=chat,
+            store=store,
+            lifecycle=lifecycle,
+            await_sleep=sleep,
+            await_monotonic=lambda: 0.0,
+            await_timeout_seconds=5.0,
+            poll_interval_seconds=0.01,
+        )
     )
 
     result = service.await_sub_agent(_WORKSPACE, child.sub_agent_id)
@@ -348,13 +347,14 @@ def test_await_sub_agent_returns_the_current_state_at_the_timeout() -> None:
     ticks = iter([0.0, 10.0, 10.0])
     sleeps: list[float] = []
     service = ControlToolService(
-        lifecycle=lifecycle,
-        store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(chat),
-        sleep=lambda seconds: sleeps.append(seconds),
-        monotonic=lambda: next(ticks),
-        await_timeout_seconds=5.0,
+        conversations=Conversations(
+            chat=chat,
+            store=store,
+            lifecycle=lifecycle,
+            await_sleep=lambda seconds: sleeps.append(seconds),
+            await_monotonic=lambda: next(ticks),
+            await_timeout_seconds=5.0,
+        )
     )
 
     result = service.await_sub_agent(_WORKSPACE, child.sub_agent_id)

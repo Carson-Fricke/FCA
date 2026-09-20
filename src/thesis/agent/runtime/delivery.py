@@ -188,11 +188,6 @@ class DeliveryService:
         self._schedule = schedule
         self._clock = clock
 
-    @property
-    def scheduler(self) -> TurnScheduler | None:
-        """Return the injected turn scheduler, if any."""
-        return self._schedule
-
     def deliver(
         self,
         anchor: Anchor,

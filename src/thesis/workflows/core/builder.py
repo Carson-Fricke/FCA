@@ -3,10 +3,14 @@
 The builder is the one construction path for a
 :class:`~thesis.workflows.core.spec.WorkflowSpec`.  It fails closed: a spec
 with a missing piece or an inconsistent table never reaches the registry.
-``build`` rejects a spec whose phases lack executors, whose transitions
-reference undeclared phases, whose piping references an undeclared transition,
-or that declares no terminal phase, then returns the single general
+``build`` rejects a spec whose transitions reference undeclared phases, whose
+piping references an undeclared transition, or that declares no terminal
+phase, then returns the single general
 :class:`~thesis.workflows.core.workflow.Workflow` object that runs it.
+
+Phases arrive as sealed-union objects (conversation, one-shot, deterministic),
+so an invalid combination cannot be expressed here: the builder performs no
+cross-field validation, only structural checks over names and tables.
 """
 
 from __future__ import annotations
@@ -14,14 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, Self, cast
 
-from thesis.workflows.core.phase import (
-    PhaseExecutor,
-    PhaseKind,
-    PhaseSeed,
-    PhaseSpec,
-    PhaseValidator,
-    WorkflowSpecError,
-)
+from thesis.workflows.core.phase import PhaseSpec, WorkflowSpecError
 from thesis.workflows.core.spec import (
     PipingFunction,
     StartHandoff,
@@ -60,31 +57,9 @@ class WorkflowBuilder[
         self._title = title
         return self
 
-    def phase(
-        self,
-        phase: str,
-        executor: PhaseExecutor[WorkflowT, RequestT, StateT] | None = None,
-        *,
-        kind: PhaseKind = PhaseKind.AGENT,
-        terminal: bool = False,
-        seed: PhaseSeed[WorkflowT, RequestT, StateT] | None = None,
-        validate: PhaseValidator | None = None,
-        on_complete: str | None = None,
-        required: tuple[str, ...] = (),
-    ) -> Self:
-        """Declare one ordered phase, its seed, and its completion contract."""
-        self._phases.append(
-            PhaseSpec(
-                phase=phase,
-                executor=executor,
-                kind=kind,
-                terminal=terminal,
-                seed=seed,
-                validate=validate,
-                on_complete=on_complete,
-                required=required,
-            )
-        )
+    def phase(self, spec: PhaseSpec[WorkflowT, RequestT, StateT]) -> Self:
+        """Declare one ordered phase as a sealed-union spec object."""
+        self._phases.append(spec)
         return self
 
     def transition(self, source: str, target: str) -> Self:
@@ -173,12 +148,6 @@ class WorkflowBuilder[
             if phase.phase in declared:
                 errors.append(f"phase {phase.phase!r} is declared twice")
             declared.add(phase.phase)
-            if phase.executor is None and phase.seed is None:
-                errors.append(f"phase {phase.phase!r} has no executor or seed")
-            if phase.kind is PhaseKind.DETERMINISTIC and phase.executor is None:
-                errors.append(
-                    f"deterministic phase {phase.phase!r} requires an executor"
-                )
             if phase.on_complete is not None and phase.on_complete not in {
                 target
                 for source, targets in self._transitions.items()

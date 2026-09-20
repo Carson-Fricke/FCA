@@ -12,7 +12,6 @@ from thesis.agent.harness_tools import (
     HarnessToolResult,
     HarnessToolSpec,
 )
-from thesis.agent.runtime.child_runner import ChildRunner
 from thesis.agent.runtime.context import ToolContext, ToolContextError
 from thesis.agent.runtime.control import (
     TOOL_REQUEST_PHASE_COMPLETION,
@@ -24,8 +23,9 @@ from thesis.agent.runtime.control_tools import (
     ControlToolRuntime,
     control_registered_tools,
 )
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.datum import DatumType
-from thesis.agent.runtime.delivery import DeliveryService, NodeInputService
+from thesis.agent.runtime.delivery import Anchor, NodeInputService
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
     DEFAULT_ROOT_BUDGET_CEILING,
@@ -39,19 +39,20 @@ from thesis.agent.runtime.policy import (
 from thesis.agent.runtime.registry import THESIS_TOOL_NAMES, build_session_registry
 from thesis.agent.runtime.session import SessionToolRegistry
 from thesis.agent.runtime.specs import SubAgentSpec
-from thesis.agent.runtime.store import InMemorySubAgentStore, PersistenceSubAgentStore
+from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.agent.runtime.workflow_tools import (
     WorkflowLauncher,
     workflow_registered_tools,
 )
 from thesis.agent.session_reply import SessionReplyProvider
 from thesis.chat.contracts import (
+    ChatMessage,
     MessageRole,
     SubAgentKind,
     SubAgentStatus,
     TranscriptItemKind,
 )
-from thesis.chat.responder import ChatReplyService, ReplyChunk, ToolResultChunk
+from thesis.chat.responder import ReplyChunk, ToolResultChunk
 from thesis.chat.service import ChatService, InMemoryChatPersistence
 from thesis.chat.streaming import InMemoryChatStreamBroker
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
@@ -500,10 +501,7 @@ def test_top_level_operator_question_renders_as_the_tool_result_only() -> None:
     store = PersistenceSubAgentStore(chat.persistence)
     lifecycle = SubAgentLifecycle(chat, store=store)
     service = ControlToolService(
-        lifecycle=lifecycle,
-        store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(chat),
+        conversations=Conversations(chat=chat, store=store, lifecycle=lifecycle)
     )
     registry = build_session_registry(
         context=_context(allowed=("request_operator_input",)),
@@ -526,26 +524,22 @@ def test_top_level_operator_question_renders_as_the_tool_result_only() -> None:
         ]
     )
 
-    def provider_factory(
-        workspace_id: str, chat_id: str, history: Sequence[ProviderChatMessage]
-    ) -> SessionReplyProvider:
-        del history
+    def reply_source(workspace_id: str, chat_id: str, history: Sequence[ChatMessage]):
         return SessionReplyProvider(
             workspace_id=workspace_id,
             chat_id=chat_id,
             conversation_id=chat_id,
             provider=provider,
             registry=registry,
-        )
+        )(list(history))
 
-    reply = ChatReplyService(
-        chat_service=chat,
+    conversations = Conversations(
+        chat=chat,
         broker=InMemoryChatStreamBroker(),
-        provider=lambda history: iter(()),
-        provider_factory=provider_factory,
+        reply_for=reply_source,
     )
 
-    reply.respond(_WORKSPACE, thread.chat_id)
+    conversations.root(_WORKSPACE, thread.chat_id).run_turn()
 
     # The operator question renders as the request_operator_input tool result
     # at the root anchor; no operator-question chat message is ever written.
@@ -587,14 +581,13 @@ def test_sub_agent_completion_tools_deliver_the_result_to_the_caller() -> None:
         parent_sub_agent_id=parent.sub_agent_id,
     )
     scheduled: list[str] = []
-    service = ControlToolService(
-        lifecycle=lifecycle,
+    conversations = Conversations(
+        chat=chat,
         store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(
-            chat, schedule=lambda ws, c, node: scheduled.append(node)
-        ),
+        lifecycle=lifecycle,
+        spawn_thread=lambda target: scheduled.append("woke"),
     )
+    service = ControlToolService(conversations=conversations)
     context = ToolContext(
         workspace_id=_WORKSPACE,
         chat_id=chat_id,
@@ -637,7 +630,9 @@ def test_sub_agent_completion_tools_deliver_the_result_to_the_caller() -> None:
     assert delivered[0].data is not None
     assert delivered[0].data["subAgentId"] == parent.sub_agent_id
     assert delivered[0].data["result"] == {"verdict": "supported", "intentEpoch": 0}
-    assert scheduled == [parent.sub_agent_id]
+    # The result delivery woke the caller's conversation exactly once.
+    assert scheduled == ["woke"]
+    assert conversations.in_flight(_WORKSPACE, chat_id, parent.sub_agent_id) is True
 
 
 def test_phase_completion_tool_marks_the_phase_node_terminal() -> None:
@@ -662,14 +657,13 @@ def test_phase_completion_tool_marks_the_phase_node_terminal() -> None:
         parent_sub_agent_id=node.sub_agent_id,
     )
     scheduled: list[str] = []
-    service = ControlToolService(
-        lifecycle=lifecycle,
+    conversations = Conversations(
+        chat=chat,
         store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(
-            chat, schedule=lambda ws, c, node: scheduled.append(node)
-        ),
+        lifecycle=lifecycle,
+        spawn_thread=lambda target: scheduled.append("woke"),
     )
+    service = ControlToolService(conversations=conversations)
     context = ToolContext(
         workspace_id=_WORKSPACE,
         chat_id=chat_id,
@@ -694,55 +688,60 @@ def test_phase_completion_tool_marks_the_phase_node_terminal() -> None:
     # A phase agent's parent is the workflow node: the completion is recorded
     # there but never schedules a turn, because no agent owns that record.
     assert scheduled == []
+    assert conversations.in_flight(_WORKSPACE, chat_id, node.sub_agent_id) is False
 
 
-def test_child_runner_leaves_a_paused_child_for_the_operator_answer() -> None:
+def test_a_paused_child_stays_for_the_operator_answer() -> None:
     chat = ChatService(persistence=InMemoryChatPersistence())
     thread = chat.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
     chat_id = thread.chat_id
     store = PersistenceSubAgentStore(chat.persistence)
     lifecycle = SubAgentLifecycle(chat, store=store)
-    child = lifecycle.spawn(
-        _WORKSPACE,
-        chat_id,
-        spec=SubAgentSpec(
+    holder: list[Conversations] = []
+
+    def registry_factory(context: ToolContext):
+        return build_session_registry(
+            context=context,
+            control=ControlToolService(conversations=holder[0]),
+        )
+
+    conversations = Conversations(
+        chat=chat,
+        store=store,
+        lifecycle=lifecycle,
+        provider=_FakeProvider(
+            [
+                _completion(
+                    tool_calls=(
+                        ToolCall(
+                            id="c1",
+                            name="request_operator_input",
+                            arguments='{"message": "Approve the model?"}',
+                        ),
+                    )
+                )
+            ]
+        ),
+        registry_factory=registry_factory,
+        spawn_thread=lambda target: None,
+    )
+    holder.append(conversations)
+    child = conversations.spawn(
+        Anchor(_WORKSPACE, chat_id),
+        SubAgentSpec(
             role="research",
             kind=SubAgentKind.ONE_SHOT,
             allowed_tools=("request_operator_input",),
         ),
+        "do the thing",
+        SubAgentKind.ONE_SHOT,
         actor_id=_ACTOR,
     )
-    service = ControlToolService(
-        lifecycle=lifecycle,
-        store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(chat),
-    )
-    provider = _FakeProvider(
-        [
-            _completion(
-                tool_calls=(
-                    ToolCall(
-                        id="c1",
-                        name="request_operator_input",
-                        arguments='{"message": "Approve the model?"}',
-                    ),
-                )
-            ),
-        ]
-    )
-    runner = ChildRunner(
-        chat=chat,
-        store=store,
-        lifecycle=lifecycle,
-        provider=provider,
-        registry_factory=lambda context: build_session_registry(
-            context=context, control=service
-        ),
-    )
 
-    paused = runner.run(child, "do the thing")
+    child.run_turn()
 
+    paused = child.record
+    assert paused is not None
     assert paused.status is SubAgentStatus.NEEDS_INPUT
     assert paused.accepts_input is True
     assert not any(
@@ -754,13 +753,13 @@ def test_child_runner_leaves_a_paused_child_for_the_operator_answer() -> None:
     receipt = inputs.accept(
         _WORKSPACE,
         chat_id,
-        child.sub_agent_id,
+        child.conversation_id,
         body="approved",
         actor=AnsweringActor(actor_id=_ACTOR, kind=OperatorActorKind.HUMAN_OPERATOR),
     )
 
     assert receipt.scheduled is False
-    resumed = lifecycle.get(_WORKSPACE, child.sub_agent_id)
+    resumed = lifecycle.get(_WORKSPACE, child.conversation_id)
     assert resumed is not None
     assert resumed.status is SubAgentStatus.RUNNING
 
@@ -839,32 +838,33 @@ def test_session_reply_projects_text_and_tool_chunks() -> None:
     assert "final answer" in text
 
 
-def test_child_runner_completes_and_delivers_to_the_chat() -> None:
+def test_spawned_child_completes_and_delivers_to_the_chat() -> None:
     chat = ChatService(persistence=InMemoryChatPersistence())
     thread = chat.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
     chat_id = thread.chat_id
-    store = InMemorySubAgentStore()
+    store = PersistenceSubAgentStore(chat.persistence)
     lifecycle = SubAgentLifecycle(chat, store=store)
-    child = lifecycle.spawn(
-        _WORKSPACE,
-        chat_id,
-        spec=SubAgentSpec(role="research", allowed_tools=("run_study",)),
-        actor_id=_ACTOR,
-    )
-    scheduled: list[tuple[str, str, str]] = []
-    runner = ChildRunner(
+    woke: list[object] = []
+    conversations = Conversations(
         chat=chat,
         store=store,
         lifecycle=lifecycle,
         provider=_FakeProvider([_completion(content="child done")]),
         registry_factory=lambda context: SessionToolRegistry(),
-        schedule=lambda workspace, chat_id, sub_agent_id: scheduled.append(
-            (workspace, chat_id, sub_agent_id)
-        ),
+        spawn_thread=lambda target: woke.append(target),
+    )
+    child = conversations.spawn(
+        Anchor(_WORKSPACE, chat_id),
+        SubAgentSpec(role="research", allowed_tools=("run_study",)),
+        "do the thing",
+        SubAgentKind.ONE_SHOT,
+        actor_id=_ACTOR,
     )
 
-    terminal = runner.run(child, "do the thing")
+    child.run_turn()
 
+    terminal = child.record
+    assert terminal is not None
     assert terminal.status.value == "completed"
     assert terminal.result == {"summary": "child done"}
     messages = chat.list_messages(_WORKSPACE, chat_id)
@@ -873,41 +873,7 @@ def test_child_runner_completes_and_delivers_to_the_chat() -> None:
         and message.kind is TranscriptItemKind.SUB_AGENT
         for message in messages
     )
-    assert scheduled == [(_WORKSPACE, chat_id, "")]
-
-
-def test_child_runner_anchors_the_trigger_on_its_own_task_message() -> None:
-    chat = ChatService(persistence=InMemoryChatPersistence())
-    thread = chat.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
-    store = InMemorySubAgentStore()
-    lifecycle = SubAgentLifecycle(chat, store=store)
-    child = lifecycle.spawn(
-        _WORKSPACE,
-        thread.chat_id,
-        spec=SubAgentSpec(role="research", allowed_tools=("start_workflow",)),
-        actor_id=_ACTOR,
-    )
-    contexts: list[ToolContext] = []
-
-    def registry_factory(context: ToolContext) -> SessionToolRegistry:
-        contexts.append(context)
-        return SessionToolRegistry()
-
-    runner = ChildRunner(
-        chat=chat,
-        store=store,
-        lifecycle=lifecycle,
-        provider=_FakeProvider([_completion(content="done")]),
-        registry_factory=registry_factory,
-    )
-
-    runner.run(child, "develop this idea")
-
-    task_message = next(
-        message
-        for message in chat.list_messages(_WORKSPACE, thread.chat_id)
-        if message.data is not None and message.data.get("kind") == "child_task"
-    )
-    assert task_message.role is MessageRole.USER
-    assert contexts[0].sub_agent_id == child.sub_agent_id
-    assert contexts[0].trigger_message_id == task_message.message_id
+    # The prompt delivery woke the child, and its delivered result woke the
+    # root conversation the child returns to.
+    assert len(woke) == 2
+    assert conversations.in_flight(_WORKSPACE, chat_id, "") is True

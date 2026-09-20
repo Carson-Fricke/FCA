@@ -36,8 +36,7 @@ from thesis.agent.router import (
     Role,
     RolePolicy,
 )
-from thesis.agent.runtime.delivery import TurnScheduler
-from thesis.agent.runtime.lifecycle import SubAgentLifecycle
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.service import ChatService
@@ -165,8 +164,7 @@ def build_workflow_runtime(
     bundle_hashes: Mapping[str, str] | None = None,
     backtest_mode: BacktestMode = "local",
     metadata: Mapping[str, object] | None = None,
-    subagent_lifecycle: SubAgentLifecycle | None = None,
-    turn_scheduler: TurnScheduler | None = None,
+    conversations: Conversations | None = None,
     clock: Callable[[], datetime] = _utc_now,
     id_factory: Callable[[str], str] = _new_id,
     invocation_id_factory: Callable[[], str] | None = None,
@@ -232,8 +230,7 @@ def build_workflow_runtime(
         harness_tools=harness_tools,
         validator=strategy_validator,
         hypothesis_store=hypothesis_store,
-        subagent_lifecycle=subagent_lifecycle,
-        turn_scheduler=turn_scheduler,
+        conversations=conversations,
         clock=clock,
         id_factory=id_factory,
     )
@@ -259,8 +256,7 @@ class WorkflowRuntime:
         harness_tools: HarnessToolProvider | None = None,
         validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
-        subagent_lifecycle: SubAgentLifecycle | None = None,
-        turn_scheduler: TurnScheduler | None = None,
+        conversations: Conversations | None = None,
         clock: Callable[[], datetime] = _utc_now,
         id_factory: Callable[[str], str] = _new_id,
     ) -> None:
@@ -287,8 +283,7 @@ class WorkflowRuntime:
         self._harness_tools = harness_tools
         self._validator = validator
         self._hypothesis_store = hypothesis_store
-        self._subagent_lifecycle = subagent_lifecycle
-        self._turn_scheduler = turn_scheduler
+        self._conversations = conversations
         self._clock = clock
         self._id_factory = id_factory
 
@@ -366,8 +361,7 @@ class WorkflowRuntime:
             coding_role=coding_role,
             experiment_id=experiment_id,
             max_rca_cycles=max_rca_cycles,
-            subagent_lifecycle=self._subagent_lifecycle,
-            turn_scheduler=self._turn_scheduler,
+            conversations=self._conversations,
         )
 
 

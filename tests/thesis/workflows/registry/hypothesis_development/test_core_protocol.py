@@ -55,31 +55,18 @@ def test_phase_transition_table_is_explicit_and_auditable() -> None:
     assert HYPOTHESIS_DEVELOPMENT_WORKFLOW.phases == HYPOTHESIS_DEVELOPMENT_PHASES
 
 
-def test_registered_hypothesis_spec_uses_real_phase_executors_and_piping() -> None:
+def test_registered_hypothesis_spec_declares_real_phases_and_piping() -> None:
+    from thesis.workflows.core.phase import (
+        ConversationPhase,
+        DeterministicPhase,
+        OneShotPhase,
+    )
     from thesis.workflows.registry import build_hypothesis_development_spec
     from thesis.workflows.registry.hypothesis_development.phases import (
         HypothesisDevelopmentPhase,
     )
-    from thesis.workflows.registry.hypothesis_development.phases.backtesting import (
-        run_strategy_backtest,
-    )
-    from thesis.workflows.registry.hypothesis_development.phases.creation import (
-        run_creation_turn,
-    )
-    from thesis.workflows.registry.hypothesis_development.phases.design import (
-        advance_design,
-    )
-    from thesis.workflows.registry.hypothesis_development.phases.optimization import (
-        optimize,
-    )
-    from thesis.workflows.registry.hypothesis_development.phases.strategy_rca import (
-        diagnose_strategy,
-    )
     from thesis.workflows.registry.hypothesis_development.phases.trials import (
-        advance_trials,
-    )
-    from thesis.workflows.registry.hypothesis_development.phases.verdict import (
-        advance_verdict,
+        run_falsification_trials,
     )
     from thesis.workflows.registry.hypothesis_development.piping import (
         reset_backtests,
@@ -88,31 +75,31 @@ def test_registered_hypothesis_spec_uses_real_phase_executors_and_piping() -> No
 
     spec = build_hypothesis_development_spec()
 
-    executors = spec.executors
-    assert (
-        executors[HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value]
-        is run_creation_turn
-    )
-    assert executors[HypothesisDevelopmentPhase.FALSIFICATION_TRIALS.value] is (
-        advance_trials
-    )
-    assert executors[HypothesisDevelopmentPhase.VERDICT.value] is advance_verdict
-    assert executors[HypothesisDevelopmentPhase.STRATEGY_DESIGN.value] is advance_design
-    assert executors[HypothesisDevelopmentPhase.STRATEGY_BACKTESTING.value] is (
-        run_strategy_backtest
-    )
-    assert executors[HypothesisDevelopmentPhase.STRATEGY_RCA.value] is diagnose_strategy
-    assert executors[HypothesisDevelopmentPhase.OPTIMIZATION.value] is optimize
-    active_phases = (
-        HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value,
-        HypothesisDevelopmentPhase.FALSIFICATION_TRIALS.value,
-        HypothesisDevelopmentPhase.VERDICT.value,
+    # The conversational phases accept operator input from birth; their agents
+    # are prompted through the declared seeds.
+    creation = HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value
+    verdict = HypothesisDevelopmentPhase.VERDICT.value
+    for phase_value in (creation, verdict):
+        declared = spec.phase_specs[phase_value]
+        assert isinstance(declared, ConversationPhase)
+        assert declared.seed is not None
+    # The one-shot agent phases run to a terminal answer through their seeds.
+    for phase_value in (
         HypothesisDevelopmentPhase.STRATEGY_DESIGN.value,
         HypothesisDevelopmentPhase.STRATEGY_BACKTESTING.value,
         HypothesisDevelopmentPhase.STRATEGY_RCA.value,
         HypothesisDevelopmentPhase.OPTIMIZATION.value,
-    )
-    assert len({executors[phase] for phase in active_phases}) == len(active_phases)
+    ):
+        declared = spec.phase_specs[phase_value]
+        assert isinstance(declared, OneShotPhase)
+        assert declared.seed is not None
+
+    # The trials phase runs deterministically from the accepted hypothesis
+    # contract instead of through an agent.
+    trials = HypothesisDevelopmentPhase.FALSIFICATION_TRIALS.value
+    trials_spec = spec.phase_specs[trials]
+    assert isinstance(trials_spec, DeterministicPhase)
+    assert trials_spec.contract is run_falsification_trials
 
     assert spec.piping
     assert all(callable(pipe) for pipe in spec.piping.values())

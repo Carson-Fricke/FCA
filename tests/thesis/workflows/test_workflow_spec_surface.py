@@ -7,7 +7,12 @@ from typing import Any
 import pytest
 
 from thesis.workflows.core.builder import WorkflowBuilder
-from thesis.workflows.core.phase import WorkflowSpecError
+from thesis.workflows.core.phase import (
+    ConversationPhase,
+    DeterministicPhase,
+    OneShotPhase,
+    WorkflowSpecError,
+)
 from thesis.workflows.core.spec import HandoffContext
 
 
@@ -19,34 +24,29 @@ def _seed(workflow: object, request: object, state: object, context: object) -> 
 def _builder() -> WorkflowBuilder[Any, Any, Any]:
     builder = WorkflowBuilder()
     builder.workflow("demo", version="1.0.0", title="Demo")
-    builder.phase("start", seed=_seed)
-    builder.phase("done", seed=_seed, terminal=True)
+    builder.phase(OneShotPhase(phase="start", seed=_seed))
+    builder.phase(OneShotPhase(phase="done", seed=_seed, terminal=True))
     builder.transition("start", "done")
     return builder
 
 
-def test_builder_accepts_a_seed_instead_of_an_executor() -> None:
+def test_builder_accepts_a_seed_on_an_agent_phase() -> None:
     spec = _builder().build().spec
     assert spec.phase_names == ("start", "done")
-    assert "start" in spec.seeds
+    assert spec.phase_specs["start"].seed is _seed
     assert spec.terminal_phases == ("done",)
 
 
-def test_builder_rejects_a_phase_with_neither_seed_nor_executor() -> None:
-    builder = WorkflowBuilder()
-    builder.workflow("demo", version="1.0.0", title="Demo")
-    builder.phase("start")
-    builder.phase("done", seed=_seed, terminal=True)
-    builder.transition("start", "done")
-    with pytest.raises(WorkflowSpecError, match="no executor or seed"):
-        builder.build()
+def test_a_deterministic_phase_is_unrepresentable_without_a_contract() -> None:
+    with pytest.raises(TypeError, match="contract"):
+        DeterministicPhase(phase="intake")  # type: ignore[call-arg]
 
 
 def test_builder_rejects_on_complete_that_is_not_a_declared_transition() -> None:
     builder = WorkflowBuilder()
     builder.workflow("demo", version="1.0.0", title="Demo")
-    builder.phase("start", seed=_seed, on_complete="elsewhere")
-    builder.phase("done", seed=_seed, terminal=True)
+    builder.phase(OneShotPhase(phase="start", seed=_seed, on_complete="elsewhere"))
+    builder.phase(OneShotPhase(phase="done", seed=_seed, terminal=True))
     builder.transition("start", "done")
     with pytest.raises(WorkflowSpecError, match="on_complete"):
         builder.build()
@@ -56,12 +56,14 @@ def test_declared_contract_surface_is_exposed_by_the_spec() -> None:
     builder = WorkflowBuilder()
     builder.workflow("demo", version="1.0.0", title="Demo")
     builder.phase(
-        "start",
-        seed=_seed,
-        on_complete="done",
-        required=("answer",),
+        ConversationPhase(
+            phase="start",
+            seed=_seed,
+            on_complete="done",
+            required=("answer",),
+        )
     )
-    builder.phase("done", seed=_seed, terminal=True)
+    builder.phase(OneShotPhase(phase="done", seed=_seed, terminal=True))
     builder.transition("start", "done")
     spec = builder.build().spec
     assert spec.on_complete == {"start": "done"}
@@ -84,42 +86,20 @@ def test_handoff_context_carries_the_accepted_contract() -> None:
 
 
 def _deterministic_executor(
-    workflow: object, request: object, state: object
+    workflow: object, request: object, state: object, context: object
 ) -> dict[str, object]:
-    del workflow, request, state
+    del workflow, request, state, context
     return {"target": "done", "answer": 42}
 
 
-def test_deterministic_phase_declares_its_executor_and_kind() -> None:
-    from thesis.workflows.core.phase import PhaseKind
-
+def test_deterministic_phase_declares_its_contract() -> None:
     builder = WorkflowBuilder()
     builder.workflow("demo", version="1.0.0", title="Demo")
-    builder.phase(
-        "intake",
-        _deterministic_executor,
-        kind=PhaseKind.DETERMINISTIC,
-    )
-    builder.phase("done", seed=_seed, terminal=True)
+    builder.phase(DeterministicPhase(phase="intake", contract=_deterministic_executor))
+    builder.phase(OneShotPhase(phase="done", seed=_seed, terminal=True))
     builder.transition("intake", "done")
     spec = builder.build().spec
 
-    assert spec.phase_specs["intake"].kind is PhaseKind.DETERMINISTIC
-    assert spec.executors["intake"] is _deterministic_executor
-    assert spec.phase_kinds["intake"] is PhaseKind.DETERMINISTIC
-
-
-def test_builder_rejects_a_deterministic_phase_without_an_executor() -> None:
-    from thesis.workflows.core.phase import PhaseKind
-
-    builder = WorkflowBuilder()
-    builder.workflow("demo", version="1.0.0", title="Demo")
-    builder.phase(
-        "intake",
-        seed=_seed,
-        kind=PhaseKind.DETERMINISTIC,
-    )
-    builder.phase("done", seed=_seed, terminal=True)
-    builder.transition("intake", "done")
-    with pytest.raises(WorkflowSpecError, match="requires an executor"):
-        builder.build()
+    intake = spec.phase_specs["intake"]
+    assert isinstance(intake, DeterministicPhase)
+    assert intake.contract is _deterministic_executor

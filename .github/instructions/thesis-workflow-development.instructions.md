@@ -3,7 +3,7 @@
 Scope: any change under `src/thesis/workflows/**`, workflow tools, or phase
 agents. Read the authoring guide first:
 `cleo docs fetch thesis-workflow-authoring-guide`. Deep contracts:
-`.github/architecture/thesis-agent-workflow-runtime.md` (REQ-018..REQ-033).
+`.github/architecture/thesis-agent-workflow-runtime.md` (REQ-018..REQ-040).
 
 ## Non-negotiables
 
@@ -11,12 +11,12 @@ agents. Read the authoring guide first:
    never drives a turn loop, never schedules a conversation. No turn drivers,
    no `advance_turn`, no engine-side prompts.
 2. **Spawning is prompting.** Create and start an agent in one act:
-   `SubAgentSpawner.spawn(...)` creates the durable record and delivers its
-   first prompt at its own anchor. Never create an agent and separately
-   schedule it.
+   `Conversations.spawn(returns_to, spec, prompt, kind)` creates the durable
+   record and delivers its first prompt at its own anchor. Never create an
+   agent and separately schedule it.
 3. **Transitions are requested.** A phase advances only when its executor
    requests it — an agent through `request_phase_completion`, deterministic
-   code through its executor's returned contract. The engine validates
+   code through its phase's returned contract. The engine validates
    (validator, required fields, target) and routes, rejecting back to the
    agent through the tool result for repair.
 4. **Handoffs are explicit.** Cross-phase data travels only through the
@@ -45,19 +45,39 @@ agents. Read the authoring guide first:
 
 - `cleo docs fetch thesis-workflow-authoring-guide` (working rules, phase
   contract, testing requirements, anti-patterns).
+- `cleo docs fetch thesis-conversation-abstraction-v1` (the conversation
+  abstraction now implemented: one `Conversation`/`Conversations` service for
+  chats and sub-agents, child return semantics composed on top,
+  REQ-034..040).
 - `cleo docs fetch thesis-chat-surface-and-subagent-anchoring-v1` (the
   inversion design record).
-- `.github/architecture/thesis-agent-workflow-runtime.md` REQ-018..REQ-033.
+- `.github/architecture/thesis-agent-workflow-runtime.md` REQ-018..REQ-040.
 - `cleo memory find "workflow"` for recorded pitfalls.
 
 ## Current shape (do not regress)
 
+- One conversation abstraction: `thesis.agent.runtime.conversation` owns the
+  `Conversation` handle and the `Conversations` service; HTTP, tools, and the
+  engine see only the service and the handles. Nothing outside the service
+  references the turn runner, coordinator, or spawner.
+- A chat is a conversation at the root anchor; a sub-agent is a nested one.
+  Phase specs are the sealed union `ConversationPhase` / `OneShotPhase` /
+  `DeterministicPhase`; a deterministic phase builds no conversation at all.
+- `ChildConversation` composes the return layer: `returns_to` anchor,
+  complete/fail/result/await_result/children/cancel, and one turn-end policy
+  (`OneShotPolicy` completes on the final answer; `ConversationalPolicy`
+  stays open). Phase children never auto-complete: their completion is the
+  engine-bound `request_phase_completion` tool.
+- The service owns scheduling: every wake is a delivery routed through the
+  service's routing rule (root to itself; a record anchor is durable-only;
+  every other conversation runs on its one serialized worker).
 - Phase table starts at `hypothesis_creation`; `requested` is retired.
 - Phase agents are children of the durable workflow node; the node is a record
   and is never turned.
 - Conversation agents accept input from birth; one-shot children complete on
-  their final answer and deliver it to the caller; phase agents complete only
-  through the completion tool.
+  their final answer and deliver it to the return anchor; phase agents complete
+  only through the completion tool.
 - Child results deliver at the caller's anchor and wake it; `await_sub_agent`
   waits (bounded) or ends the turn.
-- One turn worker per node; mid-turn wakes drain into the running session.
+- One turn worker per conversation; mid-turn wakes drain into the running
+  session.

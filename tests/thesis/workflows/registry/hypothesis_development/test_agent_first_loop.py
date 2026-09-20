@@ -13,13 +13,8 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from thesis.agent.runtime.child_runner import NodeTurnRunner
 from thesis.agent.runtime.control import ControlToolService
-from thesis.agent.runtime.delivery import (
-    DeliveryService,
-    NodeInputService,
-    TurnScheduler,
-)
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.registry import build_session_registry
 from thesis.agent.runtime.session import CompletionProvider
@@ -33,14 +28,40 @@ from thesis.chat.contracts import (
 from thesis.chat.service import ChatService
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
 from thesis.providers.invocations import ModelCompletion, Role, ToolCall
+from thesis.research.models import ResearchModelRef
+from thesis.workflows.backtests import BacktestRunResult
 from thesis.workflows.registry.hypothesis_development import (
     HypothesisDevelopmentRequest,
 )
 from thesis.workflows.registry.hypothesis_development.phases import (
     HypothesisDevelopmentPhase,
 )
+from thesis.workflows.research_models import ResearchModelRunResult
 
-from ._support import IDEAS, WORKSPACE, _Kit, _kit, _request
+from ._support import IDEAS, WORKSPACE, _hypothesis_envelope, _Kit, _kit, _request
+
+
+class _FakeStudyRunner:
+    """A research-model port that returns one completed study run."""
+
+    def run(self, request: object) -> ResearchModelRunResult:
+        del request
+        return ResearchModelRunResult(
+            model_reference=ResearchModelRef(
+                workspace_id=WORKSPACE,
+                model_id="momentum-model",
+                content_sha256="a" * 64,
+            ),
+            indicator_references=(),
+            backtest=BacktestRunResult(
+                job_id="study-1",
+                state="completed",
+                metrics={"sharpe": 1.0, "sample_valid": 1.0},
+            ),
+            workspace_artifact="workspace-model:momentum-model",
+            runtime_configuration={},
+            fitted_reference=None,
+        )
 
 
 class _QueuedCompletionProvider:
@@ -151,14 +172,16 @@ def _node_messages(chat: ChatService, chat_id: str, node_id: str) -> list[ChatMe
 def _control(
     kit: _Kit,
     store: PersistenceSubAgentStore,
-    schedule: TurnScheduler,
     request: HypothesisDevelopmentRequest,
 ) -> ControlToolService:
+    from thesis.agent.runtime.conversation import Conversations
+
     return ControlToolService(
-        lifecycle=SubAgentLifecycle(kit.chat, store=store),
-        store=store,
-        inputs=NodeInputService(chat=kit.chat, store=store),
-        delivery=DeliveryService(kit.chat, schedule=schedule),
+        conversations=Conversations(
+            chat=kit.chat,
+            store=store,
+            lifecycle=SubAgentLifecycle(kit.chat, store=store),
+        ),
         phase_completions=lambda workspace_id, record, completion: (
             kit.workflow.apply_phase_completion(
                 request, record.sub_agent_id, completion
@@ -175,8 +198,8 @@ def _runner(
     *,
     lifecycle: SubAgentLifecycle,
     on_fault=None,
-) -> NodeTurnRunner:
-    return NodeTurnRunner(
+) -> Conversations:
+    return Conversations(
         chat=kit.chat,
         store=store,
         provider=provider,
@@ -189,16 +212,16 @@ def _runner(
 
 
 def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> None:
-    scheduled: list[tuple[str, str, str]] = []
-
-    def schedule(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
-        scheduled.append((workspace_id, chat_id, sub_agent_id))
-
-    kit = _kit(tmp_path, payloads=[], results=[], turn_scheduler=schedule)
+    kit = _kit(
+        tmp_path,
+        payloads=[],
+        results=[],
+        research_runner=_FakeStudyRunner(),
+    )
     request = _request(kit)
     store = PersistenceSubAgentStore(kit.chat.persistence)
     lifecycle = SubAgentLifecycle(kit.chat, store=store)
-    control = _control(kit, store, schedule, request)
+    control = _control(kit, store, request)
 
     # Launch prepares the first phase agent: one prompt turn, and a scheduled
     # turn on that agent — never on the engine.  The workflow starts in
@@ -215,9 +238,11 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert "request_phase_completion" in seeds[0].body
     # Creation's prompt requires the operator's confirmation before completing.
     assert "REQUIRES the operator's confirmation" in seeds[0].body
-    assert scheduled == [(WORKSPACE, request.chat_id, node_id)]
+    assert kit.conversations.in_flight(WORKSPACE, request.chat_id, node_id) is True
 
-    # The phase agent's own session turn calls the completion tool.
+    # The phase agent's own session turn calls the completion tool with the
+    # hypothesis contract; the deterministic trials phase then runs the study
+    # and hands its trials contract to the verdict agent.
     runner = _runner(
         kit,
         store,
@@ -228,52 +253,64 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
                 {
                     "completion": {
                         "target": "falsification_trials",
-                        "hypothesis": {"claim": "momentum persists"},
+                        "hypothesis": _hypothesis_envelope(),
                     }
                 },
             )
         ),
         lifecycle=lifecycle,
     )
-    result = runner.run(WORKSPACE, request.chat_id, node_id)
+    result = runner.run_node_turn(WORKSPACE, request.chat_id, node_id)
     assert result.status == "completed"
 
-    # The accepted contract applied the transition and prepared the next agent.
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
-    assert execution.phase == HypothesisDevelopmentPhase.FALSIFICATION_TRIALS.value
+    assert execution.phase == HypothesisDevelopmentPhase.VERDICT.value
     seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
     assert len(seeds) == 2
     next_node = str(seeds[1].data["subAgentId"])
     assert next_node != node_id
-    assert (WORKSPACE, request.chat_id, next_node) in scheduled
+    # The verdict agent's prompt carries the trials the deterministic phase ran.
+    assert '"trials"' in seeds[1].body
+    assert "runState" in seeds[1].body
+    assert kit.conversations.in_flight(WORKSPACE, request.chat_id, next_node) is True
 
-    # Creation is a conversation (interruptible while it is working); trials is
-    # one-shot.  A completed node no longer accepts input.
+    # Creation is closed once it completed; the verdict agent is a
+    # conversation, so it accepts the operator's input from birth.
     creation = store.get_sub_agent(WORKSPACE, node_id)
-    trials = store.get_sub_agent(WORKSPACE, next_node)
+    verdict = store.get_sub_agent(WORKSPACE, next_node)
     assert creation is not None and creation.kind is SubAgentKind.CONVERSATION
-    assert trials is not None and trials.kind is SubAgentKind.ONE_SHOT
     assert creation.accepts_input is False
+    assert verdict is not None and verdict.kind is SubAgentKind.CONVERSATION
+    assert verdict.accepts_input is True
 
     # The workflow node is a record, not a conversation: it is never scheduled.
     assert creation.parent_sub_agent_id is not None
-    assert [entry[2] for entry in scheduled] == [node_id, next_node]
+    node_record = store.get_sub_agent(WORKSPACE, creation.parent_sub_agent_id)
+    assert node_record is not None
+    assert (
+        kit.conversations.in_flight(
+            WORKSPACE, request.chat_id, node_record.sub_agent_id
+        )
+        is False
+    )
+    assert len(kit.woke) == 2
 
-    # The engine never called a model: the only model turn was the agent's own.
+    # The engine never called a model: the trials run was deterministic and the
+    # only model turn was the creation agent's own.
     assert kit.provider.prompts == []
 
 
 def test_rejected_contract_is_repaired_in_turn(tmp_path: Path) -> None:
-    scheduled: list[tuple[str, str, str]] = []
-
-    def schedule(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
-        scheduled.append((workspace_id, chat_id, sub_agent_id))
-
-    kit = _kit(tmp_path, payloads=[], results=[], turn_scheduler=schedule)
+    kit = _kit(
+        tmp_path,
+        payloads=[],
+        results=[],
+        research_runner=_FakeStudyRunner(),
+    )
     request = _request(kit)
     store = PersistenceSubAgentStore(kit.chat.persistence)
     lifecycle = SubAgentLifecycle(kit.chat, store=store)
-    control = _control(kit, store, schedule, request)
+    control = _control(kit, store, request)
     creation_node = kit.workflow.prepare_phase(request)
     assert creation_node is not None
 
@@ -293,14 +330,14 @@ def test_rejected_contract_is_repaired_in_turn(tmp_path: Path) -> None:
                 {
                     "completion": {
                         "target": "falsification_trials",
-                        "hypothesis": {"claim": "momentum persists"},
+                        "hypothesis": _hypothesis_envelope(),
                     }
                 },
             ),
         ),
         lifecycle=lifecycle,
     )
-    runner.run(WORKSPACE, request.chat_id, creation_node)
+    runner.run_node_turn(WORKSPACE, request.chat_id, creation_node)
 
     failures = [
         message
@@ -310,20 +347,15 @@ def test_rejected_contract_is_repaired_in_turn(tmp_path: Path) -> None:
     assert failures
     assert "hypothesis" in str(failures[0].tool_result["failure"])
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
-    assert execution.phase == HypothesisDevelopmentPhase.FALSIFICATION_TRIALS.value
+    assert execution.phase == HypothesisDevelopmentPhase.VERDICT.value
 
 
 def test_phase_agent_fault_fails_the_execution(tmp_path: Path) -> None:
-    scheduled: list[tuple[str, str, str]] = []
-
-    def schedule(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
-        scheduled.append((workspace_id, chat_id, sub_agent_id))
-
-    kit = _kit(tmp_path, payloads=[], results=[], turn_scheduler=schedule)
+    kit = _kit(tmp_path, payloads=[], results=[])
     request = _request(kit)
     store = PersistenceSubAgentStore(kit.chat.persistence)
     lifecycle = SubAgentLifecycle(kit.chat, store=store)
-    control = _control(kit, store, schedule, request)
+    control = _control(kit, store, request)
     node_id = kit.workflow.prepare_phase(request)
     assert node_id is not None
 
@@ -337,7 +369,7 @@ def test_phase_agent_fault_fails_the_execution(tmp_path: Path) -> None:
             request, reason=str(error)
         ),
     )
-    result = runner.run(WORKSPACE, request.chat_id, node_id)
+    result = runner.run_node_turn(WORKSPACE, request.chat_id, node_id)
 
     assert result.status == "failed"
     node = store.get_sub_agent(WORKSPACE, node_id)
@@ -362,16 +394,11 @@ def test_phase_agent_fault_fails_the_execution(tmp_path: Path) -> None:
 def test_a_text_only_agent_turn_starts_and_keeps_the_node_running(
     tmp_path: Path,
 ) -> None:
-    scheduled: list[tuple[str, str, str]] = []
-
-    def schedule(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
-        scheduled.append((workspace_id, chat_id, sub_agent_id))
-
-    kit = _kit(tmp_path, payloads=[], results=[], turn_scheduler=schedule)
+    kit = _kit(tmp_path, payloads=[], results=[])
     request = _request(kit)
     store = PersistenceSubAgentStore(kit.chat.persistence)
     lifecycle = SubAgentLifecycle(kit.chat, store=store)
-    control = _control(kit, store, schedule, request)
+    control = _control(kit, store, request)
     node_id = kit.workflow.prepare_phase(request)
     assert node_id is not None
     pending = store.get_sub_agent(WORKSPACE, node_id)
@@ -380,7 +407,7 @@ def test_a_text_only_agent_turn_starts_and_keeps_the_node_running(
     # A turn that ends in text (no tool call) must still start the agent: the
     # runner starts the node it runs, so the pending spinner cannot survive it.
     runner = _runner(kit, store, control, _RecordingProvider(), lifecycle=lifecycle)
-    result = runner.run(WORKSPACE, request.chat_id, node_id)
+    result = runner.run_node_turn(WORKSPACE, request.chat_id, node_id)
 
     assert result.status == "completed"
     record = store.get_sub_agent(WORKSPACE, node_id)
@@ -392,16 +419,11 @@ def test_a_text_only_agent_turn_starts_and_keeps_the_node_running(
 def test_creation_transcript_replays_with_matching_tool_envelopes(
     tmp_path: Path,
 ) -> None:
-    scheduled: list[tuple[str, str, str]] = []
-
-    def schedule(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
-        scheduled.append((workspace_id, chat_id, sub_agent_id))
-
-    kit = _kit(tmp_path, payloads=[], results=[], turn_scheduler=schedule)
+    kit = _kit(tmp_path, payloads=[], results=[])
     request = _request(kit)
     store = PersistenceSubAgentStore(kit.chat.persistence)
     lifecycle = SubAgentLifecycle(kit.chat, store=store)
-    control = _control(kit, store, schedule, request)
+    control = _control(kit, store, request)
 
     creation_node = kit.workflow.prepare_phase(request)
     assert creation_node is not None
@@ -421,15 +443,64 @@ def test_creation_transcript_replays_with_matching_tool_envelopes(
             )
         ),
         lifecycle=lifecycle,
-    ).run(WORKSPACE, request.chat_id, creation_node)
+    ).run_node_turn(WORKSPACE, request.chat_id, creation_node)
     node = store.get_sub_agent(WORKSPACE, creation_node)
     assert node is not None and node.status is SubAgentStatus.NEEDS_INPUT
 
     # The answered turn replays the conversation with valid tool envelopes:
     # every replayed tool reply follows the assistant tool-call that requested it.
     recording = _RecordingProvider()
-    _runner(kit, store, control, recording, lifecycle=lifecycle).run(
+    _runner(kit, store, control, recording, lifecycle=lifecycle).run_node_turn(
         WORKSPACE, request.chat_id, creation_node
     )
     assert recording.tool_ids
     assert recording.bare_tool_messages == []
+
+
+def test_completing_into_a_terminal_phase_finishes_the_execution(
+    tmp_path: Path,
+) -> None:
+    """A phase completing into `failed` (or `completed`) must not try to spawn
+    an agent for the terminal phase; the execution is finished instead."""
+    kit = _kit(tmp_path, payloads=[], results=[])
+    request = _request(kit)
+    store = PersistenceSubAgentStore(kit.chat.persistence)
+    lifecycle = SubAgentLifecycle(kit.chat, store=store)
+    control = _control(kit, store, request)
+
+    creation_node = kit.workflow.prepare_phase(request)
+    assert creation_node is not None
+
+    # The creation agent completes with a terminal target (`failed`).
+    runner = _runner(
+        kit,
+        store,
+        control,
+        _QueuedCompletionProvider(
+            (
+                "request_phase_completion",
+                {
+                    "completion": {
+                        "target": "failed",
+                        "hypothesis": _hypothesis_envelope(),
+                    }
+                },
+            )
+        ),
+        lifecycle=lifecycle,
+    )
+    result = runner.run_node_turn(WORKSPACE, request.chat_id, creation_node)
+
+    # The tool call succeeded (no KeyError burning the iteration budget).
+    assert result.status == "completed"
+
+    # The execution is finished as failed, not left running at a terminal phase.
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    assert execution.state.value == "failed"
+    assert execution.finished_at is not None
+
+    # No agent was spawned for the terminal phase (only the creation node
+    # and the workflow node exist).
+    nodes = store.list_sub_agents(WORKSPACE)
+    roles = {node.role for node in nodes}
+    assert all("orchestrator" not in role or "creation" in role for role in roles)

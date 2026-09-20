@@ -121,6 +121,11 @@ class SubAgentKind(StrEnum):
 #: and budget guards apply to the phase agents spawned beneath it.
 WORKFLOW_NODE_ROLE = "workflow-node"
 
+#: Roles whose records anchor delivered data but are never run as
+#: conversations: delivering at such a record's anchor is durable-only and
+#: schedules nothing, because the reacting party already ran.
+RECORD_ANCHOR_ROLES: frozenset[str] = frozenset({WORKFLOW_NODE_ROLE})
+
 
 class SubAgentStatus(StrEnum):
     """Lifecycle status projected for one durable sub-agent."""
@@ -849,6 +854,7 @@ __all__ = [
     "SubAgentRecord",
     "SubAgentStatus",
     "WORKFLOW_NODE_ROLE",
+    "RECORD_ANCHOR_ROLES",
     "ToolJob",
     "ToolJobState",
     "TranscriptItemKind",

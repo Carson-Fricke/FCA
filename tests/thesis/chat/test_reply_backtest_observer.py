@@ -12,9 +12,9 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
 from typing import cast
 
+from thesis.agent.runtime.conversation import Conversations
 from thesis.chat import (
     ChatMessage,
-    ChatReplyService,
     ChatService,
     InMemoryChatStreamBroker,
 )
@@ -28,6 +28,21 @@ def _thread(service: ChatService):
     chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
     service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="run it")
     return chat
+
+
+def _conversations(
+    service: ChatService,
+    broker: InMemoryChatStreamBroker,
+    stream,
+    *,
+    tool_result_observer=None,
+) -> Conversations:
+    return Conversations(
+        chat=service,
+        broker=broker,
+        reply_for=lambda workspace_id, chat_id, history: stream(history),
+        tool_result_observer=tool_result_observer,
+    )
 
 
 def test_observer_enrichment_is_persisted_on_the_tool_message() -> None:
@@ -65,14 +80,11 @@ def test_observer_enrichment_is_persisted_on_the_tool_message() -> None:
             },
         )
 
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=stream,
-        tool_result_observer=observer,
+    conversations = _conversations(
+        service, broker, stream, tool_result_observer=observer
     )
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert seen == [(WORKSPACE, chat.chat_id, None)]
@@ -114,14 +126,11 @@ def test_observer_fault_does_not_break_the_reply() -> None:
     ) -> ToolResultChunk:
         raise RuntimeError("observer exploded")
 
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=stream,
-        tool_result_observer=observer,
+    conversations = _conversations(
+        service, broker, stream, tool_result_observer=observer
     )
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert message.body == "Recovered."
@@ -139,13 +148,9 @@ def test_observer_is_optional_and_defaults_to_no_op() -> None:
     broker = InMemoryChatStreamBroker()
     chat = _thread(service)
 
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=lambda history: iter(["Plain."]),
-    )
+    conversations = _conversations(service, broker, lambda history: iter(["Plain."]))
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert message.body == "Plain."

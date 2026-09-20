@@ -9,12 +9,6 @@ transition; this package owns how an agent runs, calls tools, and requests
 completion.
 """
 
-from thesis.agent.runtime.child_runner import (
-    ChildRunner,
-    NodeTurnError,
-    NodeTurnRunner,
-    RegistryFactory,
-)
 from thesis.agent.runtime.context import ToolContext, ToolContextError
 from thesis.agent.runtime.control import (
     CONTROL_TOOL_NAMES,
@@ -41,6 +35,10 @@ from thesis.agent.runtime.control_tools import (
     SpawnObserver,
     control_registered_tools,
 )
+from thesis.agent.runtime.conversation import (
+    NodeTurnError,
+    RegistryFactory,
+)
 from thesis.agent.runtime.datum import (
     Datum,
     DatumType,
@@ -58,7 +56,6 @@ from thesis.agent.runtime.delivery import (
     NodeInputNotFound,
     NodeInputReceipt,
     NodeInputService,
-    TurnScheduler,
     delivery_key,
     find_delivered,
 )
@@ -140,7 +137,6 @@ __all__ = [
     "Anchor",
     "AnsweringActor",
     "AwaitResult",
-    "ChildRunner",
     "ChatSubAgentNode",
     "ChatSubAgentProjectionError",
     "ChatSubAgentTree",
@@ -171,7 +167,6 @@ __all__ = [
     "NodeInputService",
     "NodeOperatorPolicy",
     "NodeTurnError",
-    "NodeTurnRunner",
     "OperatorActorKind",
     "OperatorInputRequest",
     "OperatorPolicyDecision",
@@ -208,7 +203,6 @@ __all__ = [
     "ToolContextError",
     "ToolExecution",
     "ToolHandler",
-    "TurnScheduler",
     "WORKFLOW_TOOL_NAMES",
     "WorkflowLauncher",
     "build_session_registry",

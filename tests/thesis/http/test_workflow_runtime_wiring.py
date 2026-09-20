@@ -1,11 +1,10 @@
-"""Wiring coverage for the workflow runtime on the chat reply service.
+"""Wiring coverage for the workflow runtime on the HTTP application.
 
-The structured chat trigger and the plain-language research predicate can only
-execute when the workflow runtime reaches
-:class:`~thesis.chat.responder.ChatReplyService`.  These tests prove
-``create_app`` attaches it both to the reply service it composes from a
-``model_provider`` and to an explicitly injected reply service, while leaving
-the service unconfigured when no runtime is supplied.
+The workflow runtime is attached to the application for the workflow-launch
+tool to resolve.  These tests prove ``create_app`` exposes it on the app state
+both when it composes a conversations service from a ``model_provider`` and
+when an explicitly injected service is supplied, while leaving the app
+unconfigured when no runtime is supplied.
 """
 
 from __future__ import annotations
@@ -15,7 +14,8 @@ from typing import cast
 
 from fastapi.testclient import TestClient
 
-from thesis.chat import ChatReplyService, ChatService, InMemoryChatStreamBroker
+from thesis.agent.runtime.conversation import Conversations
+from thesis.chat import ChatService, InMemoryChatStreamBroker
 from thesis.http.application import create_app
 from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
 from thesis.workflows.runtime import WorkflowRuntime
@@ -50,7 +50,7 @@ class _FakeRuntime:
     """Marker object standing in for the workflow runtime."""
 
 
-def test_create_app_attaches_runtime_to_composed_reply_service() -> None:
+def test_create_app_attaches_runtime_to_the_app_state() -> None:
     runtime = _FakeRuntime()
     app = create_app(
         bearer_token=TOKEN,
@@ -58,32 +58,34 @@ def test_create_app_attaches_runtime_to_composed_reply_service() -> None:
         workflow_runtime=cast(WorkflowRuntime, runtime),
     )
 
-    assert app.state.chat_reply_service.development_runtime is runtime
+    assert app.state.workflow_runtime is runtime
+    assert isinstance(app.state.conversations, Conversations)
 
 
-def test_create_app_attaches_runtime_to_injected_reply_service() -> None:
+def test_create_app_exposes_an_injected_conversations_service() -> None:
     runtime = _FakeRuntime()
     chat = ChatService()
     broker = InMemoryChatStreamBroker()
-    reply = ChatReplyService(
-        chat_service=chat,
+    conversations = Conversations(
+        chat=chat,
         broker=broker,
-        provider=lambda history: iter(()),
+        reply_for=lambda workspace_id, chat_id, history: iter(()),
     )
     app = create_app(
         bearer_token=TOKEN,
         chat_service=chat,
         chat_stream_broker=broker,
-        chat_reply_service=reply,
+        conversations=conversations,
         workflow_runtime=cast(WorkflowRuntime, runtime),
     )
 
-    assert app.state.chat_reply_service is reply
-    assert reply.development_runtime is runtime
+    assert app.state.conversations is conversations
+    assert app.state.workflow_runtime is runtime
 
 
-def test_create_app_without_runtime_leaves_reply_service_unconfigured() -> None:
+def test_create_app_without_runtime_still_serves() -> None:
     app = create_app(bearer_token=TOKEN, model_provider=_model_provider())
 
-    assert app.state.chat_reply_service.development_runtime is None
+    assert getattr(app.state, "workflow_runtime", None) is None
+    assert isinstance(app.state.conversations, Conversations)
     assert TestClient(app).get("/health").json() == {"status": "ok"}

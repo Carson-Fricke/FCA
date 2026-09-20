@@ -11,7 +11,6 @@ from typing import Annotated
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Path,
@@ -235,7 +234,6 @@ def create_chat_router() -> APIRouter:
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateMessageRequest,
-        background_tasks: BackgroundTasks,
         http_request: Request,
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
@@ -244,7 +242,10 @@ def create_chat_router() -> APIRouter:
         Steering is expressed only through chat messages: the persisted
         message is the durable acknowledgement, and the service bumps the
         intent epoch of the targeted (or all active) executions so the
-        orchestrator replans at the next safe model or tool boundary.
+        orchestrator replans at the next safe model or tool boundary.  An
+        ordinary user message is the root conversation's ``send``: the
+        conversation persists it and wakes its own reply turn, so the reply
+        never runs inside the request.
         """
         steering = (
             request.targets_execution_id is not None
@@ -269,23 +270,32 @@ def create_chat_router() -> APIRouter:
                     steering_intent=request.steering_intent,
                 )
             else:
-                message = chat_service.create_message(
-                    workspace_id,
-                    chat_id,
-                    actor_id=request.actor_id,
-                    body=request.body,
-                    role=request.role,
-                    attachment_ids=request.attachment_ids,
-                    investigation_ids=request.investigation_ids,
-                    execution_id=request.execution_id,
-                    intent_epoch=request.intent_epoch,
-                )
+                conversations = getattr(http_request.app.state, "conversations", None)
+                if conversations is not None and request.role is MessageRole.USER:
+                    message = conversations.root(workspace_id, chat_id).send(
+                        body=request.body,
+                        actor_id=request.actor_id,
+                        role=request.role,
+                        attachment_ids=request.attachment_ids,
+                        investigation_ids=request.investigation_ids,
+                        execution_id=request.execution_id,
+                        intent_epoch=request.intent_epoch,
+                    )
+                else:
+                    message = chat_service.create_message(
+                        workspace_id,
+                        chat_id,
+                        actor_id=request.actor_id,
+                        body=request.body,
+                        role=request.role,
+                        attachment_ids=request.attachment_ids,
+                        investigation_ids=request.investigation_ids,
+                        execution_id=request.execution_id,
+                        intent_epoch=request.intent_epoch,
+                    )
         except Exception as error:
             raise _service_error(error) from error
         if not steering:
-            reply_service = getattr(http_request.app.state, "chat_reply_service", None)
-            if reply_service is not None and request.role is MessageRole.USER:
-                background_tasks.add_task(reply_service.respond, workspace_id, chat_id)
             return message.as_dict()
         result = percolation.message.as_dict()
         result["steering"] = {

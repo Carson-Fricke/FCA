@@ -1,12 +1,13 @@
 """Assemble the hypothesis-development workflow specification and object.
 
 The spec is the registered definition of the concrete workflow: its ordered
-phases, the allowed transition table, one real executor per phase, and the
-typed piping between phases.
-Every phase is bound to the executor module that owns its behavior; the state
-machine wiring lives here instead of inside a workflow class.  The builder then
-assembles the one general :class:`~thesis.workflows.core.workflow.Workflow`
-instance from that spec, the doctrine, the services bundle, and the ports.
+phases, the allowed transition table, and the typed piping between phases.
+Every phase is declared as a sealed-union phase object — conversation,
+one-shot, or deterministic — bound to the module that owns its behavior; the
+state machine wiring lives here instead of inside a workflow class.  The
+builder then assembles the one general
+:class:`~thesis.workflows.core.workflow.Workflow` instance from that spec, the
+doctrine, the services bundle, and the ports.
 """
 
 from __future__ import annotations
@@ -17,8 +18,7 @@ from datetime import datetime
 from typing import Any, cast
 
 from thesis.agent.router import ModelRouter, Role
-from thesis.agent.runtime.delivery import TurnScheduler
-from thesis.agent.runtime.lifecycle import SubAgentLifecycle
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.service import ChatService
 from thesis.experiments.ledger import AttemptLedger
@@ -27,7 +27,13 @@ from thesis.research.hypothesis import HypothesisStore, InMemoryHypothesisStore
 from thesis.strategies.validation import StrategySandboxValidator
 from thesis.workflows.backtests import BacktestRunner
 from thesis.workflows.core.builder import WorkflowBuilder
-from thesis.workflows.core.phase import PhaseExecutor
+from thesis.workflows.core.phase import (
+    ConversationPhase,
+    DeterministicExecutor,
+    DeterministicPhase,
+    OneShotPhase,
+    PhaseSpec,
+)
 from thesis.workflows.core.spec import HandoffContext, PipingFunction, WorkflowSpec
 from thesis.workflows.core.workflow import Workflow, WorkflowPorts
 from thesis.workflows.research_models import (
@@ -50,14 +56,7 @@ from .phases import (
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
     HypothesisDevelopmentPhase,
 )
-from .phases.backtesting import run_strategy_backtest
-from .phases.creation import run_creation_turn
-from .phases.design import advance_design
-from .phases.lifecycle import advance_inert, run_requested_turn
-from .phases.optimization import optimize
-from .phases.strategy_rca import diagnose_strategy
-from .phases.trials import advance_trials
-from .phases.verdict import advance_verdict
+from .phases.trials import run_falsification_trials
 from .piping import identity_pipe, reset_backtests, reset_premise
 from .primitives import (
     _FALSIFICATION_PLAN_SCHEMA,
@@ -83,7 +82,6 @@ from .state import HypothesisDevelopmentOutcome, HypothesisDevelopmentState
 __all__ = [
     "build_hypothesis_development_spec",
     "build_hypothesis_development_workflow",
-    "phase_executors",
     "piping",
 ]
 
@@ -91,25 +89,21 @@ _TERMINAL_PHASES: frozenset[HypothesisDevelopmentPhase] = frozenset(
     {_COMPLETED, _FAILED}
 )
 
-_EXECUTORS: Mapping[
+#: The phases whose agents accept operator input from birth.
+_CONVERSATIONAL_PHASES: frozenset[HypothesisDevelopmentPhase] = frozenset(
+    {HypothesisDevelopmentPhase.HYPOTHESIS_CREATION, HypothesisDevelopmentPhase.VERDICT}
+)
+
+#: The deterministic contract function for each deterministic phase.
+_CONTRACTS: Mapping[
     HypothesisDevelopmentPhase,
-    PhaseExecutor[
+    DeterministicExecutor[
         DevelopmentEngine,
         HypothesisDevelopmentRequest,
         HypothesisDevelopmentState,
     ],
 ] = {
-    HypothesisDevelopmentPhase.REQUESTED: run_requested_turn,
-    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: run_creation_turn,
-    HypothesisDevelopmentPhase.FALSIFICATION_TRIALS: advance_trials,
-    HypothesisDevelopmentPhase.RCA: advance_inert,
-    HypothesisDevelopmentPhase.VERDICT: advance_verdict,
-    HypothesisDevelopmentPhase.STRATEGY_DESIGN: advance_design,
-    HypothesisDevelopmentPhase.STRATEGY_BACKTESTING: run_strategy_backtest,
-    HypothesisDevelopmentPhase.STRATEGY_RCA: diagnose_strategy,
-    HypothesisDevelopmentPhase.OPTIMIZATION: optimize,
-    HypothesisDevelopmentPhase.COMPLETED: advance_inert,
-    HypothesisDevelopmentPhase.FAILED: advance_inert,
+    HypothesisDevelopmentPhase.FALSIFICATION_TRIALS: run_falsification_trials,
 }
 
 #: Typed state pipes that replace the state movement the phases used to inline.
@@ -268,18 +262,6 @@ def _seeds() -> Mapping[HypothesisDevelopmentPhase, Callable[..., str]]:
     return seeds
 
 
-def phase_executors() -> Mapping[
-    HypothesisDevelopmentPhase,
-    PhaseExecutor[
-        DevelopmentEngine,
-        HypothesisDevelopmentRequest,
-        HypothesisDevelopmentState,
-    ],
-]:
-    """Return the real executor for every declared phase."""
-    return dict(_EXECUTORS)
-
-
 def piping() -> Mapping[tuple[str, str], PipingFunction[HypothesisDevelopmentState]]:
     """Return the real pipe for every declared transition, by phase name."""
     pipes: dict[tuple[str, str], PipingFunction[HypothesisDevelopmentState]] = {}
@@ -324,8 +306,7 @@ def build_hypothesis_development_workflow(
     max_compose_repairs: int = DEFAULT_MAX_COMPOSE_REPAIRS,
     knowledge_cutoff: datetime | None = None,
     subagent_mcp_tools: Mapping[str, tuple[str, ...]] | None = None,
-    subagent_lifecycle: SubAgentLifecycle | None = None,
-    turn_scheduler: TurnScheduler | None = None,
+    conversations: Conversations | None = None,
 ) -> Workflow[
     HypothesisDevelopmentRequest,
     HypothesisDevelopmentState,
@@ -390,15 +371,25 @@ def build_hypothesis_development_workflow(
     seeds = _seeds()
     for phase in _TRANSITIONS:
         targets = sorted(target.value for target in _TRANSITIONS[phase])
-        builder.phase(
-            phase.value,
-            _EXECUTORS[phase],
-            terminal=phase in _TERMINAL_PHASES,
-            on_complete=targets[0] if len(targets) == 1 else None,
-            seed=seeds.get(phase),
-            validate=_VALIDATORS.get(phase),
-            required=_REQUIRED.get(phase, ()),
-        )
+        common = {
+            "phase": phase.value,
+            "terminal": phase in _TERMINAL_PHASES,
+            "validate": _VALIDATORS.get(phase),
+            "on_complete": targets[0] if len(targets) == 1 else None,
+            "required": _REQUIRED.get(phase, ()),
+        }
+        declared: PhaseSpec[
+            DevelopmentEngine,
+            HypothesisDevelopmentRequest,
+            HypothesisDevelopmentState,
+        ]
+        if phase in _CONTRACTS:
+            declared = DeterministicPhase(contract=_CONTRACTS[phase], **common)
+        elif phase in _CONVERSATIONAL_PHASES:
+            declared = ConversationPhase(seed=seeds.get(phase), **common)
+        else:
+            declared = OneShotPhase(seed=seeds.get(phase), **common)
+        builder.phase(declared)
     builder.transitions(
         {
             phase.value: frozenset(target.value for target in targets)
@@ -416,8 +407,7 @@ def build_hypothesis_development_workflow(
                 chat=chat,
                 clock=clock,
                 id_factory=id_factory,
-                subagent_lifecycle=subagent_lifecycle,
-                turn_scheduler=turn_scheduler,
+                conversations=conversations,
             )
         )
     return cast(Any, builder.build())

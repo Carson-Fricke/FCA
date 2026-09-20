@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 
+from thesis.agent.runtime.conversation import Conversations
 from thesis.chat import (
     CHAT_MESSAGE,
     ChatMessage,
-    ChatReplyService,
     ChatService,
     InMemoryChatStreamBroker,
 )
@@ -28,6 +28,16 @@ def _thread(service: ChatService, body: str = "run it"):
     chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
     service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body=body)
     return chat
+
+
+def _conversations(
+    service: ChatService, broker: InMemoryChatStreamBroker, stream
+) -> Conversations:
+    return Conversations(
+        chat=service,
+        broker=broker,
+        reply_for=lambda workspace_id, chat_id, history: stream(history),
+    )
 
 
 def test_tool_result_is_persisted_as_an_ordered_message() -> None:
@@ -49,9 +59,9 @@ def test_tool_result_is_persisted_as_an_ordered_message() -> None:
         )
         yield "Answer text."
 
-    reply = ChatReplyService(chat_service=service, broker=broker, provider=stream)
+    conversations = _conversations(service, broker, stream)
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert message.body == "Answer text."
@@ -109,9 +119,9 @@ def test_tool_failure_is_persisted_without_touching_the_answer() -> None:
         )
         yield "Recovered."
 
-    reply = ChatReplyService(chat_service=service, broker=broker, provider=stream)
+    conversations = _conversations(service, broker, stream)
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert message.body == "Recovered."

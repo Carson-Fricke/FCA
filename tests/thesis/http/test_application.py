@@ -147,7 +147,7 @@ def _model_provider(transport: _RecordingTransport) -> OpenRouterProvider:
 
 def _compose_reply(app, transport: _RecordingTransport) -> str:
     service = app.state.chat_service
-    reply = app.state.chat_reply_service
+    conversations = app.state.conversations
     chat = service.create_chat(
         "workspace-a", title="Research", owner_actor_id="operator"
     )
@@ -155,7 +155,8 @@ def _compose_reply(app, transport: _RecordingTransport) -> str:
         "workspace-a", chat.chat_id, actor_id="operator", body="hello"
     )
     history = service.list_messages("workspace-a", chat.chat_id)
-    assert "".join(reply.provider(history)) == "Hi"
+    chunks = conversations.reply_for("workspace-a", chat.chat_id, history)
+    assert "".join(chunk for chunk in chunks if isinstance(chunk, str)) == "Hi"
     return str(transport.calls[0]["messages"][0]["content"])
 
 
@@ -175,13 +176,12 @@ def test_create_app_exposes_the_human_only_operator_policy() -> None:
     assert isinstance(app.state.operator_policies, OperatorPolicyRegistry)
 
 
-def test_create_app_exposes_an_injected_node_turn_scheduler() -> None:
-    def schedule(workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
-        del workspace_id, chat_id, sub_agent_id
+def test_create_app_exposes_the_shared_operator_policy_registry() -> None:
+    policies = OperatorPolicyRegistry()
 
-    app = create_app(bearer_token=TOKEN, sub_agent_turn=schedule)
+    app = create_app(bearer_token=TOKEN, operator_policies=policies)
 
-    assert app.state.sub_agent_turn is schedule
+    assert app.state.operator_policies is policies
 
 
 def test_retired_validation_routes_are_absent() -> None:

@@ -1,11 +1,10 @@
 """Workflow specification and execution-context contracts.
 
 A workflow is data: an id, a version, a title, an ordered set of phases, the
-allowed transitions between them, a phase executor per phase, and the piping
-between phases.  The engine assembles and validates that
-data through :class:`~thesis.workflows.core.builder.WorkflowBuilder` and
-resolves it by id through
-:class:`~thesis.workflows.core.registry.WorkflowRegistry`.
+allowed transitions between them, and the piping between phases.  The engine
+assembles and validates that data through
+:class:`~thesis.workflows.core.builder.WorkflowBuilder` and resolves it by id
+through :class:`~thesis.workflows.core.registry.WorkflowRegistry`.
 """
 
 from __future__ import annotations
@@ -17,16 +16,13 @@ from typing import TYPE_CHECKING, Any
 
 from thesis.workflows.core.phase import (
     HandoffContext,
-    PhaseExecutor,
-    PhaseKind,
-    PhaseSeed,
     PhaseSpec,
     PhaseValidator,
     WorkflowSpecError,
 )
 
 if TYPE_CHECKING:
-    from thesis.agent.runtime.delivery import DeliveryService, TurnScheduler
+    from thesis.agent.runtime.delivery import DeliveryService
 
 __all__ = [
     "HandoffContext",
@@ -84,10 +80,9 @@ class TransitionRequest[PhaseT]:
 class WorkflowContext:
     """The trusted per-execution context the engine plumbing operates on.
 
-    Workspace, chat, execution, anchor, and actor identity are supplied by the
-    runtime, never by a model.  The delivery and scheduler are the composed
-    ports for the run; they stay optional so the context can also describe a
-    launch before the execution exists.
+    Workspace, chat, execution, anchor, and actor identity are supplied by
+    the runtime, never by a model.  The delivery port stays optional so the
+    context can also describe a launch before the execution exists.
     """
 
     workspace_id: str
@@ -98,7 +93,6 @@ class WorkflowContext:
     intent_epoch: int = 0
     anchor_sub_agent_id: str | None = None
     delivery: DeliveryService | None = None
-    scheduler: TurnScheduler | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,34 +148,6 @@ class WorkflowSpec[WorkflowT, RequestT, StateT]:
     def terminal_phases(self) -> tuple[str, ...]:
         """Return the declared terminal phase names."""
         return tuple(phase.phase for phase in self.phases if phase.terminal)
-
-    @property
-    def executors(self) -> Mapping[str, PhaseExecutor[WorkflowT, RequestT, StateT]]:
-        """Return the executor for every phase that declares one, by name.
-
-        An agent phase has a seed instead; only deterministic phases (and
-        legacy configurations) declare an executor.
-        """
-        resolved: dict[str, PhaseExecutor[WorkflowT, RequestT, StateT]] = {}
-        for phase in self.phases:
-            executor = phase.executor
-            if executor is not None:
-                resolved[phase.phase] = executor
-        return MappingProxyType(resolved)
-
-    @property
-    def phase_kinds(self) -> Mapping[str, PhaseKind]:
-        """Return the declared phase kind for every phase, by name."""
-        return MappingProxyType({phase.phase: phase.kind for phase in self.phases})
-
-    @property
-    def seeds(
-        self,
-    ) -> Mapping[str, PhaseSeed[WorkflowT, RequestT, StateT]]:
-        """Return the prompt builder for every phase that declares one."""
-        return MappingProxyType(
-            {phase.phase: phase.seed for phase in self.phases if phase.seed is not None}
-        )
 
     @property
     def validators(self) -> Mapping[str, PhaseValidator]:

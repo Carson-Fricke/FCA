@@ -11,7 +11,7 @@ fail-closed behavior when no token is configured.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,11 +33,12 @@ from thesis.agent.harness_tools import (
     open_harness_tool_provider,
 )
 from thesis.agent.runtime import reconcile_stranded_sub_agents
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.policy import OperatorPolicyRegistry
 from thesis.auth.session import OperatorSessionService
 from thesis.auth.workspace_access import WorkspaceAuthorizer
-from thesis.chat import ChatService
-from thesis.chat.responder import ChatReplyService, ToolResultChunk, ToolResultObserver
+from thesis.chat import ChatMessage, ChatService
+from thesis.chat.responder import ReplyChunk, ToolResultChunk, ToolResultObserver
 from thesis.chat.streaming import InMemoryChatStreamBroker
 from thesis.http.auth import (
     CsrfTokenGuard,
@@ -308,7 +309,7 @@ def create_app(
     bearer_token: str | None = None,
     chat_service: ChatService | None = None,
     chat_stream_broker: InMemoryChatStreamBroker | None = None,
-    chat_reply_service: ChatReplyService | None = None,
+    conversations: Conversations | None = None,
     entra_tenant_id: str | None = None,
     entra_audience: str | None = None,
     entra_role: str = "Thesis.Access",
@@ -331,7 +332,7 @@ def create_app(
     session_workspace_id: str | None = None,
     session_clock: Callable[[], datetime] | None = None,
     timeline: CosmosTimeline | None = None,
-    sub_agent_turn: Callable[[str, str, str], None] | None = None,
+    operator_policies: OperatorPolicyRegistry | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
@@ -347,17 +348,16 @@ def create_app(
     :func:`thesis.http.workspaces.build_local_workspace_data` — to compose the
     local-mode services.
 
-    Pass     ``model_provider`` (with an optional ``harness_tool_provider``) to
-    compose the streamed chat reply service without injecting one directly.
-    The composed reply is the plain single-shot provider; tool-calling chat
-    replies come from the session-backed provider a composition injects, and
-    the harness tool surface is consumed by the backtest coordinator.  A
-    ``harness_client`` shared with the backtest boundary is adapted into the
-    tool provider without opening or initializing a second MCP transport.  Pass
-    ``sub_agent_turn`` to expose the composition's scheduler that runs one node
-    turn ``(workspace_id, chat_id, sub_agent_id)``; the chat sub-agent router
-    resolves it from ``app.state``.  ``app.state.operator_policies`` is always
-    populated with the human-only default.
+    Pass ``model_provider`` (with an optional ``harness_tool_provider``) to
+    compose the conversations service without injecting one directly.  The
+    composed service runs root replies through the plain single-shot
+    provider; tool-calling replies come from the session-backed reply source
+    a composition injects, and the harness tool surface is consumed by the
+    backtest coordinator.  A ``harness_client`` shared with the backtest
+    boundary is adapted into the tool provider without opening or
+    initializing a second MCP transport.  ``app.state.operator_policies`` is
+    always populated with the human-only default; pass ``operator_policies``
+    to share the composition's registry with the conversations service.
 
     Pass ``account_store`` and ``auth_verifier`` together to register the
     anonymous OIDC login router.  Adding ``session_service``, ``session_store``,
@@ -440,10 +440,10 @@ def create_app(
     )
     # Per-node operator policy is always present so the chat sub-agent router
     # fails closed to human-only instead of having no registry at all; a
-    # composition may replace the registry to authorize parent or peer agents.
-    application.state.operator_policies = OperatorPolicyRegistry()
-    if sub_agent_turn is not None:
-        application.state.sub_agent_turn = sub_agent_turn
+    # composition may share its registry with the conversations service.
+    application.state.operator_policies = (
+        operator_policies if operator_policies is not None else OperatorPolicyRegistry()
+    )
     backtest_coordinator: BacktestRunCoordinator | None = None
     if harness_tool_provider is not None and workspace_data is not None:
         from thesis.backtests import BacktestRunCoordinator
@@ -461,19 +461,14 @@ def create_app(
         application.state.chat_service = chat_service
     if chat_stream_broker is not None:
         application.state.chat_stream_broker = chat_stream_broker
-    if chat_reply_service is not None:
-        application.state.chat_reply_service = chat_reply_service
-        if (
-            workflow_runtime is not None
-            and chat_reply_service.development_runtime is None
-        ):
-            chat_reply_service.development_runtime = workflow_runtime
+    if conversations is not None:
+        application.state.conversations = conversations
         if (
             tool_result_observer is not None
-            and chat_reply_service.tool_result_observer is None
+            and conversations.tool_result_observer is None
         ):
-            chat_reply_service.tool_result_observer = tool_result_observer
-    if chat_reply_service is None and model_provider is not None:
+            conversations.tool_result_observer = tool_result_observer
+    if conversations is None and model_provider is not None:
         resolved_chat_service = chat_service
         if resolved_chat_service is None:
             resolved_chat_service = ChatService()
@@ -482,13 +477,19 @@ def create_app(
         if resolved_broker is None:
             resolved_broker = InMemoryChatStreamBroker()
             application.state.chat_stream_broker = resolved_broker
-        application.state.chat_reply_service = ChatReplyService(
-            chat_service=resolved_chat_service,
-            broker=resolved_broker,
-            provider=openrouter_reply_provider(
+
+        def _reply_source(
+            workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
+        ) -> Iterator[str | ReplyChunk | ToolResultChunk]:
+            del workspace_id, chat_id
+            return openrouter_reply_provider(
                 model_provider, system_prompt=DEFAULT_SYSTEM_PROMPT
-            ),
-            development_runtime=workflow_runtime,
+            )(history)
+
+        application.state.conversations = Conversations(
+            chat=resolved_chat_service,
+            broker=resolved_broker,
+            reply_for=_reply_source,
             tool_result_observer=tool_result_observer,
         )
     if workspace_data is not None:

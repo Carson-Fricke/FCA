@@ -22,16 +22,15 @@ from typing import Any, Protocol, cast
 from thesis.agent.context import PromptContext, assemble_context
 from thesis.agent.router import InvocationResult, Role
 from thesis.agent.runtime.control import PhaseCompletionRejected
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.datum import Datum, DatumType
 from thesis.agent.runtime.delivery import (
     Anchor,
     DeliveryReceipt,
     DeliveryService,
     NodeInputService,
-    TurnScheduler,
 )
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
-from thesis.agent.runtime.spawn import SubAgentSpawner
 from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.chat.contracts import (
     WORKFLOW_NODE_ROLE,
@@ -57,7 +56,11 @@ from thesis.workflows.core.delivery import NodeTurnDelivery, WorkflowNodeManager
 from thesis.workflows.core.events import emit_phase, finish_execution
 from thesis.workflows.core.gate import evaluate_gate
 from thesis.workflows.core.machine import TransitionMachine, TransitionTable
-from thesis.workflows.core.phase import PhaseExecutor, PhaseKind
+from thesis.workflows.core.phase import (
+    ConversationPhase,
+    DeterministicPhase,
+    OneShotPhase,
+)
 from thesis.workflows.core.spec import (
     HandoffContext,
     TransitionRequest,
@@ -128,13 +131,18 @@ class ActiveSubAgent:
 
 @dataclass(frozen=True, slots=True)
 class WorkflowPorts:
-    """The composed engine ports that make a workflow runnable."""
+    """The composed engine ports that make a workflow runnable.
+
+    ``conversations`` is the one service the engine sees: it spawns the
+    phase children, delivers their results, and owns every wake.  The durable
+    record lifecycle is read from that service when not supplied directly.
+    """
 
     chat: ChatService
     clock: Callable[[], datetime]
     id_factory: Callable[[str], str]
+    conversations: Conversations | None = None
     subagent_lifecycle: SubAgentLifecycle | None = None
-    turn_scheduler: TurnScheduler | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,11 +191,12 @@ class WorkflowDoctrine[RequestT: WorkflowRequest, StateT: WorkflowState, Outcome
 class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
     """The general, spec-driven workflow instance.
 
-    ``run`` drives one durable turn through the turn skeleton; ``advance_turn``
-    dispatches the durable phase to its spec executor; ``execute`` launches a
-    new execution.  The object is re-entrant: the derived in-process state is
-    retained per execution until a terminal phase, and it is rebuilt through
-    the doctrine's reconstruction hook after a restart.
+    ``prepare_phase`` spawns the current phase's agent with its prompt;
+    ``apply_phase_completion`` validates one phase agent's completion and
+    applies its transition; ``execute`` launches a new execution.  The object
+    is re-entrant: the derived in-process state is retained per execution
+    until a terminal phase, and it is rebuilt through the doctrine's
+    reconstruction hook after a restart.
     """
 
     def __init__(
@@ -205,24 +214,31 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         self._chat = None if ports is None else ports.chat
         self._clock = _utc_now if ports is None else ports.clock
         self._id_factory = _new_id if ports is None else ports.id_factory
-        self._subagent_lifecycle = None if ports is None else ports.subagent_lifecycle
-        self._turn_scheduler = None if ports is None else ports.turn_scheduler
+        self._conversations = None if ports is None else ports.conversations
+        lifecycle = None if ports is None else ports.subagent_lifecycle
+        if lifecycle is None and self._conversations is not None:
+            lifecycle = self._conversations.lifecycle
+        self._subagent_lifecycle = lifecycle
         self._active_orchestrators: dict[str, ActiveSubAgent] = {}
-        self._delivery: DeliveryService | None = None
-        self._node_inputs: NodeInputService | None = None
+        self._delivery: DeliveryService | None = (
+            None if self._conversations is None else self._conversations.delivery
+        )
+        self._node_inputs: NodeInputService | None = (
+            None if self._conversations is None else self._conversations.node_inputs
+        )
         self._nodes: WorkflowNodeManager | None = None
         self._node_turns: NodeTurnDelivery | None = None
         self._transitions: TransitionMachine[object, object, StateT] | None = None
         if ports is not None:
             if doctrine is None:
                 raise ValueError("a runnable workflow requires its doctrine")
-            self._delivery = DeliveryService(
-                ports.chat, schedule=ports.turn_scheduler, clock=ports.clock
-            )
-            self._node_inputs = NodeInputService(chat=ports.chat, clock=ports.clock)
+            if self._conversations is None:
+                raise ValueError("a runnable workflow requires the service")
+            assert self._delivery is not None
+            assert self._node_inputs is not None
             self._nodes = WorkflowNodeManager(
                 ports.chat,
-                ports.subagent_lifecycle,
+                self._subagent_lifecycle,
                 role=WORKFLOW_NODE_ROLE,
                 actor_id=doctrine.actor,
                 initial_phase=doctrine.initial_phase,
@@ -283,16 +299,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         return self._spec.transitions
 
     @property
-    def executors(self) -> Mapping[str, PhaseExecutor[Any, RequestT, StateT]]:
-        """Return the executor for every declared phase, by name."""
-        return self._spec.executors
-
-    @property
-    def phase_kinds(self) -> Mapping[str, object]:
-        """Return the declared kind for every phase, by name."""
-        return self._spec.phase_kinds
-
-    @property
     def piping(self) -> Mapping[tuple[str, str], Callable[[StateT], StateT]]:
         """Return the typed-state pipes, by transition."""
         return self._spec.piping
@@ -335,14 +341,14 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         return self._delivery
 
     @property
+    def conversations(self) -> Conversations | None:
+        """Return the one service this engine sees, when bound."""
+        return self._conversations
+
+    @property
     def subagent_lifecycle(self) -> SubAgentLifecycle | None:
         """Return the composed sub-agent lifecycle, when bound."""
         return self._subagent_lifecycle
-
-    @property
-    def turn_scheduler(self) -> TurnScheduler | None:
-        """Return the configured turn scheduler, when bound."""
-        return self._turn_scheduler
 
     @property
     def active_orchestrators(self) -> dict[str, ActiveSubAgent]:
@@ -476,7 +482,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         prompt = self._phase_prompt(
             request, state.phase, state, context, override=override
         )
-        return self._enter_phase(request, state.phase, state, prompt)
+        return self._enter_phase(request, state.phase, state, prompt, context)
 
     def _phase_prompt(
         self,
@@ -497,7 +503,8 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         if self._doctrine is None:
             return None
         phase_value = self._phase_value(phase)
-        seed = self._spec.seeds.get(phase_value)
+        spec = self._spec.phase_specs.get(phase_value)
+        seed = spec.seed if isinstance(spec, ConversationPhase | OneShotPhase) else None
         task = override or (
             seed(self, request, state, context)
             if seed is not None
@@ -508,42 +515,76 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         instruction = self._completion_instruction(phase_value)
         return f"{task}\n\n{instruction}" if instruction else task
 
-    def _spawner(self) -> SubAgentSpawner | None:
-        """Return the one spawn-with-prompt primitive, when ports are bound."""
-        if self._subagent_lifecycle is None or self._delivery is None:
-            return None
-        return SubAgentSpawner(
-            lifecycle=self._subagent_lifecycle,
-            delivery=self._delivery,
-            clock=self._clock,
-        )
+    def _phase_spawn_spec(
+        self, request: RequestT, phase_value: str
+    ) -> tuple[SubAgentSpec, SubAgentContextSpec, str]:
+        """Build the phase child's durable spec, its context, and its label.
 
-    def _deliver_phase_prompt(
+        The durable record's kind mirrors the declared phase type — a
+        conversational phase's child accepts input from birth, a one-shot
+        phase's child follows the one-shot input rule — while the child's
+        turn-end policy is conversational for every phase child, because a
+        phase completes only through the completion tool.
+        """
+        doctrine, _ = self._require_doctrine_chat()
+        family, label = doctrine.orchestrators[phase_value]
+        tools = doctrine.mcp_tools.get(family, ())
+        declared = self._spec.phase_specs.get(phase_value)
+        kind = (
+            SubAgentKind.CONVERSATION
+            if isinstance(declared, ConversationPhase)
+            else SubAgentKind.ONE_SHOT
+        )
+        spec = SubAgentSpec(
+            role=label,
+            kind=kind,
+            phase=phase_value,
+            allowed_tools=tuple(tools),
+        )
+        context = SubAgentContextSpec(
+            knowledge_cutoff=None, mcp_enabled=bool(tools), mcp_tools=tools
+        )
+        return spec, context, label
+
+    def _spawn_phase_child(
         self,
         request: RequestT,
         phase_value: str,
-        sub_agent_id: str,
-        prompt: str,
-    ) -> None:
-        """Deliver a phase prompt to an already-live agent, idempotently."""
-        spawner = self._spawner()
-        if spawner is None:
-            return
-        record = (
-            None
-            if self._subagent_lifecycle is None
-            else self._subagent_lifecycle.get(request.workspace_id, sub_agent_id)
-        )
-        if record is None:
-            return
-        spawner.deliver_prompt(
-            request.workspace_id,
-            request.chat_id,
-            record,
+        prompt: str | None,
+        *,
+        sub_agent_id: str | None = None,
+    ) -> str | None:
+        """Spawn (or re-prompt) one phase child through the one service.
+
+        Spawning and prompting are one act: the child is created and its seed
+        is delivered at its own anchor, and that delivery wakes the child's
+        own turn.  Returns the child's id, or ``None`` when no service is
+        bound or the prompt is empty.
+        """
+        if self._conversations is None or not prompt:
+            return None
+        spec, _context, _label = self._phase_spawn_spec(request, phase_value)
+        child = self._conversations.spawn(
+            Anchor(
+                request.workspace_id,
+                request.chat_id,
+                sub_agent_id=self._workflow_node_id(request),
+            ),
+            spec,
             prompt,
-            key=f"phase-seed-{request.execution_id}-{phase_value}",
-            data={"phase": phase_value},
+            # A phase child never completes on text: its completion is the
+            # tool this engine binds into its registry.
+            SubAgentKind.CONVERSATION,
+            actor_id=self._actor,
+            sub_agent_id=sub_agent_id,
+            prompt_key=f"phase-seed-{request.execution_id}-{phase_value}",
+            prompt_data={"phase": phase_value},
+            attribution={
+                "workflow_execution_id": request.execution_id,
+                "phase_attempt_id": None,
+            },
         )
+        return child.conversation_id
 
     def _completion_instruction(self, phase_value: str) -> str:
         """Describe the phase's completion obligation from its spec data.
@@ -598,18 +639,14 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             )
         handed = self._apply_contract(request, state, phase, completion)
         target_phase = self._phase_value(handed.phase)
-        next_prompt = self._phase_prompt(
-            request,
-            handed.phase,
-            handed,
-            HandoffContext(
-                source=phase,
-                target=target_phase,
-                completion=completion,
-                trigger_message_id=request.trigger_message_id,
-            ),
+        next_context = HandoffContext(
+            source=phase,
+            target=target_phase,
+            completion=completion,
+            trigger_message_id=request.trigger_message_id,
         )
-        self._enter_phase(request, handed.phase, handed, next_prompt)
+        next_prompt = self._phase_prompt(request, handed.phase, handed, next_context)
+        self._enter_phase(request, handed.phase, handed, next_prompt, next_context)
         return {
             "executionId": request.execution_id,
             "phase": target_phase,
@@ -646,7 +683,32 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             request, state, target, f"phase completion accepted for {phase!r}"
         )
         pipe = self._spec.piping.get((phase, target))
-        return advanced if pipe is None else pipe(advanced)
+        handed = advanced if pipe is None else pipe(advanced)
+        if self._phase_value(handed.phase) in self.terminal_phases:
+            final_value = self._phase_value(handed.phase)
+            if final_value == "failed":
+                self._finish_execution(
+                    request,
+                    WorkflowExecutionState.FAILED,
+                    ExecutionEventType.WORKFLOW_FAILED,
+                    payload={
+                        "state": "failed",
+                        "finalPhase": phase,
+                        "completion": dict(completion),
+                    },
+                )
+            else:
+                self._finish_execution(
+                    request,
+                    WorkflowExecutionState.COMPLETED,
+                    ExecutionEventType.WORKFLOW_COMPLETED,
+                    payload={
+                        "state": "completed",
+                        "completion": dict(completion),
+                        "finalPhase": phase,
+                    },
+                )
+        return handed
 
     def _validate_contract(
         self, phase: str, completion: Mapping[str, object]
@@ -701,28 +763,29 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         phase: object,
         state: StateT,
         prompt: str | None,
+        context: HandoffContext,
     ) -> str | None:
         """Enter a phase: run deterministic code or spawn its agent.
 
         A deterministic phase is a function that returns a contract: the engine
         validates it exactly as an agent's completion and advances, cascading
         through consecutive deterministic phases.  A non-deterministic phase
-        gets its agent spawned with ``prompt``.  Returns the seeded agent's id,
-        or ``None`` for a deterministic entry.
+        gets its agent spawned with ``prompt``.  A terminal phase has nothing
+        to enter — the execution is finished, so no agent is spawned and no
+        cascade continues.  Returns the seeded agent's id, or ``None`` for a
+        deterministic or terminal entry.
         """
         current = state
         entry = phase
         for _ in range(len(self._spec.phases) + 1):
             phase_value = self._phase_value(entry)
+            if phase_value in self.terminal_phases:
+                return None
             spec = self._spec.phase_specs.get(phase_value)
-            if spec is None or spec.kind is not PhaseKind.DETERMINISTIC:
+            if not isinstance(spec, DeterministicPhase):
                 active = self.ensure_orchestrator(request, entry, prompt=prompt)
                 return active.sub_agent_id
-            if spec.executor is None:
-                raise WorkflowEngineError(
-                    f"deterministic phase {phase_value!r} declares no executor"
-                )
-            contract = spec.executor(self, request, current)
+            contract = spec.contract(self, request, current, context)
             if contract is None:
                 return None
             if not isinstance(contract, Mapping):
@@ -736,17 +799,13 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                     f"deterministic phase {phase_value!r} produced an invalid "
                     f"contract: {error}"
                 ) from error
-            prompt = self._phase_prompt(
-                request,
-                current.phase,
-                current,
-                HandoffContext(
-                    source=phase_value,
-                    target=self._phase_value(current.phase),
-                    completion=contract,
-                    trigger_message_id=request.trigger_message_id,
-                ),
+            context = HandoffContext(
+                source=phase_value,
+                target=self._phase_value(current.phase),
+                completion=contract,
+                trigger_message_id=request.trigger_message_id,
             )
+            prompt = self._phase_prompt(request, current.phase, current, context)
             entry = current.phase
         raise WorkflowEngineError("deterministic phase cascade did not terminate")
 
@@ -1197,10 +1256,14 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 "subAgentId": active.sub_agent_id,
             },
         )
-        assert self._delivery is not None
-        scheduler = self._delivery.scheduler
-        if scheduler is not None:
-            scheduler(request.workspace_id, request.chat_id, active.sub_agent_id)
+        if self._conversations is not None:
+            self._conversations.wake(
+                Anchor(
+                    request.workspace_id,
+                    request.chat_id,
+                    sub_agent_id=active.sub_agent_id,
+                )
+            )
 
     # -- orchestrator lifecycle --------------------------------------------
 
@@ -1217,11 +1280,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         active = self._active_orchestrators.get(request.execution_id)
         if active is not None:
             if prompt is not None:
-                self._deliver_phase_prompt(
+                self._spawn_phase_child(
                     request,
                     self._phase_value(phase),
-                    active.sub_agent_id,
                     prompt,
+                    sub_agent_id=active.sub_agent_id,
                 )
             return active
         doctrine, chat = self._require_doctrine_chat()
@@ -1266,48 +1329,21 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
     ) -> None:
         doctrine, _ = self._require_doctrine_chat()
         phase_value = self._phase_value(phase)
-        family, label = doctrine.orchestrators[phase_value]
-        tools = doctrine.mcp_tools.get(family, ())
-        context = SubAgentContextSpec(
-            knowledge_cutoff=None, mcp_enabled=bool(tools), mcp_tools=tools
-        )
+        spec, context, label = self._phase_spawn_spec(request, phase_value)
         conversational = phase_value in doctrine.conversational_phases
-        node_id = self._workflow_node_id(request)
-        spec = SubAgentSpec(
-            role=label,
-            kind=(
-                SubAgentKind.CONVERSATION if conversational else SubAgentKind.ONE_SHOT
-            ),
-            phase=phase_value,
-            allowed_tools=tuple(tools),
-        )
-        spawner = self._spawner()
-        sub_agent_id = self._id_factory("subagent")
-        if spawner is not None and prompt:
-            # Spawning and prompting are one act: the created agent's first
-            # prompt is delivered at its own anchor, which wakes its turn.
-            spawned = spawner.spawn(
-                request.workspace_id,
-                request.chat_id,
-                spec=spec,
-                actor_id=self._actor,
-                prompt=prompt,
-                parent_sub_agent_id=node_id,
-                workflow_execution_id=request.execution_id,
-                prompt_key=f"phase-seed-{request.execution_id}-{phase_value}",
-                prompt_data={"phase": phase_value},
-            )
-            sub_agent_id = spawned.record.sub_agent_id
-        elif self._subagent_lifecycle is not None:
-            record = self._subagent_lifecycle.spawn(
-                request.workspace_id,
-                request.chat_id,
-                spec=spec,
-                actor_id=self._actor,
-                parent_sub_agent_id=node_id,
-                workflow_execution_id=request.execution_id,
-            )
-            sub_agent_id = record.sub_agent_id
+        sub_agent_id = self._spawn_phase_child(request, phase_value, prompt)
+        if sub_agent_id is None:
+            sub_agent_id = self._id_factory("subagent")
+            if self._subagent_lifecycle is not None:
+                record = self._subagent_lifecycle.spawn(
+                    request.workspace_id,
+                    request.chat_id,
+                    spec=spec,
+                    actor_id=self._actor,
+                    parent_sub_agent_id=self._workflow_node_id(request),
+                    workflow_execution_id=request.execution_id,
+                )
+                sub_agent_id = record.sub_agent_id
         self.append_sub_agent(
             request,
             ExecutionEventType.SUB_AGENT_SPAWNED,
@@ -1390,7 +1426,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         """
         if self._subagent_lifecycle is None:
             return
-        doctrine, _ = self._require_doctrine_chat()
         phase_value = self._phase_value(phase)
         record = self._subagent_lifecycle.get(request.workspace_id, sub_agent_id)
         if record is None or record.status not in {
@@ -1399,31 +1434,18 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             SubAgentStatus.CANCELLED,
         }:
             return
-        spec = SubAgentSpec(
-            role=role,
-            kind=(
-                SubAgentKind.CONVERSATION
-                if phase_value in doctrine.conversational_phases
-                else SubAgentKind.ONE_SHOT
-            ),
-            phase=phase_value,
-            allowed_tools=tuple(tools),
-        )
-        spawner = self._spawner()
-        if spawner is not None and prompt:
-            spawner.spawn(
-                request.workspace_id,
-                request.chat_id,
-                spec=spec,
-                actor_id=self._actor,
-                prompt=prompt,
-                parent_sub_agent_id=self._workflow_node_id(request),
-                workflow_execution_id=request.execution_id,
-                sub_agent_id=sub_agent_id,
-                prompt_key=f"phase-seed-{request.execution_id}-{phase_value}",
-                prompt_data={"phase": phase_value},
+        if prompt and self._conversations is not None:
+            self._spawn_phase_child(
+                request, phase_value, prompt, sub_agent_id=sub_agent_id
             )
             return
+        spec, _context, _label = self._phase_spawn_spec(request, phase_value)
+        spec = SubAgentSpec(
+            role=role,
+            kind=spec.kind,
+            phase=spec.phase,
+            allowed_tools=tuple(tools),
+        )
         self._subagent_lifecycle.spawn(
             request.workspace_id,
             request.chat_id,

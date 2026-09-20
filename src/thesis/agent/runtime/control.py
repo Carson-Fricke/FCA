@@ -20,23 +20,20 @@ gate, not this module: a constructed contract is a proposal, never a transition.
 
 from __future__ import annotations
 
-import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
-from thesis.agent.runtime.delivery import Anchor, DeliveryService, NodeInputService
-from thesis.agent.runtime.lifecycle import SubAgentLifecycle
-from thesis.agent.runtime.spawn import SubAgentSpawner
+from thesis.agent.runtime.child import ChildConversation
+from thesis.agent.runtime.delivery import Anchor
 from thesis.agent.runtime.specs import (
     DEFAULT_CONSTRUCTION_ATTEMPTS,
     DEFAULT_REPAIR_TURNS,
     SubAgentSpec,
 )
-from thesis.agent.runtime.store import SubAgentStore
 from thesis.chat.contracts import (
     AgentInvocation,
     AgentInvocationKind,
@@ -44,6 +41,9 @@ from thesis.chat.contracts import (
     SubAgentRecord,
     replace_record,
 )
+
+if TYPE_CHECKING:
+    from thesis.agent.runtime.conversation import Conversations
 
 TOOL_REQUEST_PHASE_COMPLETION = "request_phase_completion"
 TOOL_REQUEST_SUB_AGENT_COMPLETION = "request_sub_agent_completion"
@@ -402,44 +402,29 @@ type PhaseCompletionApplier = Callable[
 
 
 class ControlToolService:
-    """Executes the Thesis control tools against durable runtime ports.
+    """A thin adapter over the conversations service for the control tools.
 
-    The service owns no delivery semantics of its own: an operator pause goes
-    through the unified :class:`~thesis.agent.runtime.delivery.NodeInputService`
-    path, and a completed node's result reaches its caller through the unified
-    :class:`~thesis.agent.runtime.delivery.DeliveryService` path.
+    The service owns every semantic: spawning is prompting, a completion is a
+    handle call, and a pause is the unified node-input path.  This adapter
+    only records the first-class tool invocations and applies the engine-side
+    validation callbacks the composition binds.
     """
 
     def __init__(
         self,
         *,
-        lifecycle: SubAgentLifecycle,
-        store: SubAgentStore,
-        inputs: NodeInputService,
-        delivery: DeliveryService,
+        conversations: Conversations,
         execution_epochs: Callable[[str, str], int | None] | None = None,
         phase_completions: PhaseCompletionApplier | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-        sleep: Callable[[float], None] | None = None,
-        monotonic: Callable[[], float] | None = None,
-        await_timeout_seconds: float = 30.0,
-        poll_interval_seconds: float = 0.25,
         id_factory: Callable[[str], str] | None = None,
     ) -> None:
-        self._lifecycle = lifecycle
-        self._store = store
-        self._inputs = inputs
-        self._delivery = delivery
+        self._conversations = conversations
+        self._lifecycle = conversations.lifecycle
+        self._store = conversations.store
         self._execution_epochs = execution_epochs
         self._phase_completions = phase_completions
-        self._spawner = SubAgentSpawner(
-            lifecycle=lifecycle, delivery=delivery, clock=clock
-        )
         self._clock = clock
-        self._sleep = sleep or time.sleep
-        self._monotonic = monotonic or time.monotonic
-        self._await_timeout = await_timeout_seconds
-        self._poll_interval = poll_interval_seconds
         self._id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid.uuid4().hex}")
 
     def spawn(
@@ -473,18 +458,21 @@ class ControlToolService:
             phase_attempt_id=phase_attempt_id,
             idempotency_key=idempotency_key,
         )
-        spawned = self._spawner.spawn(
-            workspace_id,
-            chat_id,
-            spec=spec,
+        child = self._conversations.spawn(
+            Anchor(workspace_id, chat_id, sub_agent_id=parent_sub_agent_id),
+            spec,
+            prompt,
+            spec.kind,
             actor_id=actor_id,
-            prompt=prompt,
-            parent_sub_agent_id=parent_sub_agent_id,
             spawned_by_invocation_id=invocation.invocation_id,
-            workflow_execution_id=workflow_execution_id,
-            phase_attempt_id=phase_attempt_id,
+            attribution={
+                "workflow_execution_id": workflow_execution_id,
+                "phase_attempt_id": phase_attempt_id,
+            },
         )
-        return SpawnResult(sub_agent=spawned.record, invocation=invocation)
+        record = child.record
+        assert record is not None
+        return SpawnResult(sub_agent=record, invocation=invocation)
 
     def await_sub_agent(
         self,
@@ -499,26 +487,8 @@ class ControlToolService:
         the current state is returned so the caller can end its turn — the
         child's result is delivered to the caller's anchor when it finishes.
         """
-        budget = self._await_timeout if timeout_seconds is None else timeout_seconds
-        deadline = self._monotonic() + max(0.0, min(float(budget), self._await_timeout))
-        while True:
-            result = self._await_once(workspace_id, sub_agent_id)
-            if result.terminal or self._monotonic() >= deadline:
-                return result
-            self._sleep(self._poll_interval)
-
-    def _await_once(self, workspace_id: str, sub_agent_id: str) -> AwaitResult:
-        """Return a child's current or terminal state to its caller."""
-        record = self._lifecycle.get(workspace_id, sub_agent_id)
-        if record is None:
-            raise RuntimeError("sub-agent does not exist")
-        terminal = record.status.value in {"completed", "failed", "cancelled"}
-        return AwaitResult(
-            sub_agent_id=record.sub_agent_id,
-            status=record.status.value,
-            terminal=terminal,
-            result=record.result,
-            result_ref=record.result_ref,
+        return self._child(workspace_id, sub_agent_id).await_result(
+            timeout_seconds=timeout_seconds
         )
 
     def request_operator_input(
@@ -529,16 +499,19 @@ class ControlToolService:
         message: str,
         reason: str = "",
     ) -> OperatorInputRequest:
-        """Publish an agent-authored request and pause the node for input.
+        """Publish an agent-authored request and pause the child for input.
 
-        The pause is the unified input path's state transition: the asking node
-        enters ``needs_input`` through :meth:`NodeInputService.request_input`, so
-        the answer accepted for that node resumes the same record.  There is no
-        second, direct lifecycle call.
+        The pause is the unified input path's state transition: the asking
+        child enters ``needs_input`` through its request-input handle, so the
+        answer accepted for that child resumes the same conversation.  There
+        is no second, direct lifecycle call.
         """
         if not isinstance(message, str) or not message.strip():
             raise ValueError("request_operator_input requires a non-empty message")
-        self._inputs.request_input(workspace_id, sub_agent_id)
+        conversation = self._conversations.get(workspace_id, sub_agent_id)
+        if conversation is None:
+            raise RuntimeError("sub-agent does not exist")
+        conversation.request_input()
         return OperatorInputRequest(
             sub_agent_id=sub_agent_id,
             message=message.strip(),
@@ -554,11 +527,11 @@ class ControlToolService:
     ) -> SubAgentRecord:
         """Mark a non-phase child completed and deliver its result to the caller.
 
-        The node is the caller's own conversation, so its constructed result is
-        persisted at the caller anchor and scheduled through the one delivery
-        path every other datum uses.
+        The child is the caller's own conversation, so its constructed result
+        is persisted at the caller anchor and scheduled through the one
+        delivery path every other datum uses.
         """
-        return self._complete_node(workspace_id, sub_agent_id, result=result)
+        return self._complete_child(workspace_id, sub_agent_id, result=result)
 
     def complete_phase(
         self,
@@ -567,11 +540,10 @@ class ControlToolService:
         *,
         completion: Mapping[str, object],
     ) -> SubAgentRecord:
-        """Mark a phase node completed with its constructed completion contract.
+        """Mark a phase child completed with its constructed completion.
 
         The persisted result is a proposal, never a transition: the owning
-        deterministic workflow gate remains the only thing that advances a
-        phase.
+        deterministic gate remains the only thing that advances a phase.
         """
         record = self._lifecycle.get(workspace_id, sub_agent_id)
         if record is None:
@@ -585,33 +557,28 @@ class ControlToolService:
                 raise PhaseCompletionRejected(
                     "no workflow is available to apply this completion"
                 )
-        return self._complete_node(workspace_id, sub_agent_id, result=completion)
+        return self._complete_child(workspace_id, sub_agent_id, result=completion)
 
-    def _complete_node(
+    def _complete_child(
         self,
         workspace_id: str,
         sub_agent_id: str,
         *,
         result: Mapping[str, object],
     ) -> SubAgentRecord:
-        record = self._lifecycle.get(workspace_id, sub_agent_id)
+        child = self._child(workspace_id, sub_agent_id)
+        record = child.record
         if record is None:
             raise RuntimeError("sub-agent does not exist")
         self._reject_stale_completion(workspace_id, record, result)
-        record = self._lifecycle.complete(workspace_id, sub_agent_id, result=result)
-        self._delivery.deliver_child_result(
-            Anchor(
-                workspace_id,
-                record.chat_id,
-                sub_agent_id=record.parent_sub_agent_id,
-            ),
-            record,
-            # A phase agent's parent is the workflow node: a record, not a
-            # conversation.  Its continuation already ran in this tool call, so
-            # only a non-phase child wakes a real agent parent.
-            schedule=record.phase is None,
-        )
-        return record
+        return child.complete(result)
+
+    def _child(self, workspace_id: str, sub_agent_id: str) -> ChildConversation:
+        """Resolve one child conversation handle, failing when it is absent."""
+        resolved = self._conversations.get(workspace_id, sub_agent_id)
+        if not isinstance(resolved, ChildConversation):
+            raise RuntimeError("sub-agent does not exist")
+        return resolved
 
     def _reject_stale_completion(
         self,

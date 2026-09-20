@@ -24,14 +24,15 @@ The durable sub-agent runtime is implemented in `thesis.agent.runtime`:
 - `PhaseCompletionProtocol` implements the nested budgets exactly: three
   construction attempts per agent turn, two repair turns, then operator
   escalation, with durable repair epochs;
-- `ControlToolService` exposes the Thesis control tools, including
-  `spawn_sub_agent` recorded as a first-class tool invocation;
+- `ControlToolService` is a thin adapter over the `Conversations` service: it
+  records the spawn as a first-class tool invocation and delegates spawn,
+  await, completion, and operator input to the conversation handles;
 - `DeliveryService` is the single delivery path for a child's result, a
   workflow outcome, or an operator answer: it persists the typed datum at the
-  anchor and then schedules that anchor's turn, durable before scheduled and
+  anchor and then routes that anchor's wake, durable before routed and
   idempotent under retry, with `SubAgentNotifier` folded into it;
 - `AgentSession` is the single durable model/tool turn loop that the chat path
-  and workflow path must converge on: it sends the merged catalog, persists each
+  and workflow path converge on: it sends the merged catalog, persists each
   model and tool invocation as a first-class record, threads tool results back
   as `tool` messages, stops on a terminal control tool, and enforces a safety
   iteration cap;
@@ -47,8 +48,39 @@ The durable sub-agent runtime is implemented in `thesis.agent.runtime`:
   tool dispatch is the unified session registry and the plain provider remains
   only as `create_app`'s non-tool fallback.
 
+The conversation abstraction (`thesis-conversation-abstraction-v1`,
+REQ-034..REQ-040) is implemented in `thesis.agent.runtime.conversation` and
+`thesis.agent.runtime.child`:
+
+- one `Conversation` owns a transcript and turns for chats and sub-agents
+  alike: a chat is a conversation at the root anchor (the folded
+  `ChatReplyService` turn is its turn implementation, streaming through the
+  chat's delta sink), and a sub-agent is a nested conversation running the
+  durable session turn over its own anchored transcript;
+- the `Conversations` service is the only upstream surface — `root`, `get`,
+  `children`, `deliver`, and `spawn(returns_to, spec, prompt, kind)` — and owns
+  the per-conversation workers (serialize, coalesce, mid-turn drain), the
+  routing rule (root to itself, record anchors durable-only, every other
+  conversation on its worker), and spawning;
+- `ChildConversation` composes the return layer over an inner conversation:
+  the `returns_to` anchor, `complete`/`fail`/`result`/`await_result`/
+  `children`/`cancel`, and one turn-end policy — `OneShotPolicy` completes a
+  one-shot child on its final answer and delivers it to the return anchor,
+  `ConversationalPolicy` keeps the conversation open, and phase children
+  never auto-complete because their completion is the engine-bound
+  `request_phase_completion` tool;
+- the workflow engine sees only the service (`ports.conversations`) and the
+  handles: phase children are spawned through `service.spawn` with the
+  workflow node as their return anchor, phase results route through the
+  service's delivery, and the engine builds no spawner, delivery, or scheduler
+  of its own;
+- phase specs are the sealed union of frozen dataclasses —
+  `ConversationPhase`, `OneShotPhase`, `DeterministicPhase` — dispatched by
+  exhaustive match, so invalid combinations are unrepresentable and a
+  `DeterministicPhase` builds no conversation at all.
+
 The `hypothesis_development` workflow is now a nested package
-(`thesis/workflows/hypothesis_development/`) with concern modules (`errors`,
+(`thesis/workflows/registry/hypothesis_development/`) with concern modules (`errors`,
 `primitives`, `phases`, `contracts`, `gates`, `prompts`, `composers`, `state`,
 `workflow`) behind a stable public facade. The retired sibling workflows
 (strategy development, autonomous discovery, and the standalone RCA loop) and
@@ -915,11 +947,86 @@ state rather than blocking indefinitely.
   returns the terminal result when the child finishes inside the window and the
   current state at the timeout.
 
+**REQ-034: One conversation abstraction.** Chats and sub-agents MUST share
+one implementation of internals (identity, transcript, send/deliver/answer,
+status, turn execution). A chat MUST NOT be a subclass with different
+behavior: it is a conversation at the root anchor, and the root turn path MUST
+be the conversation's turn implementation. Target design:
+`thesis-conversation-abstraction-v1`.
+
+- Rationale: two turn paths for the same concept is the drift this repository
+  keeps paying for.
+- Verification: a root-conversation turn and a node turn run through one
+  implementation; chat behavior is unchanged from the wire's view.
+
+**REQ-035: Child semantics are composed, not inherited.** A child MUST
+delegate every internal to its inner conversation and add only the return
+target, `complete`/`fail`/`result`/`await_result`/`children`, cancellation,
+and one turn-end hook ("does a text-ending turn complete me?"). A wrapper
+that implements turns, identity, or persistence is a defect.
+
+- Rationale: the return layer is additive; internals are the invariant.
+- Verification: child semantics are testable without a root; delegation
+  covers every other operation.
+
+**REQ-036: The return target is an anchor, not a conversation.** Delivery at
+a conversation anchor schedules that conversation's turn; delivery at a record
+anchor is durable-only because the engine already reacted. The same child
+wrapper MUST serve chat-spawned helpers and phase agents without
+special-casing either.
+
+- Rationale: phase agents return to the workflow node, which is a record.
+- Verification: one wrapper serves both; record-anchor delivery schedules
+  nothing.
+
+**REQ-037: Kind is a creation parameter.** One-shot versus conversational MUST
+select a turn-end policy and input acceptance, never a different
+implementation of internals. One-shot children auto-complete on their final
+answer and deliver it to the return anchor; conversational children accept
+input from birth and stay open; phase children do not auto-complete.
+
+- Rationale: matches the durable `kind` enum without leaking it into
+  behavior classes.
+- Verification: the policy object is the only kind-dependent code.
+
+**REQ-038: No phase knowledge in child semantics.** Phase binding is spec
+data on the record, the completion tool the engine binds into the child's
+registry, and the return anchor supplied at spawn. The conversation hierarchy
+MUST contain no phase vocabulary.
+
+- Rationale: phases are engine-side bindings, not a conversation concern.
+- Verification: the child classes contain no phase names or contracts.
+
+**REQ-039: The service owns scheduling.** Every wake is a delivery; the
+`Conversations` service owns the per-conversation workers, the routing rule
+(root → itself; record anchor → durable-only; node → worker), and spawning.
+Upstream MUST NOT call a scheduler, runner, or coordinator.
+
+- Rationale: upstream seeing machinery is the miss this closes.
+- Verification: no code outside the service references the coordinator or
+  runner.
+
+**REQ-040: Phase specs are a sealed union of objects.** A workflow's phases
+MUST be a sealed union of frozen dataclasses — conversation, one-shot,
+deterministic — dispatched by exhaustive match; invalid combinations MUST be
+unrepresentable rather than builder-rejected. An agent phase's spec produces a
+child conversation through the service; a deterministic phase produces none.
+
+- Rationale: the flat spec's optional fields are validated combinations; types
+  make them unrepresentable.
+- Verification: adding a phase type fails to compile unmatched sites.
+
 Anti-patterns observed during this migration — turn drivers, engine-side model
 calls, sibling-transcript reads, re-embedding conversations in seeds,
 prose-only configuration fields, delivered tool messages without envelopes,
 silently invented entities, and a second launch entry point — are catalogued in
-the authoring guide `thesis-workflow-authoring-guide`.
+the authoring guide `thesis-workflow-authoring-guide`. REQ-034..REQ-040 are the
+conversation abstraction recorded in
+`thesis-conversation-abstraction-v1`; they are implemented by
+`thesis.agent.runtime.conversation` and `thesis.agent.runtime.child` (one
+conversation hierarchy, composed child semantics, anchor-based returns, the
+kind-as-creation-parameter turn-end policy, the service-owned routing rule,
+and the sealed phase-spec union).
 
 ## Target Package Layout
 

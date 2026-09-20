@@ -16,14 +16,9 @@ from thesis.agent.router import (
     Role,
     RolePolicy,
 )
-from thesis.agent.runtime.delivery import NodeInputService, TurnScheduler
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.lifecycle import (
     SubAgentLifecycle,
-)
-from thesis.agent.runtime.policy import (
-    AnsweringActor,
-    OperatorActorKind,
-    OperatorPolicyRegistry,
 )
 from thesis.agent.runtime.specs import (
     DEFAULT_MAX_CHILDREN,
@@ -37,7 +32,6 @@ from thesis.chat.contracts import (
     SubAgentRecord,
 )
 from thesis.chat.service import ChatService
-from thesis.chat.workflow_launcher import RuntimeWorkflowLauncher
 from thesis.execution.events import ExecutionEventType
 from thesis.experiments.ledger import AttemptLedger
 from thesis.persistence import CommandJournal
@@ -48,7 +42,6 @@ from thesis.strategies.validation import (
     StrategyValidationRequest,
     StrategyValidationResult,
 )
-from thesis.workflows import WorkflowRuntime, build_workflow_runtime
 from thesis.workflows.backtests import (
     BacktestRunError,
     BacktestRunRequest,
@@ -58,7 +51,6 @@ from thesis.workflows.backtests import (
 from thesis.workflows.core.workflow import Workflow
 from thesis.workflows.registry.hypothesis_development import (
     HypothesisDevelopmentOutcome,
-    HypothesisDevelopmentPhase,
     HypothesisDevelopmentRequest,
     HypothesisDevelopmentState,
     build_hypothesis_development_workflow,
@@ -319,6 +311,8 @@ class _Kit:
         ledger: AttemptLedger,
         factory: RecordingSubagentFactory,
         journal: CommandJournal,
+        conversations: Conversations,
+        woke: list[object],
     ) -> None:
         self.workflow = workflow
         self.chat = chat
@@ -328,6 +322,8 @@ class _Kit:
         self.ledger = ledger
         self.factory = factory
         self.journal = journal
+        self.conversations = conversations
+        self.woke = woke
 
 
 def _kit(
@@ -341,7 +337,6 @@ def _kit(
     research_runner: object | None = None,
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_children: int = DEFAULT_MAX_CHILDREN,
-    turn_scheduler: TurnScheduler | None = None,
 ) -> _Kit:
     clock = _clock()
     id_factory = _id_factory()
@@ -408,6 +403,22 @@ def _kit(
     if insert_strategy_success and len(runner_results) >= 2:
         runner_results.insert(1, ("completed", {"sharpe": 1.0}))
     runner = FakeRunner(runner_results)
+    sub_agent_store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(
+        chat,
+        store=sub_agent_store,
+        max_depth=max_depth,
+        max_children=max_children,
+    )
+    woke: list[object] = []
+    conversations = Conversations(
+        chat=chat,
+        store=sub_agent_store,
+        lifecycle=lifecycle,
+        # A dropped wake leaves the conversation in flight, so a test can
+        # assert exactly which conversations the engine woke.
+        spawn_thread=lambda target: woke.append(target),
+    )
     workflow = build_hypothesis_development_workflow(
         chat=chat,
         router=router,
@@ -425,13 +436,7 @@ def _kit(
             if research_runner is not None
             else None
         ),
-        subagent_lifecycle=SubAgentLifecycle(
-            chat,
-            store=PersistenceSubAgentStore(chat.persistence),
-            max_depth=max_depth,
-            max_children=max_children,
-        ),
-        turn_scheduler=turn_scheduler,
+        conversations=conversations,
     )
     return _Kit(
         workflow=workflow,
@@ -442,6 +447,8 @@ def _kit(
         ledger=ledger,
         factory=factory,
         journal=journal,
+        conversations=conversations,
+        woke=woke,
     )
 
 
@@ -515,64 +522,11 @@ def _latest_input_phase(kit: _Kit, request: HypothesisDevelopmentRequest) -> str
     return str(questions[-1].data["phase"])
 
 
-def _answer_current_pause(
-    kit: _Kit, request: HypothesisDevelopmentRequest, *, body: str | None = None
-) -> HypothesisDevelopmentOutcome:
-    """Answer the latest operator request through the unified node-input path.
-
-    The answering actor is the authenticated human operator; the node's
-    operator policy adjudicates the answer, and the scheduled node turn is
-    exactly one continuation of the same execution, which is never paused.
-    """
-    phase = _latest_input_phase(kit, request)
-    resolved = body or ("check off" if phase == "verdict" else "confirm")
-    outcomes: list[HypothesisDevelopmentOutcome] = []
-    service = NodeInputService(
-        chat=kit.chat,
-        store=PersistenceSubAgentStore(kit.chat.persistence),
-        policies=OperatorPolicyRegistry(),
-        schedule=lambda _ws, _chat_id, _node: outcomes.append(
-            kit.workflow.run(request)
-        ),
-    )
-    receipt = service.accept(
-        WORKSPACE,
-        request.chat_id,
-        _question_node_id(kit, request),
-        body=resolved,
-        actor=AnsweringActor(actor_id=OWNER, kind=OperatorActorKind.HUMAN_OPERATOR),
-    )
-    assert receipt.duplicate is False
-    assert receipt.scheduled is True
-    assert receipt.decision.actor.kind is OperatorActorKind.HUMAN_OPERATOR
-    assert len(outcomes) == 1
-    return outcomes[-1]
-
-
 def _prompt_with(kit: _Kit, marker: str) -> str:
     for prompt in kit.provider.prompts:
         if marker in prompt:
             return prompt
     raise AssertionError(f"no prompt contains {marker!r}")
-
-
-def _run(kit: _Kit, request: HypothesisDevelopmentRequest, confirm: str = "confirm"):
-    """Drive the conversational phases as far as the queued model turns allow.
-
-    The execution is never paused: each delivered operator request is answered
-    through the unified node-input path, and the scheduled continuation
-    re-enters ``run``.  A phase that needs more operator input simply returns,
-    so a gate failure is observable as its own awaiting outcome.
-    """
-    outcome = kit.workflow.run(request)
-    if (
-        outcome.phase is HypothesisDevelopmentPhase.HYPOTHESIS_CREATION
-        and _operator_questions(kit, request)
-    ):
-        outcome = _answer_current_pause(kit, request, body=confirm)
-    if outcome.phase is HypothesisDevelopmentPhase.VERDICT:
-        outcome = _answer_current_pause(kit, request)
-    return outcome
 
 
 def _skill_keys(policy: RolePolicy) -> set[str]:
@@ -609,148 +563,3 @@ class _TimingOutResearchRunner:
             "study 'falsify-execution-1-model' did not reach a terminal state "
             "within 3900s"
         )
-
-
-def _runtime_kit(
-    chat: ChatService,
-    *,
-    payloads: list[dict[str, object] | str],
-    results: list[tuple[str, object | None] | BacktestRunError],
-    turn_scheduler: TurnScheduler | None = None,
-) -> tuple[WorkflowRuntime, FakeProvider]:
-    """Compose the production runtime over the same deterministic fakes."""
-    clock = _clock()
-    id_factory = _id_factory()
-    provider = FakeProvider(*payloads)
-    profiles = {
-        "research-profile": ModelProfile(
-            profile_id="research-profile",
-            version="1.0.0",
-            provider="fake",
-            model="research-model",
-        ),
-        "critique-profile": ModelProfile(
-            profile_id="critique-profile",
-            version="1.0.0",
-            provider="fake",
-            model="critique-model",
-        ),
-        "coding-profile": ModelProfile(
-            profile_id="coding-profile",
-            version="1.0.0",
-            provider="fake",
-            model="coding-model",
-        ),
-    }
-    policies: dict[Role, RolePolicy] = {
-        "research": RolePolicy(
-            role="research", version="1.0.0", model_profile="research-profile"
-        ),
-        "critique": RolePolicy(
-            role="critique", version="1.0.0", model_profile="critique-profile"
-        ),
-        "coding": RolePolicy(
-            role="coding", version="1.0.0", model_profile="coding-profile"
-        ),
-    }
-    runtime = build_workflow_runtime(
-        role_policies=policies,
-        model_profiles=profiles,
-        providers={"fake": provider},
-        skills=SkillRegistry(),
-        bundle=PolicyBundle(
-            bundle_id="thesis-platform",
-            version="1.0.0",
-            bundle_sha256="a" * 64,
-            policy_sha256="b" * 64,
-        ),
-        runner=FakeRunner(results),
-        strategy_validator=FakeValidator(),
-        hypothesis_store=InMemoryHypothesisStore(),
-        subagent_lifecycle=SubAgentLifecycle(
-            chat, store=PersistenceSubAgentStore(chat.persistence)
-        ),
-        turn_scheduler=turn_scheduler,
-        clock=clock,
-        id_factory=id_factory,
-    )
-    return runtime, provider
-
-
-def _chat_for_runtime() -> ChatService:
-    return ChatService(clock=_clock(), id_factory=_id_factory())
-
-
-def _launch_runtime_workflow(
-    runtime: WorkflowRuntime,
-    chat: ChatService,
-    *,
-    turn_scheduler: TurnScheduler | None = None,
-) -> tuple[str, str]:
-    """Launch through the runtime launcher and return ``(chat_id, execution_id)``."""
-    chat_id = chat.create_chat(
-        WORKSPACE, title="runtime chat", owner_actor_id=OWNER
-    ).chat_id
-    trigger = chat.create_message(WORKSPACE, chat_id, actor_id=OWNER, body=IDEAS)
-    launcher = RuntimeWorkflowLauncher(
-        runtime,
-        chat,
-        detach=lambda function: function(),
-        turn_scheduler=turn_scheduler,
-    )
-    handle = launcher.start_hypothesis_development(
-        workspace_id=WORKSPACE,
-        chat_id=chat_id,
-        actor_id=OWNER,
-        ideas=IDEAS,
-        trigger_message_id=trigger.message_id,
-    )
-    return chat_id, str(handle["executionId"])
-
-
-def _execution_questions(
-    chat: ChatService, chat_id: str, execution_id: str
-) -> list[Any]:
-    return [
-        message
-        for message in chat.list_messages(WORKSPACE, chat_id)
-        if message.execution_id == execution_id
-        and message.data is not None
-        and message.data.get("kind") == "operator_question"
-    ]
-
-
-def _answer_through_scheduler(
-    runtime: WorkflowRuntime,
-    chat: ChatService,
-    scheduled: list[tuple[str, str, str]],
-    *,
-    chat_id: str,
-    execution_id: str,
-    node_id: str,
-    body: str,
-) -> HypothesisDevelopmentOutcome:
-    """Accept an operator answer and dispatch its turn through the runtime."""
-    outcomes: list[HypothesisDevelopmentOutcome] = []
-
-    def dispatch(workspace_id: str, target_chat_id: str, sub_agent_id: str) -> None:
-        scheduled.append((workspace_id, target_chat_id, sub_agent_id))
-        request = HypothesisDevelopmentRequest.from_execution(
-            chat, chat.get_execution(workspace_id, execution_id)
-        )
-        outcomes.append(runtime.execute_hypothesis_development(request, chat=chat))
-
-    NodeInputService(
-        chat=chat,
-        store=PersistenceSubAgentStore(chat.persistence),
-        policies=OperatorPolicyRegistry(),
-        schedule=dispatch,
-    ).accept(
-        WORKSPACE,
-        chat_id,
-        node_id,
-        body=body,
-        actor=AnsweringActor(actor_id=OWNER, kind=OperatorActorKind.HUMAN_OPERATOR),
-    )
-    assert len(outcomes) == 1
-    return outcomes[-1]

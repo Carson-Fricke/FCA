@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 
+from thesis.agent.runtime.conversation import Conversations
 from thesis.chat import (
     CHAT_MESSAGE,
     PROVIDER_DELTA,
     ChatMessage,
-    ChatReplyService,
     ChatService,
     InMemoryChatStreamBroker,
 )
 from thesis.chat.contracts import MessageRole
-from thesis.chat.responder import ReplyChunk, ReplyProvider
+from thesis.chat.responder import ReplyChunk
 
 WORKSPACE = "workspace-a"
 
@@ -35,7 +35,22 @@ def _reasoning_provider(reasoning: str, answer: str):
     return stream
 
 
-def test_provider_factory_receives_the_turn_history() -> None:
+def _conversations(
+    service: ChatService,
+    broker: InMemoryChatStreamBroker,
+    stream,
+    *,
+    spawn_thread=None,
+) -> Conversations:
+    return Conversations(
+        chat=service,
+        broker=broker,
+        reply_for=lambda workspace_id, chat_id, history: stream(history),
+        spawn_thread=spawn_thread,
+    )
+
+
+def test_reply_source_receives_the_turn_history() -> None:
     service = ChatService()
     broker = InMemoryChatStreamBroker()
     chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
@@ -43,22 +58,17 @@ def test_provider_factory_receives_the_turn_history() -> None:
     captured: dict[str, object] = {}
     captured_history: list[ChatMessage] = []
 
-    def factory(
+    def source(
         workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
-    ) -> ReplyProvider:
+    ) -> Iterator[str]:
         captured["workspace_id"] = workspace_id
         captured["chat_id"] = chat_id
         captured_history.extend(history)
-        return _reply_provider("ok")
+        yield "ok"
 
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=lambda history: iter(()),
-        provider_factory=factory,
-    )
+    conversations = Conversations(chat=service, broker=broker, reply_for=source)
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert captured["workspace_id"] == WORKSPACE
@@ -81,57 +91,18 @@ def test_node_turn_never_enters_the_top_level_history() -> None:
     )
     captured: list[ChatMessage] = []
 
-    def factory(
+    def source(
         workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
-    ) -> ReplyProvider:
+    ) -> Iterator[str]:
         del workspace_id, chat_id
         captured.extend(history)
-        return _reply_provider("ok")
+        yield "ok"
 
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=lambda history: iter(()),
-        provider_factory=factory,
-    )
+    conversations = Conversations(chat=service, broker=broker, reply_for=source)
 
-    reply.respond(WORKSPACE, chat.chat_id)
+    conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert [message.body for message in captured] == ["root"]
-
-
-def test_root_turn_never_enters_a_node_history() -> None:
-    service = ChatService()
-    broker = InMemoryChatStreamBroker()
-    chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
-    service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="root")
-    service.create_message(
-        WORKSPACE,
-        chat.chat_id,
-        actor_id="research-agent",
-        body="node-only",
-        role=MessageRole.USER,
-        data={"subAgentId": "node-1"},
-    )
-    captured: list[ChatMessage] = []
-
-    def factory(
-        workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
-    ) -> ReplyProvider:
-        del workspace_id, chat_id
-        captured.extend(history)
-        return _reply_provider("ok")
-
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=lambda history: iter(()),
-        provider_factory=factory,
-    )
-
-    reply.respond(WORKSPACE, chat.chat_id, sub_agent_id="node-1")
-
-    assert [message.body for message in captured] == ["node-only"]
 
 
 def test_reply_streams_deltas_and_persists_assistant_message() -> None:
@@ -139,11 +110,9 @@ def test_reply_streams_deltas_and_persists_assistant_message() -> None:
     broker = InMemoryChatStreamBroker()
     chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
     service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="Hi")
-    reply = ChatReplyService(
-        chat_service=service, broker=broker, provider=_reply_provider("Hel", "lo!")
-    )
+    conversations = _conversations(service, broker, _reply_provider("Hel", "lo!"))
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert message.role is MessageRole.ASSISTANT
@@ -170,9 +139,9 @@ def test_reply_failure_streams_error_and_persists_nothing() -> None:
         del history
         raise RuntimeError("provider down")
 
-    reply = ChatReplyService(chat_service=service, broker=broker, provider=failing)
+    conversations = _conversations(service, broker, failing)
 
-    assert reply.respond(WORKSPACE, chat.chat_id) is None
+    assert conversations.root(WORKSPACE, chat.chat_id).run_turn() is None
     frames = broker.read(WORKSPACE, chat.chat_id)
     assert any(frame.data.get("error") == "provider down" for frame in frames)
     stored = service.list_messages(WORKSPACE, chat.chat_id)
@@ -184,13 +153,11 @@ def test_reply_persists_multiline_text() -> None:
     broker = InMemoryChatStreamBroker()
     chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
     service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="Hi")
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=_reply_provider("Line one\n\nLine two — done ✓"),
+    conversations = _conversations(
+        service, broker, _reply_provider("Line one\n\nLine two — done ✓")
     )
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert message.body == "Line one\n\nLine two — done ✓"
@@ -201,13 +168,11 @@ def test_reply_sanitizes_control_characters() -> None:
     broker = InMemoryChatStreamBroker()
     chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
     service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="Hi")
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=_reply_provider("ok\x1b[31mred\x00"),
+    conversations = _conversations(
+        service, broker, _reply_provider("ok\x1b[31mred\x00")
     )
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert message.body == "ok[31mred"
@@ -218,13 +183,11 @@ def test_reply_streams_reasoning_before_answer_on_a_separate_channel() -> None:
     broker = InMemoryChatStreamBroker()
     chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
     service.create_message(WORKSPACE, chat.chat_id, actor_id="operator", body="Hi")
-    reply = ChatReplyService(
-        chat_service=service,
-        broker=broker,
-        provider=_reasoning_provider("Weigh the options.", "Answer text."),
+    conversations = _conversations(
+        service, broker, _reasoning_provider("Weigh the options.", "Answer text.")
     )
 
-    message = reply.respond(WORKSPACE, chat.chat_id)
+    message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
     assert message is not None
     assert message.body == "Answer text."
@@ -244,3 +207,56 @@ def test_reply_streams_reasoning_before_answer_on_a_separate_channel() -> None:
     assert isinstance(persisted, dict)
     assert persisted["body"] == "Answer text."
     assert persisted["reasoning"] == "Weigh the options."
+
+
+def test_send_persists_the_message_and_wakes_the_reply_turn() -> None:
+    service = ChatService()
+    broker = InMemoryChatStreamBroker()
+    chat = service.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
+    woke: list[object] = []
+
+    def spawn_thread(target) -> None:
+        woke.append(target())
+
+    conversations = _conversations(
+        service, broker, _reply_provider("Hi there"), spawn_thread=spawn_thread
+    )
+
+    message = conversations.root(WORKSPACE, chat.chat_id).send(
+        body="Hello", actor_id="operator"
+    )
+
+    assert message.role is MessageRole.USER
+    assert message.body == "Hello"
+    assert len(woke) == 1
+    stored = service.list_messages(WORKSPACE, chat.chat_id)
+    assert [item.role for item in stored] == [MessageRole.USER, MessageRole.ASSISTANT]
+
+
+def test_a_record_anchor_delivery_schedules_nothing() -> None:
+    from thesis.agent.runtime.specs import SubAgentSpec
+    from thesis.chat.contracts import (
+        RECORD_ANCHOR_ROLES,
+        SubAgentKind,
+    )
+    from thesis.chat.service import InMemoryChatPersistence
+
+    chat = ChatService(persistence=InMemoryChatPersistence())
+    chat_id = chat.create_chat(
+        WORKSPACE, title="Anchors", owner_actor_id="operator"
+    ).chat_id
+    conversations = _conversations(chat, InMemoryChatStreamBroker(), _reply_provider())
+    record = conversations.lifecycle.spawn(
+        WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(
+            role="workflow-node",
+            kind=SubAgentKind.ONE_SHOT,
+        ),
+        actor_id="operator",
+    )
+    assert record.role in RECORD_ANCHOR_ROLES
+
+    conversations.schedule(WORKSPACE, chat_id, record.sub_agent_id)
+
+    assert conversations.in_flight(WORKSPACE, chat_id, record.sub_agent_id) is False

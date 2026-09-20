@@ -398,7 +398,7 @@ Workflow executions are owned by the anchor that launched them, and each executi
 has a durable workflow-node record parented to that anchor which owns its phase
 agents. Node input is governed by a per-node operator policy whose default is
 human-only, so future autonomous orchestration is a policy change rather than a
-structural one. The normative requirements are REQ-018 through REQ-033 in
+structural one. The normative requirements are REQ-018 through REQ-040 in
 `thesis-agent-workflow-runtime.md`, with the accepted design record at
 `thesis-chat-surface-and-subagent-anchoring-v1`.
 
@@ -1571,8 +1571,9 @@ Decisions recorded after this list was authored are tracked in the accepted desi
 records; conversation anchoring, datum rendering, anchor-owned executions,
 workflow-node ownership, and per-node operator policy were settled in
 `thesis-chat-surface-and-subagent-anchoring-v1` and are specified as REQ-018
-through REQ-033 in `thesis-agent-workflow-runtime.md`. The working rules for
-authoring workflows are in `thesis-workflow-authoring-guide`.
+through REQ-040 in `thesis-agent-workflow-runtime.md`. The working rules for
+authoring workflows are in `thesis-workflow-authoring-guide`; the target
+conversation abstraction is `thesis-conversation-abstraction-v1`.
 
 - Exact primary, coding, research, critique, and RCA models and providers.
 - The default anti-overfitting protocol by asset class and horizon.

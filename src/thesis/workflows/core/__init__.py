@@ -13,7 +13,12 @@ from thesis.workflows.core.delivery import NodeTurnDelivery, WorkflowNodeManager
 from thesis.workflows.core.events import emit_phase, finish_execution
 from thesis.workflows.core.gate import GateCheck, GateOutcome, evaluate_gate
 from thesis.workflows.core.machine import TransitionMachine, TransitionTable
-from thesis.workflows.core.phase import PhaseExecutor, PhaseKind, PhaseSpec
+from thesis.workflows.core.phase import (
+    ConversationPhase,
+    DeterministicPhase,
+    OneShotPhase,
+    PhaseSpec,
+)
 from thesis.workflows.core.registry import (
     UnknownWorkflowError,
     WorkflowExecute,
@@ -39,11 +44,12 @@ from thesis.workflows.core.workflow import (
 
 __all__ = [
     "ActiveSubAgent",
+    "ConversationPhase",
+    "DeterministicPhase",
     "GateCheck",
     "GateOutcome",
     "NodeTurnDelivery",
-    "PhaseExecutor",
-    "PhaseKind",
+    "OneShotPhase",
     "PhaseSpec",
     "PipingFunction",
     "TERMINAL_EXECUTION_STATES",

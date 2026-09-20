@@ -22,8 +22,9 @@ import threading
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, cast
 
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.datum import Datum, DatumType, datum_from_result
-from thesis.agent.runtime.delivery import Anchor, DeliveryService, TurnScheduler
+from thesis.agent.runtime.delivery import Anchor
 from thesis.chat.contracts import RecordNotFound
 from thesis.chat.responder import DevelopmentRuntime, development_summary
 from thesis.chat.service import ChatService
@@ -94,15 +95,14 @@ class RuntimeWorkflowLauncher:
         chat: ChatService,
         *,
         detach: Detach | None = None,
-        turn_scheduler: TurnScheduler | None = None,
-        delivery: DeliveryService | None = None,
+        conversations: Conversations | None = None,
         wake_phases: frozenset[str] | None = None,
         registry: WorkflowRegistry | None = None,
     ) -> None:
         self._runtime = runtime
         self._chat = chat
         self._detach = detach or _daemon_thread
-        self._delivery = delivery or DeliveryService(chat, schedule=turn_scheduler)
+        self._conversations = conversations
         self._wake_phases = (
             DEFAULT_WAKE_PHASES if wake_phases is None else frozenset(wake_phases)
         )
@@ -257,7 +257,9 @@ class RuntimeWorkflowLauncher:
             )
         else:
             return
-        self._delivery.deliver(
+        if self._conversations is None:
+            return
+        self._conversations.deliver(
             anchor,
             datum,
             execution_id=request.execution_id,

@@ -42,11 +42,11 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.delivery import (
     NodeInputNotAccepted,
     NodeInputNotFound,
     NodeInputService,
-    TurnScheduler,
 )
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
@@ -80,9 +80,9 @@ _TERMINAL_EXECUTION_STATES = frozenset(
     }
 )
 
-#: ``app.state`` key holding the callable that runs one more node turn; the
-#: callable receives ``(workspace_id, chat_id, sub_agent_id)``.
-SUB_AGENT_TURN_STATE_KEY = "sub_agent_turn"
+#: ``app.state`` key holding the :class:`Conversations` service that owns every
+#: conversation's turns; the operator-answer route resolves it.
+CONVERSATIONS_STATE_KEY = "conversations"
 
 #: ``request.state`` key holding the authenticated principal.  The value is the
 #: same string the shared auth dependency returns, for example
@@ -166,9 +166,9 @@ def _resolve_policies(
     return OperatorPolicyRegistry()
 
 
-def _resolve_scheduler(request: Request) -> TurnScheduler | None:
-    turn = getattr(request.app.state, SUB_AGENT_TURN_STATE_KEY, None)
-    return turn if callable(turn) else None
+def _resolve_conversations(request: Request) -> Conversations | None:
+    service = getattr(request.app.state, CONVERSATIONS_STATE_KEY, None)
+    return service if isinstance(service, Conversations) else None
 
 
 class ChatSubAgentMessageRequest(BaseModel):
@@ -438,21 +438,26 @@ def create_chat_sub_agent_router(
             actor_id=authenticated_actor_id(principal),
             kind=OperatorActorKind.HUMAN_OPERATOR,
         )
-        store = _store_for(chat_service)
-        service = NodeInputService(
-            chat=chat_service,
-            store=store,
-            policies=_resolve_policies(http_request, operator_policies),
-            schedule=_resolve_scheduler(http_request),
-        )
+        conversations = _resolve_conversations(http_request)
         try:
-            receipt = service.accept(
-                workspace_id,
-                chat_id,
-                sub_agent_id,
-                body=request.body,
-                actor=actor,
-            )
+            if conversations is not None:
+                conversation = conversations.get(workspace_id, sub_agent_id)
+                if conversation is None:
+                    raise NodeInputNotFound(f"sub-agent was not found: {sub_agent_id}")
+                receipt = conversation.answer(request.body, actor)
+            else:
+                service = NodeInputService(
+                    chat=chat_service,
+                    store=_store_for(chat_service),
+                    policies=_resolve_policies(http_request, operator_policies),
+                )
+                receipt = service.accept(
+                    workspace_id,
+                    chat_id,
+                    sub_agent_id,
+                    body=request.body,
+                    actor=actor,
+                )
         except NodeInputNotFound as error:
             raise _not_found() from error
         except NodeInputNotAccepted as error:
@@ -520,8 +525,8 @@ def create_chat_sub_agent_router(
 
 __all__ = [
     "AUTHENTICATED_PRINCIPAL_STATE_KEY",
+    "CONVERSATIONS_STATE_KEY",
     "OPERATOR_POLICIES_STATE_KEY",
-    "SUB_AGENT_TURN_STATE_KEY",
     "ActorResolver",
     "ChatSubAgentMessageRequest",
     "authenticated_actor_id",

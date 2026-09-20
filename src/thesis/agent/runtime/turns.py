@@ -1,11 +1,12 @@
-"""Serialize and coalesce the turns of one node.
+"""Serialize and coalesce the turns of one conversation.
 
-Each node has exactly one worker: a wake either starts a turn or marks the node
-dirty.  The worker loops, so every wake produces at least one turn, and any
-number of wakes that arrive while a turn runs coalesce into a single follow-up
-turn which replays the transcript and therefore sees them all.  The running
-turn drains new inbound messages between model iterations (``pull_new_input``),
-so the model sees the latest data without restarting and without losing work.
+Each conversation has exactly one worker: a wake either starts a turn or marks
+the conversation dirty.  The worker loops, so every wake produces at least one
+turn, and any number of wakes that arrive while a turn runs coalesce into a
+single follow-up turn which replays the transcript and therefore sees them
+all.  The running turn drains new inbound messages between model iterations
+(``pull_new_input``), so the model sees the latest data without restarting and
+without losing work.
 """
 
 from __future__ import annotations
@@ -13,30 +14,48 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol
 
-from thesis.agent.runtime.child_runner import NodeTurnRunner
 from thesis.agent.runtime.store import SubAgentStore
 from thesis.chat.service import ChatService
 
-__all__ = ["NodeTurnCoordinator", "TurnError"]
+__all__ = ["NodeTurnCoordinator", "TurnError", "TurnRunner"]
 
-#: What one node's worker is doing right now.
+#: What one conversation's worker is doing right now.
 TurnError = tuple[str, str, Exception]
 
 
+class TurnRunner(Protocol):
+    """The runner seam the worker calls: one turn for one conversation anchor."""
+
+    def run(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        sub_agent_id: str,
+        *,
+        pull_new_input: bool = False,
+    ) -> object: ...
+
+
 @dataclass
-class _NodeState:
+class _WorkerState:
     busy: bool = False
     pending: bool = False
 
 
 class NodeTurnCoordinator:
-    """One serialized turn worker per node, coalescing concurrent wakes."""
+    """One serialized turn worker per conversation, coalescing concurrent wakes.
+
+    The worker key is the conversation's placement triple — workspace, chat,
+    and anchor id — so the root conversation of each chat (whose anchor id is
+    the empty string) and every nested conversation have independent workers.
+    """
 
     def __init__(
         self,
         *,
-        runner: NodeTurnRunner,
+        runner: TurnRunner,
         chat: ChatService,
         store: SubAgentStore,
         spawn_thread: Callable[[Callable[[], None]], None] | None = None,
@@ -47,14 +66,14 @@ class NodeTurnCoordinator:
         self._store = store
         self._spawn_thread = spawn_thread or _spawn_daemon_thread
         self._on_error = on_error
-        self._states: dict[tuple[str, str], _NodeState] = {}
+        self._states: dict[tuple[str, str, str], _WorkerState] = {}
         self._guard = threading.Lock()
 
     def schedule(self, workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
-        """Wake one node: start its worker, or mark it dirty when busy."""
-        key = (workspace_id, sub_agent_id)
+        """Wake one conversation: start its worker, or mark it dirty when busy."""
+        key = (workspace_id, chat_id, sub_agent_id)
         with self._guard:
-            state = self._states.setdefault(key, _NodeState())
+            state = self._states.setdefault(key, _WorkerState())
             state.pending = True
             if state.busy:
                 return
@@ -62,14 +81,14 @@ class NodeTurnCoordinator:
             state.pending = False
         self._spawn_thread(lambda: self._work(workspace_id, chat_id, sub_agent_id))
 
-    def in_flight(self, workspace_id: str, sub_agent_id: str) -> bool:
-        """Return whether a turn is currently running for the node."""
+    def in_flight(self, workspace_id: str, chat_id: str, sub_agent_id: str) -> bool:
+        """Return whether a turn is currently running for the conversation."""
         with self._guard:
-            state = self._states.get((workspace_id, sub_agent_id))
+            state = self._states.get((workspace_id, chat_id, sub_agent_id))
             return bool(state and state.busy)
 
     def _work(self, workspace_id: str, chat_id: str, sub_agent_id: str) -> None:
-        key = (workspace_id, sub_agent_id)
+        key = (workspace_id, chat_id, sub_agent_id)
         try:
             while True:
                 try:

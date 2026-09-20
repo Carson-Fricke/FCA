@@ -10,7 +10,11 @@ import pytest
 
 from thesis.workflows.core.builder import WorkflowBuilder
 from thesis.workflows.core.machine import TransitionMachine, TransitionTable
-from thesis.workflows.core.phase import PhaseKind, WorkflowSpecError
+from thesis.workflows.core.phase import (
+    DeterministicPhase,
+    OneShotPhase,
+    WorkflowSpecError,
+)
 from thesis.workflows.core.registry import (
     UnknownWorkflowError,
     WorkflowRegistration,
@@ -40,21 +44,22 @@ def _now() -> datetime:
     return datetime(2026, 9, 18, 12, 0, tzinfo=UTC)
 
 
-def _phrase_executor(workflow: object, request: object, state: _State) -> _State:
-    del workflow, request
-    return state
+def _contract(workflow: object, request: object, state: _State, context: object):
+    del workflow, request, context
+    return {"target": "working"}
+
+
+def _seed(workflow: object, request: object, state: object, context: object) -> str:
+    del workflow, request, state, context
+    return "do the phase"
 
 
 def _builder() -> WorkflowBuilder[object, object, _State]:
     builder = WorkflowBuilder[object, object, _State]()
     builder.workflow("demo", version="1.0.0", title="Demo")
-    builder.phase(
-        "requested",
-        _phrase_executor,
-        kind=PhaseKind.DETERMINISTIC,
-    )
-    builder.phase("working", _phrase_executor)
-    builder.phase("done", _phrase_executor, terminal=True)
+    builder.phase(DeterministicPhase(phase="requested", contract=_contract))
+    builder.phase(OneShotPhase(phase="working", seed=_seed))
+    builder.phase(OneShotPhase(phase="done", terminal=True))
     builder.transitions(
         {
             "requested": ("working",),
@@ -66,25 +71,21 @@ def _builder() -> WorkflowBuilder[object, object, _State]:
 
 
 def test_builder_assembles_a_validated_spec() -> None:
-    spec = _builder().build()
+    spec = _builder().build().spec
 
     assert spec.workflow_id == "demo"
     assert spec.phase_names == ("requested", "working", "done")
     assert spec.terminal_phases == ("done",)
-    assert set(spec.executors) == {"requested", "working", "done"}
+    assert isinstance(spec.phase_specs["requested"], DeterministicPhase)
+    assert spec.phase_specs["requested"].contract is _contract
+    assert isinstance(spec.phase_specs["working"], OneShotPhase)
     assert spec.transitions["working"] == frozenset({"done"})
     assert spec.transitions["done"] == frozenset()
-    assert spec.phase_kinds["requested"] is PhaseKind.DETERMINISTIC
 
 
-def test_builder_rejects_a_phase_without_an_executor() -> None:
-    builder = WorkflowBuilder[object, object, _State]()
-    builder.workflow("demo", version="1.0.0", title="Demo")
-    builder.phase("requested", _phrase_executor)
-    builder.phase("done", terminal=True)
-
-    with pytest.raises(WorkflowSpecError, match="has no executor"):
-        builder.build()
+def test_a_deterministic_phase_is_unrepresentable_without_a_contract() -> None:
+    with pytest.raises(TypeError, match="contract"):
+        DeterministicPhase(phase="requested")  # type: ignore[call-arg]
 
 
 def test_builder_rejects_an_undeclared_transition_phase() -> None:
@@ -98,7 +99,7 @@ def test_builder_rejects_an_undeclared_transition_phase() -> None:
 def test_builder_requires_a_terminal_phase() -> None:
     builder = WorkflowBuilder[object, object, _State]()
     builder.workflow("demo", version="1.0.0", title="Demo")
-    builder.phase("requested", _phrase_executor)
+    builder.phase(OneShotPhase(phase="requested", seed=_seed))
 
     with pytest.raises(WorkflowSpecError, match="terminal phase"):
         builder.build()

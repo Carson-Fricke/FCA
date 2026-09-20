@@ -4,6 +4,11 @@ from __future__ import annotations
 
 
 def test_registered_hypothesis_spec_mirrors_the_existing_definition() -> None:
+    from thesis.workflows.core.phase import (
+        ConversationPhase,
+        DeterministicPhase,
+        OneShotPhase,
+    )
     from thesis.workflows.registry import build_hypothesis_development_spec
     from thesis.workflows.registry.hypothesis_development.phases import (
         _TRANSITIONS,
@@ -20,7 +25,26 @@ def test_registered_hypothesis_spec_mirrors_the_existing_definition() -> None:
         for phase, targets in _TRANSITIONS.items()
     }
     assert spec.terminal_phases == ("completed", "failed")
-    assert set(spec.executors) == set(spec.phase_names)
+    # Agent phases declare their prompt seed; the trials phase declares a
+    # deterministic contract instead, so it owns no conversation at all.
+    deterministic = {
+        name
+        for name, declared in spec.phase_specs.items()
+        if isinstance(declared, DeterministicPhase)
+    }
+    conversational = {
+        name
+        for name, declared in spec.phase_specs.items()
+        if isinstance(declared, ConversationPhase)
+    }
+    one_shot = {
+        name
+        for name, declared in spec.phase_specs.items()
+        if isinstance(declared, OneShotPhase)
+    }
+    assert deterministic == {"falsification_trials"}
+    assert conversational == {"hypothesis_creation", "verdict"}
+    assert one_shot == set(spec.phase_names) - deterministic - conversational
 
 
 def test_registry_resolves_to_the_general_workflow_object() -> None:

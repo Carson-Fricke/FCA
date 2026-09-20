@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
-from thesis.agent.runtime.child_runner import NodeTurnRunner
-from thesis.agent.runtime.delivery import DeliveryService
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.session import (
     RegisteredTool,
@@ -86,7 +85,7 @@ def test_coordinator_coalesces_wakes_that_arrive_during_a_turn() -> None:
         ("node-1", True),
         ("node-1", True),
     ]
-    assert coordinator.in_flight(_WORKSPACE, "node-1") is False
+    assert coordinator.in_flight(_WORKSPACE, "chat-1", "node-1") is False
 
 
 class _DrainProbeProvider:
@@ -179,16 +178,15 @@ def test_a_mid_turn_wake_is_drained_into_the_running_session() -> None:
             )
         ]
     )
-    runner = NodeTurnRunner(
+    service = Conversations(
         chat=chat,
         store=store,
         provider=provider,
         registry_factory=lambda context: registry,
         lifecycle=lifecycle,
-        delivery=DeliveryService(chat),
     )
 
-    result = runner.run(_WORKSPACE, chat_id, child.sub_agent_id, pull_new_input=True)
+    result = service.run_node_turn(_WORKSPACE, chat_id, child.sub_agent_id)
 
     assert result.status == "completed"
     assert provider.calls == 2

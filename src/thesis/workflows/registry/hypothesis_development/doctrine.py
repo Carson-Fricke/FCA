@@ -140,7 +140,6 @@ def _context_of(
         trigger_message_id=request.trigger_message_id,
         intent_epoch=request.intent_epoch,
         delivery=workflow.delivery,
-        scheduler=workflow.turn_scheduler,
     )
 
 

@@ -6,13 +6,13 @@ from collections.abc import Mapping, Sequence
 
 import pytest
 
-from thesis.agent.runtime.child_runner import NodeTurnRunner
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.control import (
     TOOL_REQUEST_OPERATOR_INPUT,
     ControlToolService,
 )
 from thesis.agent.runtime.control_tools import control_registered_tools
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.datum import DatumType, datum_from_result
 from thesis.agent.runtime.delivery import (
     DELIVERY_KEY_FIELD,
@@ -387,7 +387,7 @@ def test_node_turn_runner_persists_the_transcript() -> None:
         ]
     )
     captured: list[object] = []
-    runner = NodeTurnRunner(
+    runner = Conversations(
         chat=chat,
         store=store,
         provider=provider,
@@ -403,10 +403,10 @@ def test_node_turn_runner_persists_the_transcript() -> None:
         data={"subAgentId": node, "kind": "operator_input"},
     )
 
-    result = runner.run(_WORKSPACE, chat_id, node)
+    result = runner.run_node_turn(_WORKSPACE, chat_id, node)
 
     assert result.content == "node answer"
-    transcript = runner.transcript(_WORKSPACE, chat_id, node)
+    transcript = runner.transcript(Anchor(_WORKSPACE, chat_id, sub_agent_id=node))
     assistant = [
         message
         for message in transcript
@@ -449,16 +449,15 @@ def test_node_turn_runner_completes_a_one_shot_child_and_delivers_the_result() -
         kind=SubAgentKind.ONE_SHOT,
         parent_sub_agent_id=caller,
     )
-    runner = NodeTurnRunner(
+    runner = Conversations(
         chat=chat,
         store=store,
         provider=_FakeProvider([_completion(content="19")]),
         registry_factory=lambda context: SessionToolRegistry([]),
         lifecycle=lifecycle,
-        delivery=DeliveryService(chat, schedule=lambda workspace, chat, node: None),
     )
 
-    runner.run(_WORKSPACE, chat_id, child)
+    runner.run_node_turn(_WORKSPACE, chat_id, child)
 
     completed = lifecycle.get(_WORKSPACE, child)
     assert completed is not None
@@ -480,19 +479,17 @@ def test_operator_request_is_a_flag_at_the_asking_node_and_accepts_a_reply() -> 
     lifecycle.start(_WORKSPACE, sibling)
     scheduled: list[str] = []
     service = ControlToolService(
-        lifecycle=lifecycle,
-        store=store,
-        inputs=NodeInputService(
+        conversations=Conversations(
             chat=chat,
             store=store,
+            lifecycle=lifecycle,
             # The request path consults no operator policy: a registry that
             # would deny every answer still lets the node ask.
             policies=OperatorPolicyRegistry(
                 default=NodeOperatorPolicy(allowed_actor_kinds=frozenset())
             ),
-            schedule=lambda workspace, chat_id, node: scheduled.append(node),
-        ),
-        delivery=DeliveryService(chat),
+            spawn_thread=lambda target: scheduled.append("woke"),
+        )
     )
     provider = _FakeProvider(
         [
@@ -519,14 +516,14 @@ def test_operator_request_is_a_flag_at_the_asking_node_and_accepts_a_reply() -> 
         allowed_tools=(TOOL_REQUEST_OPERATOR_INPUT,),
     )
     registry = SessionToolRegistry(control_registered_tools(service, context))
-    runner = NodeTurnRunner(
+    runner = Conversations(
         chat=chat,
         store=store,
         provider=provider,
         registry_factory=lambda context: registry,
     )
 
-    runner.run(_WORKSPACE, chat_id, asking)
+    runner.run_node_turn(_WORKSPACE, chat_id, asking)
 
     waiting = lifecycle.get(_WORKSPACE, asking)
     assert waiting is not None
@@ -577,7 +574,7 @@ def test_operator_request_is_a_flag_at_the_asking_node_and_accepts_a_reply() -> 
     assert resumed is not None
     assert resumed.status is SubAgentStatus.RUNNING
 
-    runner.run(_WORKSPACE, chat_id, asking)
+    runner.run_node_turn(_WORKSPACE, chat_id, asking)
 
     assistant = [
         message
@@ -598,10 +595,7 @@ def test_operator_answer_drives_the_phase_turn_to_request_phase_completion() -> 
     )
     lifecycle.start(_WORKSPACE, phase)
     service = ControlToolService(
-        lifecycle=lifecycle,
-        store=store,
-        inputs=NodeInputService(chat=chat, store=store),
-        delivery=DeliveryService(chat),
+        conversations=Conversations(chat=chat, store=store, lifecycle=lifecycle)
     )
 
     def registry_factory(context: ToolContext) -> SessionToolRegistry:
@@ -620,12 +614,12 @@ def test_operator_answer_drives_the_phase_turn_to_request_phase_completion() -> 
             ),
         ]
     )
-    NodeTurnRunner(
+    Conversations(
         chat=chat,
         store=store,
         provider=asking,
         registry_factory=registry_factory,
-    ).run(_WORKSPACE, chat_id, phase)
+    ).run_node_turn(_WORKSPACE, chat_id, phase)
     waiting = lifecycle.get(_WORKSPACE, phase)
     assert waiting is not None
     assert waiting.status is SubAgentStatus.NEEDS_INPUT
@@ -644,7 +638,7 @@ def test_operator_answer_drives_the_phase_turn_to_request_phase_completion() -> 
             ),
         ]
     )
-    runner = NodeTurnRunner(
+    runner = Conversations(
         chat=chat,
         store=store,
         provider=completing,
@@ -654,7 +648,7 @@ def test_operator_answer_drives_the_phase_turn_to_request_phase_completion() -> 
 
     def schedule(workspace_id: str, chat: str, node_id: str) -> None:
         driven.append(node_id)
-        runner.run(workspace_id, chat, node_id)
+        runner.run_node_turn(workspace_id, chat, node_id)
 
     receipt = NodeInputService(chat=chat, store=store, schedule=schedule).accept(
         _WORKSPACE,
@@ -690,7 +684,7 @@ def test_re_delivered_result_does_not_duplicate_a_node_turn() -> None:
         parent_sub_agent_id=node,
     )
     provider = _FakeProvider([_completion(content="handled the result")])
-    runner = NodeTurnRunner(
+    runner = Conversations(
         chat=chat,
         store=store,
         provider=provider,
@@ -700,7 +694,7 @@ def test_re_delivered_result_does_not_duplicate_a_node_turn() -> None:
 
     def schedule(workspace_id: str, chat: str, node_id: str) -> None:
         turns.append(node_id)
-        runner.run(workspace_id, chat, node_id)
+        runner.run_node_turn(workspace_id, chat, node_id)
 
     service = DeliveryService(chat, schedule=schedule)
     terminal = lifecycle.complete(_WORKSPACE, child, result={"finding": "none"})
