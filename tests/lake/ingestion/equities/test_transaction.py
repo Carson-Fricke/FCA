@@ -396,9 +396,7 @@ class _BlipClient(FakeClient):
 def test_transient_fetch_blip_is_retried_within_the_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0
-    )
+    monkeypatch.setattr("lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0)
     session = _session()
     client = _BlipClient(
         2,
@@ -442,9 +440,7 @@ def test_permanent_fetch_failure_is_not_retried() -> None:
 def test_exhausted_transient_fetch_failure_is_marked_retryable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0
-    )
+    monkeypatch.setattr("lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0)
     session = _session()
     client = _BlipClient(
         3,
@@ -464,5 +460,3 @@ def test_exhausted_transient_fetch_failure_is_marked_retryable(
     assert (result.coverage[0].error_message or "").startswith("trade: ConnectError")
     assert result.objects == ()
     assert committer.commits[0][0] == ()
-
-

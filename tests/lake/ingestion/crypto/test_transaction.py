@@ -519,9 +519,7 @@ class _BlipCryptoClient(FakeClient):
 def test_crypto_transient_fetch_blip_is_retried_within_the_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0
-    )
+    monkeypatch.setattr("lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0)
     day = date(2024, 1, 18)
     client = _BlipCryptoClient(
         2,
@@ -547,5 +545,3 @@ def test_crypto_transient_fetch_blip_is_retried_within_the_transaction(
     ]
     assert [record.row_count for record in result.coverage] == [1, 1]
     assert len(committer.objects) == 2
-
-

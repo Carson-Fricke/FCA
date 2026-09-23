@@ -210,7 +210,10 @@ fn a_failed_job_reports_its_own_error() {
         &EnsureJobProgress::Failed("provider rejected the window".to_string()),
     ) {
         CoverageVerdict::Incomplete(message) => {
-            assert!(message.contains("provider rejected the window"), "{message}");
+            assert!(
+                message.contains("provider rejected the window"),
+                "{message}"
+            );
         }
         other => panic!("expected a failure, got {other:?}"),
     }

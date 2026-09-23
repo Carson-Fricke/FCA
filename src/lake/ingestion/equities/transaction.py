@@ -158,9 +158,7 @@ class EquityIngestTransaction:
                 canonical_symbol,
                 session,
                 data_type,
-                _coverage_status(
-                    session.is_partial, len(records_by_type[data_type])
-                ),
+                _coverage_status(session.is_partial, len(records_by_type[data_type])),
                 metadata[data_type],
             )
             for data_type in selected
@@ -278,7 +276,9 @@ def _canonical_symbol(symbol: str) -> str:
     return canonical
 
 
-def _fetch_error(data_types: Sequence[DataType], results: Sequence[object]) -> str | None:
+def _fetch_error(
+    data_types: Sequence[DataType], results: Sequence[object]
+) -> str | None:
     errors: list[str] = []
     for data_type, result in zip(data_types, results, strict=True):
         if isinstance(result, asyncio.CancelledError):

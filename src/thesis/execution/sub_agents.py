@@ -151,7 +151,10 @@ def _validate_event_extras(
                 "output events require an artifact or tool-result reference"
             )
     elif event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT and extra is not None:
-        if not isinstance(extra.get("question"), str) or not str(extra["question"]).strip():
+        if (
+            not isinstance(extra.get("question"), str)
+            or not str(extra["question"]).strip()
+        ):
             raise SubAgentContractError(
                 "needs_input events require a non-empty question when present"
             )
