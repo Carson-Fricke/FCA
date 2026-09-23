@@ -52,19 +52,13 @@ from thesis.workflows.backtests import (
     BacktestRunner,
     HarnessBacktestRunner,
 )
-from thesis.workflows.core.workflow import Workflow
+from thesis.workflows.core.execution_store import ExecutionStore
+from thesis.workflows.core.workflow import Detach, Workflow
 from thesis.workflows.registry.hypothesis_development import (
-    DEFAULT_MAX_RCA_CYCLES,
-    FalsificationPlanner,
     HypothesisDevelopmentOutcome,
     HypothesisDevelopmentRequest,
     HypothesisDevelopmentState,
-    RcaComposer,
-    StrategyDesigner,
     build_hypothesis_development_workflow,
-)
-from thesis.workflows.registry.hypothesis_development import (
-    HypothesisComposer as DevelopmentHypothesisComposer,
 )
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
@@ -165,9 +159,11 @@ def build_workflow_runtime(
     backtest_mode: BacktestMode = "local",
     metadata: Mapping[str, object] | None = None,
     conversations: Conversations | None = None,
+    execution_store: ExecutionStore | None = None,
+    detach: Detach | None = None,
     clock: Callable[[], datetime] = _utc_now,
     id_factory: Callable[[str], str] = _new_id,
-    invocation_id_factory: Callable[[], str] | None = None,
+    invocation_id_factory: Callable[[str], str] | None = None,
 ) -> WorkflowRuntime:
     """Compose the model router and backtest runner into one runtime holder.
 
@@ -192,8 +188,15 @@ def build_workflow_runtime(
             "research_runner is omitted"
         )
 
-    def _invocation_id() -> str:
-        return id_factory("invocation")
+    if invocation_id_factory is not None:
+
+        def _invocation_id() -> str:
+            return invocation_id_factory("invocation")
+
+    else:
+
+        def _invocation_id() -> str:
+            return id_factory("invocation")
 
     router = build_model_router(
         role_policies=role_policies,
@@ -203,11 +206,7 @@ def build_workflow_runtime(
         bundle=bundle,
         bundle_hashes=bundle_hashes,
         clock=clock,
-        invocation_id_factory=(
-            invocation_id_factory
-            if invocation_id_factory is not None
-            else _invocation_id
-        ),
+        invocation_id_factory=_invocation_id,
     )
     resolved_runner: BacktestRunner = (
         runner
@@ -231,6 +230,8 @@ def build_workflow_runtime(
         validator=strategy_validator,
         hypothesis_store=hypothesis_store,
         conversations=conversations,
+        execution_store=execution_store,
+        detach=detach,
         clock=clock,
         id_factory=id_factory,
     )
@@ -257,6 +258,8 @@ class WorkflowRuntime:
         validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
         conversations: Conversations | None = None,
+        execution_store: ExecutionStore | None = None,
+        detach: Detach | None = None,
         clock: Callable[[], datetime] = _utc_now,
         id_factory: Callable[[str], str] = _new_id,
     ) -> None:
@@ -284,6 +287,8 @@ class WorkflowRuntime:
         self._validator = validator
         self._hypothesis_store = hypothesis_store
         self._conversations = conversations
+        self._execution_store = execution_store
+        self._detach = detach
         self._clock = clock
         self._id_factory = id_factory
 
@@ -307,24 +312,22 @@ class WorkflowRuntime:
         """Return the composed harness MCP tool provider, when configured."""
         return self._harness_tools
 
+    @property
+    def execution_store(self) -> ExecutionStore | None:
+        """Return the composed execution store, when configured."""
+        return self._execution_store
+
     def build_hypothesis_development(
         self,
         *,
         chat: ChatService,
         validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
-        composer: DevelopmentHypothesisComposer | None = None,
-        planner: FalsificationPlanner | None = None,
-        rca_composer: RcaComposer | None = None,
-        designer: StrategyDesigner | None = None,
         ledger: AttemptLedger | None = None,
         subagent_factory: SubagentContextFactory | None = None,
         journal: CommandJournal | None = None,
         research_role: Role = "research",
-        critique_role: Role = "critique",
-        coding_role: Role = "coding",
         experiment_id: str | None = None,
-        max_rca_cycles: int = DEFAULT_MAX_RCA_CYCLES,
     ) -> Workflow[
         HypothesisDevelopmentRequest,
         HypothesisDevelopmentState,
@@ -347,21 +350,16 @@ class WorkflowRuntime:
             research_runner=self._research_runner,
             validator=resolved_validator,
             hypothesis_store=resolved_store,
-            composer=composer,
-            planner=planner,
-            rca_composer=rca_composer,
-            designer=designer,
             ledger=ledger,
             subagent_factory=subagent_factory,
             journal=journal,
             clock=self._clock,
             id_factory=self._id_factory,
             research_role=research_role,
-            critique_role=critique_role,
-            coding_role=coding_role,
             experiment_id=experiment_id,
-            max_rca_cycles=max_rca_cycles,
             conversations=self._conversations,
+            execution_store=self._execution_store,
+            detach=self._detach,
         )
 
 

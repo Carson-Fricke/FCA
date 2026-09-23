@@ -28,9 +28,14 @@ agents. Read the authoring guide first:
 6. **One writer, one path.** One tool-result payload shape, one delivery path,
    one spawn path. Collapse duplicates instead of syncing them.
 7. **Operator gates are prompted, not enforced.** Instruct the phase agent to
-   ask via `request_workflow_input` and complete only on acceptance. Do not add
-   engine policy, config fields, or gates whose only effect is prose. Trust the
-   model; a model that ignores its phase prompt is unfit for this domain.
+   ask via `request_workflow_input` and complete only on acceptance. Never add
+   a deterministic gate to a workflow unless the operator specifically asked
+   for that gate in the request that authorized the work: no engine-enforced
+   confirmations and no validators whose job is to block an agent's requested
+   transition until some conversational condition holds. Steering belongs in
+   the phase prompt and the advertised tool schema, not the engine. Do not add
+   engine policy, config fields, or gates whose only effect is prose. Trust
+   the model; a model that ignores its phase prompt is unfit for this domain.
 8. **Never invent an entity silently.** A new phase, agent, tool, or durable
    concept must be declared in the phase table, documented, and tested in the
    same change.

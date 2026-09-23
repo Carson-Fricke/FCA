@@ -25,7 +25,7 @@ from thesis.agent.runtime.control_tools import (
 )
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.datum import DatumType
-from thesis.agent.runtime.delivery import Anchor, NodeInputService
+from thesis.agent.runtime.delivery import Anchor
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
     DEFAULT_ROOT_BUDGET_CEILING,
@@ -343,6 +343,36 @@ def test_workflow_tool_rejects_an_unknown_workflow() -> None:
     assert "unknown workflow" in str(execution.failure["message"])
 
 
+def test_phase_completion_tool_advertises_the_declared_schema() -> None:
+    control = _ControlStub()
+
+    def registered(schema: object) -> Mapping[str, object]:
+        tools = {
+            tool.name: tool.spec
+            for tool in control_registered_tools(
+                cast(ControlToolRuntime, control),
+                _context(sub_agent_id="phase-1"),
+                phase_completion_schema=cast("Mapping[str, object] | None", schema),
+            )
+        }
+        return cast("Mapping[str, object]", tools["request_phase_completion"])
+
+    default = registered(None)["function"]["parameters"]
+    assert default["properties"]["completion"] == {"type": "object"}
+
+    advertised = registered(
+        {
+            "type": "object",
+            "properties": {"hypothesis": {"type": "object"}},
+            "required": ["hypothesis"],
+        }
+    )["function"]["parameters"]
+    assert advertised["required"] == ["completion"]
+    completion = advertised["properties"]["completion"]
+    assert completion["required"] == ["hypothesis"]
+    assert completion["properties"]["hypothesis"] == {"type": "object"}
+
+
 def test_spawn_uses_trusted_parent_not_model_arguments() -> None:
     control = _ControlStub()
     context = ToolContext(
@@ -377,6 +407,12 @@ def test_spawn_uses_trusted_parent_not_model_arguments() -> None:
     assert spawn["idempotency_key"] is None
     assert isinstance(spawn["spec"], SubAgentSpec)
     assert spawn["spec"].delegated_budget == 3
+
+    # The handle datum carries the child's identity and delegated task so the
+    # caller's transcript can render the spawn card without a second lookup.
+    assert execution.structured["sub_agent_id"] == "sa-1"
+    assert execution.structured["role"] == "research"
+    assert execution.structured["task"] == "evaluate the sample"
 
 
 def test_spawn_policy_is_permissive_by_default() -> None:
@@ -749,8 +785,7 @@ def test_a_paused_child_stays_for_the_operator_answer() -> None:
         for message in chat.list_messages(_WORKSPACE, chat_id)
     )
 
-    inputs = NodeInputService(chat=chat, store=store)
-    receipt = inputs.accept(
+    inputs = conversations.answer(
         _WORKSPACE,
         chat_id,
         child.conversation_id,
@@ -758,7 +793,7 @@ def test_a_paused_child_stays_for_the_operator_answer() -> None:
         actor=AnsweringActor(actor_id=_ACTOR, kind=OperatorActorKind.HUMAN_OPERATOR),
     )
 
-    assert receipt.scheduled is False
+    assert inputs.duplicate is False
     resumed = lifecycle.get(_WORKSPACE, child.conversation_id)
     assert resumed is not None
     assert resumed.status is SubAgentStatus.RUNNING

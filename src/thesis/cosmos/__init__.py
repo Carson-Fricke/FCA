@@ -5,12 +5,14 @@ from thesis.cosmos.client import (
     DEFAULT_DATABASE,
     DEFAULT_ENDPOINT,
     EMULATOR_KEY,
+    EXECUTIONS_CONTAINER,
     TIMELINE_CONTAINER,
     CosmosSettings,
     ensure_database,
     open_cosmos_client,
 )
 from thesis.cosmos.events import CosmosExecutionEventStore
+from thesis.cosmos.execution_store import CosmosExecutionStore
 from thesis.cosmos.records import CosmosChatPersistence
 from thesis.cosmos.timeline import (
     KIND_CHAT,
@@ -26,11 +28,13 @@ __all__ = [
     "CATALOG_CONTAINER",
     "CosmosChatPersistence",
     "CosmosExecutionEventStore",
+    "CosmosExecutionStore",
     "CosmosSettings",
     "CosmosTimeline",
     "DEFAULT_DATABASE",
     "DEFAULT_ENDPOINT",
     "EMULATOR_KEY",
+    "EXECUTIONS_CONTAINER",
     "KIND_CHAT",
     "KIND_COUNTER",
     "KIND_EVENT",

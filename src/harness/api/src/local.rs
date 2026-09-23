@@ -12,7 +12,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde_json::{json, Value};
 
 use backtest::backtest::config::BacktestConfig;
@@ -23,11 +23,11 @@ use backtest::sweeps::runner::{
 use backtest::sweeps::spec::{SweepMode, SweepSpec};
 use backtest::sweeps::RunStatus as SweepRunStatus;
 
-use crate::lake_ensure::{LakeEnsureClient, MAX_ENSURE_RANGE_DAYS};
+use crate::lake_ensure::LakeEnsureClient;
 use mcp::store::{JobRepository, JobState, RunCatalogRecord, RunStatus, RunStore};
 
-/// Nanoseconds in one UTC day, used to split ensure requests into lake ranges.
-const NANOS_PER_DAY: i64 = 86_400 * 1_000_000_000;
+/// The lake data types every configured symbol is ensured for.
+const LAKE_DATA_TYPES: [&str; 2] = ["trade", "quote"];
 
 /// Local backtest submitter that runs the native engine and records the run.
 pub struct NativeBacktestSubmitter {
@@ -206,16 +206,43 @@ fn run_background_study_inner(
             None
         }
     });
-    if let Err(message) = ensure_lake_data(&configuration) {
-        let mut artifacts = BTreeMap::new();
-        artifacts.insert(
-            "error.json".to_string(),
-            serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-        );
-        let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
-        let _ = run_store.put(record, artifacts);
-        fail_job(&jobs, &run_id, started, message);
-        return;
+    let configuration_digest = configuration.configuration_hash();
+    let mut configuration = configuration;
+    let mut actual_data_start = None;
+    let mut actual_data_end = None;
+    if !configuration.symbols.is_empty() {
+        if let Some(client) = LakeEnsureClient::from_env() {
+            if let Err(message) = ensure_lake_data_with(&client, &configuration) {
+                let mut artifacts = BTreeMap::new();
+                artifacts.insert(
+                    "error.json".to_string(),
+                    serde_json::to_vec(&json!({"error": message}))
+                        .unwrap_or_else(|_| b"{}".to_vec()),
+                );
+                let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
+                let _ = run_store.put(record, artifacts);
+                fail_job(&jobs, &run_id, started, message);
+                return;
+            }
+            match clamp_study_window(&client, &mut configuration) {
+                Ok((start, end)) => {
+                    actual_data_start = Some(start);
+                    actual_data_end = Some(end);
+                }
+                Err(message) => {
+                    let mut artifacts = BTreeMap::new();
+                    artifacts.insert(
+                        "error.json".to_string(),
+                        serde_json::to_vec(&json!({"error": message}))
+                            .unwrap_or_else(|_| b"{}".to_vec()),
+                    );
+                    let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
+                    let _ = run_store.put(record, artifacts);
+                    fail_job(&jobs, &run_id, started, message);
+                    return;
+                }
+            }
+        }
     }
     match host::study::run_study_config(
         &configuration,
@@ -236,7 +263,9 @@ fn run_background_study_inner(
             }
             let mut record =
                 RunCatalogRecord::new(&run_id, run_status(outcome.completed()), "study");
-            record.configuration_digest = Some(configuration.configuration_hash());
+            record.configuration_digest = Some(configuration_digest);
+            record.data_start = actual_data_start;
+            record.data_end = actual_data_end;
             record.metrics = headline_metrics(&artifacts, &configuration);
             if let Err(error) = run_store.put(record, artifacts) {
                 fail_job(&jobs, &run_id, started, error.to_string());
@@ -259,7 +288,7 @@ fn run_background_study_inner(
                 serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
             );
             let mut record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
-            record.configuration_digest = Some(configuration.configuration_hash());
+            record.configuration_digest = Some(configuration_digest);
             let _ = run_store.put(record, artifacts);
             fail_job(&jobs, &run_id, started, message);
         }
@@ -419,33 +448,163 @@ fn run_background_backtest_inner(
 ///
 /// The market-lake process owns provider credentials and the actual fetch; the
 /// harness only asks for the run window's symbols. A missing token or an empty
-/// symbol set leaves the existing synthetic/lake behavior unchanged. Windows
-/// longer than the lake's per-request range limit are split into consecutive
-/// ranges so a full-history research window is ensured in order.
+/// symbol set leaves the existing synthetic/lake behavior unchanged.
 fn ensure_lake_data(configuration: &BacktestConfig) -> Result<(), String> {
-    if configuration.symbols.is_empty() {
-        return Ok(());
-    }
     let Some(client) = LakeEnsureClient::from_env() else {
         return Ok(());
     };
-    let chunk_span = MAX_ENSURE_RANGE_DAYS * NANOS_PER_DAY;
-    let mut chunk_start = configuration.start_ns;
-    while chunk_start < configuration.end_ns {
-        let chunk_end = chunk_start
-            .saturating_add(chunk_span)
-            .min(configuration.end_ns);
-        let start = date_string(chunk_start);
-        let end = date_string(chunk_end.saturating_sub(1));
-        for symbol in &configuration.symbols {
-            let (asset_class, lake_symbol) = lake_asset_class(symbol);
-            for data_type in ["trade", "quote"] {
-                client.ensure(asset_class, data_type, &lake_symbol, &start, &end)?;
+    ensure_lake_data_with(&client, configuration)
+}
+
+/// Ensure every configured symbol with one already-built client.
+///
+/// Each symbol/data-type pair gets a single ensure request spanning the whole
+/// run window: the lake plans and resumes its own fetches server-side, so a
+/// full-history window is never split into ranges and a repeat request picks
+/// up where an interrupted run left off. The requests are independent, so they
+/// are issued concurrently; the run fails only when a request reports a
+/// lake-side failure, naming what completed alongside what did not.
+fn ensure_lake_data_with(
+    client: &LakeEnsureClient,
+    configuration: &BacktestConfig,
+) -> Result<(), String> {
+    if configuration.symbols.is_empty() {
+        return Ok(());
+    }
+    let start = date_string(configuration.start_ns);
+    let end = date_string(configuration.end_ns.saturating_sub(1));
+    let mut requests = Vec::new();
+    for symbol in &configuration.symbols {
+        let (asset_class, lake_symbol) = lake_asset_class(symbol);
+        for data_type in LAKE_DATA_TYPES {
+            requests.push((asset_class, lake_symbol.clone(), data_type));
+        }
+    }
+    let handles: Vec<_> = requests
+        .into_iter()
+        .map(|(asset_class, lake_symbol, data_type)| {
+            let label = format!("{lake_symbol} {asset_class}/{data_type}");
+            let client = client.clone();
+            let start = start.clone();
+            let end = end.clone();
+            let handle = std::thread::spawn(move || {
+                client.ensure(asset_class, data_type, &lake_symbol, &start, &end)
+            });
+            (label, handle)
+        })
+        .collect();
+    let mut completed = Vec::new();
+    let mut failures = Vec::new();
+    for (label, handle) in handles {
+        match handle.join() {
+            Ok(Ok(())) => completed.push(label),
+            Ok(Err(message)) => failures.push(message),
+            Err(payload) => {
+                failures.push(format!("{}: {}", label, panic_message(payload.as_ref())));
             }
         }
-        chunk_start = chunk_end;
     }
-    Ok(())
+    if failures.is_empty() {
+        return Ok(());
+    }
+    let mut message = format!(
+        "market-lake ensure failed for {} of {} requests",
+        failures.len(),
+        completed.len() + failures.len(),
+    );
+    if !completed.is_empty() {
+        message.push_str(&format!(" (completed: {})", completed.join(", ")));
+    }
+    message.push_str("; ");
+    message.push_str(&failures.join("; "));
+    Err(message)
+}
+
+/// Clamp a study's data-window start to the lake's complete coverage.
+///
+/// Returns the actual `(start, end)` session dates the study will replay. The
+/// start moves to the earliest session with complete data when the lake's
+/// coverage begins after the requested start, so a model contract reaching
+/// back before the provider's history no longer launches a study that can only
+/// replay empty data. The requested window is kept when the lake reports no
+/// complete session inside it.
+fn clamp_study_window(
+    client: &LakeEnsureClient,
+    configuration: &mut BacktestConfig,
+) -> Result<(NaiveDate, NaiveDate), String> {
+    let earliest = earliest_complete_session_ns(
+        client,
+        &configuration.symbols,
+        configuration.start_ns,
+        configuration.end_ns,
+    )?;
+    if let Some(start_ns) = clamped_start_ns(configuration.start_ns, configuration.end_ns, earliest)
+    {
+        configuration.start_ns = start_ns;
+    }
+    let start_date = date_of(configuration.start_ns).ok_or_else(|| {
+        "the clamped data window start is outside the representable range".to_string()
+    })?;
+    let end_date = date_of(configuration.end_ns.saturating_sub(1)).ok_or_else(|| {
+        "the clamped data window end is outside the representable range".to_string()
+    })?;
+    Ok((start_date, end_date))
+}
+
+/// The earliest fully covered session across a symbol set, in epoch nanos.
+///
+/// Each symbol resolves to the earliest session where either lake data type is
+/// complete, and the result is the latest of those per-symbol dates: the
+/// study's data window starts only where every configured symbol carries data.
+fn earliest_complete_session_ns(
+    client: &LakeEnsureClient,
+    symbols: &[String],
+    start_ns: i64,
+    end_ns: i64,
+) -> Result<Option<i64>, String> {
+    let start = date_string(start_ns);
+    let end = date_string(end_ns.saturating_sub(1));
+    let mut window_start: Option<i64> = None;
+    for symbol in symbols {
+        let (asset_class, lake_symbol) = lake_asset_class(symbol);
+        let mut symbol_start: Option<i64> = None;
+        for data_type in LAKE_DATA_TYPES {
+            let Some(session) = client.earliest_complete_session(
+                asset_class,
+                data_type,
+                &lake_symbol,
+                &start,
+                &end,
+            )?
+            else {
+                continue;
+            };
+            let Some(session_ns) = date_ns(&session) else {
+                continue;
+            };
+            symbol_start = Some(match symbol_start {
+                Some(current) => current.min(session_ns),
+                None => session_ns,
+            });
+        }
+        if let Some(symbol_ns) = symbol_start {
+            window_start = Some(match window_start {
+                Some(current) => current.max(symbol_ns),
+                None => symbol_ns,
+            });
+        }
+    }
+    Ok(window_start)
+}
+
+/// Move a window start to an earliest complete session without emptying it.
+fn clamped_start_ns(requested_start_ns: i64, end_ns: i64, earliest: Option<i64>) -> Option<i64> {
+    let start_ns = earliest?;
+    if start_ns > requested_start_ns && start_ns < end_ns {
+        Some(start_ns)
+    } else {
+        None
+    }
 }
 
 /// Mark one background job failed when its worker exits without a terminal
@@ -506,6 +665,19 @@ fn date_string(nanos: i64) -> String {
     chrono::DateTime::from_timestamp(seconds, 0)
         .map(|value| value.format("%Y-%m-%d").to_string())
         .unwrap_or_default()
+}
+
+/// Parse a `YYYY-MM-DD` session date into epoch nanoseconds at UTC midnight.
+fn date_ns(value: &str) -> Option<i64> {
+    let date = NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok()?;
+    let seconds = date.and_hms_opt(0, 0, 0)?.and_utc().timestamp();
+    seconds.checked_mul(1_000_000_000)
+}
+
+/// The UTC calendar date of an epoch-nanosecond timestamp.
+fn date_of(nanos: i64) -> Option<NaiveDate> {
+    let seconds = nanos.div_euclid(1_000_000_000);
+    chrono::DateTime::from_timestamp(seconds, 0).map(|value| value.date_naive())
 }
 
 fn fail_job(jobs: &Arc<dyn JobRepository>, run_id: &str, started: DateTime<Utc>, message: String) {

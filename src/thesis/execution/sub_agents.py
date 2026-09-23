@@ -2,8 +2,7 @@
 
 The sub-agent hierarchy is never a separate mutable resource: it is projected
 from the execution's ordered event log.  A ``sub_agent.spawned`` event creates a
-node, later ``sub_agent.*`` events advance its status and input acceptance, and
-``workflow.gate.*`` events mark human-input gates on the owning orchestrator.
+node, later ``sub_agent.*`` events advance its status and input acceptance.
 Because every event keeps its single global execution cursor, a projection can
 filter by node (or the whole subtree) without breaking resume or event-id
 deduplication.
@@ -31,13 +30,6 @@ SUB_AGENT_EVENT_TYPES: frozenset[ExecutionEventType] = frozenset(
         ExecutionEventType.SUB_AGENT_NEEDS_INPUT,
         ExecutionEventType.SUB_AGENT_COMPLETED,
         ExecutionEventType.SUB_AGENT_FAILED,
-    }
-)
-
-GATE_EVENT_TYPES: frozenset[ExecutionEventType] = frozenset(
-    {
-        ExecutionEventType.WORKFLOW_GATE_BLOCKED,
-        ExecutionEventType.WORKFLOW_GATE_RESOLVED,
     }
 )
 
@@ -106,7 +98,7 @@ def sub_agent_payload(
     parent_sub_agent_id: str | None,
     phase: str,
     role: str,
-    context: SubAgentContextSpec,
+    context: SubAgentContextSpec | None = None,
     accepts_input: bool = False,
     extra: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
@@ -119,12 +111,13 @@ def sub_agent_payload(
         raise SubAgentContractError("parentSubAgentId must be null or non-empty")
     payload: dict[str, object] = {
         "acceptsInput": bool(accepts_input),
-        "context": context.as_dict(),
         "parentSubAgentId": parent_sub_agent_id,
         "phase": phase,
         "role": role,
         "subAgentId": sub_agent_id,
     }
+    if context is not None:
+        payload["context"] = context.as_dict()
     if extra is not None:
         payload.update(extra)
     return payload
@@ -157,11 +150,10 @@ def _validate_event_extras(
             raise SubAgentContractError(
                 "output events require an artifact or tool-result reference"
             )
-    elif event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT:
-        question = None if extra is None else extra.get("question")
-        if not isinstance(question, str) or not question.strip():
+    elif event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT and extra is not None:
+        if not isinstance(extra.get("question"), str) or not str(extra["question"]).strip():
             raise SubAgentContractError(
-                "needs_input events require a non-empty question"
+                "needs_input events require a non-empty question when present"
             )
     elif event_type is ExecutionEventType.SUB_AGENT_COMPLETED and (
         extra is None or not isinstance(extra.get("frozen"), bool)
@@ -180,7 +172,7 @@ def append_sub_agent_event(
     parent_sub_agent_id: str | None,
     phase: str,
     role: str,
-    context: SubAgentContextSpec,
+    context: SubAgentContextSpec | None = None,
     accepts_input: bool = False,
     actor_id: str = "thesis-workflow",
     actor_scope: ActorScope = ActorScope.WORKFLOW,
@@ -211,49 +203,6 @@ def append_sub_agent_event(
             actor_scope=actor_scope,
             occurred_at=occurred_at,
             payload=payload,
-            intent_epoch=intent_epoch,
-        )
-    )
-
-
-def append_gate_event(
-    store: ExecutionEventStore,
-    *,
-    execution_id: str,
-    workspace_id: str,
-    event_type: ExecutionEventType,
-    occurred_at: datetime,
-    from_phase: str,
-    to_phase: str,
-    gate: str,
-    reason: str,
-    sub_agent_id: str | None = None,
-    accepts_input: bool = False,
-    actor_id: str = "thesis-workflow",
-    actor_scope: ActorScope = ActorScope.WORKFLOW,
-    correlation_id: str | None = None,
-    intent_epoch: int = 0,
-) -> ExecutionEvent:
-    """Append a gate blocked/resolved event bound to an owning orchestrator."""
-    if event_type not in GATE_EVENT_TYPES:
-        raise SubAgentContractError("event_type must be a workflow.gate.* event")
-    return store.append(
-        ExecutionEvent(
-            execution_id=execution_id,
-            workspace_id=workspace_id,
-            event_type=event_type,
-            correlation_id=correlation_id or execution_id,
-            actor_id=actor_id,
-            actor_scope=actor_scope,
-            occurred_at=occurred_at,
-            payload={
-                "acceptsInput": bool(accepts_input),
-                "fromPhase": from_phase,
-                "gate": gate,
-                "reason": reason,
-                "subAgentId": sub_agent_id,
-                "toPhase": to_phase,
-            },
             intent_epoch=intent_epoch,
         )
     )
@@ -329,11 +278,6 @@ class SubAgentTree:
                     ExecutionEventType.SUB_AGENT_FAILED,
                 }:
                     accepts[sub_agent_id] = False
-            if (
-                event_type is ExecutionEventType.WORKFLOW_GATE_RESOLVED
-                and sub_agent_id in spawns
-            ):
-                accepts[sub_agent_id] = False
             if (
                 event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT
                 and sub_agent_id in spawns
@@ -441,7 +385,6 @@ def filter_replay(
 
 
 __all__ = [
-    "GATE_EVENT_TYPES",
     "STATUS_COMPLETED",
     "STATUS_FAILED",
     "STATUS_NEEDS_INPUT",
@@ -451,7 +394,6 @@ __all__ = [
     "SubAgentContractError",
     "SubAgentNode",
     "SubAgentTree",
-    "append_gate_event",
     "append_sub_agent_event",
     "filter_replay",
     "sub_agent_payload",

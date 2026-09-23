@@ -7,29 +7,24 @@ that anchor.  Delivery is durable before it is scheduled and idempotent under
 retry, keyed by a delivery key persisted inside the message payload so the
 dedupe survives reload without a new durable record field.
 
-The same module owns the node-input path: an answer addressed to a node is
-authorized by the node's operator policy (human-only by default, DEC-Q3) before
-it is persisted and scheduled.  The answering actor and its kind are built by
-the trusted caller, never by a model or a request body.
+The receipt an accepted node answer returns (:class:`NodeInputReceipt`) and the
+answering actor it carries (:class:`~thesis.agent.runtime.policy.AnsweringActor`)
+live here too: the answering actor and its kind are built by the trusted caller,
+never by a model or a request body.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from thesis.agent.runtime.datum import Datum, DatumType
-from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
-    AnsweringActor,
     OperatorPolicyDecision,
-    OperatorPolicyRegistry,
 )
-from thesis.agent.runtime.store import PersistenceSubAgentStore, SubAgentStore
 from thesis.chat.contracts import (
     ChatMessage,
     MessageRole,
@@ -191,7 +186,7 @@ class DeliveryService:
     def deliver(
         self,
         anchor: Anchor,
-        datum: Datum,
+        datum: Datum | None = None,
         *,
         body: str | None = None,
         kind: TranscriptItemKind = TranscriptItemKind.SUB_AGENT,
@@ -211,10 +206,25 @@ class DeliveryService:
         produce a runnable turn -- an operator question before any answer
         exists -- so nothing is dispatched until the answer's own accept path
         schedules the turn; the receipt reports ``scheduled=False``.
+
+        A delivery without a datum carries no datum payload: the caller must
+        supply an explicit ``idempotency_key`` and ``body``, and the persisted
+        message is built from ``data``/``role``/``kind`` alone (no tool result
+        unless one is explicitly passed).  The key is what makes the delivery
+        idempotent, so it is never derived for a datum-less delivery.
         """
+        if datum is None:
+            if idempotency_key is None:
+                raise DeliveryError(
+                    "a delivery without a datum requires an explicit idempotency_key"
+                )
+            if body is None:
+                raise DeliveryError(
+                    "a delivery without a datum requires an explicit body"
+                )
         key = (
             delivery_key(anchor, datum)
-            if idempotency_key is None
+            if datum is not None and idempotency_key is None
             else _require_text(idempotency_key, "idempotency_key")
         )
         existing = find_delivered(self._chat, anchor, key)
@@ -225,18 +235,25 @@ class DeliveryService:
                 scheduled=False,
                 duplicate=True,
             )
-        payload = _datum_payload(datum)
-        payload.update(dict(data or {}))
+        if datum is None:
+            payload: dict[str, object] = dict(data or {})
+            message_body = _require_text(body, "body")
+            message_tool_result = tool_result
+        else:
+            payload = _datum_payload(datum)
+            payload.update(dict(data or {}))
+            message_body = body or _default_body(datum)
+            message_tool_result = payload if tool_result is None else tool_result
         payload["subAgentId"] = anchor.sub_agent_id
         payload[DELIVERY_KEY_FIELD] = key
         message = self._chat.create_message(
             anchor.workspace_id,
             anchor.chat_id,
             actor_id=actor_id,
-            body=body or _default_body(datum),
+            body=message_body,
             role=role,
             kind=kind,
-            tool_result=payload if tool_result is None else tool_result,
+            tool_result=message_tool_result,
             data=payload,
             execution_id=execution_id,
         )
@@ -309,118 +326,6 @@ class NodeInputReceipt:
         }
 
 
-class NodeInputService:
-    """Accept an answer addressed to a node under its operator policy.
-
-    This is the node-input path DEC-Q3 governs.  The answerer's identity and
-    kind arrive as an :class:`AnsweringActor` built by the trusted caller; the
-    message is persisted with the policy provenance and only then is the node's
-    turn scheduled.
-    """
-
-    def __init__(
-        self,
-        *,
-        chat: ChatService,
-        store: SubAgentStore | None = None,
-        policies: OperatorPolicyRegistry | None = None,
-        schedule: TurnScheduler | None = None,
-        clock: Callable[[], datetime] = _utc_now,
-        id_factory: Callable[[str], str] | None = None,
-    ) -> None:
-        self._chat = chat
-        self._store = store or PersistenceSubAgentStore(chat.persistence)
-        self._policies = policies or OperatorPolicyRegistry()
-        self._lifecycle = SubAgentLifecycle(chat, store=self._store)
-        self._schedule = schedule
-        self._clock = clock
-        self._id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid.uuid4().hex}")
-
-    @property
-    def policies(self) -> OperatorPolicyRegistry:
-        """Return the active operator policy registry."""
-        return self._policies
-
-    def request_input(
-        self,
-        workspace_id: str,
-        sub_agent_id: str,
-    ) -> SubAgentRecord:
-        """Open one node's input state so an answer may resume it.
-
-        This is the one pause path: the question's state lives on the asking
-        node, and the same node's answer path (:meth:`accept`) consumes the
-        input and returns the node to ``running``.
-        """
-        record = self._store.get_sub_agent(workspace_id, sub_agent_id)
-        if record is None:
-            raise NodeInputNotFound(f"sub-agent was not found: {sub_agent_id}")
-        return self._lifecycle.request_input(workspace_id, sub_agent_id)
-
-    def accept(
-        self,
-        workspace_id: str,
-        chat_id: str,
-        sub_agent_id: str,
-        *,
-        body: str,
-        actor: AnsweringActor,
-        idempotency_key: str | None = None,
-    ) -> NodeInputReceipt:
-        """Authorize, persist, and schedule one answer for a node."""
-        message_body = _require_text(body, "body")
-        record = self._store.get_sub_agent(workspace_id, sub_agent_id)
-        if record is None or record.chat_id != chat_id:
-            raise NodeInputNotFound(f"sub-agent was not found: {sub_agent_id}")
-        if not self._lifecycle.accepts_unsolicited_input(record):
-            raise NodeInputNotAccepted(
-                f"sub-agent {sub_agent_id} is not accepting input"
-            )
-        decision = self._policies.authorize_node_input(record, actor)
-        decision.require()
-        key = (
-            self._id_factory("input")
-            if idempotency_key is None
-            else _require_text(idempotency_key, "idempotency_key")
-        )
-        anchor = Anchor(workspace_id, chat_id, sub_agent_id)
-        existing = find_delivered(self._chat, anchor, key)
-        if existing is not None:
-            return NodeInputReceipt(
-                message=existing,
-                decision=decision,
-                scheduled=False,
-                duplicate=True,
-            )
-        message = self._chat.create_message(
-            workspace_id,
-            chat_id,
-            actor_id=actor.actor_id,
-            body=message_body,
-            role=MessageRole.USER,
-            kind=TranscriptItemKind.SUB_AGENT,
-            data={
-                "subAgentId": sub_agent_id,
-                "parentSubAgentId": record.parent_sub_agent_id,
-                "kind": "operator_input",
-                "actorKind": actor.kind.value,
-                "operatorPolicy": decision.as_dict(),
-                DELIVERY_KEY_FIELD: key,
-            },
-        )
-        if record.status is SubAgentStatus.NEEDS_INPUT:
-            self._lifecycle.resume(workspace_id, sub_agent_id)
-        scheduled = self._schedule is not None
-        if self._schedule is not None:
-            self._schedule(workspace_id, chat_id, sub_agent_id)
-        return NodeInputReceipt(
-            message=message,
-            decision=decision,
-            scheduled=scheduled,
-            duplicate=False,
-        )
-
-
 __all__ = [
     "DELIVERY_KEY_FIELD",
     "ROOT_ANCHOR_ID",
@@ -431,7 +336,6 @@ __all__ = [
     "NodeInputNotAccepted",
     "NodeInputNotFound",
     "NodeInputReceipt",
-    "NodeInputService",
     "TurnScheduler",
     "delivery_key",
     "find_delivered",

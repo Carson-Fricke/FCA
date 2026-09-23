@@ -575,10 +575,7 @@ impl HarnessTools {
     /// # Errors
     ///
     /// Returns [`ToolExecutionError`] when the boundary fails.
-    pub fn run_study(
-        &self,
-        arguments: &Map<String, Value>,
-    ) -> Result<Value, ToolExecutionError> {
+    pub fn run_study(&self, arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
         let config_path = resolve_config(arguments)?;
         if self.context.mode == Boundary::Remote {
             return self.launch_remote_study(&config_path);
@@ -593,11 +590,7 @@ impl HarnessTools {
                     ))
                 });
         }
-        let mut tail = vec![
-            "study-job".to_string(),
-            "--config".to_string(),
-            config_path,
-        ];
+        let mut tail = vec!["study-job".to_string(), "--config".to_string(), config_path];
         tail.extend(workspace_arguments(arguments)?);
         self.invoke_process(&tail, "study-job")
     }

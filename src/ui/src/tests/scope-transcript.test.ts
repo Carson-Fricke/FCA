@@ -75,14 +75,13 @@ function node(overrides: Partial<SubAgentNode> = {}): SubAgentNode {
 }
 
 describe('buildNodeEntries', () => {
-	it('interleaves user messages, thinking, tools, and outputs chronologically', () => {
+	it('interleaves user messages, tools, and outputs chronologically', () => {
 		const entries = buildNodeEntries({
 			messages: [
 				message('m1', '2026-09-08T17:14:00Z'),
 				message('m3', '2026-09-08T17:14:03Z')
 			],
 			events: [
-				event('sub_agent.progress', { subAgentId: 'sub-1', kind: 'thinking', text: 'weighing' }, 1, '2026-09-08T17:14:01Z'),
 				event('tool.result', { subAgentId: 'sub-1', toolResult }, 2, '2026-09-08T17:14:02Z'),
 				event('sub_agent.output', { subAgentId: 'sub-1', text: 'the answer' }, 3, '2026-09-08T17:14:04Z')
 			]
@@ -90,20 +89,40 @@ describe('buildNodeEntries', () => {
 
 		expect(entries.map((entry) => entry.kind)).toEqual([
 			'message',
-			'thinking',
 			'tool',
 			'message',
 			'assistant'
 		]);
 		expect(entries.map((entry) => entry.at)).toEqual([
 			'2026-09-08T17:14:00Z',
-			'2026-09-08T17:14:01Z',
 			'2026-09-08T17:14:02Z',
 			'2026-09-08T17:14:03Z',
 			'2026-09-08T17:14:04Z'
 		]);
 		const assistant = entries.at(-1);
 		expect(assistant?.kind === 'assistant' && assistant.text).toBe('the answer');
+	});
+
+	it('never renders engine activity labels as conversation content', () => {
+		const entries = buildNodeEntries({
+			messages: [],
+			events: [
+				event(
+					'sub_agent.progress',
+					{ subAgentId: 'sub-1', kind: 'activity', text: 'Preparing trials.' },
+					1,
+					'2026-09-08T17:14:01Z'
+				),
+				event(
+					'sub_agent.progress',
+					{ subAgentId: 'sub-1', kind: 'thinking', text: 'weighing' },
+					2,
+					'2026-09-08T17:14:02Z'
+				)
+			]
+		});
+
+		expect(entries).toEqual([]);
 	});
 
 	it('parses structured falsification report artifacts into kind=falsification', () => {
@@ -199,35 +218,21 @@ describe('buildNodeEntries', () => {
 		expect(value).toContain('reject');
 	});
 
-	it('does not render the same reply twice for output and needs-input events', () => {
+	it('never renders needs-input events: the event log is liveness wiring', () => {
+		// The pause signal flips node status (and the root attention line);
+		// the real question renders from its own tool-result message. The
+		// event itself must never become conversational content.
 		const entries = buildNodeEntries({
 			messages: [],
 			events: [
 				event('sub_agent.output', { subAgentId: 'sub-1', text: 'Please approve.' }, 1),
-				event('sub_agent.needs_input', { subAgentId: 'sub-1', question: 'Please approve.' }, 2)
+				event('sub_agent.needs_input', { subAgentId: 'sub-1', question: 'Please approve.' }, 2),
+				event('sub_agent.needs_input', { subAgentId: 'sub-1' }, 3)
 			]
 		});
 
 		expect(entries.filter((entry) => entry.kind === 'assistant')).toHaveLength(1);
-		expect(entries[0].kind === 'assistant' && entries[0].needsInput).toBe(false);
-	});
-
-	it('renders subsequent needs-input questions across turns even with identical wording', () => {
-		const question = 'Please review and confirm.';
-		const entries = buildNodeEntries({
-			messages: [message('m1', '2026-09-08T17:14:03Z')],
-			events: [
-				event('sub_agent.output', { subAgentId: 'sub-1', text: 'Initial proposal.' }, 1, '2026-09-08T17:14:01Z'),
-				event('sub_agent.needs_input', { subAgentId: 'sub-1', question }, 2, '2026-09-08T17:14:02Z'),
-				event('sub_agent.output', { subAgentId: 'sub-1', text: 'Revised proposal.' }, 4, '2026-09-08T17:14:04Z'),
-				event('sub_agent.needs_input', { subAgentId: 'sub-1', question }, 5, '2026-09-08T17:14:05Z')
-			]
-		});
-
-		const questions = entries.filter((entry) => entry.kind === 'assistant' && entry.needsInput);
-		expect(questions).toHaveLength(2);
-		expect(questions[0].kind === 'assistant' && questions[0].text).toBe(question);
-		expect(questions[1].kind === 'assistant' && questions[1].text).toBe(question);
+		expect(entries.every((entry) => entry.kind !== 'event')).toBe(true);
 	});
 });
 

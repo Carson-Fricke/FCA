@@ -162,12 +162,17 @@ def control_registered_tools(
     *,
     on_spawn: SpawnObserver | None = None,
     policy: SpawnPolicy | None = None,
+    phase_completion_schema: Mapping[str, object] | None = None,
 ) -> tuple[RegisteredTool, ...]:
     """Return the conversation-scoped control tools bound to ``runtime``.
 
     The chat scope and a node scope differ exactly in the caller's ability to
     return data to its own caller: only a sub-agent/phase conversation may
-    invoke the completion tools.
+    invoke the completion tools.  ``phase_completion_schema`` is the owning
+    phase's declared completion JSON Schema; when supplied, the
+    ``request_phase_completion`` tool advertises it so the provider
+    constrains the contract at decode time — the engine still validates the
+    accepted call deterministically.
     """
 
     def handle_spawn(arguments: Mapping[str, object]) -> ToolExecution:
@@ -216,6 +221,11 @@ def control_registered_tools(
         if on_spawn is not None:
             on_spawn(result.sub_agent, task)
         structured = dict(result.as_dict())
+        # The handle the caller's transcript renders: the child's identity and
+        # delegated task travel with the datum so the spawn card can present
+        # the child without a second lookup.
+        structured["role"] = spec.role
+        structured["task"] = task
         if authorization is not None:
             structured["authorization"] = authorization
         return ToolExecution(
@@ -378,13 +388,24 @@ def control_registered_tools(
         )
 
     # A workflow phase agent is offered the wrapped operator-input tool instead
-    # of the plain one: identical behavior, and it flags the workflow card so the
-    # phase shows as awaiting operator input. Handled by the same handler.
+    # of the plain one: identical behavior, and it flags the workflow card so
+    # the phase shows as awaiting operator input. Handled by the same handler.
     operator_tool = (
         TOOL_REQUEST_WORKFLOW_INPUT
         if context.workflow_execution_id is not None
         else TOOL_REQUEST_OPERATOR_INPUT
     )
+    completion_spec = _SPECS[TOOL_REQUEST_PHASE_COMPLETION]
+    if phase_completion_schema is not None:
+        completion_spec = ControlToolSpec(
+            name=TOOL_REQUEST_PHASE_COMPLETION,
+            description=completion_spec.description,
+            input_schema={
+                "type": "object",
+                "properties": {"completion": dict(phase_completion_schema)},
+                "required": ["completion"],
+            },
+        )
     tools = [
         RegisteredTool(
             spec=_function_tool(_SPECS[TOOL_SPAWN_SUB_AGENT]),
@@ -403,7 +424,7 @@ def control_registered_tools(
         tools.extend(
             (
                 RegisteredTool(
-                    spec=_function_tool(_SPECS[TOOL_REQUEST_PHASE_COMPLETION]),
+                    spec=_function_tool(completion_spec),
                     handler=handle_request_phase_completion,
                 ),
                 RegisteredTool(

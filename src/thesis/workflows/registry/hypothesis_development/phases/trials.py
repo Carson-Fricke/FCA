@@ -7,17 +7,16 @@ from dataclasses import replace
 
 from thesis.experiments.ledger import AttemptKind
 from thesis.research.hypothesis import HypothesisDocument
-from thesis.workflows.backtests import (
-    BacktestRunError,
-    BacktestRunTimeout,
-    HarnessError,
-)
 from thesis.workflows.core.phase import HandoffContext
 from thesis.workflows.research_models import (
     ResearchModelRunResult,
 )
 
-from ..artifacts import build_hypothesis, project_hypothesis
+from ..artifacts import (
+    build_hypothesis,
+    falsification_report_artifact,
+    project_hypothesis,
+)
 from ..composers.hypothesis import (
     _compose_falsifiers,
     _compose_research_model,
@@ -32,7 +31,6 @@ from ..errors import (
     FalsificationComposeError,
     WorkflowError,
 )
-from ..gates.evidence import check_evidence_bound
 from ..jobs import run_research_model
 from ..ledger import append_attempt
 from ..primitives import (
@@ -41,14 +39,12 @@ from ..primitives import (
     _digest,
     _metric,
 )
-from ..prompts.falsification import _falsification_turn_prompt
 from ..services import DevelopmentEngine, services_of
 from ..state import HypothesisDevelopmentState
 from . import (
+    _FALSIFICATION_TRIALS,
     _VERDICT,
-    _ActiveSubAgent,
 )
-from .verdict import emit_verdict_review, evaluate_verdict
 
 
 def run_falsification_trials(
@@ -62,8 +58,42 @@ def run_falsification_trials(
     The accepted hypothesis contract is composed into the typed document and
     falsification plan, the research model runs once through the harness, and
     each planned falsifier is recorded as a trial with its observed value and
-    verdict.  No agent is spawned: this phase is a computation.
+    verdict.  No agent is spawned: this phase is a computation.  Its progress
+    and its outcome are workflow-scoped events (REQ-C2): the report artifact
+    lands as ``workflow.phase_result``, and a failed computation records the
+    error variant before propagating.
     """
+    phase = _FALSIFICATION_TRIALS.value
+    try:
+        contract, final = _run_falsification_trials(workflow, request, state, context)
+    except Exception as error:  # noqa: BLE001 - the failure is the datum
+        workflow.emit_phase_result(
+            request,
+            phase,
+            summary=f"Falsification trials failed: {error or type(error).__name__}",
+            artifact={
+                "type": "error",
+                "message": str(error) or type(error).__name__,
+            },
+        )
+        raise
+    artifact = falsification_report_artifact(workflow, final)
+    workflow.emit_phase_result(
+        request,
+        phase,
+        summary=str(artifact.get("content") or f"Ran {len(final.trials)} trial(s)."),
+        artifact=artifact,
+    )
+    return contract
+
+
+def _run_falsification_trials(
+    workflow: DevelopmentEngine,
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> tuple[Mapping[str, object], HypothesisDevelopmentState]:
+    """Run the trials computation and return its contract and final state."""
     payload = context.completion.get("hypothesis")
     if not isinstance(payload, Mapping):
         raise WorkflowError(
@@ -74,16 +104,12 @@ def run_falsification_trials(
     services_of(workflow).store.save(document)
     plan = _plan_from_document(document)
     staged = replace(state, draft=draft, hypothesis=document, plan=plan)
-    try:
-        final = run_trials(workflow, request, staged)
-    except BacktestRunTimeout as error:
-        raise WorkflowError(
-            f"the falsification model run has not reached a terminal state: {error}"
-        ) from error
-    return {
+    final = run_trials(workflow, request, staged)
+    contract: Mapping[str, object] = {
         "trials": [dict(trial.as_dict()) for trial in final.trials],
         "target": _VERDICT.value,
     }
+    return contract, final
 
 
 def _draft_from_contract(payload: Mapping[str, object]) -> HypothesisDraft:
@@ -141,57 +167,6 @@ def _plan_from_document(document: HypothesisDocument) -> FalsificationPlan:
     return FalsificationPlan(tests=tuple(tests), controls=())
 
 
-def advance_trials(
-    workflow: DevelopmentEngine,
-    request: HypothesisDevelopmentRequest,
-    state: HypothesisDevelopmentState,
-) -> HypothesisDevelopmentState:
-    """Run the bounded premise and strategy loops one turn at a time."""
-    document = state.hypothesis
-    if document is None:
-        raise WorkflowError("falsification trials require a hypothesis")
-    state = run_trials(workflow, request, state)
-    if not state.trials:
-        # The research model has not reached a terminal state; the timeout
-        # was delivered as an ordinary operator request on the trials node.
-        return state
-    # The agent evaluates the trials first, in prose, including any harness
-    # or data failure, before the evidence gate decides whether the verdict
-    # can be trusted. This is the agent-first replacement for a separate
-    # falsification RCA step and guarantees failures reach the model.
-    active = workflow.active_orchestrators.get(request.execution_id)
-    if active is not None:
-        prose = author_falsification_prose(workflow, request, state, active)
-        state = replace(state, falsification_prose=prose or None)
-        if prose:
-            workflow.emit_orchestrator_text(request, prose)
-    before = state.phase
-    state = workflow._transition_checked(
-        request,
-        state,
-        _VERDICT,
-        "evidence bound to every planned falsifier",
-        lambda: check_evidence_bound(state.plan, state.trials),
-    )
-    if state.phase is before:
-        # The evidence gate delivered its reason as an operator request;
-        # the next turn re-checks it once the operator has answered.
-        return state
-    verdict = evaluate_verdict(workflow, state)
-    state = project_hypothesis(workflow, request, state, status=verdict.outcome)
-    state = replace(state, verdict=verdict)
-    append_attempt(
-        workflow,
-        request,
-        state,
-        AttemptKind.METRIC,
-        "falsification verdict recorded",
-        verdict.as_dict(),
-    )
-    emit_verdict_review(workflow, request, state)
-    return state
-
-
 def run_trials(
     workflow: DevelopmentEngine,
     request: HypothesisDevelopmentRequest,
@@ -216,94 +191,66 @@ def run_trials(
     runtime_configuration = state.research_model_runtime_configuration
     fitted_reference = state.fitted_model_reference
     model_run: ResearchModelRunResult | None = None
-    model_error: str | None = None
     # Scope the run id to the hypothesis revision so a revised model never
     # adopts or overwrites the previous revision's run.
     model_run_id = (
         f"falsify-{request.execution_id}-{document.content_sha256[:12]}-model"
     )
-    if any(test.test_id not in retained for test in plan.tests):
-        try:
-            model_run = run_research_model(
-                workflow,
-                request,
-                state,
-                model=state.draft.model,
-                correlation_id=model_run_id,
-                label="layer-a-model",
+    pending = [test for test in plan.tests if test.test_id not in retained]
+    if pending:
+        # The study runs to completion — the research runner polls until the
+        # harness reports the job terminal — and a harness failure or an
+        # unusable study result is the phase's failure: the exception (or the
+        # WorkflowError below) escapes to the phase executor, which records
+        # the error variant before propagating.  There is never a silent
+        # all-failed-trial completion.
+        model_run = run_research_model(
+            workflow,
+            request,
+            state,
+            model=state.draft.model,
+            correlation_id=model_run_id,
+            label="layer-a-model",
+        )
+        result = model_run.backtest
+        if not result.succeeded:
+            detail = result.error or f"harness run ended in state {result.state!r}"
+            raise WorkflowError(f"the falsification study failed: {detail}")
+        metrics = result.metrics
+        if not isinstance(metrics, Mapping) or not metrics:
+            raise WorkflowError(
+                "the falsification study returned no usable metrics, so the "
+                "planned falsifiers cannot be evaluated"
             )
-        except BacktestRunTimeout as error:
-            # The run has not finished, so no falsifier has an observation
-            # yet. Pause for the operator instead of recording a false
-            # refutation for every planned test.
-            append_attempt(
-                workflow,
-                request,
-                state,
-                AttemptKind.ABORTED_JOB,
-                "layer A research model run is still executing",
-                {"error": str(error)},
+        missing = sorted(
+            {
+                test.observable
+                for test in pending
+                if _metric(metrics, test.observable) is None
+            }
+        )
+        if missing:
+            raise WorkflowError(
+                "the falsification study metrics do not carry the planned "
+                f"observable(s): {', '.join(missing)}"
             )
-            workflow._request_operator_input(
-                request,
-                state,
-                purpose="wait for the Layer A research model run to finish",
-                detail=(
-                    "the falsification model run has not reached a terminal state "
-                    f"yet ({error}); its market-data backfill or replay may still "
-                    "be running, so no falsifier can be evaluated"
-                ),
-            )
-            return state
-        except (BacktestRunError, HarnessError, ValueError) as error:
-            model_error = str(error)
-        else:
-            model_reference = model_run.model_reference
-            model_artifact = model_run.workspace_artifact
-            fitted_parameters = model_run.fitted_parameters
-            runtime_configuration = model_run.runtime_configuration
-            fitted_reference = model_run.fitted_reference
+        model_reference = model_run.model_reference
+        model_artifact = model_run.workspace_artifact
+        fitted_parameters = model_run.fitted_parameters
+        runtime_configuration = model_run.runtime_configuration
+        fitted_reference = model_run.fitted_reference
     for test in plan.tests:
         existing = retained.get(test.test_id)
         if existing is not None:
             trials.append(existing)
             continue
-        if model_error is not None:
-            trials.append(
-                FalsificationTrial(
-                    test_id=test.test_id,
-                    falsifier_id=test.falsifier_id,
-                    run_id=model_run_id,
-                    digest=_digest({"error": model_error}),
-                    run_state="failed",
-                    observed=None,
-                    falsified=False,
-                    detail=model_error,
-                )
-            )
-            append_attempt(
-                workflow,
-                request,
-                state,
-                AttemptKind.ABORTED_JOB,
-                f"falsification trial {test.test_id} could not run",
-                {
-                    "error": model_error,
-                    "falsifierId": test.falsifier_id,
-                },
-            )
-            continue
         assert model_run is not None
         result = model_run.backtest
-        sample_valid = _metric(result.metrics, "sample_valid")
-        if sample_valid is not None and sample_valid <= 0:
-            observed = None
-        else:
-            observed = _metric(result.metrics, test.observable)
+        # Every planned falsifier observes its actual metric value — the
+        # data-failure falsifiers included — so a fired falsifier records
+        # what really happened instead of collapsing into no observation.
+        observed = _metric(result.metrics, test.observable)
         falsifier = falsifiers[test.falsifier_id]
-        detail = result.error
-        if detail is None and not result.succeeded:
-            detail = f"harness run ended in state {result.state!r}"
         trials.append(
             FalsificationTrial(
                 test_id=test.test_id,
@@ -312,8 +259,10 @@ def run_trials(
                 digest=_digest(result.as_dict()),
                 run_state=result.state,
                 observed=observed,
-                falsified=observed is not None and falsifier.falsifies(observed),
-                detail=detail,
+                falsified=(
+                    falsifier.falsifies(observed) if observed is not None else False
+                ),
+                detail=result.error,
             )
         )
         append_attempt(
@@ -323,7 +272,7 @@ def run_trials(
             AttemptKind.METRIC,
             f"falsification trial {test.test_id} recorded",
             {
-                "detail": detail,
+                "detail": result.error,
                 "falsifierId": test.falsifier_id,
                 "observed": observed,
                 "runId": result.job_id,
@@ -340,31 +289,3 @@ def run_trials(
         research_model_runtime_configuration=runtime_configuration,
     )
     return project_hypothesis(workflow, request, state)
-
-
-def author_falsification_prose(
-    workflow: DevelopmentEngine,
-    request: HypothesisDevelopmentRequest,
-    state: HypothesisDevelopmentState,
-    active: _ActiveSubAgent,
-) -> str:
-    """Prompt the sub-agent for the falsification phase to produce its prose analysis."""
-    services = services_of(workflow)
-    prompt_for = workflow._prompt_builder(
-        workspace_scope=request.workspace_id,
-        role=active.role,
-        context_id=f"{request.execution_id}-falsification-prose",
-    )
-    task = _falsification_turn_prompt(
-        state,
-        (state.fitted_parameters or {}),
-    )
-    try:
-        assert services.router is not None
-        invocation = services.router.invoke(
-            services.research_role,
-            prompt_for(task),
-        )
-        return (invocation.output or "").strip()
-    except Exception:
-        return ""

@@ -24,20 +24,12 @@ describe('ScopeTranscript sub-agent content', () => {
 			}
 		},
 		{
-			kind: 'thinking',
-			id: 't1',
-			at: '2026-09-08T17:14:02Z',
-			order: 2,
-			text: 'Draft a falsifiable hypothesis from the operator idea.'
-		},
-		{
 			kind: 'assistant',
 			id: 'a1',
 			at: '2026-09-08T17:14:03Z',
 			order: 3,
 			text: 'Hypothesis: momentum underreacts after earnings.',
-			actorId: 'thesis-agent',
-			needsInput: false
+			actorId: 'thesis-agent'
 		}
 	];
 
@@ -47,34 +39,8 @@ describe('ScopeTranscript sub-agent content', () => {
 
 		expect(screen.getByTestId('scope-spawn')).toHaveTextContent('ideation');
 		expect(
-			screen.getByText('Draft a falsifiable hypothesis from the operator idea.')
-		).toBeInTheDocument();
-		expect(
 			screen.getByText(/Hypothesis: momentum underreacts after earnings\./)
 		).toBeInTheDocument();
-	});
-
-	it('renders a needs-input question prominently', async () => {
-		render(ScopeTranscript, {
-			props: {
-				entries: [
-					{
-						kind: 'assistant',
-						id: 'q1',
-						at: '2026-09-08T17:14:04Z',
-						order: 1,
-						text: 'State the disagreement/edge and I will retry.',
-						actorId: 'thesis-agent',
-						needsInput: true
-					}
-				],
-				workspaceId: 'w1'
-			}
-		});
-		await tick();
-
-		expect(screen.getByTestId('scope-needs-input')).toHaveTextContent('needs input');
-		expect(screen.getByText('question')).toBeInTheDocument();
 	});
 
 	it('shows a typing indicator while the agent is working', async () => {
@@ -124,6 +90,6 @@ describe('ScopeTranscript sub-agent content', () => {
 		await tick();
 
 		expect(screen.getByTestId('falsification-report-card')).toBeInTheDocument();
-		expect(screen.getByTestId('falsification-badge')).toHaveTextContent('3/3 Trials Survived');
+		expect(screen.getByTestId('falsification-badge')).toHaveTextContent('1/1 Trials Survived');
 	});
 });

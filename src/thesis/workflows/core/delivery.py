@@ -1,31 +1,20 @@
-"""Node lifecycle and node-turn delivery.
+"""Node lifecycle.
 
 Every workflow execution owns one durable workflow node parented to the anchor
 that launched it.  :class:`WorkflowNodeManager` creates, resolves, and closes
-that node.  :class:`NodeTurnDelivery` delivers operator questions as node
-turns: the question is persisted at the node's anchor and schedules nothing,
-because the accepted operator answer is the single scheduling point.
+that node.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import datetime
 
-from thesis.agent.runtime.datum import DatumType, datum_from_result
-from thesis.agent.runtime.delivery import (
-    Anchor,
-    DeliveryReceipt,
-    DeliveryService,
-    NodeInputService,
-)
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.chat.contracts import (
-    MessageRole,
     SubAgentKind,
     SubAgentRecord,
-    TranscriptItemKind,
     WorkflowExecutionState,
 )
 from thesis.chat.service import ChatService
@@ -152,123 +141,4 @@ class WorkflowNodeManager:
                 "frozen": True,
                 "status": STATUS_COMPLETED if completed else STATUS_FAILED,
             },
-        )
-
-
-class NodeTurnDelivery:
-    """Deliver operator questions as durable turns at a node's anchor."""
-
-    def __init__(
-        self,
-        *,
-        chat: ChatService,
-        delivery: DeliveryService,
-        node_inputs: NodeInputService,
-        actor_id: str,
-    ) -> None:
-        self._chat = chat
-        self._delivery = delivery
-        self._node_inputs = node_inputs
-        self._actor_id = actor_id
-
-    def sequence(self, context: WorkflowContext) -> int:
-        """Return the retry-stable sequence number for the next request.
-
-        The sequence is the number of operator questions already delivered for
-        the execution plus one, so a retried pause resolves to the key of the
-        message it already delivered instead of duplicating the turn.
-        """
-        execution_id = _execution_id(context)
-        return (
-            sum(
-                1
-                for message in self._chat.list_messages(
-                    context.workspace_id, context.chat_id
-                )
-                if message.execution_id == execution_id
-                and message.data is not None
-                and message.data.get("kind") == "operator_question"
-            )
-            + 1
-        )
-
-    def deliver_question(
-        self,
-        context: WorkflowContext,
-        *,
-        sub_agent_id: str,
-        phase: str,
-        body: str,
-        question: str | None = None,
-        fields: Mapping[str, object] | None = None,
-    ) -> DeliveryReceipt:
-        """Persist one question as the node's assistant turn, scheduling none.
-
-        The question has no answer yet, so a delivery-time schedule could only
-        produce the workflow's unanswered-request no-op.  The answer accepted
-        through :meth:`~thesis.agent.runtime.delivery.NodeInputService.accept`
-        is the single scheduling point.  A re-delivered question resolves to
-        the durable message instead of duplicating the turn.
-        """
-        execution_id = _execution_id(context)
-        payload: dict[str, object] = {
-            "kind": "operator_question",
-            "phase": phase,
-            "turn": "assistant",
-        }
-        if question is not None:
-            payload["question"] = question
-        if fields:
-            payload.update(fields)
-        # The delivery key identifies the pause occurrence, not the question
-        # text: two cycles can pause with the same authored request, and each
-        # must deliver its own turn.
-        sequence = self.sequence(context)
-        payload["sequence"] = sequence
-        datum = datum_from_result(
-            DatumType.OPERATOR_QUESTION.value,
-            ok=True,
-            structured=dict(payload),
-            text=body,
-        )
-        return self._delivery.deliver(
-            Anchor(context.workspace_id, context.chat_id, sub_agent_id=sub_agent_id),
-            datum,
-            body=body,
-            role=MessageRole.ASSISTANT,
-            kind=TranscriptItemKind.SUB_AGENT,
-            data=payload,
-            execution_id=execution_id,
-            actor_id=self._actor_id,
-            idempotency_key=f"operator-request-{execution_id}-{sequence}",
-            schedule=False,
-        )
-
-    def deliver_request(
-        self,
-        context: WorkflowContext,
-        *,
-        sub_agent_id: str,
-        phase: str,
-        body: str,
-        question: str | None = None,
-        fields: Mapping[str, object] | None = None,
-        open_node_input: bool,
-    ) -> None:
-        """Deliver one operator request and optionally open its node input.
-
-        The node's durable record enters ``needs_input`` through the unified
-        node-input path so the answer accepted for that node resumes the same
-        record under the node's operator policy; the question delivery itself
-        schedules nothing.
-        """
-        if open_node_input:
-            self._node_inputs.request_input(context.workspace_id, sub_agent_id)
-        self.deliver_question(
-            context,
-            sub_agent_id=sub_agent_id,
-            phase=phase,
-            body=body,
-            question=question,
-            fields=fields,
         )

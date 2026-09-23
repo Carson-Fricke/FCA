@@ -2,11 +2,10 @@
 
 This package owns the chat-attached sub-agent model that agent-backed workflow
 phases are built on: immutable specifications and budgets, durable sub-agent and
-invocation stores, deterministic lifecycle guards, the Thesis control tools
-(including the phase-completion handshake), and asynchronous result delivery to
-parents.  The workflow state machine stays deterministic and owns every phase
-transition; this package owns how an agent runs, calls tools, and requests
-completion.
+invocation stores, deterministic lifecycle guards, the Thesis control tools, and
+asynchronous result delivery to parents.  The workflow state machine stays
+deterministic and owns every phase transition; this package owns how an agent
+runs, calls tools, and requests completion.
 """
 
 from thesis.agent.runtime.context import ToolContext, ToolContextError
@@ -19,12 +18,9 @@ from thesis.agent.runtime.control import (
     TOOL_REQUEST_SUB_AGENT_COMPLETION,
     TOOL_SPAWN_SUB_AGENT,
     AwaitResult,
-    CompletionOutcome,
-    CompletionStatus,
     ControlToolService,
     ControlToolSpec,
     OperatorInputRequest,
-    PhaseCompletionProtocol,
     SpawnResult,
     set_result_ref,
 )
@@ -55,7 +51,6 @@ from thesis.agent.runtime.delivery import (
     NodeInputNotAccepted,
     NodeInputNotFound,
     NodeInputReceipt,
-    NodeInputService,
     delivery_key,
     find_delivered,
 )
@@ -140,9 +135,7 @@ __all__ = [
     "ChatSubAgentNode",
     "ChatSubAgentProjectionError",
     "ChatSubAgentTree",
-    "CompletionOutcome",
     "CompletionProvider",
-    "CompletionStatus",
     "ControlToolRuntime",
     "ControlToolService",
     "ControlToolSpec",
@@ -164,7 +157,6 @@ __all__ = [
     "NodeInputNotAccepted",
     "NodeInputNotFound",
     "NodeInputReceipt",
-    "NodeInputService",
     "NodeOperatorPolicy",
     "NodeTurnError",
     "OperatorActorKind",
@@ -174,7 +166,6 @@ __all__ = [
     "OperatorPolicyError",
     "OperatorPolicyRegistry",
     "PersistenceSubAgentStore",
-    "PhaseCompletionProtocol",
     "RegisteredTool",
     "RegistryFactory",
     "RolePolicySpec",

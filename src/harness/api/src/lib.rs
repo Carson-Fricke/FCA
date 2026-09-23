@@ -485,10 +485,7 @@ pub fn execute_backtest_job(
 /// A missing `--config` and a configuration whose `shell` is not `study` both
 /// exit `2`; an engine failure exits `1` after printing the summary.
 #[must_use]
-pub fn execute_study_job(
-    args: &StudyJobArgs,
-    runner: &dyn StudyJobRunner,
-) -> CommandResult {
+pub fn execute_study_job(args: &StudyJobArgs, runner: &dyn StudyJobRunner) -> CommandResult {
     let Some(config) = args.config.as_deref() else {
         return CommandResult::UsageError(
             "A study configuration is required: study-job --config <path>".to_string(),

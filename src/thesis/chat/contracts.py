@@ -92,9 +92,6 @@ class InvestigationState(StrEnum):
 class WorkflowExecutionState(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
-    # Retained to decode historical execution rows. Nothing writes it: the
-    # workflow engine no longer pauses an execution for operator input.
-    PAUSED = "paused"
     STOPPED = "stopped"
     CANCELLED = "cancelled"
     COMPLETED = "completed"

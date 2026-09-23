@@ -1,10 +1,14 @@
-"""Composer for the canonical JSON hypothesis envelope."""
+"""Compose helpers for the canonical JSON hypothesis envelope.
+
+The compose *helpers* here are the live extraction surface: the deterministic
+trials phase and the rebuild fold turn an accepted hypothesis contract's
+payload into the typed draft through them.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from thesis.agent.router import InvocationResult
 from thesis.research.hypothesis import HypothesisFalsifier
 from thesis.research.indicators import (
     IndicatorArtifactError,
@@ -12,71 +16,23 @@ from thesis.research.indicators import (
     WorkspaceIndicator,
 )
 from thesis.research.models import IndicatorBinding, ResearchModel, ResearchModelError
+from thesis.workflows.research_models import study_window
 
-from ..contracts import (
-    HypothesisDraft,
-)
 from ..errors import (
     FalsificationComposeError,
-    WorkflowError,
 )
-from ..primitives import _DEFAULT_HORIZON, _DEFAULT_RISK_FACTOR, _DEFAULT_UNIVERSE
+from ..primitives import _DEFAULT_UNIVERSE
 from ._shared import (
-    _compose_text,
-    _json_document,
     _model_text,
     _optional_compose_text,
 )
 
-
-class JsonDevelopmentHypothesisComposer:
-    """Parse the canonical JSON hypothesis envelope from model output.
-
-    Composition is deliberately lenient: only ``claim`` and ``disagreement``
-    plus the falsifier core fields and a research ``model`` are required.
-    Prose metadata remains tolerant, but Layer A cannot silently substitute a
-    placeholder strategy for a missing statistical model.
-    """
-
-    def compose(self, invocation: InvocationResult) -> HypothesisDraft:
-        document = _json_document(invocation, "hypothesis")
-        claim = _compose_text(document, "claim", "claim")
-        disagreement = _compose_text(document, "disagreement", "disagreement")
-        model = _compose_research_model(document.get("model"))
-        universe = _compose_universe(document.get("universe"), model)
-        falsifiers = _compose_falsifiers(document.get("falsifiers"))
-        sizing = document.get("sizing")
-        if not (isinstance(sizing, str) and sizing.strip()):
-            sizing = None
-        body = document.get("body", "")
-        if body is None:
-            body = ""
-        if not isinstance(body, str):
-            raise FalsificationComposeError("hypothesis body must be text")
-        hypothesis_id = document.get("hypothesisId")
-        if hypothesis_id is not None and not (
-            isinstance(hypothesis_id, str) and hypothesis_id.strip()
-        ):
-            hypothesis_id = None
-        try:
-            return HypothesisDraft(
-                claim=claim,
-                disagreement=disagreement,
-                risk_factor=_optional_compose_text(
-                    document, "riskFactor", _DEFAULT_RISK_FACTOR, max_length=4_096
-                ),
-                horizon=_optional_compose_text(
-                    document, "horizon", _DEFAULT_HORIZON, max_length=4_096
-                ),
-                universe=universe,
-                falsifiers=falsifiers,
-                model=model,
-                sizing=None if sizing is None else sizing.strip(),
-                body=body,
-                hypothesis_id=None if hypothesis_id is None else hypothesis_id.strip(),
-            )
-        except WorkflowError as error:
-            raise FalsificationComposeError(str(error)) from error
+__all__ = [
+    "_compose_falsifiers",
+    "_compose_research_model",
+    "_compose_universe",
+    "_optional_compose_text",
+]
 
 
 def _compose_research_model(value: object) -> ResearchModel:
@@ -95,6 +51,9 @@ def _compose_research_model(value: object) -> ResearchModel:
     if not isinstance(configuration, Mapping):
         raise FalsificationComposeError("model harnessConfiguration must be an object")
     try:
+        # The fetch window is the model's to declare; validating it here keeps
+        # the composer accepting exactly what the contract collector accepts.
+        study_window(configuration)
         return ResearchModel(
             model_id=_model_text(value.get("modelId"), "modelId"),
             version=_model_text(value.get("version"), "model version"),
@@ -198,9 +157,14 @@ def _compose_symbols(value: object, label: str) -> tuple[str, ...]:
 
 def _compose_falsifiers(value: object) -> tuple[HypothesisFalsifier, ...]:
     if value is None:
-        return ()
+        # The trials phase derives one trial per falsifier and its contract
+        # requires a non-empty trial list: a hypothesis without falsifiers can
+        # never be consumed, so it is rejected before any transition commits.
+        raise FalsificationComposeError("hypothesis requires at least one falsifier")
     if isinstance(value, str) or not isinstance(value, Sequence):
         raise FalsificationComposeError("falsifiers must be a sequence")
+    if not value:
+        raise FalsificationComposeError("hypothesis requires at least one falsifier")
     falsifiers: list[HypothesisFalsifier] = []
     for index, item in enumerate(value):
         if not isinstance(item, Mapping):

@@ -107,6 +107,26 @@ describe('ChatTranscript tool-result datum-type routing', () => {
 		expect(screen.getByTestId('backtest-tool-card')).toBeInTheDocument();
 	});
 
+	it('routes a sub-agent handle datum to the sub-agent card', async () => {
+		renderTool({
+			...toolResult,
+			tool: 'spawn_sub_agent',
+			datumType: 'sub_agent_handle',
+			structured: {
+				sub_agent_id: 'sa-7',
+				status: 'spawned',
+				kind: 'conversation',
+				role: 'research',
+				task: 'evaluate the sample'
+			}
+		});
+		await tick();
+
+		expect(screen.getByTestId('sub-agent-card')).toBeInTheDocument();
+		expect(screen.queryByTestId('generic-tool-card')).toBeNull();
+		expect(screen.queryByTestId('tool-result-card')).toBeNull();
+	});
+
 	it('falls back to the generic card for unknown datum types and tools', async () => {
 		renderTool({ ...toolResult, tool: 'not_a_real_tool', datumType: 'not_a_real_datum_type' });
 		await tick();
@@ -167,10 +187,10 @@ describe('ChatTranscript live workflow routing', () => {
 		});
 		await tick();
 
-		// One route: the registry renderer renders the card through the tool
-		// result wrapper, exactly like every other surface.
-		const wrapper = screen.getByTestId('tool-result-card');
-		expect(wrapper).toHaveAttribute('data-tool', 'start_workflow');
+		// One route: the standalone workflow card renders through the registry
+		// without the generic tool-result wrapper, exactly like the sub-agent
+		// handle card.
+		expect(screen.queryByTestId('tool-result-card')).toBeNull();
 		const card = container.querySelector('[data-testid="workflow-card"]');
 		expect(card).not.toBeNull();
 		expect(card).toHaveAttribute('data-execution', 'exec-42');

@@ -241,6 +241,39 @@ fn date_string_formats_whole_utc_days() {
 }
 
 #[test]
+fn session_dates_round_trip_through_nanos() {
+    let nanos = date_ns("2015-12-10").expect("session date");
+    assert_eq!(date_string(nanos), "2015-12-10");
+    assert_eq!(
+        date_of(nanos),
+        chrono::NaiveDate::from_ymd_opt(2015, 12, 10)
+    );
+    assert!(date_ns("not-a-date").is_none());
+}
+
+#[test]
+fn the_window_start_clamps_forward_to_the_first_complete_session() {
+    let requested = date_ns("2005-01-03").expect("requested start");
+    let end = date_ns("2026-01-01").expect("end");
+    let earliest = date_ns("2015-12-10").expect("earliest");
+    assert_eq!(
+        clamped_start_ns(requested, end, Some(earliest)),
+        Some(earliest)
+    );
+}
+
+#[test]
+fn a_window_start_never_clamps_backward_or_into_an_empty_window() {
+    let requested = date_ns("2016-01-04").expect("requested start");
+    let end = date_ns("2026-01-01").expect("end");
+    let earliest = date_ns("2015-12-10").expect("earliest");
+    assert_eq!(clamped_start_ns(requested, end, Some(earliest)), None);
+    assert_eq!(clamped_start_ns(requested, end, Some(requested)), None);
+    assert_eq!(clamped_start_ns(requested, end, Some(end)), None);
+    assert_eq!(clamped_start_ns(requested, end, None), None);
+}
+
+#[test]
 fn background_job_guard_fails_a_job_left_in_flight() {
     let root = std::env::temp_dir().join(format!(
         "harness-job-guard-{}-{}",

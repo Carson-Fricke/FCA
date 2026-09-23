@@ -8,13 +8,13 @@ discriminated by anchor, so every conversation in a chat streams on that
 chat's unified timeline.  The chat is containment and storage scope, never a
 second identity.
 
-Operations: ``send(body, actor)``, ``deliver(datum)``, and
-``answer(body, actor)`` each persist then wake; ``status`` and ``in_flight``
-observe; ``subscribe`` tails the chat's live frames; ``run_turn`` is the turn
-body the worker calls.  Turn execution is one implementation: the durable
-session loop, turn persistence, the mid-turn input drain, and one serialized
-worker per conversation.  There is no parent, no completion, and no kind
-branching here.
+Operations: ``send(body, actor)`` and ``deliver(datum)`` each persist then
+wake; ``request_input`` pauses the node for an operator reply; ``status`` and
+``in_flight`` observe; ``subscribe`` tails the chat's live frames; ``run_turn``
+is the turn body the worker calls.  Turn execution is one implementation: the
+durable session loop, turn persistence, the mid-turn input drain, and one
+serialized worker per conversation.  There is no parent, no completion, and no
+kind branching here.
 
 A reply's streamed deltas are a sink concern inside the turn: a conversation
 at the root anchor publishes its reply through the chat's delta sink, and a
@@ -41,10 +41,12 @@ from thesis.agent.runtime.datum import Datum, tool_result_payload
 from thesis.agent.runtime.delivery import (
     ROOT_ANCHOR_ID,
     Anchor,
+    DeliveryError,
     DeliveryReceipt,
     DeliveryService,
+    NodeInputNotAccepted,
+    NodeInputNotFound,
     NodeInputReceipt,
-    NodeInputService,
 )
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import AnsweringActor, OperatorPolicyRegistry
@@ -556,35 +558,17 @@ class Conversation:
             schedule=schedule,
         )
 
-    def answer(
-        self,
-        body: str,
-        actor: AnsweringActor,
-        *,
-        idempotency_key: str | None = None,
-    ) -> NodeInputReceipt:
-        """Authorize, persist, and schedule one answer for this conversation."""
-        if self._anchor.sub_agent_id is None:
-            raise NodeTurnError("an answer targets a nested conversation")
-        _LOGGER.info(
-            "operator.input.answer anchor=%s actor=%s",
-            self._anchor.sub_agent_id,
-            actor.actor_id,
-        )
-        return self._service.node_inputs.accept(
-            self._anchor.workspace_id,
-            self._anchor.chat_id,
-            self._anchor.sub_agent_id,
-            body=body,
-            actor=actor,
-            idempotency_key=idempotency_key,
-        )
-
     def request_input(self) -> SubAgentRecord:
-        """Open this conversation's input state so an answer may resume it."""
+        """Open this conversation's input state so an answer may resume it.
+
+        The pause is a lifecycle transition on the node's durable record: the
+        question's state lives on the asking node, and the answer admitted
+        through :meth:`Conversations.answer` consumes the input and returns the
+        node to ``running``.
+        """
         if self._anchor.sub_agent_id is None:
             raise NodeTurnError("a pause targets a nested conversation")
-        return self._service.node_inputs.request_input(
+        return self._service.lifecycle.request_input(
             self._anchor.workspace_id, self._anchor.sub_agent_id
         )
 
@@ -813,11 +797,8 @@ class Conversations:
             else SubAgentLifecycle(chat, store=self._store)
         )
         self._delivery = DeliveryService(chat, schedule=self.schedule)
-        self._node_inputs = NodeInputService(
-            chat=chat,
-            store=self._store,
-            policies=policies,
-            schedule=self.schedule,
+        self._operator_policies = (
+            policies if policies is not None else OperatorPolicyRegistry()
         )
         self._spawner = SubAgentSpawner(
             lifecycle=self._lifecycle, delivery=self._delivery
@@ -867,11 +848,6 @@ class Conversations:
     def delivery(self) -> DeliveryService:
         """Return the one delivery path this service routes."""
         return self._delivery
-
-    @property
-    def node_inputs(self) -> NodeInputService:
-        """Return the node-input path that accepts answers for conversations."""
-        return self._node_inputs
 
     @property
     def max_history(self) -> int:
@@ -999,7 +975,7 @@ class Conversations:
     def deliver(
         self,
         anchor: Anchor,
-        datum: Datum,
+        datum: Datum | None,
         *,
         body: str | None = None,
         kind: TranscriptItemKind = TranscriptItemKind.SUB_AGENT,
@@ -1011,7 +987,12 @@ class Conversations:
         tool_result: Mapping[str, object] | None = None,
         schedule: bool = True,
     ) -> DeliveryReceipt:
-        """Persist one datum at an anchor, then route that anchor's wake."""
+        """Persist one datum at an anchor, then route that anchor's wake.
+
+        The transport generalizes beyond datum payloads (REQ-A1): a delivery
+        without a datum persists a plain message built from ``body``/``role``/
+        ``kind``/``data`` and requires an explicit ``idempotency_key``.
+        """
         return self._delivery.deliver(
             anchor,
             datum,
@@ -1024,6 +1005,74 @@ class Conversations:
             idempotency_key=idempotency_key,
             tool_result=tool_result,
             schedule=schedule,
+        )
+
+    def answer(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        sub_agent_id: str,
+        *,
+        body: str,
+        actor: AnsweringActor,
+        idempotency_key: str | None = None,
+    ) -> NodeInputReceipt:
+        """Authorize, persist, and schedule one external answer for a node.
+
+        This is the admission layer above the one intake (REQ-A4): admission
+        control runs before any persistence -- an unknown node fails closed,
+        a node not accepting unsolicited input fails closed, and the operator
+        policy gate must allow the answering actor.  The node is then resumed
+        (``needs_input`` -> ``running``) and the intake is performed through
+        the generalized transport, carrying the same provenance payload the
+        node-input path persists, so messages render identically.  The
+        answerer's identity and kind are built by the trusted caller, never
+        by a model or a request body.
+        """
+        message_body = body.strip()
+        if not message_body:
+            raise DeliveryError("body must be non-empty text")
+        record = self._store.get_sub_agent(workspace_id, sub_agent_id)
+        if record is None or record.chat_id != chat_id:
+            raise NodeInputNotFound(f"sub-agent was not found: {sub_agent_id}")
+        if not self._lifecycle.accepts_unsolicited_input(record):
+            raise NodeInputNotAccepted(
+                f"sub-agent {sub_agent_id} is not accepting input"
+            )
+        decision = self._operator_policies.authorize_node_input(record, actor)
+        decision.require()
+        _LOGGER.info(
+            "operator.input.answer node=%s actor=%s",
+            sub_agent_id,
+            actor.actor_id,
+        )
+        key = (
+            f"input-{uuid.uuid4().hex}" if idempotency_key is None else idempotency_key
+        )
+        if record.status is SubAgentStatus.NEEDS_INPUT:
+            self._lifecycle.resume(workspace_id, sub_agent_id)
+        receipt = self._delivery.deliver(
+            Anchor(workspace_id, chat_id, sub_agent_id),
+            None,
+            body=message_body,
+            role=MessageRole.USER,
+            kind=TranscriptItemKind.SUB_AGENT,
+            data={
+                "subAgentId": sub_agent_id,
+                "parentSubAgentId": record.parent_sub_agent_id,
+                "kind": "operator_input",
+                "actorKind": actor.kind.value,
+                "operatorPolicy": decision.as_dict(),
+            },
+            actor_id=actor.actor_id,
+            idempotency_key=key,
+            execution_id=record.workflow_execution_id,
+        )
+        return NodeInputReceipt(
+            message=receipt.message,
+            decision=decision,
+            scheduled=receipt.scheduled,
+            duplicate=receipt.duplicate,
         )
 
     # -- scheduling: the routing rule ----------------------------------------

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..errors import (
@@ -54,3 +55,23 @@ class FalsificationTrial:
             "runState": self.run_state,
             "testId": self.test_id,
         }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> FalsificationTrial:
+        """Rebuild one trial from its portable representation."""
+        observed = payload.get("observed")
+        detail = payload.get("detail")
+        return cls(
+            test_id=str(payload.get("testId", "")),
+            falsifier_id=str(payload.get("falsifierId", "")),
+            run_id=str(payload.get("runId", "")),
+            digest=str(payload.get("digest", "")),
+            run_state=str(payload.get("runState", "")),
+            observed=(
+                observed
+                if isinstance(observed, int | float) and not isinstance(observed, bool)
+                else None
+            ),
+            falsified=bool(payload.get("falsified", False)),
+            detail=None if detail is None else str(detail),
+        )

@@ -1,8 +1,8 @@
 """Atomic, dependency-injected ingestion for one equity symbol session.
 
 The existing Parquet and catalog protocols each represent one resource. This
-module adds the transaction boundary needed to publish both data types and
-their coverage rows as one commit supplied by the caller.
+module adds the transaction boundary needed to publish the requested data types
+and their coverage rows as one commit supplied by the caller.
 """
 
 from __future__ import annotations
@@ -21,6 +21,9 @@ from lake.ingestion.common import (
     PartitionWriter,
     StagedParquetObject,
     WriterFactory,
+    fetch_with_transient_retry,
+    is_transient_fetch_error,
+    normalize_data_types,
 )
 from lake.providers.alpaca.records import NormalizedQuote, NormalizedTrade
 from lake.storage.capacity import StorageCapGuard
@@ -55,6 +58,9 @@ class EquityIngestResult:
     session_date: date
     coverage: tuple[CoverageRecord, ...]
     objects: tuple[ParquetMetadata, ...]
+    #: Whether the session's fetch failure was a transport-level hiccup: the
+    #: backfill may retry it in-ensure; permanent failures are never retried.
+    retryable: bool = False
 
 
 class EquityIngestTransaction:
@@ -77,44 +83,68 @@ class EquityIngestTransaction:
         self,
         symbol: str,
         session: CoverageSession,
+        *,
+        data_types: Sequence[DataType | str] | DataType | str | None = None,
     ) -> EquityIngestResult:
-        """Fetch and publish trades and quotes for one planned session.
+        """Fetch and publish the requested data types for one planned session.
 
-        Both provider requests complete before staging begins. Fetch or
+        Every provider request completes before staging begins. Fetch or
         normalization failures publish only error metadata through the same
         atomic boundary; a failed commit is propagated without a compensating
         write that could hide a partial backend failure.
+
+        ``data_types`` selects the published datasets. A trade-only ensure
+        fetches and publishes trades alone, so two ensure requests for the same
+        symbol stop duplicating each other's whole session.
         """
         canonical_symbol = _canonical_symbol(symbol)
+        selected = normalize_data_types(data_types)
         if self._storage_guard is not None:
             self._storage_guard.enforce_ingest()
-        trade_result, quote_result = await asyncio.gather(
-            self._client.get_trades(
-                canonical_symbol, session.open_time, session.close_time
-            ),
-            self._client.get_quotes(
-                canonical_symbol, session.open_time, session.close_time
-            ),
-            return_exceptions=True,
+        # Alpaca's ``end`` parameter is inclusive, so the fetch window is
+        # [open_time, close_time] on both ends: a raw print stamped exactly at
+        # the session close (the 16:00:00 ET closing auction print) is part of
+        # this session's data and must be accepted by the record validation.
+        results = list(
+            await asyncio.gather(
+                *(
+                    fetch_with_transient_retry(
+                        lambda data_type=data_type: self._fetch(
+                            data_type, canonical_symbol, session
+                        )
+                    )
+                    for data_type in selected
+                ),
+                return_exceptions=True,
+            )
         )
 
-        fetch_error = _fetch_error(trade_result, quote_result)
+        fetch_error = _fetch_error(selected, results)
         if fetch_error is not None:
-            return self._publish_error(canonical_symbol, session, fetch_error)
+            return self._publish_error(
+                canonical_symbol,
+                session,
+                selected,
+                fetch_error,
+                retryable=_fetch_retryable(results),
+            )
 
-        trades = cast(Sequence[NormalizedTrade], trade_result)
-        quotes = cast(Sequence[NormalizedQuote], quote_result)
+        records_by_type: dict[DataType, Sequence[object]] = {
+            data_type: cast(Sequence[object], result)
+            for data_type, result in zip(selected, results, strict=True)
+        }
         try:
             staged, metadata = self._stage(
                 canonical_symbol,
                 session,
-                trades,
-                quotes,
+                selected,
+                records_by_type,
             )
         except Exception as error:
             return self._publish_error(
                 canonical_symbol,
                 session,
+                selected,
                 _error_message(error),
             )
 
@@ -123,99 +153,94 @@ class EquityIngestTransaction:
                 additional_bytes=sum(item.metadata.bytes for item in staged)
             )
 
-        coverage = self._coverage(
-            canonical_symbol,
-            session,
-            metadata,
-            trade_rows=len(trades),
-            quote_rows=len(quotes),
+        coverage = tuple(
+            _coverage_record(
+                canonical_symbol,
+                session,
+                data_type,
+                _coverage_status(
+                    session.is_partial, len(records_by_type[data_type])
+                ),
+                metadata[data_type],
+            )
+            for data_type in selected
         )
         self._committer.commit(objects=staged, coverage=coverage)
         return EquityIngestResult(
             symbol=canonical_symbol,
             session_date=session.session_date,
             coverage=coverage,
-            objects=metadata,
+            objects=tuple(metadata[data_type] for data_type in selected),
+        )
+
+    async def _fetch(
+        self,
+        data_type: DataType,
+        symbol: str,
+        session: CoverageSession,
+    ) -> Sequence[NormalizedTrade] | Sequence[NormalizedQuote]:
+        """Fetch one requested dataset for one symbol session."""
+        if data_type is DataType.TRADE:
+            return await self._client.get_trades(
+                symbol, session.open_time, session.close_time
+            )
+        return await self._client.get_quotes(
+            symbol, session.open_time, session.close_time
         )
 
     def _stage(
         self,
         symbol: str,
         session: CoverageSession,
-        trades: Sequence[NormalizedTrade],
-        quotes: Sequence[NormalizedQuote],
-    ) -> tuple[
-        tuple[StagedParquetObject, ...],
-        tuple[ParquetMetadata, ParquetMetadata],
-    ]:
+        data_types: Sequence[DataType],
+        records_by_type: Mapping[DataType, Sequence[object]],
+    ) -> tuple[tuple[StagedParquetObject, ...], dict[DataType, ParquetMetadata]]:
         store = _StagingObjectStore()
         writer = self._writer_factory(store)
-        trade_metadata = writer.write(
-            _trade_mappings(trades, symbol, session),
-            session_date=session.session_date,
-            asset_class=AssetClass.EQUITY,
-            data_type=DataType.TRADE,
-            symbol=symbol,
-        )
-        quote_metadata = writer.write(
-            _quote_mappings(quotes, symbol, session),
-            session_date=session.session_date,
-            asset_class=AssetClass.EQUITY,
-            data_type=DataType.QUOTE,
-            symbol=symbol,
-        )
-        metadata: tuple[ParquetMetadata, ParquetMetadata] = (
-            trade_metadata,
-            quote_metadata,
-        )
+        metadata: dict[DataType, ParquetMetadata] = {}
+        for data_type in data_types:
+            records = records_by_type[data_type]
+            mappings: Sequence[Mapping[str, object]]
+            if data_type is DataType.TRADE:
+                mappings = _trade_mappings(
+                    cast(Sequence[NormalizedTrade], records), symbol, session
+                )
+            else:
+                mappings = _quote_mappings(
+                    cast(Sequence[NormalizedQuote], records), symbol, session
+                )
+            metadata[data_type] = writer.write(
+                mappings,
+                session_date=session.session_date,
+                asset_class=AssetClass.EQUITY,
+                data_type=data_type,
+                symbol=symbol,
+            )
         staged = tuple(
-            StagedParquetObject(item, store.read(item.path)) for item in metadata
+            StagedParquetObject(item, store.read(item.path))
+            for item in metadata.values()
         )
         return staged, metadata
-
-    def _coverage(
-        self,
-        symbol: str,
-        session: CoverageSession,
-        metadata: tuple[ParquetMetadata, ParquetMetadata],
-        *,
-        trade_rows: int,
-        quote_rows: int,
-    ) -> tuple[CoverageRecord, CoverageRecord]:
-        trade_status = _coverage_status(session.is_partial, trade_rows)
-        quote_status = _coverage_status(session.is_partial, quote_rows)
-        return (
-            _coverage_record(
-                symbol, session, DataType.TRADE, trade_status, metadata[0]
-            ),
-            _coverage_record(
-                symbol, session, DataType.QUOTE, quote_status, metadata[1]
-            ),
-        )
 
     def _publish_error(
         self,
         symbol: str,
         session: CoverageSession,
+        data_types: Sequence[DataType],
         message: str,
+        *,
+        retryable: bool = False,
     ) -> EquityIngestResult:
-        coverage = (
+        coverage = tuple(
             CoverageRecord(
                 asset_class=AssetClass.EQUITY,
-                data_type=DataType.TRADE,
+                data_type=data_type,
                 symbol=symbol,
                 session_date=session.session_date,
                 status=CoverageStatus.ERROR,
                 error_message=message,
-            ),
-            CoverageRecord(
-                asset_class=AssetClass.EQUITY,
-                data_type=DataType.QUOTE,
-                symbol=symbol,
-                session_date=session.session_date,
-                status=CoverageStatus.ERROR,
-                error_message=message,
-            ),
+            )
+            for data_type in data_types
         )
         self._committer.commit(objects=(), coverage=coverage)
         return EquityIngestResult(
@@ -223,6 +248,7 @@ class EquityIngestTransaction:
             session_date=session.session_date,
             coverage=coverage,
             objects=(),
+            retryable=retryable,
         )
 
 
@@ -252,14 +278,30 @@ def _canonical_symbol(symbol: str) -> str:
     return canonical
 
 
-def _fetch_error(trades: object, quotes: object) -> str | None:
+def _fetch_error(data_types: Sequence[DataType], results: Sequence[object]) -> str | None:
     errors: list[str] = []
-    for name, result in (("trade", trades), ("quote", quotes)):
+    for data_type, result in zip(data_types, results, strict=True):
         if isinstance(result, asyncio.CancelledError):
             raise result
         if isinstance(result, BaseException):
-            errors.append(f"{name}: {_error_message(result)}")
+            errors.append(f"{data_type.value}: {_error_message(result)}")
     return "; ".join(errors) if errors else None
+
+
+def _fetch_retryable(results: Sequence[object]) -> bool:
+    """Return whether every failing fetch failed transiently.
+
+    A session whose fetches failed only at the transport level (DNS,
+    connection, timeout) may be retried in-ensure; a session with a permanent
+    failure re-runs into the same wall and must not be.
+    """
+    failures = [
+        result
+        for result in results
+        if isinstance(result, BaseException)
+        and not isinstance(result, asyncio.CancelledError)
+    ]
+    return bool(failures) and all(is_transient_fetch_error(e) for e in failures)
 
 
 def _error_message(error: BaseException) -> str:
@@ -378,7 +420,10 @@ def _validate_record_timestamp(
     if timestamp.tzinfo is None or timestamp.utcoffset() is None:
         raise ValueError(f"{symbol} record timestamp must be timezone-aware")
     normalized = timestamp.astimezone(UTC)
-    if not session.open_time <= normalized < session.close_time:
+    # Both session bounds are inclusive: the provider fetch passes close_time
+    # as Alpaca's inclusive end, so the closing auction print stamped exactly
+    # at 16:00:00 ET belongs to this session and must not be rejected.
+    if not session.open_time <= normalized <= session.close_time:
         raise ValueError(
             f"{symbol} record timestamp is outside session {session.session_date}"
         )

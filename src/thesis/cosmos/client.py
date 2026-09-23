@@ -37,6 +37,8 @@ DEFAULT_DATABASE = "thesis"
 TIMELINE_CONTAINER = "timeline"
 #: One container holds the workspace-scoped records (chats, executions, ...).
 CATALOG_CONTAINER = "catalog"
+#: One container holds the execution-store documents (one per execution).
+EXECUTIONS_CONTAINER = "executions"
 
 
 def _is_loopback(endpoint: str) -> bool:
@@ -94,6 +96,9 @@ def ensure_database(
     database.create_container_if_not_exists(
         id=CATALOG_CONTAINER, partition_key=PartitionKey(path="/workspaceId")
     )
+    database.create_container_if_not_exists(
+        id=EXECUTIONS_CONTAINER, partition_key=PartitionKey(path="/executionId")
+    )
     return database
 
 
@@ -102,6 +107,7 @@ __all__ = [
     "DEFAULT_DATABASE",
     "DEFAULT_ENDPOINT",
     "EMULATOR_KEY",
+    "EXECUTIONS_CONTAINER",
     "TIMELINE_CONTAINER",
     "CosmosSettings",
     "ensure_database",

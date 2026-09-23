@@ -457,6 +457,16 @@ An `advance`, `loopback`, or `fail` result MUST end the current phase-agent
 turn. A `remain` result keeps the turn active and MAY be followed by evidence
 gathering, another completion request, or an operator-input request.
 
+Acceptance commits the transition and then enters the successor phase through
+the runtime's detach seam. The completion tool call MUST return once its
+transition is committed; it MUST NOT stay open while the successor phase runs.
+An agent successor is spawned and woken through the conversation service, which
+already schedules turns out of band; a deterministic successor (for example the
+falsification trials) runs as its own detached unit of work, records its own
+phase result and transition, and a fault there fails the execution durably
+instead of surfacing inside the completed phase's tool call. A composition
+without a detach seam (tests, embedders) enters the successor inline.
+
 An acceptance failure caused by missing or contradictory evidence is not a
 schema construction failure. It MUST return `remain` with violations and leave
 the phase active so the agent can call more tools, revise its evidence, request
@@ -518,6 +528,13 @@ DeterministicPhaseOutcome
 The workflow runner validates the action against the transition table, persists
 the result, and applies it. Deterministic phase failures MUST retain the partial
 result and failure detail.
+
+A deterministic phase run is dispatched off the phase-completion call: the
+completed phase's agent tool call returns when its transition commits, and the
+deterministic run executes as its own unit, persisting its phase result and its
+own transition before the next phase begins. Its failure is the execution's
+failure, recorded and delivered durably — never a silently wedged execution and
+never a delayed tool response.
 
 ## Harness Study Tool
 
@@ -1027,6 +1044,40 @@ conversation abstraction recorded in
 conversation hierarchy, composed child semantics, anchor-based returns, the
 kind-as-creation-parameter turn-end policy, the service-owned routing rule,
 and the sealed phase-spec union).
+
+**REQ-041: Contract handoffs are validated before they commit and advertised
+before they are called.** A phase's completion contract MUST be validated
+completely — every missing or wrongly-typed field reported once, in one
+deterministic pass — before the engine applies the transition, so a rejected
+handoff can never leave the execution committed to a phase whose successor
+cannot consume the contract. A contract the deterministic successor composes
+(the hypothesis-development creation handoff) MUST be validated by the same
+shape the composer enforces, guarded by a re-run of the composer itself so the
+validator and the consumer cannot drift. Every rejection MUST travel the
+`PhaseCompletionRejected` repair channel as an ordinary tool result, never as
+a generic fault. A phase whose spec declares a completion JSON Schema MUST
+have it advertised on the `request_phase_completion` tool its agent sees, so
+the provider constrains the call at decode time; the engine still validates
+the accepted call deterministically. Tool-call arguments that are not a bare
+JSON object MUST be recovered tolerantly (fenced or embedded JSON) before the
+call fails, and an unrecoverable call MUST fail with an actionable message.
+
+- Rationale: a handoff that fails deep validation after the transition
+  commits wedges the execution in a phase no live agent can complete, and a
+  first-error-only rejection forces the model into blind iteration; a
+  schema-constrained, fully-reported contract repairs in one turn. A phase
+  agent MUST never be invited to end the run itself: the completion
+  instruction and the advertised target enum name only real successors,
+  never the `failed` phase — an agent that cannot proceed asks the operator
+  through `request_workflow_input` instead. Operator gates stay
+  conversational; per the workflow development instructions, no deterministic
+  gate may be added to a workflow unless the operator explicitly requested
+  it.
+- Verification: a deeply invalid creation contract is rejected in-turn with
+  every problem listed, the execution stays in its current phase, and the
+  repaired contract completes the workflow; the phase agent's tool catalog
+  carries the declared schema; fenced and embedded tool arguments dispatch
+  normally.
 
 ## Target Package Layout
 

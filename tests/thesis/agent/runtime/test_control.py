@@ -1,4 +1,4 @@
-"""Phase-completion handshake and control-tool command behavior."""
+"""Control-tool command behavior."""
 
 from __future__ import annotations
 
@@ -9,16 +9,13 @@ from thesis.agent.runtime.control import (
     TOOL_REQUEST_PHASE_COMPLETION,
     TOOL_SPAWN_SUB_AGENT,
     AwaitResult,
-    CompletionStatus,
     ControlToolService,
-    PhaseCompletionProtocol,
 )
 from thesis.agent.runtime.control_tools import (
     CONTROL_NODE_TOOL_NAMES,
     control_registered_tools,
 )
 from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.delivery import NodeInputService
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import AnsweringActor, OperatorActorKind
 from thesis.agent.runtime.specs import SubAgentSpec
@@ -33,59 +30,6 @@ from thesis.chat.service import ChatService, InMemoryChatPersistence
 
 _WORKSPACE = "ws-test"
 _ACTOR = "operator-1"
-
-
-def _construct(payload: object) -> dict[str, object]:
-    if not isinstance(payload, dict) or "claim" not in payload:
-        raise ValueError("claim is required")
-    return payload
-
-
-def test_protocol_accepts_a_valid_contract() -> None:
-    protocol = PhaseCompletionProtocol(phase_attempt_id="attempt-1")
-    outcome = protocol.submit({"claim": "x"}, _construct)
-    assert outcome.status is CompletionStatus.CONSTRUCTED
-    assert outcome.accepted
-    assert outcome.value == {"claim": "x"}
-
-
-def test_protocol_reports_construction_failures_in_turn_then_exhausts() -> None:
-    protocol = PhaseCompletionProtocol(phase_attempt_id="attempt-1")
-    first = protocol.submit({}, _construct)
-    second = protocol.submit({}, _construct)
-    third = protocol.submit({}, _construct)
-    assert first.status is CompletionStatus.CONSTRUCTION_FAILED
-    assert first.errors and "claim is required" in first.errors[0]
-    assert second.status is CompletionStatus.CONSTRUCTION_FAILED
-    assert third.status is CompletionStatus.EXHAUSTED
-    blocked = protocol.submit({"claim": "x"}, _construct)
-    assert blocked.status is CompletionStatus.EXHAUSTED
-
-
-def test_protocol_allows_two_repair_turns_then_escalates() -> None:
-    protocol = PhaseCompletionProtocol(phase_attempt_id="attempt-1")
-    protocol.submit({}, _construct)
-    first = protocol.begin_repair_turn()
-    assert first.status is CompletionStatus.REPAIR
-    assert first.repair_turn == 1
-    assert protocol.attempts_used == 0
-    second = protocol.begin_repair_turn()
-    assert second.status is CompletionStatus.REPAIR
-    assert second.repair_turn == 2
-    escalated = protocol.begin_repair_turn()
-    assert escalated.status is CompletionStatus.ESCALATE
-
-
-def test_reset_epoch_restores_budgets() -> None:
-    protocol = PhaseCompletionProtocol(phase_attempt_id="attempt-1")
-    protocol.submit({}, _construct)
-    protocol.begin_repair_turn()
-    protocol.begin_repair_turn()
-    assert protocol.begin_repair_turn().status is CompletionStatus.ESCALATE
-    protocol.reset_epoch()
-    assert protocol.epoch == 1
-    assert protocol.repair_turn == 0
-    assert protocol.submit({"claim": "x"}, _construct).accepted
 
 
 def _service(
@@ -246,7 +190,7 @@ def test_request_operator_input_pauses_the_node() -> None:
         service.request_operator_input(_WORKSPACE, child.sub_agent_id, message="   ")
 
 
-def test_operator_input_pause_and_answer_share_the_node_input_path() -> None:
+def test_operator_input_pause_and_answer_share_the_input_path() -> None:
     service, lifecycle, chat = _service()
     chat_id = chat.list_chats(_WORKSPACE)[0].chat_id
     store = PersistenceSubAgentStore(chat.persistence)
@@ -267,8 +211,11 @@ def test_operator_input_pause_and_answer_share_the_node_input_path() -> None:
     assert record.status is SubAgentStatus.NEEDS_INPUT
     assert record.accepts_input is True
 
-    inputs = NodeInputService(chat=chat, store=store)
-    receipt = inputs.accept(
+    woke: list[object] = []
+    conversations = Conversations(
+        chat=chat, store=store, lifecycle=lifecycle, spawn_thread=woke.append
+    )
+    receipt = conversations.answer(
         _WORKSPACE,
         chat_id,
         child.sub_agent_id,
@@ -276,7 +223,7 @@ def test_operator_input_pause_and_answer_share_the_node_input_path() -> None:
         actor=AnsweringActor(actor_id=_ACTOR, kind=OperatorActorKind.HUMAN_OPERATOR),
     )
 
-    assert receipt.scheduled is False
+    assert receipt.scheduled is True
     resumed = lifecycle.get(_WORKSPACE, child.sub_agent_id)
     assert resumed is not None
     assert resumed.status is SubAgentStatus.RUNNING

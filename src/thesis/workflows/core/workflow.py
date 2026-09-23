@@ -13,22 +13,19 @@ hooks the spec supplies.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
-from thesis.agent.context import PromptContext, assemble_context
-from thesis.agent.router import InvocationResult, Role
 from thesis.agent.runtime.control import PhaseCompletionRejected
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.datum import Datum, DatumType
 from thesis.agent.runtime.delivery import (
     Anchor,
-    DeliveryReceipt,
     DeliveryService,
-    NodeInputService,
 )
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.specs import SubAgentSpec
@@ -52,9 +49,18 @@ from thesis.execution.sub_agents import (
     SubAgentContextSpec,
     append_sub_agent_event,
 )
-from thesis.workflows.core.delivery import NodeTurnDelivery, WorkflowNodeManager
+from thesis.execution.workflow_events import (
+    append_workflow_phase_result,
+    append_workflow_progress,
+)
+from thesis.workflows.core.delivery import WorkflowNodeManager
 from thesis.workflows.core.events import emit_phase, finish_execution
-from thesis.workflows.core.gate import evaluate_gate
+from thesis.workflows.core.execution_store import (
+    ExecutionIdentity,
+    ExecutionStore,
+    ExecutionStoreConflict,
+    StoreTransition,
+)
 from thesis.workflows.core.machine import TransitionMachine, TransitionTable
 from thesis.workflows.core.phase import (
     ConversationPhase,
@@ -71,6 +77,7 @@ from thesis.workflows.core.state import WorkflowState
 
 __all__ = [
     "ActiveSubAgent",
+    "Detach",
     "Workflow",
     "WorkflowDoctrine",
     "WorkflowEngineError",
@@ -129,6 +136,11 @@ class ActiveSubAgent:
     context: SubAgentContextSpec
 
 
+#: Runs one zero-argument callable out of band.  The composition owns the
+#: threading seam; the engine only names it.
+Detach = Callable[[Callable[[], None]], None]
+
+
 @dataclass(frozen=True, slots=True)
 class WorkflowPorts:
     """The composed engine ports that make a workflow runnable.
@@ -136,6 +148,11 @@ class WorkflowPorts:
     ``conversations`` is the one service the engine sees: it spawns the
     phase children, delivers their results, and owns every wake.  The durable
     record lifecycle is read from that service when not supplied directly.
+    ``execution_store`` is the authoritative durable document per execution
+    (REQ-B5); machine history is committed there first and projected after.
+    ``detach`` is the scheduling seam for successor-phase entry: when bound,
+    a phase completion returns as soon as its transition is committed and the
+    next phase runs out of band; when absent the engine enters it inline.
     """
 
     chat: ChatService
@@ -143,6 +160,8 @@ class WorkflowPorts:
     id_factory: Callable[[str], str]
     conversations: Conversations | None = None
     subagent_lifecycle: SubAgentLifecycle | None = None
+    execution_store: ExecutionStore | None = None
+    detach: Detach | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,9 +182,6 @@ class WorkflowDoctrine[RequestT: WorkflowRequest, StateT: WorkflowState, Outcome
     tasks: Mapping[str, str]
     activity: Mapping[str, str]
     default_activity: str
-    operator_role: object
-    json_instruction: str
-    max_compose_repairs: int
     mcp_tools: Mapping[str, tuple[str, ...]]
     request_of: Callable[[WorkflowExecution, str], RequestT]
     context_of: Callable[
@@ -182,10 +198,6 @@ class WorkflowDoctrine[RequestT: WorkflowRequest, StateT: WorkflowState, Outcome
     transition_error: Callable[[object, object], Exception]
     record_of: Callable[[int, object, object, datetime, int, str], object]
     rebuild: Callable[[StateT, object, tuple[object, ...]], StateT]
-    author_question: Callable[[object, Callable[[str], PromptContext], str], str]
-    invoke: Callable[
-        [object, Role | str, PromptContext, Mapping[str, object]], InvocationResult
-    ]
 
 
 class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
@@ -215,6 +227,8 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         self._clock = _utc_now if ports is None else ports.clock
         self._id_factory = _new_id if ports is None else ports.id_factory
         self._conversations = None if ports is None else ports.conversations
+        self._execution_store = None if ports is None else ports.execution_store
+        self._detach = None if ports is None else ports.detach
         lifecycle = None if ports is None else ports.subagent_lifecycle
         if lifecycle is None and self._conversations is not None:
             lifecycle = self._conversations.lifecycle
@@ -223,19 +237,17 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         self._delivery: DeliveryService | None = (
             None if self._conversations is None else self._conversations.delivery
         )
-        self._node_inputs: NodeInputService | None = (
-            None if self._conversations is None else self._conversations.node_inputs
-        )
         self._nodes: WorkflowNodeManager | None = None
-        self._node_turns: NodeTurnDelivery | None = None
         self._transitions: TransitionMachine[object, object, StateT] | None = None
         if ports is not None:
             if doctrine is None:
                 raise ValueError("a runnable workflow requires its doctrine")
             if self._conversations is None:
                 raise ValueError("a runnable workflow requires the service")
+            if self._execution_store is None:
+                raise ValueError("a runnable workflow requires the execution store")
             assert self._delivery is not None
-            assert self._node_inputs is not None
+            assert self._subagent_lifecycle is not None
             self._nodes = WorkflowNodeManager(
                 ports.chat,
                 self._subagent_lifecycle,
@@ -243,12 +255,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 actor_id=doctrine.actor,
                 initial_phase=doctrine.initial_phase,
                 clock=ports.clock,
-            )
-            self._node_turns = NodeTurnDelivery(
-                chat=ports.chat,
-                delivery=self._delivery,
-                node_inputs=self._node_inputs,
-                actor_id=doctrine.actor,
             )
             self._transitions = TransitionMachine(
                 TransitionTable(spec.transitions, error=doctrine.transition_error),
@@ -346,6 +352,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         return self._conversations
 
     @property
+    def execution_store(self) -> ExecutionStore | None:
+        """Return the authoritative execution store, when bound."""
+        return self._execution_store
+
+    @property
     def subagent_lifecycle(self) -> SubAgentLifecycle | None:
         """Return the composed sub-agent lifecycle, when bound."""
         return self._subagent_lifecycle
@@ -356,6 +367,33 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         return self._active_orchestrators
 
     # -- launch and observation -------------------------------------------
+
+    def _record_launch(self, request: RequestT) -> None:
+        """Create the execution's durable document in the store (REQ-B1).
+
+        The identity and the launch request are written at launch, so a
+        rebuild never reaches into the chat for the trigger.  A document that
+        already exists (a replayed launch) is kept as it is.
+        """
+        store = self._execution_store
+        if store is None:
+            return
+        identity = ExecutionIdentity(
+            execution_id=request.execution_id,
+            workspace_id=request.workspace_id,
+            chat_id=request.chat_id,
+            workflow_id=self.definition.workflow_id,
+            workflow_version=self.definition.version,
+            requested_by=request.requested_by,
+        )
+        payload = getattr(request, "as_dict", None)
+        try:
+            store.create(
+                identity,
+                launch_request=dict(payload()) if callable(payload) else {},
+            )
+        except ExecutionStoreConflict:
+            return
 
     def launch(
         self,
@@ -386,6 +424,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             investigation_id=investigation_id,
         )
         request = doctrine.request_of(execution, ideas)
+        self._record_launch(request)
         self._create_workflow_node(request, anchor_sub_agent_id)
         try:
             chat.start_workflow(
@@ -599,6 +638,10 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         targets = sorted(self._spec.transitions.get(phase_value, frozenset()))
         if not targets:
             return ""
+        # The engine still accepts a terminal failure target, but the agent is
+        # never invited to name it: a phase agent that cannot proceed asks the
+        # operator instead of ending the run.
+        named = [target for target in targets if target != "failed"] or targets
         lines = [
             "Complete this phase only by calling request_phase_completion with a "
             "completion object."
@@ -612,9 +655,13 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         if declared is not None:
             lines.append(f"Use target {declared!r}.")
         else:
-            lines.append(
-                "Name the target in the completion: " + ", ".join(targets) + "."
-            )
+            lines.append("Name the target in the completion: " + ", ".join(named) + ".")
+            if "failed" in targets and "failed" not in named:
+                lines.append(
+                    "Never name the failed target yourself; if the work cannot "
+                    "proceed, ask the operator through request_workflow_input "
+                    "instead."
+                )
         return " ".join(lines)
 
     def apply_phase_completion(
@@ -625,13 +672,25 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         This is the workflow's whole reaction to the agent's tool call: the
         contract is validated, a rejection is returned to the agent through the
         tool result for repair, and an accepted completion applies the declared
-        transition and spawns, seeds, and schedules the next phase agent — or
-        closes the execution when the phase is terminal.
+        transition.  Acceptance is the end of the completed phase and the end of
+        this tool call: the successor phase is entered through the detach seam
+        (:meth:`_hand_off_phase`), so a deterministic successor — or the next
+        agent's spawn — runs as its own unit instead of blocking the caller's
+        turn.  A terminal phase closes the execution here.
         """
         if self._doctrine is None or self._chat is None:
             raise WorkflowEngineError("workflow has no doctrine or chat service bound")
         state = self._reconstruct_state(request)
         phase = self._phase_value(state.phase)
+        declared = self._spec.phase_specs.get(phase)
+        if isinstance(declared, DeterministicPhase):
+            # A deterministic phase has no node and no orchestrator (REQ-C1):
+            # its contract is applied inside the engine's own cascade, so a
+            # completion addressed to it never belongs to an agent turn.
+            raise PhaseCompletionRejected(
+                f"phase {phase!r} is deterministic and accepts no completion; "
+                "the workflow advances on its own"
+            )
         active = self.ensure_orchestrator(request, state.phase)
         if active.sub_agent_id != node_id:
             raise PhaseCompletionRejected(
@@ -646,12 +705,41 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             trigger_message_id=request.trigger_message_id,
         )
         next_prompt = self._phase_prompt(request, handed.phase, handed, next_context)
-        self._enter_phase(request, handed.phase, handed, next_prompt, next_context)
+        self._hand_off_phase(request, handed, next_prompt, next_context)
         return {
             "executionId": request.execution_id,
             "phase": target_phase,
             "applied": True,
         }
+
+    def _hand_off_phase(
+        self,
+        request: RequestT,
+        state: StateT,
+        prompt: str | None,
+        context: HandoffContext,
+    ) -> None:
+        """Enter the successor phase, detached when the composition binds it.
+
+        The transition is already committed; entering the successor is the next
+        phase's own work.  With a detach seam the caller's turn is released
+        immediately and the successor runs out of band — a deterministic phase
+        then produces its phase result and its own transition, and a fault
+        fails the execution durably instead of surfacing inside the completed
+        phase's tool call.  Without a seam the entry runs inline, which keeps
+        tests and embedders deterministic.
+        """
+        if self._detach is None:
+            self._enter_phase(request, state.phase, state, prompt, context)
+            return
+
+        def run() -> None:
+            try:
+                self._enter_phase(request, state.phase, state, prompt, context)
+            except Exception as error:  # noqa: BLE001 - a detached fault is durable
+                self.fail_execution(request, reason=str(error) or type(error).__name__)
+
+        self._detach(run)
 
     def _apply_contract(
         self,
@@ -680,7 +768,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             return state
         target = self._resolve_target(phase, completion)
         advanced = self._transition(
-            request, state, target, f"phase completion accepted for {phase!r}"
+            request,
+            state,
+            target,
+            f"phase completion accepted for {phase!r}",
+            completion=completion,
         )
         pipe = self._spec.piping.get((phase, target))
         handed = advanced if pipe is None else pipe(advanced)
@@ -836,7 +928,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             ExecutionEventType.WORKFLOW_FAILED,
             payload={"errorMessage": reason, "state": "failed"},
         )
-        if self._delivery is None:
+        if self._conversations is None:
             return
         execution_phase = "failed"
         try:
@@ -848,7 +940,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         else:
             execution_phase = execution.phase or "failed"
         text = f"Hypothesis development {request.execution_id} failed: {reason}."
-        self._delivery.deliver(
+        self._conversations.deliver(
             Anchor(
                 request.workspace_id,
                 request.chat_id,
@@ -923,33 +1015,21 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         doctrine, _ = self._require_doctrine_chat()
         return doctrine.reconstruct(self, request)
 
-    def _transition_checked(
-        self,
-        request: RequestT,
-        state: StateT,
-        target: object,
-        reason: str,
-        check: Callable[[], str | None],
-    ) -> StateT:
-        """Validate phase exit criteria, requesting operator input if blocked."""
-        outcome = evaluate_gate(check)
-        if outcome.reason is not None:
-            return self._request_operator_input(
-                request,
-                state,
-                purpose=f"validate the step before {self._phase_value(target)}",
-                detail=outcome.reason,
-            )
-        return self._transition(request, state, target, reason)
-
     def _transition(
         self,
         request: RequestT,
         state: StateT,
         target: object,
         reason: str,
+        *,
+        completion: Mapping[str, object] | None = None,
     ) -> StateT:
-        advanced = self._advance(state, target, reason)
+        at = self._clock()
+        advanced = self._advance(state, target, reason, at=at)
+        # Store-first ordering (REQ-B2): the transition — with its completion
+        # contract — is committed to the execution store before any
+        # projection, so a crash in between leaves the state correct.
+        self._commit_transition(request, state, target, at, reason, completion)
         self._emit_phase(request, target, {"reason": reason})
         _, chat = self._require_doctrine_chat()
         try:
@@ -961,12 +1041,40 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         self._on_phase_entered(request, advanced)
         return advanced
 
-    def _advance(self, state: StateT, target: object, reason: str) -> StateT:
+    def _commit_transition(
+        self,
+        request: RequestT,
+        state: StateT,
+        target: object,
+        at: datetime,
+        reason: str,
+        completion: Mapping[str, object] | None,
+    ) -> None:
+        """Append the applied transition, with its completion, to the store."""
+        store = self._execution_store
+        if store is None:
+            return
+        store.append_transition(
+            request.execution_id,
+            StoreTransition(
+                sequence=len(state.transitions) + 1,
+                from_phase=self._phase_value(state.phase),
+                to_phase=self._phase_value(target),
+                occurred_at=at,
+                intent_epoch=state.intent_epoch,
+                reason=reason,
+                completion=dict(completion or {}),
+            ),
+        )
+
+    def _advance(
+        self, state: StateT, target: object, reason: str, *, at: datetime
+    ) -> StateT:
         assert self._transitions is not None
         request = TransitionRequest(
             target_phase=target, intent_epoch=state.intent_epoch
         )
-        return self._transitions.apply(state, request, reason=reason, at=self._clock())
+        return self._transitions.apply(state, request, reason=reason, at=at)
 
     def _emit_phase(
         self,
@@ -1018,217 +1126,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         assert self._nodes is not None
         self._nodes.finish(self._context(request), final_state)
 
-    # -- operator interaction ----------------------------------------------
-
-    def _request_operator_input(
-        self,
-        request: RequestT,
-        state: StateT,
-        *,
-        purpose: str,
-        detail: str,
-        active: ActiveSubAgent | None = None,
-    ) -> StateT:
-        """Deliver an LLM-authored operator request as an ordinary prompt turn.
-
-        Operator-facing text is never a canned workflow string. The model is
-        asked to author the request from the concrete reason the workflow needs
-        direction; the only fallback is the raw reason itself, used solely when
-        the model is unavailable so the workflow still surfaces the concrete
-        failure rather than inventing conversational text.
-
-        The request is one node turn on the asking phase node and the execution
-        is never paused or fenced.  The node enters ``needs_input`` through the
-        unified node-input path so the operator's answer is accepted for that
-        node and starts exactly one node turn.
-        """
-        resolved = active or self._active_orchestrators.get(request.execution_id)
-        question = self._operator_question(
-            request,
-            state,
-            active=resolved,
-            purpose=purpose,
-            detail=detail,
-        )
-        self._deliver_operator_request(
-            request,
-            resolved,
-            question,
-            question=question,
-        )
-        return self._replace_state(state, detail=question)
-
-    def _operator_question(
-        self,
-        request: RequestT,
-        state: StateT,
-        *,
-        active: ActiveSubAgent | None,
-        purpose: str,
-        detail: str,
-    ) -> str:
-        """Ask the model to author one operator-facing request.
-
-        Returns the raw reason when the model is unavailable, so the operator
-        still sees the concrete failure instead of a fabricated prompt.
-        """
-        del state
-        doctrine, _ = self._require_doctrine_chat()
-        if active is None:
-            return detail
-        prompt_for = self._prompt_builder(
-            workspace_scope=request.workspace_id,
-            role=active.role,
-            context_id=f"{request.execution_id}-operator-question",
-        )
-        task = "\n".join(
-            [
-                "You are the workflow's operator-facing voice. The workflow "
-                "needs the operator's direction to continue.",
-                "Author the operator request, not a summary.",
-                f"Purpose: {purpose}",
-                f"Concrete reason the workflow needs direction: {detail}",
-                "",
-                "Write exactly one concise, natural request addressed to the "
-                "operator. Include the concrete reason, say what you need from "
-                "them, and do not mention internal step names, schemas, or that "
-                "you are a model. If you reference any mathematics, render it as "
-                "LaTeX for KaTeX: inline math as \\(...\\) and display equations "
-                "as \\[...\\] on their own line, never with a bare $. Reply with "
-                "the request text only: no quotes, no JSON, no code fences.",
-            ]
-        )
-        try:
-            text = doctrine.author_question(self._services, prompt_for, task)
-        except Exception:  # noqa: BLE001 - a failed author falls back to the reason
-            return detail
-        return text.strip() or detail
-
-    def _deliver_node_turn(
-        self,
-        request: RequestT,
-        active: ActiveSubAgent,
-        body: str,
-        *,
-        question: str | None = None,
-        **fields: object,
-    ) -> DeliveryReceipt:
-        """Deliver one node-authored operator question at the phase node's anchor.
-
-        The operator-facing text is persisted as the phase node's assistant turn
-        at the node's anchor, but no turn is scheduled: the question has no
-        answer yet, so a delivery-time schedule could only produce the
-        workflow's unanswered-request no-op.  The answer accepted through
-        :meth:`~thesis.agent.runtime.delivery.NodeInputService.accept` is the
-        single scheduling point, and its scheduled turn re-enters this workflow
-        exactly once.  A re-delivered question resolves to the durable message
-        instead of duplicating the turn.
-        """
-        assert self._node_turns is not None
-        return self._node_turns.deliver_question(
-            self._context(request),
-            sub_agent_id=active.sub_agent_id,
-            phase=self._phase_value(active.phase),
-            body=body,
-            question=question,
-            fields=fields,
-        )
-
-    def _deliver_operator_request(
-        self,
-        request: RequestT,
-        active: ActiveSubAgent | None,
-        body: str,
-        *,
-        question: str | None = None,
-        **fields: object,
-    ) -> None:
-        """Deliver one operator request as a node turn and open the node.
-
-        The phase node's durable record enters ``needs_input`` through the
-        unified node-input path so the answer accepted for that node resumes the
-        same record under the node's operator policy; the answer's accept
-        schedules the one turn that re-enters the workflow, and the question
-        delivery itself schedules nothing.
-        """
-        assert self._node_turns is not None
-        if active is None:
-            return
-        self._node_turns.deliver_request(
-            self._context(request),
-            sub_agent_id=active.sub_agent_id,
-            phase=self._phase_value(active.phase),
-            body=body,
-            question=question,
-            fields=fields,
-            open_node_input=self._subagent_lifecycle is not None,
-        )
-
-    def _prompt_builder(
-        self, *, workspace_scope: str, role: str, context_id: str
-    ) -> Callable[[str], PromptContext]:
-        """Return a function that renders one task into a scoped prompt."""
-
-        def build(task: str) -> PromptContext:
-            return assemble_context(
-                workspace_scope=workspace_scope,
-                task=task,
-                role=role,
-                context_id=context_id,
-            )
-
-        return build
-
-    def _compose_with_repair(
-        self,
-        request: RequestT,
-        role: Role | str,
-        *,
-        base_task: str,
-        prompt_for: Callable[[str], PromptContext],
-        compose: Callable[[InvocationResult], Any],
-        response_schema: str,
-        emit_activity: bool = True,
-        emit_output: bool = True,
-    ) -> tuple[Any, InvocationResult]:
-        """Invoke the model and compose, repairing malformed output in place.
-
-        A compose failure never ends the run by itself: the model is re-invoked
-        with the validation error and the required schema, up to
-        ``max_compose_repairs`` times.  When repairs are exhausted the final
-        error is re-raised.
-        """
-        doctrine, _ = self._require_doctrine_chat()
-        if emit_activity:
-            self._emit_orchestrator_progress(request, base_task)
-        last_error: Exception | None = None
-        invocation: InvocationResult | None = None
-        for _ in range(doctrine.max_compose_repairs + 1):
-            task = f"{base_task}\n\n{doctrine.json_instruction}"
-            if last_error is not None:
-                task = (
-                    f"{base_task}\n\nYour previous reply could not be used: "
-                    f"{last_error}. Reply again with a single JSON object that "
-                    f"matches this schema: {response_schema}\n\n"
-                    f"{doctrine.json_instruction}"
-                )
-            invocation = doctrine.invoke(
-                self._services,
-                role,
-                prompt_for(task),
-                {"type": "json_object"},
-            )
-            try:
-                composed = compose(invocation)
-            except Exception as error:  # noqa: BLE001 - compose output is repairable
-                last_error = error
-                continue
-            if emit_activity and emit_output:
-                self._emit_orchestrator_output(request, invocation)
-            return composed, invocation
-        assert invocation is not None and last_error is not None
-        raise last_error
-
     def _post_phase_handoff(
         self,
         request: RequestT,
@@ -1236,34 +1133,41 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         *,
         kind: str,
     ) -> None:
-        """Persist a system handoff into the currently active phase thread."""
-        _, chat = self._require_doctrine_chat()
+        """Deliver a system handoff into the currently active phase thread.
+
+        The handoff is one delivery through the one service (REQ-A2): the
+        message is persisted at the phase agent's anchor and the anchor's wake
+        is routed by the service's own rule.  The delivery key is derived from
+        the handoff's content, so a re-delivered handoff resolves to the
+        durable message instead of duplicating the turn.
+        """
+        self._require_doctrine_chat()
         active = self._active_orchestrators.get(request.execution_id)
         if active is None:
             raise WorkflowEngineError("phase handoff requires an active orchestrator")
-        chat.create_message(
-            request.workspace_id,
-            request.chat_id,
-            actor_id=self._actor,
+        phase = self._phase_value(active.phase)
+        digest = hashlib.sha256(
+            f"{request.execution_id}|{kind}|{phase}|{body}".encode()
+        ).hexdigest()
+        assert self._conversations is not None
+        self._conversations.deliver(
+            Anchor(
+                request.workspace_id, request.chat_id, sub_agent_id=active.sub_agent_id
+            ),
+            None,
             body=body,
             role=MessageRole.SYSTEM,
-            execution_id=request.execution_id,
             kind=TranscriptItemKind.SUB_AGENT,
             data={
                 "executionId": request.execution_id,
                 "handoffKind": kind,
-                "phase": self._phase_value(active.phase),
+                "phase": phase,
                 "subAgentId": active.sub_agent_id,
             },
+            execution_id=request.execution_id,
+            actor_id=self._actor,
+            idempotency_key=f"handoff-{digest[:32]}",
         )
-        if self._conversations is not None:
-            self._conversations.wake(
-                Anchor(
-                    request.workspace_id,
-                    request.chat_id,
-                    sub_agent_id=active.sub_agent_id,
-                )
-            )
 
     # -- orchestrator lifecycle --------------------------------------------
 
@@ -1547,9 +1451,8 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         phase_value = self._phase_value(state.phase)
         if phase_value in doctrine.active_phases:
             self._activate_orchestrator(request, state.phase)
-            task = doctrine.tasks.get(phase_value)
-            if task is not None:
-                self._emit_orchestrator_progress(request, task)
+            if phase_value in doctrine.tasks:
+                self._emit_orchestrator_progress(request)
 
     # -- projections --------------------------------------------------------
 
@@ -1587,34 +1490,69 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             extra=extra,
         )
 
-    def emit_orchestrator_text(self, request: RequestT, text: str) -> None:
-        """Record the active orchestrator's authored text as an artifact."""
-        doctrine, _ = self._require_doctrine_chat()
-        active = self._active_orchestrators.get(request.execution_id)
-        if active is None or not text.strip():
-            return
-        self.append_sub_agent(
-            request,
-            ExecutionEventType.SUB_AGENT_OUTPUT,
-            sub_agent_id=active.sub_agent_id,
-            parent_sub_agent_id=None,
-            phase=active.phase,
-            role=active.role,
-            context=active.context,
-            accepts_input=(
-                self._phase_value(active.phase) in doctrine.conversational_phases
-            ),
-            extra={
-                "artifact": {"content": text.strip(), "type": "text"},
-                "kind": "artifact",
-            },
+    def emit_phase_progress(
+        self,
+        request: RequestT,
+        phase: object,
+        *,
+        kind: str | None = None,
+        text: str | None = None,
+    ) -> None:
+        """Append one execution-scoped ``workflow.progress`` event (REQ-C2).
+
+        Deterministic phases are not sub-agents: their executors record
+        progress through this engine passthrough, carrying the phase name and
+        never a ``subAgentId``.
+        """
+        _, chat = self._require_doctrine_chat()
+        append_workflow_progress(
+            chat.event_store,
+            execution_id=request.execution_id,
+            workspace_id=request.workspace_id,
+            occurred_at=self._clock(),
+            phase=self._phase_value(phase),
+            kind=kind,
+            text=text,
+            actor_id=self._actor,
+            intent_epoch=request.intent_epoch,
         )
 
-    def _emit_orchestrator_progress(self, request: RequestT, text: str) -> None:
-        """Record a safe activity label, never the raw model instruction."""
+    def emit_phase_result(
+        self,
+        request: RequestT,
+        phase: object,
+        *,
+        summary: str,
+        artifact: Mapping[str, object],
+    ) -> None:
+        """Append one ``workflow.phase_result`` event and store the artifact.
+
+        The event is the projection; the typed artifact is also recorded in
+        the execution store (REQ-B1), so the phase's outcome survives chat
+        deletion.  A failed computation records the error variant.
+        """
+        _, chat = self._require_doctrine_chat()
+        phase_value = self._phase_value(phase)
+        append_workflow_phase_result(
+            chat.event_store,
+            execution_id=request.execution_id,
+            workspace_id=request.workspace_id,
+            occurred_at=self._clock(),
+            phase=phase_value,
+            summary=summary,
+            artifact=artifact,
+            actor_id=self._actor,
+            intent_epoch=request.intent_epoch,
+        )
+        store = self._execution_store
+        if store is not None:
+            store.put_phase_result(request.execution_id, phase_value, artifact)
+
+    def _emit_orchestrator_progress(self, request: RequestT) -> None:
+        """Record the active phase's safe activity label."""
         doctrine, _ = self._require_doctrine_chat()
         active = self._active_orchestrators.get(request.execution_id)
-        if active is None or not text.strip():
+        if active is None:
             return
         activity = doctrine.activity.get(
             self._phase_value(active.phase), doctrine.default_activity
@@ -1631,29 +1569,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 self._phase_value(active.phase) in doctrine.conversational_phases
             ),
             extra={"kind": "activity", "text": activity},
-        )
-
-    def _emit_orchestrator_output(
-        self, request: RequestT, invocation: InvocationResult
-    ) -> None:
-        """Record the active phase orchestrator's reply as a visible artifact."""
-        doctrine, _ = self._require_doctrine_chat()
-        active = self._active_orchestrators.get(request.execution_id)
-        output = invocation.output
-        if active is None or not output:
-            return
-        self.append_sub_agent(
-            request,
-            ExecutionEventType.SUB_AGENT_OUTPUT,
-            sub_agent_id=active.sub_agent_id,
-            parent_sub_agent_id=None,
-            phase=active.phase,
-            role=active.role,
-            context=active.context,
-            accepts_input=(
-                self._phase_value(active.phase) in doctrine.conversational_phases
-            ),
-            extra={"artifact": {"content": output, "type": "text"}, "kind": "artifact"},
         )
 
     def _require_doctrine_chat(

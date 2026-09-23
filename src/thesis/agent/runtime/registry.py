@@ -102,8 +102,15 @@ def build_session_registry(
     workflow: WorkflowLauncher | None = None,
     on_spawn: SpawnObserver | None = None,
     spawn_policy: SpawnPolicy | None = None,
+    phase_completion_schema: Mapping[str, object] | None = None,
 ) -> SessionToolRegistry:
-    """Compose the merged, policy-scoped catalog for one session context."""
+    """Compose the merged, policy-scoped catalog for one session context.
+
+    ``phase_completion_schema`` is the phase's declared completion JSON
+    Schema; when the context belongs to a workflow phase agent, the catalog
+    advertises it on ``request_phase_completion`` so the provider constrains
+    the call at decode time.
+    """
     tools: list[RegisteredTool] = []
     if harness_tools is not None:
         tools.extend(harness_registered_tools(harness_tools))
@@ -114,6 +121,7 @@ def build_session_registry(
                 context,
                 on_spawn=on_spawn,
                 policy=spawn_policy,
+                phase_completion_schema=phase_completion_schema,
             )
         )
     if workflow is not None:

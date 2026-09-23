@@ -1,34 +1,8 @@
-"""Hypothesis-creation prompts, protocols, and model-output helpers."""
+"""Hypothesis-creation prompts and model-output helpers."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Protocol
-
-from thesis.agent.router import InvocationResult
-
-from ..contracts import (
-    HypothesisDraft,
-)
-
-
-class HypothesisComposer(Protocol):
-    """Injected boundary that turns model output into a hypothesis draft."""
-
-    def compose(self, invocation: InvocationResult) -> HypothesisDraft: ...
-
-
-def _event_output_text(payload: Mapping[str, object]) -> str | None:
-    """Return the visible text carried by one sub-agent output payload."""
-    text = payload.get("text")
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-    artifact = payload.get("artifact")
-    if isinstance(artifact, Mapping):
-        content = artifact.get("content")
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-    return None
+from collections.abc import Sequence
 
 
 def _conversation_lines(conversation: Sequence[tuple[str, str]]) -> list[str]:
@@ -68,6 +42,41 @@ _LATEX_INSTRUCTION = (
     "\\(\\alpha\\) and \\(\\frac{a}{b}\\). Never wrap plain numbers or "
     "currency amounts in math delimiters, never use a bare $ for math, and "
     "never place math inside a fenced code block."
+)
+
+
+#: The completion protocol every creation turn follows. It leads the prompt
+#: so the confirmation gate is the first rule the model reads, and it is
+#: repeated at the very end so it is also the last. The protocol is a loop:
+#: propose and ask in one response, revise and ask again on corrections, and
+#: finalize only once the operator confirms.
+_CREATION_COMPLETION_PROTOCOL = (
+    "Completion protocol — follow it exactly:",
+    "1. In ONE response: write the proposal as your reply text AND call "
+    'request_workflow_input {"message": "..."} with a concise request to '
+    "confirm or revise it. A response that posts the proposal without that "
+    "tool call is incomplete: the turn ends there and the operator is never "
+    "asked.",
+    "2. Never ask for confirmation in prose only: a prose question is "
+    "invisible to the workflow — the operator is asked only when you call "
+    "request_workflow_input.",
+    "3. If the operator replies with corrections, post the revised proposal "
+    "AND call request_workflow_input again, in that same response. Repeat "
+    "until the operator's latest message confirms the proposal.",
+    "4. Only then finalize: call request_phase_completion with target "
+    '"falsification_trials" and the completion contract at the end of this '
+    "prompt.",
+    'Never name target "failed": that ends the whole workflow. If you believe '
+    "the work cannot proceed, say why and call request_workflow_input instead.",
+)
+
+#: The final line of the prompt; the last rule the model reads before its
+#: first reply.
+_CREATION_PROTOCOL_REMINDER = (
+    "Reminder: until the operator confirms, every turn posts the (revised) "
+    "proposal as reply text AND calls request_workflow_input in the same "
+    "response. Only after the operator's latest message accepts it, call "
+    'request_phase_completion (target "falsification_trials").'
 )
 
 
@@ -124,10 +133,19 @@ _CREATION_TURN_INSTRUCTIONS = (
     "even then.",
     "2. Propose the model yourself. Choose the estimator, the sampling "
     "frequency, the lookback/rolling windows and the sample period, and give a "
-    "one-clause reason for each choice. Do not ask the operator which "
-    "statistics, tests, windows or thresholds to use: that is your job. Be "
-    "concrete and creative; if several models fit, name the primary one and "
-    "the alternative. Model families you may reach for:",
+    "one-clause reason for each choice. The sample window derives from the "
+    "operator's stated horizon: an operator asking about the last month gets a "
+    "model sampled over roughly the last month of available data, so prefer "
+    "the most recent available data that satisfies the hypothesis and never "
+    "fetch decades of history the hypothesis does not need. Declare that "
+    "window in the contract as harnessConfiguration.start and "
+    "harnessConfiguration.end (RFC 3339 UTC bounds, end exclusive): those two "
+    "values are the exact period the study fetches, so a two-month horizon "
+    "declares two months of bounds and never relies on a default period. Do "
+    "not ask the "
+    "operator which statistics, tests, windows or thresholds to use: that is "
+    "your job. Be concrete and creative; if several models fit, name the "
+    "primary one and the alternative. Model families you may reach for:",
     *_CREATION_MODEL_FAMILIES,
     "3. State what the intuition PREDICTS the estimates will look like "
     "(direction and rough magnitude) and what a no-structure null "
@@ -154,17 +172,17 @@ _CREATION_TURN_INSTRUCTIONS = (
     "sampling frequency, sample window, minimum session counts), and "
     "'### Falsifiers & Controls' (Layer A falsifiers with observable/threshold, "
     "negative controls, and Layer B live monitors). Lead with the proposed "
-    "model, not with questions.",
-    "7. This phase REQUIRES the operator's confirmation before it can complete. "
-    "After you post your proposal, call the request_workflow_input tool with one "
-    "concise request asking the operator to confirm or revise it, and wait. If "
-    "the operator asks for changes, revise and ask again. Never fabricate the "
-    "operator's answer and never fetch or infer their inputs on their behalf.",
-    "8. Only after the operator's latest message accepts the proposal, finalize "
-    "it by calling the request_phase_completion tool with the completion "
-    "contract listed at the end of this prompt; do not restate the model in "
-    "your reply. The workflow validates the contract and routes the transition, "
-    "and you never advance a phase yourself.",
+    "model, not with questions. The completion protocol pairs it with the "
+    "request_workflow_input call in the same response.",
+    "7. This phase REQUIRES the operator's confirmation before it can "
+    "complete, exactly as the completion protocol above states: propose and "
+    "ask in one response, revise and ask again on corrections, and finalize "
+    "only after the operator's latest message confirms. Never fabricate "
+    "the operator's answer and never fetch or infer their inputs on their "
+    "behalf. When you finalize, call the request_phase_completion tool with "
+    "the completion contract listed at the end of this prompt; do not restate "
+    "the model in that reply. The workflow validates the contract and routes "
+    "the transition, and you never advance a phase yourself.",
     _LATEX_INSTRUCTION,
 )
 
@@ -177,7 +195,10 @@ _CREATION_FINALIZE_INSTRUCTIONS = (
     "null predicts instead and why the intuition departs from it. Without a "
     "departure there is no regularity to trade.",
     "- riskFactor: the main reason the regularity could be spurious or regime-bound.",
-    "- horizon: the sampling frequency and the estimation window(s) of the model.",
+    "- horizon: the sampling frequency and the estimation window(s) of the "
+    "model. Derive the sample window from the operator's stated horizon: "
+    "prefer recent available data covering roughly that horizon, and do not "
+    "fetch decades of history the hypothesis does not need.",
     "- universe: the ticker symbols in the model, including any benchmark or "
     "control series.",
     "- falsifiers: the Layer A falsifiers. Each has falsifierId, observable (a "
@@ -192,13 +213,14 @@ _CREATION_FINALIZE_INSTRUCTIONS = (
     "- body: Markdown with the full model specification: variables and "
     "transformations, the estimator, the expected estimates versus the null, "
     "the negative controls, the Layer B monitoring rule and known limitations. "
-    + _LATEX_INSTRUCTION,
+    "Render its math as LaTeX for KaTeX, exactly as instructed above.",
     "- model (required): a statistical research model, NOT a strategy. Include "
     "modelId, semantic version, description, source defining "
     "fit(context) -> dict[str, number] and observe(fit, context) -> "
     "dict[str, number], fitEntrypoint='fit', observeEntrypoint='observe', "
-    "outputs "
-    "listing every falsifier observable, tests, and harnessConfiguration with "
+    "outputs (a JSON array of identifier strings listing every falsifier "
+    "observable — the observable names themselves, never objects with a type "
+    "field), tests, and harnessConfiguration with "
     "symbols listing every required symbol. The plain context contains quotes, "
     "trades, trade_prices and returns by symbol; it exposes no orders, positions or "
     "sizing. The model source may import only math, statistics and numpy. If "
@@ -221,10 +243,14 @@ def _creation_turn_prompt(conversation: Sequence[tuple[str, str]]) -> str:
 
     The phase instructions frame the system side of the turn; the conversation
     it is handed starts with the operator's message verbatim, which is the turn
-    trigger.  No synthesized paraphrase of that message is ever sent.
+    trigger.  No synthesized paraphrase of that message is ever sent.  The
+    completion protocol leads and closes the prompt so the confirmation gate
+    is both the first and the last rule the model reads.
     """
     lines = [
         _CREATION_MISSION,
+        "",
+        *_CREATION_COMPLETION_PROTOCOL,
         "",
         *_CREATION_LAYERS,
         "",
@@ -234,22 +260,7 @@ def _creation_turn_prompt(conversation: Sequence[tuple[str, str]]) -> str:
         "",
         "Submit this completion contract when the operator accepts your proposal:",
         *_CREATION_FINALIZE_INSTRUCTIONS,
-    ]
-    return "\n".join(lines)
-
-
-def _creation_finalize_prompt(conversation: Sequence[tuple[str, str]]) -> str:
-    lines = [
-        "Produce the FINAL hypothesis agreed in this conversation as a "
-        "statistical model that is estimated and falsified on historical data. "
-        "Treat the operator's idea and every turn below as the source of truth; "
-        "fill any remaining gap with the model you proposed, never with a "
-        "placeholder.",
         "",
-        *_CREATION_LAYERS,
-        "",
-        *_conversation_lines(conversation),
-        "",
-        *_CREATION_FINALIZE_INSTRUCTIONS,
+        _CREATION_PROTOCOL_REMINDER,
     ]
     return "\n".join(lines)

@@ -12,11 +12,16 @@
 	const distributions = $derived(Object.entries(data.distributions ?? {}));
 	const series = $derived(data.series ?? []);
 	const hypothesis = $derived(data.hypothesis ?? {});
-	const total = $derived(data.totalCount ?? trials.length);
+	const refuted = $derived(trials.filter((trial) => trial.falsified).length);
 	const passed = $derived(
-		data.passedCount ?? trials.filter((trial) => !trial.falsified && trial.observed !== null).length
+		trials.filter((trial) => !trial.falsified && trial.observed !== null).length
 	);
-	const survived = $derived(data.survived ?? (total > 0 && passed === total));
+	const total = $derived(trials.length > 0 ? trials.length : (data.totalCount ?? 0));
+	const survived = $derived(
+		trials.length > 0
+			? refuted === 0 && passed === total
+			: (data.survived ?? (total > 0 && passed === total))
+	);
 
 	function label(value: string): string {
 		return value.replace(/[_-]/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
@@ -51,10 +56,16 @@
 			<span
 				class="rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase {survived
 					? 'border-profit/40 bg-profit/10 text-profit'
-					: 'border-loss/40 bg-loss/10 text-loss'}"
+					: refuted > 0
+						? 'border-loss/40 bg-loss/10 text-loss'
+						: 'border-warn/40 bg-warn/10 text-warn'}"
 				data-testid="falsification-badge"
 			>
-				{survived ? `${passed}/${total} Trials Survived` : `${total - passed}/${total} Refuted`}
+				{survived
+					? `${passed}/${total} Trials Survived`
+					: refuted > 0
+						? `${refuted}/${total} Refuted`
+						: `${passed}/${total} Observed`}
 			</span>
 		</div>
 		{#if hypothesis.claim}
@@ -100,7 +111,10 @@
 		<div class="space-y-3 p-3.5" data-testid="scorecard-view">
 			{#each trials as trial (trial.testId)}
 				{@const position = gauge(trial.observed, trial.threshold)}
-				<div class="rounded-lg border border-surface-700 bg-surface-950/30 p-3">
+				<div
+					class="rounded-lg border border-surface-700 bg-surface-950/30 p-3"
+					data-testid="trial-row-{trial.testId}"
+				>
 					<div class="flex items-start justify-between gap-3">
 						<div>
 							<p class="font-mono text-xs font-semibold text-slate-800">{trial.testId}</p>
@@ -124,10 +138,31 @@
 							<div class="absolute inset-y-0 w-1 -translate-x-1/2 rounded bg-accent" style="left: {position.observed}%"></div>
 						{/if}
 					</div>
-					<div class="mt-1 flex justify-between font-mono text-[10px] text-slate-500">
-						<span>observed {number(trial.observed)}</span>
-						<span>falsifies when {trial.condition} {number(trial.threshold)}</span>
+					<div class="mt-1 flex justify-between font-mono text-[10px]">
+						{#if trial.observed === null}
+							<span class="text-warn" data-testid="trial-observed">no observation recorded</span>
+						{:else}
+							<span
+								class={trial.falsified ? 'text-loss' : 'text-profit'}
+								data-testid="trial-observed"
+							>
+								observed {number(trial.observed)}
+							</span>
+						{/if}
+						<span class="text-slate-500">falsifies when {trial.condition} {number(trial.threshold)}</span>
 					</div>
+					{#if trial.detail}
+						<p class="mt-1.5 text-[11px] leading-snug text-slate-600" data-testid="trial-detail">
+							{trial.detail}
+						</p>
+					{/if}
+					{#if trial.runState || trial.runId}
+						<p class="mt-1 font-mono text-[10px] text-slate-500" data-testid="trial-run">
+							{#if trial.runState}<span class="font-semibold text-slate-600 uppercase">{trial.runState}</span>{/if}
+							{#if trial.runState && trial.runId}<span class="mx-1">·</span>{/if}
+							{#if trial.runId}<span>run {trial.runId}</span>{/if}
+						</p>
+					{/if}
 				</div>
 			{/each}
 		</div>
@@ -167,7 +202,15 @@
 				{#each trials as trial (trial.testId)}
 					<div class="rounded-lg border border-surface-700 bg-surface-950/30 p-3">
 						<p class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">{label(trial.observable)}</p>
-						<p class="mt-1 font-mono text-sm font-semibold {trial.falsified ? 'text-loss' : 'text-profit'}">{number(trial.observed)}</p>
+						<p
+							class="mt-1 font-mono text-sm font-semibold {trial.falsified
+								? 'text-loss'
+								: trial.observed === null
+									? 'text-warn'
+									: 'text-profit'}"
+						>
+							{number(trial.observed)}
+						</p>
 						<p class="mt-1 font-mono text-[10px] text-slate-500">threshold {trial.condition} {number(trial.threshold)}</p>
 					</div>
 				{/each}

@@ -1,21 +1,15 @@
-"""Thesis control tools and the phase-completion handshake.
+"""Thesis control tools.
 
 These tools are presented to an agent in the same model tool catalog as the
 harness tools, but they are Thesis-owned: they never reach the harness.  The
 model requests a phase or sub-agent completion with a typed contract; the tool
-handler constructs that contract, returns field-level errors inside the same
-agent turn, and only persisted and validated results are treated as durable.
+handler constructs that contract and returns field-level errors inside the same
+agent turn — the workflow validates the contract and rejects it back to the
+agent for repair, and only persisted and validated results are treated as
+durable.
 
-The retry semantics are exact and nested:
-
-* one agent turn permits ``construction_attempts`` failed constructions, each
-  returned to the model as a tool result;
-* a turn that ends without an accepted completion gets a durable repair turn,
-  bounded by ``repair_turns``;
-* exhausting the repair turns escalates to the operator.
-
-Deterministic acceptance (advance/loopback/remain/fail) is owned by the workflow
-gate, not this module: a constructed contract is a proposal, never a transition.
+Deterministic acceptance is owned by the workflow: a constructed contract is a
+proposal, never a transition.
 """
 
 from __future__ import annotations
@@ -24,16 +18,11 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import StrEnum
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 from thesis.agent.runtime.child import ChildConversation
 from thesis.agent.runtime.delivery import Anchor
-from thesis.agent.runtime.specs import (
-    DEFAULT_CONSTRUCTION_ATTEMPTS,
-    DEFAULT_REPAIR_TURNS,
-    SubAgentSpec,
-)
+from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.chat.contracts import (
     AgentInvocation,
     AgentInvocationKind,
@@ -62,8 +51,6 @@ CONTROL_TOOL_NAMES: tuple[str, ...] = (
     TOOL_AWAIT_SUB_AGENT,
 )
 
-_T = TypeVar("_T")
-
 
 @dataclass(frozen=True, slots=True)
 class ControlToolSpec:
@@ -81,7 +68,7 @@ CONTROL_TOOL_SPECS: tuple[ControlToolSpec, ...] = (
             "Request completion of the current workflow phase by submitting its "
             "typed completion contract. The runtime resolves the phase and "
             "execution from trusted context; the contract is validated "
-            "deterministically and the phase gate decides the transition."
+            "deterministically and the workflow applies the transition."
         ),
         input_schema={
             "type": "object",
@@ -170,166 +157,6 @@ CONTROL_TOOL_SPECS: tuple[ControlToolSpec, ...] = (
         },
     ),
 )
-
-
-class CompletionStatus(StrEnum):
-    """The outcome of one completion-contract submission or repair decision."""
-
-    CONSTRUCTED = "constructed"
-    CONSTRUCTION_FAILED = "construction_failed"
-    EXHAUSTED = "exhausted"
-    REPAIR = "repair"
-    ESCALATE = "escalate"
-
-
-@dataclass(frozen=True, slots=True)
-class CompletionOutcome:
-    """The typed result of a completion submission or repair boundary."""
-
-    status: CompletionStatus
-    errors: tuple[str, ...] = ()
-    value: object | None = None
-    construction_attempts_used: int = 0
-    repair_turn: int = 0
-
-    @property
-    def accepted(self) -> bool:
-        return self.status is CompletionStatus.CONSTRUCTED
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "status": self.status.value,
-            "errors": list(self.errors),
-            "attemptsUsed": self.construction_attempts_used,
-            "repairTurn": self.repair_turn,
-        }
-
-
-class PhaseCompletionProtocol:
-    """Nested construction/repair budgets for one phase attempt.
-
-    Three failed constructions are permitted per agent turn.  A turn that ends
-    without an accepted completion consumes one of two repair turns; exhausting
-    them escalates to the operator.  On operator response the caller starts a
-    fresh epoch with :meth:`reset_epoch`.
-    """
-
-    def __init__(
-        self,
-        *,
-        phase_attempt_id: str,
-        construction_attempts: int = DEFAULT_CONSTRUCTION_ATTEMPTS,
-        repair_turns: int = DEFAULT_REPAIR_TURNS,
-    ) -> None:
-        if construction_attempts < 1:
-            raise ValueError("construction_attempts must be at least one")
-        if repair_turns < 0:
-            raise ValueError("repair_turns must not be negative")
-        self._phase_attempt_id = phase_attempt_id
-        self._construction_attempts = construction_attempts
-        self._repair_turns = repair_turns
-        self._epoch = 0
-        self._repair_turn = 0
-        self._attempts_used = 0
-        self._last_errors: tuple[str, ...] = ()
-        self._accepted = False
-
-    @property
-    def phase_attempt_id(self) -> str:
-        return self._phase_attempt_id
-
-    @property
-    def epoch(self) -> int:
-        return self._epoch
-
-    @property
-    def repair_turn(self) -> int:
-        return self._repair_turn
-
-    @property
-    def attempts_used(self) -> int:
-        return self._attempts_used
-
-    @property
-    def accepted(self) -> bool:
-        return self._accepted
-
-    def submit(
-        self,
-        payload: object,
-        construct: Callable[[object], _T],
-    ) -> CompletionOutcome:
-        """Construct one submitted contract, reporting errors in-turn."""
-        if self._accepted:
-            raise RuntimeError("a completion protocol cannot accept a second contract")
-        if self._attempts_used >= self._construction_attempts:
-            return CompletionOutcome(
-                status=CompletionStatus.EXHAUSTED,
-                errors=self._last_errors,
-                construction_attempts_used=self._attempts_used,
-                repair_turn=self._repair_turn,
-            )
-        self._attempts_used += 1
-        try:
-            value = construct(payload)
-        except Exception as error:  # noqa: BLE001 - a bad contract is a normal turn
-            self._last_errors = _error_lines(error)
-            status = (
-                CompletionStatus.EXHAUSTED
-                if self._attempts_used >= self._construction_attempts
-                else CompletionStatus.CONSTRUCTION_FAILED
-            )
-            return CompletionOutcome(
-                status=status,
-                errors=self._last_errors,
-                construction_attempts_used=self._attempts_used,
-                repair_turn=self._repair_turn,
-            )
-        self._accepted = True
-        self._last_errors = ()
-        return CompletionOutcome(
-            status=CompletionStatus.CONSTRUCTED,
-            value=value,
-            construction_attempts_used=self._attempts_used,
-            repair_turn=self._repair_turn,
-        )
-
-    def begin_repair_turn(self) -> CompletionOutcome:
-        """Close an unaccepted turn and allow a durable repair turn, or escalate."""
-        if self._accepted:
-            return CompletionOutcome(
-                status=CompletionStatus.CONSTRUCTED,
-                construction_attempts_used=self._attempts_used,
-                repair_turn=self._repair_turn,
-            )
-        if self._repair_turn >= self._repair_turns:
-            return CompletionOutcome(
-                status=CompletionStatus.ESCALATE,
-                errors=self._last_errors,
-                construction_attempts_used=self._attempts_used,
-                repair_turn=self._repair_turn,
-            )
-        self._repair_turn += 1
-        self._attempts_used = 0
-        return CompletionOutcome(
-            status=CompletionStatus.REPAIR,
-            errors=self._last_errors,
-            construction_attempts_used=self._attempts_used,
-            repair_turn=self._repair_turn,
-        )
-
-    def reset_epoch(self) -> None:
-        """Start a fresh operator-directed epoch with full budgets."""
-        self._epoch += 1
-        self._repair_turn = 0
-        self._attempts_used = 0
-        self._last_errors = ()
-        self._accepted = False
-
-
-def _error_lines(error: BaseException) -> tuple[str, ...]:
-    text = str(error).strip()
-    return (text,) if text else (type(error).__name__,)
 
 
 class StaleCompletionError(RuntimeError):
@@ -542,8 +369,8 @@ class ControlToolService:
     ) -> SubAgentRecord:
         """Mark a phase child completed with its constructed completion.
 
-        The persisted result is a proposal, never a transition: the owning
-        deterministic gate remains the only thing that advances a phase.
+        The persisted result is a proposal, never a transition: the workflow
+        validates the contract and remains the only thing that advances a phase.
         """
         record = self._lifecycle.get(workspace_id, sub_agent_id)
         if record is None:
@@ -646,12 +473,9 @@ def set_result_ref(record: SubAgentRecord, result_ref: str) -> SubAgentRecord:
 __all__ = [
     "CONTROL_TOOL_NAMES",
     "CONTROL_TOOL_SPECS",
-    "CompletionOutcome",
-    "CompletionStatus",
     "ControlToolService",
     "ControlToolSpec",
     "OperatorInputRequest",
-    "PhaseCompletionProtocol",
     "SpawnResult",
     "AwaitResult",
     "StaleCompletionError",

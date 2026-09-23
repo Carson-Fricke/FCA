@@ -42,12 +42,13 @@ from pydantic import (
     model_validator,
 )
 
+from thesis.research.grammar import IDENTIFIER_PATTERN
+
 FRONT_MATTER_DELIMITER = "---"
 SCHEMA_VERSION = 1
 HYPOTHESIS_DIRECTORY = "hypotheses"
 _ARTIFACT_MEDIA_TYPE = "text/markdown"
 
-_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
 _UNSAFE_SLUG = re.compile(r"[^a-z0-9]+")
 
 FalsifierCondition = Literal["gte", "lte", "gt", "lt"]
@@ -77,7 +78,7 @@ Identifier = Annotated[
         strip_whitespace=True,
         min_length=1,
         max_length=128,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+        pattern=IDENTIFIER_PATTERN,
     ),
 ]
 NonEmptyText = Annotated[

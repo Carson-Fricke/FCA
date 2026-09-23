@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pyarrow.parquet as pq
 import pytest
 
@@ -330,3 +331,138 @@ def test_invalid_provider_record_is_not_published_as_a_success() -> None:
 
 def test_atomic_committer_is_a_runtime_injected_boundary() -> None:
     assert isinstance(AtomicFake(), AtomicIngestCommitter)
+
+
+def test_print_stamped_exactly_at_session_close_is_published() -> None:
+    # The fetch passes close_time as Alpaca's inclusive end, so the closing
+    # auction print stamped exactly at 16:00:00 ET belongs to the session on
+    # both the trade and quote paths.
+    committer = AtomicFake()
+    transaction = EquityIngestTransaction(
+        client=FakeClient(
+            trades=[_trade("2024-01-19T21:00:00Z", 1)],
+            quotes=[_quote("2024-01-19T21:00:00Z")],
+        ),
+        committer=committer,
+    )
+
+    result = _run(transaction.run("AAPL", _session()))
+
+    assert [record.status for record in result.coverage] == [
+        CoverageStatus.COMPLETE,
+        CoverageStatus.COMPLETE,
+    ]
+    assert [record.row_count for record in result.coverage] == [1, 1]
+
+
+def test_print_stamped_after_session_close_is_rejected() -> None:
+    committer = AtomicFake()
+    transaction = EquityIngestTransaction(
+        client=FakeClient(
+            trades=[_trade("2024-01-19T21:00:00.500000Z", 1)],
+            quotes=[_quote("2024-01-19T14:30:00Z")],
+        ),
+        committer=committer,
+    )
+
+    result = _run(transaction.run("AAPL", _session()))
+
+    assert result.objects == ()
+    assert committer.commits[0][0] == ()
+    assert all(record.status is CoverageStatus.ERROR for record in result.coverage)
+    assert "outside session" in (result.coverage[0].error_message or "")
+
+
+class _BlipClient(FakeClient):
+    def __init__(
+        self,
+        failures: int,
+        trades: Sequence[NormalizedTrade] = (),
+        quotes: Sequence[NormalizedQuote] = (),
+    ) -> None:
+        super().__init__(trades=trades, quotes=quotes)
+        self.failures = failures
+
+    async def get_trades(
+        self, symbol: str, start: date | datetime | str, end: date | datetime | str
+    ) -> Sequence[NormalizedTrade]:
+        self.calls.append(("trade", symbol, start, end))
+        if self.failures > 0:
+            self.failures -= 1
+            raise httpx.ConnectError("temporary DNS failure")
+        return self.trades
+
+
+def test_transient_fetch_blip_is_retried_within_the_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0
+    )
+    session = _session()
+    client = _BlipClient(
+        2,
+        trades=[_trade("2024-01-19T14:30:00Z", 1)],
+        quotes=[_quote("2024-01-19T14:30:00Z")],
+    )
+    committer = AtomicFake()
+    transaction = EquityIngestTransaction(client=client, committer=committer)
+
+    result = _run(transaction.run("AAPL", session))
+
+    kinds = [call[0] for call in client.calls]
+    assert kinds.count("trade") == 3
+    assert kinds.count("quote") == 1
+    assert result.retryable is False
+    assert [record.status for record in result.coverage] == [
+        CoverageStatus.COMPLETE,
+        CoverageStatus.COMPLETE,
+    ]
+    assert [record.row_count for record in result.coverage] == [1, 1]
+    assert len(committer.commits) == 1
+
+
+def test_permanent_fetch_failure_is_not_retried() -> None:
+    session = _session()
+    client = FakeClient(trade_error=ValueError("bad request"))
+    committer = AtomicFake()
+    transaction = EquityIngestTransaction(client=client, committer=committer)
+
+    result = _run(transaction.run("AAPL", session))
+
+    kinds = [call[0] for call in client.calls]
+    assert kinds.count("trade") == 1
+    assert kinds.count("quote") == 1
+    assert result.retryable is False
+    assert all(record.status is CoverageStatus.ERROR for record in result.coverage)
+    assert result.coverage[0].error_message == "trade: ValueError: bad request"
+    assert result.objects == ()
+
+
+def test_exhausted_transient_fetch_failure_is_marked_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0
+    )
+    session = _session()
+    client = _BlipClient(
+        3,
+        trades=[_trade("2024-01-19T14:30:00Z", 1)],
+        quotes=[_quote("2024-01-19T14:30:00Z")],
+    )
+    committer = AtomicFake()
+    transaction = EquityIngestTransaction(client=client, committer=committer)
+
+    result = _run(transaction.run("AAPL", session))
+
+    kinds = [call[0] for call in client.calls]
+    assert kinds.count("trade") == 3
+    assert kinds.count("quote") == 1
+    assert result.retryable is True
+    assert all(record.status is CoverageStatus.ERROR for record in result.coverage)
+    assert (result.coverage[0].error_message or "").startswith("trade: ConnectError")
+    assert result.objects == ()
+    assert committer.commits[0][0] == ()
+
+

@@ -9,13 +9,11 @@ general object plus this data.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, cast
 
-from thesis.agent.context import PromptContext
-from thesis.agent.router import InvocationResult, Role
 from thesis.research.hypothesis import (
     HypothesisArtifactError,
     HypothesisDocument,
@@ -23,7 +21,6 @@ from thesis.research.hypothesis import (
 from thesis.workflows.core.spec import WorkflowContext
 from thesis.workflows.core.workflow import Workflow, WorkflowDoctrine
 
-from .artifacts import falsification_report_artifact
 from .contracts.creation import HypothesisDevelopmentRequest
 from .errors import (
     HypothesisDevelopmentIntakeError,
@@ -32,7 +29,6 @@ from .errors import (
 )
 from .phases import (
     _ACTIVE_PHASES,
-    _FALSIFICATION_TRIALS,
     _HYPOTHESIS_CREATION,
     _OPTIMIZATION,
     _PHASE_ORCHESTRATORS,
@@ -46,17 +42,16 @@ from .phases import (
     PhaseTransition,
 )
 from .primitives import (
-    _JSON_ONLY_INSTRUCTION,
     _WORKFLOW_ACTOR,
     _text,
 )
+from .rebuild import rebuild_state
 from .services import HypothesisDevelopmentServices, services_of
 from .state import HypothesisDevelopmentOutcome, HypothesisDevelopmentState
 
 #: The phases whose entries open a visible orchestrator conversation.
 _ACTIVITY: Mapping[HypothesisDevelopmentPhase, str] = {
     _HYPOTHESIS_CREATION: "Finalizing the structured hypothesis model.",
-    _FALSIFICATION_TRIALS: "Preparing historical falsification trials.",
     _VERDICT: "Recording the falsification verdict.",
     _STRATEGY_DESIGN: "Preparing the strategy design from the surviving model.",
     _STRATEGY_BACKTESTING: "Testing the designed strategy through the harness.",
@@ -87,9 +82,6 @@ def hypothesis_development_doctrine(
         tasks={phase.value: task for phase, task in _PHASE_TASKS.items()},
         activity={phase.value: text for phase, text in _ACTIVITY.items()},
         default_activity=_DEFAULT_ACTIVITY,
-        operator_role=services.research_role,
-        json_instruction=_JSON_ONLY_INSTRUCTION,
-        max_compose_repairs=services.max_compose_repairs,
         mcp_tools=services.mcp_tools,
         request_of=_request_of,
         context_of=_context_of,
@@ -101,8 +93,6 @@ def hypothesis_development_doctrine(
         transition_error=_transition_error,
         record_of=_record_of,
         rebuild=_rebuild,
-        author_question=_author_question,
-        invoke=_invoke,
     )
 
 
@@ -172,46 +162,24 @@ def _reconstruct_state(
     ],
     request: HypothesisDevelopmentRequest,
 ) -> HypothesisDevelopmentState:
-    """Rebuild the run state for an execution with no in-process continuation.
+    """Rebuild the run state from the execution store (REQ-B4).
 
-    The durable execution phase is authoritative; the checkpointed snapshot
-    (written after every non-terminal turn) supplies the derived artifacts the
-    next turn needs, so a restart continues instead of restarting the workflow
-    at its first phase.  Without a usable snapshot the hypothesis is recovered
-    from its workspace artifact when it exists.
+    The store document is authoritative for machine state: the identity and
+    launch request were written at launch and every transition was committed
+    with its completion contract, so folding the stored transitions restores
+    the full typed state — draft, trials, verdict — without reading the chat
+    event log or the hypothesis side-store.
     """
-    chat = workflow.chat
-    if chat is None:
-        raise WorkflowError("workflow requires a chat service")
-    execution = chat.get_execution(request.workspace_id, request.execution_id)
-    durable_phase = _durable_phase(execution.phase)
-    fresh = HypothesisDevelopmentState(
-        workspace_id=request.workspace_id,
-        execution_id=request.execution_id,
-        phase=durable_phase,
-        intent_epoch=execution.intent_epoch,
+    store = workflow.execution_store
+    if store is None:
+        raise WorkflowError("workflow requires the execution store")
+    document = store.get(request.execution_id)
+    return rebuild_state(
+        request.workspace_id,
+        request.execution_id,
+        document.transitions,
+        initial_phase=_HYPOTHESIS_CREATION,
     )
-    document = _load_hypothesis(workflow, request)
-    if document is None:
-        return fresh
-    return replace(fresh, hypothesis=document)
-
-
-def _durable_phase(value: str | None) -> HypothesisDevelopmentPhase:
-    """Map the durable execution phase onto a known live workflow phase.
-
-    ``requested`` is retired: a durable row that still carries it is read as
-    ``hypothesis_creation``, the workflow's current first phase.
-    """
-    if value is None:
-        return _HYPOTHESIS_CREATION
-    try:
-        phase = HypothesisDevelopmentPhase(value)
-    except ValueError:
-        return _HYPOTHESIS_CREATION
-    if phase is HypothesisDevelopmentPhase.REQUESTED:
-        return _HYPOTHESIS_CREATION
-    return phase
 
 
 def _load_hypothesis(
@@ -243,8 +211,6 @@ def _phase_summary(state: HypothesisDevelopmentState, phase: object) -> str:
             return f"Hypothesis: {state.hypothesis.front_matter.claim}"
         if state.draft is not None:
             return f"Drafted hypothesis: {state.draft.claim}"
-    elif resolved is _FALSIFICATION_TRIALS:
-        return f"Ran {len(state.trials)} falsification trial(s)."
     elif resolved is _VERDICT and state.verdict is not None:
         return f"Verdict: {state.verdict.outcome}. {state.verdict.reason}".strip()
     elif resolved is _STRATEGY_DESIGN and state.strategy_bundle is not None:
@@ -271,11 +237,7 @@ def _phase_report(
     active: object,
 ) -> Mapping[str, object] | None:
     """Return the rich structured report one phase exit projects, if any."""
-    phase = getattr(active, "phase", None)
-    if active is not None and phase is _FALSIFICATION_TRIALS and state.trials:
-        return falsification_report_artifact(
-            workflow, state, prose=state.falsification_prose or ""
-        )
+    del workflow, state, active
     return None
 
 
@@ -351,30 +313,6 @@ def _rebuild(
 
 
 # -- model adapters ----------------------------------------------------------
-
-
-def _author_question(
-    services: object,
-    prompt_for: Callable[[str], PromptContext],
-    task: str,
-) -> str:
-    """Invoke the operator-facing author role and return its reply text."""
-    resolved = cast(HypothesisDevelopmentServices, services)
-    assert resolved.router is not None
-    invocation = resolved.router.invoke(resolved.research_role, prompt_for(task))
-    return (invocation.output or "").strip()
-
-
-def _invoke(
-    services: object,
-    role: Role | str,
-    prompt: PromptContext,
-    response_format: Mapping[str, object],
-) -> InvocationResult:
-    """Invoke one composer role with the documented response format."""
-    resolved = cast(HypothesisDevelopmentServices, services)
-    assert resolved.router is not None
-    return resolved.router.invoke(role, prompt, response_format=dict(response_format))
 
 
 __all__ = [

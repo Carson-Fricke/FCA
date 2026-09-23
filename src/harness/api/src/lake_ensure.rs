@@ -8,25 +8,35 @@
 //! market-lake process owns the provider credentials and the fetch; the
 //! harness only issues the request.
 //!
-//! A session the lake persisted as `error`, or a closed session it left
-//! `partial`, is a hard failure: ensure exists to make a period complete, so
-//! the harness names the failed sessions immediately instead of polling until
-//! the timeout. A session that is still trading is accepted as partial.
-//! Callers split long windows into lake-sized ranges before calling
-//! [`LakeEnsureClient::ensure`].
+//! One request covers the whole window: the lake plans, resumes, and retries
+//! its own fetches server-side, so callers never split ranges and a repeat
+//! request picks up where the previous run left off. Polling has no overall
+//! deadline — the ensure job runs to completion in the lake — and uses a
+//! backoff cadence. A closed session the lake left `partial`, or an errored
+//! fetch, is a gap the lake treats as actionable and repairs inside the
+//! running job, so polling continues while the job is in flight. Only a
+//! settled job turns a still-short window into a failure, and the harness then
+//! names the sessions the lake could not complete. A session that is still
+//! trading is accepted as partial.
 
 use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
 /// Default loopback port of the local market-lake API in the dev stack.
 pub const DEFAULT_LAKE_BASE_URL: &str = "http://127.0.0.1:8002";
-/// Default wall-clock bound for one ensure request and its coverage polling.
-pub const DEFAULT_ENSURE_TIMEOUT_SECONDS: u64 = 3_600;
-/// Inclusive day span the market-lake ensure contract accepts per request.
-pub const MAX_ENSURE_RANGE_DAYS: i64 = 365;
-const DEFAULT_POLL_MILLIS: u64 = 1_000;
+/// Wall-clock bound for one ensure, job, or coverage HTTP call.
+const HTTP_TIMEOUT_SECONDS: u64 = 60;
+/// First coverage-poll interval.
+const POLL_START: Duration = Duration::from_millis(1_000);
+/// Coverage polls never wait longer than this between attempts.
+const POLL_MAX: Duration = Duration::from_millis(5_000);
+
+/// The coverage-poll interval that follows one wait.
+fn next_poll_interval(current: Duration) -> Duration {
+    current.checked_mul(2).unwrap_or(POLL_MAX).min(POLL_MAX)
+}
 
 /// Whether one coverage entry is satisfied.
 ///
@@ -58,8 +68,9 @@ fn coverage_is_satisfied(body: &Value) -> bool {
 
 /// Return a message naming every session the lake could not complete.
 ///
-/// Ensure guarantees completeness, so an `error` fetch or a closed session the
-/// lake left `partial` fails fast instead of being polled until the timeout.
+/// This is the diagnostic for a window that is still short once the ensure job
+/// has settled. While the job is in flight the same rows are repairable gaps
+/// the lake is already re-fetching, so they are not failures yet.
 fn coverage_incompleteness(body: &Value) -> Option<String> {
     let entries = body.get("entries").and_then(Value::as_array)?;
     let failures: Vec<String> = entries
@@ -105,13 +116,95 @@ fn coverage_incompleteness(body: &Value) -> Option<String> {
     }
 }
 
+/// What the lake reports about one ensure job.
+#[derive(Debug, PartialEq, Eq)]
+enum EnsureJobProgress {
+    /// The lake is still working: a repairable gap may still heal.
+    InFlight,
+    /// The lake finished its plan, or no job was launched: nothing more is
+    /// coming for this request.
+    Settled,
+    /// The lake reported the job failed.
+    Failed(String),
+}
+
+/// Classify one ensure-job status body.
+///
+/// A closed session left `partial`, or an errored fetch, is a gap the lake
+/// classifies as actionable and repairs inside the running job. Only a settled
+/// job turns a still-short window into a failure, so the repair lands instead
+/// of being aborted mid-flight.
+fn ensure_job_progress(body: &Value) -> EnsureJobProgress {
+    match body.get("state").and_then(Value::as_str) {
+        Some("failed") => EnsureJobProgress::Failed(
+            body.get("error_message")
+                .and_then(Value::as_str)
+                .unwrap_or("the ensure job failed")
+                .to_string(),
+        ),
+        Some("complete") => EnsureJobProgress::Settled,
+        _ => EnsureJobProgress::InFlight,
+    }
+}
+
+/// The poll loop's verdict for one observation of coverage and job progress.
+#[derive(Debug, PartialEq, Eq)]
+enum CoverageVerdict {
+    /// Every session is satisfied: this ensure is done.
+    Satisfied,
+    /// Coverage is short but the lake is still repairing it: keep polling.
+    Repairing,
+    /// Coverage is short and nothing more is coming: this ensure failed.
+    Incomplete(String),
+}
+
+/// Decide what one coverage poll means.
+fn coverage_verdict(coverage: &Value, progress: &EnsureJobProgress) -> CoverageVerdict {
+    if coverage_is_satisfied(coverage) {
+        return CoverageVerdict::Satisfied;
+    }
+    match progress {
+        EnsureJobProgress::InFlight => CoverageVerdict::Repairing,
+        EnsureJobProgress::Failed(message) => {
+            CoverageVerdict::Incomplete(format!("market-lake ensure job failed: {message}"))
+        }
+        EnsureJobProgress::Settled => CoverageVerdict::Incomplete(format!(
+            "market-lake could not complete the period: {}",
+            coverage_incompleteness(coverage).unwrap_or_else(|| {
+                "the lake finished its ensure with coverage still incomplete".to_string()
+            })
+        )),
+    }
+}
+
+/// Return the earliest fully covered session date in a coverage response.
+///
+/// A session qualifies only when its fetch is `complete`: `empty` and
+/// `delisted` sessions carry no data, and `missing` sessions were never
+/// fetched. ISO dates compare lexicographically, so a linear minimum is the
+/// chronological earliest.
+fn earliest_complete_date(body: &Value) -> Option<String> {
+    body.get("entries")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(|entry| {
+            if entry.get("status").and_then(Value::as_str) != Some("complete") {
+                return None;
+            }
+            entry
+                .get("session_date")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .min()
+}
+
 /// The market-lake ensure client used before a local lake read.
 #[derive(Debug, Clone)]
 pub struct LakeEnsureClient {
     base_url: String,
     token: String,
     timeout: Duration,
-    poll: Duration,
 }
 
 impl LakeEnsureClient {
@@ -128,25 +221,24 @@ impl LakeEnsureClient {
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_LAKE_BASE_URL.to_string());
-        let timeout_seconds = std::env::var("LAKE_ENSURE_TIMEOUT_SECONDS")
-            .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .unwrap_or(DEFAULT_ENSURE_TIMEOUT_SECONDS)
-            .max(1);
         Some(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             token,
-            timeout: Duration::from_secs(timeout_seconds),
-            poll: Duration::from_millis(DEFAULT_POLL_MILLIS),
+            timeout: Duration::from_secs(HTTP_TIMEOUT_SECONDS),
         })
     }
 
     /// Ensure one symbol/data-type window is terminally covered.
     ///
+    /// The window may span the provider's full history: the lake plans and
+    /// resumes its own fetches, so the request is never split and a repeat
+    /// request continues an interrupted ensure.
+    ///
     /// # Errors
     ///
-    /// Returns a message when the lake is unreachable, rejects the request, the
-    /// ensure job fails, or coverage is still not terminal before the timeout.
+    /// Returns a message when the lake is unreachable, rejects the request, or
+    /// its ensure job settles with coverage still incomplete. Polling has no
+    /// overall deadline; only a settled job reports a failure.
     pub fn ensure(
         &self,
         asset_class: &str,
@@ -165,11 +257,6 @@ impl LakeEnsureClient {
         let response = self
             .post("/v1/catalog/ensure", &body)
             .map_err(|error| format!("market-lake ensure request failed: {error}"))?;
-        if let Some(error) = coverage_incompleteness(&response) {
-            return Err(format!(
-                "market-lake could not complete the period: {error}"
-            ));
-        }
         if coverage_is_satisfied(&response) {
             return Ok(());
         }
@@ -186,6 +273,34 @@ impl LakeEnsureClient {
             })
     }
 
+    /// Return the earliest fully covered session date for one symbol window.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the coverage query fails. A window with no
+    /// complete session resolves to `None`.
+    pub fn earliest_complete_session(
+        &self,
+        asset_class: &str,
+        data_type: &str,
+        symbol: &str,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Option<String>, String> {
+        let coverage = self
+            .get_coverage(asset_class, data_type, symbol, start_date, end_date)
+            .map_err(|error| format!("market-lake coverage query failed: {error}"))?;
+        Ok(earliest_complete_date(&coverage))
+    }
+
+    /// Poll one ensure request until it is satisfied or settled.
+    ///
+    /// A pending job means the lake is still repairing whatever the coverage
+    /// window is short of, so the loop keeps polling. Only a settled job, or a
+    /// request that launched none, turns a short window into a failure — which
+    /// is what lets a closed session the lake left `partial` be repaired by
+    /// the very ensure that would previously have aborted before the repair
+    /// landed.
     fn poll_coverage(
         &self,
         asset_class: &str,
@@ -195,45 +310,23 @@ impl LakeEnsureClient {
         end_date: &str,
         job_id: Option<String>,
     ) -> Result<(), String> {
-        let deadline = Instant::now() + self.timeout;
+        let mut interval = POLL_START;
         loop {
-            if let Some(job_id) = &job_id {
-                if let Some(failure) = self.job_failure(job_id)? {
-                    return Err(failure);
-                }
-            }
+            let progress = match &job_id {
+                Some(job_id) => ensure_job_progress(&self.get(&format!("/v1/jobs/{job_id}"))?),
+                None => EnsureJobProgress::Settled,
+            };
             let coverage = self
                 .get_coverage(asset_class, data_type, symbol, start_date, end_date)
                 .map_err(|error| format!("market-lake coverage query failed: {error}"))?;
-            if let Some(error) = coverage_incompleteness(&coverage) {
-                return Err(format!(
-                    "market-lake could not complete the period: {error}"
-                ));
+            match coverage_verdict(&coverage, &progress) {
+                CoverageVerdict::Satisfied => return Ok(()),
+                CoverageVerdict::Incomplete(message) => return Err(message),
+                CoverageVerdict::Repairing => {}
             }
-            if coverage_is_satisfied(&coverage) {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(format!(
-                    "timed out after {}s waiting for coverage",
-                    self.timeout.as_secs()
-                ));
-            }
-            sleep(self.poll);
+            sleep(interval);
+            interval = next_poll_interval(interval);
         }
-    }
-
-    fn job_failure(&self, job_id: &str) -> Result<Option<String>, String> {
-        let path = format!("/v1/jobs/{job_id}");
-        let body = self.get(&path)?;
-        if body.get("state").and_then(Value::as_str) == Some("failed") {
-            let message = body
-                .get("error_message")
-                .and_then(Value::as_str)
-                .unwrap_or("the ensure job failed");
-            return Ok(Some(message.to_string()));
-        }
-        Ok(None)
     }
 
     fn get_coverage(

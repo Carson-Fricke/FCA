@@ -13,7 +13,8 @@ import re
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TypeVar
+
+from thesis.research.grammar import IDENTIFIER as _IDENTIFIER
 
 from .errors import WorkflowError
 
@@ -36,51 +37,19 @@ _WORKFLOW_VERSION = "1.0.0"
 _WORKFLOW_TITLE = "Hypothesis development"
 
 
-_TOOL_NAME = "harness.backtest"
-
-
 _MODEL_TOOL_NAME = "harness.research_model"
 
 
 _WORKFLOW_ACTOR = "thesis-workflow"
 
 
-_HYPOTHESIS_MEDIA_TYPE = "text/markdown"
-
-
-#: Appended to every composer task so the model emits one bare JSON object.
-_JSON_ONLY_INSTRUCTION = (
-    "Respond with a single JSON object and nothing else: no prose, no "
-    "explanations, and no markdown code fences."
-)
-
-
-_CREATION_TURN_SCHEMA = '{"message": string, "advance": boolean}'
-
-
 _VERDICTS = frozenset({VERDICT_SUPPORTED, VERDICT_REFUTED, VERDICT_INCONCLUSIVE})
-
-
-_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
 
 
 _WORKSPACE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
-
-
-#: Composed value returned by a repair-aware composer call.
-_ComposedT = TypeVar("_ComposedT")
-
-
-DEFAULT_MAX_HYPOTHESIS_CYCLES = 5
-
-
-DEFAULT_MAX_RCA_CYCLES = 5
-
-
-DEFAULT_MAX_COMPOSE_REPAIRS = 2
 
 
 #: Minimum fields a good-faith model reply must carry; everything else is
@@ -103,7 +72,8 @@ _HYPOTHESIS_SCHEMA = (
     '"model": {"modelId": string, "version": string, "description": string, '
     '"source": string, "fitEntrypoint": string, "observeEntrypoint": string, '
     '"outputs": [string], "tests": '
-    '{path: string}, "harnessConfiguration": {"symbols": [string]}, "indicators": [{"alias": '
+    '{path: string}, "harnessConfiguration": {"symbols": [string], '
+    '"start": string, "end": string}, "indicators": [{"alias": '
     'string, "scope": "global"|"workspace", "name": string, "symbol": string, '
     '"parameters": {}, "contentSha256": string|null, "definition": object|null}]}}'
 )

@@ -23,11 +23,8 @@ __all__ = ["_ActiveSubAgent"]
 class HypothesisDevelopmentPhase(StrEnum):
     """The explicit, ordered phases of the hypothesis-development workflow."""
 
-    REQUESTED = "requested"
     HYPOTHESIS_CREATION = "hypothesis_creation"
     FALSIFICATION_TRIALS = "falsification_trials"
-    # Retained to decode historical execution events. New runs use STRATEGY_RCA.
-    RCA = "rca"
     VERDICT = "verdict"
     STRATEGY_DESIGN = "strategy_design"
     STRATEGY_BACKTESTING = "strategy_backtesting"
@@ -35,20 +32,12 @@ class HypothesisDevelopmentPhase(StrEnum):
     OPTIMIZATION = "optimization"
     COMPLETED = "completed"
     FAILED = "failed"
-    # Retained to decode historical continuations. New runs never enter it.
-    PAUSED = "paused"
-
-
-_REQUESTED = HypothesisDevelopmentPhase.REQUESTED
 
 
 _HYPOTHESIS_CREATION = HypothesisDevelopmentPhase.HYPOTHESIS_CREATION
 
 
 _FALSIFICATION_TRIALS = HypothesisDevelopmentPhase.FALSIFICATION_TRIALS
-
-
-_RCA = HypothesisDevelopmentPhase.RCA
 
 
 _VERDICT = HypothesisDevelopmentPhase.VERDICT
@@ -74,7 +63,6 @@ _FAILED = HypothesisDevelopmentPhase.FAILED
 
 _ACTIVE_PHASES = (
     _HYPOTHESIS_CREATION,
-    _FALSIFICATION_TRIALS,
     _VERDICT,
     _STRATEGY_DESIGN,
     _STRATEGY_BACKTESTING,
@@ -84,14 +72,12 @@ _ACTIVE_PHASES = (
 
 
 #: Role family and human label for each phase's top-level orchestrator.
+#: The deterministic falsification-trials phase is not a sub-agent (REQ-C1):
+#: it has no durable node and no orchestrator, so it is not listed here.
 _PHASE_ORCHESTRATORS: Mapping[HypothesisDevelopmentPhase, tuple[str, str]] = {
     _HYPOTHESIS_CREATION: (
         "research",
         "Thesis hypothesis-creation orchestrator",
-    ),
-    _FALSIFICATION_TRIALS: (
-        "research",
-        "Thesis research falsification trials orchestrator",
     ),
     _VERDICT: ("research", "Thesis research verdict orchestrator"),
     _STRATEGY_DESIGN: ("coding", "Thesis coding strategy-design orchestrator"),
@@ -106,16 +92,14 @@ _PHASE_ORCHESTRATORS: Mapping[HypothesisDevelopmentPhase, tuple[str, str]] = {
 
 #: What each phase orchestrator is prompted to do, recorded as visible thinking
 #: so the operator can see the phase's intent even when it makes no model call.
+#: The deterministic falsification-trials phase is not a sub-agent (REQ-C1):
+#: it has no durable node and no orchestrator, so it declares no task here.
 _PHASE_TASKS: Mapping[HypothesisDevelopmentPhase, str] = {
     _HYPOTHESIS_CREATION: (
         "Turn the operator's intuition into one statistical model of the assets "
         "involved, estimated on historical data: the regularity it predicts, the "
         "no-structure null it must beat, the Layer A falsifiers that would refute "
         "it, and the negative controls."
-    ),
-    _FALSIFICATION_TRIALS: (
-        "Call the harness research-model MCP tool for the planned falsification "
-        "trials, inspect its typed result, and explain the empirical findings."
     ),
     _VERDICT: "Record the falsification verdict from the trial results.",
     _STRATEGY_DESIGN: (
@@ -137,7 +121,6 @@ _TRANSITIONS: Mapping[
 ] = {
     _HYPOTHESIS_CREATION: frozenset({_FALSIFICATION_TRIALS, _FAILED}),
     _FALSIFICATION_TRIALS: frozenset({_VERDICT, _FAILED}),
-    _RCA: frozenset({_FALSIFICATION_TRIALS, _HYPOTHESIS_CREATION, _FAILED}),
     _VERDICT: frozenset({_STRATEGY_DESIGN, _HYPOTHESIS_CREATION, _FAILED}),
     _STRATEGY_DESIGN: frozenset({_STRATEGY_BACKTESTING, _FAILED}),
     _STRATEGY_BACKTESTING: frozenset({_OPTIMIZATION, _STRATEGY_RCA, _FAILED}),

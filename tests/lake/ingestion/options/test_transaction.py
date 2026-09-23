@@ -431,6 +431,52 @@ def test_option_provider_failure_publishes_error_coverage_without_objects() -> N
     )
 
 
+def test_option_print_stamped_exactly_at_session_close_is_published() -> None:
+    # The fetch passes close_time as Alpaca's inclusive end, so the closing
+    # auction print stamped exactly at 21:00:00Z belongs to the session on
+    # both the trade and quote paths.
+    coverage = InMemoryCatalogRepository()
+    committer = AtomicFake(coverage)
+    writers: list[FakeWriter] = []
+    transaction = OptionIngestTransaction(
+        client=FakeOptionClient(
+            trades=(_trade("2024-01-19T21:00:00Z"),),
+            quotes=(_quote("2024-01-19T21:00:00Z"),),
+        ),
+        committer=committer,
+        writer_factory=_writer_factory(writers),
+    )
+
+    result = _run(transaction.run(SPY_CONTRACT, SESSION))
+
+    assert [record.status for record in result.coverage] == [
+        CoverageStatus.COMPLETE,
+        CoverageStatus.COMPLETE,
+    ]
+    assert [record.row_count for record in result.coverage] == [1, 1]
+
+
+def test_option_print_stamped_after_session_close_is_rejected() -> None:
+    coverage = InMemoryCatalogRepository()
+    committer = AtomicFake(coverage)
+    writers: list[FakeWriter] = []
+    transaction = OptionIngestTransaction(
+        client=FakeOptionClient(
+            trades=(_trade("2024-01-19T21:00:00.500000Z"),),
+            quotes=(_quote("2024-01-19T14:31:00Z"),),
+        ),
+        committer=committer,
+        writer_factory=_writer_factory(writers),
+    )
+
+    result = _run(transaction.run(SPY_CONTRACT, SESSION))
+
+    assert result.objects == ()
+    assert committer.objects == {}
+    assert all(record.status is CoverageStatus.ERROR for record in result.coverage)
+    assert "outside session" in (result.coverage[0].error_message or "")
+
+
 def test_option_plan_enqueue_uses_injected_sender() -> None:
     catalog = ContractsCatalog(InMemoryContractRepository([SPY_CONTRACT]))
     coverage = InMemoryCatalogRepository()

@@ -5,12 +5,14 @@ from __future__ import annotations
 from thesis.chat.service import ChatService
 from thesis.cosmos.client import (
     CATALOG_CONTAINER,
+    EXECUTIONS_CONTAINER,
     TIMELINE_CONTAINER,
     CosmosSettings,
     ensure_database,
     open_cosmos_client,
 )
 from thesis.cosmos.events import CosmosExecutionEventStore
+from thesis.cosmos.execution_store import CosmosExecutionStore
 from thesis.cosmos.records import CosmosChatPersistence
 from thesis.cosmos.timeline import CosmosTimeline
 
@@ -36,4 +38,17 @@ def open_cosmos_chat_stack(
     return ChatService(persistence=catalog, events=events), timeline
 
 
-__all__ = ["open_cosmos_chat_stack"]
+def open_execution_store(
+    settings: CosmosSettings | None = None,
+) -> CosmosExecutionStore:
+    """Open the Cosmos-backed execution store over the executions container.
+
+    One durable document per workflow execution (REQ-B5); the container is
+    provisioned by :func:`ensure_database` alongside the chat stack.
+    """
+    client = open_cosmos_client(settings)
+    database = ensure_database(client, settings)
+    return CosmosExecutionStore(database.get_container_client(EXECUTIONS_CONTAINER))
+
+
+__all__ = ["open_cosmos_chat_stack", "open_execution_store"]

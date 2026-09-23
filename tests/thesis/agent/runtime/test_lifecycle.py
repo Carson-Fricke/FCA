@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from thesis.agent.runtime.lifecycle import (
@@ -10,8 +12,13 @@ from thesis.agent.runtime.lifecycle import (
 )
 from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.agent.runtime.store import PersistenceSubAgentStore
-from thesis.chat.contracts import SubAgentKind, SubAgentStatus
+from thesis.chat.contracts import (
+    SubAgentKind,
+    SubAgentStatus,
+    WorkflowExecution,
+)
 from thesis.chat.service import ChatService, InMemoryChatPersistence
+from thesis.execution.events import ExecutionEventType
 
 _WORKSPACE = "ws-test"
 _ACTOR = "operator-1"
@@ -201,3 +208,61 @@ def test_request_input_then_complete_is_terminal() -> None:
     assert not lifecycle.accepts_unsolicited_input(done)
     with pytest.raises(SubAgentLifecycleError):
         lifecycle.start(_WORKSPACE, node.sub_agent_id)
+
+
+def _execution(chat: ChatService, execution_id: str, chat_id: str) -> None:
+    chat.persistence.save(
+        WorkflowExecution(
+            workspace_id=_WORKSPACE,
+            execution_id=execution_id,
+            chat_id=chat_id,
+            trigger_message_id="msg-1",
+            workflow_id="hypothesis-development",
+            workflow_version="1.0.0",
+            requested_by=_ACTOR,
+            created_at=datetime.now(UTC),
+            created_by=_ACTOR,
+        )
+    )
+
+
+def test_request_input_projects_a_needs_input_event_for_execution_nodes() -> None:
+    chat = _chat()
+    lifecycle = _lifecycle(chat)
+    _execution(chat, "exec-1", "chat-1")
+    node = lifecycle.spawn(
+        _WORKSPACE,
+        "chat-1",
+        spec=SubAgentSpec(role="research"),
+        actor_id=_ACTOR,
+        workflow_execution_id="exec-1",
+    )
+    lifecycle.start(_WORKSPACE, node.sub_agent_id)
+    lifecycle.request_input(_WORKSPACE, node.sub_agent_id)
+
+    events = chat.replay_events(_WORKSPACE, "exec-1").events
+    needs_input = [
+        event
+        for event in events
+        if event.event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT
+    ]
+    assert len(needs_input) == 1
+    payload = needs_input[0].payload
+    assert payload["subAgentId"] == node.sub_agent_id
+    assert payload["acceptsInput"] is True
+    assert payload["phase"] == ""
+
+
+def test_request_input_without_an_execution_appends_no_event() -> None:
+    chat = _chat()
+    lifecycle = _lifecycle(chat)
+    # A sibling execution exists in the log, but the node itself carries no
+    # execution attribution: the flip must not project anywhere.
+    _execution(chat, "exec-1", "chat-1")
+    node = lifecycle.spawn(
+        _WORKSPACE, "chat-1", spec=SubAgentSpec(role="research"), actor_id=_ACTOR
+    )
+    lifecycle.start(_WORKSPACE, node.sub_agent_id)
+    lifecycle.request_input(_WORKSPACE, node.sub_agent_id)
+
+    assert chat.replay_events(_WORKSPACE, "exec-1").events == ()

@@ -46,9 +46,9 @@ from thesis.workflows.backtests import (
     BacktestRunError,
     BacktestRunRequest,
     BacktestRunResult,
-    BacktestRunTimeout,
 )
-from thesis.workflows.core.workflow import Workflow
+from thesis.workflows.core.execution_store import InMemoryExecutionStore
+from thesis.workflows.core.workflow import Detach, Workflow
 from thesis.workflows.registry.hypothesis_development import (
     HypothesisDevelopmentOutcome,
     HypothesisDevelopmentRequest,
@@ -99,7 +99,12 @@ def _model() -> dict[str, object]:
         "outputs": ["sharpe"],
         "indicators": [],
         "tests": {"test_model.py": "def test_model():\n    assert True\n"},
-        "harnessConfiguration": {"seed": 7, "symbols": ["SPY"]},
+        "harnessConfiguration": {
+            "seed": 7,
+            "symbols": ["SPY"],
+            "start": "2024-01-01T00:00:00Z",
+            "end": "2024-03-01T00:00:00Z",
+        },
     }
 
 
@@ -199,42 +204,6 @@ class FakeProvider:
         del profile, allowed_tools
         self.prompts.append(prompt.rendered)
         self.response_formats.append(response_format)
-        if "operator-facing voice" in prompt.rendered:
-            marker = "Concrete reason the workflow needs direction: "
-            detail = (
-                prompt.rendered.split(marker, 1)[-1].splitlines()[0]
-                if marker in prompt.rendered
-                else "the workflow needs direction"
-            )
-            return ModelResponse(output=f"To continue, I need your direction: {detail}")
-        if "workflow's verdict gate" in prompt.rendered:
-            marker = "Operator's latest message: "
-            body = (
-                prompt.rendered.split(marker, 1)[-1].splitlines()[0].lower()
-                if marker in prompt.rendered
-                else ""
-            )
-            circle = any(
-                word in body
-                for word in (
-                    "circle",
-                    "revise",
-                    "revisit",
-                    "disagree",
-                    "not ready",
-                    "go back",
-                )
-            )
-            action = (
-                "circle_back"
-                if circle
-                else ("check_off" if body.strip() else "ambiguous")
-            )
-            return ModelResponse(output=json.dumps({"action": action, "message": "ok"}))
-        if "falsification trials orchestrator" in prompt.rendered:
-            return ModelResponse(
-                output="### Empirical Falsification Findings\n\nAll planned trials survived historical testing."
-            )
         if not self._payloads:
             raise AssertionError("model invoked more times than expected")
         payload = self._payloads.pop(0)
@@ -312,6 +281,7 @@ class _Kit:
         factory: RecordingSubagentFactory,
         journal: CommandJournal,
         conversations: Conversations,
+        execution_store: InMemoryExecutionStore,
         woke: list[object],
     ) -> None:
         self.workflow = workflow
@@ -323,6 +293,7 @@ class _Kit:
         self.factory = factory
         self.journal = journal
         self.conversations = conversations
+        self.execution_store = execution_store
         self.woke = woke
 
 
@@ -337,6 +308,7 @@ def _kit(
     research_runner: object | None = None,
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_children: int = DEFAULT_MAX_CHILDREN,
+    detach: Detach | None = None,
 ) -> _Kit:
     clock = _clock()
     id_factory = _id_factory()
@@ -419,6 +391,7 @@ def _kit(
         # assert exactly which conversations the engine woke.
         spawn_thread=lambda target: woke.append(target),
     )
+    execution_store = InMemoryExecutionStore()
     workflow = build_hypothesis_development_workflow(
         chat=chat,
         router=router,
@@ -437,6 +410,8 @@ def _kit(
             else None
         ),
         conversations=conversations,
+        execution_store=execution_store,
+        detach=detach,
     )
     return _Kit(
         workflow=workflow,
@@ -448,6 +423,7 @@ def _kit(
         factory=factory,
         journal=journal,
         conversations=conversations,
+        execution_store=execution_store,
         woke=woke,
     )
 
@@ -491,35 +467,12 @@ def _creation_node_id(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
     return _phase_node_id(kit, request, "hypothesis_creation")
 
 
-def _operator_questions(kit: _Kit, request: HypothesisDevelopmentRequest) -> list[Any]:
-    """Return the operator questions delivered on the unified delivery path."""
-    return [
-        message
-        for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
-        if message.execution_id == request.execution_id
-        and message.data is not None
-        and message.data.get("kind") == "operator_question"
-    ]
-
-
-def _question_node_id(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
-    questions = _operator_questions(kit, request)
-    assert questions, "no operator question was delivered"
-    return str(questions[-1].data["subAgentId"])
-
-
 def _node_record(kit: _Kit, sub_agent_id: str) -> SubAgentRecord:
     record = PersistenceSubAgentStore(kit.chat.persistence).get_sub_agent(
         WORKSPACE, sub_agent_id
     )
     assert record is not None, f"no durable sub-agent record for {sub_agent_id}"
     return record
-
-
-def _latest_input_phase(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
-    questions = _operator_questions(kit, request)
-    assert questions, "no operator question was delivered"
-    return str(questions[-1].data["phase"])
 
 
 def _prompt_with(kit: _Kit, marker: str) -> str:
@@ -538,28 +491,3 @@ def _events_by_type(
 ) -> list[Any]:
     events = kit.workflow.observe(WORKSPACE, execution_id).events
     return [event for event in events if event.event_type is event_type]
-
-
-class _StubInvocation:
-    """Minimal invocation stand-in exposing only the composer input surface."""
-
-    def __init__(self, output: str) -> None:
-        self.response = ModelResponse(output=output)
-
-
-def _fenced(envelope: dict[str, object]) -> str:
-    return f"```json\n{json.dumps(envelope)}\n```"
-
-
-class _TimingOutResearchRunner:
-    """A research-model port whose run has not reached a terminal state."""
-
-    def __init__(self) -> None:
-        self.requests: list[object] = []
-
-    def run(self, request: object) -> object:
-        self.requests.append(request)
-        raise BacktestRunTimeout(
-            "study 'falsify-execution-1-model' did not reach a terminal state "
-            "within 3900s"
-        )

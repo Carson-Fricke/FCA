@@ -61,7 +61,7 @@ DEFAULT_WAKE_PHASES: frozenset[str] = frozenset({"completed", "failed"})
 _LAUNCHED_PHASE = "requested"
 
 
-def _daemon_thread(function: Callable[[], None]) -> None:
+def daemon_thread(function: Callable[[], None]) -> None:
     """Default detach seam: a daemon thread that never blocks the turn."""
     threading.Thread(target=function, daemon=True).start()
 
@@ -101,7 +101,7 @@ class RuntimeWorkflowLauncher:
     ) -> None:
         self._runtime = runtime
         self._chat = chat
-        self._detach = detach or _daemon_thread
+        self._detach = detach or daemon_thread
         self._conversations = conversations
         self._wake_phases = (
             DEFAULT_WAKE_PHASES if wake_phases is None else frozenset(wake_phases)
@@ -293,4 +293,5 @@ __all__ = [
     "AnchoredWorkflowLaunch",
     "Detach",
     "RuntimeWorkflowLauncher",
+    "daemon_thread",
 ]

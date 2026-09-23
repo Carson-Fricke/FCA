@@ -16,6 +16,7 @@ from pathlib import Path
 from thesis.agent.runtime.control import ControlToolService
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
+from thesis.agent.runtime.policy import AnsweringActor, OperatorActorKind
 from thesis.agent.runtime.registry import build_session_registry
 from thesis.agent.runtime.session import CompletionProvider
 from thesis.agent.runtime.store import PersistenceSubAgentStore
@@ -32,6 +33,7 @@ from thesis.research.models import ResearchModelRef
 from thesis.workflows.backtests import BacktestRunResult
 from thesis.workflows.registry.hypothesis_development import (
     HypothesisDevelopmentRequest,
+    rebuild_state,
 )
 from thesis.workflows.registry.hypothesis_development.phases import (
     HypothesisDevelopmentPhase,
@@ -212,6 +214,16 @@ def _runner(
 
 
 def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> None:
+    """The full agent-first loop over the new contracts.
+
+    Launch → the creation agent proposes → `request_workflow_input` → the
+    operator confirms → `request_phase_completion` (target
+    falsification_trials) → the trials run deterministically (no trials node,
+    workflow-scoped events) → the verdict agent is spawned with the trials in
+    its seed → the verdict completes into the strategy chain.  The execution
+    store is authoritative throughout: every transition is committed there
+    with its completion contract.
+    """
     kit = _kit(
         tmp_path,
         payloads=[],
@@ -230,19 +242,47 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert node_id is not None
     seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
     assert [seed.data["subAgentId"] for seed in seeds] == [node_id]
-    # Spawning and prompting are one act: the prompt is delivered at the new
-    # agent's own anchor as a user turn, and that delivery scheduled its turn.
     assert seeds[0].role is MessageRole.USER
     assert seeds[0].data["kind"] == "agent_prompt"
     assert IDEAS in seeds[0].body
     assert "request_phase_completion" in seeds[0].body
-    # Creation's prompt requires the operator's confirmation before completing.
     assert "REQUIRES the operator's confirmation" in seeds[0].body
+    assert "request_workflow_input" in seeds[0].body
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, node_id) is True
 
-    # The phase agent's own session turn calls the completion tool with the
-    # hypothesis contract; the deterministic trials phase then runs the study
-    # and hands its trials contract to the verdict agent.
+    # The creation agent proposes and asks the operator through its own
+    # wrapped tool: the node enters needs_input and schedules nothing.
+    runner = _runner(
+        kit,
+        store,
+        control,
+        _QueuedCompletionProvider(
+            (
+                "request_workflow_input",
+                {
+                    "message": "Please confirm the proposal.",
+                    "reason": "Operator confirmation is required.",
+                },
+            )
+        ),
+        lifecycle=lifecycle,
+    )
+    result = runner.run_node_turn(WORKSPACE, request.chat_id, node_id)
+    assert result.status == "completed"
+    creation = store.get_sub_agent(WORKSPACE, node_id)
+    assert creation is not None and creation.status is SubAgentStatus.NEEDS_INPUT
+
+    # The operator confirms through the admission layer, then the agent's
+    # resumed turn completes the phase.
+    kit.conversations.answer(
+        WORKSPACE,
+        request.chat_id,
+        node_id,
+        body="Confirmed — run the falsification trials.",
+        actor=AnsweringActor("owner-1", OperatorActorKind.HUMAN_OPERATOR),
+    )
+    resumed = store.get_sub_agent(WORKSPACE, node_id)
+    assert resumed is not None and resumed.status is SubAgentStatus.RUNNING
     runner = _runner(
         kit,
         store,
@@ -274,6 +314,52 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert "runState" in seeds[1].body
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, next_node) is True
 
+    # The deterministic trials phase is not a sub-agent: no trials record
+    # exists in the tree and no sub_agent.* event names the phase.
+    records = store.list_sub_agents(WORKSPACE)
+    assert all(record.phase != "falsification_trials" for record in records)
+    assert all("falsification trials" not in record.role.lower() for record in records)
+    events = kit.workflow.observe(WORKSPACE, request.execution_id).events
+    assert not [
+        event
+        for event in events
+        if event.event_type.value.startswith("sub_agent.")
+        and event.payload.get("phase") == "falsification_trials"
+    ]
+    # The trials run is observable as workflow-scoped events only.
+    progress = [
+        event for event in events if event.event_type.value == "workflow.progress"
+    ]
+    assert progress
+    for event in progress:
+        assert event.payload["phase"] == "falsification_trials"
+        assert "subAgentId" not in event.payload
+    phase_results = [
+        event for event in events if event.event_type.value == "workflow.phase_result"
+    ]
+    assert len(phase_results) == 1
+    artifact = phase_results[0].payload["artifact"]
+    assert artifact["type"] == "falsification_report"
+    assert artifact["totalCount"] == 1
+
+    # The execution store is authoritative: both transitions committed with
+    # their completion contracts, and the fold restores the full typed state.
+    document = kit.execution_store.get(request.execution_id)
+    assert [(item.from_phase, item.to_phase) for item in document.transitions] == [
+        ("hypothesis_creation", "falsification_trials"),
+        ("falsification_trials", "verdict"),
+    ]
+    rebuilt = rebuild_state(
+        WORKSPACE,
+        request.execution_id,
+        document.transitions,
+        initial_phase=HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
+    )
+    assert rebuilt.phase is HypothesisDevelopmentPhase.VERDICT
+    assert rebuilt.draft is not None
+    assert rebuilt.draft.claim == _hypothesis_envelope()["claim"]
+    assert [trial.run_state for trial in rebuilt.trials] == ["completed"]
+
     # Creation is closed once it completed; the verdict agent is a
     # conversation, so it accepts the operator's input from birth.
     creation = store.get_sub_agent(WORKSPACE, node_id)
@@ -283,20 +369,83 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert verdict is not None and verdict.kind is SubAgentKind.CONVERSATION
     assert verdict.accepts_input is True
 
-    # The workflow node is a record, not a conversation: it is never scheduled.
-    assert creation.parent_sub_agent_id is not None
-    node_record = store.get_sub_agent(WORKSPACE, creation.parent_sub_agent_id)
-    assert node_record is not None
-    assert (
-        kit.conversations.in_flight(
-            WORKSPACE, request.chat_id, node_record.sub_agent_id
-        )
-        is False
+    # The verdict agent must ask before completing: its seed carries the
+    # completion protocol, and its first turn proposes the verdict and calls
+    # request_workflow_input instead of completing.
+    assert "request_workflow_input" in seeds[1].body
+    assert "hypothesis_creation" in seeds[1].body
+    runner = _runner(
+        kit,
+        store,
+        control,
+        _QueuedCompletionProvider(
+            (
+                "request_workflow_input",
+                {
+                    "message": "The falsifier survived; propose strategy design.",
+                    "reason": "Operator confirmation is required.",
+                },
+            )
+        ),
+        lifecycle=lifecycle,
     )
-    assert len(kit.woke) == 2
+    result = runner.run_node_turn(WORKSPACE, request.chat_id, next_node)
+    assert result.status == "completed"
+    verdict = store.get_sub_agent(WORKSPACE, next_node)
+    assert verdict is not None and verdict.status is SubAgentStatus.NEEDS_INPUT
 
-    # The engine never called a model: the trials run was deterministic and the
-    # only model turn was the creation agent's own.
+    # The operator confirms through the admission layer, then the agent's
+    # resumed turn completes the phase; the workflow advances into the
+    # strategy chain on top of the store fold.
+    kit.conversations.answer(
+        WORKSPACE,
+        request.chat_id,
+        next_node,
+        body="Confirmed — proceed to strategy design.",
+        actor=AnsweringActor("owner-1", OperatorActorKind.HUMAN_OPERATOR),
+    )
+    runner = _runner(
+        kit,
+        store,
+        control,
+        _QueuedCompletionProvider(
+            (
+                "request_phase_completion",
+                {
+                    "completion": {
+                        "verdict": {
+                            "outcome": "supported",
+                            "reason": "the planned falsifier survived the trials",
+                        },
+                        "target": "strategy_design",
+                    }
+                },
+            )
+        ),
+        lifecycle=lifecycle,
+    )
+    result = runner.run_node_turn(WORKSPACE, request.chat_id, next_node)
+    assert result.status == "completed"
+
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    assert execution.phase == HypothesisDevelopmentPhase.STRATEGY_DESIGN.value
+    document = kit.execution_store.get(request.execution_id)
+    assert [item.to_phase for item in document.transitions] == [
+        "falsification_trials",
+        "verdict",
+        "strategy_design",
+    ]
+    rebuilt = rebuild_state(
+        WORKSPACE,
+        request.execution_id,
+        document.transitions,
+        initial_phase=HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
+    )
+    assert rebuilt.verdict is not None
+    assert rebuilt.verdict.outcome == "supported"
+
+    # The engine never called a model: the trials run was deterministic and
+    # the only model turns were the creation agent's own session turns.
     assert kit.provider.prompts == []
 
 
@@ -346,6 +495,91 @@ def test_rejected_contract_is_repaired_in_turn(tmp_path: Path) -> None:
     ]
     assert failures
     assert "hypothesis" in str(failures[0].tool_result["failure"])
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    assert execution.phase == HypothesisDevelopmentPhase.VERDICT.value
+
+
+def test_deep_invalid_contract_is_rejected_and_repaired_in_turn(tmp_path: Path) -> None:
+    """A contract that passes the shallow check but is deeply invalid is
+    rejected before any transition commits: every problem is reported at once
+    through the repair channel, the phase never moves on a rejected handoff,
+    and the repaired contract still completes the workflow."""
+    kit = _kit(
+        tmp_path,
+        payloads=[],
+        results=[],
+        research_runner=_FakeStudyRunner(),
+    )
+    request = _request(kit)
+    store = PersistenceSubAgentStore(kit.chat.persistence)
+    lifecycle = SubAgentLifecycle(kit.chat, store=store)
+    control = _control(kit, store, request)
+    creation_node = kit.workflow.prepare_phase(request)
+    assert creation_node is not None
+
+    invalid = _hypothesis_envelope()
+    invalid["claim"] = "   "
+    invalid["model"] = {"modelId": 7}
+    invalid["falsifiers"] = [
+        {
+            "falsifierId": "f1",
+            "observable": "sharpe",
+            "condition": "below",
+            "threshold": 0.0,
+            "test": "Run the momentum probe.",
+        }
+    ]
+
+    runner = _runner(
+        kit,
+        store,
+        control,
+        _QueuedCompletionProvider(
+            (
+                "request_phase_completion",
+                {
+                    "completion": {
+                        "target": "falsification_trials",
+                        "hypothesis": invalid,
+                    }
+                },
+            ),
+            (
+                "request_phase_completion",
+                {
+                    "completion": {
+                        "target": "falsification_trials",
+                        "hypothesis": _hypothesis_envelope(),
+                    }
+                },
+            ),
+        ),
+        lifecycle=lifecycle,
+    )
+    result = runner.run_node_turn(WORKSPACE, request.chat_id, creation_node)
+
+    # The rejected call was an ordinary tool result, so the turn ran on and
+    # the repaired contract completed the phase.
+    assert result.status == "completed"
+    failures = [
+        message
+        for message in _node_messages(kit.chat, request.chat_id, creation_node)
+        if message.tool_result is not None and message.tool_result.get("ok") is False
+    ]
+    assert failures
+    failure = str(failures[0].tool_result["failure"])
+    # Every missing or wrongly-typed field is reported in one deterministic
+    # rejection, so the repair turn is precise.
+    assert "completion contract rejected with" in failure
+    assert "hypothesis.claim: must be non-empty text" in failure
+    assert "hypothesis.model.modelId: must be text, got int" in failure
+    assert "hypothesis.model.version: required non-empty text is missing" in failure
+    assert (
+        "hypothesis.falsifiers[0].condition: Input should be 'gte', 'lte', 'gt' "
+        "or 'lt'" in failure
+    )
+    # The handoff never half-committed: the second call was applied as the
+    # creation phase's completion and the workflow reached the verdict phase.
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.phase == HypothesisDevelopmentPhase.VERDICT.value
 

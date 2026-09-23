@@ -31,6 +31,8 @@ from thesis.chat.contracts import (
     replace_record,
 )
 from thesis.chat.service import ChatService
+from thesis.execution.events import ExecutionEventType
+from thesis.execution.sub_agents import append_sub_agent_event
 
 _TERMINAL_STATUSES = frozenset(
     {
@@ -249,13 +251,34 @@ class SubAgentLifecycle:
         *,
         accepts_input: bool = True,
     ) -> SubAgentRecord:
-        """Move a node to ``needs_input`` so an operator reply may be accepted."""
-        return self._update(
+        """Move a node to ``needs_input`` so an operator reply may be accepted.
+
+        The flip is projected onto the owning execution's event log as a
+        ``sub_agent.needs_input`` event, so live surfaces see the pause
+        without re-reading the record store.  A node without a workflow
+        execution has no event log; its state travels through the record
+        store alone.
+        """
+        record = self._update(
             workspace_id,
             sub_agent_id,
             status=SubAgentStatus.NEEDS_INPUT,
             accepts_input=accepts_input,
         )
+        if record.workflow_execution_id is not None:
+            append_sub_agent_event(
+                self._chat.event_store,
+                execution_id=record.workflow_execution_id,
+                workspace_id=record.workspace_id,
+                event_type=ExecutionEventType.SUB_AGENT_NEEDS_INPUT,
+                occurred_at=record.updated_at or datetime.now(UTC),
+                sub_agent_id=record.sub_agent_id,
+                parent_sub_agent_id=record.parent_sub_agent_id,
+                phase=record.phase or "",
+                role=record.role,
+                accepts_input=True,
+            )
+        return record
 
     def resume(self, workspace_id: str, sub_agent_id: str) -> SubAgentRecord:
         """Consume operator input and return the node to ``running``."""
@@ -339,8 +362,8 @@ class SubAgentLifecycle:
         A non-terminal record is stranded when either:
 
         * it is a workflow node whose execution is not running (the execution
-          was just stopped at startup, is paused with no worker left to resume
-          it, already reached a terminal state, or no longer exists), or
+          was just stopped at startup, already reached a terminal state, or no
+          longer exists), or
         * its chat no longer resolves to a chat in the workspace.
 
         Descendants of a stranded node are cancelled with it.  A running

@@ -115,6 +115,202 @@ function renderSurface() {
 	});
 }
 
+function renderSurfaceWith(
+	messages: ChatMessage[],
+	overrides: Record<string, unknown> = {}
+) {
+	return render(ChatSurface, {
+		props: {
+			workspaceId: 'alpha-lab',
+			chatId: 'chat-1',
+			messages,
+			execution,
+			onSend: vi.fn(),
+			hostId: 'test-surface',
+			...overrides
+		}
+	});
+}
+
+describe('ChatSurface deterministic phase run view', () => {
+	const trialsEvents = [
+		event('workflow.launched', { workflow: { phases: ['hypothesis_creation', 'falsification_trials', 'verdict'] } }, 1),
+		event('workflow.started', {}, 2),
+		event('sub_agent.spawned', { subAgentId: 'sub-1', parentSubAgentId: null, phase: 'hypothesis_creation', role: 'Researcher', acceptsInput: true }, 3),
+		event('workflow.phase', { phase: 'falsification_trials' }, 4),
+		event('workflow.progress', { phase: 'falsification_trials', kind: 'tool', text: 'Running the falsification model.' }, 5),
+		event('workflow.progress', { phase: 'falsification_trials', kind: 'tool', text: 'Falsification execution completed in state completed.' }, 6),
+		event(
+			'workflow.phase_result',
+			{
+				phase: 'falsification_trials',
+				summary: 'Ran 1 falsification trial(s): 1 survived, 0 refuted.',
+				artifact: {
+					type: 'falsification_report',
+					content: 'Ran 1 falsification trial(s): 1 survived, 0 refuted.',
+					passedCount: 1,
+					falsifiedCount: 0,
+					totalCount: 1,
+					survived: true,
+					hypothesis: { claim: 'Five-day momentum in SPY continues.' },
+					trials: [
+						{
+							testId: 't1',
+							falsifierId: 'f1',
+							runId: 'study-1',
+							runState: 'completed',
+							detail: null,
+							observed: 1.0,
+							falsified: false,
+							observable: 'sharpe',
+							condition: 'lt',
+							threshold: 0.0,
+							description: 'Run the momentum probe and require a negative Sharpe.'
+						}
+					],
+					controls: [],
+					metrics: { sharpe: 1.0 }
+				}
+			},
+			7
+		)
+	];
+
+	it('opens the run view from the deterministic phase pill and renders live progress and the result', async () => {
+		listChatSubAgents.mockResolvedValue([]);
+		listExecutionEvents.mockResolvedValue(trialsEvents);
+		listNodeEvents.mockResolvedValue([]);
+		window.localStorage.clear();
+
+		renderSurface();
+		await waitFor(() => expect(screen.getAllByTestId('phase-step')).toHaveLength(3));
+		expect(screen.getByText('falsification trials')).toHaveAttribute('data-status', 'active');
+
+		await fireEvent.click(screen.getByText('falsification trials'));
+		await waitFor(() => expect(screen.getByTestId('phase-run-view')).toBeInTheDocument());
+		// Live progress lines render from the ingested events.
+		const lines = screen.getAllByTestId('phase-progress-line');
+		expect(lines).toHaveLength(2);
+		expect(screen.getByTestId('phase-run-status')).toHaveTextContent('Completed');
+		// The result card renders from the phase_result event's artifact.
+		await waitFor(() =>
+			expect(screen.getByTestId('falsification-report-card')).toBeInTheDocument()
+		);
+		// A deterministic phase never offers a composer.
+		expect(screen.queryByTestId('sub-agent-composer')).toBeNull();
+		expect(screen.getByTestId('scope-readonly')).toBeInTheDocument();
+		// The scope deep link round-trips through the phase grammar.
+		expect(screen.getAllByTestId('scope-crumb')[1]).toHaveTextContent('falsification_trials');
+	});
+
+	it('renders the error variant for a failed computation', async () => {
+		listChatSubAgents.mockResolvedValue([]);
+		listExecutionEvents.mockResolvedValue([
+			event('workflow.phase', { phase: 'falsification_trials' }, 1),
+			event('workflow.started', {}, 2),
+			event(
+				'workflow.phase_result',
+				{
+					phase: 'falsification_trials',
+					summary: 'Falsification trials failed: harness exploded',
+					artifact: { type: 'error', message: 'harness exploded' }
+				},
+				3
+			)
+		]);
+		listNodeEvents.mockResolvedValue([]);
+		window.localStorage.clear();
+
+		renderSurface();
+		await waitFor(() =>
+			expect(screen.getByText('falsification trials')).toHaveAttribute('data-status', 'active')
+		);
+		await fireEvent.click(screen.getByText('falsification trials'));
+
+		await waitFor(() => expect(screen.getByTestId('phase-run-error')).toBeInTheDocument());
+		expect(screen.getByTestId('phase-run-error')).toHaveTextContent('harness exploded');
+		expect(screen.getByTestId('phase-run-status')).toHaveTextContent('Failed');
+		expect(screen.queryByTestId('falsification-report-card')).toBeNull();
+	});
+
+	it('renders the run view from a phase deep link before any click', async () => {
+		listChatSubAgents.mockResolvedValue([]);
+		listExecutionEvents.mockResolvedValue(trialsEvents);
+		listNodeEvents.mockResolvedValue([]);
+		window.localStorage.clear();
+
+		renderSurfaceWith([anchor], {
+			initialScope: 'conversation:chat-1/phase:falsification_trials'
+		});
+
+		await waitFor(() => expect(screen.getByTestId('phase-run-view')).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByTestId('falsification-report-card')).toBeInTheDocument()
+		);
+	});
+
+	it('does not replay a scope from a previous conversation onto a new chat', async () => {
+		// The regression: the page drops its scope grant on conversation
+		// switches, and the controller enforces conversation identity - so a
+		// scope whose root names another chat can never replay onto this one,
+		// even when the stale phase name is legal for the new run.
+		listChatSubAgents.mockResolvedValue([]);
+		listExecutionEvents.mockResolvedValue([
+			event('workflow.launched', { workflow: { phases: ['hypothesis_creation', 'falsification_trials', 'verdict'] } }, 1),
+			event('workflow.started', {}, 2)
+		]);
+		listNodeEvents.mockResolvedValue([]);
+		window.localStorage.clear();
+
+		// The NEW chat runs the same workflow (so the stale phase name is
+		// legal), which is exactly the cross-chat confusion the fix prevents.
+		const otherChatExecution = {
+			...execution,
+			execution_id: 'exec-2',
+			chat_id: 'chat-2',
+			phase: 'hypothesis_creation'
+		};
+		const otherChatAnchor: ChatMessage = {
+			...anchor,
+			chat_id: 'chat-2',
+			execution_id: 'exec-2',
+			created_at: '2026-09-09T17:14:01Z',
+			data: { executionId: 'exec-2', currentPhase: 'hypothesis_creation', status: 'running', workflowId: 'hypothesis-development' }
+		};
+
+		renderSurfaceWith([otherChatAnchor], {
+			chatId: 'chat-2',
+			execution: otherChatExecution,
+			hostId: 'stale-scope-switch',
+			// The mount-time residue the page keeps passing: the conversation
+			// root is the OLD chat. Identity enforcement drops it and
+			// everything after it.
+			initialScope: 'conversation:chat-1/phase:falsification_trials'
+		});
+
+		// The foreign scope was dropped: the root transcript renders.
+		await waitFor(() => expect(screen.getByTestId('chat-composer')).toBeInTheDocument());
+		expect(screen.queryByTestId('phase-run-view')).toBeNull();
+		expect(screen.queryByTestId('scope-stack')).toBeNull();
+	});
+
+	it('still opens agent phases as conversations', async () => {
+		listChatSubAgents.mockResolvedValue([knownNode]);
+		listExecutionEvents.mockResolvedValue([
+			event('workflow.phase', { phase: 'research' }, 1)
+		]);
+		listNodeEvents.mockResolvedValue([]);
+		window.localStorage.clear();
+
+		renderSurface();
+		await waitFor(() => expect(screen.getAllByTestId('phase-step')).toHaveLength(1));
+		await fireEvent.click(screen.getByTestId('phase-step'));
+
+		await waitFor(() => expect(screen.getByTestId('scope-transcript')).toBeInTheDocument());
+		expect(screen.queryByTestId('phase-run-view')).toBeNull();
+	});
+});
+
 describe('ChatSurface drill-in', () => {
 	it('enters a phase sub-agent, renders its transcript, posts to it, then backs out', async () => {
 		listChatSubAgents.mockResolvedValue([knownNode]);
@@ -379,6 +575,116 @@ it('drills into a phase from externally-ingested timeline events', async () => {
 
 		await waitFor(() => expect(screen.getByTestId('scope-transcript')).toBeInTheDocument());
 		expect(screen.getAllByTestId('scope-crumb')).toHaveLength(2);
+	});
+
+	it('drills into a chat-spawned sub-agent from its handle card', async () => {
+		const helper = {
+			...knownNode,
+			subAgentId: 'helper-1',
+			phase: '',
+			role: 'Research helper',
+			status: 'running',
+			acceptsInput: true,
+			workflowExecutionId: null
+		};
+		listChatSubAgents.mockResolvedValue([helper]);
+		listExecutionEvents.mockResolvedValue([]);
+		listNodeEvents.mockResolvedValue([]);
+		window.localStorage.clear();
+
+		const spawnResult = {
+			tool: 'spawn_sub_agent',
+			callId: 'call-spawn-1',
+			ok: true,
+			summary: 'Sub-agent spawned; it runs asynchronously.',
+			datumType: 'sub_agent_handle',
+			structured: {
+				sub_agent_id: 'helper-1',
+				status: 'spawned',
+				kind: 'conversation',
+				role: 'research',
+				task: 'Check the regime'
+			},
+			text: 'Sub-agent spawned; it runs asynchronously.',
+			failure: null
+		};
+		const base = {
+			chat_id: 'chat-1',
+			workspace_id: 'alpha-lab',
+			state: 'accepted' as const,
+			attachment_ids: [] as string[],
+			updated_at: null,
+			execution_id: null,
+			intent_epoch: 0
+		};
+
+		render(ChatSurface, {
+			props: {
+				workspaceId: 'alpha-lab',
+				chatId: 'chat-1',
+				messages: [
+					{
+						...base,
+						message_id: 'm1',
+						actor_id: 'operator',
+						role: 'user',
+						body: 'please research',
+						created_at: '2026-09-08T17:14:01Z'
+					},
+					{
+						...base,
+						message_id: 'm2',
+						actor_id: 'thesis-agent',
+						role: 'tool',
+						body: spawnResult.summary,
+						created_at: '2026-09-08T17:14:02Z',
+						tool_result: spawnResult
+					},
+					{
+						...base,
+						message_id: 'm3',
+						actor_id: 'operator',
+						role: 'user',
+						body: 'Initial task prompt',
+						created_at: '2026-09-08T17:14:03Z',
+						kind: 'sub_agent' as const,
+						data: { subAgentId: 'helper-1' }
+					},
+					{
+						...base,
+						message_id: 'm4',
+						actor_id: 'helper-1',
+						role: 'assistant',
+						body: 'Working on it now.',
+						created_at: '2026-09-08T17:14:04Z',
+						kind: 'sub_agent' as const,
+						data: { subAgentId: 'helper-1' }
+					}
+				],
+				execution: null,
+				onSend: vi.fn(),
+				hostId: 'chat-spawn'
+			}
+		});
+
+		const card = await waitFor(() => screen.getByTestId('sub-agent-card'));
+		expect(card).toHaveAttribute('data-sub-agent', 'helper-1');
+		expect(screen.getByTestId('sub-agent-card-task')).toHaveTextContent('Check the regime');
+		// The datum upgrades to the durable node's live status.
+		await waitFor(() => expect(card).toHaveAttribute('data-status', 'running'));
+
+		await fireEvent.click(card);
+		await waitFor(() => expect(screen.getByTestId('scope-transcript')).toBeInTheDocument());
+		expect(screen.getAllByTestId('scope-crumb')).toHaveLength(2);
+
+		// The nested surface opens on the initial prompt as the first user
+		// message, with the agent's reply after it.
+		const entries = screen.getAllByTestId('chat-message');
+		expect(entries[0]).toHaveAttribute('data-role', 'user');
+		expect(entries[0]).toHaveTextContent('Initial task prompt');
+		expect(entries[1]).toHaveAttribute('data-role', 'assistant');
+		expect(entries[1]).toHaveTextContent('Working on it now.');
+		expect(screen.getByTestId('sub-agent-composer')).toBeInTheDocument();
 	});
 
 	it('hides the workflow node and enters the phase agent, then backs out to the anchor', async () => {

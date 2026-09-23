@@ -670,7 +670,8 @@ pub fn synthetic_fixture(
     for (idx, symbol) in symbols.iter().enumerate() {
         let events = synthetic_events(configuration, options, symbol, &sessions)?;
         if idx == 0 {
-            primary_fingerprints = Some(synthetic_fingerprints(&events, &sessions, options, symbol));
+            primary_fingerprints =
+                Some(synthetic_fingerprints(&events, &sessions, options, symbol));
         }
         all_events.extend(events);
     }

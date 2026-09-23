@@ -1,20 +1,17 @@
-"""Workflow-owned tool jobs and cycle-budget stops.
+"""Workflow-owned tool jobs.
 
-The research-model and backtest runs publish a visible tool job on the chat
-transcript and record its typed result; the cycle-budget stop delivers an
-operator request for an exhausted revision loop.  These are domain operations
-over the general workflow object, not engine members.
+The research-model run publishes a visible tool job on the chat transcript and
+records its typed result.  This is a domain operation over the general
+workflow object, not an engine member.
+
+A deterministic phase is not a sub-agent (REQ-C2): the falsification run's
+progress is recorded as execution-scoped ``workflow.progress`` events carrying
+the phase name — never as orchestrator-attributed ``sub_agent.*`` events.
 """
 
 from __future__ import annotations
 
-from thesis.execution.events import ExecutionEventType
 from thesis.research.models import ResearchModel
-from thesis.strategies.bundles import StrategyBundle
-from thesis.workflows.backtests import (
-    BacktestRunRequest,
-    BacktestRunResult,
-)
 from thesis.workflows.core.workflow import Workflow
 from thesis.workflows.research_models import (
     ResearchModelRunRequest,
@@ -22,19 +19,15 @@ from thesis.workflows.research_models import (
 )
 
 from .contracts.creation import HypothesisDevelopmentRequest
-from .errors import _PhaseFailure
 from .primitives import (
     _MODEL_TOOL_NAME,
-    _TOOL_NAME,
     _WORKFLOW_ACTOR,
 )
 from .services import services_of
 from .state import HypothesisDevelopmentState
 
 __all__ = [
-    "backtest",
     "run_research_model",
-    "stop_for_cycle_budget",
 ]
 
 
@@ -65,25 +58,12 @@ def run_research_model(
         correlation_id=correlation_id,
     )
     chat.start_tool_job(request.workspace_id, job.tool_job_id, actor_id=_WORKFLOW_ACTOR)
-    active = workflow.active_orchestrators.get(request.execution_id)
-    if active is not None:
-        workflow.append_sub_agent(
-            request,
-            ExecutionEventType.SUB_AGENT_PROGRESS,
-            sub_agent_id=active.sub_agent_id,
-            parent_sub_agent_id=None,
-            phase=active.phase,
-            role=active.role,
-            context=active.context,
-            accepts_input=False,
-            extra={
-                "kind": "tool",
-                "toolCall": {
-                    "callId": job.tool_job_id,
-                    "tool": _MODEL_TOOL_NAME,
-                },
-            },
-        )
+    workflow.emit_phase_progress(
+        request,
+        state.phase,
+        kind="tool",
+        text=f"Running the falsification model ({label}).",
+    )
     try:
         model_run = services.research_runner.run(
             ResearchModelRunRequest(
@@ -109,29 +89,12 @@ def run_research_model(
             error_message=str(error),
             intent_epoch=state.intent_epoch,
         )
-        if active is not None:
-            workflow.append_sub_agent(
-                request,
-                ExecutionEventType.SUB_AGENT_PROGRESS,
-                sub_agent_id=active.sub_agent_id,
-                parent_sub_agent_id=None,
-                phase=active.phase,
-                role=active.role,
-                context=active.context,
-                accepts_input=False,
-                extra={
-                    "kind": "tool",
-                    "toolResult": {
-                        "callId": job.tool_job_id,
-                        "failure": {"message": str(error)},
-                        "ok": False,
-                        "structured": {},
-                        "summary": "Falsification execution failed",
-                        "text": str(error),
-                        "tool": _MODEL_TOOL_NAME,
-                    },
-                },
-            )
+        workflow.emit_phase_progress(
+            request,
+            state.phase,
+            kind="tool",
+            text=f"Falsification execution failed: {error}",
+        )
         raise
     result = model_run.backtest
     chat.record_tool_result(
@@ -157,119 +120,10 @@ def run_research_model(
         ),
         intent_epoch=state.intent_epoch,
     )
-    if active is not None:
-        workflow.append_sub_agent(
-            request,
-            ExecutionEventType.SUB_AGENT_PROGRESS,
-            sub_agent_id=active.sub_agent_id,
-            parent_sub_agent_id=None,
-            phase=active.phase,
-            role=active.role,
-            context=active.context,
-            accepts_input=False,
-            extra={
-                "kind": "tool",
-                "toolResult": {
-                    "callId": job.tool_job_id,
-                    "failure": None,
-                    "ok": result.succeeded,
-                    "structured": result.as_dict(),
-                    "summary": "Falsification execution completed",
-                    "text": "",
-                    "tool": _MODEL_TOOL_NAME,
-                },
-            },
-        )
-    return model_run
-
-
-def backtest(
-    workflow: Workflow[
-        HypothesisDevelopmentRequest,
-        HypothesisDevelopmentState,
-        object,
-    ],
-    request: HypothesisDevelopmentRequest,
-    state: HypothesisDevelopmentState,
-    *,
-    bundle: StrategyBundle,
-    correlation_id: str,
-    label: str,
-) -> BacktestRunResult:
-    """Publish and run one strategy backtest behind a visible tool job."""
-    chat = workflow.chat
-    assert chat is not None
-    services = services_of(workflow)
-    assert services.runner is not None
-    experiment_id = services.experiment_id or f"experiment-{request.execution_id}"
-    job = chat.submit_tool_job(
-        request.workspace_id,
-        request.execution_id,
-        tool_name=_TOOL_NAME,
-        actor_id=_WORKFLOW_ACTOR,
-        correlation_id=correlation_id,
-        strategy_ids=(bundle.strategy_id,),
-    )
-    chat.start_tool_job(request.workspace_id, job.tool_job_id, actor_id=_WORKFLOW_ACTOR)
-    try:
-        result = services.runner.run(
-            BacktestRunRequest(
-                run_id=job.correlation_id,
-                workspace_id=request.workspace_id,
-                bundle=bundle,
-                workflow_execution_id=request.execution_id,
-                experiment_id=experiment_id,
-            )
-        )
-    except Exception as error:
-        chat.record_tool_result(
-            request.workspace_id,
-            job.tool_job_id,
-            result=None,
-            actor_id=_WORKFLOW_ACTOR,
-            success=False,
-            error_message=str(error),
-            intent_epoch=state.intent_epoch,
-        )
-        raise
-    chat.record_tool_result(
-        request.workspace_id,
-        job.tool_job_id,
-        result=result.as_dict(),
-        actor_id=_WORKFLOW_ACTOR,
-        success=result.succeeded,
-        error_message=None if result.succeeded else f"state {result.state!r} ({label})",
-        intent_epoch=state.intent_epoch,
-    )
-    return result
-
-
-def stop_for_cycle_budget(
-    workflow: Workflow[
-        HypothesisDevelopmentRequest,
-        HypothesisDevelopmentState,
-        object,
-    ],
-    request: HypothesisDevelopmentRequest,
-    state: HypothesisDevelopmentState,
-    *,
-    purpose: str,
-    detail: str,
-) -> HypothesisDevelopmentState:
-    """Stop a loop that exhausted its auditable attempt budget."""
-    active = workflow.active_orchestrators.get(request.execution_id)
-    message = workflow._operator_question(
+    workflow.emit_phase_progress(
         request,
-        state,
-        active=active,
-        purpose=purpose,
-        detail=detail,
+        state.phase,
+        kind="tool",
+        text=f"Falsification execution completed in state {result.state}.",
     )
-    if active is not None:
-        workflow._deliver_node_turn(
-            request,
-            active,
-            message,
-            question=message,
-        )
-    raise _PhaseFailure(message, state)
+    return model_run

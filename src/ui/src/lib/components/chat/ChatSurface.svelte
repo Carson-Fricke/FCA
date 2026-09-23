@@ -2,11 +2,13 @@
 	import ChatComposer from './ChatComposer.svelte';
 	import ChatStarters from './ChatStarters.svelte';
 	import ChatTranscript from './ChatTranscript.svelte';
+	import PhaseRunView from './PhaseRunView.svelte';
 	import ScopeStack from './ScopeStack.svelte';
 	import ScopeTranscript from './ScopeTranscript.svelte';
 	import StreamingReply from './StreamingReply.svelte';
 	import SubAgentComposer from './SubAgentComposer.svelte';
 	import WorkflowCard from './WorkflowCard.svelte';
+	import { setSubAgentLiveView } from './sub-agent-live-view';
 	import { WorkflowScopeController } from '$lib/workflow-scope.svelte';
 	import { buildNodeEntries } from '$lib/transcript';
 	import {
@@ -92,6 +94,7 @@
 		hostId
 	);
 	let attachedExecutionId = $state('');
+	let attachedChatId = $state('');
 
 	/**
 	 * The execution the surface navigates. A fresh workflow launched in this
@@ -139,16 +142,29 @@
 	);
 
 	// Attach to the active chat's execution; a different execution (or none)
-	// resets the scope to the conversation root.
+	// resets the scope to the conversation root. Without an execution the
+	// controller still attaches to the chat itself, so sub-agent cards can
+	// drill into chat-spawned agents that have no activity log at all.
 	$effect(() => {
 		const current = effectiveExecution;
 		if (!current) {
-			controller.detach();
+			if (chatId && chatId !== attachedChatId) {
+				attachedChatId = chatId;
+				controller.attachChat(chatId, {
+					rootLabel,
+					scope: initialScope,
+					hash: initialHash
+				});
+			} else if (!chatId && attachedChatId) {
+				attachedChatId = '';
+				controller.detach();
+			}
 			attachedExecutionId = '';
 			return;
 		}
 		if (current.execution_id === attachedExecutionId) return;
 		attachedExecutionId = current.execution_id;
+		attachedChatId = '';
 		controller.attach(current.execution_id, current, {
 			chatId: chatId ?? current.chat_id,
 			rootLabel,
@@ -161,6 +177,25 @@
 	// Feed the scope controller from the single shared timeline stream.
 	$effect(() => {
 		if (effectiveEvents.length) controller.ingestEvents(effectiveEvents);
+	});
+
+	// Chat-spawned agents have no activity log, so their durable status only
+	// advances on the record itself: refresh the tree whenever the chat
+	// timeline moves while no execution is attached. The first run after an
+	// attach seeds without refreshing; the attach itself just loaded the
+	// tree.
+	let nodeRefreshSeeded = false;
+	$effect(() => {
+		const timelineMoved = messages[messages.length - 1]?.message_id ?? '';
+		if (effectiveExecution || !attachedChatId) {
+			nodeRefreshSeeded = false;
+			return;
+		}
+		if (!nodeRefreshSeeded || !timelineMoved) {
+			nodeRefreshSeeded = true;
+			return;
+		}
+		controller.refreshNodes();
 	});
 
 	$effect(() => {
@@ -183,9 +218,41 @@
 
 	const active = $derived(controller.activeSegment);
 	const scoped = $derived(
-		controller.scope.segments.some((segment) => segment.kind === 'sub_agent')
+		controller.scope.segments.some(
+			(segment) => segment.kind === 'sub_agent' || segment.kind === 'phase'
+		)
 	);
 	const isNodeScope = $derived(active?.kind === 'sub_agent');
+	const isPhaseScope = $derived(active?.kind === 'phase');
+
+	/**
+	 * The active phase's run view state (REQ-D2): live `workflow.progress`
+	 * lines for the phase, then its `workflow.phase_result` — the error
+	 * variant when the artifact is one.
+	 */
+	const phaseRun = $derived.by(() => {
+		if (!active || active.kind !== 'phase') return null;
+		let result: { summary: string; artifact: Record<string, unknown> } | null = null;
+		let error: { message: string } | null = null;
+		const progress: Array<{ text: string; at: string }> = [];
+		for (const event of controller.eventsForPhase(active.id)) {
+			if (event.eventType === 'workflow.progress') {
+				progress.push({
+					text: String(event.payload['text'] ?? ''),
+					at: event.occurredAt
+				});
+				continue;
+			}
+			const artifact = (event.payload['artifact'] ?? {}) as Record<string, unknown>;
+			if (artifact['type'] === 'error') {
+				error = { message: String(artifact['message'] ?? '') };
+			} else {
+				result = { summary: String(event.payload['summary'] ?? ''), artifact };
+				error = null;
+			}
+		}
+		return { progress, result, error };
+	});
 
 	const phases = $derived.by(() => {
 		// The launch contract declares the complete phase sequence; lifecycle
@@ -235,21 +302,23 @@
 	});
 
 	const composerNode = $derived(isNodeScope ? controller.subAgentById(active!.id) : null);
-	// The node scope shows the typing indicator only while a reply is actually
-	// owed: a running agent that has already answered is idle, not busy.
-	const nodePending = $derived.by(() => {
-		const node = composerNode;
-		if (!node) return false;
+
+	/** Whether one sub-agent owes a reply right now (its last scoped message is a prompt). */
+	function subAgentPending(subAgentId: string): boolean {
 		const scoped = messages.filter(
 			(message) =>
 				message.kind === 'sub_agent' &&
-				String(message.data?.subAgentId ?? '') === node.subAgentId
+				String(message.data?.subAgentId ?? '') === subAgentId
 		);
 		if (!scoped.length) {
-			return node.status === 'spawned';
+			return controller.subAgentById(subAgentId)?.status === 'spawned';
 		}
 		return scoped[scoped.length - 1].role === 'user';
-	});
+	}
+
+	// The node scope shows the typing indicator only while a reply is actually
+	// owed: a running agent that has already answered is idle, not busy.
+	const nodePending = $derived(composerNode ? subAgentPending(composerNode.subAgentId) : false);
 	const showNodeComposer = $derived(
 		isNodeScope && composerNode?.acceptsInput === true && active?.readOnly !== true
 	);
@@ -292,6 +361,24 @@
 		controller.enterSubAgent(node);
 	}
 
+	/** Drill into a spawned sub-agent by id, awaiting the durable tree first. */
+	async function enterSpawnedSubAgent(subAgentId: string): Promise<void> {
+		await controller.ensureLoaded();
+		const node = controller.subAgentById(subAgentId);
+		if (node) controller.enterSubAgent(node);
+	}
+
+	// The registry-selected sub-agent renderer reads this context, so a spawn
+	// card upgrades to the live node status and drills into the nested
+	// conversation from any transcript that renders it.
+	setSubAgentLiveView(() => ({
+		nodeFor: (subAgentId: string) => controller.subAgentById(subAgentId),
+		pendingFor: subAgentPending,
+		onEnterSubAgent: (subAgentId: string) => {
+			void enterSpawnedSubAgent(subAgentId);
+		}
+	}));
+
 	async function sendNode(_node: SubAgentNode, body: string): Promise<void> {
 		if (!composerNode) return;
 		const message = await controller.submit(composerNode, body);
@@ -307,14 +394,24 @@
 			onBack={() => controller.back()}
 			onNavigate={(index) => controller.navigateTo(index)}
 		>
-			<ScopeTranscript
-				entries={scopeEntries}
-				{workspaceId}
-				busy={controller.busy}
-				readOnly={active?.readOnly === true}
-				pending={nodePending}
-				onEnterSubAgent={enterSubAgent}
-			/>
+			{#if isPhaseScope && phaseRun}
+				<div class="min-h-0 flex-1 overflow-y-auto p-3" data-testid="phase-run-scroll">
+					<PhaseRunView
+						progress={phaseRun.progress}
+						result={phaseRun.result}
+						error={phaseRun.error}
+					/>
+				</div>
+			{:else}
+				<ScopeTranscript
+					entries={scopeEntries}
+					{workspaceId}
+					busy={controller.busy}
+					readOnly={active?.readOnly === true}
+					pending={nodePending}
+					onEnterSubAgent={enterSubAgent}
+				/>
+			{/if}
 		</ScopeStack>
 	{:else}
 		<div class="min-h-0 flex-1 overflow-y-auto p-3" data-testid="transcript-scroll">
@@ -379,11 +476,18 @@
 		>
 			This sub-agent does not accept input.
 		</div>
-		{:else}
-			<ChatComposer
-				onSubmit={onSend}
-				activeExecutionId={effectiveExecution?.execution_id ?? null}
-				{busy}
-			/>
-		{/if}
+	{:else if isPhaseScope}
+		<div
+			class="border-t border-surface-700 bg-surface-900 px-3 py-2 text-center text-[11px] text-slate-500"
+			data-testid="scope-readonly"
+		>
+			This phase is a deterministic run and does not accept input.
+		</div>
+	{:else}
+		<ChatComposer
+			onSubmit={onSend}
+			activeExecutionId={effectiveExecution?.execution_id ?? null}
+			{busy}
+		/>
+	{/if}
 </div>

@@ -7,6 +7,7 @@ import RunToolCard from './RunToolCard.svelte';
 import JobToolCard from './JobToolCard.svelte';
 import ArtifactsToolCard from './ArtifactsToolCard.svelte';
 import OperatorQuestionCard from './OperatorQuestionCard.svelte';
+import SubAgentHandleCard from './SubAgentHandleCard.svelte';
 import WorkflowOutcomeCard from './WorkflowOutcomeCard.svelte';
 import WorkflowExecutionCard from './WorkflowExecutionCard.svelte';
 
@@ -29,7 +30,7 @@ export const TOOL_RESULT_RENDERERS: Record<string, Component<ToolResultCardProps
 	tool_result: GenericToolCard,
 	workflow_execution: WorkflowExecutionCard,
 	workflow_outcome: WorkflowOutcomeCard,
-	sub_agent_handle: GenericToolCard,
+	sub_agent_handle: SubAgentHandleCard,
 	sub_agent_status: GenericToolCard,
 	operator_question: OperatorQuestionCard,
 	// Harness tool names, doubling as their implicit datum types.
@@ -39,6 +40,27 @@ export const TOOL_RESULT_RENDERERS: Record<string, Component<ToolResultCardProps
 	get_backtest_status: JobToolCard,
 	list_artifacts: ArtifactsToolCard
 };
+
+/**
+ * Datum types whose renderings are self-contained cards: the transcript
+ * renders them without the generic tool-result wrapper because the card
+ * itself carries the identity, status, and click-through affordance. Failed
+ * control calls never carry these datum types (a failure falls back to the
+ * generic datum typed by the tool name), so the wrapper's ok/failure chip is
+ * never lost.
+ */
+const STANDALONE_CARD_DATUM_TYPES: ReadonlySet<string> = new Set([
+	'workflow_execution',
+	'sub_agent_handle'
+]);
+
+/**
+ * Whether one tool result renders as a standalone card, skipping the generic
+ * tool-result wrapper (tool name, ok chip, call id).
+ */
+export function isStandaloneCard(datumType?: string | null): boolean {
+	return datumType != null && STANDALONE_CARD_DATUM_TYPES.has(datumType);
+}
 
 /**
  * Resolve the renderer for one tool result: the payload's `datumType` first,

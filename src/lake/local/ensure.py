@@ -67,6 +67,10 @@ class LocalEnsureLauncher:
                 provider=self._equity_provider,
                 environ=self._environ,
                 now=self._now,
+                # One ensure asks for one data type and fetches only that one:
+                # the harness issues a separate ensure per data type, so the
+                # whole session was previously fetched twice.
+                data_types=(request.data_type,),
             )
             return
         if request.asset_class is AssetClass.CRYPTO:
@@ -78,6 +82,7 @@ class LocalEnsureLauncher:
                 provider=self._crypto_provider,
                 environ=self._environ,
                 now=self._now,
+                data_types=(request.data_type,),
             )
             return
         raise LocalIngestError(

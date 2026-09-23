@@ -123,12 +123,6 @@
 					<ToolResultCard result={entry.result} {workspaceId} />
 				</div>
 			</div>
-		{:else if entry.kind === 'thinking'}
-			<ThinkingAccordion
-				text={entry.text}
-				testId="scope-thinking-{entry.id}"
-				initiallyOpen={true}
-			/>
 		{:else if entry.kind === 'spawn'}
 			<section
 				class="rounded-xl border border-surface-700 bg-surface-950/40 p-3"
@@ -149,26 +143,11 @@
 				class="flex justify-start"
 				data-testid="scope-assistant"
 				data-role="assistant"
-				data-needs-input={entry.needsInput ? 'true' : 'false'}
 			>
-				<div
-					class="w-full p-1 {entry.needsInput
-						? 'rounded-xl border border-warn/40 bg-warn/5 p-3'
-						: ''}"
-				>
+				<div class="w-full p-1">
 					<header class="mb-1 flex items-center gap-2 text-[10px] tracking-wider">
-						<span class="text-slate-500 uppercase">
-							{entry.needsInput ? 'question' : 'assistant'}
-						</span>
+						<span class="text-slate-500 uppercase">assistant</span>
 						<span class="font-mono text-slate-500">{entry.actorId}</span>
-						{#if entry.needsInput}
-							<span
-								class="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 font-mono text-[10px] text-warn"
-								data-testid="scope-needs-input"
-							>
-								needs input
-							</span>
-						{/if}
 					</header>
 					<MarkdownBody text={entry.text} />
 				</div>

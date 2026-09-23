@@ -125,13 +125,15 @@ contracts rather than importing engine internals.
 
 A harness backtest never fails merely because a requested symbol was not
 ingested before: the harness asks the published market-lake ensure contract to
-fetch the run window's configured symbols, then polls coverage to a terminal
-status before reading the local Parquet lake. Ensure guarantees completeness:
-the lake pages every fetch until the provider cursor is exhausted, long
-windows are split into lake-sized ranges, and the harness fails fast (naming
-the sessions) when a closed session is left `partial` or errored instead of
-waiting out its one-hour bound. The lake owns provider credentials and the
-fetch; the harness only issues the ensure request.
+fetch the run window's configured symbols, then polls coverage until it is
+satisfied before reading the local Parquet lake. One ensure request covers the
+whole window — the lake plans, resumes, and retries its own fetches — and the
+lake pages every fetch until the provider cursor is exhausted. A closed
+session left `partial`, or an errored fetch, is a repairable gap the lake
+re-fetches inside the running job, so the harness keeps polling while that job
+is in flight and fails only once it settles, naming the sessions the lake
+could not complete. The lake owns provider credentials and the fetch; the
+harness only issues the ensure request.
 
 The FCA repository's root `strategies` directory remains reserved for
 repository-owned examples and reference strategies. Thesis-generated and user
@@ -1416,7 +1418,7 @@ metric values in prose.
   authentication, browser-session security, and offline/auth-failure behavior.
 - Define workspace, chat, investigation, workflow execution, event, experiment,
   evidence, strategy bundle, and consent schemas.
-- Define the public Thesis-to-lake and Thesis-to-harness client boundaries.
+- Define the public Thesis-to-harness client boundary.
 - Create the versioned workspace repository template and local workspace
   provider.
 - Initialize one CLEO project per workspace and implement the queued

@@ -10,7 +10,7 @@
  * path grammar is unit-testable without a component or the DOM.
  */
 
-export type ScopeSegmentKind = 'conversation' | 'workflow' | 'sub_agent';
+export type ScopeSegmentKind = 'conversation' | 'workflow' | 'sub_agent' | 'phase';
 
 export interface ScopeSegment {
 	kind: ScopeSegmentKind;
@@ -22,7 +22,12 @@ export interface ScopeSegment {
 	readOnly?: boolean;
 }
 
-const SCOPE_KINDS: ScopeSegmentKind[] = ['conversation', 'workflow', 'sub_agent'];
+const SCOPE_KINDS: ScopeSegmentKind[] = [
+	'conversation',
+	'workflow',
+	'sub_agent',
+	'phase'
+];
 
 function isScopeKind(value: string): value is ScopeSegmentKind {
 	return (SCOPE_KINDS as string[]).includes(value);
@@ -32,6 +37,7 @@ function isScopeKind(value: string): value is ScopeSegmentKind {
 export function defaultScopeLabel(kind: ScopeSegmentKind, id: string): string {
 	if (kind === 'conversation') return 'Conversation';
 	if (kind === 'workflow') return 'Workflow';
+	if (kind === 'phase') return `Phase ${id}`;
 	return id;
 }
 

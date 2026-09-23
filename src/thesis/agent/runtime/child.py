@@ -23,9 +23,7 @@ from thesis.agent.runtime.datum import Datum
 from thesis.agent.runtime.delivery import (
     Anchor,
     DeliveryReceipt,
-    NodeInputReceipt,
 )
-from thesis.agent.runtime.policy import AnsweringActor
 from thesis.chat import (
     ChatMessage,
     MessageRole,
@@ -224,12 +222,6 @@ class ChildConversation:
             idempotency_key=idempotency_key,
             schedule=schedule,
         )
-
-    def answer(
-        self, body: str, actor: AnsweringActor, *, idempotency_key: str | None = None
-    ) -> NodeInputReceipt:
-        """Authorize, persist, and schedule one answer for the child."""
-        return self._inner.answer(body, actor, idempotency_key=idempotency_key)
 
     def request_input(self) -> SubAgentRecord:
         """Open the child's input state so an answer may resume it."""

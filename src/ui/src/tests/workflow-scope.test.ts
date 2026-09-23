@@ -226,6 +226,156 @@ describe('WorkflowScopeController workflow-node handling', () => {
 	});
 });
 
+describe('WorkflowScopeController deterministic phase view', () => {
+	function progressEvent(cursor: number, text: string): ExecutionEvent {
+		return event(
+			'workflow.progress',
+			{ phase: 'falsification_trials', kind: 'tool', text },
+			cursor
+		);
+	}
+
+	function resultEvent(cursor: number): ExecutionEvent {
+		return event(
+			'workflow.phase_result',
+			{
+				phase: 'falsification_trials',
+				summary: 'Ran 1 falsification trial(s): 1 survived, 0 refuted.',
+				artifact: { type: 'falsification_report', totalCount: 1 }
+			},
+			cursor
+		);
+	}
+
+	it('opens a phase run view for a nodeless deterministic phase and deep-links to it', async () => {
+		// The trials phase has no durable node: only workflow-scoped events.
+		listChatSubAgents.mockResolvedValue([anchor, workflowNode, phaseNode]);
+		const controller = new WorkflowScopeController('ws-1', 'deterministic-phase');
+		controller.attach('exec-1', execution('exec-1'), { externalEvents: true });
+		await controller.ensureLoaded();
+		controller.ingestEvents([
+			event('workflow.phase', { phase: 'falsification_trials' }, 1),
+			progressEvent(2, 'Running the falsification model.'),
+			resultEvent(3)
+		]);
+
+		await controller.enterPhase('falsification_trials');
+		expect(controller.activeSegment).toMatchObject({
+			kind: 'phase',
+			id: 'falsification_trials'
+		});
+		// The segment deep-links through the `?scope=` grammar and round-trips.
+		const serialized = controller.scope.toQuery();
+		expect(serialized).toContain('phase:falsification_trials');
+		controller.detach();
+
+		const restored = new WorkflowScopeController('ws-1', 'deterministic-phase');
+		restored.attach('exec-1', execution('exec-1'), {
+			externalEvents: true,
+			scope: serialized
+		});
+		await restored.ensureLoaded();
+		expect(restored.activeSegment).toMatchObject({
+			kind: 'phase',
+			id: 'falsification_trials'
+		});
+		restored.detach();
+	});
+
+	it('filters the phase-scoped events by phase name', async () => {
+		listChatSubAgents.mockResolvedValue([anchor, workflowNode, phaseNode]);
+		const controller = new WorkflowScopeController('ws-1', 'phase-events');
+		controller.attach('exec-1', execution('exec-1'), { externalEvents: true });
+		await controller.ensureLoaded();
+		controller.ingestEvents([
+			progressEvent(1, 'Running the falsification model.'),
+			event(
+				'workflow.progress',
+				{ phase: 'verdict', kind: 'activity', text: 'Recording the verdict.' },
+				2
+			),
+			resultEvent(3)
+		]);
+
+		const trials = controller.eventsForPhase('falsification_trials');
+		expect(trials.map((item) => item.eventType)).toEqual([
+			'workflow.progress',
+			'workflow.phase_result'
+		]);
+		expect(controller.eventsForPhase('verdict')).toHaveLength(1);
+		// Sub-agent lifecycle events never leak into the phase view.
+		controller.ingestEvents([
+			event(
+				'sub_agent.progress',
+				{ subAgentId: 'phase-1', phase: 'falsification_trials' },
+				4
+			)
+		]);
+		expect(controller.eventsForPhase('falsification_trials')).toHaveLength(2);
+		controller.detach();
+	});
+
+	it('keeps a restored phase segment when the durable tree loads', async () => {
+		listChatSubAgents.mockResolvedValue([anchor, workflowNode, phaseNode]);
+		const controller = new WorkflowScopeController('ws-1', 'phase-normalize');
+		controller.attach('exec-1', execution('exec-1'), {
+			externalEvents: true,
+			scope: 'conversation:chat-1/phase:falsification_trials'
+		});
+		await controller.ensureLoaded();
+
+		expect(controller.activeSegment).toMatchObject({
+			kind: 'phase',
+			id: 'falsification_trials'
+		});
+		controller.detach();
+	});
+});
+
+describe('WorkflowScopeController chat attachment', () => {
+	it('attaches to a chat without an execution and enters a chat-spawned agent', async () => {
+		const helper = node({
+			subAgentId: 'helper-1',
+			role: 'Helper',
+			acceptsInput: true,
+			workflowExecutionId: null
+		});
+		listChatSubAgents.mockResolvedValue([helper]);
+		const controller = new WorkflowScopeController('ws-1', 'chat-mode');
+		controller.attachChat('chat-1');
+		await controller.ensureLoaded();
+
+		expect(controller.subAgentById('helper-1')).toMatchObject({ subAgentId: 'helper-1' });
+
+		controller.enterSubAgent(controller.subAgentById('helper-1')!);
+		expect(controller.activeSegment).toMatchObject({ kind: 'sub_agent', id: 'helper-1' });
+		// No execution is attached: no activity log is read for the helper.
+		expect(listExecutionEvents).not.toHaveBeenCalled();
+		expect(listNodeEvents).not.toHaveBeenCalled();
+		controller.detach();
+	});
+
+	it('refreshes the durable tree so statuses advance without an activity log', async () => {
+		const helper = node({
+			subAgentId: 'helper-1',
+			role: 'Helper',
+			workflowExecutionId: null,
+			status: 'running'
+		});
+		listChatSubAgents.mockResolvedValue([helper]);
+		const controller = new WorkflowScopeController('ws-1', 'chat-refresh');
+		controller.attachChat('chat-1');
+		await controller.ensureLoaded();
+
+		listChatSubAgents.mockResolvedValue([{ ...helper, status: 'completed' }]);
+		controller.refreshNodes();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(controller.subAgentById('helper-1')?.status).toBe('completed');
+		controller.detach();
+	});
+});
+
 describe('WorkflowScopeController launch stability', () => {
 	it('does not change the current selection when a workflow launches', async () => {
 		listChatSubAgents.mockResolvedValue([anchor]);

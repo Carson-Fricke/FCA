@@ -177,3 +177,20 @@ class WorkflowSpec[WorkflowT, RequestT, StateT]:
         return MappingProxyType(
             {phase.phase: phase.required for phase in self.phases if phase.required}
         )
+
+    @property
+    def completion_schemas(self) -> Mapping[str, Mapping[str, object]]:
+        """Return the advertised completion JSON Schema for every phase.
+
+        A phase that declares a schema gets it merged into the
+        ``request_phase_completion`` tool its agent sees, so the provider
+        constrains the contract at decode time; a phase without one keeps the
+        generic loose object schema.
+        """
+        return MappingProxyType(
+            {
+                phase.phase: phase.completion_schema
+                for phase in self.phases
+                if phase.completion_schema is not None
+            }
+        )

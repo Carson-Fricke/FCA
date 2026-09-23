@@ -22,6 +22,8 @@ from lake.ingestion.common import (
     AtomicIngestCommitter,
     StagedParquetObject,
     WriterFactory,
+    fetch_with_transient_retry,
+    is_transient_fetch_error,
 )
 from lake.providers.alpaca.records import NormalizedCryptoQuote, NormalizedCryptoTrade
 from lake.storage.parquet import ParquetMetadata, ParquetWriter
@@ -60,6 +62,9 @@ class CryptoIngestResult:
     session_date: date
     coverage: tuple[CoverageRecord, ...]
     objects: tuple[ParquetMetadata, ...]
+    #: Whether the day's fetch failure was a transport-level hiccup: the
+    #: backfill may retry it in-ensure; permanent failures are never retried.
+    retryable: bool = False
 
 
 class CryptoIngestTransaction:
@@ -99,6 +104,9 @@ class CryptoIngestTransaction:
         canonical_symbol = _canonical_pair(symbol)
         selected_types = _normalize_data_types(data_types)
         _validate_session(session)
+        # Alpaca's ``end`` parameter is inclusive, so the fetch window ends at
+        # query_end itself: a raw print stamped exactly at that bound (the UTC
+        # day close for a closed session) belongs to this day's data.
         query_end = min(
             self.now() if session.is_partial else session.close_time,
             session.close_time,
@@ -120,7 +128,11 @@ class CryptoIngestTransaction:
         fetch_error = _fetch_error(selected_types, results)
         if fetch_error is not None:
             return self._publish_error(
-                canonical_symbol, session, selected_types, fetch_error
+                canonical_symbol,
+                session,
+                selected_types,
+                fetch_error,
+                retryable=_fetch_retryable(results),
             )
 
         records = {
@@ -171,8 +183,12 @@ class CryptoIngestTransaction:
         end: datetime,
     ) -> Sequence[NormalizedCryptoTrade] | Sequence[NormalizedCryptoQuote]:
         if data_type is DataType.TRADE:
-            return await self._client.get_crypto_trades(symbol, start, end)
-        return await self._client.get_crypto_quotes(symbol, start, end)
+            return await fetch_with_transient_retry(
+                lambda: self._client.get_crypto_trades(symbol, start, end)
+            )
+        return await fetch_with_transient_retry(
+            lambda: self._client.get_crypto_quotes(symbol, start, end)
+        )
 
     def _stage(
         self,
@@ -252,6 +268,8 @@ class CryptoIngestTransaction:
         session: CoverageSession,
         data_types: Sequence[DataType],
         message: str,
+        *,
+        retryable: bool = False,
     ) -> CryptoIngestResult:
         coverage = tuple(
             CoverageRecord(
@@ -270,6 +288,7 @@ class CryptoIngestTransaction:
             session_date=session.session_date,
             coverage=coverage,
             objects=(),
+            retryable=retryable,
         )
 
 
@@ -409,7 +428,9 @@ def _validate_record_timestamp(
     if timestamp.tzinfo is None or timestamp.utcoffset() is None:
         raise ValueError(f"{symbol} record timestamp must be timezone-aware")
     normalized = timestamp.astimezone(UTC)
-    if not session.open_time <= normalized < query_end:
+    # The fetch end bound is inclusive (see run), so the final print at exactly
+    # query_end belongs to this session and must not be rejected.
+    if not session.open_time <= normalized <= query_end:
         raise ValueError(
             f"{symbol} record timestamp is outside UTC day {session.session_date}"
         )
@@ -438,6 +459,22 @@ def _fetch_error(
         if isinstance(result, BaseException):
             errors.append(f"{data_type.value}: {_error_message(result)}")
     return "; ".join(errors) if errors else None
+
+
+def _fetch_retryable(results: Sequence[object]) -> bool:
+    """Return whether every failing fetch failed transiently.
+
+    A day whose fetches failed only at the transport level (DNS, connection,
+    timeout) may be retried in-ensure; a permanent failure re-runs into the
+    same wall and must not be.
+    """
+    failures = [
+        result
+        for result in results
+        if isinstance(result, BaseException)
+        and not isinstance(result, asyncio.CancelledError)
+    ]
+    return bool(failures) and all(is_transient_fetch_error(e) for e in failures)
 
 
 def _error_message(error: BaseException) -> str:

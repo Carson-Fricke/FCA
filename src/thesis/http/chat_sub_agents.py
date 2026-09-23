@@ -46,14 +46,12 @@ from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.delivery import (
     NodeInputNotAccepted,
     NodeInputNotFound,
-    NodeInputService,
 )
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
     AnsweringActor,
     OperatorActorKind,
     OperatorPolicyDenied,
-    OperatorPolicyRegistry,
 )
 from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.agent.runtime.tree import (
@@ -88,10 +86,6 @@ CONVERSATIONS_STATE_KEY = "conversations"
 #: same string the shared auth dependency returns, for example
 #: ``"session:<account-id>"`` for a cookie session.
 AUTHENTICATED_PRINCIPAL_STATE_KEY = "authenticated_principal"
-
-#: ``request.state``/``app.state`` key holding an
-#: :class:`~thesis.agent.runtime.policy.OperatorPolicyRegistry`.
-OPERATOR_POLICIES_STATE_KEY = "operator_policies"
 
 _SESSION_PRINCIPAL_PREFIX = "session:"
 
@@ -155,17 +149,6 @@ def authenticated_principal(
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _resolve_policies(
-    request: Request, injected: OperatorPolicyRegistry | None
-) -> OperatorPolicyRegistry:
-    runtime = getattr(request.app.state, OPERATOR_POLICIES_STATE_KEY, None)
-    if isinstance(runtime, OperatorPolicyRegistry):
-        return runtime
-    if injected is not None:
-        return injected
-    return OperatorPolicyRegistry()
-
-
 def _resolve_conversations(request: Request) -> Conversations | None:
     service = getattr(request.app.state, CONVERSATIONS_STATE_KEY, None)
     return service if isinstance(service, Conversations) else None
@@ -198,6 +181,18 @@ def _node_not_executable() -> HTTPException:
         detail={
             "code": "sub_agent_without_execution",
             "message": ("sub-agent has no workflow execution; it has no activity log"),
+        },
+    )
+
+
+def _conversations_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "conversations_unavailable",
+            "message": (
+                "the conversations service is not composed; operator answers require it"
+            ),
         },
     )
 
@@ -261,7 +256,6 @@ async def _node_event_stream(
 def create_chat_sub_agent_router(
     *,
     actor_resolver: ActorResolver | None = None,
-    operator_policies: OperatorPolicyRegistry | None = None,
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
     sleeper: StreamSleeper | None = None,
     max_poll_cycles: int | None = None,
@@ -269,9 +263,9 @@ def create_chat_sub_agent_router(
     """Create the durable, chat-scoped sub-agent router.
 
     ``actor_resolver`` is the seam for the authenticated principal when the
-    application cannot set it on request state.  ``operator_policies`` is the
-    runtime-level override map for per-node answering policy; without an
-    override every node stays human-only.
+    application cannot set it on request state.  Answers are admitted by the
+    composed conversations service's operator policies; without a service the
+    route fails closed with a service-unavailable error.
     """
     router = APIRouter(
         prefix="/v1/workspaces/{workspace_id}/chats/{chat_id}",
@@ -439,25 +433,20 @@ def create_chat_sub_agent_router(
             kind=OperatorActorKind.HUMAN_OPERATOR,
         )
         conversations = _resolve_conversations(http_request)
+        if conversations is None:
+            raise _conversations_unavailable()
         try:
-            if conversations is not None:
-                conversation = conversations.get(workspace_id, sub_agent_id)
-                if conversation is None:
-                    raise NodeInputNotFound(f"sub-agent was not found: {sub_agent_id}")
-                receipt = conversation.answer(request.body, actor)
-            else:
-                service = NodeInputService(
-                    chat=chat_service,
-                    store=_store_for(chat_service),
-                    policies=_resolve_policies(http_request, operator_policies),
-                )
-                receipt = service.accept(
-                    workspace_id,
-                    chat_id,
-                    sub_agent_id,
-                    body=request.body,
-                    actor=actor,
-                )
+            # The admission layer above the one intake (REQ-A4): the trusted
+            # caller answers through the service, which runs the policy gate,
+            # the input-state check, and the resume before the intake is
+            # performed on the generalized transport.
+            receipt = conversations.answer(
+                workspace_id,
+                chat_id,
+                sub_agent_id,
+                body=request.body,
+                actor=actor,
+            )
         except NodeInputNotFound as error:
             raise _not_found() from error
         except NodeInputNotAccepted as error:
@@ -526,7 +515,6 @@ def create_chat_sub_agent_router(
 __all__ = [
     "AUTHENTICATED_PRINCIPAL_STATE_KEY",
     "CONVERSATIONS_STATE_KEY",
-    "OPERATOR_POLICIES_STATE_KEY",
     "ActorResolver",
     "ChatSubAgentMessageRequest",
     "authenticated_actor_id",

@@ -14,7 +14,7 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Protocol
 
 from harness.indicators import IndicatorSpec
@@ -30,6 +30,7 @@ from thesis.research.models import (
     FittedModelRef,
     InMemoryResearchModelStore,
     ResearchModel,
+    ResearchModelError,
     ResearchModelRef,
     ResearchModelStore,
 )
@@ -180,32 +181,33 @@ class BacktestResearchModelRunner:
         )
 
 
-#: Fallback study window start. The current instrument set (spot bitcoin ETFs)
-#: begins in January 2024; a model that needs another window declares one in its
-#: harness configuration.
-_DEFAULT_RESEARCH_START = "2024-01-01T00:00:00Z"
-
+#: Keys that name the model's sample window in its harness configuration.
 _START_WINDOW_KEYS = ("start", "start_date", "startDate", "dataStart")
 _END_WINDOW_KEYS = ("end", "end_date", "endDate", "dataEnd")
 
 
-def study_window(
-    configuration: Mapping[str, object],
-    *,
-    now: datetime | None = None,
-) -> tuple[str, str]:
+def study_window(configuration: Mapping[str, object]) -> tuple[str, str]:
     """Return the inclusive-start, exclusive-end replay window for one study.
 
-    Canonical RFC3339 ``start``/``end`` values are honoured as declared.
-    Alternate date keys are normalized to UTC midnights with an exclusive end,
-    and a missing or sentinel window falls back to the closed-session history
-    so a study never silently replays the harness's two-day synthetic default.
+    The window is the model's to declare and is piped through to the fetch
+    exactly as declared: canonical RFC3339 ``start``/``end`` values are honoured
+    verbatim, and alternate date keys are normalized to UTC midnights with an
+    exclusive end.  A bound the model never declares is a contract violation,
+    not an invitation to substitute one — silently replaying a default range is
+    how a 42-session model ends up fetching years of history it never reads.
     """
     start = _window_bound(configuration, _START_WINDOW_KEYS)
     end = _window_bound(configuration, _END_WINDOW_KEYS)
-    resolved_start = start or _DEFAULT_RESEARCH_START
-    resolved_end = end or _default_window_end(now=now)
-    return resolved_start, resolved_end
+    if start is None or end is None:
+        missing = [
+            name for name, bound in (("start", start), ("end", end)) if bound is None
+        ]
+        raise ResearchModelError(
+            "model harnessConfiguration must declare its sample window; "
+            f"missing {', '.join(missing)}. Set harnessConfiguration.start and "
+            "harnessConfiguration.end to the period the hypothesis needs."
+        )
+    return start, end
 
 
 def _window_bound(
@@ -217,6 +219,10 @@ def _window_bound(
             continue
         text = value.strip()
         if "T" in text:
+            try:
+                datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                continue
             return text
         try:
             parsed = date.fromisoformat(text)
@@ -226,18 +232,6 @@ def _window_bound(
             parsed += timedelta(days=1)
         return f"{parsed.isoformat()}T00:00:00Z"
     return None
-
-
-def _default_window_end(*, now: datetime | None = None) -> str:
-    """Return the exclusive end of the default window: today's UTC midnight.
-
-    Ending before the current day keeps the window to closed sessions only: an
-    in-progress or not-yet-open session can never be completed by an ensure and
-    would otherwise poll to the harness timeout.
-    """
-    current = datetime.now(UTC) if now is None else now.astimezone(UTC)
-    midnight = current.replace(hour=0, minute=0, second=0, microsecond=0)
-    return midnight.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _adapter_bundle(

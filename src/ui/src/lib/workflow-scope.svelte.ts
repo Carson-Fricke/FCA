@@ -103,6 +103,7 @@ export class WorkflowScopeController {
 	#readonlyCursorStore: CursorStore;
 	/** Resolves once the initial root events and sub-agent list are loaded. */
 	#initialLoad: Promise<void> | null = null;
+	#refreshingNodes = false;
 
 	constructor(workspaceId: string, hostId: string, cursorStore?: CursorStore) {
 		this.#workspaceId = workspaceId;
@@ -146,6 +147,10 @@ export class WorkflowScopeController {
 		this.#executionId = executionId;
 		const attachedExecutionId = executionId;
 		this.#chatId = options.chatId ?? execution?.chat_id ?? null;
+		// Chat-mode attaches share one empty execution id, so the fetch guards
+		// also pin the chat: a listing that resolves after a chat switch is
+		// discarded instead of merging into the new chat's tree.
+		const attachedChatId = this.#chatId;
 		this.execution = execution;
 		this.rootEvents = [];
 		this.knownNodes = [];
@@ -161,6 +166,12 @@ export class WorkflowScopeController {
 		let segments = parseScope(options.scope).filter(
 			(segment) => segment.kind !== 'workflow'
 		);
+		// Conversation identity: a parsed root naming another chat is URL
+		// residue from a previous conversation - drop it and everything after
+		// it; this conversation's own root is substituted below.
+		if (segments[0]?.kind === 'conversation' && segments[0].id !== root.id) {
+			segments = [];
+		}
 		if (!segments.some((segment) => segment.kind === 'conversation')) segments = [root, ...segments];
 		segments = applyHashTarget(segments, scopeFromHash(options.hash)).filter(
 			(segment) => segment.kind !== 'workflow'
@@ -184,7 +195,7 @@ export class WorkflowScopeController {
 		const nodesReady = this.#chatId
 			? listChatSubAgents(this.#workspaceId, this.#chatId)
 					.then((nodes) => {
-						if (this.#executionId !== attachedExecutionId) return;
+						if (this.#executionId !== attachedExecutionId || this.#chatId !== attachedChatId) return;
 						this.knownNodes = mergeNodes(this.knownNodes, nodes);
 						nodesLoaded = true;
 					})
@@ -195,7 +206,7 @@ export class WorkflowScopeController {
 		// persisted segment that names a hidden workflow node (or a node this
 		// chat does not own) is dropped instead of being restored and queried.
 		this.#initialLoad = Promise.all([eventsReady, nodesReady]).then(() => {
-			if (this.#executionId !== attachedExecutionId) return;
+			if (this.#executionId !== attachedExecutionId || this.#chatId !== attachedChatId) return;
 			if (nodesLoaded) this.normalizeScope();
 			this.restoreActiveSubscription();
 		});
@@ -210,26 +221,80 @@ export class WorkflowScopeController {
 		this.#initialLoad = null;
 	}
 
+	/**
+	 * Attach to a chat's sub-agent tree without any workflow execution.
+	 *
+	 * Chat-spawned helpers have no activity log, so nothing is subscribed and
+	 * no execution events are loaded: the durable tree alone drives
+	 * navigation, and the scoped transcripts render from the shared chat
+	 * timeline. The empty execution id keeps phase lookups unscoped and the
+	 * execution subscription dormant.
+	 */
+	attachChat(chatId: string, options: AttachOptions = {}): void {
+		this.attach('', null, { ...options, chatId, externalEvents: true });
+	}
+
+	/**
+	 * Re-fetch the durable chat sub-agent tree.
+	 *
+	 * Chat-spawned agents have no activity log, so their durable status only
+	 * advances on the record itself; the surface refreshes the tree whenever
+	 * the chat timeline moves so the spawn cards stay current without an
+	 * event stream. A refresh already in flight is skipped, not queued.
+	 */
+	refreshNodes(): void {
+		const chatId = this.#chatId;
+		if (!chatId || this.#refreshingNodes) return;
+		this.#refreshingNodes = true;
+		listChatSubAgents(this.#workspaceId, chatId)
+			.then((nodes) => {
+				if (this.#chatId !== chatId) return;
+				this.knownNodes = mergeNodes(this.knownNodes, nodes);
+			})
+			.catch(() => undefined)
+			.finally(() => {
+				this.#refreshingNodes = false;
+			});
+	}
+
 	/** Wait for the initial root events and sub-agent list to load. */
 	async ensureLoaded(): Promise<void> {
 		if (this.#initialLoad) await this.#initialLoad;
 	}
 
 	/**
-	 * Enter the sub-agent that governs a phase.
+	 * Enter the view that governs a phase.
 	 *
-	 * The phase agent is located in the projected tree (it may sit under the
-	 * launching anchor now that the implementation record is hidden) so the
-	 * operator drills straight into the actual agent — never the hidden
-	 * workflow node. The tree is awaited first so a click that races the
-	 * initial load still resolves to the real node instead of a placeholder.
+	 * An agent phase is governed by a visible node: the operator drills into
+	 * its orchestrator conversation.  A deterministic phase has no node and no
+	 * conversation (REQ-D1): entering it pushes a `phase` scope segment, whose
+	 * segment renders the run view (live progress lines, then the result).
 	 */
 	async enterPhase(phase: string, readOnly = false): Promise<void> {
 		await this.ensureLoaded();
 		const node = this.findPhaseNode(phase);
-		if (!node) return;
-		this.enterSubAgent(node);
-		if (readOnly) this.scope.updateActive({ readOnly: true });
+		if (node) {
+			this.enterSubAgent(node);
+			if (readOnly) this.scope.updateActive({ readOnly: true });
+			return;
+		}
+		this.scope.push({
+			kind: 'phase',
+			id: phase,
+			label: `Phase ${phase}`,
+			// A deterministic phase is always a read-only run view.
+			readOnly: true
+		});
+	}
+
+	/** The execution-scoped events recorded for one phase (REQ-C2). */
+	eventsForPhase(phase: string): ExecutionEvent[] {
+		return this.flatEvents.filter(
+			(event) =>
+				(event.eventType === 'workflow.progress' ||
+					event.eventType === 'workflow.phase_result') &&
+				event.payload['phase'] === phase
+		);
 	}
 
 	/** The phase agent for one phase name, scoped to this execution. */
@@ -317,9 +382,38 @@ export class WorkflowScopeController {
 	private normalizeScope(): void {
 		const segments = this.scope.segments;
 		if (!segments.length) return;
+		// The declared phase sequence this execution launched with; a phase
+		// segment naming a phase outside it belongs to another execution.
+		const declared = new Set(
+			this.rootEvents
+				.filter((event) => event.eventType === 'workflow.launched')
+				.flatMap((event) => {
+					const workflow = event.payload?.['workflow'];
+					const phases =
+						workflow && typeof workflow === 'object'
+							? (workflow as Record<string, unknown>)['phases']
+							: null;
+					return Array.isArray(phases)
+						? phases.filter((phase): phase is string => typeof phase === 'string')
+						: [];
+				})
+		);
 		const rebuilt: ScopeSegment[] = [segments[0]];
 		for (const segment of segments.slice(1)) {
-			if (segment.kind !== 'sub_agent') continue;
+			// Phase segments are view state over the event stream, not node
+			// records - but a stale one from a previous conversation's URL must
+			// not replay onto this execution. Keep it only when this run
+			// actually declared the phase.
+			if (segment.kind === 'phase') {
+				if (declared.size === 0 || declared.has(segment.id)) {
+					rebuilt.push(segment);
+				}
+				continue;
+			}
+			if (segment.kind !== 'sub_agent') {
+				rebuilt.push(segment);
+				continue;
+			}
 			const node = this.subAgentById(segment.id);
 			if (!node || isWorkflowNodeRole(node.role)) break;
 			for (const item of [...this.ancestorsOf(node), node]) {

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 
 import pytest
 
@@ -18,10 +19,10 @@ from thesis.agent.runtime.delivery import (
     DELIVERY_KEY_FIELD,
     ROOT_ANCHOR_ID,
     Anchor,
+    DeliveryError,
     DeliveryService,
     NodeInputNotAccepted,
     NodeInputNotFound,
-    NodeInputService,
 )
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
@@ -43,6 +44,7 @@ from thesis.chat.contracts import (
     SubAgentKind,
     SubAgentStatus,
     TranscriptItemKind,
+    WorkflowExecution,
 )
 from thesis.chat.service import ChatService, InMemoryChatPersistence
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
@@ -230,139 +232,6 @@ def test_deliver_child_result_reaches_a_node_anchor() -> None:
     assert second.duplicate is True
     assert first.message.data is not None
     assert first.message.data["status"] == "failed"
-
-
-def test_human_only_node_rejects_an_agent_answer() -> None:
-    chat, chat_id, store, lifecycle = _setup()
-    node = _spawn(lifecycle, chat_id)
-    scheduled: list[str] = []
-    service = NodeInputService(
-        chat=chat,
-        store=store,
-        schedule=lambda workspace, chat, node_id: scheduled.append(node_id),
-    )
-
-    with pytest.raises(OperatorPolicyDenied) as error:
-        service.accept(
-            _WORKSPACE,
-            chat_id,
-            node,
-            body="an agent answer",
-            actor=AnsweringActor("other-agent", OperatorActorKind.AGENT),
-        )
-
-    provenance = error.value.as_dict()
-    assert provenance["code"] == "operator_policy_denied"
-    assert provenance["actorKind"] == "agent"
-    assert provenance["policy"] == "human_only"
-    assert _node_scoped(chat, chat_id, node) == []
-    assert scheduled == []
-
-
-def test_authorized_parent_answer_is_accepted_with_provenance() -> None:
-    chat, chat_id, store, lifecycle = _setup()
-    parent = _spawn(lifecycle, chat_id, role="lead")
-    child = _spawn(lifecycle, chat_id, role="critique", parent_sub_agent_id=parent)
-    policies = OperatorPolicyRegistry(
-        role_policies={
-            "critique": NodeOperatorPolicy(
-                allowed_actor_kinds=frozenset(
-                    {
-                        OperatorActorKind.HUMAN_OPERATOR,
-                        OperatorActorKind.PARENT_AGENT,
-                    }
-                )
-            )
-        }
-    )
-    scheduled: list[str] = []
-    service = NodeInputService(
-        chat=chat,
-        store=store,
-        policies=policies,
-        schedule=lambda workspace, chat, node_id: scheduled.append(node_id),
-    )
-
-    receipt = service.accept(
-        _WORKSPACE,
-        chat_id,
-        child,
-        body="the parent's answer",
-        actor=AnsweringActor(parent, OperatorActorKind.PARENT_AGENT),
-        idempotency_key="answer-1",
-    )
-
-    assert receipt.decision.allowed is True
-    assert receipt.message.actor_id == parent
-    data = receipt.message.data
-    assert data is not None
-    assert data["subAgentId"] == child
-    assert data["kind"] == "operator_input"
-    assert data["actorKind"] == "parent_agent"
-    assert data["operatorPolicy"]["allowedActorKinds"] == [
-        "human_operator",
-        "parent_agent",
-    ]
-    assert scheduled == [child]
-
-    retry = service.accept(
-        _WORKSPACE,
-        chat_id,
-        child,
-        body="the parent's answer",
-        actor=AnsweringActor(parent, OperatorActorKind.PARENT_AGENT),
-        idempotency_key="answer-1",
-    )
-
-    assert retry.duplicate is True
-    assert retry.message.message_id == receipt.message.message_id
-    assert scheduled == [child]
-
-
-def test_human_operator_answer_is_accepted_by_default() -> None:
-    chat, chat_id, store, lifecycle = _setup()
-    node = _spawn(lifecycle, chat_id)
-    scheduled: list[str] = []
-    service = NodeInputService(
-        chat=chat,
-        store=store,
-        schedule=lambda workspace, chat, node_id: scheduled.append(node_id),
-    )
-
-    receipt = service.accept(
-        _WORKSPACE,
-        chat_id,
-        node,
-        body="operator answer",
-        actor=AnsweringActor("acct-9", OperatorActorKind.HUMAN_OPERATOR),
-    )
-
-    assert receipt.decision.allowed is True
-    assert receipt.message.actor_id == "acct-9"
-    assert scheduled == [node]
-
-
-def test_node_input_fails_closed_for_a_one_shot_or_unknown_node() -> None:
-    chat, chat_id, store, lifecycle = _setup()
-    node = _spawn(lifecycle, chat_id, kind=SubAgentKind.ONE_SHOT)
-    service = NodeInputService(chat=chat, store=store)
-
-    with pytest.raises(NodeInputNotAccepted):
-        service.accept(
-            _WORKSPACE,
-            chat_id,
-            node,
-            body="hello",
-            actor=AnsweringActor("acct-9"),
-        )
-    with pytest.raises(NodeInputNotFound):
-        service.accept(
-            _WORKSPACE,
-            chat_id,
-            "missing",
-            body="hello",
-            actor=AnsweringActor("acct-9"),
-        )
 
 
 def test_node_turn_runner_persists_the_transcript() -> None:
@@ -556,12 +425,14 @@ def test_operator_request_is_a_flag_at_the_asking_node_and_accepts_a_reply() -> 
     assert _node_scoped(chat, chat_id, sibling) == []
 
     # The reply path is the only resume, and a human answer needs no policy or
-    # approval configuration.
-    receipt = NodeInputService(
+    # approval configuration: the default human-only registry admits it.
+    answer_service = Conversations(
         chat=chat,
         store=store,
-        schedule=lambda workspace, chat_id, node: scheduled.append(node),
-    ).accept(
+        lifecycle=lifecycle,
+        spawn_thread=lambda target: scheduled.append("woke"),
+    )
+    receipt = answer_service.answer(
         _WORKSPACE,
         chat_id,
         asking,
@@ -569,7 +440,7 @@ def test_operator_request_is_a_flag_at_the_asking_node_and_accepts_a_reply() -> 
         actor=AnsweringActor(_ACTOR, OperatorActorKind.HUMAN_OPERATOR),
     )
     assert receipt.scheduled is True
-    assert scheduled == [asking]
+    assert scheduled == ["woke"]
     resumed = lifecycle.get(_WORKSPACE, asking)
     assert resumed is not None
     assert resumed.status is SubAgentStatus.RUNNING
@@ -646,11 +517,18 @@ def test_operator_answer_drives_the_phase_turn_to_request_phase_completion() -> 
     )
     driven: list[str] = []
 
-    def schedule(workspace_id: str, chat: str, node_id: str) -> None:
-        driven.append(node_id)
-        runner.run_node_turn(workspace_id, chat, node_id)
+    def wake(run: Callable[[], None]) -> None:
+        driven.append(phase)
+        runner.run_node_turn(_WORKSPACE, chat_id, phase)
 
-    receipt = NodeInputService(chat=chat, store=store, schedule=schedule).accept(
+    answering = Conversations(
+        chat=chat,
+        store=store,
+        lifecycle=lifecycle,
+        spawn_thread=wake,
+    )
+
+    receipt = answering.answer(
         _WORKSPACE,
         chat_id,
         phase,
@@ -710,3 +588,226 @@ def test_re_delivered_result_does_not_duplicate_a_node_turn() -> None:
     ]
     assert turns == [node]
     assert [message.body for message in assistant] == ["handled the result"]
+
+
+# -- datum-less deliveries (REQ-A1/A4 prerequisite) --------------------------
+
+
+def test_datum_less_delivery_requires_an_explicit_key_and_body() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    node = _spawn(lifecycle, chat_id)
+    service = DeliveryService(chat)
+
+    with pytest.raises(DeliveryError):
+        service.deliver(Anchor(_WORKSPACE, chat_id, node), None, body="hello")
+    with pytest.raises(DeliveryError):
+        service.deliver(
+            Anchor(_WORKSPACE, chat_id, node),
+            None,
+            idempotency_key="answer-1",
+        )
+
+
+def test_datum_less_delivery_persists_without_a_datum_payload_and_dedupes() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    node = _spawn(lifecycle, chat_id)
+    scheduled: list[str] = []
+    service = DeliveryService(
+        chat, schedule=lambda workspace, chat, node_id: scheduled.append(node_id)
+    )
+
+    first = service.deliver(
+        Anchor(_WORKSPACE, chat_id, node),
+        None,
+        body="the operator's answer",
+        role=MessageRole.USER,
+        kind=TranscriptItemKind.SUB_AGENT,
+        data={"kind": "operator_input"},
+        idempotency_key="answer-1",
+    )
+    second = service.deliver(
+        Anchor(_WORKSPACE, chat_id, node),
+        None,
+        body="the operator's answer",
+        role=MessageRole.USER,
+        kind=TranscriptItemKind.SUB_AGENT,
+        data={"kind": "operator_input"},
+        idempotency_key="answer-1",
+    )
+
+    assert first.duplicate is False
+    assert first.scheduled is True
+    assert scheduled == [node]
+    message = first.message
+    assert message.role is MessageRole.USER
+    assert message.kind is TranscriptItemKind.SUB_AGENT
+    assert message.body == "the operator's answer"
+    assert message.tool_result is None
+    assert message.data is not None
+    assert message.data == {
+        "kind": "operator_input",
+        "subAgentId": node,
+        DELIVERY_KEY_FIELD: "answer-1",
+    }
+    # The redelivery resolves to the durable message and wakes nothing.
+    assert second.duplicate is True
+    assert second.scheduled is False
+    assert second.message.message_id == first.message.message_id
+    assert scheduled == [node]
+    assert len(_node_scoped(chat, chat_id, node)) == 1
+
+
+# -- Conversations.answer: the admission layer (REQ-A4) ----------------------
+
+
+def test_answer_denies_an_agent_actor_and_persists_nothing() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    node = _spawn(lifecycle, chat_id)
+    woke: list[object] = []
+    conversations = Conversations(
+        chat=chat, store=store, lifecycle=lifecycle, spawn_thread=woke.append
+    )
+
+    with pytest.raises(OperatorPolicyDenied) as error:
+        conversations.answer(
+            _WORKSPACE,
+            chat_id,
+            node,
+            body="an agent answer",
+            actor=AnsweringActor("other-agent", OperatorActorKind.AGENT),
+            idempotency_key="answer-1",
+        )
+
+    provenance = error.value.as_dict()
+    assert provenance["code"] == "operator_policy_denied"
+    assert provenance["actorKind"] == "agent"
+    assert _node_scoped(chat, chat_id, node) == []
+    assert woke == []
+
+
+def test_answer_fails_closed_for_a_one_shot_or_unknown_node() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    node = _spawn(lifecycle, chat_id, kind=SubAgentKind.ONE_SHOT)
+    conversations = Conversations(
+        chat=chat, store=store, lifecycle=lifecycle, spawn_thread=lambda target: None
+    )
+
+    with pytest.raises(NodeInputNotAccepted):
+        conversations.answer(
+            _WORKSPACE,
+            chat_id,
+            node,
+            body="hello",
+            actor=AnsweringActor(_ACTOR),
+        )
+    with pytest.raises(NodeInputNotFound):
+        conversations.answer(
+            _WORKSPACE,
+            chat_id,
+            "missing",
+            body="hello",
+            actor=AnsweringActor(_ACTOR),
+        )
+    assert _node_scoped(chat, chat_id, node) == []
+
+
+def test_answer_resumes_wakes_and_persists_the_provenance_payload() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    parent = _spawn(lifecycle, chat_id, role="lead")
+    node = lifecycle.spawn(
+        _WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="phase", kind=SubAgentKind.ONE_SHOT, allowed_tools=()),
+        actor_id=_ACTOR,
+        parent_sub_agent_id=parent,
+        workflow_execution_id="exec-1",
+    ).sub_agent_id
+    chat.persistence.save(
+        WorkflowExecution(
+            workspace_id=_WORKSPACE,
+            execution_id="exec-1",
+            chat_id=chat_id,
+            trigger_message_id="msg-1",
+            workflow_id="hypothesis-development",
+            workflow_version="1.0.0",
+            requested_by=_ACTOR,
+            created_at=datetime.now(UTC),
+            created_by=_ACTOR,
+        )
+    )
+    lifecycle.request_input(_WORKSPACE, node)
+    woke: list[object] = []
+    conversations = Conversations(
+        chat=chat, store=store, lifecycle=lifecycle, spawn_thread=woke.append
+    )
+
+    receipt = conversations.answer(
+        _WORKSPACE,
+        chat_id,
+        node,
+        body="approved",
+        actor=AnsweringActor(_ACTOR, OperatorActorKind.HUMAN_OPERATOR),
+        idempotency_key="answer-1",
+    )
+
+    assert receipt.decision.allowed is True
+    assert receipt.duplicate is False
+    resumed = lifecycle.get(_WORKSPACE, node)
+    assert resumed is not None
+    assert resumed.status is SubAgentStatus.RUNNING
+    assert resumed.accepts_input is False
+    message = receipt.message
+    assert message.actor_id == _ACTOR
+    assert message.role is MessageRole.USER
+    assert message.kind is TranscriptItemKind.SUB_AGENT
+    assert message.body == "approved"
+    assert message.execution_id == "exec-1"
+    data = message.data
+    assert data is not None
+    assert data["subAgentId"] == node
+    assert data["parentSubAgentId"] == parent
+    assert data["kind"] == "operator_input"
+    assert data["actorKind"] == "human_operator"
+    policy = data["operatorPolicy"]
+    assert isinstance(policy, dict) and policy["allowed"] is True
+    assert data[DELIVERY_KEY_FIELD] == "answer-1"
+    assert woke != []
+
+
+def test_answer_redelivery_is_idempotent_on_an_active_conversation_node() -> None:
+    chat, chat_id, store, lifecycle = _setup()
+    parent = _spawn(lifecycle, chat_id, role="lead")
+    node = _spawn(lifecycle, chat_id, parent_sub_agent_id=parent)
+    lifecycle.request_input(_WORKSPACE, node)
+    woke: list[object] = []
+    conversations = Conversations(
+        chat=chat, store=store, lifecycle=lifecycle, spawn_thread=woke.append
+    )
+
+    first = conversations.answer(
+        _WORKSPACE,
+        chat_id,
+        node,
+        body="the answer",
+        actor=AnsweringActor(_ACTOR, OperatorActorKind.HUMAN_OPERATOR),
+        idempotency_key="answer-1",
+    )
+    resumed = lifecycle.get(_WORKSPACE, node)
+    assert resumed is not None
+    assert resumed.status is SubAgentStatus.RUNNING
+
+    retry = conversations.answer(
+        _WORKSPACE,
+        chat_id,
+        node,
+        body="the answer",
+        actor=AnsweringActor(_ACTOR, OperatorActorKind.HUMAN_OPERATOR),
+        idempotency_key="answer-1",
+    )
+
+    assert first.duplicate is False
+    assert retry.duplicate is True
+    assert retry.message.message_id == first.message.message_id
+    assert len(_node_scoped(chat, chat_id, node)) == 1
+    # The redelivery wakes nothing: one answer, one scheduled turn.
+    assert len(woke) == 1

@@ -17,7 +17,6 @@ from thesis.execution.sub_agents import (
     SubAgentContextSpec,
     SubAgentContractError,
     SubAgentTree,
-    append_gate_event,
     append_sub_agent_event,
     filter_replay,
     sub_agent_payload,
@@ -138,22 +137,6 @@ def test_append_sub_agent_event_rejects_invalid_nested_payloads() -> None:
         )
 
 
-def test_append_gate_event_rejects_non_gate_types() -> None:
-    store = InMemoryExecutionEventStore()
-    with pytest.raises(SubAgentContractError):
-        append_gate_event(
-            store,
-            execution_id=EXECUTION,
-            workspace_id=WORKSPACE,
-            event_type=ExecutionEventType.SUB_AGENT_SPAWNED,
-            occurred_at=NOW,
-            from_phase="a",
-            to_phase="b",
-            gate="g",
-            reason="r",
-        )
-
-
 def test_tree_projection_supports_depth_and_keeps_global_cursors() -> None:
     store = InMemoryExecutionEventStore()
     store.append(
@@ -222,7 +205,7 @@ def test_tree_projection_supports_depth_and_keeps_global_cursors() -> None:
     assert resumed.next_cursor == third.cursor + 1
 
 
-def test_needs_input_sets_accepts_input_until_a_gate_resolves() -> None:
+def test_needs_input_sets_accepts_input() -> None:
     store = InMemoryExecutionEventStore()
     _spawn(store, "a", None)
     append_sub_agent_event(
@@ -246,20 +229,23 @@ def test_needs_input_sets_accepts_input_until_a_gate_resolves() -> None:
     assert waiting_node.accepts_input is True
     assert waiting_node.status == STATUS_NEEDS_INPUT
 
-    append_gate_event(
+    # Completion closes the input state again.
+    append_sub_agent_event(
         store,
         execution_id=EXECUTION,
         workspace_id=WORKSPACE,
-        event_type=ExecutionEventType.WORKFLOW_GATE_RESOLVED,
+        event_type=ExecutionEventType.SUB_AGENT_COMPLETED,
         occurred_at=NOW,
-        from_phase="hypothesis",
-        to_phase="falsification_plan",
-        gate="falsifiability",
-        reason="threshold supplied",
         sub_agent_id="a",
+        parent_sub_agent_id=None,
+        phase="hypothesis",
+        role="orchestrator",
+        context=SubAgentContextSpec(),
+        accepts_input=False,
+        extra={"status": "completed", "frozen": True},
     )
 
-    resolved = SubAgentTree.from_events(EXECUTION, store.replay(EXECUTION).events)
-    resolved_node = resolved.get("a")
-    assert resolved_node is not None
-    assert resolved_node.accepts_input is False
+    completed = SubAgentTree.from_events(EXECUTION, store.replay(EXECUTION).events)
+    completed_node = completed.get("a")
+    assert completed_node is not None
+    assert completed_node.accepts_input is False

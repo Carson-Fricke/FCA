@@ -366,7 +366,10 @@ def _validate_record(
     if record.timestamp.tzinfo is None or record.timestamp.utcoffset() is None:
         raise ValueError(f"{contract.symbol} record timestamp must be timezone-aware")
     timestamp = record.timestamp.astimezone(UTC)
-    if not session.open_time <= timestamp < session.close_time:
+    # Both session bounds are inclusive: the provider fetch passes close_time
+    # as Alpaca's inclusive end, so the closing auction print stamped exactly
+    # at session close belongs to this session and must not be rejected.
+    if not session.open_time <= timestamp <= session.close_time:
         raise ValueError(
             f"{contract.symbol} record timestamp is outside session {session.session_date}"
         )

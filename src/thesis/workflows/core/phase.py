@@ -73,6 +73,7 @@ class _PhaseSpec[WorkflowT, RequestT, StateT]:
     validate: PhaseValidator | None = None
     on_complete: str | None = None
     required: tuple[str, ...] = ()
+    completion_schema: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.phase, str) or not self.phase.strip():

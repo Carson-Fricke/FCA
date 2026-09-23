@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import httpx
 import pytest
 
 from lake.catalog import (
@@ -392,6 +393,85 @@ def test_failed_crypto_fetch_publishes_atomic_error_coverage_without_objects() -
     assert committer.objects == {}
 
 
+def test_print_stamped_exactly_at_the_utc_day_close_is_published() -> None:
+    # The fetch passes query_end as Alpaca's inclusive end, so the final print
+    # stamped exactly at next UTC midnight belongs to the closed day.
+    day = date(2024, 1, 18)
+    committer = AtomicFake()
+    transaction = CryptoIngestTransaction(
+        client=FakeClient(
+            trades_by_day={
+                day: (
+                    NormalizedCryptoTrade(
+                        timestamp=datetime(2024, 1, 19, 0, 0, tzinfo=UTC),
+                        symbol="BTC/USD",
+                        trade_id=1,
+                        exchange="CBSE",
+                        price=Decimal("41234.12"),
+                        size=Decimal("0.01"),
+                        taker_side="B",
+                    ),
+                )
+            },
+            quotes_by_day={
+                day: (
+                    NormalizedCryptoQuote(
+                        timestamp=datetime(2024, 1, 19, 0, 0, tzinfo=UTC),
+                        symbol="BTC/USD",
+                        bid_exchange="CBSE",
+                        bid_price=Decimal("41234.12"),
+                        bid_size=Decimal("0.1"),
+                        ask_exchange="CBSE",
+                        ask_price=Decimal("41235.12"),
+                        ask_size=Decimal("0.2"),
+                    ),
+                )
+            },
+        ),
+        committer=committer,
+        clock=FixedClock(datetime(2024, 1, 20, tzinfo=UTC)),
+    )
+
+    result = _run(transaction.run("BTC/USD", _session(day)))
+
+    assert [record.status for record in result.coverage] == [
+        CoverageStatus.COMPLETE,
+        CoverageStatus.COMPLETE,
+    ]
+    assert [record.row_count for record in result.coverage] == [1, 1]
+    assert {record.session_date for record in committer.catalog.list()} == {day}
+
+
+def test_print_stamped_after_the_utc_day_close_is_rejected() -> None:
+    day = date(2024, 1, 18)
+    committer = AtomicFake()
+    transaction = CryptoIngestTransaction(
+        client=FakeClient(
+            trades_by_day={
+                day: (
+                    NormalizedCryptoTrade(
+                        timestamp=datetime(2024, 1, 19, 0, 0, 0, 500000, tzinfo=UTC),
+                        symbol="BTC/USD",
+                        trade_id=1,
+                        exchange="CBSE",
+                        price=Decimal("41234.12"),
+                        size=Decimal("0.01"),
+                        taker_side="B",
+                    ),
+                )
+            },
+        ),
+        committer=committer,
+        clock=FixedClock(datetime(2024, 1, 20, tzinfo=UTC)),
+    )
+
+    result = _run(transaction.run("BTC/USD", _session(day)))
+
+    assert result.objects == ()
+    assert all(record.status is CoverageStatus.ERROR for record in result.coverage)
+    assert "outside UTC day" in (result.coverage[0].error_message or "")
+
+
 def test_crypto_handler_is_a_queue_worker_handler_and_rejects_non_crypto_messages() -> (
     None
 ):
@@ -411,3 +491,61 @@ def test_crypto_handler_is_a_queue_worker_handler_and_rejects_non_crypto_message
                 )
             )
         )
+
+
+class _BlipCryptoClient(FakeClient):
+    def __init__(
+        self,
+        failures: int,
+        *,
+        trades_by_day: Mapping[date, Sequence[NormalizedCryptoTrade]] | None = None,
+        quotes_by_day: Mapping[date, Sequence[NormalizedCryptoQuote]] | None = None,
+    ) -> None:
+        super().__init__(trades_by_day=trades_by_day, quotes_by_day=quotes_by_day)
+        self.failures = failures
+
+    async def get_crypto_trades(
+        self, pair: str, start: date | datetime | str, end: date | datetime | str
+    ) -> Sequence[NormalizedCryptoTrade]:
+        assert isinstance(start, datetime)
+        assert isinstance(end, datetime)
+        self.calls.append(("trade", pair, start, end))
+        if self.failures > 0:
+            self.failures -= 1
+            raise httpx.ConnectError("temporary DNS failure")
+        return self.trades_by_day.get(start.date(), ())
+
+
+def test_crypto_transient_fetch_blip_is_retried_within_the_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "lake.ingestion.common.TRANSIENT_RETRY_BASE_DELAY_SECONDS", 0.0
+    )
+    day = date(2024, 1, 18)
+    client = _BlipCryptoClient(
+        2,
+        trades_by_day={day: (_trade(day),)},
+        quotes_by_day={day: (_quote(day),)},
+    )
+    committer = AtomicFake()
+    transaction = CryptoIngestTransaction(
+        client=client,
+        committer=committer,
+        clock=FixedClock(datetime(2024, 1, 20, tzinfo=UTC)),
+    )
+
+    result = _run(transaction.run("BTC/USD", _session(day)))
+
+    kinds = [call[0] for call in client.calls]
+    assert kinds.count("trade") == 3
+    assert kinds.count("quote") == 1
+    assert result.retryable is False
+    assert [record.status.value for record in result.coverage] == [
+        "complete",
+        "complete",
+    ]
+    assert [record.row_count for record in result.coverage] == [1, 1]
+    assert len(committer.objects) == 2
+
+

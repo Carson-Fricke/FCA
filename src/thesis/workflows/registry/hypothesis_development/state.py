@@ -43,7 +43,6 @@ class HypothesisDevelopmentState:
     research_model_runtime_configuration: Mapping[str, object] | None = None
     plan: FalsificationPlan | None = None
     trials: tuple[FalsificationTrial, ...] = ()
-    falsification_prose: str | None = None
     hypothesis_cycles: int = 0
     rca: tuple[RcaDiagnosis, ...] = ()
     verdict: FalsificationVerdict | None = None

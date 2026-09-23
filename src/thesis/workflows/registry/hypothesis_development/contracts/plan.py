@@ -16,20 +16,6 @@ from ..primitives import (
 
 
 @dataclass(frozen=True, slots=True)
-class PlannedTest:
-    """One planned falsifier test before it is bound to a declared falsifier."""
-
-    test_id: str
-    falsifier_id: str
-    description: str
-
-    def __post_init__(self) -> None:
-        _identifier(self.test_id, "test_id")
-        _identifier(self.falsifier_id, "falsifier_id")
-        _text(self.description, "test description", max_length=2_048)
-
-
-@dataclass(frozen=True, slots=True)
 class PlaceboControl:
     """One negative/placebo control that should not show the claimed edge."""
 
@@ -41,14 +27,6 @@ class PlaceboControl:
         _identifier(self.control_id, "control_id")
         _text(self.description, "control description", max_length=2_048)
         _text(self.expectation, "control expectation", max_length=2_048)
-
-
-@dataclass(frozen=True, slots=True)
-class FalsificationPlanDraft:
-    """The model-authored plan before falsifier binding."""
-
-    tests: tuple[PlannedTest, ...]
-    controls: tuple[PlaceboControl, ...]
 
 
 @dataclass(frozen=True, slots=True)

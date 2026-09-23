@@ -43,6 +43,14 @@
 	let drafting = $state(false);
 	/** The conversation queued for modal delete confirmation. */
 	let deleteTarget = $state<ChatThread | null>(null);
+	/**
+	 * The scope/hash deep link is a mount-time URL carrier: captured once so
+	 * a scoped load (F5/deep link) restores its view, and dropped on any
+	 * conversation switch so the surface attaches at the root instead of
+	 * replaying a view that belongs to the previous conversation.
+	 */
+	let scopeGrant = $state<string | null>(page.url.searchParams.get('scope'));
+	let hashGrant = $state<string | null>(page.url.hash);
 	const timeline = new TimelineController();
 	const messages = $derived(timeline.messages);
 	const events = $derived(timeline.events);
@@ -100,7 +108,9 @@
 			return;
 		}
 		let cancelled = false;
-		const requested = page.url.searchParams.get('chat');
+		// `page.url` is frozen at mount (replaceState never updates it), so
+		// the live address bar is the only correct scope source here.
+		const requested = new URL(location.href).searchParams.get('chat');
 		if (requested !== id) {
 			replaceState(`/w/${workspaceId}/conversations?chat=${id}`, {});
 		}
@@ -121,6 +131,8 @@
 		deleteTarget = null;
 		chatId = null;
 		execution = null;
+		scopeGrant = null;
+		hashGrant = null;
 		replaceState(`/w/${workspaceId}/conversations`, {});
 	}
 
@@ -209,7 +221,8 @@
 
 	/** Reflect the in-pane scope path in the conversation URL. */
 	function syncScope(scope: string): void {
-		const url = new URL(page.url);
+		// `page.url` is frozen at mount; the live address bar is the truth.
+		const url = new URL(location.href);
 		const current = url.searchParams.get('scope') ?? '';
 		if (current === scope) return;
 		if (scope) url.searchParams.set('scope', scope);
@@ -218,6 +231,13 @@
 	}
 
 	function switchChat(id: string): void {
+		// The URL is the scope carrier: switching conversations drops any
+		// `?scope=` from the previous conversation's drill-in *before* the
+		// surface re-attaches, so its scope reset lands on the conversation
+		// root instead of replaying a segment that belongs to another chat.
+		replaceState(`/w/${workspaceId}/conversations?chat=${id}`, {});
+		scopeGrant = null;
+		hashGrant = null;
 		chatId = id;
 		drafting = false;
 		deleteTarget = null;
@@ -342,8 +362,8 @@
 			onScopeChange={syncScope}
 			hostId="conversation"
 			rootLabel={selectedChat?.title ?? 'Conversation'}
-			initialScope={page.url.searchParams.get('scope')}
-			initialHash={page.url.hash}
+			initialScope={scopeGrant}
+			initialHash={hashGrant}
 		/>
 	</section>
 

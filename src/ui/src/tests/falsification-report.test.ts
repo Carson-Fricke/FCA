@@ -25,7 +25,10 @@ const mockReportData: FalsificationReportData = {
 			threshold: 4680,
 			observed: 25000,
 			falsified: false,
-			description: 'Requires at least 4680 5-min bars.'
+			description: 'Requires at least 4680 5-min bars.',
+			detail: 'Observed 25000 5-min bars across the evaluation window.',
+			runId: 'run_t01',
+			runState: 'completed'
 		},
 		{
 			testId: 'T02_no_underperformance_alpha',
@@ -69,7 +72,9 @@ describe('FalsificationReportCard', () => {
 		render(FalsificationReportCard, { props: { data: mockReportData } });
 
 		expect(screen.getByTestId('falsification-report-card')).toBeInTheDocument();
-		expect(screen.getByTestId('falsification-badge')).toHaveTextContent('7/7 Trials Survived');
+		// The mock carries stale backend counts (7/7) next to 3 rendered trials;
+		// the badge must report what is actually rendered.
+		expect(screen.getByTestId('falsification-badge')).toHaveTextContent('3/3 Trials Survived');
 		expect(screen.getByTestId('falsification-claim')).toHaveTextContent(
 			'MSTR underperforms IBIT'
 		);
@@ -85,6 +90,131 @@ describe('FalsificationReportCard', () => {
 		expect(statuses[0]).toHaveTextContent('SURVIVED');
 		expect(screen.getByText('T01_insufficient_bars')).toBeInTheDocument();
 		expect(screen.getByText('T02_no_underperformance_alpha')).toBeInTheDocument();
+	});
+
+	it('renders per-trial evidence: observed value, condition, detail, and run state', () => {
+		render(FalsificationReportCard, { props: { data: mockReportData } });
+
+		const row = screen.getByTestId('trial-row-T01_insufficient_bars');
+		expect(row).toBeInTheDocument();
+		expect(row).toHaveTextContent('T01_insufficient_bars');
+		expect(row).toHaveTextContent('observed 25000.00');
+		expect(row).toHaveTextContent('falsifies when lt 4680.00');
+		expect(screen.getByTestId('trial-detail')).toHaveTextContent(
+			'Observed 25000 5-min bars across the evaluation window.'
+		);
+		expect(screen.getByTestId('trial-run')).toHaveTextContent('completed');
+		expect(screen.getByTestId('trial-run')).toHaveTextContent('run run_t01');
+	});
+
+	it('renders a refuted badge and loss-styled observed value for a falsified trial', () => {
+		const refutedReport: FalsificationReportData = {
+			...mockReportData,
+			trials: [
+				{
+					testId: 'T04_alpha_fired',
+					falsifierId: 'no_underperformance_alpha',
+					observable: 'alpha',
+					condition: 'gte',
+					threshold: -0.000005,
+					observed: 0.0004,
+					falsified: true,
+					detail: 'Positive alpha contradicts the claimed underperformance.'
+				}
+			]
+		};
+
+		render(FalsificationReportCard, { props: { data: refutedReport } });
+
+		const row = screen.getByTestId('trial-row-T04_alpha_fired');
+		expect(screen.getByTestId('trial-status')).toHaveTextContent('REFUTED');
+		expect(screen.getByTestId('trial-observed')).toHaveTextContent('observed 0.0004');
+		expect(row).toHaveTextContent('Positive alpha contradicts the claimed underperformance.');
+	});
+
+	it('distinguishes no evidence (observed null) from a fired zero observation', () => {
+		const mixedReport: FalsificationReportData = {
+			...mockReportData,
+			trials: [
+				{
+					testId: 'T05_pending',
+					falsifierId: 'f_pending',
+					observable: 'hit_rate',
+					condition: 'lt',
+					threshold: 0.5,
+					observed: null,
+					falsified: false
+				},
+				{
+					testId: 'T06_zero_fired',
+					falsifierId: 'f_zero',
+					observable: 'hit_rate',
+					condition: 'lt',
+					threshold: 0.5,
+					observed: 0,
+					falsified: true
+				}
+			]
+		};
+
+		render(FalsificationReportCard, { props: { data: mixedReport } });
+
+		const pendingRow = screen.getByTestId('trial-row-T05_pending');
+		expect(pendingRow).toHaveTextContent('NO EVIDENCE');
+		expect(pendingRow).toHaveTextContent('no observation recorded');
+		expect(pendingRow).not.toHaveTextContent('0.0000');
+
+		const zeroRow = screen.getByTestId('trial-row-T06_zero_fired');
+		expect(zeroRow).toHaveTextContent('REFUTED');
+		expect(zeroRow).toHaveTextContent('observed 0.0000');
+		expect(zeroRow).not.toHaveTextContent('no observation recorded');
+	});
+
+	it('derives summary counts from the rendered trial rows, not backend tallies', () => {
+		const dishonestCounts: FalsificationReportData = {
+			...mockReportData,
+			passedCount: 4,
+			falsifiedCount: 0,
+			totalCount: 4,
+			survived: true,
+			trials: [
+				{
+					testId: 'T07_pass',
+					falsifierId: 'f1',
+					observable: 'alpha',
+					condition: 'lt',
+					threshold: 0,
+					observed: -0.01,
+					falsified: false
+				},
+				{
+					testId: 'T08_refuted',
+					falsifierId: 'f2',
+					observable: 'beta',
+					condition: 'lt',
+					threshold: 1,
+					observed: 1.4,
+					falsified: true
+				},
+				{
+					testId: 'T09_pending',
+					falsifierId: 'f3',
+					observable: 'half_life',
+					condition: 'gt',
+					threshold: 0,
+					observed: null,
+					falsified: false
+				}
+			]
+		};
+
+		render(FalsificationReportCard, { props: { data: dishonestCounts } });
+
+		expect(screen.getByTestId('falsification-badge')).toHaveTextContent('1/3 Refuted');
+		const statuses = screen.getAllByTestId('trial-status');
+		expect(statuses).toHaveLength(3);
+		expect(statuses[1]).toHaveTextContent('REFUTED');
+		expect(statuses[2]).toHaveTextContent('NO EVIDENCE');
 	});
 
 	it('shows control specifications without inventing a null distribution', async () => {

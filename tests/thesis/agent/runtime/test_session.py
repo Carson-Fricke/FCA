@@ -213,3 +213,76 @@ def test_iteration_cap_stops_a_runaway_loop() -> None:
     )
     result = session.run([ProviderChatMessage(role="user", content="go")])
     assert result.status == "iterations_exhausted"
+
+
+def _capturing_tool(captured: list[Mapping[str, object]]) -> RegisteredTool:
+    def handler(arguments: Mapping[str, object]) -> ToolExecution:
+        captured.append(dict(arguments))
+        return ToolExecution(ok=True, structured={"ran": True}, text="done")
+
+    return RegisteredTool(_function_spec("probe"), handler)
+
+
+def test_fenced_tool_arguments_are_recovered_in_turn() -> None:
+    captured: list[Mapping[str, object]] = []
+    provider = _FakeProvider(
+        [
+            _completion(
+                tool_calls=(
+                    ToolCall(
+                        id="call-1",
+                        name="probe",
+                        arguments='```json\n{"payload": "fenced"}\n```',
+                    ),
+                )
+            ),
+            _completion(content="recovered"),
+        ]
+    )
+    session, _ = _session(provider, [_capturing_tool(captured)])
+    result = session.run([ProviderChatMessage(role="user", content="go")])
+
+    assert captured == [{"payload": "fenced"}]
+    assert result.content == "recovered"
+
+
+def test_prose_wrapped_tool_arguments_are_recovered_in_turn() -> None:
+    captured: list[Mapping[str, object]] = []
+    provider = _FakeProvider(
+        [
+            _completion(
+                tool_calls=(
+                    ToolCall(
+                        id="call-1",
+                        name="probe",
+                        arguments='Here is the call: {"payload": "embedded"} — enjoy',
+                    ),
+                )
+            ),
+            _completion(content="recovered"),
+        ]
+    )
+    session, _ = _session(provider, [_capturing_tool(captured)])
+    result = session.run([ProviderChatMessage(role="user", content="go")])
+
+    assert captured == [{"payload": "embedded"}]
+    assert result.content == "recovered"
+
+
+def test_unrecoverable_arguments_fail_with_an_actionable_message() -> None:
+    provider = _FakeProvider(
+        [
+            _completion(
+                tool_calls=(
+                    ToolCall(id="call-1", name="probe", arguments="not json at all"),
+                )
+            ),
+            _completion(content="recovered"),
+        ]
+    )
+    session, _ = _session(provider)
+    result = session.run([ProviderChatMessage(role="user", content="go")])
+
+    assert result.content == "recovered"
+    assert result.turns[1].role == "tool"
+    assert "tolerant recovery" in result.turns[1].content

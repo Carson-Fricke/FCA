@@ -13,8 +13,6 @@ from thesis.chat.contracts import (
     ChatThread,
     SubAgentStatus,
     WorkflowDefinition,
-    WorkflowExecutionState,
-    replace_record,
 )
 from thesis.chat.service import ChatService, InMemoryChatPersistence
 
@@ -98,25 +96,6 @@ def test_reconcile_cancels_a_stopped_executions_node_and_descendants() -> None:
     assert set(cancelled) == {node, phase}
     assert _status(chat, node) is SubAgentStatus.CANCELLED
     assert _status(chat, phase) is SubAgentStatus.CANCELLED
-
-
-def test_reconcile_cancels_a_paused_executions_node() -> None:
-    chat = _service()
-    chat_id = _chat(chat)
-    execution_id = _execution(chat, chat_id)
-    node = _spawn(chat, chat_id, workflow_execution_id=execution_id)
-    # A paused row can only arrive from history: nothing writes the state
-    # anymore. A restart leaves no worker able to continue it, so its node is
-    # stranded exactly like a stopped one's.
-    execution = chat.get_execution(_WORKSPACE, execution_id)
-    chat.persistence.save(
-        replace_record(execution, state=WorkflowExecutionState.PAUSED)
-    )
-
-    cancelled = reconcile_stranded_sub_agents(chat, _WORKSPACE)
-
-    assert cancelled == (node,)
-    assert _status(chat, node) is SubAgentStatus.CANCELLED
 
 
 def test_reconcile_cancels_a_node_whose_execution_is_absent() -> None:

@@ -68,8 +68,15 @@ from thesis.chat.contracts import (  # noqa: E402
     WorkflowExecutionState,
 )
 from thesis.chat.streaming import InMemoryChatStreamBroker  # noqa: E402
-from thesis.chat.workflow_launcher import RuntimeWorkflowLauncher  # noqa: E402
-from thesis.cosmos.stack import open_cosmos_chat_stack  # noqa: E402
+from thesis.chat.workflow_launcher import (  # noqa: E402
+    Detach,
+    RuntimeWorkflowLauncher,
+    daemon_thread,
+)
+from thesis.cosmos.stack import (  # noqa: E402
+    open_cosmos_chat_stack,
+    open_execution_store,
+)
 from thesis.http.application import (  # noqa: E402
     create_app,
     serving_workspace_store,
@@ -102,6 +109,7 @@ from thesis.strategies.validation import (  # noqa: E402
     StrategyValidationRequest,
     StrategyValidationResult,
 )
+from thesis.workflows.core.execution_store import ExecutionStore  # noqa: E402
 from thesis.workflows.local import McpBacktestRunner, McpStudyRunner  # noqa: E402
 from thesis.workflows.registry.hypothesis_development import (  # noqa: E402
     HypothesisDevelopmentRequest,
@@ -294,6 +302,8 @@ def _development_runtime(
     model_provider: OpenRouterProvider,
     harness_tools: HarnessToolProvider,
     conversations: Conversations | None = None,
+    execution_store: ExecutionStore | None = None,
+    detach: Detach | None = None,
 ):
     """Compose the workflow runtime for the falsification-first pipeline."""
     skills = SkillRegistry()
@@ -342,6 +352,8 @@ def _development_runtime(
         strategy_validator=_StructuralStrategyValidator(),
         hypothesis_store=WorkspaceHypothesisStore(WORKSPACE_ROOT),
         conversations=conversations,
+        execution_store=execution_store,
+        detach=detach,
     )
 
 
@@ -435,6 +447,30 @@ if os.environ.get("OPENROUTER_API_KEY"):
         workflow = workflow_runtime.build_hypothesis_development(chat=chat_service)
         return workflow.apply_phase_completion(request, record.sub_agent_id, completion)
 
+    def _phase_completion_schema(
+        context: ToolContext,
+    ) -> Mapping[str, object] | None:
+        """Resolve the phase's advertised completion schema for one node.
+
+        A phase agent's record carries the phase it orchestrates, so the
+        workflow's declared completion schemas are looked up by name; a root
+        chat context or a chat-spawned helper keeps the generic tool schema.
+        """
+        if (
+            workflow_runtime is None
+            or subagent_store is None
+            or not context.workflow_execution_id
+            or not context.sub_agent_id
+        ):
+            return None
+        record = subagent_store.get_sub_agent(
+            context.workspace_id, context.sub_agent_id
+        )
+        if record is None or not record.phase or not record.workflow_execution_id:
+            return None
+        workflow = workflow_runtime.build_hypothesis_development(chat=chat_service)
+        return workflow.spec.completion_schemas.get(record.phase)
+
     def _registry_for(context: ToolContext):
         return build_session_registry(
             context=context,
@@ -442,6 +478,7 @@ if os.environ.get("OPENROUTER_API_KEY"):
             control=control_service,
             workflow=launcher,
             spawn_policy=spawn_policy,
+            phase_completion_schema=_phase_completion_schema(context),
         )
 
     def _fail_phase_execution(record: SubAgentRecord, error: Exception) -> None:
@@ -505,7 +542,17 @@ if os.environ.get("OPENROUTER_API_KEY"):
     )
     if harness_tools is not None:
         workflow_runtime = _development_runtime(
-            model_provider, harness_tools, conversations
+            model_provider,
+            harness_tools,
+            conversations,
+            # The execution store shares the Cosmos database with the chat
+            # stack: one durable document per workflow execution, independent
+            # of chat deletion.
+            open_execution_store(),
+            # A phase completion returns when its transition commits; the
+            # successor phase (including a deterministic run such as the
+            # falsification trials) runs out of band on this seam.
+            detach=daemon_thread,
         )
     launcher = (
         None

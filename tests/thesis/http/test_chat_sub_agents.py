@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from thesis.agent.runtime.delivery import NodeInputService
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.policy import (
     NodeOperatorPolicy,
@@ -77,8 +77,23 @@ def _with_principal(app: FastAPI, principal: str) -> FastAPI:
     return app
 
 
-def _client(chat: ChatService) -> TestClient:
-    return TestClient(create_app(bearer_token=TOKEN, chat_service=chat))
+def _client(
+    chat: ChatService, conversations: Conversations | None = None
+) -> TestClient:
+    return TestClient(
+        create_app(bearer_token=TOKEN, chat_service=chat, conversations=conversations)
+    )
+
+
+def _conversations(chat: ChatService) -> Conversations:
+    """Compose the conversations service the answer route is admitted through."""
+    store = PersistenceSubAgentStore(chat.persistence)
+    return Conversations(
+        chat=chat,
+        store=store,
+        lifecycle=SubAgentLifecycle(chat, store=store),
+        spawn_thread=lambda target: None,
+    )
 
 
 def _spawn(
@@ -169,7 +184,7 @@ def test_operator_input_uses_the_authenticated_actor() -> None:
     chat, chat_id = _service()
     child = _spawn(chat, chat_id)
 
-    response = _client(chat).post(
+    response = _client(chat, _conversations(chat)).post(
         f"/v1/workspaces/{WORKSPACE}/chats/{chat_id}/sub_agents/{child}/messages",
         headers=_headers(),
         json={"body": "please continue"},
@@ -229,15 +244,23 @@ def test_operator_input_fails_closed_without_an_exposed_principal() -> None:
 def test_operator_policy_denial_fails_closed_with_provenance() -> None:
     chat, chat_id = _service()
     child = _spawn(chat, chat_id)
+    # A conversations service whose registry allows no actor kinds: the
+    # admission layer denies every answer before anything is persisted.
+    conversations = Conversations(
+        chat=chat,
+        store=PersistenceSubAgentStore(chat.persistence),
+        lifecycle=SubAgentLifecycle(
+            chat, store=PersistenceSubAgentStore(chat.persistence)
+        ),
+        policies=OperatorPolicyRegistry(
+            default=NodeOperatorPolicy(allowed_actor_kinds=frozenset())
+        ),
+        spawn_thread=lambda target: None,
+    )
     app = FastAPI()
     app.state.chat_service = chat
-    app.include_router(
-        create_chat_sub_agent_router(
-            operator_policies=OperatorPolicyRegistry(
-                default=NodeOperatorPolicy(allowed_actor_kinds=frozenset())
-            )
-        )
-    )
+    app.state.conversations = conversations
+    app.include_router(create_chat_sub_agent_router())
     _with_principal(app, SESSION_PRINCIPAL)
     client = TestClient(app)
 
@@ -258,7 +281,7 @@ def test_one_shot_child_rejects_unsolicited_input() -> None:
     chat, chat_id = _service()
     child = _spawn(chat, chat_id, kind=SubAgentKind.ONE_SHOT)
 
-    response = _client(chat).post(
+    response = _client(chat, _conversations(chat)).post(
         f"/v1/workspaces/{WORKSPACE}/chats/{chat_id}/sub_agents/{child}/messages",
         headers=_headers(),
         json={"body": "hello"},
@@ -268,15 +291,36 @@ def test_one_shot_child_rejects_unsolicited_input() -> None:
     assert response.json()["error"]["code"] == "sub_agent_not_accepting_input"
 
 
+def test_operator_answer_fails_closed_without_the_conversations_service() -> None:
+    """Without the conversations service the answer route fails closed."""
+    chat, chat_id = _service()
+    child = _spawn(chat, chat_id)
+    app = FastAPI()
+    app.state.chat_service = chat
+    app.include_router(create_chat_sub_agent_router())
+    _with_principal(app, SESSION_PRINCIPAL)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/v1/workspaces/{WORKSPACE}/chats/{chat_id}/sub_agents/{child}/messages",
+        json={"body": "please continue"},
+    )
+
+    assert response.status_code == 503
+    body = response.json()["detail"]
+    assert body["code"] == "conversations_unavailable"
+    assert chat.list_messages(WORKSPACE, chat_id) == ()
+
+
 def test_operator_answer_resumes_a_paused_node() -> None:
     chat, chat_id = _service()
     child = _spawn(chat, chat_id, kind=SubAgentKind.ONE_SHOT)
     store = PersistenceSubAgentStore(chat.persistence)
-    NodeInputService(chat=chat, store=store).request_input(WORKSPACE, child)
+    SubAgentLifecycle(chat, store=store).request_input(WORKSPACE, child)
     paused = store.get_sub_agent(WORKSPACE, child)
     assert paused is not None and paused.status is SubAgentStatus.NEEDS_INPUT
 
-    response = _client(chat).post(
+    response = _client(chat, _conversations(chat)).post(
         f"/v1/workspaces/{WORKSPACE}/chats/{chat_id}/sub_agents/{child}/messages",
         headers=_headers(),
         json={"body": "please continue"},
@@ -593,6 +637,83 @@ def test_cancel_is_chat_scoped_and_idempotent() -> None:
     assert stored_other is not None and stored_other.status is SubAgentStatus.PENDING
 
 
+def test_operator_answer_routes_through_the_conversations_service() -> None:
+    """With the service bound, the answer is admitted by Conversations.answer."""
+    chat, chat_id = _service()
+    child = _spawn(chat, chat_id)
+    store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(chat, store=store)
+    SubAgentLifecycle(chat, store=store).request_input(WORKSPACE, child)
+    woke: list[object] = []
+    conversations = Conversations(
+        chat=chat,
+        store=store,
+        lifecycle=lifecycle,
+        policies=OperatorPolicyRegistry(),
+        spawn_thread=woke.append,
+    )
+    app = FastAPI()
+    app.state.chat_service = chat
+    app.state.conversations = conversations
+    app.state.operator_policies = OperatorPolicyRegistry()
+    app.include_router(create_chat_sub_agent_router())
+    _with_principal(app, SESSION_PRINCIPAL)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/v1/workspaces/{WORKSPACE}/chats/{chat_id}/sub_agents/{child}/messages",
+        json={"body": "please continue"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["subAgentId"] == child
+    assert response.json()["operatorPolicy"]["allowed"] is True
+    persisted = [
+        message
+        for message in chat.list_messages(WORKSPACE, chat_id)
+        if message.body == "please continue"
+    ]
+    assert len(persisted) == 1
+    message = persisted[0]
+    assert message.data is not None
+    assert message.data["kind"] == "operator_input"
+    assert message.data["subAgentId"] == child
+    assert message.data["actorKind"] == "human_operator"
+    assert message.data["deliveryKey"]
+    # The admission resumed the node and scheduled exactly one turn.
+    resumed = store.get_sub_agent(WORKSPACE, child)
+    assert resumed is not None and resumed.status is SubAgentStatus.RUNNING
+    assert len(woke) == 1
+
+
+def test_operator_answer_via_the_service_fails_closed_for_unknown_nodes() -> None:
+    chat, chat_id = _service()
+    store = PersistenceSubAgentStore(chat.persistence)
+    conversations = Conversations(
+        chat=chat,
+        store=store,
+        lifecycle=SubAgentLifecycle(chat, store=store),
+        policies=OperatorPolicyRegistry(),
+        spawn_thread=lambda target: None,
+    )
+    app = FastAPI()
+    app.state.chat_service = chat
+    app.state.conversations = conversations
+    app.state.operator_policies = OperatorPolicyRegistry()
+    app.include_router(create_chat_sub_agent_router())
+    _with_principal(app, SESSION_PRINCIPAL)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/v1/workspaces/{WORKSPACE}/chats/{chat_id}/sub_agents/missing/messages",
+        json={"body": "hello"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "sub_agent_not_found"
+    assert chat.list_messages(WORKSPACE, chat_id) == ()
+
+
 def test_operator_request_leaves_siblings_and_the_workflow_untouched() -> None:
     chat, chat_id = _service()
     execution_id = _execution(chat, chat_id)
@@ -615,7 +736,7 @@ def test_operator_request_leaves_siblings_and_the_workflow_untouched() -> None:
         kind=SubAgentKind.ONE_SHOT,
         start=True,
     )
-    client = _client(chat)
+    client = _client(chat, _conversations(chat))
     store = PersistenceSubAgentStore(chat.persistence)
 
     # A one-shot agent normally forbids interruption...
@@ -628,7 +749,7 @@ def test_operator_request_leaves_siblings_and_the_workflow_untouched() -> None:
 
     # ...and asking is a flag on that one node: no approval, no policy
     # configuration, and no execution state change is required.
-    NodeInputService(chat=chat, store=store).request_input(WORKSPACE, asking)
+    SubAgentLifecycle(chat, store=store).request_input(WORKSPACE, asking)
 
     waiting = store.get_sub_agent(WORKSPACE, asking)
     assert waiting is not None
@@ -644,10 +765,6 @@ def test_operator_request_leaves_siblings_and_the_workflow_untouched() -> None:
     assert (
         chat.get_execution(WORKSPACE, execution_id).state
         is WorkflowExecutionState.RUNNING
-    )
-    assert not any(
-        event.event_type is ExecutionEventType.WORKFLOW_PAUSED
-        for event in chat.replay_events(WORKSPACE, execution_id).events
     )
 
     # The reply path accepts the answer with the default human-only policy.

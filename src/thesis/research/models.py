@@ -20,6 +20,18 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol, cast
 
+from thesis.research.grammar import (
+    IDENTIFIER as _IDENTIFIER,
+)
+from thesis.research.grammar import (
+    NAME as _NAME,
+)
+from thesis.research.grammar import (
+    PYTHON_IDENTIFIER as _PYTHON_IDENTIFIER,
+)
+from thesis.research.grammar import (
+    VERSION as _VERSION,
+)
 from thesis.research.indicators import (
     IndicatorRef,
     IndicatorScope,
@@ -30,9 +42,6 @@ from thesis.research.indicators import (
 
 MODEL_DIRECTORY = "models"
 _HASH_DOMAIN = b"fca:thesis-research-model:v1\0"
-_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
-_NAME = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
-_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
 _WORKSPACE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
@@ -187,7 +196,10 @@ class ResearchModel:
             (self.fit_entrypoint, "fit_entrypoint"),
             (self.observe_entrypoint, "observe_entrypoint"),
         ):
-            if not isinstance(entrypoint, str) or not entrypoint.isidentifier():
+            if (
+                not isinstance(entrypoint, str)
+                or _PYTHON_IDENTIFIER.fullmatch(entrypoint) is None
+            ):
                 raise ResearchModelError(f"{label} must be a Python identifier")
         try:
             tree = ast.parse(self.source, filename=f"<{self.model_id}>", mode="exec")

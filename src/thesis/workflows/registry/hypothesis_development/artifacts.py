@@ -16,9 +16,6 @@ from .contracts import (
     HypothesisDevelopmentRequest,
     HypothesisDraft,
 )
-from .phases import (
-    _COMPLETED,
-)
 from .services import DevelopmentEngine, services_of
 from .state import HypothesisDevelopmentState
 
@@ -67,7 +64,6 @@ def project_hypothesis(
 def falsification_report_artifact(
     workflow: DevelopmentEngine,
     state: HypothesisDevelopmentState,
-    prose: str = "",
 ) -> dict[str, object]:
     """Build the rich structured falsification trials report artifact."""
     tests_by_id = {t.test_id: t for t in (state.plan.tests if state.plan else ())}
@@ -122,7 +118,6 @@ def falsification_report_artifact(
     return {
         "type": "falsification_report",
         "content": summary_text,
-        "prose": prose,
         "passedCount": passed_count,
         "falsifiedCount": falsified_count,
         "totalCount": total_count,
@@ -143,19 +138,3 @@ def falsification_report_artifact(
         "controls": controls_data,
         "metrics": metrics_data,
     }
-
-
-def completion_payload(
-    workflow: DevelopmentEngine,
-    request: HypothesisDevelopmentRequest,
-    state: HypothesisDevelopmentState,
-) -> dict[str, object]:
-    payload: dict[str, object] = {"state": _COMPLETED.value}
-    if state.hypothesis is not None:
-        payload["hypothesis"] = {
-            "name": state.hypothesis.relative_path,
-            "sha256": state.hypothesis.content_sha256,
-        }
-    if state.verdict is not None:
-        payload["verdict"] = state.verdict.outcome
-    return payload

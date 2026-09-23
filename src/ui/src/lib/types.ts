@@ -173,14 +173,13 @@ export type ExecutionEventType =
 	| 'workflow.launched'
 	| 'workflow.started'
 	| 'workflow.phase'
-	| 'workflow.paused'
+	| 'workflow.progress'
+	| 'workflow.phase_result'
 	| 'workflow.steered'
 	| 'workflow.stopped'
 	| 'workflow.cancelled'
 	| 'workflow.completed'
 	| 'workflow.failed'
-	| 'workflow.gate.blocked'
-	| 'workflow.gate.resolved'
 	| 'message.accepted'
 	| 'tool.submitted'
 	| 'tool.started'
@@ -240,7 +239,7 @@ export interface WorkflowExecutionRecord {
 	created_at: string;
 }
 
-// ---------- Nested sub-agents, gates, and transcript items ----------
+// ---------- Nested sub-agents and transcript items ----------
 
 /**
  * Discriminator for chat transcript items. Every renderable entry carries a
@@ -293,28 +292,6 @@ export interface SubAgentNode {
 	 * log, so the UI never requests events for it.
 	 */
 	workflowExecutionId: string | null;
-}
-
-export type GateStatus = 'blocked' | 'resolved';
-
-/** The three operator resolutions a workflow gate accepts. */
-export type GateResolutionKind = 'disagreement' | 'approve_plan' | 'verdict';
-
-export interface GateResolution {
-	kind: GateResolutionKind;
-	note?: string | null;
-	verdict?: string | null;
-	resolvedAt?: string | null;
-}
-
-/** One workflow gate: verbatim reason plus its optional resolution. */
-export interface WorkflowGate {
-	gateId: string;
-	executionId: string;
-	phase: string;
-	status: GateStatus;
-	reason: string;
-	resolution?: GateResolution | null;
 }
 
 /** A phase in the compact workflow stepper. */

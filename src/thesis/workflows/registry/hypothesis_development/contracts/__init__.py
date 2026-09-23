@@ -1,38 +1,27 @@
-"""Request, hypothesis, plan, trial, verdict, strategy, and RCA contracts.
+"""Request, hypothesis, plan, trial, verdict, and RCA contracts.
 
-Extracted from the original single-module hypothesis-development
-implementation; behavior is unchanged.  Each subject module owns its own
-contracts and this package re-exports the complete public surface.
+Each subject module owns its own contracts and this package re-exports the
+public surface.
 """
 
 from __future__ import annotations
 
 from .creation import HypothesisDevelopmentRequest
 from .hypothesis import HypothesisDraft
-from .plan import (
-    FalsificationPlan,
-    FalsificationPlanDraft,
-    FalsifierTest,
-    PlaceboControl,
-    PlannedTest,
-)
+from .plan import FalsificationPlan, FalsifierTest, PlaceboControl
 from .rca import RcaDiagnosis
-from .strategy import ExitCriterion, StrategyContent, StrategyDesignDraft
+from .strategy import ExitCriterion
 from .trials import FalsificationTrial
 from .verdict import FalsificationVerdict
 
 __all__ = [
     "ExitCriterion",
     "FalsificationPlan",
-    "FalsificationPlanDraft",
     "FalsificationTrial",
     "FalsificationVerdict",
     "FalsifierTest",
     "HypothesisDevelopmentRequest",
     "HypothesisDraft",
     "PlaceboControl",
-    "PlannedTest",
     "RcaDiagnosis",
-    "StrategyContent",
-    "StrategyDesignDraft",
 ]

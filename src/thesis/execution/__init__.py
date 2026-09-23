@@ -44,7 +44,6 @@ from thesis.execution.recovery import (
     WorkflowRecovery,
 )
 from thesis.execution.sub_agents import (
-    GATE_EVENT_TYPES,
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_NEEDS_INPUT,
@@ -54,7 +53,6 @@ from thesis.execution.sub_agents import (
     SubAgentContractError,
     SubAgentNode,
     SubAgentTree,
-    append_gate_event,
     append_sub_agent_event,
     filter_replay,
     sub_agent_payload,
@@ -76,7 +74,6 @@ __all__ = [
     "ExecutionQueue",
     "ExecutionStorage",
     "FencingError",
-    "GATE_EVENT_TYPES",
     "IdempotencyConflict",
     "InMemoryExecutionEventStore",
     "InvalidTransition",
@@ -106,7 +103,6 @@ __all__ = [
     "Workflow",
     "WorkflowRecovery",
     "WorkflowStatus",
-    "append_gate_event",
     "append_sub_agent_event",
     "filter_replay",
     "sub_agent_payload",

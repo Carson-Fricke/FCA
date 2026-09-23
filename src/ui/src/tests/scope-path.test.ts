@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	applyHashTarget,
+	defaultScopeLabel,
 	parseScope,
 	ScopeController,
 	scopeFromHash,
@@ -22,6 +23,27 @@ describe('scope path grammar', () => {
 			['workflow', 'exec-1'],
 			['sub_agent', 'sub-1']
 		]);
+	});
+
+	it('round-trips a phase segment through the query value', () => {
+		const segments: ScopeSegment[] = [
+			{ kind: 'conversation', id: 'chat-1', label: 'Conversation' },
+			{ kind: 'workflow', id: 'exec-1', label: 'Workflow' },
+			{ kind: 'phase', id: 'falsification_trials', label: 'Phase falsification_trials' }
+		];
+		expect(serializeScope(segments)).toBe(
+			'conversation:chat-1/workflow:exec-1/phase:falsification_trials'
+		);
+		const parsed = parseScope(serializeScope(segments));
+		expect(parsed.map((segment) => [segment.kind, segment.id])).toEqual([
+			['conversation', 'chat-1'],
+			['workflow', 'exec-1'],
+			['phase', 'falsification_trials']
+		]);
+		expect(parsed[2].label).toBe('Phase falsification_trials');
+		expect(defaultScopeLabel('phase', 'falsification_trials')).toBe(
+			'Phase falsification_trials'
+		);
 	});
 
 	it('drops malformed entries', () => {

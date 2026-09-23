@@ -6,18 +6,29 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
 from threading import RLock
+from typing import ClassVar
 
 from lake.catalog.models import CoverageRecord, CoverageStatus, canonical_symbol
 from lake.contracts import AssetClass, DataType
 
+_CatalogKey = tuple[AssetClass, DataType, str, date]
+_CatalogRows = dict[_CatalogKey, CoverageRecord]
+
 _MARKER_NAME = ".market-lake-local"
 _MARKER_CONTENT = "market-lake-local-v1\n"
 _STATE_SCHEMA_VERSION = 1
+
+#: How many times the atomic catalog replace is retried when Windows denies
+#: it because another handle (a concurrent reader in another process, an
+#: antivirus, or a search indexer) briefly holds the target open.
+_REPLACE_ATTEMPTS = 6
+_REPLACE_BACKOFF_SECONDS = 0.05
 
 
 class LocalStateError(RuntimeError):
@@ -114,11 +125,25 @@ class LocalLayout:
 
 
 class LocalCatalogRepository:
-    """Coverage catalog persisted as stable, atomically replaced JSON."""
+    """Coverage catalog persisted as stable, atomically replaced JSON.
+
+    The lock is a class attribute, not an instance one: the local API serves
+    coverage reads through one repository while an ensure backfill runs in a
+    worker thread through another, and both must serialize on the same
+    catalog file.  On Windows a replace of a file with any open handle fails,
+    so a read overlapping a write would otherwise kill the write.
+    """
+
+    _lock = RLock()
+    #: The most recently parsed catalog, shared by every repository instance
+    #: over the same file. Every coverage query re-reads the whole catalog, so
+    #: re-parsing a multi-megabyte JSON document per poll dominated the local
+    #: API's CPU. The entry is invalidated by the file's mtime and size, so a
+    #: write from another repository, worker thread, or process is observed.
+    _cache: ClassVar[tuple[Path, tuple[int, int], _CatalogRows] | None] = None
 
     def __init__(self, path: str | os.PathLike[str]) -> None:
         self._path = Path(path).resolve()
-        self._lock = RLock()
 
     def get(
         self,
@@ -176,11 +201,27 @@ class LocalCatalogRepository:
             and (end is None or record.session_date <= end)
         )
 
-    def _read(
-        self,
-    ) -> dict[tuple[AssetClass, DataType, str, date], CoverageRecord]:
-        if not self._path.exists():
+    def _stamp(self) -> tuple[int, int] | None:
+        """Return the catalog file's ``(mtime_ns, size)``, or None if absent."""
+        try:
+            status = self._path.stat()
+        except OSError:
+            return None
+        return (status.st_mtime_ns, status.st_size)
+
+    def _read(self) -> _CatalogRows:
+        """Return the parsed catalog, reusing a cached parse when unchanged.
+
+        Callers hold the class lock, so the cache is only ever touched under
+        it. A fresh dict is returned: ``upsert_many`` mutates its result, and a
+        shared dict would let that mutation escape the lock.
+        """
+        stamp = self._stamp()
+        if stamp is None:
             return {}
+        cached = type(self)._cache
+        if cached is not None and cached[0] == self._path and cached[1] == stamp:
+            return dict(cached[2])
         try:
             payload = json.loads(self._path.read_text(encoding="utf-8"))
             if not isinstance(payload, dict) or set(payload) != {
@@ -197,7 +238,6 @@ class LocalCatalogRepository:
             result = {record.key: record for record in records}
             if len(result) != len(records):
                 raise ValueError("catalog contains duplicate coverage keys")
-            return result
         except (
             OSError,
             UnicodeError,
@@ -206,21 +246,21 @@ class LocalCatalogRepository:
             ValueError,
         ) as error:
             raise LocalStateError(f"local catalog is invalid: {self._path}") from error
+        type(self)._cache = (self._path, stamp, result)
+        return dict(result)
 
     def _write(self, records: Iterable[CoverageRecord]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        ordered = sorted(records, key=_record_sort_key)
         payload = {
             "schema_version": _STATE_SCHEMA_VERSION,
-            "coverage": [
-                _record_to_json(record)
-                for record in sorted(records, key=_record_sort_key)
-            ],
+            "coverage": [_record_to_json(record) for record in ordered],
         }
         serialized = (
             json.dumps(
                 payload,
                 ensure_ascii=True,
-                indent=2,
+                separators=(",", ":"),
                 sort_keys=True,
             )
             + "\n"
@@ -240,11 +280,36 @@ class LocalCatalogRepository:
                 temporary.write(serialized)
                 temporary.flush()
                 os.fsync(temporary.fileno())
-            os.replace(temporary_path, self._path)
+            self._replace(temporary_path)
             temporary_path = None
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
+        # Cache exactly what was written, so this write does not force the next
+        # reader to re-parse the whole document.
+        stamp = self._stamp()
+        if stamp is not None:
+            type(self)._cache = (
+                self._path,
+                stamp,
+                {record.key: record for record in ordered},
+            )
+
+    def _replace(self, temporary_path: Path) -> None:
+        """Atomically install the new catalog, tolerating open target handles.
+
+        ``os.replace`` is denied on Windows whenever the target is open in
+        another process (readers do not share delete access), so the replace
+        is retried briefly: those handles are transient by construction.
+        """
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(temporary_path, self._path)
+                return
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(_REPLACE_BACKOFF_SECONDS * (attempt + 1))
 
 
 class LocalFileIssuer:

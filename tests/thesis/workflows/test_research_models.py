@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
+
+import pytest
 
 from thesis.research.indicators import (
     IndicatorScope,
@@ -15,6 +16,7 @@ from thesis.research.models import (
     IndicatorBinding,
     InMemoryResearchModelStore,
     ResearchModel,
+    ResearchModelError,
     WorkspaceResearchModelStore,
 )
 from thesis.workflows.backtests import (
@@ -89,7 +91,12 @@ def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
         fit_entrypoint="fit",
         observe_entrypoint="observe",
         outputs=("rolling_corr_60d_median",),
-        harness_configuration={"symbols": ["MSTR", "IBIT"], "seed": 7},
+        harness_configuration={
+            "symbols": ["MSTR", "IBIT"],
+            "seed": 7,
+            "start": "2024-01-01T00:00:00Z",
+            "end": "2024-03-01T00:00:00Z",
+        },
         indicators=(
             IndicatorBinding(
                 alias="pair_corr",
@@ -136,10 +143,10 @@ def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
     request = backtests.requests[0]
     assert request.workspace_id == "workspace-one"
     config = cast("Mapping[str, object]", request.bundle.harness_configuration)
-    # The study carries an explicit window so the harness never falls back to
-    # its two-day synthetic default.
+    # The model's declared window is piped through to the fetch verbatim, so
+    # the study never reads a period the hypothesis did not ask for.
     assert config["start"] == "2024-01-01T00:00:00Z"
-    assert str(config["end"]).endswith("T00:00:00Z")
+    assert config["end"] == "2024-03-01T00:00:00Z"
     instances = cast("Sequence[Mapping[str, object]]", config["strategy_instances"])
     assert instances[0]["implementation"] == (
         "harness.research.study:ResearchModelProgram"
@@ -192,7 +199,12 @@ def test_runner_persists_artifacts_through_workspace_stores(tmp_path: Path) -> N
         fit_entrypoint="fit",
         observe_entrypoint="observe",
         outputs=("rolling_corr_60d_median",),
-        harness_configuration={"symbols": ["MSTR", "IBIT"], "seed": 7},
+        harness_configuration={
+            "symbols": ["MSTR", "IBIT"],
+            "seed": 7,
+            "start": "2024-01-01T00:00:00Z",
+            "end": "2024-03-01T00:00:00Z",
+        },
         indicators=(binding,),
         tests={"test_model.py": "def test_model():\n    assert True\n"},
     )
@@ -241,7 +253,12 @@ def test_runner_falls_back_to_request_universe_when_configuration_omits_symbols(
         fit_entrypoint="fit",
         observe_entrypoint="observe",
         outputs=("observed_metric",),
-        harness_configuration={"requiredSymbols": ["MSTR", "IBIT"], "seed": 7},
+        harness_configuration={
+            "requiredSymbols": ["MSTR", "IBIT"],
+            "seed": 7,
+            "start": "2024-01-01T00:00:00Z",
+            "end": "2024-03-01T00:00:00Z",
+        },
         indicators=(),
         tests={"test_model.py": "def test_model():\n    assert True\n"},
     )
@@ -271,13 +288,18 @@ def test_runner_falls_back_to_request_universe_when_configuration_omits_symbols(
     assert list(cast("Sequence[object]", instances[0]["symbols"])) == ["MSTR", "IBIT"]
 
 
-def test_study_window_defaults_to_the_closed_session_history() -> None:
-    start, end = study_window({}, now=datetime(2026, 9, 17, 15, 30, tzinfo=UTC))
+def test_study_window_requires_the_model_to_declare_both_bounds() -> None:
+    # The window is the model's to declare. Substituting a default is what let
+    # a 42-session model fetch 2.75 years of history it never read, so a
+    # missing bound is a contract violation rather than a fallback.
+    with pytest.raises(ResearchModelError, match="must declare its sample window"):
+        study_window({})
 
-    # The default window excludes the current day so only closed sessions are
-    # ensured; an open or not-yet-open session can never satisfy an ensure.
-    assert start == "2024-01-01T00:00:00Z"
-    assert end == "2026-09-17T00:00:00Z"
+    with pytest.raises(ResearchModelError, match="missing start"):
+        study_window({"end": "2026-09-17T00:00:00Z"})
+
+    with pytest.raises(ResearchModelError, match="missing end"):
+        study_window({"start": "2026-08-01T00:00:00Z"})
 
 
 def test_study_window_normalizes_declared_dates_to_exclusive_midnights() -> None:
@@ -296,11 +318,30 @@ def test_study_window_honours_canonical_rfc3339_bounds() -> None:
     assert end == "2024-06-01T00:00:00Z"
 
 
-def test_study_window_ignores_sentinel_dates() -> None:
+def test_study_window_rejects_a_sentinel_instead_of_piping_it_to_the_fetch() -> None:
+    # A sentinel is not a date. An earlier version normalized only the shape it
+    # recognized and fell through for anything else, which is how a placeholder
+    # could reach the harness as a literal bound; undeclared now fails loudly.
+    with pytest.raises(ResearchModelError, match="missing start"):
+        study_window(
+            {"dataStart": "latest_complete_historical_session", "start": None},
+        )
+
+    with pytest.raises(ResearchModelError, match="missing end"):
+        study_window(
+            {
+                "start": "2026-08-01T00:00:00Z",
+                "end_date": "latest_complete_historical_session",
+            },
+        )
+
+
+def test_study_window_pipes_a_declared_month_through_unchanged() -> None:
+    # The regression: an operator asking about the last month must produce a
+    # month of bounds, never a default period orders of magnitude larger.
     start, end = study_window(
-        {"dataStart": "latest_complete_historical_session"},
-        now=datetime(2026, 9, 17, tzinfo=UTC),
+        {"start": "2026-08-17T00:00:00Z", "end": "2026-09-17T00:00:00Z"}
     )
 
-    assert start == "2024-01-01T00:00:00Z"
+    assert start == "2026-08-17T00:00:00Z"
     assert end == "2026-09-17T00:00:00Z"

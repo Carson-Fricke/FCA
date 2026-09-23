@@ -27,9 +27,10 @@ class ExecutionEventType(StrEnum):
     WORKFLOW_LAUNCHED = "workflow.launched"
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_PHASE = "workflow.phase"
-    # Retained to decode historical execution events. Nothing appends it: the
-    # workflow engine no longer pauses an execution for operator input.
-    WORKFLOW_PAUSED = "workflow.paused"
+    # Workflow-scoped progress and result events for deterministic phases
+    # (REQ-C2): execution-scoped, no subAgentId.
+    WORKFLOW_PROGRESS = "workflow.progress"
+    WORKFLOW_PHASE_RESULT = "workflow.phase_result"
     WORKFLOW_STEERED = "workflow.steered"
     WORKFLOW_STOPPED = "workflow.stopped"
     WORKFLOW_CANCELLED = "workflow.cancelled"
@@ -46,8 +47,6 @@ class ExecutionEventType(StrEnum):
     SUB_AGENT_NEEDS_INPUT = "sub_agent.needs_input"
     SUB_AGENT_COMPLETED = "sub_agent.completed"
     SUB_AGENT_FAILED = "sub_agent.failed"
-    WORKFLOW_GATE_BLOCKED = "workflow.gate.blocked"
-    WORKFLOW_GATE_RESOLVED = "workflow.gate.resolved"
 
 
 @dataclass(frozen=True, slots=True)

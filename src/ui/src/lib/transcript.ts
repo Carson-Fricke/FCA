@@ -5,7 +5,7 @@
  * a phase or sub-agent must show *that* agent's conversation. A sub-agent's
  * history lives in two durable sources: user messages it received (persisted as
  * `kind=sub_agent` chat messages carrying its `subAgentId`) and its own
- * execution events (thinking, tool calls, outputs, gates). This module merges
+ * execution events (thinking, tool calls, outputs). This module merges
  * both into a single, time-ordered entry list so a message can never drift out
  * of order relative to the tool renderings around it.
  *
@@ -30,7 +30,9 @@ export interface FalsificationTrialItem {
 	observed: number | null;
 	falsified: boolean;
 	description?: string;
+	detail?: string;
 	runId?: string;
+	runState?: string;
 }
 
 export interface FalsificationControlItem {
@@ -63,7 +65,6 @@ export interface FalsificationReportData {
 export type ScopeEntry =
 	| { kind: 'message'; id: string; at: string; order: number; message: ChatMessage }
 	| { kind: 'tool'; id: string; at: string; order: number; result: ToolResult }
-	| { kind: 'thinking'; id: string; at: string; order: number; text: string }
 	| {
 			kind: 'assistant';
 			id: string;
@@ -71,7 +72,6 @@ export type ScopeEntry =
 			order: number;
 			text: string;
 			actorId: string;
-			needsInput: boolean;
 	  }
 	| { kind: 'sub-agent'; id: string; at: string; order: number; node: SubAgentNode }
 	| { kind: 'spawn'; id: string; at: string; order: number; spawn: SpawnDetails }
@@ -178,25 +178,26 @@ export function buildNodeEntries({
 	});
 
 	for (const event of events) {
-		if (event.eventType.startsWith('workflow.gate.')) continue;
-
 		const base = { id: event.eventId, at: event.occurredAt, order: event.cursor } as const;
 		if (event.eventType === 'sub_agent.spawned') {
 			entries.push({ kind: 'spawn', ...base, spawn: spawnDetails(event) });
+			continue;
+		}
+		// Engine activity labels and the needs-input pause signal are
+		// lifecycle wiring (node status, liveness), not conversation content:
+		// they never render. Tool progress still falls through to the plain
+		// event line.
+		if (
+			event.eventType === 'sub_agent.needs_input' ||
+			(event.eventType === 'sub_agent.progress' &&
+				stringField(event, 'kind') !== 'tool')
+		) {
 			continue;
 		}
 		const result = parseToolResult(event);
 		if (result) {
 			entries.push({ kind: 'tool', ...base, result });
 			continue;
-		}
-		if (event.eventType === 'sub_agent.progress') {
-			const progressKind = stringField(event, 'kind');
-			const text = stringField(event, 'text');
-			if ((progressKind === 'thinking' || progressKind === 'activity') && text) {
-				entries.push({ kind: 'thinking', ...base, text });
-				continue;
-			}
 		}
 		if (event.eventType === 'sub_agent.output') {
 			const artifact = field(event, 'artifact') as Record<string, unknown> | null;
@@ -220,29 +221,10 @@ export function buildNodeEntries({
 					kind: 'assistant',
 					...base,
 					text,
-					actorId: event.actorId,
-					needsInput: false
+					actorId: event.actorId
 				});
 				continue;
 			}
-		}
-		if (event.eventType === 'sub_agent.needs_input') {
-			const text = stringField(event, 'question') ?? 'Input required to continue.';
-			// The orchestrator writes the visible reply as sub_agent.output and
-			// then writes needs_input to update the node status. Render one reply,
-			// not two copies of the same question in the same turn.
-			const lastAssistant = [...entries].reverse().find((e) => e.kind === 'assistant');
-			const duplicateOfLast = lastAssistant && lastAssistant.text === text;
-			if (!duplicateOfLast) {
-				entries.push({
-					kind: 'assistant',
-					...base,
-					text,
-					actorId: event.actorId,
-					needsInput: true
-				});
-			}
-			continue;
 		}
 		entries.push({ kind: 'event', ...base, event });
 	}

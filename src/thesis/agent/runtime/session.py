@@ -25,6 +25,7 @@ from types import MappingProxyType
 from typing import Protocol
 
 from thesis.agent.runtime.datum import Datum, normalize_datums
+from thesis.agent.runtime.json_recovery import extract_json_object
 from thesis.agent.runtime.store import SubAgentStore
 from thesis.chat.contracts import (
     AgentInvocation,
@@ -200,9 +201,13 @@ def _tool_arguments(call: ToolCall) -> Mapping[str, object] | None:
     if not raw:
         return {}
     try:
-        decoded = json.loads(raw)
+        decoded: object = json.loads(raw)
     except ValueError:
-        return None
+        # Tolerant recovery: a model that wrapped its JSON in prose or a
+        # markdown fence still gets one in-turn repair-free dispatch.
+        decoded = extract_json_object(raw)
+        if decoded is None:
+            return None
     return decoded if isinstance(decoded, Mapping) else None
 
 
@@ -329,7 +334,11 @@ class AgentSession:
                         ok=False,
                         failure={
                             "kind": "tool",
-                            "message": "tool arguments were not a JSON object",
+                            "message": (
+                                "tool arguments were not a JSON object, even "
+                                "after tolerant recovery of fenced or embedded "
+                                "JSON; send one raw JSON object"
+                            ),
                         },
                     )
                 else:

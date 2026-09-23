@@ -2,11 +2,11 @@
  * Client-side derivation of the nested sub-agent tree from the durable
  * execution event stream.
  *
- * The backend publishes `sub_agent.*` and `workflow.gate.*` events whose
- * payloads carry the node identity (`subAgentId`, `parentSubAgentId`,
- * `phase`, `role`), the sandbox `context`, and whether the node
- * `acceptsInput`. The UI never invents nodes: every node here is sourced from
- * at least one event (or an explicit REST `listChatSubAgents` row).
+ * The backend publishes `sub_agent.*` and `workflow.*` events whose payloads
+ * carry the node identity (`subAgentId`, `parentSubAgentId`, `phase`, `role`),
+ * the sandbox `context`, and whether the node `acceptsInput`. The UI never
+ * invents nodes: every node here is sourced from at least one event (or an
+ * explicit REST `listChatSubAgents` row).
  *
  * These functions are pure so the transcript and tree rendering are testable
  * with mocked event streams, independent of the network.
@@ -20,7 +20,6 @@ import type {
 	ToolResult,
 	TranscriptItem,
 	WorkflowExecutionRecord,
-	WorkflowGate,
 	WorkflowPhase
 } from './types';
 
@@ -256,14 +255,11 @@ export function projectExecution(
 	for (const event of [...events].sort((a, b) => a.cursor - b.cursor)) {
 		const eventPhase = event.payload?.phase;
 		if (typeof eventPhase === 'string' && eventPhase.length > 0) phase = eventPhase;
-		switch (event.eventType) {
-			case 'workflow.started':
-				state = 'running';
-				break;
-			case 'workflow.paused':
-				state = 'paused';
-				break;
-			case 'workflow.stopped':
+	switch (event.eventType) {
+		case 'workflow.started':
+			state = 'running';
+			break;
+		case 'workflow.stopped':
 				state = 'stopped';
 				break;
 			case 'workflow.cancelled':
@@ -294,20 +290,6 @@ export function parseToolResult(event: ExecutionEvent): ToolResult | null {
 export function parseReasoning(event: ExecutionEvent): string | null {
 	const value = field(event, 'reasoning') ?? field(event, 'thinking');
 	return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-interface GateDraft {
-	gateId: string;
-	executionId: string;
-	phase: string;
-	status: 'blocked' | 'resolved';
-	reason: string;
-	resolution: WorkflowGate['resolution'];
-}
-
-/** Derive gate cards (blocked and resolved) from the event stream. Deprecated: gates are replaced by conversational needs_input. */
-export function deriveGates(_events: ExecutionEvent[]): WorkflowGate[] {
-	return [];
 }
 
 /**

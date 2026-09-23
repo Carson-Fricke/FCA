@@ -37,7 +37,6 @@ from thesis.workflows.backtests import (
     BacktestRunner,
     BacktestRunRequest,
     BacktestRunResult,
-    BacktestRunTimeout,
 )
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
@@ -55,10 +54,10 @@ _ROLES: tuple[Role, ...] = ("primary", "coding", "critique", "research")
 _PENDING_STATES = frozenset({"queued", "submitted", "pending", "running"})
 _SUCCESS_STATES = frozenset({"succeeded", "completed", "success", "complete"})
 
-#: Wall-clock budget for one launched run. A first-time study can spend many
-#: minutes in on-demand market-data ensure before the engine starts, so the
-#: deadline must outlast the harness's own ensure timeout (one hour) with slack.
-_DEFAULT_POLL_DEADLINE_SECONDS = 3_900.0
+#: Poll cadence for one launched run. The run polls until the harness reports
+#: the job terminal: a first-time study can spend many minutes in on-demand
+#: market-data ensure before the engine starts, so the study runs to completion
+#: and only a harness connection failure fails the poll.
 _DEFAULT_POLL_INITIAL_INTERVAL_SECONDS = 0.25
 _DEFAULT_POLL_MAX_INTERVAL_SECONDS = 5.0
 
@@ -74,10 +73,9 @@ class McpBacktestRunner:
     pending job is joined (a resumed execution polls the run already in flight
     instead of launching a duplicate). Terminal jobs are relaunched, because a
     run id is reused across revision cycles and a succeeded job may describe a
-    superseded model or strategy. Polling uses wall-clock backoff up to
-    ``poll_deadline_seconds`` and raises
-    :class:`~thesis.workflows.backtests.BacktestRunTimeout` when the run is
-    still executing, so callers can distinguish "not done yet" from a failure.
+    superseded model or strategy. Polling uses wall-clock backoff until the
+    harness reports the job terminal; a harness status failure raises
+    :class:`~thesis.workflows.backtests.BacktestRunError`.
     """
 
     _runner_label = "backtest"
@@ -89,7 +87,6 @@ class McpBacktestRunner:
         *,
         mode: BacktestMode = "local",
         metadata: Mapping[str, object] | None = None,
-        poll_deadline_seconds: float = _DEFAULT_POLL_DEADLINE_SECONDS,
         poll_interval_seconds: float = _DEFAULT_POLL_INITIAL_INTERVAL_SECONDS,
         poll_max_interval_seconds: float = _DEFAULT_POLL_MAX_INTERVAL_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
@@ -99,8 +96,6 @@ class McpBacktestRunner:
         self._harness_tools = harness_tools
         self._mode: BacktestMode = mode
         self._metadata = dict(metadata or {})
-        if poll_deadline_seconds <= 0:
-            raise ValueError("poll_deadline_seconds must be positive")
         if poll_interval_seconds < 0:
             raise ValueError("poll_interval_seconds must be non-negative")
         if poll_max_interval_seconds < poll_interval_seconds:
@@ -109,7 +104,6 @@ class McpBacktestRunner:
             )
         if not callable(sleep):
             raise TypeError("sleep must be callable")
-        self._poll_deadline_seconds = poll_deadline_seconds
         self._poll_interval_seconds = poll_interval_seconds
         self._poll_max_interval_seconds = poll_max_interval_seconds
         self._sleep = sleep
@@ -200,8 +194,7 @@ class McpBacktestRunner:
         return self._result(run_id, resolved)
 
     def _poll_terminal(self, run_id: str, state: str) -> str:
-        """Poll one pending job until it is terminal or the deadline passes."""
-        deadline = time.monotonic() + self._poll_deadline_seconds
+        """Poll one pending job until the harness reports it terminal."""
         interval = self._poll_interval_seconds
         while True:
             status = self._harness_tools.call_tool(
@@ -214,11 +207,6 @@ class McpBacktestRunner:
             state = _first_text(status.structured, "status", "state") or state
             if state.casefold() not in _PENDING_STATES:
                 return state
-            if time.monotonic() >= deadline:
-                raise BacktestRunTimeout(
-                    f"{self._runner_label} {run_id!r} did not reach a terminal state "
-                    f"within {self._poll_deadline_seconds:g}s"
-                )
             self._sleep(interval)
             if interval > 0:
                 interval = min(interval * 2, self._poll_max_interval_seconds)

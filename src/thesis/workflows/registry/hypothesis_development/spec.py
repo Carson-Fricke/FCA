@@ -27,6 +27,7 @@ from thesis.research.hypothesis import HypothesisStore, InMemoryHypothesisStore
 from thesis.strategies.validation import StrategySandboxValidator
 from thesis.workflows.backtests import BacktestRunner
 from thesis.workflows.core.builder import WorkflowBuilder
+from thesis.workflows.core.execution_store import ExecutionStore
 from thesis.workflows.core.phase import (
     ConversationPhase,
     DeterministicExecutor,
@@ -35,19 +36,20 @@ from thesis.workflows.core.phase import (
     PhaseSpec,
 )
 from thesis.workflows.core.spec import HandoffContext, PipingFunction, WorkflowSpec
-from thesis.workflows.core.workflow import Workflow, WorkflowPorts
+from thesis.workflows.core.workflow import Detach, Workflow, WorkflowPorts
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
     ResearchModelRunner,
 )
 
-from .composers.hypothesis import JsonDevelopmentHypothesisComposer
-from .composers.plan import JsonFalsificationPlanner
-from .composers.rca import JsonRcaComposer
-from .composers.strategy import JsonStrategyDesigner
 from .contracts.creation import HypothesisDevelopmentRequest
+from .contracts.validation import (
+    HYPOTHESIS_COMPLETION_SCHEMA,
+    format_contract_errors,
+    hypothesis_payload_errors,
+)
 from .doctrine import hypothesis_development_doctrine
-from .errors import WorkflowError
+from .errors import FalsificationComposeError, WorkflowError
 from .phases import (
     _COMPLETED,
     _FAILED,
@@ -56,23 +58,16 @@ from .phases import (
     HYPOTHESIS_DEVELOPMENT_WORKFLOW,
     HypothesisDevelopmentPhase,
 )
-from .phases.trials import run_falsification_trials
+from .phases.trials import _draft_from_contract, run_falsification_trials
 from .piping import identity_pipe, reset_backtests, reset_premise
 from .primitives import (
     _FALSIFICATION_PLAN_SCHEMA,
     _HYPOTHESIS_SCHEMA,
     _RCA_SCHEMA,
     _STRATEGY_DESIGN_SCHEMA,
-    DEFAULT_MAX_COMPOSE_REPAIRS,
-    DEFAULT_MAX_HYPOTHESIS_CYCLES,
-    DEFAULT_MAX_RCA_CYCLES,
     _new_id,
     _utc_now,
 )
-from .prompts.creation import HypothesisComposer
-from .prompts.falsification import FalsificationPlanner
-from .prompts.rca import RcaComposer
-from .prompts.strategy import StrategyDesigner
 from .services import (
     DevelopmentEngine,
     HypothesisDevelopmentServices,
@@ -160,6 +155,34 @@ def _creation_seed(
     return _creation_prompt(workflow, request)
 
 
+def _verdict_seed(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> str:
+    """Seed the verdict agent with the ask protocol and the recorded trials.
+
+    The deterministic trials land as the accepted completion from the
+    falsification-trials phase; the verdict agent proposes the verdict from
+    them and must ask the operator through ``request_workflow_input`` before
+    completing — it never auto-completes over the trials.
+    """
+    del workflow, request, state
+    from .prompts.verdict import _verdict_instructions
+
+    parts = [_verdict_instructions()]
+    if context.source is not None and context.completion:
+        parts += [
+            "",
+            f"Accepted completion from the {context.source} phase:",
+            json.dumps(
+                dict(context.completion), ensure_ascii=True, indent=2, default=str
+            ),
+        ]
+    return "\n".join(parts)
+
+
 def _contract_seed(task: str, *, schema: str | None = None) -> Callable[..., str]:
     """Build a seed that carries the accepted handoff and the contract shape."""
 
@@ -214,6 +237,68 @@ def _list_field(name: str) -> Callable[[Mapping[str, object]], str | None]:
     return validate
 
 
+def _creation_validator(completion: Mapping[str, object]) -> str | None:
+    """Deeply validate the creation contract before any transition commits.
+
+    The creation handoff is the one contract a deterministic phase consumes,
+    so the payload is validated completely here — inside the engine's
+    pre-transition validator — instead of first failing inside the trials
+    phase after the state has already moved.  Every missing or wrongly-typed
+    field is reported at once so the agent repairs the whole contract in one
+    turn.
+    """
+    payload = completion.get("hypothesis")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'hypothesis' must be a non-empty object"
+    errors = hypothesis_payload_errors(payload)
+    if not errors:
+        # Drift guard: the collector must be at least as strict as the
+        # composer the deterministic successor phase runs, so anything the
+        # collector missed still rejects the contract here — never later,
+        # after the transition has committed.
+        try:
+            _draft_from_contract(payload)
+        except (FalsificationComposeError, WorkflowError) as error:
+            errors = [str(error)]
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
+def _phase_completion_schema(
+    phase: HypothesisDevelopmentPhase,
+) -> Mapping[str, object] | None:
+    """Return the completion JSON Schema advertised for one phase's agent.
+
+    The creation phase carries its full deep schema; every other agent phase
+    advertises its required handoff fields and the declared target enum, so
+    the provider constrains the contract at decode time instead of relying
+    on prompt text alone.
+    """
+    if phase is HypothesisDevelopmentPhase.HYPOTHESIS_CREATION:
+        return HYPOTHESIS_COMPLETION_SCHEMA
+    required = _REQUIRED.get(phase, ())
+    # The advertised target enum names only real successors: the engine still
+    # accepts a terminal failure target, but the advertised shape never
+    # invites the agent to end the whole run itself.
+    targets = sorted(
+        target.value
+        for target in _TRANSITIONS.get(phase, frozenset())
+        if target is not _FAILED
+    )
+    if not required and not targets:
+        return None
+    properties: dict[str, object] = {
+        "target": {"type": "string", "enum": targets},
+    }
+    for name in required:
+        properties[name] = {"type": "object"}
+    schema: dict[str, object] = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = list(required)
+    return schema
+
+
 #: The required handoff obligation for each phase.
 _REQUIRED: Mapping[HypothesisDevelopmentPhase, tuple[str, ...]] = {
     HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: ("hypothesis",),
@@ -229,7 +314,7 @@ _REQUIRED: Mapping[HypothesisDevelopmentPhase, tuple[str, ...]] = {
 _VALIDATORS: Mapping[
     HypothesisDevelopmentPhase, Callable[[Mapping[str, object]], str | None]
 ] = {
-    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: _mapping_field("hypothesis"),
+    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: _creation_validator,
     HypothesisDevelopmentPhase.FALSIFICATION_TRIALS: _list_field("trials"),
     HypothesisDevelopmentPhase.VERDICT: _mapping_field("verdict"),
     HypothesisDevelopmentPhase.STRATEGY_DESIGN: _mapping_field("strategy"),
@@ -251,6 +336,7 @@ def _seeds() -> Mapping[HypothesisDevelopmentPhase, Callable[..., str]]:
     """Build one prompt seed per phase from its task, obligation, and shape."""
     seeds: dict[HypothesisDevelopmentPhase, Callable[..., str]] = {
         HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: _creation_seed,
+        HypothesisDevelopmentPhase.VERDICT: _verdict_seed,
     }
     for phase, task in _PHASE_TASKS.items():
         if phase in seeds or phase not in _REQUIRED:
@@ -289,24 +375,18 @@ def build_hypothesis_development_workflow(
     research_runner: ResearchModelRunner | None = None,
     validator: StrategySandboxValidator | None = None,
     hypothesis_store: HypothesisStore | None = None,
-    composer: HypothesisComposer | None = None,
-    planner: FalsificationPlanner | None = None,
-    rca_composer: RcaComposer | None = None,
-    designer: StrategyDesigner | None = None,
     ledger: AttemptLedger | None = None,
     subagent_factory: SubagentContextFactory | None = None,
     journal: CommandJournal | None = None,
     clock: Callable[[], datetime] = _utc_now,
     id_factory: Callable[[str], str] = _new_id,
     research_role: Role = "research",
-    critique_role: Role = "critique",
-    coding_role: Role = "coding",
     experiment_id: str | None = None,
-    max_rca_cycles: int = DEFAULT_MAX_RCA_CYCLES,
-    max_compose_repairs: int = DEFAULT_MAX_COMPOSE_REPAIRS,
     knowledge_cutoff: datetime | None = None,
     subagent_mcp_tools: Mapping[str, tuple[str, ...]] | None = None,
     conversations: Conversations | None = None,
+    execution_store: ExecutionStore | None = None,
+    detach: Detach | None = None,
 ) -> Workflow[
     HypothesisDevelopmentRequest,
     HypothesisDevelopmentState,
@@ -325,10 +405,6 @@ def build_hypothesis_development_workflow(
         getattr(resolved_research_runner, "run", None)
     ):
         raise WorkflowError("research_runner must implement ResearchModelRunner")
-    if not isinstance(max_rca_cycles, int) or max_rca_cycles < 0:
-        raise WorkflowError("max_rca_cycles must be a non-negative integer")
-    if not isinstance(max_compose_repairs, int) or max_compose_repairs < 0:
-        raise WorkflowError("max_compose_repairs must be a non-negative integer")
     tools: dict[str, tuple[str, ...]] = {
         family: tuple(family_tools)
         for family, family_tools in dict(subagent_mcp_tools or {}).items()
@@ -337,12 +413,6 @@ def build_hypothesis_development_workflow(
         store=(
             InMemoryHypothesisStore() if hypothesis_store is None else hypothesis_store
         ),
-        composer=(
-            JsonDevelopmentHypothesisComposer() if composer is None else composer
-        ),
-        planner=JsonFalsificationPlanner() if planner is None else planner,
-        rca_composer=JsonRcaComposer() if rca_composer is None else rca_composer,
-        designer=JsonStrategyDesigner() if designer is None else designer,
         router=router,
         runner=runner,
         research_runner=resolved_research_runner,
@@ -350,12 +420,7 @@ def build_hypothesis_development_workflow(
         ledger=ledger,
         journal=journal,
         research_role=research_role,
-        critique_role=critique_role,
-        coding_role=coding_role,
         experiment_id=experiment_id,
-        max_hypothesis_cycles=DEFAULT_MAX_HYPOTHESIS_CYCLES,
-        max_rca_cycles=max_rca_cycles,
-        max_compose_repairs=max_compose_repairs,
         mcp_tools=tools,
     )
     builder = WorkflowBuilder[
@@ -377,6 +442,7 @@ def build_hypothesis_development_workflow(
             "validate": _VALIDATORS.get(phase),
             "on_complete": targets[0] if len(targets) == 1 else None,
             "required": _REQUIRED.get(phase, ()),
+            "completion_schema": _phase_completion_schema(phase),
         }
         declared: PhaseSpec[
             DevelopmentEngine,
@@ -408,6 +474,8 @@ def build_hypothesis_development_workflow(
                 clock=clock,
                 id_factory=id_factory,
                 conversations=conversations,
+                execution_store=execution_store,
+                detach=detach,
             )
         )
     return cast(Any, builder.build())

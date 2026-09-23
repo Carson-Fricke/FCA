@@ -1,3 +1,6 @@
+import json
+import os
+import threading
 from datetime import date
 
 import pytest
@@ -10,6 +13,7 @@ from lake.local import (
     LocalLayout,
     LocalStateError,
 )
+from lake.local.state import _record_to_json
 
 
 def _record(symbol: str = "AAPL") -> CoverageRecord:
@@ -108,3 +112,101 @@ def test_local_file_issuer_confines_urls_to_existing_objects(tmp_path) -> None:
         issuer.issue("../secret")
     with pytest.raises(LocalStateError, match="unavailable"):
         issuer.issue("date=2024-01-19/MISSING.parquet")
+
+
+def test_concurrent_reader_and_writer_repositories_do_not_corrupt(tmp_path) -> None:
+    """An ensure backfill writes through one repository while the API serves
+    coverage reads through another; the shared class lock serializes them, so
+    a read never overlaps the atomic replace (the Windows killer)."""
+    layout = LocalLayout(tmp_path / "local")
+    layout.initialize()
+    writer = LocalCatalogRepository(layout.catalog)
+    reader = LocalCatalogRepository(layout.catalog)
+    writer.upsert_many((_record(),))
+    failures: list[BaseException] = []
+    stop = threading.Event()
+
+    def poll() -> None:
+        while not stop.is_set():
+            try:
+                reader.list(symbol="AAPL")
+            except BaseException as error:  # noqa: BLE001 - recorded, then re-raised below
+                failures.append(error)
+                return
+
+    def write() -> None:
+        for index in range(50):
+            writer.upsert_many((_record("MSFT" if index % 2 else "AAPL"),))
+
+    poller = threading.Thread(target=poll)
+    poller.start()
+    try:
+        write()
+    finally:
+        stop.set()
+        poller.join(timeout=5)
+    assert failures == []
+
+
+def test_catalog_replace_retries_a_transiently_held_target(
+    tmp_path, monkeypatch
+) -> None:
+    """A target handle held briefly by another process (or an antivirus scan)
+    denies the first replace; the repository retries instead of failing."""
+    layout = LocalLayout(tmp_path / "local")
+    layout.initialize()
+    repository = LocalCatalogRepository(layout.catalog)
+    repository.upsert_many((_record(),))
+    real_replace = os.replace
+    calls = {"count": 0}
+    hold = open(layout.catalog, "rb")  # noqa: SIM115 - released in the finally block
+
+    def flaky_replace(source, target):  # type: ignore[no-untyped-def]
+        calls["count"] += 1
+        if calls["count"] == 1:
+            # First attempt collides with the still-open handle: simulate the
+            # reader releasing it right after the denied replace.
+            hold.close()
+            raise PermissionError(5, "Access is denied")
+        return real_replace(source, target)
+
+    monkeypatch.setattr("lake.local.state.os.replace", flaky_replace)
+    try:
+        repository.upsert_many((_record("MSFT"),))
+    finally:
+        hold.close()
+
+    assert calls["count"] == 2
+    assert repository.list(symbol="MSFT") == (_record("MSFT"),)
+
+
+def test_catalog_reads_reuse_a_parsed_cache_without_going_stale(tmp_path) -> None:
+    """Parsing the whole catalog on every coverage read dominated the API's CPU,
+    so the parse is cached per file stamp — and the cache must never serve a
+    parse older than the file."""
+    layout = LocalLayout(tmp_path / "local")
+    layout.initialize()
+    writer = LocalCatalogRepository(layout.catalog)
+    reader = LocalCatalogRepository(layout.catalog)
+
+    writer.upsert_many((_record("AAPL"),))
+    assert reader.list(symbol="AAPL") == (_record("AAPL"),)
+
+    # Every repository instance over the same file shares one coherent cache.
+    LocalCatalogRepository(layout.catalog).upsert_many((_record("MSFT"),))
+    assert reader.list(symbol="MSFT") == (_record("MSFT"),)
+
+    # A write that bypasses the repository entirely (another process, or the
+    # CLI) changes the file stamp, so no stale parse is served.
+    payload = json.loads(layout.catalog.read_text(encoding="utf-8"))
+    payload["coverage"].append(_record_to_json(_record("NVDA")))
+    layout.catalog.write_text(json.dumps(payload), encoding="utf-8")
+    assert sorted(record.symbol for record in reader.list()) == [
+        "AAPL",
+        "MSFT",
+        "NVDA",
+    ]
+
+    # An upsert mutates its own copy, never the shared cached parse.
+    writer.upsert_many((_record("TSLA"),))
+    assert len(reader.list()) == 4
