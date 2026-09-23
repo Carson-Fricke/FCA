@@ -21,6 +21,7 @@ from thesis.workflows.core.registry import (
     WorkflowRegistry,
 )
 from thesis.workflows.core.spec import TransitionRequest, WorkflowContext
+from thesis.workflows.core.workflow import WorkflowRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,8 +55,8 @@ def _seed(workflow: object, request: object, state: object, context: object) -> 
     return "do the phase"
 
 
-def _builder() -> WorkflowBuilder[object, object, _State]:
-    builder = WorkflowBuilder[object, object, _State]()
+def _builder() -> WorkflowBuilder[object, WorkflowRequest, _State]:
+    builder = WorkflowBuilder[object, WorkflowRequest, _State]()
     builder.workflow("demo", version="1.0.0", title="Demo")
     builder.phase(DeterministicPhase(phase="requested", contract=_contract))
     builder.phase(OneShotPhase(phase="working", seed=_seed))
@@ -85,7 +86,7 @@ def test_builder_assembles_a_validated_spec() -> None:
 
 def test_a_deterministic_phase_is_unrepresentable_without_a_contract() -> None:
     with pytest.raises(TypeError, match="contract"):
-        DeterministicPhase(phase="requested")  # type: ignore[call-arg]
+        DeterministicPhase(phase="requested")  # ty: ignore[missing-argument]
 
 
 def test_builder_rejects_an_undeclared_transition_phase() -> None:
@@ -97,7 +98,7 @@ def test_builder_rejects_an_undeclared_transition_phase() -> None:
 
 
 def test_builder_requires_a_terminal_phase() -> None:
-    builder = WorkflowBuilder[object, object, _State]()
+    builder = WorkflowBuilder[object, WorkflowRequest, _State]()
     builder.workflow("demo", version="1.0.0", title="Demo")
     builder.phase(OneShotPhase(phase="requested", seed=_seed))
 

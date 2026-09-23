@@ -1,7 +1,8 @@
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import cast
 
 import httpx
 import pyarrow.parquet as pq
@@ -13,6 +14,7 @@ from lake.coverage.application import EnsureJob, EnsureSpec
 from lake.local import LocalCatalogRepository, LocalIngestError, LocalLayout
 from lake.local.ensure import LocalEnsureLauncher
 from lake.local.ingest import (
+    AlpacaEquityProvider,
     run_local_backfill,
     run_local_crypto_backfill,
     run_local_ingest,
@@ -368,14 +370,16 @@ class PoisonedSessionAlpaca(SessionAlpaca):
         return await super().fetch_trades(symbols, start, end)
 
 
-def _backfill_two_sessions(provider: object, tmp_path) -> dict[str, object]:
+def _backfill_two_sessions(
+    provider: AlpacaEquityProvider, tmp_path
+) -> dict[str, object]:
     return asyncio.run(
         run_local_backfill(
             layout=LocalLayout(tmp_path / "local"),
             symbols=["MSFT"],
             start_date=date(2024, 1, 18),
             end_date=date(2024, 1, 19),
-            provider=provider,  # type: ignore[arg-type]
+            provider=provider,
             environ=_credentials(),
             now=datetime(2024, 1, 22, tzinfo=UTC),
         )
@@ -386,13 +390,14 @@ def test_backfill_survives_a_poisoned_session_and_surfaces_the_error(tmp_path) -
     provider = PoisonedSessionAlpaca(poisoned=date(2024, 1, 19))
 
     result = _backfill_two_sessions(provider, tmp_path)
+    sessions = cast(list[dict[str, object]], result["sessions"])
 
     # The fetchable session still ingested and the poisoned one is reported.
-    assert [entry["session_date"] for entry in result["sessions"]] == [
+    assert [entry["session_date"] for entry in sessions] == [
         "2024-01-18",
         "2024-01-19",
     ]
-    healthy, poisoned = result["sessions"]
+    healthy, poisoned = sessions
     assert healthy["statuses"] == ["complete", "complete"]
     assert healthy["error"] is None
     assert poisoned["statuses"] == ["error", "error"]
@@ -416,8 +421,9 @@ def test_backfill_survives_a_poisoned_session_and_surfaces_the_error(tmp_path) -
     # Error coverage stays non-terminal: a rerun retries only that session,
     # and with a healthy provider it converges instead of re-failing forever.
     healed = _backfill_two_sessions(SessionAlpaca(), tmp_path)
-    assert [entry["session_date"] for entry in healed["sessions"]] == ["2024-01-19"]
-    assert [entry["statuses"] for entry in healed["sessions"]] == [
+    healed_sessions = cast(list[dict[str, object]], healed["sessions"])
+    assert [entry["session_date"] for entry in healed_sessions] == ["2024-01-19"]
+    assert [entry["statuses"] for entry in healed_sessions] == [
         ["complete", "complete"]
     ]
     healed_records = LocalCatalogRepository(
@@ -465,8 +471,9 @@ def test_backfill_runs_sessions_concurrently(tmp_path) -> None:
                 in_flight["now"] -= 1
 
     result = _backfill_two_sessions(SlowAlpaca(), tmp_path)
+    sessions = cast(list[dict[str, object]], result["sessions"])
 
-    assert len(result["sessions"]) == 2
+    assert len(sessions) == 2
     assert in_flight["max"] > 1
 
 
@@ -485,8 +492,9 @@ def test_backfill_batches_catalog_persistence(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(LocalCatalogRepository, "upsert_many", counting_upsert)
 
     result = _backfill_two_sessions(SessionAlpaca(), tmp_path)
+    sessions = cast(list[dict[str, object]], result["sessions"])
 
-    assert [entry["statuses"] for entry in result["sessions"]] == [
+    assert [entry["statuses"] for entry in sessions] == [
         ["complete", "complete"],
         ["complete", "complete"],
     ]
@@ -579,13 +587,14 @@ def test_crypto_backfill_survives_a_poisoned_day_and_never_passes_a_limit(
             pairs=["BTC/USD"],
             start_date=date(2024, 1, 1),
             end_date=date(2024, 1, 2),
-            provider=provider,  # type: ignore[arg-type]
+            provider=provider,
             environ=_credentials(),
             now=datetime(2024, 1, 3, 12, tzinfo=UTC),
         )
     )
 
-    healthy, poisoned = result["sessions"]
+    sessions = cast(list[dict[str, object]], result["sessions"])
+    healthy, poisoned = sessions
     assert healthy["statuses"] == ["complete", "complete"]
     assert healthy["error"] is None
     assert poisoned["statuses"] == ["error", "error"]
@@ -604,7 +613,7 @@ class FakeResponse:
     def __init__(self, payload: object) -> None:
         self.payload = payload
         self.status_code = 200
-        self.headers: dict[str, str] = {}
+        self.headers: Mapping[str, str] = {}
 
     def json(self) -> object:
         return self.payload
@@ -622,14 +631,16 @@ class CryptoPageTransport:
         method: str,
         url: str,
         *,
-        params: dict[str, str | int],
-        headers: dict[str, str],
+        params: Mapping[str, str | int],
+        headers: Mapping[str, str],
         timeout: float,
     ) -> FakeResponse:
         del method, headers, timeout
         self.calls.append({"url": url, "params": dict(params)})
-        key = (url, str(params["start"]), params.get("page_token"))
-        return FakeResponse(self.pages[key])  # type: ignore[index]
+        page_token = params.get("page_token")
+        assert page_token is None or isinstance(page_token, str)
+        key = (url, str(params["start"]), page_token)
+        return FakeResponse(self.pages[key])
 
 
 def test_crypto_ensure_paginates_within_the_provider_limit_bounds(tmp_path) -> None:
@@ -705,7 +716,7 @@ def test_crypto_ensure_paginates_within_the_provider_limit_bounds(tmp_path) -> N
             pairs=["BTC/USD"],
             start_date=date(2024, 1, 1),
             end_date=date(2024, 1, 2),
-            provider=AlpacaClient(transport=transport),  # type: ignore[arg-type]
+            provider=AlpacaClient(transport=transport),
             environ=_credentials(),
             now=datetime(2024, 1, 3, 12, tzinfo=UTC),
         )
@@ -714,7 +725,8 @@ def test_crypto_ensure_paginates_within_the_provider_limit_bounds(tmp_path) -> N
     assert result["errors"] == []
     assert len(transport.calls) == 6
     for call in transport.calls:
-        limit = call["params"]["limit"]
+        params = cast(dict[str, str | int], call["params"])
+        limit = params["limit"]
         assert isinstance(limit, int) and not isinstance(limit, bool)
         assert 1 <= limit <= 10_000
     records = LocalCatalogRepository(LocalLayout(tmp_path / "local").catalog).list(
@@ -760,15 +772,16 @@ def test_backfill_retries_transiently_failed_sessions_in_run(tmp_path, monkeypat
     result = _backfill_two_sessions(provider, tmp_path)
 
     assert result["errors"] == []
-    assert [entry["session_date"] for entry in result["sessions"]] == [
+    sessions = cast(list[dict[str, object]], result["sessions"])
+    assert [entry["session_date"] for entry in sessions] == [
         "2024-01-18",
         "2024-01-19",
     ]
-    assert [entry["statuses"] for entry in result["sessions"]] == [
+    assert [entry["statuses"] for entry in sessions] == [
         ["complete", "complete"],
         ["complete", "complete"],
     ]
-    assert all(entry["retryable"] is False for entry in result["sessions"])
+    assert all(entry["retryable"] is False for entry in sessions)
     assert provider.trade_calls.count(date(2024, 1, 19)) == 4
     assert provider.trade_calls.count(date(2024, 1, 18)) == 1
 
@@ -788,7 +801,8 @@ def test_backfill_does_not_retry_permanent_session_failures(tmp_path, monkeypatc
 
     result = _backfill_two_sessions(provider, tmp_path)
 
-    healthy, poisoned = result["sessions"]
+    sessions = cast(list[dict[str, object]], result["sessions"])
+    healthy, poisoned = sessions
     assert healthy["statuses"] == ["complete", "complete"]
     assert poisoned["statuses"] == ["error", "error"]
     assert poisoned["error"] == "trade: RuntimeError: poisoned session"

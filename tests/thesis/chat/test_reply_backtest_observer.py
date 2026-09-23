@@ -132,7 +132,7 @@ def test_observer_fault_does_not_break_the_reply() -> None:
 
     message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
-    assert message is not None
+    assert isinstance(message, ChatMessage)
     assert message.body == "Recovered."
     tool_message = next(
         item
@@ -152,5 +152,5 @@ def test_observer_is_optional_and_defaults_to_no_op() -> None:
 
     message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
-    assert message is not None
+    assert isinstance(message, ChatMessage)
     assert message.body == "Plain."

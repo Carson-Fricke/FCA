@@ -33,13 +33,15 @@ def _builder() -> WorkflowBuilder[Any, Any, Any]:
 def test_builder_accepts_a_seed_on_an_agent_phase() -> None:
     spec = _builder().build().spec
     assert spec.phase_names == ("start", "done")
-    assert spec.phase_specs["start"].seed is _seed
+    start = spec.phase_specs["start"]
+    assert isinstance(start, OneShotPhase)
+    assert start.seed is _seed
     assert spec.terminal_phases == ("done",)
 
 
 def test_a_deterministic_phase_is_unrepresentable_without_a_contract() -> None:
     with pytest.raises(TypeError, match="contract"):
-        DeterministicPhase(phase="intake")  # type: ignore[call-arg]
+        DeterministicPhase(phase="intake")  # ty: ignore[missing-argument]
 
 
 def test_builder_rejects_on_complete_that_is_not_a_declared_transition() -> None:

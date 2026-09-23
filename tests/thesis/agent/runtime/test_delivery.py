@@ -255,7 +255,7 @@ def test_node_turn_runner_persists_the_transcript() -> None:
             )
         ]
     )
-    captured: list[object] = []
+    captured: list[ToolContext] = []
     runner = Conversations(
         chat=chat,
         store=store,

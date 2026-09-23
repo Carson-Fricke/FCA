@@ -7,16 +7,20 @@ and request at launch, and rebuilds the typed state from the store alone.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
 
+from thesis.execution.events import EventReplay, ExecutionEvent, ExecutionEventStore
 from thesis.research.models import ResearchModelRef
 from thesis.workflows.backtests import BacktestRunResult
 from thesis.workflows.core.execution_store import (
+    ExecutionDocument,
     ExecutionIdentity,
     ExecutionStoreConflict,
     InMemoryExecutionStore,
+    StoreTransition,
 )
 from thesis.workflows.core.workflow import Workflow, WorkflowPorts
 from thesis.workflows.registry.hypothesis_development import (
@@ -96,10 +100,16 @@ def test_transitions_commit_to_the_store_with_their_completions(
         ("falsification_trials", "verdict"),
     ]
     creation, trials = document.transitions
-    assert creation.completion["hypothesis"]["claim"] == _hypothesis_envelope()["claim"]
+    hypothesis = creation.completion["hypothesis"]
+    assert isinstance(hypothesis, Mapping)
+    assert hypothesis["claim"] == _hypothesis_envelope()["claim"]
     assert creation.reason == "phase completion accepted for 'hypothesis_creation'"
-    assert trials.completion["trials"]
-    assert trials.completion["trials"][0]["runState"] == "completed"
+    trials_completion = trials.completion["trials"]
+    assert trials_completion
+    assert isinstance(trials_completion, Sequence)
+    first_trial = trials_completion[0]
+    assert isinstance(first_trial, Mapping)
+    assert first_trial["runState"] == "completed"
     assert [item.sequence for item in document.transitions] == [1, 2]
 
 
@@ -109,6 +119,7 @@ def test_the_store_commit_lands_before_the_phase_projection(tmp_path: Path) -> N
     )
     request = _request(kit)
     node_id = kit.workflow.prepare_phase(request)
+    assert node_id is not None
 
     log: list[tuple[str, str]] = []
 
@@ -118,31 +129,68 @@ def test_the_store_commit_lands_before_the_phase_projection(tmp_path: Path) -> N
         def __init__(self, inner: InMemoryExecutionStore) -> None:
             self._inner = inner
 
-        def __getattr__(self, name: str):
-            return getattr(self._inner, name)
+        def create(
+            self,
+            identity: ExecutionIdentity,
+            *,
+            launch_request: Mapping[str, object] | None = None,
+        ) -> ExecutionDocument:
+            return self._inner.create(identity, launch_request=launch_request)
+
+        def get(self, execution_id: str) -> ExecutionDocument:
+            return self._inner.get(execution_id)
 
         def append_transition(
-            self, execution_id: str, transition: object, **kwargs: object
-        ):
-            log.append(("store", str(transition.to_phase)))  # type: ignore[attr-defined]
-            return self._inner.append_transition(execution_id, transition, **kwargs)
+            self,
+            execution_id: str,
+            transition: StoreTransition,
+            *,
+            expected_revision: int | None = None,
+        ) -> ExecutionDocument:
+            log.append(("store", transition.to_phase))
+            return self._inner.append_transition(
+                execution_id, transition, expected_revision=expected_revision
+            )
+
+        def put_phase_result(
+            self,
+            execution_id: str,
+            phase: str,
+            artifact: Mapping[str, object],
+            *,
+            expected_revision: int | None = None,
+        ) -> ExecutionDocument:
+            return self._inner.put_phase_result(
+                execution_id, phase, artifact, expected_revision=expected_revision
+            )
 
     class _RecordingEvents:
         """Wraps the chat event store, logging each appended event."""
 
-        def __init__(self, inner: object) -> None:
+        def __init__(self, inner: ExecutionEventStore) -> None:
             self._inner = inner
 
-        def __getattr__(self, name: str):
-            return getattr(self._inner, name)
-
-        def append(self, event: object):
-            log.append(("event", str(event.event_type.value)))  # type: ignore[attr-defined]
+        def append(self, event: ExecutionEvent) -> ExecutionEvent:
+            log.append(("event", event.type.value))
             return self._inner.append(event)
+
+        def replay(
+            self,
+            execution_id: str,
+            *,
+            after_cursor: int = 0,
+            limit: int | None = None,
+        ) -> EventReplay:
+            return self._inner.replay(
+                execution_id, after_cursor=after_cursor, limit=limit
+            )
+
+        def latest_cursor(self, execution_id: str) -> int:
+            return self._inner.latest_cursor(execution_id)
 
     recording_store = _RecordingStore(kit.execution_store)
     kit.workflow._execution_store = recording_store  # noqa: SLF001 - test seam
-    kit.chat._events = _RecordingEvents(kit.chat._events)  # type: ignore[attr-defined]
+    kit.chat._events = _RecordingEvents(kit.chat._events)  # noqa: SLF001 - test seam
     kit.workflow.apply_phase_completion(
         request,
         node_id,
@@ -270,7 +318,10 @@ def test_the_trials_datum_survives_as_a_store_record(tmp_path: Path) -> None:
     document = kit.execution_store.get(request.execution_id)
     # The trials datum lives in the trials→verdict completion contract.
     trials = document.transitions[-1].completion["trials"]
-    assert trials[0]["observed"] == 1.0
+    assert isinstance(trials, Sequence)
+    first_trial = trials[0]
+    assert isinstance(first_trial, Mapping)
+    assert first_trial["observed"] == 1.0
     # And the phase's rendered result artifact is a store record too (REQ-B1).
     artifact = document.phase_results["falsification_trials"]
     assert artifact["type"] == "falsification_report"

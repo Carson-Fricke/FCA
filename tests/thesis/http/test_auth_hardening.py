@@ -16,6 +16,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from thesis.agent.residency import OperationAuditRecord
 from thesis.auth import (
     BrowserSecurity,
     OperatorSessionService,
@@ -329,9 +330,9 @@ class _FakeAuditWriter:
     """In-memory stand-in for the residency store's ``append_audit``."""
 
     def __init__(self) -> None:
-        self.records: list[object] = []
+        self.records: list[OperationAuditRecord] = []
 
-    def append_audit(self, record: object) -> object:
+    def append_audit(self, record: OperationAuditRecord) -> OperationAuditRecord:
         self.records.append(record)
         return record
 
@@ -365,16 +366,16 @@ def test_residency_adapter_maps_events_onto_operation_audit_records() -> None:
     )
 
     recorded, unavailable = writer.records
-    assert recorded.operation_id == "audit-1"  # type: ignore[attr-defined]
-    assert recorded.workspace_id == "identity-audit"  # type: ignore[attr-defined]
-    assert recorded.operation == "open_investigation"  # type: ignore[attr-defined]
-    assert recorded.status == "recorded"  # type: ignore[attr-defined]
-    assert recorded.recorded_at == NOW  # type: ignore[attr-defined]
-    assert recorded.route_ref == "identity/login"  # type: ignore[attr-defined]
-    assert recorded.inputs_digest == event.digest  # type: ignore[attr-defined]
-    assert recorded.reason is None  # type: ignore[attr-defined]
-    assert unavailable.status == "unavailable"  # type: ignore[attr-defined]
-    assert unavailable.reason == "rate_limited"  # type: ignore[attr-defined]
+    assert recorded.operation_id == "audit-1"
+    assert recorded.workspace_id == "identity-audit"
+    assert recorded.operation == "open_investigation"
+    assert recorded.status == "recorded"
+    assert recorded.recorded_at == NOW
+    assert recorded.route_ref == "identity/login"
+    assert recorded.inputs_digest == event.digest
+    assert recorded.reason is None
+    assert unavailable.status == "unavailable"
+    assert unavailable.reason == "rate_limited"
 
 
 def test_audit_events_never_accept_or_carry_a_secret_field() -> None:

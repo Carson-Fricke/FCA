@@ -108,7 +108,7 @@ def test_no_trials_record_exists_in_the_sub_agent_tree(tmp_path: Path) -> None:
     assert not [
         event
         for event in events
-        if event.event_type.value.startswith("sub_agent.")
+        if str(event.event_type).startswith("sub_agent.")
         and event.payload.get("phase") == TRIALS
     ]
 
@@ -177,6 +177,7 @@ def test_a_failed_computation_records_the_error_variant(tmp_path: Path) -> None:
     )
     request = _request(kit)
     node_id = kit.workflow.prepare_phase(request)
+    assert node_id is not None
 
     import pytest
 

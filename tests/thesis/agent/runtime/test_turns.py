@@ -13,7 +13,7 @@ from thesis.agent.runtime.session import (
 )
 from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.agent.runtime.store import PersistenceSubAgentStore
-from thesis.agent.runtime.turns import NodeTurnCoordinator
+from thesis.agent.runtime.turns import NodeTurnCoordinator, TurnRunner
 from thesis.chat.contracts import (
     MessageRole,
     SubAgentKind,
@@ -50,12 +50,12 @@ class _RecordingRunner:
 
 
 def _coordinator(
-    runner: object, spawned: list[Callable[[], None]]
+    runner: TurnRunner, spawned: list[Callable[[], None]]
 ) -> NodeTurnCoordinator:
     chat = ChatService(persistence=InMemoryChatPersistence())
     store = PersistenceSubAgentStore(chat.persistence)
     return NodeTurnCoordinator(
-        runner=runner,  # type: ignore[arg-type]
+        runner=runner,
         chat=chat,
         store=store,
         spawn_thread=lambda target: spawned.append(target),

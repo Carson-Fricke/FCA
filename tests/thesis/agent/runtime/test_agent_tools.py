@@ -346,6 +346,10 @@ def test_workflow_tool_rejects_an_unknown_workflow() -> None:
 def test_phase_completion_tool_advertises_the_declared_schema() -> None:
     control = _ControlStub()
 
+    def _mapping(value: object) -> Mapping[str, object]:
+        assert isinstance(value, Mapping)
+        return value
+
     def registered(schema: object) -> Mapping[str, object]:
         tools = {
             tool.name: tool.spec
@@ -355,10 +359,11 @@ def test_phase_completion_tool_advertises_the_declared_schema() -> None:
                 phase_completion_schema=cast("Mapping[str, object] | None", schema),
             )
         }
-        return cast("Mapping[str, object]", tools["request_phase_completion"])
+        function = tools["request_phase_completion"]["function"]
+        return _mapping(_mapping(function)["parameters"])
 
-    default = registered(None)["function"]["parameters"]
-    assert default["properties"]["completion"] == {"type": "object"}
+    default = registered(None)
+    assert _mapping(default["properties"])["completion"] == {"type": "object"}
 
     advertised = registered(
         {
@@ -366,11 +371,11 @@ def test_phase_completion_tool_advertises_the_declared_schema() -> None:
             "properties": {"hypothesis": {"type": "object"}},
             "required": ["hypothesis"],
         }
-    )["function"]["parameters"]
+    )
     assert advertised["required"] == ["completion"]
-    completion = advertised["properties"]["completion"]
+    completion = _mapping(_mapping(advertised["properties"])["completion"])
     assert completion["required"] == ["hypothesis"]
-    assert completion["properties"]["hypothesis"] == {"type": "object"}
+    assert _mapping(completion["properties"])["hypothesis"] == {"type": "object"}
 
 
 def test_spawn_uses_trusted_parent_not_model_arguments() -> None:

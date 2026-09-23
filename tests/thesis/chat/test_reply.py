@@ -114,7 +114,7 @@ def test_reply_streams_deltas_and_persists_assistant_message() -> None:
 
     message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
-    assert message is not None
+    assert isinstance(message, ChatMessage)
     assert message.role is MessageRole.ASSISTANT
     assert message.body == "Hello!"
     frames = broker.read(WORKSPACE, chat.chat_id)
@@ -159,7 +159,7 @@ def test_reply_persists_multiline_text() -> None:
 
     message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
-    assert message is not None
+    assert isinstance(message, ChatMessage)
     assert message.body == "Line one\n\nLine two — done ✓"
 
 
@@ -174,7 +174,7 @@ def test_reply_sanitizes_control_characters() -> None:
 
     message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
-    assert message is not None
+    assert isinstance(message, ChatMessage)
     assert message.body == "ok[31mred"
 
 
@@ -189,7 +189,7 @@ def test_reply_streams_reasoning_before_answer_on_a_separate_channel() -> None:
 
     message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
-    assert message is not None
+    assert isinstance(message, ChatMessage)
     assert message.body == "Answer text."
     assert message.reasoning == "Weigh the options."
     deltas = [

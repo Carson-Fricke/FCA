@@ -88,6 +88,12 @@ def _stores(tmp_path: Path) -> tuple[LocalInviteStore, LocalAccountStore]:
     )
 
 
+def _stored_invite(invites: LocalInviteStore, invite_id: str) -> Invite:
+    stored = invites.get(invite_id)
+    assert stored is not None
+    return stored
+
+
 def test_happy_path_consumes_invite_and_creates_bound_account(
     tmp_path: Path,
 ) -> None:
@@ -114,7 +120,7 @@ def test_happy_path_consumes_invite_and_creates_bound_account(
     assert result.account.created_at == _NOW
     assert result.account.updated_at == _NOW
     assert accounts.get_by_email("invitee@example.com") == result.account
-    assert invites.get("inv-1").consumed_at == _NOW
+    assert _stored_invite(invites, "inv-1").consumed_at == _NOW
     assert audit.events == [
         RedemptionAuditEvent(
             outcome="redeemed",
@@ -186,7 +192,7 @@ def test_concurrent_redeem_yields_exactly_one_success(tmp_path: Path) -> None:
     assert len(failures) == 1
     assert isinstance(failures[0], InvalidInviteError)
     assert len(accounts.list()) == 1
-    assert invites.get("inv-1").consumed_at == _NOW
+    assert _stored_invite(invites, "inv-1").consumed_at == _NOW
 
 
 def test_unknown_token_rejects(tmp_path: Path) -> None:
@@ -235,7 +241,7 @@ def test_email_binding_mismatch_rejects(tmp_path: Path) -> None:
 
     with pytest.raises(InviteEmailMismatchError):
         service.redeem(token="tok-abc", email="other@example.com")
-    assert invites.get("inv-1").consumed_at is None
+    assert _stored_invite(invites, "inv-1").consumed_at is None
 
 
 def test_existing_account_rejects_without_consuming_invite(tmp_path: Path) -> None:
@@ -247,7 +253,7 @@ def test_existing_account_rejects_without_consuming_invite(tmp_path: Path) -> No
     invites.put(_invite(invite_id="inv-2", token="tok-second"))
     with pytest.raises(InvalidInviteError, match="already exists"):
         service.redeem(token="tok-second", email="invitee@example.com")
-    assert invites.get("inv-2").consumed_at is None
+    assert _stored_invite(invites, "inv-2").consumed_at is None
 
 
 def test_rate_limit_triggers_and_emits_failure_audit(tmp_path: Path) -> None:
@@ -270,7 +276,7 @@ def test_rate_limit_triggers_and_emits_failure_audit(tmp_path: Path) -> None:
 
     assert audit.events[-1].outcome == "rejected"
     assert audit.events[-1].reason == "rate_limited"
-    assert invites.get("inv-1").consumed_at is None
+    assert _stored_invite(invites, "inv-1").consumed_at is None
     assert all(
         "valid-token" not in key and "unknown-token" not in key
         for key, _ in limiter.calls

@@ -63,7 +63,7 @@ def test_tool_result_is_persisted_as_an_ordered_message() -> None:
 
     message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
-    assert message is not None
+    assert isinstance(message, ChatMessage)
     assert message.body == "Answer text."
     stored = service.list_messages(WORKSPACE, chat.chat_id)
     assert [item.role for item in stored] == [
@@ -123,7 +123,7 @@ def test_tool_failure_is_persisted_without_touching_the_answer() -> None:
 
     message = conversations.root(WORKSPACE, chat.chat_id).run_turn()
 
-    assert message is not None
+    assert isinstance(message, ChatMessage)
     assert message.body == "Recovered."
     tool_message = next(
         item

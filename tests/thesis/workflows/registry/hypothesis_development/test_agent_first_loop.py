@@ -171,6 +171,18 @@ def _node_messages(chat: ChatService, chat_id: str, node_id: str) -> list[ChatMe
     ]
 
 
+def _message_data(message: ChatMessage) -> Mapping[str, object]:
+    data = message.data
+    assert data is not None
+    return data
+
+
+def _tool_result(message: ChatMessage) -> Mapping[str, object]:
+    result = message.tool_result
+    assert result is not None
+    return result
+
+
 def _control(
     kit: _Kit,
     store: PersistenceSubAgentStore,
@@ -241,9 +253,9 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     node_id = kit.workflow.prepare_phase(request)
     assert node_id is not None
     seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
-    assert [seed.data["subAgentId"] for seed in seeds] == [node_id]
+    assert [_message_data(seed)["subAgentId"] for seed in seeds] == [node_id]
     assert seeds[0].role is MessageRole.USER
-    assert seeds[0].data["kind"] == "agent_prompt"
+    assert _message_data(seeds[0])["kind"] == "agent_prompt"
     assert IDEAS in seeds[0].body
     assert "request_phase_completion" in seeds[0].body
     assert "REQUIRES the operator's confirmation" in seeds[0].body
@@ -307,7 +319,7 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert execution.phase == HypothesisDevelopmentPhase.VERDICT.value
     seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
     assert len(seeds) == 2
-    next_node = str(seeds[1].data["subAgentId"])
+    next_node = str(_message_data(seeds[1])["subAgentId"])
     assert next_node != node_id
     # The verdict agent's prompt carries the trials the deterministic phase ran.
     assert '"trials"' in seeds[1].body
@@ -323,22 +335,21 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert not [
         event
         for event in events
-        if event.event_type.value.startswith("sub_agent.")
+        if event.type.value.startswith("sub_agent.")
         and event.payload.get("phase") == "falsification_trials"
     ]
     # The trials run is observable as workflow-scoped events only.
-    progress = [
-        event for event in events if event.event_type.value == "workflow.progress"
-    ]
+    progress = [event for event in events if event.type.value == "workflow.progress"]
     assert progress
     for event in progress:
         assert event.payload["phase"] == "falsification_trials"
         assert "subAgentId" not in event.payload
     phase_results = [
-        event for event in events if event.event_type.value == "workflow.phase_result"
+        event for event in events if event.type.value == "workflow.phase_result"
     ]
     assert len(phase_results) == 1
     artifact = phase_results[0].payload["artifact"]
+    assert isinstance(artifact, Mapping)
     assert artifact["type"] == "falsification_report"
     assert artifact["totalCount"] == 1
 
@@ -494,7 +505,7 @@ def test_rejected_contract_is_repaired_in_turn(tmp_path: Path) -> None:
         if message.tool_result is not None and message.tool_result.get("ok") is False
     ]
     assert failures
-    assert "hypothesis" in str(failures[0].tool_result["failure"])
+    assert "hypothesis" in str(_tool_result(failures[0])["failure"])
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.phase == HypothesisDevelopmentPhase.VERDICT.value
 
@@ -567,7 +578,7 @@ def test_deep_invalid_contract_is_rejected_and_repaired_in_turn(tmp_path: Path) 
         if message.tool_result is not None and message.tool_result.get("ok") is False
     ]
     assert failures
-    failure = str(failures[0].tool_result["failure"])
+    failure = str(_tool_result(failures[0])["failure"])
     # Every missing or wrongly-typed field is reported in one deterministic
     # rejection, so the repair turn is precise.
     assert "completion contract rejected with" in failure
@@ -621,6 +632,7 @@ def test_phase_agent_fault_fails_the_execution(tmp_path: Path) -> None:
     tool_result = failures[0].tool_result
     assert tool_result is not None
     structured = tool_result["structured"]
+    assert isinstance(structured, Mapping)
     assert structured["status"] == "failed"
     assert structured["phase"]
 

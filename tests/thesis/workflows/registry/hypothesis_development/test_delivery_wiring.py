@@ -8,12 +8,16 @@ durable message instead of duplicating the turn.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from thesis.agent.runtime.store import PersistenceSubAgentStore
-from thesis.chat.contracts import MessageRole, TranscriptItemKind
+from thesis.chat.contracts import ChatMessage, MessageRole, TranscriptItemKind
 from thesis.research.models import ResearchModelRef
 from thesis.workflows.backtests import BacktestRunResult
+from thesis.workflows.registry.hypothesis_development import (
+    HypothesisDevelopmentRequest,
+)
 from thesis.workflows.research_models import ResearchModelRunResult
 
 from ._support import WORKSPACE, _hypothesis_envelope, _kit, _request
@@ -45,7 +49,7 @@ class _CompletedStudyRunner:
 HANDOFF = "Falsification findings: the planned falsifier fired."
 
 
-def _complete_creation(kit, request: object) -> str:
+def _complete_creation(kit, request: HypothesisDevelopmentRequest) -> str:
     """Drive the run into the verdict phase and return the verdict node id."""
     node_id = kit.workflow.prepare_phase(request)
     assert node_id is not None
@@ -59,7 +63,7 @@ def _complete_creation(kit, request: object) -> str:
     return active.sub_agent_id
 
 
-def _handoff_messages(kit, request: object) -> list[object]:
+def _handoff_messages(kit, request: HypothesisDevelopmentRequest) -> list[ChatMessage]:
     return [
         message
         for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
@@ -82,15 +86,17 @@ def test_phase_handoff_lands_through_the_one_delivery_path(tmp_path: Path) -> No
     messages = _handoff_messages(kit, request)
     assert len(messages) == 1
     message = messages[0]
+    data = message.data
+    assert data is not None
     assert message.role is MessageRole.SYSTEM
     assert message.kind is TranscriptItemKind.SUB_AGENT
     assert message.body == HANDOFF
-    assert message.data["executionId"] == request.execution_id
-    assert message.data["handoffKind"] == "falsification_findings"
-    assert message.data["phase"] == "verdict"
-    assert message.data["subAgentId"] == verdict_node
+    assert data["executionId"] == request.execution_id
+    assert data["handoffKind"] == "falsification_findings"
+    assert data["phase"] == "verdict"
+    assert data["subAgentId"] == verdict_node
     # The delivery carries its durable idempotency key.
-    assert message.data["deliveryKey"]
+    assert data["deliveryKey"]
     # The re-delivered handoff deduped: one message, one extra wake at most.
     assert len(kit.woke) == first_wake_count
 
@@ -114,9 +120,13 @@ def test_failure_datum_lands_through_the_one_delivery_path(tmp_path: Path) -> No
     ]
     assert len(failures) == 1
     message = failures[0]
-    assert message.data["structured"]["executionId"] == request.execution_id
-    assert message.data["structured"]["status"] == "failed"
-    assert message.data["failure"] == {"kind": "workflow", "message": "provider down"}
+    data = message.data
+    assert data is not None
+    structured = data["structured"]
+    assert isinstance(structured, Mapping)
+    assert structured["executionId"] == request.execution_id
+    assert structured["status"] == "failed"
+    assert data["failure"] == {"kind": "workflow", "message": "provider down"}
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.state.value == "failed"
 
