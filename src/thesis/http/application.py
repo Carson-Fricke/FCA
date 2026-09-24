@@ -734,6 +734,11 @@ def serving_app_from_environment() -> FastAPI:
     streaming surfaces answer with an in-memory service, and the workspace
     DATA routes fail closed with 503 until a data bundle is composed by a
     later runtime task.
+
+    The serving stack composes the conversations service, control tools, and
+    workflow runtime when ``OPENROUTER_API_KEY`` and ``HARNESS_MCP_URL`` are
+    configured (see :mod:`thesis.http.serving`); the execution store then
+    shares the same Cosmos database as the chat surface.
     """
     bearer_token = _environment_value("THESIS_API__BEARER_TOKEN")
     tenant_id = _environment_value("THESIS_API__ENTRA_TENANT_ID")
@@ -749,7 +754,13 @@ def serving_app_from_environment() -> FastAPI:
             "authentication is not configured; set THESIS_API__BEARER_TOKEN "
             "or both THESIS_API__ENTRA_TENANT_ID and THESIS_API__ENTRA_AUDIENCE"
         )
-    from thesis.cosmos.stack import open_cosmos_chat_stack
+    from thesis.chat.workflow_launcher import daemon_thread
+    from thesis.cosmos.stack import open_cosmos_chat_stack, open_execution_store
+    from thesis.http.serving import (
+        build_serving_stack,
+        open_serving_harness_tools,
+        open_serving_model_provider,
+    )
     from thesis.http.workspaces import build_local_workspace_data
 
     chat_service, timeline = open_cosmos_chat_stack()
@@ -757,13 +768,31 @@ def serving_app_from_environment() -> FastAPI:
         chat_service=chat_service,
         workspace_store=serving_workspace_store(),
     )
+    # The workflow runtime needs a model provider and a harness tool provider;
+    # without them the stack stays chat-only and the durable message surface
+    # still serves. The execution store is the same Cosmos database, so a
+    # composed runtime persists one durable document per execution.
+    model_provider = open_serving_model_provider()
+    harness_tools = open_serving_harness_tools() if model_provider is not None else None
+    stack = build_serving_stack(
+        chat_service=chat_service,
+        model_provider=model_provider,
+        harness_tools=harness_tools,
+        execution_store=(open_execution_store() if harness_tools is not None else None),
+        detach=daemon_thread,
+    )
     return create_app(
         bearer_token=bearer_token,
         entra_tenant_id=tenant_id,
         entra_audience=audience,
         entra_role=role,
-        chat_service=chat_service,
+        chat_service=stack.chat_service,
         workspace_data=workspace_data,
+        chat_stream_broker=stack.broker,
+        conversations=stack.conversations,
+        workflow_runtime=stack.workflow_runtime,
+        harness_tool_provider=stack.harness_tool_provider,
+        operator_policies=stack.operator_policies,
         timeline=timeline,
     )
 

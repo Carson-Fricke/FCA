@@ -31,6 +31,7 @@ RUNTIME_CONFIG = ROOT / "config" / "thesis" / "runtime.yaml"
 MAIN_TEMPLATE = ROOT / "infra" / "main.bicep"
 THESIS_MODULE = ROOT / "infra" / "modules" / "thesis.bicep"
 THESIS_COSMOS_MODULE = ROOT / "infra" / "modules" / "thesis-cosmos.bicep"
+CONTAINER_APPS_MODULE = ROOT / "infra" / "modules" / "container-apps.bicep"
 
 HARNESS_ENTRYPOINTS = {
     "lake": "lake.cli:main",
@@ -453,3 +454,32 @@ def test_deployed_wiring_consumes_the_provisioned_cosmos_account() -> None:
     for partition in ("'/chatId'", "'/workspaceId'", "'/executionId'"):
         assert partition in cosmos_module
     assert "disableLocalAuth: true" in cosmos_module
+
+
+def test_deployed_wiring_exposes_the_workflow_runtime_configuration() -> None:
+    """`thesis serve` composes the workflow runtime from these variables.
+
+    The composition (`thesis/http/serving.py`) needs a model key and a
+    reachable harness; the template must expose both, and both secrets stay
+    optional so the module deploys before the operator provisions them.
+    """
+    thesis_module = THESIS_MODULE.read_text(encoding="utf-8")
+    main_template = MAIN_TEMPLATE.read_text(encoding="utf-8")
+
+    for variable in (
+        "THESIS_MODEL",
+        "HARNESS_MCP_URL",
+        "HARNESS_API_BEARER_TOKEN",
+        "OPENROUTER_API_KEY",
+    ):
+        assert f"name: '{variable}'" in thesis_module
+    assert "harnessBearerTokenSecretName" in thesis_module
+    assert "modelApiKeySecretName" in thesis_module
+    assert "thesisHarnessBearerTokenSecretName" in main_template
+    assert "thesisModelApiKeySecretName" in main_template
+    # An empty explicit URL derives the internal harness endpoint, so the
+    # port must be published with the api app's FQDN.
+    assert "containerApps.outputs.api.fqdn" in main_template
+    assert "containerApps.outputs.api.port" in main_template
+    container_apps = CONTAINER_APPS_MODULE.read_text(encoding="utf-8")
+    assert "port: apiContainerPort" in container_apps

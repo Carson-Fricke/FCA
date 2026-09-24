@@ -3,8 +3,10 @@
 Binds the real chat surface (T211), the workspace DATA routes (T231), and
 the screener router to a single uvicorn process on 127.0.0.1:8000, with a
 LocalHarnessProcess backtest-launch boundary and CORS for the Svelte dev
-server.  This is the composition `thesis serve` will eventually take over;
-see .github/runbooks/thesis-local-stack.md.
+server.  The serving stack itself (conversations, control tools, workflow
+runtime, launcher) is composed by :func:`thesis.http.serving.build_serving_stack`
+— the same composition `thesis serve` uses — and only the local harness
+transport and logging differ here; see .github/runbooks/thesis-local-stack.md.
 
 Usage:
     uv run python scripts/local/thesis_local_api.py
@@ -18,7 +20,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from collections.abc import Mapping, Sequence
 
 import uvicorn
 
@@ -30,49 +31,13 @@ sys.path.insert(0, "src")
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 from thesis.agent.harness_tools import (  # noqa: E402
-    HARNESS_TOOL_NAMES,
     HarnessMcpComposition,
     HarnessToolProvider,
     open_harness_mcp_composition,
     open_harness_tool_provider,
 )
-from thesis.agent.hypothesis_skills import (  # noqa: E402
-    with_hypothesis_development_skills,
-)
-from thesis.agent.router import (  # noqa: E402
-    ModelProfile,
-    Role,
-    RolePolicy,
-)
-from thesis.agent.runtime.context import ToolContext  # noqa: E402
 from thesis.agent.runtime.control import ControlToolService  # noqa: E402
-from thesis.agent.runtime.conversation import Conversations  # noqa: E402
-from thesis.agent.runtime.lifecycle import SubAgentLifecycle  # noqa: E402
-from thesis.agent.runtime.policy import (  # noqa: E402
-    OperatorPolicyRegistry,
-    SpawnPolicy,
-)
-from thesis.agent.runtime.registry import (  # noqa: E402
-    THESIS_TOOL_NAMES,
-    build_session_registry,
-)
-from thesis.agent.runtime.store import PersistenceSubAgentStore  # noqa: E402
-from thesis.agent.session_reply import SessionReplyProvider  # noqa: E402
-from thesis.agent.skills import SkillRegistry  # noqa: E402
-from thesis.agent.tool_dispatch import with_harness_mcp  # noqa: E402
-from thesis.chat.contracts import (  # noqa: E402
-    ChatMessage,
-    MessageRole,
-    RecordNotFound,
-    SubAgentRecord,
-    WorkflowExecutionState,
-)
-from thesis.chat.streaming import InMemoryChatStreamBroker  # noqa: E402
-from thesis.chat.workflow_launcher import (  # noqa: E402
-    Detach,
-    RuntimeWorkflowLauncher,
-    daemon_thread,
-)
+from thesis.chat.workflow_launcher import daemon_thread  # noqa: E402
 from thesis.cosmos.stack import (  # noqa: E402
     open_cosmos_chat_stack,
     open_execution_store,
@@ -80,6 +45,10 @@ from thesis.cosmos.stack import (  # noqa: E402
 from thesis.http.application import (  # noqa: E402
     create_app,
     serving_workspace_store,
+)
+from thesis.http.serving import (  # noqa: E402
+    build_serving_stack,
+    open_serving_model_provider,
 )
 from thesis.http.workspaces import build_local_workspace_data  # noqa: E402
 from thesis.integrations.harness import ProcessResult  # noqa: E402
@@ -92,36 +61,7 @@ from thesis.integrations.mcp import (  # noqa: E402
     HarnessMcpTopology,
     harness_mcp_topology_from_env,
 )
-from thesis.providers.openrouter import (  # noqa: E402
-    OpenRouterProfile,
-    OpenRouterProvider,
-)
-from thesis.providers.transports import (  # noqa: E402
-    DEFAULT_SYSTEM_PROMPT,
-    EnvironmentApiKeySource,
-    HttpOpenRouterTransport,
-    openrouter_reply_provider,
-)
-from thesis.research.hypothesis import WorkspaceHypothesisStore  # noqa: E402
-from thesis.research.indicators import WorkspaceIndicatorStore  # noqa: E402
-from thesis.research.models import WorkspaceResearchModelStore  # noqa: E402
-from thesis.strategies.validation import (  # noqa: E402
-    StrategyValidationRequest,
-    StrategyValidationResult,
-)
-from thesis.workflows.core.execution_store import ExecutionStore  # noqa: E402
-from thesis.workflows.local import McpBacktestRunner, McpStudyRunner  # noqa: E402
-from thesis.workflows.registry.hypothesis_development import (  # noqa: E402
-    HypothesisDevelopmentRequest,
-)
-from thesis.workflows.research_models import (  # noqa: E402
-    BacktestResearchModelRunner,
-)
-from thesis.workflows.runtime import build_workflow_runtime  # noqa: E402
-from thesis.workspaces.local import (  # noqa: E402
-    LocalWorkspaceProvider,
-    default_workspace_root,
-)
+from thesis.workspaces.local import default_workspace_root  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -206,40 +146,6 @@ def _harness_composition() -> tuple[HarnessBoundary | None, HarnessToolProvider 
     return composition.boundary, provider
 
 
-class _WorkflowModelProvider:
-    """Adapt the OpenRouter chat client to the router's provider port."""
-
-    def __init__(self, provider: OpenRouterProvider) -> None:
-        self._provider = provider
-
-    def invoke(
-        self,
-        *,
-        profile,  # noqa: ANN001
-        prompt,  # noqa: ANN001
-        allowed_tools,
-        response_format=None,  # noqa: ANN001
-    ):
-        del profile, allowed_tools
-        from thesis.agent.router import ModelResponse
-        from thesis.providers.invocations import ChatMessage as ProviderChatMessage
-
-        completion = self._provider.complete(
-            messages=[ProviderChatMessage(role="user", content=prompt.rendered)],
-            response_format=response_format,
-        )
-        return ModelResponse(output=completion.content)
-
-
-class _StructuralStrategyValidator:
-    """Accept a structurally valid bundle for local composition."""
-
-    def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
-        return StrategyValidationResult(
-            True, (), validation_id=f"local-{request.bundle_sha256[:16]}"
-        )
-
-
 class _LoggingControlToolService(ControlToolService):
     """Control surface that logs operator-input and transition decisions."""
 
@@ -291,78 +197,11 @@ class _LoggingControlToolService(ControlToolService):
         return record
 
 
-def _execution_epoch(workspace_id: str, execution_id: str) -> int | None:
-    try:
-        return chat_service.get_execution(workspace_id, execution_id).intent_epoch
-    except RecordNotFound:
-        return None
-
-
-def _development_runtime(
-    model_provider: OpenRouterProvider,
-    harness_tools: HarnessToolProvider,
-    conversations: Conversations | None = None,
-    execution_store: ExecutionStore | None = None,
-    detach: Detach | None = None,
-):
-    """Compose the workflow runtime for the falsification-first pipeline."""
-    skills = SkillRegistry()
-    profiles = {
-        "local-openrouter": ModelProfile(
-            profile_id="local-openrouter",
-            version="1.0.0",
-            provider="openrouter",
-            model=os.environ.get("THESIS_MODEL", "z-ai/glm-5.3-flash"),
-        )
-    }
-
-    def policy(role: Role) -> RolePolicy:
-        base = RolePolicy(
-            role=role,
-            version="1.0.0",
-            model_profile="local-openrouter",
-            allowed_tools=(),
-        )
-        return with_hypothesis_development_skills(with_harness_mcp(base))
-
-    runner = McpBacktestRunner(harness_tools)
-    # Research models always compile to a ``study`` shell, so the falsification
-    # phase must execute through ``run_study``; the backtest runner would reject
-    # the study configuration before any computation.  The durable workspace
-    # stores are bound to the runner itself: model publications, fits, and run
-    # records persist under the workspace models/ tree instead of an
-    # in-process store that dies with the API process.
-    workspaces = LocalWorkspaceProvider(WORKSPACE_ROOT)
-    research_runner = BacktestResearchModelRunner(
-        McpStudyRunner(harness_tools),
-        models=WorkspaceResearchModelStore(workspaces),
-        indicators=WorkspaceIndicatorStore(workspaces),
-    )
-    return build_workflow_runtime(
-        role_policies={
-            "research": policy("research"),
-            "critique": policy("critique"),
-            "coding": policy("coding"),
-        },
-        model_profiles=profiles,
-        providers={"openrouter": _WorkflowModelProvider(model_provider)},
-        skills=skills,
-        runner=runner,
-        research_runner=research_runner,
-        strategy_validator=_StructuralStrategyValidator(),
-        hypothesis_store=WorkspaceHypothesisStore(WORKSPACE_ROOT),
-        conversations=conversations,
-        execution_store=execution_store,
-        detach=detach,
-    )
-
-
 _harness, _harness_tools = _harness_composition()
 
 # Conversations persist in Cosmos DB (the local emulator by default) and every
 # message/event shares one per-chat timeline served by the unified stream.
 chat_service, timeline = open_cosmos_chat_stack()
-chat_stream_broker = InMemoryChatStreamBroker()
 
 workspace_data = build_local_workspace_data(
     workspace_root=WORKSPACE_ROOT,
@@ -372,207 +211,37 @@ workspace_data = build_local_workspace_data(
     workspace_store=serving_workspace_store(),
 )
 
-#: Every tool the top-level chat agent may call: the full harness catalog plus
-#: every Thesis-owned control tool (spawn, await, operator input, and workflow
-#: launch).  A workflow's phase sub-agents are a different mechanism entirely:
-#: the workflow state machine spawns them deterministically through the same
-#: durable command contract, without the top-level agent calling any tool.
-_AGENT_ALLOWED_TOOLS: tuple[str, ...] = tuple(
-    sorted({*HARNESS_TOOL_NAMES, *THESIS_TOOL_NAMES})
+# One serving composition owns the conversations service, control tools,
+# workflow runtime, and launcher; the local composition only swaps in the
+# logging control service and the local workspace tree.
+model_provider = open_serving_model_provider()
+execution_store = (
+    open_execution_store()
+    if model_provider is not None and _harness_tools is not None
+    else None
 )
-
-
-def _trigger_message_id(history: Sequence[ChatMessage]) -> str | None:
-    """Return the operator message that requested the current agent turn."""
-    for message in reversed(history):
-        if message.role is MessageRole.USER:
-            return message.message_id
-    return None
-
-
-# Wire a live model provider only when a key is present; otherwise chat stays
-# a durable message surface with no reply, rather than failing every send.
-conversations: Conversations | None = None
-workflow_runtime = None
-harness_tools = None
-subagent_store: PersistenceSubAgentStore | None = None
-# The composition point for per-node answering policy; the default is
-# human-only, and a future autonomous node changes this registry, not the
-# route: the app and the conversations service share it.
-operator_policies = OperatorPolicyRegistry()
-_TERMINAL_EXECUTION_STATES = frozenset(
-    {
-        WorkflowExecutionState.COMPLETED,
-        WorkflowExecutionState.FAILED,
-        WorkflowExecutionState.STOPPED,
-        WorkflowExecutionState.CANCELLED,
-    }
+stack = build_serving_stack(
+    chat_service=chat_service,
+    model_provider=model_provider,
+    harness_tools=_harness_tools,
+    execution_store=execution_store,
+    workspace_root=WORKSPACE_ROOT,
+    detach=daemon_thread,
+    control_factory=_LoggingControlToolService,
+    on_turn_error=lambda error: print(
+        f"TURN ERROR: {error[2]!r}", file=sys.stderr, flush=True
+    ),
 )
-if os.environ.get("OPENROUTER_API_KEY"):
-    model_name = os.environ.get("THESIS_MODEL", "z-ai/glm-5.3-flash")
-    provider_profile = OpenRouterProfile(
-        profile_id="local-openrouter",
-        model=model_name,
-    )
-    model_provider = OpenRouterProvider(
-        provider_profile,
-        EnvironmentApiKeySource(),
-        HttpOpenRouterTransport(provider_profile.base_url),
-    )
-    harness_tools = _harness_tools
-    subagent_store = PersistenceSubAgentStore(chat_service.persistence)
-    # Permissive by default: undeclared roles are allowed, children inherit the
-    # caller's tools, and root spawning is authorized. Only escalation (a child
-    # gaining a tool its caller lacks) and the root budget ceiling are enforced.
-    spawn_policy = SpawnPolicy()
-    lifecycle = SubAgentLifecycle(
-        chat_service,
-        store=subagent_store,
-        max_depth=spawn_policy.max_depth,
-        max_children=spawn_policy.max_children,
-    )
-
-    def _apply_phase_completion(
-        workspace_id: str,
-        record: SubAgentRecord,
-        completion: Mapping[str, object],
-    ) -> Mapping[str, object] | None:
-        """Apply one phase agent's completion through the workflow object."""
-        if workflow_runtime is None or record.workflow_execution_id is None:
-            return None
-        execution = chat_service.get_execution(
-            workspace_id, record.workflow_execution_id
-        )
-        request = HypothesisDevelopmentRequest.from_execution(chat_service, execution)
-        workflow = workflow_runtime.build_hypothesis_development(chat=chat_service)
-        return workflow.apply_phase_completion(request, record.sub_agent_id, completion)
-
-    def _phase_completion_schema(
-        context: ToolContext,
-    ) -> Mapping[str, object] | None:
-        """Resolve the phase's advertised completion schema for one node.
-
-        A phase agent's record carries the phase it orchestrates, so the
-        workflow's declared completion schemas are looked up by name; a root
-        chat context or a chat-spawned helper keeps the generic tool schema.
-        """
-        if (
-            workflow_runtime is None
-            or subagent_store is None
-            or not context.workflow_execution_id
-            or not context.sub_agent_id
-        ):
-            return None
-        record = subagent_store.get_sub_agent(
-            context.workspace_id, context.sub_agent_id
-        )
-        if record is None or not record.phase or not record.workflow_execution_id:
-            return None
-        workflow = workflow_runtime.build_hypothesis_development(chat=chat_service)
-        return workflow.spec.completion_schemas.get(record.phase)
-
-    def _registry_for(context: ToolContext):
-        return build_session_registry(
-            context=context,
-            harness_tools=harness_tools,
-            control=control_service,
-            workflow=launcher,
-            spawn_policy=spawn_policy,
-            phase_completion_schema=_phase_completion_schema(context),
-        )
-
-    def _fail_phase_execution(record: SubAgentRecord, error: Exception) -> None:
-        """Fail the owning workflow execution after a phase-agent fault."""
-        if workflow_runtime is None or record.workflow_execution_id is None:
-            return
-        execution = chat_service.get_execution(
-            record.workspace_id, record.workflow_execution_id
-        )
-        request = HypothesisDevelopmentRequest.from_execution(chat_service, execution)
-        workflow = workflow_runtime.build_hypothesis_development(chat=chat_service)
-        workflow.fail_execution(request, reason=str(error) or type(error).__name__)
-
-    def _provider_for(workspace_id: str, chat_id: str, history: Sequence[ChatMessage]):
-        context = ToolContext(
-            workspace_id=workspace_id,
-            chat_id=chat_id,
-            conversation_id=chat_id,
-            actor_id="thesis-agent",
-            trigger_message_id=_trigger_message_id(history),
-            allowed_tools=_AGENT_ALLOWED_TOOLS,
-        )
-        return SessionReplyProvider(
-            workspace_id=workspace_id,
-            chat_id=chat_id,
-            conversation_id=chat_id,
-            provider=model_provider,
-            registry=_registry_for(context),
-            store=subagent_store,
-        )
-
-    def _reply_source(workspace_id: str, chat_id: str, history: Sequence[ChatMessage]):
-        if harness_tools is None:
-            return openrouter_reply_provider(
-                model_provider, system_prompt=DEFAULT_SYSTEM_PROMPT
-            )(history)
-        return _provider_for(workspace_id, chat_id, history)(history)
-
-    # One conversations service owns every conversation's turns and routing;
-    # the closures above late-bind the control service and workflow runtime
-    # that are composed from it below.
-    conversations = Conversations(
-        chat=chat_service,
-        broker=chat_stream_broker,
-        reply_for=_reply_source,
-        store=subagent_store,
-        provider=model_provider,
-        registry_factory=_registry_for,
-        lifecycle=lifecycle,
-        policies=operator_policies,
-        on_fault=_fail_phase_execution,
-        on_turn_error=lambda error: print(
-            f"TURN ERROR: {error[2]!r}", file=sys.stderr, flush=True
-        ),
-    )
-
-    control_service = _LoggingControlToolService(
-        conversations=conversations,
-        execution_epochs=_execution_epoch,
-        phase_completions=_apply_phase_completion,
-    )
-    if harness_tools is not None:
-        workflow_runtime = _development_runtime(
-            model_provider,
-            harness_tools,
-            conversations,
-            # The execution store shares the Cosmos database with the chat
-            # stack: one durable document per workflow execution, independent
-            # of chat deletion.
-            open_execution_store(),
-            # A phase completion returns when its transition commits; the
-            # successor phase (including a deterministic run such as the
-            # falsification trials) runs out of band on this seam.
-            detach=daemon_thread,
-        )
-    launcher = (
-        None
-        if workflow_runtime is None
-        else RuntimeWorkflowLauncher(
-            workflow_runtime,
-            chat_service,
-            conversations=conversations,
-        )
-    )
 
 app = create_app(
-    chat_service=chat_service,
+    chat_service=stack.chat_service,
     workspace_data=workspace_data,
-    chat_stream_broker=chat_stream_broker,
-    conversations=conversations,
-    workflow_runtime=workflow_runtime,
-    harness_tool_provider=harness_tools,
+    chat_stream_broker=stack.broker,
+    conversations=stack.conversations,
+    workflow_runtime=stack.workflow_runtime,
+    harness_tool_provider=stack.harness_tool_provider,
+    operator_policies=stack.operator_policies,
     timeline=timeline,
-    operator_policies=operator_policies,
 )
 app.add_middleware(
     CORSMiddleware,

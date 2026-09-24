@@ -848,6 +848,7 @@ output api object = {
   name: apiApp.name
   resourceId: apiApp.id
   fqdn: apiApp.properties.configuration.ingress.fqdn
+  port: apiContainerPort
 }
 
 @description('Use this name or resource ID with the Container Apps job start operation for an on-demand ingest execution.')

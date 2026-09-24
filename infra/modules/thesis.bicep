@@ -101,6 +101,18 @@ param thesisCosmosEndpoint string
 @minLength(1)
 param thesisCosmosDatabaseName string = 'thesis'
 
+@description('OpenRouter model name injected as THESIS_MODEL. Empty leaves the runtime default (z-ai/glm-5.3-flash).')
+param thesisModel string = ''
+
+@description('Harness MCP endpoint injected as HARNESS_MCP_URL. Empty disables the workflow runtime; the composition derives the internal market-lake api endpoint by default.')
+param harnessMcpUrl string = ''
+
+@description('Name of the operator-provisioned Key Vault secret holding the harness API bearer token, injected as HARNESS_API_BEARER_TOKEN. Empty disables the workflow runtime so the module stays deployable before the secret exists.')
+param harnessBearerTokenSecretName string = ''
+
+@description('Name of the operator-provisioned Key Vault secret holding the OpenRouter API key, injected as OPENROUTER_API_KEY. Empty disables model replies and the workflow runtime.')
+param modelApiKeySecretName string = ''
+
 @description('Name of the operator-provisioned Key Vault secret holding the Azure Communication Services email connection string. No secret value is embedded in this module. Empty disables invite-mail delivery wiring so the module stays deployable before the operator creates the secret (see .github/runbooks/thesis-public-auth.md Step 4).')
 param mailerConnectionStringSecretName string = 'thesis-acs-email-connection-string'
 
@@ -174,24 +186,41 @@ var thesisSecretName = 'thesis-api-bearer-token'
 // secret name disables the mailer wiring so the module stays deployable before
 // the operator creates the secret. The bearer secret is always required.
 var thesisMailerEnabled = !empty(mailerConnectionStringSecretName)
-var thesisSecrets = thesisMailerEnabled ? [
-  {
-    name: thesisSecretName
-    keyVaultUrl: '${keyVaultUri}secrets/${thesisSecretName}'
-    identity: thesisIdentityResourceId
-  }
-  {
-    name: mailerConnectionStringSecretName
-    keyVaultUrl: '${keyVaultUri}secrets/${mailerConnectionStringSecretName}'
-    identity: thesisIdentityResourceId
-  }
-] : [
-  {
-    name: thesisSecretName
-    keyVaultUrl: '${keyVaultUri}secrets/${thesisSecretName}'
-    identity: thesisIdentityResourceId
-  }
-]
+// Workflow wiring is opt-in per secret: the module stays deployable before the
+// operator provisions the harness token or the model key, and the runtime
+// composes only what it can authenticate (thesis/http/serving.py).
+var thesisHarnessEnabled = !empty(harnessBearerTokenSecretName)
+var thesisModelKeyEnabled = !empty(modelApiKeySecretName)
+var thesisSecrets = concat(
+  [
+    {
+      name: thesisSecretName
+      keyVaultUrl: '${keyVaultUri}secrets/${thesisSecretName}'
+      identity: thesisIdentityResourceId
+    }
+  ],
+  thesisMailerEnabled ? [
+    {
+      name: mailerConnectionStringSecretName
+      keyVaultUrl: '${keyVaultUri}secrets/${mailerConnectionStringSecretName}'
+      identity: thesisIdentityResourceId
+    }
+  ] : [],
+  thesisHarnessEnabled ? [
+    {
+      name: harnessBearerTokenSecretName
+      keyVaultUrl: '${keyVaultUri}secrets/${harnessBearerTokenSecretName}'
+      identity: thesisIdentityResourceId
+    }
+  ] : [],
+  thesisModelKeyEnabled ? [
+    {
+      name: modelApiKeySecretName
+      keyVaultUrl: '${keyVaultUri}secrets/${modelApiKeySecretName}'
+      identity: thesisIdentityResourceId
+    }
+  ] : []
+)
 // The bearer token reaches the container only through a secretRef; no
 // provider, model, or broker secret is configured for Thesis. The ACS
 // connection string likewise reaches the container only through a secretRef.
@@ -264,12 +293,41 @@ var thesisEntraEnvironment = empty(thesisApiEntraAudience) ? [] : [
     value: thesisApiEntraAudience
   }
 ]
+// The workflow runtime reads these through thesis/http/serving.py: a model
+// key plus a reachable harness MCP endpoint compose conversations, control
+// tools, and the workflow runtime; either missing leaves the app chat-only.
+var thesisWorkflowEnvironment = concat(
+  empty(thesisModel) ? [] : [
+    {
+      name: 'THESIS_MODEL'
+      value: thesisModel
+    }
+  ],
+  empty(harnessMcpUrl) ? [] : [
+    {
+      name: 'HARNESS_MCP_URL'
+      value: harnessMcpUrl
+    }
+  ],
+  thesisHarnessEnabled ? [
+    {
+      name: 'HARNESS_API_BEARER_TOKEN'
+      secretRef: harnessBearerTokenSecretName
+    }
+  ] : [],
+  thesisModelKeyEnabled ? [
+    {
+      name: 'OPENROUTER_API_KEY'
+      secretRef: modelApiKeySecretName
+    }
+  ] : []
+)
 var thesisApiEnvironment = concat(thesisBaseEnvironment, thesisEntraEnvironment, [
   {
     name: 'THESIS_API__BEARER_TOKEN'
     secretRef: thesisSecretName
   }
-], thesisMailerEnvironment)
+], thesisMailerEnvironment, thesisWorkflowEnvironment)
 
 // The vault is referenced, not created: the composition owns the Key Vault.
 var keyVaultName = split(replace(keyVaultUri, 'https://', ''), '.')[0]

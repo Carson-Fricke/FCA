@@ -100,7 +100,36 @@ healthy deployment shows the two `THESIS_COSMOS_*` variables and zero
   container serves the workflow execution store wherever that runtime is
   composed.
 
-## 5. Troubleshooting
+## 5. Workflow runtime wiring
+
+`thesis serve` composes the conversations service, control tools, and the
+workflow runtime only when it can authenticate the model and the harness
+(`thesis/http/serving.py`). The deployment injects:
+
+| Variable | Source | Purpose |
+| --- | --- | --- |
+| `THESIS_MODEL` | non-secret parameter | OpenRouter model name; empty uses the runtime default |
+| `OPENROUTER_API_KEY` | Key Vault secret (operator-provisioned) | model replies and every phase agent |
+| `HARNESS_MCP_URL` | derived by `main.bicep` from the internal market-lake api endpoint | harness tools and studies |
+| `HARNESS_API_BEARER_TOKEN` | Key Vault secret `harness-api-bearer-token` (already required by the market-lake api app) | harness authentication |
+
+Enable model replies and workflows once:
+
+```bash
+az keyvault secret set --vault-name <vault> --name thesis-openrouter-api-key --value <key>
+```
+
+then set `thesisModelApiKeySecretName = 'thesis-openrouter-api-key'` in the
+parameter file and redeploy. Until then the app still serves chat, timeline,
+and workspaces; the workflow launch surface reports no workflow available
+rather than failing startup.
+
+Two limits are deliberate until the Azure workspace provider lands (T343/T344):
+research-model publications, indicator definitions, and hypothesis artifacts
+stay in process memory when no workspace tree is bound; runs, trials, and
+conversations remain durable in the execution store and Cosmos.
+
+## 6. Troubleshooting
 
 - **403 Forbidden from the Cosmos SDK at startup**: the role assignment has
   not propagated yet, or `thesisPrincipalId` is not the Thesis identity's
@@ -118,7 +147,7 @@ healthy deployment shows the two `THESIS_COSMOS_*` variables and zero
   deployment in the target resource group (the deterministic suffix includes
   the group id) or choose a new prefix.
 
-## 6. Key-based fallback (exceptional)
+## 7. Key-based fallback (exceptional)
 
 The default is identity-only; keys are never provisioned. If a legacy tool
 requires key auth, that is a deliberate change requiring all of:

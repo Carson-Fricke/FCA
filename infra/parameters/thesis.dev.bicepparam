@@ -46,6 +46,12 @@ param thesisImageReference = 'example.azurecr.io/fca-thesis@sha256:0000000000000
 param thesisEnableExternalIngress = false
 // Empty keeps the Thesis API on the static bearer token; set an Entra app client ID to enable Entra validation.
 param thesisApiAudience = ''
+// Workflow runtime wiring: the harness bearer secret already exists because
+// the market-lake api app consumes it. Create thesis-openrouter-api-key in Key
+// Vault and set thesisModelApiKeySecretName to enable model replies and the
+// workflow runtime (see .github/runbooks/thesis-cosmos.md).
+param thesisHarnessBearerTokenSecretName = 'harness-api-bearer-token'
+param thesisModelApiKeySecretName = ''
 // Scale-to-zero with a bounded two-replica ceiling keeps idle compute at $0.
 param thesisContainerCpu = '0.25'
 param thesisContainerMemory = '0.5Gi'

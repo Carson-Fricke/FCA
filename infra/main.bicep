@@ -123,6 +123,18 @@ param thesisEnableExternalIngress bool = false
 @description('Entra application client ID the Thesis API accepts as token audience. Empty keeps the Thesis API on static bearer authentication only.')
 param thesisApiAudience string = ''
 
+@description('OpenRouter model name injected into the Thesis API as THESIS_MODEL. Empty uses the runtime default (z-ai/glm-5.3-flash).')
+param thesisModel string = ''
+
+@description('Harness MCP endpoint for the Thesis workflow runtime. Empty derives the internal market-lake api endpoint so both apps stay in one Container Apps environment.')
+param thesisHarnessMcpUrl string = ''
+
+@description('Key Vault secret name holding the harness API bearer token (operator-provisioned; the market-lake api app consumes the same secret). Empty disables the Thesis workflow runtime.')
+param thesisHarnessBearerTokenSecretName string = ''
+
+@description('Key Vault secret name holding the OpenRouter API key (operator-provisioned). Empty disables model replies and the Thesis workflow runtime.')
+param thesisModelApiKeySecretName string = ''
+
 @description('Operator-owned hostname served by the Thesis API. Empty keeps the Container Apps default FQDN; a non-empty value adds a hostname binding and a managed certificate gated on registrar-side DNS validation (domain-hosting.md).')
 param thesisCustomDomain string = ''
 
@@ -393,6 +405,12 @@ module thesisApi './modules/thesis.bicep' = if (deployThesis) {
     thesisWorkspaceRegistryTableName: deployThesis ? thesisWorkspaces.outputs.registryTableName : 'workspaces'
     thesisCosmosEndpoint: deployThesis ? thesisCosmos.outputs.endpoint : 'https://not-deployed.invalid'
     thesisCosmosDatabaseName: deployThesis ? thesisCosmos.outputs.databaseName : 'thesis'
+    // The workflow runtime reaches the harness over the environment's internal
+    // DNS, so an empty explicit URL derives the market-lake api endpoint.
+    thesisModel: thesisModel
+    harnessMcpUrl: empty(thesisHarnessMcpUrl) ? 'http://${containerApps.outputs.api.fqdn}:${containerApps.outputs.api.port}' : thesisHarnessMcpUrl
+    harnessBearerTokenSecretName: thesisHarnessBearerTokenSecretName
+    modelApiKeySecretName: thesisModelApiKeySecretName
     location: location
     tags: tags
     enableExternalIngress: thesisIngressExternal
