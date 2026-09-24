@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 
 from harness.configuration import load_yaml_mapping
 from thesis import cli
+from thesis.chat.service import ChatService
 
 runner = CliRunner()
 
@@ -143,10 +144,26 @@ def _capture_uvicorn_run(
     return captured
 
 
+def _stub_cosmos_stack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Compose serve without the Cosmos emulator.
+
+    ``serving_app_from_environment`` opens the Cosmos-backed chat stack at
+    startup, which means a live emulator at localhost:8081.  These packaging
+    tests pin the process and route contract, not the durable store, so the
+    stack is replaced with the in-memory chat service (and no timeline) that
+    ``create_app`` already supports.
+    """
+    monkeypatch.setattr(
+        "thesis.cosmos.stack.open_cosmos_chat_stack",
+        lambda: (ChatService(), None),
+    )
+
+
 def test_serve_starts_uvicorn_with_the_composed_asgi_application(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_serve_environment(monkeypatch)
+    _stub_cosmos_stack(monkeypatch)
     monkeypatch.setenv("THESIS_API__BEARER_TOKEN", "serving-token")
     captured = _capture_uvicorn_run(monkeypatch)
 
@@ -167,6 +184,7 @@ def test_serve_honors_the_non_secret_binding_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_serve_environment(monkeypatch)
+    _stub_cosmos_stack(monkeypatch)
     monkeypatch.setenv("THESIS_API__BEARER_TOKEN", "serving-token")
     monkeypatch.setenv("THESIS_SERVE_HOST", "0.0.0.0")
     monkeypatch.setenv("THESIS_SERVE_PORT", "9001")
@@ -216,6 +234,7 @@ def test_serve_accepts_entra_authentication_without_a_bearer_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_serve_environment(monkeypatch)
+    _stub_cosmos_stack(monkeypatch)
     monkeypatch.setenv("THESIS_API__ENTRA_TENANT_ID", "tenant")
     monkeypatch.setenv("THESIS_API__ENTRA_AUDIENCE", "audience")
     captured = _capture_uvicorn_run(monkeypatch)
