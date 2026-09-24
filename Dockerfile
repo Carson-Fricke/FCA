@@ -44,6 +44,11 @@ COPY --from=rust-planner /build/recipe.json /build/recipe.json
 RUN cargo chef cook --locked --release --recipe-path /build/recipe.json \
       -p native -p api -p live
 COPY src/harness/ ./
+# The `mcp` crate embeds config/harness/backtest.yaml at compile time via
+# `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../config/..."))`.
+# With WORKDIR /build/src/harness that resolves to /build/config/harness/, so
+# the file must exist here before the workspace compiles.
+COPY config/harness/ /build/config/harness/
 RUN cargo build --locked --release -p native \
     && cargo build --locked --release -p api --bins \
     && cargo build --locked --release -p live --bin trader
