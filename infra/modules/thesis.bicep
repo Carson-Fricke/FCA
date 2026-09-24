@@ -18,6 +18,11 @@ targetScope = 'resourceGroup'
 // the quant-harness identity, keeping provider, broker, and model secrets
 // out of Thesis scope (fca-thesis.md security invariants).
 //
+// Durable conversation state lives in the Cosmos DB account provisioned by
+// thesis-cosmos.bicep. That account disables local (key) auth, so the runtime
+// authenticates with this managed identity through data-plane RBAC and no
+// Cosmos secret exists in Key Vault or in this module.
+//
 // Public hosting on an operator-owned hostname is opt-in and has two mutually
 // exclusive postures. The direct posture sets customDomainName (and requires
 // enableExternalIngress=true) and binds the hostname to this Container App.
@@ -87,6 +92,14 @@ param thesisWorkspaceContainerPrefix string
 @description('Name of the workspace registry table on the Thesis persistence account.')
 @minLength(1)
 param thesisWorkspaceRegistryTableName string
+
+@description('Endpoint of the Thesis Cosmos DB account consumed as THESIS_COSMOS_ENDPOINT, provisioned by thesis-cosmos.bicep. The runtime authenticates with the managed identity, so no key is injected.')
+@minLength(1)
+param thesisCosmosEndpoint string
+
+@description('Cosmos SQL database name consumed as THESIS_COSMOS_DATABASE. Must match the database provisioned by thesis-cosmos.bicep.')
+@minLength(1)
+param thesisCosmosDatabaseName string = 'thesis'
 
 @description('Name of the operator-provisioned Key Vault secret holding the Azure Communication Services email connection string. No secret value is embedded in this module. Empty disables invite-mail delivery wiring so the module stays deployable before the operator creates the secret (see .github/runbooks/thesis-public-auth.md Step 4).')
 param mailerConnectionStringSecretName string = 'thesis-acs-email-connection-string'
@@ -224,6 +237,18 @@ var thesisBaseEnvironment = [
   {
     name: 'THESIS_WORKSPACE_REGISTRY_TABLE'
     value: thesisWorkspaceRegistryTableName
+  }
+  // Durable conversation state lives in the account provisioned by
+  // thesis-cosmos.bicep. The runtime reaches it with the same managed identity
+  // (AZURE_CLIENT_ID above) through Cosmos data-plane RBAC; the account
+  // disables local auth, so no key exists in Key Vault or in this module.
+  {
+    name: 'THESIS_COSMOS_ENDPOINT'
+    value: thesisCosmosEndpoint
+  }
+  {
+    name: 'THESIS_COSMOS_DATABASE'
+    value: thesisCosmosDatabaseName
   }
 ]
 // Entra configuration is non-secret; both variables are set together only

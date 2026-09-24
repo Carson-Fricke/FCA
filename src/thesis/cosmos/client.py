@@ -9,7 +9,11 @@ Connection settings come from the environment:
 ``THESIS_COSMOS_ENDPOINT``
     Account endpoint.  Defaults to the emulator (``https://localhost:8081``).
 ``THESIS_COSMOS_KEY``
-    Account key.  Defaults to the well-known emulator key.
+    Account key.  Optional.  A loopback endpoint without a key uses the
+    well-known emulator key; a deployed endpoint without a key authenticates
+    with ``DefaultAzureCredential`` — the container app's user-assigned managed
+    identity, resolved through ``AZURE_CLIENT_ID`` — so the account can keep
+    local (key) auth disabled (``infra/modules/thesis-cosmos.bicep``).
 ``THESIS_COSMOS_DATABASE``
     Database name.  Defaults to ``thesis``.
 
@@ -22,8 +26,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from azure.core.credentials import TokenCredential
 from azure.cosmos import CosmosClient, DatabaseProxy, PartitionKey
 from azure.cosmos.documents import ConnectionMode
+from azure.identity import DefaultAzureCredential
 
 #: The public, non-secret key the Cosmos DB emulator always uses.
 EMULATOR_KEY = (
@@ -50,7 +56,9 @@ class CosmosSettings:
     """Resolved Cosmos DB connection settings."""
 
     endpoint: str = DEFAULT_ENDPOINT
-    key: str = EMULATOR_KEY
+    #: ``None`` selects ``DefaultAzureCredential``; a loopback endpoint
+    #: therefore defaults to the public emulator key instead.
+    key: str | None = EMULATOR_KEY
     database: str = DEFAULT_DATABASE
 
     @property
@@ -64,19 +72,30 @@ class CosmosSettings:
         endpoint = (os.environ.get("THESIS_COSMOS_ENDPOINT") or "").strip()
         key = (os.environ.get("THESIS_COSMOS_KEY") or "").strip()
         database = (os.environ.get("THESIS_COSMOS_DATABASE") or "").strip()
+        resolved_endpoint = endpoint or DEFAULT_ENDPOINT
         return cls(
-            endpoint=endpoint or DEFAULT_ENDPOINT,
-            key=key or EMULATOR_KEY,
+            endpoint=resolved_endpoint,
+            key=key or (EMULATOR_KEY if _is_loopback(resolved_endpoint) else None),
             database=database or DEFAULT_DATABASE,
         )
 
 
 def open_cosmos_client(settings: CosmosSettings | None = None) -> CosmosClient:
-    """Open a Cosmos client for the emulator or a real account."""
+    """Open a Cosmos client for the emulator, a keyed account, or Entra ID.
+
+    A configured key authenticates the emulator and key-enabled accounts.
+    Without one the deployed runtime authenticates with the ambient
+    ``DefaultAzureCredential``, so an account that disables local auth needs no
+    stored secret; the identity must hold the Cosmos data-plane contributor
+    role that ``infra/modules/thesis-cosmos.bicep`` assigns.
+    """
     resolved = settings or CosmosSettings.from_environment()
+    credential: str | TokenCredential = (
+        resolved.key if resolved.key is not None else DefaultAzureCredential()
+    )
     return CosmosClient(
         resolved.endpoint,
-        credential=resolved.key,
+        credential=credential,
         connection_verify=resolved.connection_verify,
         # The emulator advertises an internal container IP; gateway mode keeps
         # the client on the configured loopback endpoint.

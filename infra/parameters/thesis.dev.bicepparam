@@ -60,6 +60,10 @@ param thesisStaticWebAppName = ''
 // Empty keeps the generated azurestaticapps.net hostname until T301 binds an
 // operator-owned custom domain.
 param thesisStaticWebAppCustomDomain = ''
+// Durable conversation state uses the Cosmos DB account provisioned by
+// infra/modules/thesis-cosmos.bicep; the composition injects its endpoint and
+// database into the API with managed-identity auth, so no Cosmos parameter is
+// required here.
 // Seed registry matching config/thesis/workspace.yaml; the runbook seeds the
 // matching workspaces table row after deployment.
 param thesisWorkspaceRegistry = [

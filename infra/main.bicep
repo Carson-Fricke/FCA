@@ -193,6 +193,10 @@ var thesisIngressExternal = thesisEnableExternalIngress || deployThesisStaticWeb
 // A dedicated persistence account for Thesis workspaces: 'thesis' plus the
 // same deterministic suffix keeps the name distinct from the lake account.
 var thesisWorkspacesStorageAccountName = 'thesis${take(deterministicSuffix, 18)}'
+// A dedicated Cosmos DB account for Thesis conversation state. The name stays
+// globally unique through the deterministic suffix and follows Cosmos naming
+// rules (lowercase letters, digits, hyphens).
+var thesisCosmosAccountName = '${shortNamePrefix}-cosmos-${take(deterministicSuffix, 6)}'
 var budgetName = '${namePrefix}-budget'
 // The PerGB2018 Log Analytics SKU requires at least 30 days.
 var logRetentionDays = 30
@@ -355,6 +359,18 @@ module thesisWorkspaces './modules/thesis-workspaces.bicep' = if (deployThesis) 
   }
 }
 
+module thesisCosmos './modules/thesis-cosmos.bicep' = if (deployThesis) {
+  name: 'thesis-cosmos'
+  params: {
+    accountName: thesisCosmosAccountName
+    location: location
+    tags: tags
+    // Same conditional-identity guard as thesis-workspaces: the filler is
+    // never evaluated in an enabled deployment.
+    thesisPrincipalId: deployThesis ? thesisIdentity.properties.principalId : '00000000-0000-0000-0000-000000000000'
+  }
+}
+
 module thesisApi './modules/thesis.bicep' = if (deployThesis) {
   name: 'thesis-api'
   // Param expressions referencing containerApps, keyVault, and
@@ -375,6 +391,8 @@ module thesisApi './modules/thesis.bicep' = if (deployThesis) {
     thesisWorkspaceStorageAccountName: deployThesis ? thesisWorkspaces.outputs.storageAccountName : 'thesisnotdeployed'
     thesisWorkspaceContainerPrefix: deployThesis ? thesisWorkspaces.outputs.containerPrefix : 'thesis-ws-'
     thesisWorkspaceRegistryTableName: deployThesis ? thesisWorkspaces.outputs.registryTableName : 'workspaces'
+    thesisCosmosEndpoint: deployThesis ? thesisCosmos.outputs.endpoint : 'https://not-deployed.invalid'
+    thesisCosmosDatabaseName: deployThesis ? thesisCosmos.outputs.databaseName : 'thesis'
     location: location
     tags: tags
     enableExternalIngress: thesisIngressExternal
@@ -443,6 +461,7 @@ output deploymentSummary object = {
     api: deployThesis ? thesisApi.outputs.thesisApi : null
     identity: deployThesis ? thesisApi.outputs.thesisIdentity : null
     workspaces: deployThesis ? thesisWorkspaces.outputs.isolation : null
+    cosmos: deployThesis ? thesisCosmos.outputs.persistence : null
     costEnvelope: deployThesis ? thesisApi.outputs.costEnvelope : null
     staticWebAppEnabled: deployThesis && deployThesisStaticWebApp
     staticWebApp: (deployThesis && deployThesisStaticWebApp) ? thesisStaticWebApp.outputs.staticWebApp : null

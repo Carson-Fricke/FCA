@@ -28,6 +28,9 @@ ROOT = Path(__file__).parents[3]
 PYPROJECT = ROOT / "pyproject.toml"
 DOCKERFILE_THESIS = ROOT / "Dockerfile.thesis"
 RUNTIME_CONFIG = ROOT / "config" / "thesis" / "runtime.yaml"
+MAIN_TEMPLATE = ROOT / "infra" / "main.bicep"
+THESIS_MODULE = ROOT / "infra" / "modules" / "thesis.bicep"
+THESIS_COSMOS_MODULE = ROOT / "infra" / "modules" / "thesis-cosmos.bicep"
 
 HARNESS_ENTRYPOINTS = {
     "lake": "lake.cli:main",
@@ -422,3 +425,31 @@ def test_shared_image_entrypoint_remains_quant_harness_owned() -> None:
 
     assert 'ENTRYPOINT ["lake"]' in main_lines
     assert 'ENTRYPOINT ["thesis"]' not in main_lines
+
+
+def test_deployed_wiring_consumes_the_provisioned_cosmos_account() -> None:
+    """The deployed container must be pointed at the provisioned account.
+
+    ``serving_app_from_environment`` reads ``THESIS_COSMOS_ENDPOINT`` and
+    ``THESIS_COSMOS_DATABASE`` through ``CosmosSettings.from_environment``.
+    This pins the composition: the Cosmos module provisions the schema the
+    runtime expects, main.bicep passes the module outputs into the Thesis app,
+    and thesis.bicep injects both variables and no account key.
+    """
+    main_template = MAIN_TEMPLATE.read_text(encoding="utf-8")
+    thesis_module = THESIS_MODULE.read_text(encoding="utf-8")
+    cosmos_module = THESIS_COSMOS_MODULE.read_text(encoding="utf-8")
+
+    assert "name: 'THESIS_COSMOS_ENDPOINT'" in thesis_module
+    assert "name: 'THESIS_COSMOS_DATABASE'" in thesis_module
+    assert "THESIS_COSMOS_KEY" not in thesis_module
+    assert "thesisCosmos.outputs.endpoint" in main_template
+    assert "thesisCosmos.outputs.databaseName" in main_template
+    # The module owns the schema and keeps partition keys in lockstep with
+    # src/thesis/cosmos/client.py.
+    assert "databaseName string = 'thesis'" in cosmos_module
+    for container in ("'timeline'", "'catalog'", "'executions'"):
+        assert container in cosmos_module
+    for partition in ("'/chatId'", "'/workspaceId'", "'/executionId'"):
+        assert partition in cosmos_module
+    assert "disableLocalAuth: true" in cosmos_module
