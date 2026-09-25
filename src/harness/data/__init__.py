@@ -5,7 +5,9 @@ views the surviving Python products and the strategy plugin surface consume
 remain here: exact OHLCV bar derivation, the engine-clocked history and
 strategy-history capabilities, derived listing lifecycle events, the
 point-in-time option contract universe with its DTE/strike/moneyness filters,
-the SecurityMaster listings view, and the composite universe view.
+the SecurityMaster listings view, the composite universe view, and the
+point-in-time reference queries and fixture schemas over classification and
+fundamentals Parquet partitions.
 """
 
 from harness.data.bars import (
@@ -50,6 +52,16 @@ from harness.data.options_universe import (
     StrikeFilter,
     UnderlyingView,
 )
+from harness.data.reference import (
+    CLASSIFICATION_SCHEMA,
+    FUNDAMENTALS_SCHEMA,
+    REFERENCE_SCHEMA_VERSION,
+    classification_snapshot,
+    classification_table,
+    fundamentals_facts,
+    fundamentals_table,
+    latest_fundamentals,
+)
 from harness.data.security_master import (
     ListingsCatalogPort,
     SecurityMasterView,
@@ -70,6 +82,7 @@ __all__ = (
     "Bar",
     "BarAggregator",
     "BarBuilder",
+    "CLASSIFICATION_SCHEMA",
     "ContractsCatalogPort",
     "CorporateActionEvent",
     "CorporateActionKind",
@@ -77,6 +90,7 @@ __all__ = (
     "DelistingEvent",
     "DteFilter",
     "EquityListingUniverse",
+    "FUNDAMENTALS_SCHEMA",
     "HistoryAggregate",
     "HistoricalView",
     "HistorySubscription",
@@ -93,6 +107,7 @@ __all__ = (
     "OptionUniverseSpec",
     "OptionUniverseView",
     "PessimisticDelistingSettlement",
+    "REFERENCE_SCHEMA_VERSION",
     "RenameEvent",
     "SecurityMasterView",
     "SecuritySnapshot",
@@ -109,7 +124,12 @@ __all__ = (
     "aggregate_trades",
     "bars_from_trades",
     "build_bars",
+    "classification_snapshot",
+    "classification_table",
     "from_nanos",
+    "fundamentals_facts",
+    "fundamentals_table",
     "interval_delta",
+    "latest_fundamentals",
     "to_nanos",
 )

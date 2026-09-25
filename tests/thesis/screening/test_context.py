@@ -1,10 +1,10 @@
-"""Concrete screener context tests over real lake reference objects.
+"""Concrete screener context tests over real reference Parquet objects.
 
 The classification and fundamentals fixtures are written as actual Parquet
-partitions in the lake's Hive layout and read back through
-``lake.reference.query`` — the production path — so the point-in-time
-semantics (snapshot knowledge dates, filed-date restatements) are exercised
-for real rather than stubbed.
+partitions in the lake's Hive layout and read back through the harness
+reference facade (``harness.data.reference``) — the production path — so the
+point-in-time semantics (snapshot knowledge dates, filed-date restatements)
+are exercised for real rather than stubbed.
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import pytest
 
+from harness.data.reference import classification_table, fundamentals_table
 from harness.data.security_master import SecurityMasterView
 from harness.data.universe_view import EquityListingUniverse, UniverseView
 from lake.catalog.models import ListingRecord
-from lake.reference.schemas import classification_table, fundamentals_table
 from thesis.screening import (
     MarketBar,
     OhlcvBar,

@@ -12,11 +12,11 @@ repository's point-in-time surfaces:
   (rename-aware earliest listing date for the listing-age metric);
 - daily OHLCV windows through an injected :class:`~thesis.screening.indicators.OhlcvPort`;
 - classification facts through an injected classification port, backed in
-  production by :class:`LakeClassificationFacts` over
-  :func:`lake.reference.query.classification_snapshot`;
+  production by :class:`LakeClassificationFacts` over the harness reference
+  facade :func:`harness.data.reference.classification_snapshot`;
 - fundamentals facts through an injected fundamentals port, backed in
   production by :class:`LakeFundamentalsFacts` over
-  :func:`lake.reference.query.latest_fundamentals` with filed-date
+  :func:`harness.data.reference.latest_fundamentals` with filed-date
   point-in-time semantics (a restatement filed later never leaks into an
   earlier view);
 - technical indicator values computed through the harness indicator registry
@@ -39,6 +39,7 @@ from typing import Final, Protocol
 
 from harness.core.clock import Clock
 from harness.core.symbols import canonical_symbol
+from harness.data.reference import classification_snapshot, latest_fundamentals
 from harness.data.security_master import SecurityMasterView
 from harness.data.universe_view import UniverseView
 from thesis.screening.engine import MarketBar, ScreenerError, UniverseEntry
@@ -233,7 +234,7 @@ class LakeScreenerContext:
 
 
 class LakeClassificationFacts:
-    """Classification fact sheets over ``lake.reference`` snapshot objects."""
+    """Classification fact sheets over harness reference snapshots."""
 
     def __init__(self, root: str | PathLike[str]) -> None:
         self._root = root
@@ -244,8 +245,6 @@ class LakeClassificationFacts:
         cached = self._cache.get(as_of)
         if cached is not None:
             return cached
-        from lake.reference.query import classification_snapshot
-
         sheet: dict[str, dict[str, str]] = {}
         for row in classification_snapshot(self._root, as_of):
             symbol = str(row.get("symbol", "")).strip().upper()
@@ -290,8 +289,9 @@ class LakeFundamentalsFacts:
 
     Each screener field resolves from the latest visible XBRL fact among the
     field's candidate tags; among visible candidates the greatest
-    ``(filed, accn, period_end)`` wins, mirroring the lake's restatement
-    rule.  Per-field filing dates ride along as ``<field>_filed`` facts.
+    ``(filed, accn, period_end)`` wins, mirroring the harness reference
+    restatement rule.  Per-field filing dates ride along as
+    ``<field>_filed`` facts.
     """
 
     def __init__(
@@ -309,7 +309,6 @@ class LakeFundamentalsFacts:
         cached = self._cache.get((cik, as_of))
         if cached is not None:
             return dict(cached)
-        from lake.reference.query import latest_fundamentals
 
         resolved: dict[str, str] = {}
         for field, (taxonomy, tags, unit) in self._specs.items():
