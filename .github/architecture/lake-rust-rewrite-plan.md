@@ -4,19 +4,19 @@
 
 ## Status
 
-Phases 0–4 are implemented: the market-lake service is native Rust in the
+Phases 0–5 are implemented: the market-lake service is native Rust in the
 workspace under `src/lake/`, the `lake` console script execs the Rust binary
 through a thin Python shim (`lake.cli.rust_entrypoints`), and the published
-HTTP contract is served byte-compatibly for local deployments. The Python
-packages that phase 5 has not yet replaced (`lake.providers.alpaca`,
-`lake.reference`, `lake.queue`, `lake.hosted`, `lake.operations`,
-`lake.storage`, `lake.ingestion`, `lake.query` SQL, `lake.local`) remain in
-place and are still imported by the soak/experiment scripts and Thesis
-screening; phase 6 deletion happens with phase 5. Phase 5 remains: option
-ingestion and selection-driven ensure, reference data, DuckDB-backed SQL
-queries, the queue worker, Azure hosted boundaries (tables, blobs, SAS,
-leases, Entra JWT validation), and the `lake ingest`/`lake operations`
-commands.
+HTTP contract is served byte-compatibly for local deployments. Phase 5 landed
+the remainder — option ingestion, the `lake-reference` ingest crate,
+DuckDB-backed bounded SQL, the `lake-queue` worker with dead letters, the
+Azure hosted boundaries (tables, blobs, SAS, leases, Entra JWT validation)
+with the `lake ingest`/`lake operations` commands — and Thesis now reads
+reference data through `harness.data.reference` instead of `lake.reference`.
+Only the retained Python surface (see
+`lake-rust-phase5-6-handoff.md`) still imports the old Python packages
+(`lake.providers.alpaca`, `lake.catalog.models`, the session helpers), and
+phase 6 deletes every Python module the Rust crates replace.
 
 ## Why rewrite
 

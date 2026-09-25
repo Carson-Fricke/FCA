@@ -75,14 +75,13 @@ The market-lake service is native Rust (see `## Market-Lake Rust Workspace`
 below and `lake-rust-rewrite-plan.md` for the porting order and status). The
 Python packages under `src/lake` are the retained library surface for code
 that is not the lake service: soak and experiment scripts import the value
-objects, configuration loaders, session helpers, and the Alpaca client, and
-Thesis screening imports the reference query partitions. The service-shaped
-Python packages that the Rust workspace has already replaced (local, http,
-ingestion, storage, coverage, catalog, query, providers, hosted, queue) stay
-in place until the phase-5 remainder (options ingestion, reference data,
+objects, configuration loaders, session helpers, and the Alpaca client. The
+service-shaped Python packages that the Rust workspace has already replaced —
+including the phase-5 remainder (options ingestion, reference data,
 DuckDB-backed SQL queries, the queue worker, Azure hosted boundaries, and
-Entra JWT validation) is ported; the phase-6 deletion removes them and keeps
-only that retained surface.
+Entra JWT validation) — stay in place until the phase-6 deletion removes them
+and keeps only that retained surface. Thesis reads reference data through
+`harness.data.reference`, never through `lake.reference` directly.
 
 | Package | Responsibility |
 | --- | --- |

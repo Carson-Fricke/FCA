@@ -63,9 +63,51 @@
   optional budget.
 * Dockerfile builds the `lake` binary in a `lake` stage; CI has the
   `lake-rust` job; `MANIFEST.in`/`.dockerignore` updated.
-* **Not ported yet**: options ingestion, reference ingest, DuckDB SQL, queue
-  worker, Azure hosted boundaries, Entra JWT validation, `lake ingest`,
-  `lake operations`.
+
+## Phase 5 status (all workstreams landed and verified)
+
+Phase 5 is complete on this branch. Each workstream landed as its own commit
+and the full workspace gates pass (`cargo fmt/clippy/test`: 698 tests across
+68 binaries; Python ruff + 784 pytest tests).
+
+* **5A (T351)** — `lake-providers` gained option records/parsing and the
+  `/v1beta1/options` fetch path; `lake-ingestion/src/options/` ports the
+  selector, transaction, backfill, and queue handle. The e2e coverage-route
+  test lives in `ingestion/tests/options_http_end_to_end.rs` (the canonical
+  `http/tests/` relocation needs `lake-ingestion`/`lake-storage`/`lake-providers`
+  dev-deps in the http crate; deferred to keep the http dep graph one-way).
+* **5B (T352)** — new `lake-reference` crate: EDGAR/Nasdaq ingest with the SEC
+  10 rps cap and User-Agent enforced by construction, byte-identical schemas,
+  and both point-in-time read rules as parity tests against Python-written
+  oracle parquet.
+* **5C (T353)** — `lake-query` executes bounded SQL through the bundled
+  DuckDB; the `data` relation is a materialized temp table (a view would
+  re-bind under `enable_external_access = false`), the plan check greps the
+  uppercased EXPLAIN text, and `http`/`local` wire the engine through
+  `LakeApiState.bounded_query` with `api.sql.*` settings.
+* **5D (T355)** — new `lake-queue` crate (worker, renewal cadence,
+  dead-letter envelope/replay) plus the `QueueSender` port in `lake-storage`;
+  parity-tested against the Python suite's cases.
+* **5E (T356)** — official Azure SDK crates 0.21 (`azure_core`, `azure_identity`,
+  `azure_storage_blobs`, `azure_data_tables`, `azure_storage_queues`): tables
+  catalog/job adapters, blob store/SAS/leases, queue transport, Entra JWT
+  validation (`jsonwebtoken` + injectable JWKS fetch), `lake-hosted`
+  composition (`LAKE_STORAGE_ACCOUNT_NAME` selects Azure), and the
+  `lake ingest`/`lake operations` CLI commands.
+* **Thesis reference migration (T354)** — the classification/fundamentals
+  query surface moved to `harness.data.reference`; Thesis no longer imports
+  `lake.reference` anywhere, so phase 6 can delete the Python reference
+  modules instead of retaining them.
+
+### Operator decisions recorded
+
+1. Reference: Thesis never imports `lake.reference` — reads go through the
+   harness (done); the Python `lake.reference` modules are phase-6 deletions.
+2. Azure access: official SDK crates (used; no REST fallback was needed).
+3. Multiple API keys: out of scope for phase 5; the lane is per-key so adding
+   lanes is additive.
+4. `requests_per_minute`: left unset in the committed YAML; the HOLD path
+   arms only when configured.
 
 ## Phase 5 workstreams
 
@@ -174,22 +216,22 @@ Thesis suites pass against the Rust lake.
 | `scripts/experiments/spy_0dte/*` | `lake.contracts.*`, `lake.configuration`, `lake.providers.alpaca.*`, `lake.catalog.models` |
 | `strategies/harness_examples/short_put_spread.py` | `lake.catalog.models.ContractRecord` |
 | `tests/harness/data/*` | `lake.catalog.front_sets`, `lake.catalog.memory`, `lake.catalog.models` |
-| `src/thesis/screening/context.py` + its tests | `lake.reference.query`, `lake.reference.schemas` |
 | everyone | `lake` console script (`lake.cli:main`), `python -m lake`, `lakeclient` (untouched) |
 
 Keep: `lake/contracts/` (py), `lake/configuration/` (loader/settings/universes),
 `lake/coverage/` reduced to the session helpers (re-export from contracts is
 acceptable if Python consumers only need `equity_sessions` / `crypto_utc_days`),
 `lake/catalog/{models,front_sets,memory}.py` plus whatever those import,
-`lake/providers/alpaca/`, `lake/reference/{query,schemas}.py` plus their
-transitive imports, `lake/cli/` (shim only), `lake/__init__.py`,
-`lake/__main__.py`.
+`lake/providers/alpaca/`, `lake/cli/` (shim only), `lake/__init__.py`,
+`lake/__main__.py`. Thesis migrated off `lake.reference` in T354: the query
+surface now lives in `harness.data.reference`, so `lake/reference/` is deleted
+in full.
 
 ### Delete
 
 `lake/local/`, `lake/http/`, `lake/ingestion/`, `lake/storage/`,
 `lake/query/`, `lake/queue/`, `lake/hosted/`, `lake/operations/`,
-`lake/tools/`, `lake/catalog/azure.py` (and its `__init__` exports),
+`lake/reference/`, `lake/tools/`, `lake/catalog/azure.py` (and its `__init__` exports),
 `lake/coverage/{service,application}.py`, `lake/app.py`, `lake/crypto.py`,
 `lake/options.py`, and any Python files left in Rust-owned directories that
 are not in the retained table.
