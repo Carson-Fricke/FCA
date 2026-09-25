@@ -2,10 +2,13 @@
 //!
 //! The ports mirror the Python `lake.storage.ports` protocols: whole-object
 //! replacement for the Parquet writer, an extended read/prefix boundary for
-//! consumers that own whole prefixes, and the read-only SAS issuer used by the
-//! service boundary.
+//! consumers that own whole prefixes, the read-only SAS issuer used by the
+//! service boundary, and the queue send boundary used by dead-letter transfer
+//! and operator replay.
 
+use futures_util::future::BoxFuture;
 use lake_contracts::DataError;
+use serde_json::Value;
 
 /// Whole-object replacement boundary used by the Parquet writer.
 ///
@@ -41,4 +44,14 @@ impl<T: BlobStore + ?Sized> ObjectStore for T {}
 pub trait SasIssuer: Send + Sync {
     /// Issue a read-only access URL for `object_path`.
     fn issue(&self, object_path: &str) -> Result<String, DataError>;
+}
+
+/// Send boundary for one queue message.
+///
+/// Mirrors the Python `lake.storage.ports.QueueSender` protocol: one JSON
+/// object message per call. The Azure queue adapter arrives with the hosted
+/// phase.
+pub trait QueueSender: Send + Sync {
+    /// Send one JSON-object queue message.
+    fn send<'a>(&'a self, message: &'a Value) -> BoxFuture<'a, Result<(), DataError>>;
 }

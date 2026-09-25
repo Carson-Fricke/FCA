@@ -19,4 +19,4 @@ pub use capacity::{
 pub use leases::{Lease, LeaseProvider, SymbolDayScope};
 pub use local::LocalFilesystemStore;
 pub use parquet::{normalize_records, ParquetMetadata, ParquetWriter};
-pub use ports::{BlobStore, ObjectStore, ReadableBlobStore, SasIssuer};
+pub use ports::{BlobStore, ObjectStore, QueueSender, ReadableBlobStore, SasIssuer};
