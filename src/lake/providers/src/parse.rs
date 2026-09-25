@@ -5,12 +5,14 @@
 //! field ranges, UTC timestamps, exact decimals, conditions handling, and
 //! protocol errors naming the offending field.
 
+use lake_catalog::ContractRecord;
 use lake_contracts::{DateTime, Decimal18};
 use serde_json::Value;
 
 use crate::error::ProviderError;
 use crate::records::{
-    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedQuote, NormalizedTrade,
+    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote, NormalizedOptionTrade,
+    NormalizedQuote, NormalizedTrade,
 };
 
 /// The two Alpaca data types the client fetches.
@@ -157,6 +159,122 @@ pub(crate) fn parse_crypto_quote(
         ask_exchange: optional_text(row, "ax")?,
         ask_price: decimal(row, "ap")?,
         ask_size: decimal(row, "as")?,
+    })
+}
+
+/// One parsed option page: contract-ordered rows plus the next cursor.
+pub(crate) type OptionPageRows<'a> = (Vec<(&'a ContractRecord, &'a Value)>, Option<String>);
+
+/// Extract the rows and the next cursor from one option page.
+///
+/// Option pages are always keyed by symbol (`{"trades": {"SPY…": [...]}}`),
+/// every key must be one of the requested contracts, and the rows are returned
+/// in contract insertion order and then provider row order, mirroring
+/// `_option_page_rows`.
+pub(crate) fn option_page_rows<'a>(
+    payload: &'a Value,
+    data_type: DataType,
+    contracts: &'a [(String, ContractRecord)],
+) -> Result<OptionPageRows<'a>, ProviderError> {
+    if !payload.is_object() {
+        return Err(protocol("Alpaca option response body must be an object"));
+    }
+    let data_type_name = data_type.value();
+    let raw_rows = payload.get(data_type_name).ok_or_else(|| {
+        protocol(format!(
+            "Alpaca option response is missing '{data_type_name}'"
+        ))
+    })?;
+    let Value::Object(rows_by_symbol) = raw_rows else {
+        return Err(protocol(format!(
+            "Alpaca option {data_type_name} rows must be an object"
+        )));
+    };
+    let mut rows_by_contract: std::collections::HashMap<&str, Vec<&Value>> =
+        std::collections::HashMap::new();
+    for (raw_symbol, symbol_rows) in rows_by_symbol {
+        let symbol = raw_symbol.trim().to_uppercase();
+        let Some((_, contract)) = contracts.iter().find(|(requested, _)| *requested == symbol)
+        else {
+            return Err(protocol(format!(
+                "Alpaca option response contains unselected symbol '{raw_symbol}'"
+            )));
+        };
+        let Value::Array(items) = symbol_rows else {
+            return Err(protocol(format!(
+                "Alpaca option {data_type_name} rows for '{raw_symbol}' must be an array"
+            )));
+        };
+        let mut rows = Vec::with_capacity(items.len());
+        for item in items {
+            if !item.is_object() {
+                return Err(protocol("Alpaca option row must be an object"));
+            }
+            rows.push(item);
+        }
+        rows_by_contract.insert(contract.symbol.as_str(), rows);
+    }
+    let mut rows: Vec<(&ContractRecord, &Value)> = Vec::new();
+    for (requested, contract) in contracts {
+        if let Some(contract_rows) = rows_by_contract.remove(requested.as_str()) {
+            for row in contract_rows {
+                rows.push((contract, row));
+            }
+        }
+    }
+    let next_page_token = match payload.get("next_page_token") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(token)) => Some(token.clone()),
+        Some(_) => {
+            return Err(protocol(
+                "Alpaca option next_page_token must be a string or null",
+            ));
+        }
+    };
+    Ok((rows, next_page_token))
+}
+
+/// Parse one option trade row against the requested contract.
+pub(crate) fn parse_option_trade(
+    row: &Value,
+    contract: &ContractRecord,
+) -> Result<NormalizedOptionTrade, ProviderError> {
+    Ok(NormalizedOptionTrade {
+        timestamp: timestamp(row)?,
+        symbol: contract.symbol.clone(),
+        underlying: contract.underlying.clone(),
+        expiration_date: contract.expiration_date,
+        strike_price: contract.strike_price,
+        option_type: contract.option_type,
+        exchange: text(row, "x")?,
+        price: decimal(row, "p")?,
+        size: u32::try_from(integer(row, "s", 0, Some(i128::from(u32::MAX)))?)
+            .expect("bounded by the maximum"),
+        condition: text(row, "c")?,
+    })
+}
+
+/// Parse one option quote row against the requested contract.
+pub(crate) fn parse_option_quote(
+    row: &Value,
+    contract: &ContractRecord,
+) -> Result<NormalizedOptionQuote, ProviderError> {
+    Ok(NormalizedOptionQuote {
+        timestamp: timestamp(row)?,
+        symbol: contract.symbol.clone(),
+        underlying: contract.underlying.clone(),
+        expiration_date: contract.expiration_date,
+        strike_price: contract.strike_price,
+        option_type: contract.option_type,
+        bid_exchange: text(row, "bx")?,
+        bid_price: decimal(row, "bp")?,
+        bid_size: u32::try_from(integer(row, "bs", 0, Some(i128::from(u32::MAX)))?)
+            .expect("bounded by the maximum"),
+        ask_exchange: text(row, "ax")?,
+        ask_price: decimal(row, "ap")?,
+        ask_size: u32::try_from(integer(row, "as", 0, Some(i128::from(u32::MAX)))?)
+            .expect("bounded by the maximum"),
+        condition: text(row, "c")?,
     })
 }
 

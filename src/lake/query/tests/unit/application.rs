@@ -3,7 +3,9 @@ use lake_contracts::{partition_path, AssetClass, DataType, Date, DateTime};
 use lake_coverage::{CoverageReport, CoverageSession, CoverageState, SessionCoverage};
 use serde_json::json;
 
-use super::{classify, has_expected_path, incomplete_error, sas_unavailable, validate_request};
+use super::{
+    classify_sessions, has_expected_path, incomplete_error, sas_unavailable, validate_request,
+};
 
 fn date(month: u32, day: u32) -> Date {
     Date::from_ymd(2024, month, day).expect("valid date")
@@ -94,7 +96,7 @@ fn classify_requires_complete_state_and_canonical_path() {
     let missing = entry(CoverageState::Missing, date(1, 19), None);
     let complete = canonical_entry(date(1, 18));
 
-    let (usable, incomplete) = classify(
+    let (usable, incomplete) = classify_sessions(
         &report(vec![
             complete.clone(),
             with_bad_path.clone(),
@@ -104,7 +106,8 @@ fn classify_requires_complete_state_and_canonical_path() {
             delisted.clone(),
             missing.clone(),
         ]),
-        &request(),
+        AssetClass::Equity,
+        DataType::Trade,
         "aapl",
     );
 
@@ -127,9 +130,10 @@ fn classify_preserves_report_order() {
     let first = canonical_entry(date(1, 18));
     let second = canonical_entry(date(1, 19));
 
-    let (usable, incomplete) = classify(
+    let (usable, incomplete) = classify_sessions(
         &report(vec![first.clone(), second.clone()]),
-        &request(),
+        AssetClass::Equity,
+        DataType::Trade,
         "aapl",
     );
 
@@ -142,7 +146,8 @@ fn has_expected_path_rejects_a_missing_record_or_path() {
     let session_date = date(1, 18);
     assert!(!has_expected_path(
         &entry(CoverageState::Complete, session_date, None),
-        &request(),
+        AssetClass::Equity,
+        DataType::Trade,
         "aapl",
     ));
     assert!(!has_expected_path(
@@ -151,12 +156,14 @@ fn has_expected_path_rejects_a_missing_record_or_path() {
             session_date,
             Some(record(session_date, None))
         ),
-        &request(),
+        AssetClass::Equity,
+        DataType::Trade,
         "aapl",
     ));
     assert!(has_expected_path(
         &canonical_entry(session_date),
-        &request(),
+        AssetClass::Equity,
+        DataType::Trade,
         "aapl"
     ));
 }

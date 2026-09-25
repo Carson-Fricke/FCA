@@ -14,6 +14,7 @@ use lake_contracts::{AssetClass, DataError, DataType, Date, DateTime};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 
+use crate::bounded::BoundedDuckDbQuery;
 use crate::error::QueryApplicationError;
 
 /// A file-query request over one symbol and inclusive session-date window.
@@ -155,7 +156,7 @@ pub type EnsureCallback = Arc<
         + Sync,
 >;
 
-/// Everything a file query needs that is not part of the request.
+/// Everything a file or SQL query needs that is not part of the request.
 pub struct FileQueryContext<'a> {
     /// Coverage catalog the request is classified against.
     pub catalog: &'a dyn CatalogRepository,
@@ -167,6 +168,10 @@ pub struct FileQueryContext<'a> {
     pub ensure_callback: Option<EnsureCallback>,
     /// Point-in-time instant used for coverage classification.
     pub as_of: DateTime,
+    /// Optional bounded DuckDB engine backing SQL-mode queries.
+    pub bounded_query: Option<&'a BoundedDuckDbQuery>,
+    /// Whether the server authorizes `force` overrides for SQL queries.
+    pub force_authorized: bool,
 }
 
 #[cfg(test)]

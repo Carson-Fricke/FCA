@@ -1,20 +1,21 @@
-//! Authenticated file-query and deferred SQL-query routes.
+//! Authenticated file-query and bounded SQL-query routes.
 
+use axum::body::Body;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use lake_contracts::{partition_path, AssetClass, DataType, Date, DateTime};
-use lake_coverage::{
-    requested_coverage, CoverageReport, CoverageState, EnsureSpec, SessionCoverage,
-};
+use lake_coverage::{CoverageReport, SessionCoverage};
 use lake_query::{
-    execute_file_query, FileQueryContext, FileQueryFile, FileQueryRequest, FileQueryResponse,
-    FileQueryResults, FileUrlIssuer,
+    execute_file_query, execute_sql_query, BoundedQueryError, BoundedQueryOutput,
+    BoundedQueryResult, EnsuredQueryFile, FileQueryContext, FileQueryFile, FileQueryRequest,
+    FileQueryResponse, FileQueryResults, FileUrlIssuer, SqlQueryError, SqlQueryRequest,
 };
+use serde::Serialize;
 
 use crate::error::ApiError;
-use crate::models::{parse_query_body, FileQueryBody, QueryBody, SqlQueryBody};
+use crate::models::{parse_query_body, FileQueryBody, QueryBody, SqlOutput, SqlQueryBody};
 use crate::selection::{contracts_or_default, option_coverage, OptionRequestLike};
 use crate::state::ApiContext;
 use crate::validate::StrictJson;
@@ -50,6 +51,8 @@ async fn query_file(context: &ApiContext, request: &FileQueryBody) -> Result<Res
             sas_issuer: context.state.sas_issuer.as_deref(),
             ensure_callback: context.state.ensure_callback.clone(),
             as_of,
+            bounded_query: None,
+            force_authorized: false,
         },
         &file_request,
     )
@@ -111,52 +114,32 @@ async fn query_sql(context: &ApiContext, request: &SqlQueryBody) -> Result<Respo
         return query_option_sql(context, request).await;
     }
     let as_of = context.coverage_as_of();
-    let spec = EnsureSpec {
+    let sql_request = SqlQueryRequest {
         asset_class: request.asset_class,
         data_type: request.data_type,
         symbol: request.symbol.clone().unwrap_or_default(),
         start_date: request.start_date,
         end_date: request.end_date,
+        ensure: request.ensure,
+        sql: request.sql.clone(),
+        output: bounded_output(request.output),
+        force: request.force,
     };
-    let report = requested_coverage(
-        context.state.catalog.as_ref(),
-        context.state.listings.as_deref(),
-        &spec,
-        as_of,
-        "query",
-    )
-    .map_err(|error| ApiError::from_coverage(&error))?;
-    let (_, incomplete) = classify_standard(&report, &spec);
-    if !incomplete.is_empty() && !request.ensure {
-        return Err(incomplete_error(&incomplete, false));
-    }
-    if !incomplete.is_empty() {
-        let Some(callback) = context.state.ensure_callback.clone() else {
-            return Err(ensure_unavailable());
-        };
-        callback(
-            request.asset_class,
-            request.data_type,
-            request.symbol.clone().unwrap_or_default(),
-            request.start_date,
-            request.end_date,
-        )
-        .await
-        .map_err(|_| ensure_failed())?;
-        let refreshed = requested_coverage(
-            context.state.catalog.as_ref(),
-            context.state.listings.as_deref(),
-            &spec,
+    let result = execute_sql_query(
+        FileQueryContext {
+            catalog: context.state.catalog.as_ref(),
+            listings: context.state.listings.as_deref(),
+            sas_issuer: None,
+            ensure_callback: context.state.ensure_callback.clone(),
             as_of,
-            "query",
-        )
-        .map_err(|error| ApiError::from_coverage(&error))?;
-        let (_, incomplete) = classify_standard(&refreshed, &spec);
-        if !incomplete.is_empty() {
-            return Err(incomplete_error(&incomplete, true));
-        }
-    }
-    Err(query_unavailable())
+            bounded_query: context.state.bounded_query.as_deref(),
+            force_authorized: context.state.authorized_force_override,
+        },
+        &sql_request,
+    )
+    .await
+    .map_err(map_sql_error)?;
+    Ok(sql_response(&result.result, request.output))
 }
 
 async fn query_option_sql(
@@ -165,19 +148,137 @@ async fn query_option_sql(
 ) -> Result<Response, ApiError> {
     let as_of = context.coverage_as_of();
     let report = run_option_coverage(context, request, as_of)?;
-    let (_, incomplete) = classify_option(&report, request.data_type);
+    let (usable, incomplete) = classify_option(&report, request.data_type);
     if !incomplete.is_empty() && !request.ensure {
         return Err(incomplete_error(&incomplete, false));
     }
-    if !incomplete.is_empty() {
+    let usable = if !incomplete.is_empty() {
         invoke_option_ensure(context, request).await?;
         let refreshed = run_option_coverage(context, request, as_of)?;
-        let (_, incomplete) = classify_option(&refreshed, request.data_type);
+        let (usable, incomplete) = classify_option(&refreshed, request.data_type);
         if !incomplete.is_empty() {
             return Err(incomplete_error(&incomplete, true));
         }
+        usable
+    } else {
+        usable
+    };
+    let Some(bounded_query) = context.state.bounded_query.as_deref() else {
+        return Err(query_unavailable());
+    };
+    let files = option_ensured_files(&usable, request.data_type);
+    let result = bounded_query.execute(
+        &request.sql,
+        &files,
+        request.force,
+        context.state.authorized_force_override,
+        bounded_output(request.output),
+    );
+    match result {
+        Ok(result) => Ok(sql_response(&result, request.output)),
+        Err(error) => Err(bounded_query_error(&error)),
     }
-    Err(query_unavailable())
+}
+
+/// Map the route's SQL output enum onto the bounded executor's.
+fn bounded_output(output: SqlOutput) -> BoundedQueryOutput {
+    match output {
+        SqlOutput::Json => BoundedQueryOutput::Json,
+        SqlOutput::Arrow => BoundedQueryOutput::Arrow,
+    }
+}
+
+/// Map SQL orchestration failures onto the Python error envelope.
+fn map_sql_error(error: SqlQueryError) -> ApiError {
+    match error {
+        SqlQueryError::Application(error) => ApiError::from_query(&error),
+        SqlQueryError::Bounded(error) => bounded_query_error(&error),
+    }
+}
+
+/// Map a bounded-executor rejection onto the Python status table.
+fn bounded_query_error(error: &BoundedQueryError) -> ApiError {
+    let status = match error.code.as_str() {
+        "query_storage_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+        "scan_limit_exceeded" | "result_limit_exceeded" => StatusCode::PAYLOAD_TOO_LARGE,
+        "force_override_not_authorized" => StatusCode::FORBIDDEN,
+        _ => StatusCode::UNPROCESSABLE_ENTITY,
+    };
+    ApiError::new(status, error.code.clone(), error.message.clone())
+}
+
+/// The strict JSON representation of a bounded SQL result.
+#[derive(Serialize)]
+struct SqlQueryResponse {
+    /// Always `"json"`.
+    format: &'static str,
+    /// Column names in result order.
+    columns: Vec<String>,
+    /// The JSON rows.
+    rows: Vec<serde_json::Value>,
+    /// Serialized result size in bytes.
+    result_bytes: u64,
+    /// Conservative catalog/file scan estimate in bytes.
+    estimated_scan_bytes: u64,
+    /// Whether the authorized force override was applied.
+    forced: bool,
+    /// Stable response limitations.
+    limitations: Vec<String>,
+}
+
+/// Render one bounded result the way the Python `_sql_response` does.
+fn sql_response(result: &BoundedQueryResult, output: SqlOutput) -> Response {
+    let mut limitations = vec![
+        "SQL is executed only against the canonical complete request partitions.".to_string(),
+        "Storage paths, mutating statements, and uncapped execution are rejected.".to_string(),
+    ];
+    if result.forced {
+        limitations.push(
+            "The authorized force override permitted a scan or result above its configured cap."
+                .to_string(),
+        );
+    }
+    match output {
+        SqlOutput::Arrow => {
+            let force_header = if result.forced { "true" } else { "false" };
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/vnd.apache.arrow.stream"),
+                )
+                .header(
+                    "x-query-estimated-scan-bytes",
+                    HeaderValue::from(result.estimated_scan_bytes),
+                )
+                .header(
+                    "x-query-result-bytes",
+                    HeaderValue::from(result.result_bytes),
+                )
+                .header(
+                    "x-query-force-applied",
+                    HeaderValue::from_static(force_header),
+                )
+                .body(Body::from(result.arrow_bytes.clone()))
+                .expect("static response")
+        }
+        SqlOutput::Json => {
+            let response = SqlQueryResponse {
+                format: "json",
+                columns: result.columns.clone(),
+                rows: result
+                    .rows
+                    .iter()
+                    .map(|row| serde_json::Value::Object(row.clone()))
+                    .collect(),
+                result_bytes: result.result_bytes,
+                estimated_scan_bytes: result.estimated_scan_bytes,
+                forced: result.forced,
+                limitations,
+            };
+            (StatusCode::OK, Json(response)).into_response()
+        }
+    }
 }
 
 /// The selection fields shared by the file and SQL option query bodies.
@@ -351,38 +452,24 @@ fn option_expected_path(entry: &SessionCoverage, data_type: DataType) -> bool {
     .is_ok_and(|expected| object_path == expected)
 }
 
-/// Split equity/crypto entries the way the file query does.
-fn classify_standard(
-    report: &CoverageReport,
-    spec: &EnsureSpec,
-) -> (Vec<SessionCoverage>, Vec<SessionCoverage>) {
-    let mut usable = Vec::new();
-    let mut incomplete = Vec::new();
-    for entry in &report.entries {
-        if entry.state == CoverageState::Complete && standard_expected_path(entry, spec) {
-            usable.push(entry.clone());
-        } else {
-            incomplete.push(entry.clone());
-        }
-    }
-    (usable, incomplete)
-}
-
-/// Require complete rows to point at their canonical partition.
-fn standard_expected_path(entry: &SessionCoverage, spec: &EnsureSpec) -> bool {
-    let Some(record) = entry.record.as_ref() else {
-        return false;
-    };
-    let Some(object_path) = record.object_path.as_deref() else {
-        return false;
-    };
-    partition_path(
-        entry.session_date(),
-        spec.asset_class,
-        spec.data_type,
-        &spec.symbol,
-    )
-    .is_ok_and(|expected| object_path == expected)
+/// Map complete option entries to the bounded executor's file contract,
+/// skipping entries the Python `_option_ensured_files` skips.
+fn option_ensured_files(entries: &[SessionCoverage], data_type: DataType) -> Vec<EnsuredQueryFile> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let record = entry.record.as_ref()?;
+            let object_path = record.object_path.as_deref()?;
+            Some(EnsuredQueryFile::new(
+                AssetClass::Option,
+                data_type,
+                entry.symbol.clone(),
+                entry.session_date(),
+                object_path,
+                record.byte_size,
+            ))
+        })
+        .collect()
 }
 
 /// Map complete entries to files with one issued URL each.
@@ -485,7 +572,7 @@ fn sas_unavailable() -> ApiError {
     ApiError::sas_unavailable("file query SAS issuance is not configured")
 }
 
-/// The Python `query_unavailable` rejection: DuckDB is a later phase.
+/// The Python `query_unavailable` rejection when no engine is configured.
 fn query_unavailable() -> ApiError {
     ApiError::new(
         StatusCode::SERVICE_UNAVAILABLE,

@@ -17,6 +17,7 @@ members = [
     "query",
     "http",
     "local",
+    "reference",
     "cli",
 ]
 
@@ -37,6 +38,7 @@ lake-ingestion = { path = "ingestion" }
 lake-query = { path = "query" }
 lake-http = { path = "http" }
 lake-local = { path = "local" }
+lake-reference = { path = "reference" }
 
 arrow-array = "59"
 arrow-buffer = "59"

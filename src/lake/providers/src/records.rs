@@ -1,11 +1,12 @@
 //! Normalized provider records independent of HTTP transport.
 //!
-//! Ports `lake.providers.alpaca.records` for the equity and crypto payloads
-//! the Rust ingest path consumes. `to_row` renders the exact ingestion row the
-//! Python writer produced: nanosecond integer timestamps, canonical decimal
-//! strings, and the provider field names.
+//! Ports `lake.providers.alpaca.records` for the equity, option, and crypto
+//! payloads the Rust ingest path consumes. `to_row` renders the exact
+//! ingestion row the Python writer produced: nanosecond integer timestamps,
+//! canonical decimal strings, and the provider field names.
 
-use lake_contracts::{DateTime, Decimal18};
+use lake_catalog::OptionType;
+use lake_contracts::{Date, DateTime, Decimal18};
 use serde_json::{json, Value};
 
 /// One equity trade.
@@ -87,6 +88,97 @@ impl NormalizedQuote {
             "ask_size": self.ask_size,
             "conditions": self.conditions,
             "tape": self.tape,
+        })
+    }
+}
+
+/// One option trade for a selected OSI contract.
+///
+/// The contract identity fields (`symbol`, `underlying`, `expiration_date`,
+/// `strike_price`, `option_type`) come from the requested contract, exactly as
+/// the Python client derives them; only the OPRA fields are read from the row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NormalizedOptionTrade {
+    /// Provider timestamp in UTC.
+    pub timestamp: DateTime,
+    /// Canonical OSI symbol of the requested contract.
+    pub symbol: String,
+    /// Canonical underlying symbol of the requested contract.
+    pub underlying: String,
+    /// Expiration date of the requested contract.
+    pub expiration_date: Date,
+    /// Strike price of the requested contract.
+    pub strike_price: Decimal18,
+    /// Call or put side of the requested contract.
+    pub option_type: OptionType,
+    /// Exchange code (`x`).
+    pub exchange: String,
+    /// Trade price (`p`).
+    pub price: Decimal18,
+    /// Contract size (`s`).
+    pub size: u32,
+    /// Sale condition (`c`): one string for options, not an array.
+    pub condition: String,
+}
+
+impl NormalizedOptionTrade {
+    /// The canonical ingestion row for the pinned `option.trade` schema.
+    pub fn to_row(&self) -> Value {
+        json!({
+            "timestamp": self.timestamp.to_nanos(),
+            "symbol": self.symbol,
+            "exchange": self.exchange,
+            "price": self.price.to_canonical_string(),
+            "size": self.size,
+            "condition": self.condition,
+        })
+    }
+}
+
+/// One option quote for a selected OSI contract.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NormalizedOptionQuote {
+    /// Provider timestamp in UTC.
+    pub timestamp: DateTime,
+    /// Canonical OSI symbol of the requested contract.
+    pub symbol: String,
+    /// Canonical underlying symbol of the requested contract.
+    pub underlying: String,
+    /// Expiration date of the requested contract.
+    pub expiration_date: Date,
+    /// Strike price of the requested contract.
+    pub strike_price: Decimal18,
+    /// Call or put side of the requested contract.
+    pub option_type: OptionType,
+    /// Bid exchange code (`bx`).
+    pub bid_exchange: String,
+    /// Bid price (`bp`).
+    pub bid_price: Decimal18,
+    /// Bid size (`bs`).
+    pub bid_size: u32,
+    /// Ask exchange code (`ax`).
+    pub ask_exchange: String,
+    /// Ask price (`ap`).
+    pub ask_price: Decimal18,
+    /// Ask size (`as`).
+    pub ask_size: u32,
+    /// Quote condition (`c`): one string for options, not an array.
+    pub condition: String,
+}
+
+impl NormalizedOptionQuote {
+    /// The canonical ingestion row for the pinned `option.quote` schema.
+    pub fn to_row(&self) -> Value {
+        json!({
+            "timestamp": self.timestamp.to_nanos(),
+            "symbol": self.symbol,
+            "bid_exchange": self.bid_exchange,
+            "bid_price": self.bid_price.to_canonical_string(),
+            "bid_size": self.bid_size,
+            "ask_exchange": self.ask_exchange,
+            "ask_price": self.ask_price.to_canonical_string(),
+            "ask_size": self.ask_size,
+            "condition": self.condition,
         })
     }
 }

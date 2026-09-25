@@ -1,4 +1,5 @@
 use super::*;
+use lake_catalog::ContractRecord;
 use serde_json::json;
 
 fn instant() -> DateTime {
@@ -205,6 +206,80 @@ fn crypto_quote_row_has_exact_keys_and_values() {
             "ask_exchange": null,
             "ask_price": "42001",
             "ask_size": "2",
+        })
+    );
+}
+
+fn option_contract(symbol: &str) -> ContractRecord {
+    ContractRecord::new(
+        symbol,
+        "SPY",
+        Date::from_ymd(2024, 1, 19).expect("date"),
+        Decimal18::parse("500").expect("strike"),
+        OptionType::Call,
+        100,
+        None,
+        None,
+    )
+    .expect("contract")
+}
+
+#[test]
+fn option_trade_row_has_exact_option_schema_keys_and_values() {
+    let trade = NormalizedOptionTrade {
+        timestamp: instant(),
+        symbol: "SPY240119C00500000".to_string(),
+        underlying: "SPY".to_string(),
+        expiration_date: Date::from_ymd(2024, 1, 19).expect("date"),
+        strike_price: Decimal18::parse("500").expect("strike"),
+        option_type: OptionType::Call,
+        exchange: "XOPR".to_string(),
+        price: Decimal18::parse("2.50").expect("price"),
+        size: 3,
+        condition: "I".to_string(),
+    };
+    assert_eq!(
+        trade.to_row(),
+        json!({
+            "timestamp": 1732717800123456000i64,
+            "symbol": "SPY240119C00500000",
+            "exchange": "XOPR",
+            "price": "2.5",
+            "size": 3,
+            "condition": "I",
+        })
+    );
+}
+
+#[test]
+fn option_quote_row_has_exact_option_schema_keys_and_values() {
+    let quote = NormalizedOptionQuote {
+        timestamp: instant(),
+        symbol: "SPY240119C00500000".to_string(),
+        underlying: "SPY".to_string(),
+        expiration_date: Date::from_ymd(2024, 1, 19).expect("date"),
+        strike_price: option_contract("SPY240119C00500000").strike_price,
+        option_type: OptionType::Call,
+        bid_exchange: "XOPR".to_string(),
+        bid_price: Decimal18::parse("2.40").expect("bid"),
+        bid_size: 4,
+        ask_exchange: "CBOE".to_string(),
+        ask_price: Decimal18::parse("2.60").expect("ask"),
+        ask_size: 5,
+        condition: "A".to_string(),
+    };
+    assert_eq!(
+        quote.to_row(),
+        json!({
+            "timestamp": 1732717800123456000i64,
+            "symbol": "SPY240119C00500000",
+            "bid_exchange": "XOPR",
+            "bid_price": "2.4",
+            "bid_size": 4,
+            "ask_exchange": "CBOE",
+            "ask_price": "2.6",
+            "ask_size": 5,
+            "condition": "A",
         })
     );
 }

@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 description = "Equity and crypto ingest transactions, record validation, and the committer boundary."
-
 [dependencies]
+lake-configuration.workspace = true
 lake-contracts.workspace = true
 lake-catalog.workspace = true
 lake-coverage.workspace = true
@@ -21,3 +21,7 @@ tokio.workspace = true
 [dev-dependencies]
 tokio.workspace = true
 tempfile.workspace = true
+axum.workspace = true
+http-body-util.workspace = true
+tower.workspace = true
+lake-http.workspace = true

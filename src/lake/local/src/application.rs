@@ -13,7 +13,9 @@ use lake_configuration::{LakeSettings, UniverseSettings};
 use lake_contracts::DateTime;
 use lake_coverage::{ensure_job_id, EnsureJob, EnsureJobLauncher, EnsureSpec};
 use lake_http::{create_app, LakeApiConfig, LakeApiState};
-use lake_query::{EnsureCallback, FileUrlIssuer, QueryApplicationError};
+use lake_query::{
+    BoundedDuckDbQuery, EnsureCallback, FileUrlIssuer, QueryApplicationError, QueryLimits,
+};
 
 use crate::ensure::{local_ensure_deadline_seconds, LocalEnsureLauncher};
 use crate::ingest::LocalIngestError;
@@ -70,6 +72,14 @@ pub fn create_local_app_with(
     let repository: Arc<dyn CatalogRepository> = catalog.clone();
     let jobs: Arc<dyn JobRepository> = Arc::new(MemoryJobRepository::new());
     let issuer: Arc<dyn FileUrlIssuer> = Arc::new(LocalFileIssuer::new(layout.objects()));
+    let sql_limits = QueryLimits::new(
+        settings.api.sql.max_scan_bytes,
+        settings.api.sql.max_result_bytes,
+    )
+    .map_err(LocalIngestError::new)?;
+    let sql_force_authorized = settings.api.sql.authorized_force_override_default;
+    let bounded_query: Arc<BoundedDuckDbQuery> =
+        Arc::new(BoundedDuckDbQuery::new(layout.objects(), sql_limits));
     let launcher = Arc::new(
         LocalEnsureLauncher::new(layout.clone(), environ.clone(), settings, universes, now())?
             .with_catalog(Arc::clone(&catalog))
@@ -113,6 +123,8 @@ pub fn create_local_app_with(
         sas_issuer: Some(issuer),
         ensure_launcher: Some(ensure_launcher),
         ensure_callback: Some(ensure_callback),
+        bounded_query: Some(bounded_query),
+        authorized_force_override: sql_force_authorized,
         ensure_wait_deadline_seconds: deadline,
         bearer_token: Some(bearer_token),
         now,

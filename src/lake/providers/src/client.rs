@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::future::try_join_all;
 use futures_util::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
+use lake_catalog::ContractRecord;
 use lake_contracts::{format_nanos_utc, parse_iso_nanos, DateTime};
 use serde_json::Value;
 
@@ -27,7 +28,8 @@ use crate::governor::RequestGovernor;
 use crate::lane::{lane_for, Lane};
 use crate::parse::{self, DataType};
 use crate::records::{
-    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedQuote, NormalizedTrade, Timestamped,
+    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote, NormalizedOptionTrade,
+    NormalizedQuote, NormalizedTrade, Timestamped,
 };
 use crate::transport::{
     AlpacaTransport, BoxFuture, ReqwestTransport, TransportFailure, TransportResponse,
@@ -35,8 +37,14 @@ use crate::transport::{
 
 /// Alpaca's per-page ceiling.
 const PAGE_SIZE: u32 = 10_000;
+/// Alpaca's per-page ceiling for option data.
+const OPTION_PAGE_SIZE: u32 = 1_000;
+/// Contracts bundled into one option request.
+const OPTION_CONTRACTS_PER_REQUEST: usize = 100;
 /// The only equity feed the lake requests.
 const EQUITY_FEED: &str = "sip";
+/// The only option feed the lake requests.
+const OPTION_FEED: &str = "opra";
 /// Statuses the retry policy treats as transient.
 const RETRYABLE_STATUS_CODES: [u16; 7] = [408, 425, 429, 500, 502, 503, 504];
 /// Initial fan-out granularity: one seed unit per this many nanoseconds.
@@ -253,6 +261,123 @@ impl AlpacaClient {
             None,
         );
         self.fetch_market(&pairs, &spec).await
+    }
+
+    /// Fetch historical OPRA trades for selected option contracts.
+    ///
+    /// Contracts are deduplicated by OSI symbol, batched 100 per request, and
+    /// each batch follows its cursor sequentially: the option endpoints do not
+    /// participate in the equity split planner. Every attempt consumes the
+    /// governor and the shared per-key lane through the same request path as
+    /// the equity and crypto fetches.
+    pub async fn fetch_option_trades(
+        &self,
+        contracts: &[ContractRecord],
+        start: DateTime,
+        end: DateTime,
+    ) -> Result<Vec<NormalizedOptionTrade>, ProviderError> {
+        self.fetch_option_data(
+            contracts,
+            DataType::Trades,
+            start,
+            end,
+            parse::parse_option_trade,
+        )
+        .await
+    }
+
+    /// Fetch historical OPRA quotes for selected option contracts.
+    pub async fn fetch_option_quotes(
+        &self,
+        contracts: &[ContractRecord],
+        start: DateTime,
+        end: DateTime,
+    ) -> Result<Vec<NormalizedOptionQuote>, ProviderError> {
+        self.fetch_option_data(
+            contracts,
+            DataType::Quotes,
+            start,
+            end,
+            parse::parse_option_quote,
+        )
+        .await
+    }
+
+    async fn fetch_option_data<T>(
+        &self,
+        contracts: &[ContractRecord],
+        data_type: DataType,
+        start: DateTime,
+        end: DateTime,
+        parser: fn(&Value, &ContractRecord) -> Result<T, ProviderError>,
+    ) -> Result<Vec<T>, ProviderError> {
+        let contracts = normalize_contracts(contracts);
+        let mut records = Vec::new();
+        for batch in contracts.chunks(OPTION_CONTRACTS_PER_REQUEST) {
+            records.extend(
+                self.fetch_option_batch(batch, data_type, start, end, parser)
+                    .await?,
+            );
+        }
+        Ok(records)
+    }
+
+    /// Fetch one option batch, paging its cursor to exhaustion.
+    async fn fetch_option_batch<T>(
+        &self,
+        batch: &[(String, ContractRecord)],
+        data_type: DataType,
+        start: DateTime,
+        end: DateTime,
+        parser: fn(&Value, &ContractRecord) -> Result<T, ProviderError>,
+    ) -> Result<Vec<T>, ProviderError> {
+        let symbols = batch
+            .iter()
+            .map(|(symbol, _)| symbol.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let base_params = vec![
+            ("symbols".to_string(), symbols),
+            ("start".to_string(), format_nanos_utc(start.to_nanos_i64())),
+            ("end".to_string(), format_nanos_utc(end.to_nanos_i64())),
+            ("limit".to_string(), OPTION_PAGE_SIZE.to_string()),
+            ("sort".to_string(), "asc".to_string()),
+        ];
+        let path = format!("/v1beta1/options/{}", data_type.value());
+        let mut page_token: Option<String> = None;
+        let mut seen_tokens: HashSet<String> = HashSet::new();
+        let mut records: Vec<T> = Vec::new();
+        loop {
+            let mut params = base_params.clone();
+            // The provider's option trades endpoint rejects a feed parameter
+            // outright ("unexpected query parameter(s): feed"); only quotes
+            // accept one. The feed stays pinned to "opra" by configuration.
+            if data_type == DataType::Quotes {
+                params.push(("feed".to_string(), OPTION_FEED.to_string()));
+            }
+            if let Some(token) = &page_token {
+                params.push(("page_token".to_string(), token.clone()));
+            }
+            let response = self.request(&path, &params).await?;
+            let (rows, next_page_token) =
+                parse::option_page_rows(&response.body, data_type, batch)?;
+            for (contract, row) in rows {
+                records.push(parser(row, contract)?);
+            }
+            match next_page_token {
+                None => return Ok(records),
+                Some(token) if token.is_empty() => return Ok(records),
+                Some(token) => {
+                    if !seen_tokens.insert(token.clone()) {
+                        return Err(ProviderError::Protocol(format!(
+                            "repeated Alpaca option {} page token",
+                            data_type.value()
+                        )));
+                    }
+                    page_token = Some(token);
+                }
+            }
+        }
     }
 
     /// Fetch equity trades as `slices` concurrent sub-windows merged in
@@ -754,6 +879,21 @@ fn provider_headers(config: &ProviderConfig) -> Vec<(String, String)> {
         headers.push(("APCA-API-SECRET-KEY".to_string(), api_secret.clone()));
     }
     headers
+}
+
+/// Deduplicate option contracts by OSI symbol, first occurrence winning.
+///
+/// Mirrors `_normalize_contracts`: the first record for a symbol decides both
+/// the request order and the contract metadata used to normalize its rows.
+fn normalize_contracts(contracts: &[ContractRecord]) -> Vec<(String, ContractRecord)> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut result = Vec::with_capacity(contracts.len());
+    for contract in contracts {
+        if seen.insert(contract.symbol.clone()) {
+            result.push((contract.symbol.clone(), contract.clone()));
+        }
+    }
+    result
 }
 
 fn normalize_symbols<S: AsRef<str>>(symbols: &[S]) -> Result<Vec<String>, ProviderError> {

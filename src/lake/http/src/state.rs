@@ -8,7 +8,7 @@ use lake_catalog::{
 };
 use lake_contracts::DateTime;
 use lake_coverage::EnsureJobLauncher;
-use lake_query::{EnsureCallback, FileUrlIssuer};
+use lake_query::{BoundedDuckDbQuery, EnsureCallback, FileUrlIssuer};
 
 /// The clock provider used to classify currently open sessions.
 pub type ApiClock = Arc<dyn Fn() -> DateTime + Send + Sync>;
@@ -35,6 +35,10 @@ pub struct LakeApiState {
     pub ensure_launcher: Option<EnsureJobLauncher>,
     /// Optional coverage-ensure callback used by the query route.
     pub ensure_callback: Option<EnsureCallback>,
+    /// Optional bounded DuckDB engine backing SQL-mode queries.
+    pub bounded_query: Option<Arc<BoundedDuckDbQuery>>,
+    /// Whether `force=true` is authorized for SQL queries.
+    pub authorized_force_override: bool,
     /// Maximum seconds one ensure request waits for its launcher.
     pub ensure_wait_deadline_seconds: f64,
     /// Static bearer token; `None` fails every protected request closed.
@@ -53,6 +57,8 @@ impl std::fmt::Debug for LakeApiState {
             .field("sas_issuer", &self.sas_issuer.is_some())
             .field("ensure_launcher", &self.ensure_launcher.is_some())
             .field("ensure_callback", &self.ensure_callback.is_some())
+            .field("bounded_query", &self.bounded_query.is_some())
+            .field("authorized_force_override", &self.authorized_force_override)
             .field(
                 "ensure_wait_deadline_seconds",
                 &self.ensure_wait_deadline_seconds,

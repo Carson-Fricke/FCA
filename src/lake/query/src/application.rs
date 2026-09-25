@@ -13,10 +13,10 @@
 //! is incomplete, including terminal `empty` and `delisted` sessions, so a file
 //! query never pretends a session with no partition is covered.
 //!
-//! The bounded DuckDB SQL mode is not ported; `query_unavailable` therefore
-//! names no reachable path in this crate.
+//! The bounded DuckDB SQL path shares these classification helpers and lives
+//! in [`crate::sql`].
 
-use lake_contracts::{partition_path, AssetClass};
+use lake_contracts::{partition_path, AssetClass, DataType};
 use lake_coverage::{
     requested_coverage, CoverageReport, CoverageState, EnsureSpec, SessionCoverage,
 };
@@ -55,7 +55,8 @@ pub async fn execute_file_query(
     };
 
     let mut report = coverage_report(&context, &spec)?;
-    let (mut usable, mut incomplete) = classify(&report, request, symbol);
+    let (mut usable, mut incomplete) =
+        classify_sessions(&report, request.asset_class, request.data_type, symbol);
     if !incomplete.is_empty() && !request.ensure {
         return Err(incomplete_error(&incomplete, false));
     }
@@ -84,7 +85,8 @@ pub async fn execute_file_query(
             )
         })?;
         report = coverage_report(&context, &spec)?;
-        (usable, incomplete) = classify(&report, request, symbol);
+        (usable, incomplete) =
+            classify_sessions(&report, request.asset_class, request.data_type, symbol);
     }
 
     let pending_sessions = incomplete.len() as u64;
@@ -150,15 +152,18 @@ fn validate_request(request: &FileQueryRequest) -> Result<&str, QueryApplication
 ///
 /// Mirrors `_classify_files`: an entry is usable only when it is `complete` and
 /// its object path is the canonical partition for the request.
-fn classify(
+pub(crate) fn classify_sessions(
     report: &CoverageReport,
-    request: &FileQueryRequest,
+    asset_class: AssetClass,
+    data_type: DataType,
     symbol: &str,
 ) -> (Vec<SessionCoverage>, Vec<SessionCoverage>) {
     let mut usable = Vec::new();
     let mut incomplete = Vec::new();
     for entry in &report.entries {
-        if entry.state == CoverageState::Complete && has_expected_path(entry, request, symbol) {
+        if entry.state == CoverageState::Complete
+            && has_expected_path(entry, asset_class, data_type, symbol)
+        {
             usable.push(entry.clone());
         } else {
             incomplete.push(entry.clone());
@@ -168,24 +173,24 @@ fn classify(
 }
 
 /// Return whether a complete entry points at its canonical object.
-fn has_expected_path(entry: &SessionCoverage, request: &FileQueryRequest, symbol: &str) -> bool {
+fn has_expected_path(
+    entry: &SessionCoverage,
+    asset_class: AssetClass,
+    data_type: DataType,
+    symbol: &str,
+) -> bool {
     let Some(record) = entry.record.as_ref() else {
         return false;
     };
     let Some(object_path) = record.object_path.as_deref() else {
         return false;
     };
-    partition_path(
-        entry.session_date(),
-        request.asset_class,
-        request.data_type,
-        symbol,
-    )
-    .is_ok_and(|expected| object_path == expected)
+    partition_path(entry.session_date(), asset_class, data_type, symbol)
+        .is_ok_and(|expected| object_path == expected)
 }
 
 /// Compute one coverage report with the Python `"query"` operation.
-fn coverage_report(
+pub(crate) fn coverage_report(
     context: &FileQueryContext<'_>,
     spec: &EnsureSpec,
 ) -> Result<CoverageReport, QueryApplicationError> {
@@ -200,7 +205,10 @@ fn coverage_report(
 }
 
 /// Build the Python `coverage_incomplete` rejection for pending sessions.
-fn incomplete_error(entries: &[SessionCoverage], ensure_requested: bool) -> QueryApplicationError {
+pub(crate) fn incomplete_error(
+    entries: &[SessionCoverage],
+    ensure_requested: bool,
+) -> QueryApplicationError {
     let message = if ensure_requested {
         "coverage remains incomplete after ensure"
     } else {
@@ -271,7 +279,7 @@ fn build_files(
 ///
 /// Classification guarantees this cannot happen; the mapping keeps the crate
 /// panic-free if a future classifier regresses.
-fn missing_object_path() -> QueryApplicationError {
+pub(crate) fn missing_object_path() -> QueryApplicationError {
     QueryApplicationError::new(
         "internal_error",
         "complete coverage entry has no object path",

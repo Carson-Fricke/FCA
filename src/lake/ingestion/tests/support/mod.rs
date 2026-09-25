@@ -7,15 +7,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::future::BoxFuture;
-use lake_catalog::{CatalogRepository, CoverageRecord, MemoryCatalogRepository};
+use lake_catalog::{
+    CatalogRepository, ContractRecord, CoverageRecord, MemoryCatalogRepository,
+    MemoryContractRepository, OptionType,
+};
 use lake_contracts::{partition_path, AssetClass, DataError, DataType, Date, DateTime, Decimal18};
 use lake_coverage::CoverageSession;
 use lake_ingestion::{
-    AtomicIngestCommitter, CryptoClock, CryptoDataProvider, EquityDataProvider, PartitionWriter,
-    StagedParquetObject, TransientRetry,
+    AtomicIngestCommitter, CryptoClock, CryptoDataProvider, EquityDataProvider,
+    OptionMarketDataClient, PartitionWriter, StagedParquetObject, TransientRetry,
 };
 use lake_providers::{
-    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedQuote, NormalizedTrade, ProviderError,
+    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote, NormalizedOptionTrade,
+    NormalizedQuote, NormalizedTrade, ProviderError,
 };
 use lake_storage::{
     BlobStore, LocalFilesystemStore, ParquetMetadata, ReadableBlobStore, StorageCapGuard,
@@ -621,4 +625,176 @@ impl FixedClock {
 /// Read one object back from a local store.
 pub fn read_object(store: &LocalFilesystemStore, path: &str) -> Vec<u8> {
     store.read(path).expect("object exists")
+}
+
+/// The 2024-01-19 option session: 14:30 through 21:00 UTC.
+pub fn option_session(partial: bool) -> CoverageSession {
+    CoverageSession {
+        session_date: day(2024, 1, 19),
+        open_time: instant(14, 30, 0, 0),
+        close_time: instant(21, 0, 0, 0),
+        is_partial: partial,
+    }
+}
+
+/// The default selected OSI contract: SPY 240119 C 500.
+pub fn spy_option_contract() -> ContractRecord {
+    ContractRecord::new(
+        "SPY240119C00500000",
+        "SPY",
+        day(2024, 1, 19),
+        Decimal18::parse("500").expect("strike"),
+        OptionType::Call,
+        100,
+        None,
+        None,
+    )
+    .expect("valid contract")
+}
+
+/// An option trade with the test defaults.
+pub fn option_trade(timestamp: DateTime, symbol: &str) -> NormalizedOptionTrade {
+    NormalizedOptionTrade {
+        timestamp,
+        symbol: symbol.to_string(),
+        underlying: "SPY".to_string(),
+        expiration_date: day(2024, 1, 19),
+        strike_price: Decimal18::parse("500").expect("strike"),
+        option_type: OptionType::Call,
+        exchange: "XOPR".to_string(),
+        price: Decimal18::parse("2.50").expect("price"),
+        size: 3,
+        condition: "I".to_string(),
+    }
+}
+
+/// An option quote with the test defaults.
+pub fn option_quote(timestamp: DateTime, symbol: &str) -> NormalizedOptionQuote {
+    NormalizedOptionQuote {
+        timestamp,
+        symbol: symbol.to_string(),
+        underlying: "SPY".to_string(),
+        expiration_date: day(2024, 1, 19),
+        strike_price: Decimal18::parse("500").expect("strike"),
+        option_type: OptionType::Call,
+        bid_exchange: "XOPR".to_string(),
+        bid_price: Decimal18::parse("2.40").expect("bid"),
+        bid_size: 4,
+        ask_exchange: "CBOE".to_string(),
+        ask_price: Decimal18::parse("2.60").expect("ask"),
+        ask_size: 5,
+        condition: "A".to_string(),
+    }
+}
+
+/// Deterministic test fake for the option market-data boundary.
+pub struct FakeOptionProvider {
+    pub trades: Mutex<Vec<NormalizedOptionTrade>>,
+    pub quotes: Mutex<Vec<NormalizedOptionQuote>>,
+    pub trade_error: Mutex<Option<ProviderError>>,
+    pub quote_error: Mutex<Option<ProviderError>>,
+    pub calls: Mutex<Vec<ProviderCall>>,
+}
+
+impl FakeOptionProvider {
+    /// Build a fake returning the supplied records.
+    pub fn new(trades: Vec<NormalizedOptionTrade>, quotes: Vec<NormalizedOptionQuote>) -> Self {
+        Self {
+            trades: Mutex::new(trades),
+            quotes: Mutex::new(quotes),
+            trade_error: Mutex::new(None),
+            quote_error: Mutex::new(None),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Make every trade fetch fail permanently.
+    pub fn with_trade_error(self, error: ProviderError) -> Self {
+        *guard(&self.trade_error) = Some(error);
+        self
+    }
+
+    /// Make every quote fetch fail permanently.
+    pub fn with_quote_error(self, error: ProviderError) -> Self {
+        *guard(&self.quote_error) = Some(error);
+        self
+    }
+
+    /// The recorded call data types in request order.
+    pub fn call_kinds(&self) -> Vec<DataType> {
+        guard(&self.calls)
+            .iter()
+            .map(|call| call.data_type)
+            .collect()
+    }
+
+    fn record(&self, data_type: DataType, symbols: &[String], start: DateTime, end: DateTime) {
+        guard(&self.calls).push(ProviderCall {
+            data_type,
+            symbols: symbols.to_vec(),
+            start,
+            end,
+        });
+    }
+}
+
+impl OptionMarketDataClient for FakeOptionProvider {
+    fn get_option_trades<'a>(
+        &'a self,
+        contracts: &'a [ContractRecord],
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedOptionTrade>, ProviderError>> {
+        Box::pin(async move {
+            let symbols = contracts
+                .iter()
+                .map(|c| c.symbol.clone())
+                .collect::<Vec<_>>();
+            self.record(DataType::Trade, &symbols, start, end);
+            if let Some(error) = guard(&self.trade_error).clone() {
+                return Err(error);
+            }
+            Ok(guard(&self.trades).clone())
+        })
+    }
+
+    fn get_option_quotes<'a>(
+        &'a self,
+        contracts: &'a [ContractRecord],
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedOptionQuote>, ProviderError>> {
+        Box::pin(async move {
+            let symbols = contracts
+                .iter()
+                .map(|c| c.symbol.clone())
+                .collect::<Vec<_>>();
+            self.record(DataType::Quote, &symbols, start, end);
+            if let Some(error) = guard(&self.quote_error).clone() {
+                return Err(error);
+            }
+            Ok(guard(&self.quotes).clone())
+        })
+    }
+}
+
+/// Shared catalog plus contract/front-set repositories for option tests.
+pub struct OptionCatalog {
+    /// Shared coverage catalog.
+    pub catalog: Arc<MemoryCatalogRepository>,
+    /// Contract metadata repository.
+    pub contracts: Arc<MemoryContractRepository>,
+    /// Daily front-set repository.
+    pub front_sets: Arc<lake_catalog::MemoryDailyFrontSetRepository>,
+}
+
+impl OptionCatalog {
+    /// Build an empty option catalog with the supplied contracts.
+    pub fn new(contracts: Vec<ContractRecord>) -> Self {
+        Self {
+            catalog: Arc::new(MemoryCatalogRepository::new()),
+            contracts: Arc::new(MemoryContractRepository::from_records(contracts)),
+            front_sets: Arc::new(lake_catalog::MemoryDailyFrontSetRepository::new()),
+        }
+    }
 }

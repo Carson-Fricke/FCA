@@ -117,6 +117,8 @@ pub fn build_api_router(environ: &BTreeMap<String, String>) -> Result<Router, Co
         sas_issuer: None,
         ensure_launcher: None,
         ensure_callback: None,
+        bounded_query: None,
+        authorized_force_override: false,
         ensure_wait_deadline_seconds: deadline,
         bearer_token,
         now: Arc::new(system_now),

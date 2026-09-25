@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Alpaca client: cursor paging, retry/backoff, and a shared request-budget governor."
 
 [dependencies]
+lake-catalog.workspace = true
 lake-contracts.workspace = true
 futures-util.workspace = true
 percent-encoding.workspace = true

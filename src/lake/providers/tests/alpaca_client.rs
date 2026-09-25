@@ -838,3 +838,237 @@ async fn with_reqwest_builds_a_configured_client() {
     let client = AlpacaClient::with_reqwest(config, RequestGovernor::new(None)).expect("client");
     assert_eq!(client.config().max_concurrency, 1);
 }
+
+fn jan19(hour: u32, minute: u32) -> DateTime {
+    DateTime::from_ymd_hms(2024, 1, 19, hour, minute, 0, 0).expect("instant")
+}
+
+fn option_contract(
+    symbol: &str,
+    option_type: lake_catalog::OptionType,
+) -> lake_catalog::ContractRecord {
+    lake_catalog::ContractRecord::new(
+        symbol,
+        "SPY",
+        jan19(0, 0).date(),
+        lake_contracts::Decimal18::parse("500").expect("strike"),
+        option_type,
+        100,
+        None,
+        None,
+    )
+    .expect("contract")
+}
+
+fn option_trade_row(timestamp: &str) -> Value {
+    json!({"t": timestamp, "x": "XOPR", "p": "2.5", "s": 3, "c": "I"})
+}
+
+#[tokio::test]
+async fn option_trade_request_shape_omits_the_feed_and_uses_option_pages() {
+    let transport = FakeTransport::new(|_| ok(json!({"trades": {}})));
+    let client = client(fast_config(), transport.clone());
+    let contracts = vec![option_contract(
+        "SPY240119C00500000",
+        lake_catalog::OptionType::Call,
+    )];
+    client
+        .fetch_option_trades(&contracts, jan19(14, 30), jan19(21, 0))
+        .await
+        .expect("fetch");
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].url,
+        "https://data.alpaca.markets/v1beta1/options/trades"
+    );
+    assert_eq!(
+        requests[0].params,
+        pairs(&[
+            ("symbols", "SPY240119C00500000"),
+            ("start", "2024-01-19T14:30:00Z"),
+            ("end", "2024-01-19T21:00:00Z"),
+            ("limit", "1000"),
+            ("sort", "asc"),
+        ])
+    );
+    assert_eq!(requests[0].param("feed"), None);
+}
+
+#[tokio::test]
+async fn option_quotes_send_the_opra_feed_and_normalize_single_conditions() {
+    let transport = FakeTransport::new(|_| {
+        ok(json!({"quotes": {"SPY240119C00500000": [json!({
+            "t": "2024-01-19T14:31:00Z",
+            "bx": "XOPR",
+            "bp": "2.4",
+            "bs": 4,
+            "ax": "CBOE",
+            "ap": "2.6",
+            "as": 5,
+            "c": "A",
+        })]}}))
+    });
+    let client = client(fast_config(), transport.clone());
+    let contract = option_contract("SPY240119C00500000", lake_catalog::OptionType::Call);
+    let quotes = client
+        .fetch_option_quotes(&[contract], jan19(14, 30), jan19(21, 0))
+        .await
+        .expect("fetch");
+
+    assert_eq!(quotes.len(), 1);
+    assert_eq!(quotes[0].symbol, "SPY240119C00500000");
+    assert_eq!(quotes[0].underlying, "SPY");
+    assert_eq!(quotes[0].condition, "A");
+    assert_eq!(quotes[0].bid_size, 4);
+    assert_eq!(quotes[0].ask_exchange, "CBOE");
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].url,
+        "https://data.alpaca.markets/v1beta1/options/quotes"
+    );
+    assert_eq!(requests[0].param("feed"), Some("opra"));
+    assert_eq!(requests[0].param("limit"), Some("1000"));
+}
+
+#[tokio::test]
+async fn option_trades_page_the_cursor_sequentially_and_deduplicate_contracts() {
+    let transport = FakeTransport::new(|request| match request.param("page_token") {
+        None => ok(json!({
+            "trades": {"SPY240119C00500000": [option_trade_row("2024-01-19T14:31:00Z")]},
+            "next_page_token": "t1",
+        })),
+        Some("t1") => ok(json!({
+            "trades": {"SPY240119C00500000": [option_trade_row("2024-01-19T14:32:00Z")]},
+            "next_page_token": "",
+        })),
+        Some(other) => panic!("unexpected page token {other}"),
+    });
+    let client = client(fast_config(), transport.clone());
+    let contract = option_contract("SPY240119C00500000", lake_catalog::OptionType::Call);
+    let trades = client
+        .fetch_option_trades(&[contract.clone(), contract], jan19(14, 30), jan19(21, 0))
+        .await
+        .expect("fetch");
+
+    let timestamps: Vec<_> = trades.iter().map(|trade| trade.timestamp).collect();
+    assert_eq!(
+        timestamps,
+        vec![jan19(14, 31), jan19(14, 32)],
+        "provider page order, no duplicate-symbol second batch"
+    );
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].param("symbols"), Some("SPY240119C00500000"));
+    assert_eq!(requests[0].param("page_token"), None);
+    assert_eq!(requests[1].param("page_token"), Some("t1"));
+    assert_eq!(requests[1].param("feed"), None);
+}
+
+#[tokio::test]
+async fn option_contracts_are_batched_one_hundred_per_request() {
+    let contracts: Vec<_> = (0..101)
+        .map(|index| {
+            option_contract(
+                &format!("SPY240119C00{index:05}"),
+                lake_catalog::OptionType::Call,
+            )
+        })
+        .collect();
+    let transport = FakeTransport::new(|_| ok(json!({"trades": {}})));
+    let client = client(fast_config(), transport.clone());
+    client
+        .fetch_option_trades(&contracts, jan19(14, 30), jan19(21, 0))
+        .await
+        .expect("fetch");
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2, "one batch per 100 contracts");
+    assert_eq!(
+        requests[0]
+            .param("symbols")
+            .expect("symbols")
+            .split(',')
+            .count(),
+        100
+    );
+    assert_eq!(
+        requests[1]
+            .param("symbols")
+            .expect("symbols")
+            .split(',')
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn option_unselected_symbols_are_protocol_errors() {
+    let transport = FakeTransport::new(|_| ok(json!({"trades": {"QQQ240119C00500000": []}})));
+    let client = client(fast_config(), transport.clone());
+    let contract = option_contract("SPY240119C00500000", lake_catalog::OptionType::Call);
+    let error = client
+        .fetch_option_trades(&[contract], jan19(14, 30), jan19(21, 0))
+        .await
+        .expect_err("unselected symbol");
+    match error {
+        ProviderError::Protocol(message) => {
+            assert!(
+                message.contains("unselected symbol 'QQQ240119C00500000'"),
+                "{message}"
+            );
+        }
+        other => panic!("expected protocol error, got {other:?}"),
+    }
+    assert_eq!(transport.requests().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn option_fetches_consume_the_governor_and_honor_retry_after() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let transport = FakeTransport::new(move |_| {
+        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            retry_later(429, "2")
+        } else {
+            ok(
+                json!({"trades": {"SPY240119C00500000": [option_trade_row("2024-01-19T14:31:00Z")]}}),
+            )
+        }
+    });
+    let mut config = fast_config();
+    config.max_attempts = 3;
+    let client = client(config, transport.clone());
+    let contract = option_contract("SPY240119C00500000", lake_catalog::OptionType::Call);
+    let trades = client
+        .fetch_option_trades(&[contract], jan19(14, 30), jan19(21, 0))
+        .await
+        .expect("fetch");
+    assert_eq!(trades.len(), 1);
+    assert_eq!(transport.requests().len(), 2, "429 then 200");
+}
+
+#[tokio::test]
+async fn option_repeated_page_token_is_a_protocol_error() {
+    let transport = FakeTransport::new(|_| {
+        ok(json!({"trades": {"SPY240119C00500000": []}, "next_page_token": "loop"}))
+    });
+    let client = client(fast_config(), transport.clone());
+    let contract = option_contract("SPY240119C00500000", lake_catalog::OptionType::Call);
+    let error = client
+        .fetch_option_trades(&[contract], jan19(14, 30), jan19(21, 0))
+        .await
+        .expect_err("looping cursor");
+    match error {
+        ProviderError::Protocol(message) => {
+            assert!(
+                message.contains("repeated Alpaca option trades page token"),
+                "{message}"
+            );
+        }
+        other => panic!("expected protocol error, got {other:?}"),
+    }
+    assert_eq!(transport.requests().len(), 2);
+}

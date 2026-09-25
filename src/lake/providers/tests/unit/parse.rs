@@ -1,4 +1,6 @@
 use super::*;
+use lake_catalog::OptionType;
+use lake_contracts::Date;
 use serde_json::json;
 
 fn expect_protocol(result: Result<impl std::fmt::Debug, ProviderError>, needle: &str) {
@@ -372,4 +374,196 @@ fn page_rows_rejects_malformed_shapes() {
         ),
         "next_page_token",
     );
+}
+
+fn option_contract(symbol: &str, option_type: OptionType) -> ContractRecord {
+    ContractRecord::new(
+        symbol,
+        "SPY",
+        Date::from_ymd(2024, 1, 19).expect("date"),
+        Decimal18::parse("500").expect("strike"),
+        option_type,
+        100,
+        None,
+        None,
+    )
+    .expect("contract")
+}
+
+fn option_trade_row() -> Value {
+    json!({
+        "t": "2024-01-19T14:31:00.123456Z",
+        "x": "XOPR",
+        "p": "2.50",
+        "s": 3,
+        "c": "I",
+    })
+}
+
+fn option_quote_row() -> Value {
+    json!({
+        "t": "2024-01-19T14:32:00Z",
+        "bx": "XOPR",
+        "bp": "2.40",
+        "bs": 4,
+        "ax": "CBOE",
+        "ap": "2.60",
+        "as": 5,
+        "c": "A",
+    })
+}
+
+#[test]
+fn option_trade_parses_opra_fields_and_contract_identity() {
+    let contract = option_contract("SPY240119C00500000", OptionType::Call);
+    let trade = parse_option_trade(&option_trade_row(), &contract).expect("trade");
+    assert_eq!(trade.timestamp.to_nanos(), 1705674660123456000);
+    assert_eq!(trade.symbol, "SPY240119C00500000");
+    assert_eq!(trade.underlying, "SPY");
+    assert_eq!(
+        trade.expiration_date,
+        Date::from_ymd(2024, 1, 19).expect("d")
+    );
+    assert_eq!(trade.strike_price, Decimal18::parse("500").expect("strike"));
+    assert_eq!(trade.option_type, OptionType::Call);
+    assert_eq!(trade.exchange, "XOPR");
+    assert_eq!(trade.price, Decimal18::parse("2.50").expect("price"));
+    assert_eq!(trade.size, 3);
+    assert_eq!(trade.condition, "I");
+}
+
+#[test]
+fn option_quote_parses_bid_ask_and_single_condition() {
+    let contract = option_contract("SPY240119P00500000", OptionType::Put);
+    let quote = parse_option_quote(&option_quote_row(), &contract).expect("quote");
+    assert_eq!(quote.option_type, OptionType::Put);
+    assert_eq!(quote.bid_exchange, "XOPR");
+    assert_eq!(quote.bid_size, 4);
+    assert_eq!(quote.ask_exchange, "CBOE");
+    assert_eq!(quote.ask_size, 5);
+    assert_eq!(quote.condition, "A");
+}
+
+#[test]
+fn option_rows_reject_missing_and_malformed_fields() {
+    let contract = option_contract("SPY240119C00500000", OptionType::Call);
+    let mut row = option_trade_row();
+    row.as_object_mut().expect("object").remove("x");
+    expect_protocol(parse_option_trade(&row, &contract), "missing 'x'");
+
+    let mut row = option_trade_row();
+    row["p"] = json!("not-a-number");
+    expect_protocol(parse_option_trade(&row, &contract), "'p' must be numeric");
+
+    let mut row = option_quote_row();
+    row["bs"] = json!(-1);
+    expect_protocol(
+        parse_option_quote(&row, &contract),
+        "'bs' must be an integer",
+    );
+
+    let mut row = option_trade_row();
+    row["c"] = json!(["I"]);
+    expect_protocol(
+        parse_option_trade(&row, &contract),
+        "'c' must be a non-empty string",
+    );
+
+    let mut row = option_trade_row();
+    row["t"] = "2024-01-19T14:31:00".into();
+    expect_protocol(
+        parse_option_trade(&row, &contract),
+        "must include a timezone",
+    );
+}
+
+#[test]
+fn option_page_rows_reject_unknown_symbols_and_preserve_contract_order() {
+    let first = option_contract("SPY240119C00500000", OptionType::Call);
+    let second = option_contract("SPY240119C00510000", OptionType::Call);
+    let contracts = vec![
+        (first.symbol.clone(), first.clone()),
+        (second.symbol.clone(), second.clone()),
+    ];
+
+    // Keys are canonicalized (trimmed, uppercased) before the selection check,
+    // and rows are returned in contract order rather than provider key order.
+    let payload = json!({
+        "trades": {
+            "spy240119c00510000": [option_trade_row()],
+            "  SPY240119C00500000 ": [option_trade_row()],
+        },
+        "next_page_token": null,
+    });
+    let (rows, token) = option_page_rows(&payload, DataType::Trades, &contracts).expect("rows");
+    assert_eq!(token, None);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].0.symbol, "SPY240119C00500000");
+    assert_eq!(rows[1].0.symbol, "SPY240119C00510000");
+}
+
+#[test]
+fn option_page_rows_rejects_malformed_pages() {
+    let contract = option_contract("SPY240119C00500000", OptionType::Call);
+    let contracts = vec![(contract.symbol.clone(), contract)];
+
+    expect_protocol(
+        option_page_rows(&json!([]), DataType::Trades, &contracts),
+        "Alpaca option response body must be an object",
+    );
+    expect_protocol(
+        option_page_rows(&json!({}), DataType::Trades, &contracts),
+        "Alpaca option response is missing 'trades'",
+    );
+    expect_protocol(
+        option_page_rows(&json!({"trades": []}), DataType::Trades, &contracts),
+        "Alpaca option trades rows must be an object",
+    );
+    expect_protocol(
+        option_page_rows(
+            &json!({"trades": {"QQQ240119C00500000": []}}),
+            DataType::Trades,
+            &contracts,
+        ),
+        "unselected symbol",
+    );
+    expect_protocol(
+        option_page_rows(
+            &json!({"trades": {"SPY240119C00500000": {}}}),
+            DataType::Trades,
+            &contracts,
+        ),
+        "must be an array",
+    );
+    expect_protocol(
+        option_page_rows(
+            &json!({"trades": {"SPY240119C00500000": ["row"]}}),
+            DataType::Trades,
+            &contracts,
+        ),
+        "Alpaca option row must be an object",
+    );
+    expect_protocol(
+        option_page_rows(
+            &json!({"trades": {"SPY240119C00500000": []}, "next_page_token": 3}),
+            DataType::Trades,
+            &contracts,
+        ),
+        "next_page_token must be a string or null",
+    );
+}
+
+#[test]
+fn option_page_rows_returns_contract_order_without_their_rows() {
+    let first = option_contract("SPY240119C00500000", OptionType::Call);
+    let second = option_contract("SPY240119C00510000", OptionType::Call);
+    let contracts = vec![
+        (first.symbol.clone(), first),
+        (second.symbol.clone(), second),
+    ];
+    let payload = json!({"trades": {"SPY240119C00510000": [option_trade_row()]}});
+    let (rows, token) = option_page_rows(&payload, DataType::Trades, &contracts).expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0.symbol, "SPY240119C00510000");
+    assert_eq!(token, None);
 }

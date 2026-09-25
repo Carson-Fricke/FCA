@@ -1,17 +1,20 @@
-//! Provider boundaries for the equity and crypto ingest transactions.
+//! Provider boundaries for the equity, option, and crypto ingest transactions.
 //!
 //! The Python transactions accept a duck-typed client with `get_trades` /
-//! `get_quotes` coroutines. The Rust port names those boundaries as object-safe
-//! traits so the locally constructed [`AlpacaClient`] and test fakes are
-//! interchangeable, and the transaction owns one boxed future per requested
-//! data type.
+//! `get_quotes` / `get_option_trades` / `get_option_quotes` coroutines. The
+//! Rust port names those boundaries as object-safe traits so the locally
+//! constructed [`AlpacaClient`] and test fakes are interchangeable, and the
+//! transaction owns one boxed future per requested data type.
 
 use futures_util::future::BoxFuture;
+use lake_catalog::ContractRecord;
 use lake_contracts::DateTime;
 use lake_providers::{
-    AlpacaClient, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedQuote, NormalizedTrade,
-    ProviderError,
+    AlpacaClient, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,
+    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade, ProviderError,
 };
+
+use crate::options::transaction::OptionMarketDataClient;
 
 /// Provider boundary for the two equity one-symbol fetches.
 pub trait EquityDataProvider: Send + Sync {
@@ -99,6 +102,33 @@ impl CryptoDataProvider for AlpacaClient {
         Box::pin(async move {
             let client: &AlpacaClient = self;
             client.fetch_crypto_quotes(pairs, start, end).await
+        })
+    }
+}
+
+/// Provider boundary for the selected OPRA contract fetches.
+impl OptionMarketDataClient for AlpacaClient {
+    fn get_option_trades<'a>(
+        &'a self,
+        contracts: &'a [ContractRecord],
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedOptionTrade>, ProviderError>> {
+        Box::pin(async move {
+            let client: &AlpacaClient = self;
+            client.fetch_option_trades(contracts, start, end).await
+        })
+    }
+
+    fn get_option_quotes<'a>(
+        &'a self,
+        contracts: &'a [ContractRecord],
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedOptionQuote>, ProviderError>> {
+        Box::pin(async move {
+            let client: &AlpacaClient = self;
+            client.fetch_option_quotes(contracts, start, end).await
         })
     }
 }
