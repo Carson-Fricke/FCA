@@ -1,4 +1,4 @@
-"""Focused tests for the lake run-record model, mappers, and repositories."""
+"""Focused tests for the lake run-record model and repository."""
 
 from __future__ import annotations
 
@@ -7,54 +7,8 @@ from datetime import date, datetime
 from typing import Any, cast
 
 import pytest
-from azure.core.exceptions import ResourceNotFoundError
-from azure.data.tables import TableClient, TableEntity, UpdateMode
 
-from lake.catalog import (
-    AzureTableRunRepository,
-    InMemoryRunRepository,
-    RunRecord,
-    RunState,
-    run_from_entity,
-    run_to_entity,
-)
-
-_METRICS_JSON = '{"max_drawdown":"-0.0825","sharpe":"1.2345"}'
-
-
-class FakeTable:
-    def __init__(self) -> None:
-        self.entities: dict[tuple[str, str], TableEntity] = {}
-        self.queries: list[tuple[str, dict[str, object] | None]] = []
-        self.deletes: list[tuple[str, str]] = []
-
-    def get_entity(self, partition_key: str, row_key: str) -> TableEntity:
-        try:
-            return self.entities[(partition_key, row_key)]
-        except KeyError:
-            raise ResourceNotFoundError("missing") from None
-
-    def upsert_entity(self, entity: TableEntity, mode: UpdateMode) -> None:
-        assert mode is UpdateMode.REPLACE
-        self.entities[(entity["PartitionKey"], entity["RowKey"])] = TableEntity(entity)
-
-    def query_entities(
-        self,
-        query_filter: str,
-        *,
-        parameters: dict[str, object] | None = None,
-    ) -> list[TableEntity]:
-        self.queries.append((query_filter, parameters))
-        partition = (parameters or {}).get("partition")
-        return [
-            entity
-            for entity in self.entities.values()
-            if entity["PartitionKey"] == partition
-        ]
-
-    def delete_entity(self, partition_key: str, row_key: str) -> None:
-        self.deletes.append((partition_key, row_key))
-        self.entities.pop((partition_key, row_key), None)
+from lake.catalog import InMemoryRunRepository, RunRecord, RunState
 
 
 def _record(
@@ -73,32 +27,6 @@ def _record(
         total_bytes=24,
         metrics={"max_drawdown": "-0.0825", "sharpe": "1.2345"},
     )
-
-
-@pytest.mark.parametrize("status", list(RunState))
-def test_run_records_round_trip_through_entity(status: RunState) -> None:
-    record = _record(status)
-    entity = run_to_entity(record)
-
-    assert entity["PartitionKey"] == "runs"
-    assert entity["RowKey"] == "run-2024-01-02"
-    assert entity["Metrics"] == _METRICS_JSON
-    assert run_from_entity(entity) == record
-
-
-def test_run_entity_omits_optional_fields_and_encodes_row_keys() -> None:
-    record = RunRecord(
-        run_id="run/2024 01",
-        status=RunState.FAILED,
-        strategy_id="mean-revert",
-    )
-    entity = run_to_entity(record)
-
-    assert entity["RowKey"] == "run%2F2024%2001"
-    assert entity["Metrics"] == "{}"
-    for name in ("DataStart", "DataEnd", "RunDigest", "ConfigurationDigest"):
-        assert name not in entity
-    assert run_from_entity(entity) == record
 
 
 def test_run_records_round_trip_through_memory() -> None:
@@ -180,33 +108,3 @@ def test_memory_run_repository_upserts_filters_sorts_and_deletes() -> None:
     assert repository.delete("run-2024-01-01") is True
     assert repository.delete("run-2024-01-01") is False
     assert repository.get("run-2024-01-01") is None
-
-
-def test_azure_run_repository_round_trips_without_live_azure() -> None:
-    table = FakeTable()
-    adapter: AzureTableRunRepository = AzureTableRunRepository(cast(TableClient, table))
-    record = _record(RunState.FAILED)
-
-    assert adapter.upsert(record) == record
-    assert ("runs", "run-2024-01-02") in table.entities
-    assert adapter.get(record.run_id) == record
-    assert adapter.list(status=RunState.FAILED) == (record,)
-    assert adapter.list(status=RunState.COMPLETE) == ()
-    assert adapter.list(strategy_id="momentum") == (record,)
-    assert adapter.list(strategy_id="mean-revert") == ()
-    assert adapter.delete(record.run_id) is True
-    assert ("runs", "run-2024-01-02") in table.deletes
-    assert adapter.delete(record.run_id) is False
-    assert adapter.get(record.run_id) is None
-
-
-def test_azure_run_repository_queries_only_the_runs_partition() -> None:
-    table = FakeTable()
-    adapter = AzureTableRunRepository(cast(TableClient, table))
-    record = _record()
-
-    adapter.upsert(record)
-
-    assert adapter.list() == (record,)
-    assert table.queries == [("PartitionKey eq @partition", {"partition": "runs"})]
-    assert adapter.get("missing-run") is None

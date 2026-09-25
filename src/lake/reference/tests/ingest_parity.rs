@@ -1,4 +1,4 @@
-﻿//! Ingest parity integration tests: the golden fixtures drive the whole
+//! Ingest parity integration tests: the golden fixtures drive the whole
 //! ingest, and the written partitions are asserted against the point-in-time
 //! read contract (`tests/lake/reference/test_query.py` semantics) and against
 //! the Python-written oracle Parquet in `tests/oracle/`.
@@ -24,7 +24,7 @@ use lake_storage::{BlobStore, LocalFilesystemStore};
 use tempfile::TempDir;
 
 fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/lake/reference/fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
 fn oracle_dir() -> PathBuf {

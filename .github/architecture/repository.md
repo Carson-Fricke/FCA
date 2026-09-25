@@ -76,11 +76,11 @@ below and `lake-rust-rewrite-plan.md` for the porting order and status). The
 Python packages under `src/lake` are the retained library surface for code
 that is not the lake service: soak and experiment scripts import the value
 objects, configuration loaders, session helpers, and the Alpaca client. The
-service-shaped Python packages that the Rust workspace has already replaced —
-including the phase-5 remainder (options ingestion, reference data,
-DuckDB-backed SQL queries, the queue worker, Azure hosted boundaries, and
-Entra JWT validation) — stay in place until the phase-6 deletion removes them
-and keeps only that retained surface. Thesis reads reference data through
+phase-6 deletion removed every service-shaped Python package the Rust
+workspace replaced (local, http, ingestion, storage, query, queue, hosted,
+operations, reference, tools, the coverage/catalog service machinery, and the
+top-level `app`/`crypto`/`options` modules); those directories now contain
+only their Rust crates. Thesis reads reference data through
 `harness.data.reference`, never through `lake.reference` directly.
 
 | Package | Responsibility |
@@ -93,8 +93,7 @@ and keeps only that retained surface. Thesis reads reference data through
 | `harness.screening` | Process-isolated execution sandbox for custom screener filters. |
 | `harness.strategy` | Mode-independent strategy callbacks (`Strategy`, `CALLBACK_ORDER`), the protocol-only `StrategyContext` surface, the sandbox lint, and the callback-contract reference fixture. The engine-bound context and binding were deleted; the native Rust context replaces them. See `## Strategy Contract` for the implemented loading, dispatch, and context surface. |
 | `harness.testing` | Canonical artifact support, the Rust-core parity oracle, and the cross-mode tick-indicator parity oracle. |
-| `lake.operations` | Daily coverage and budget report: freshness, failure, queue-age, storage, and budget summaries with an injectable alert channel and the `lake operations` operator command. |
-| `lake.local` | Local-only composition over filesystem state: the deterministic Hive layout and catalog, the single-session ingest, and the arbitrary-symbol ranged ensure/backfill that fetches a requested symbol window on demand instead of failing because it was never ingested. Page sizing is the lake's internal policy and pagination runs until the provider cursor is exhausted, so a fetch returns the requested window in full; callers request a window, never a limit. |
+| `lake.coverage` | The retained Python session helpers only: inclusive XNYS and UTC-day sessions with the current-session flag. Coverage classification and gap planning are native Rust in the `lake-coverage` crate. |
 
 `harness.oms`, `harness.fills`, `harness.portfolio`, `harness.risk`,
 `harness.venues`, `harness.results`, `harness.sweeps`, `harness.http`,
@@ -102,6 +101,13 @@ and keeps only that retained surface. Thesis reads reference data through
 `harness.strategy.context` / `harness.strategy.binding` modules were deleted.
 Their behavior is native Rust in `native`, `live`,
 `backtest`, `num`, `api`, and `mcp`.
+
+The lake service Python packages (`lake.local`, `lake.http`, `lake.ingestion`,
+`lake.storage`, `lake.query`, `lake.queue`, `lake.hosted`, `lake.operations`,
+`lake.reference`, `lake.tools`, the coverage/catalog service machinery, and
+the top-level `lake.app`/`lake.crypto`/`lake.options` modules) were deleted in
+phase 6; their behavior is native Rust in the `lake-*` crates, and their
+directories now contain only Rust crate content.
 
 The event ordering contract is timestamp, source sequence, fixed serialized
 event-class priority, then incoming feed order. `SimClock` advances only from

@@ -1,1 +1,0 @@
-"""Option ingestion capability."""

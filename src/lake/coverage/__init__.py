@@ -1,31 +1,20 @@
-"""Coverage calculation facade."""
+"""Session helpers for Python consumers of the market lake.
 
-from lake.coverage.service import (
-    CoverageEntry,
-    CoverageGap,
-    CoverageReport,
+Coverage classification and gap planning are native Rust; this package keeps
+only the calendar helpers that survive the phase-6 deletion (see
+``lake-rust-rewrite-plan.md``).
+"""
+
+from lake.coverage.sessions import (
     CoverageSession,
-    CoverageState,
-    GapPlan,
-    SessionCoverage,
-    calculate_coverage,
     crypto_sessions,
     equity_sessions,
-    plan_gaps,
     sessions_for,
 )
 
 __all__ = [
-    "CoverageEntry",
-    "CoverageGap",
-    "CoverageReport",
     "CoverageSession",
-    "CoverageState",
-    "GapPlan",
-    "SessionCoverage",
-    "calculate_coverage",
     "crypto_sessions",
     "equity_sessions",
-    "plan_gaps",
     "sessions_for",
 ]

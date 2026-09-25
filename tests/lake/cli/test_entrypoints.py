@@ -24,20 +24,12 @@ def test_package_import_and_console_script() -> None:
 
 def test_published_capability_facades_import() -> None:
     modules = (
-        "lake.app",
         "lake.catalog",
         "lake.cli",
         "lake.configuration",
         "lake.contracts",
         "lake.coverage",
-        "lake.crypto",
-        "lake.local",
-        "lake.operations",
-        "lake.options",
         "lake.providers.alpaca",
-        "lake.query",
-        "lake.queue",
-        "lake.storage",
     )
 
     assert [import_module(name).__name__ for name in modules] == list(modules)

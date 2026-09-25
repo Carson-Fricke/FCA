@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use super::*;
 
 fn fixtures_dir() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/lake/reference/fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
 fn company_facts_bytes() -> Vec<u8> {

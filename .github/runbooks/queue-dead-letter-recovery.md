@@ -5,13 +5,13 @@ It is an operator-triggered recovery path, not an automatic retry loop.
 
 ## Delivery Behavior
 
-`lake.queue.QueueWorker` receives one leased message at a time. A
-handler failure below `max_delivery_attempts` leaves the source message
-undeleted so Azure Queue visibility timeout can redeliver it. On the final
-failed delivery, the worker writes a versioned envelope to the configured
-dead-letter queue and deletes the source message only after the send succeeds.
-If dead-letter delivery fails, the source message is not deleted and can be
-retried safely.
+The Rust lake queue worker (`lake-queue` crate) receives one leased message at
+a time. A handler failure below `max_delivery_attempts` leaves the source
+message undeleted so Azure Queue visibility timeout can redeliver it. On the
+final failed delivery, the worker writes a versioned envelope to the
+configured dead-letter queue and deletes the source message only after the
+send succeeds. If dead-letter delivery fails, the source message is not
+deleted and can be retried safely.
 
 Messages received after the configured attempt limit are dead-lettered without
 calling the handler. This prevents a poison message from retrying indefinitely.
@@ -44,10 +44,11 @@ credentials, tokens, or complete sensitive payloads into incident tickets.
 2. Read and validate the envelope. Confirm `schema_version` is supported and
    `source_queue` is the intended target. Never replay using
    `source_pop_receipt`.
-3. For a valid JSON object, use `lake.queue.DeadLetterReplayer` with a
-   `QueueSender` for the original queue. The replayer sends only the original
-   payload, not the dead-letter metadata wrapper, so the normal worker handler
-   receives its usual message contract.
+3. For a valid JSON object, use the lake queue replayer (`lake_queue::DeadLetterReplayer`
+   in the Rust `lake-queue` crate) with a `QueueSender` for the original
+   queue. The replayer sends only the original payload, not the dead-letter
+   metadata wrapper, so the normal worker handler receives its usual message
+   contract.
 4. For malformed or non-object `original_content`, correct the payload through
    the approved change/review path and pass the repaired JSON object explicitly
    as `repaired_payload`. Keep the original envelope unchanged for audit.

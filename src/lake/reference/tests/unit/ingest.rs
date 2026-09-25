@@ -13,7 +13,7 @@ use crate::nasdaq::NasdaqSecurity;
 use crate::partitions::cik_object_name;
 
 fn fixtures_dir() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/lake/reference/fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
 fn company_facts() -> Vec<XbrlFact> {

@@ -205,8 +205,18 @@ repo-wide, and updates docs.
 
 ## Phase 6 — delete the Python lake
 
-Only start phase 6 when every phase-5 workstream is green and the harness and
-Thesis suites pass against the Rust lake.
+**Status: complete.** The service-shaped Python modules are deleted
+(`local/`, `http/`, `ingestion/`, `storage/`, `query/`, `queue/`, `hosted/`,
+`operations/`, `reference/`, `tools/`, `catalog/azure.py`,
+`coverage/{service,application}.py`, `app.py`, `crypto.py`, `options.py`),
+keeping only the retained surface; the coverage package now re-exports the
+session helpers from a reduced `lake/coverage/sessions.py`. The catalog test
+files kept only their in-memory/model cases (the Azure-adapter cases moved
+with the Rust crate), the CLI facade test imports only the retained facades,
+and the EDGAR/Nasdaq golden fixtures moved into
+`src/lake/reference/tests/fixtures/`. Only start this section's work when
+every phase-5 workstream is green and the harness and Thesis suites pass
+against the Rust lake — both held.
 
 ### Retained Python surface (verify the import closure before deleting anything)
 
