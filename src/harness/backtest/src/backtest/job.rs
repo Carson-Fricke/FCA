@@ -540,6 +540,11 @@ pub fn run_native_study_job_with_data_dir(
 }
 
 /// Drive the native engine for one job over a lake directory or synthetic fixture.
+///
+/// A configured lake directory is load-bearing: when the local lake cannot
+/// serve the configured window the job fails with the reader's error instead
+/// of silently replaying the synthetic benchmark, so a study over missing
+/// data never reports fabricated results.
 fn run_native_engine_outcome(
     configuration: &BacktestConfig,
     engine_options: &EngineOptions,
@@ -552,10 +557,7 @@ fn run_native_engine_outcome(
         SyntheticDataOptions::default()
     };
     let fixture = match data_dir {
-        Some(directory) => match lake_fixture(configuration, directory) {
-            Ok(fixture) => fixture,
-            Err(_) => synthetic_fixture(configuration, &synthetic_options)?,
-        },
+        Some(directory) => lake_fixture(configuration, directory)?,
         None => synthetic_fixture(configuration, &synthetic_options)?,
     };
     let preflight = preflight_data(configuration, &fixture)?;
