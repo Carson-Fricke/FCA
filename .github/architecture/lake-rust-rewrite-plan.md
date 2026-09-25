@@ -4,10 +4,19 @@
 
 ## Status
 
-Not started. This is the target shape and the porting order for replacing the
-Python market-lake under `src/lake/` with a Rust product. It follows the pattern
-of [Rust Interface Migration](rust-interface-migration.md): the service becomes
-Rust, a thin Python surface survives for code that must keep importing values.
+Phases 0–4 are implemented: the market-lake service is native Rust in the
+workspace under `src/lake/`, the `lake` console script execs the Rust binary
+through a thin Python shim (`lake.cli.rust_entrypoints`), and the published
+HTTP contract is served byte-compatibly for local deployments. The Python
+packages that phase 5 has not yet replaced (`lake.providers.alpaca`,
+`lake.reference`, `lake.queue`, `lake.hosted`, `lake.operations`,
+`lake.storage`, `lake.ingestion`, `lake.query` SQL, `lake.local`) remain in
+place and are still imported by the soak/experiment scripts and Thesis
+screening; phase 6 deletion happens with phase 5. Phase 5 remains: option
+ingestion and selection-driven ensure, reference data, DuckDB-backed SQL
+queries, the queue worker, Azure hosted boundaries (tables, blobs, SAS,
+leases, Entra JWT validation), and the `lake ingest`/`lake operations`
+commands.
 
 ## Why rewrite
 
@@ -219,6 +228,60 @@ published client until its consumers migrate.
 * Warm coverage query under 20 ms at 30k rows, with no whole-file re-parse.
 * The harness and Thesis suites pass unchanged against the Rust lake.
 * The `lake` console script and the retained Python imports still resolve.
+
+## Implementation status (phases 0–4)
+
+* **Phase 0 — parity oracle.** `src/lake/tests/oracle/generate.py` writes the
+  committed fixtures from the reference Python implementation: the
+  `exchange_calendars` XNYS sessions for 2015–2027
+  (`contracts/tests/oracle/xnys_sessions.json`), a canonical `catalog.json`
+  written by `LocalCatalogRepository` (`catalog/tests/oracle/catalog_v1.json`),
+  Python `ensure_job_id` digests (`coverage/tests/oracle/ensure_job_ids.json`),
+  and Python `ParquetWriter` output for every pinned dataset plus a row
+  manifest (`storage/tests/oracle/`). Rust integration tests assert session
+  parity (they caught and fixed a wrong December 31 observance rule), catalog
+  byte-identity after migration and rewrite, job-id digest equality, and
+  Python-written Parquet decoding to the pinned schemas, metadata, and rows.
+* **Phase 1 — `contracts`, `configuration`, `catalog`, `coverage`.** The
+  `lake-contracts` crate owns asset classes, data types, Hive partitions,
+  symbols, the pinned Arrow schemas, the session calendars, the scale-18
+  decimal, and the shared error. `lake-configuration` ports the strict
+  YAML-subset loader, environment overrides, and validated settings/universes
+  models, adding the design's `provider.request.requests_per_minute`. The
+  `lake-catalog` crate ports the value objects and repositories; the indexed
+  store keeps the canonical `catalog.json` format byte-for-byte (reads are
+  in-memory after one load, writes are atomic with Windows sharing-violation
+  retries), so the one-time migration is reading the existing file. The
+  `lake-coverage` crate ports classification (including `delisted`), gap
+  planning, and the ensure application with the agreed terminality semantics.
+* **Phase 2 — `providers`.** The `lake-providers` crate ports the Alpaca
+  client (cursor paging, inclusive end bound, 10k page size, retry set,
+  `Retry-After`, bounded per-attempt concurrency) and adds the two design
+  capabilities: a process-wide token-bucket `RequestGovernor` that every
+  client shares and every attempt (including retries) consumes, and a
+  time-sliced planner that splits a window into half-open sub-windows fetched
+  concurrently and merged in timestamp order. Equity and crypto endpoints are
+  ported; options are phase 5.
+* **Phase 3 — `storage` and `ingestion`.** `lake-storage` owns the
+  Arrow/Parquet writer (zstd, writer version 2.0-equivalent, schema metadata
+  mirrored into file key-value metadata), atomic local replacement with
+  Windows retries, the capacity guard, and the lease ports. `lake-ingestion`
+  ports the equity and crypto transactions (validate/sort/write per session,
+  error-only coverage on fetch failure, one commit per run) over the committer
+  boundary.
+* **Phase 4 — `query`, `http`, `local`, `cli`, flipped.** `lake-query` ports
+  the file-query application (SQL mode stays `query_unavailable`, matching the
+  Python behavior when no DuckDB engine is configured). `lake-http` publishes
+  `/health`, `/v1/auth/check`, `/v1/catalog/coverage`, `/v1/catalog/ensure`,
+  `/v1/jobs/{job_id}`, `/v1/query`, and `/v1/raw` with the exact payloads,
+  status codes, option-selection errors, and static bearer authentication;
+  Entra JWT validation is phase 5. `lake-local` ports the layout/marker,
+  local catalog, ingest/backfill/ensure launcher, and the local app
+  composition. `lake-cli` builds the `lake` binary; the console script
+  resolves through `lake.cli.rust_entrypoints` with `LAKE_RUST_BINARY_DIR`
+  and `src/lake/target/{release,debug}` discovery. The Dockerfile compiles
+  the binary in a `lake` stage and ships it under `/opt/rust/bin`; CI gates
+  the workspace in the `lake-rust` job.
 
 ## Out of scope
 

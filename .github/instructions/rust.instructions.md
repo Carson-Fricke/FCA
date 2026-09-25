@@ -1,5 +1,5 @@
 ---
-applyTo: "src/harness/**/*.rs"
+applyTo: "src/harness/**/*.rs,src/lake/**/*.rs"
 ---
 
 # Rust Conventions
@@ -39,3 +39,7 @@ crate.
   `cargo clippy --workspace --all-targets -- -D warnings`, and
   `cargo test --workspace`. The strategy host embeds CPython, so set
   `PYO3_PYTHON` and put the interpreter's directory on `PATH` when running tests.
+- Workspace root is also `src/lake/Cargo.toml`. Crates are direct children:
+  `contracts`, `configuration`, `catalog`, `coverage`, `providers`,
+  `storage`, `ingestion`, `query`, `http`, `local`, `cli`. From `src/lake`,
+  run the same three gates; no Python interpreter is needed.

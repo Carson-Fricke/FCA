@@ -6,7 +6,9 @@ schema_version: 1
 provider:
   name: alpaca
   request:
-    max_concurrency: 4
+    # Ceiling for the adaptive per-key in-flight bound: the controller ramps
+    # toward it while throughput improves and backs off when latency inflates.
+    max_concurrency: 512
     timeout_seconds: 30
     retry:
       max_attempts: 5

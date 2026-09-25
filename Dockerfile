@@ -48,6 +48,22 @@ RUN cargo build --locked --release -p native \
     && cargo build --locked --release -p api --bins \
     && cargo build --locked --release -p live --bin trader
 
+# The market-lake workspace is the lake service. It shares the Rust base image
+# and toolchain with the harness stages; cargo-chef caching mirrors them.
+FROM rust-base AS lake-planner
+
+WORKDIR /build/src/lake
+COPY src/lake/ ./
+RUN cargo chef prepare --recipe-path /build/recipe.json
+
+FROM rust-base AS lake
+
+WORKDIR /build/src/lake
+COPY --from=lake-planner /build/recipe.json /build/recipe.json
+RUN cargo chef cook --locked --release --recipe-path /build/recipe.json -p lake-cli
+COPY src/lake/ ./
+RUN cargo build --locked --release -p lake-cli --bins
+
 FROM python:3.12-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -91,6 +107,7 @@ FROM python:3.12-slim AS runtime
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONPATH="/opt/venv/lib/python3.12/site-packages" \
     LAKE_CONFIG_ROOT=/app \
+    LAKE_RUST_BINARY_DIR=/opt/rust/bin \
     HARNESS_RUST_BINARY_DIR=/opt/rust/bin \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONFAULTHANDLER=1 \
@@ -111,6 +128,9 @@ COPY --from=rust \
     /build/src/harness/target/release/mcp \
     /build/src/harness/target/release/trader \
     /opt/rust/bin/
+# The Rust market-lake binary. The `lake` console script is a thin shim that
+# execs it; discovery uses LAKE_RUST_BINARY_DIR.
+COPY --from=lake /build/src/lake/target/release/lake /opt/rust/bin/lake
 COPY config/ /app/config/
 
 WORKDIR /app

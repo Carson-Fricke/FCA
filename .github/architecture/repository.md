@@ -57,7 +57,7 @@ below).
 
 | Boundary | Path | Responsibility |
 | --- | --- | --- |
-| `market-lake` | `src/lake` | Provider ingestion, stable lake schemas, storage and catalog access, coverage planning, and the lake API/client surface. |
+| `market-lake` | `src/lake` | The lake service (Rust workspace) and the retained Python library surface: provider ingestion, stable lake schemas, storage and catalog access, coverage planning, and the lake API/client surface. |
 | `quant-harness` | `src/harness` | Deterministic simulation, OMS and portfolio behavior, results, paper and shadow runtimes, and capability-gated live execution. |
 | `lakeclient` | `src/lakeclient` | Consumer-facing authenticated ensure, polling, file-query, and Parquet access without provider or Azure credentials. |
 | `thesis` | `src/thesis` | Workspace-scoped research, coordination, persistence, authorization, and model-provider boundaries. |
@@ -71,9 +71,18 @@ than engine internals.
 
 ## Market-Lake Packages
 
-`src/lake` is organized by capability rather than by deployment layer. Public
-package facades expose deliberate contracts; provider SDKs, FastAPI, Azure
-adapters, and orchestration details stay behind those boundaries.
+The market-lake service is native Rust (see `## Market-Lake Rust Workspace`
+below and `lake-rust-rewrite-plan.md` for the porting order and status). The
+Python packages under `src/lake` are the retained library surface for code
+that is not the lake service: soak and experiment scripts import the value
+objects, configuration loaders, session helpers, and the Alpaca client, and
+Thesis screening imports the reference query partitions. The service-shaped
+Python packages that the Rust workspace has already replaced (local, http,
+ingestion, storage, coverage, catalog, query, providers, hosted, queue) stay
+in place until the phase-5 remainder (options ingestion, reference data,
+DuckDB-backed SQL queries, the queue worker, Azure hosted boundaries, and
+Entra JWT validation) is ported; the phase-6 deletion removes them and keeps
+only that retained surface.
 
 | Package | Responsibility |
 | --- | --- |
@@ -175,6 +184,41 @@ src/harness/
 
 The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, and `cargo test --workspace`.
+
+## Market-Lake Rust Workspace
+
+`src/lake/` is a Cargo workspace at the product root whose `Cargo.toml` and the
+Python package `lake/` coexist, exactly as `src/harness/` does. The lake
+service is authoritative: the `lake` binary serves the published catalog,
+ensure, jobs, query, and raw routes, and the `lake` console script is a thin
+Python shim (`lake.cli`) that execs it, with binary discovery through
+`LAKE_RUST_BINARY_DIR` and `src/lake/target/{release,debug}`.
+
+```text
+src/lake/
+|-- Cargo.toml                 Workspace manifest (resolver 2)
+|-- rust-toolchain.toml        Pinned stable toolchain
+|-- contracts/                 Asset classes, data types, sessions, partitions, Arrow schemas
+|-- configuration/             Strict YAML-subset loader, environment overrides, settings models
+|-- catalog/                   Coverage/job/run/contract/listing records, repositories, JSON store
+|-- coverage/                  Coverage classification, gap planning, ensure application
+|-- providers/                 Alpaca client, paging, retry, request-budget governor
+|-- storage/                   Arrow/Parquet writer, atomic object replace, capacity guard, lease ports
+|-- ingestion/                 Equity and crypto ingest transactions, committer boundary
+|-- query/                     Bounded file queries
+|-- http/                      Axum boundary publishing the lake contract
+|-- local/                     Local layout, ingest/backfill, ensure launcher, local composition
+`-- cli/                       The `lake` binary
+```
+
+Crate conventions follow `.github/instructions/rust.instructions.md`: unit
+tests that need private access live in `tests/unit/<name>.rs` pulled in with
+`#[path]`, integration tests are `tests/<name>.rs`, and no inline
+`#[cfg(test)]` modules exist. The phase-0 parity oracle lives in
+`src/lake/tests/oracle/` (generator plus committed fixtures) and the Rust
+oracles load it. The workspace is gated by `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, and
+`cargo test --workspace` in the `lake-rust` CI job.
 
 ## Strategy Contract
 

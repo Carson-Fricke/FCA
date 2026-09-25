@@ -1,16 +1,19 @@
+"""The lake console script is a thin shim over the Rust ``lake`` binary."""
+
+import os
 import subprocess
 import sys
-from collections.abc import Sequence
 from importlib import import_module
 from importlib.metadata import entry_points
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pytest import MonkeyPatch
 
 import lake
 from lake import cli
-from lake.cli import commands
+from lake.cli import rust_entrypoints
 
 
 def test_package_import_and_console_script() -> None:
@@ -40,61 +43,57 @@ def test_published_capability_facades_import() -> None:
     assert [import_module(name).__name__ for name in modules] == list(modules)
 
 
-@pytest.mark.parametrize(
-    ("arguments", "expected"),
-    [
-        ([], "{api,ingest,local,operations}"),
-        (["--help"], "{api,ingest,local,operations}"),
-        (["api", "--help"], "Run the market-lake API process."),
-        (["ingest", "--help"], "Run the market-lake ingest process."),
-        (
-            ["local", "--help"],
-            "Run the market lake with local files and no Azure resources.",
-        ),
-        (
-            ["operations", "--help"],
-            "Emit the daily coverage and budget report.",
-        ),
-    ],
+def test_entrypoint_binaries_cover_the_console_script() -> None:
+    assert rust_entrypoints.ENTRYPOINT_BINARIES == ("lake",)
+    assert rust_entrypoints.RUST_BINARY_DIR_VARIABLE == "LAKE_RUST_BINARY_DIR"
+
+
+def test_main_execs_the_resolved_binary(tmp_path, monkeypatch: MonkeyPatch) -> None:
+    binary = tmp_path / ("lake.exe" if os.name == "nt" else "lake")
+    binary.write_bytes(b"binary")
+    monkeypatch.setenv("LAKE_RUST_BINARY_DIR", str(tmp_path))
+    received: list[list[str]] = []
+
+    def fake_run(argv, check):  # noqa: ANN001, ANN202
+        received.append(list(argv))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(rust_entrypoints.subprocess, "run", fake_run)
+
+    assert cli.main(["local", "--help"]) == 0
+    assert received == [[str(binary), "local", "--help"]]
+    assert rust_entrypoints.rust_binary("lake") == binary
+
+
+def test_missing_binary_reports_actionably(
+    tmp_path, monkeypatch: MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Only the empty directory is consulted: the repository may legitimately
+    # have a built binary in src/lake/target, which this test must not exec.
+    monkeypatch.setattr(rust_entrypoints, "_candidate_dirs", lambda: (tmp_path,))
+    assert cli.main(["api"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cargo build --workspace" in captured.err
+    assert "src/lake" in captured.err
+
+
+def test_unknown_entrypoint_name_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        rust_entrypoints.run_entrypoint("harness")
+
+
+@pytest.mark.skipif(
+    rust_entrypoints.rust_binary("lake") is None,
+    reason="the Rust lake binary is not built in this environment",
 )
-def test_module_command_help(arguments: list[str], expected: str) -> None:
+def test_module_help_comes_from_the_rust_binary() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "lake", *arguments],
+        [sys.executable, "-m", "lake", "--help"],
         check=False,
         capture_output=True,
         text=True,
     )
-
     assert result.returncode == 0
-    assert expected in result.stdout
-    assert result.stderr == ""
-
-
-@pytest.mark.parametrize("command", ["api", "ingest", "local", "operations"])
-def test_command_dispatch(command: str, monkeypatch: MonkeyPatch) -> None:
-    received: list[str] = []
-
-    def handler(argv: Sequence[str] | None = None) -> int:
-        received.extend(argv or [])
-        return 17
-
-    monkeypatch.setitem(commands._COMMANDS, command, handler)
-
-    assert cli.main([command, "--probe"]) == 17
-    assert received == ["--probe"]
-
-
-def test_api_command_starts_uvicorn(monkeypatch: MonkeyPatch) -> None:
-    received: dict[str, object] = {}
-
-    def run(application: str, *, host: str, port: int) -> None:
-        received.update(application=application, host=host, port=port)
-
-    monkeypatch.setattr("lake.cli.api.uvicorn.run", run)
-
-    assert cli.main(["api", "--host", "127.0.0.1", "--port", "9000"]) == 0
-    assert received == {
-        "application": "lake.app:app",
-        "host": "127.0.0.1",
-        "port": 9000,
-    }
+    assert "api" in result.stdout
+    assert "local" in result.stdout

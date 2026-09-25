@@ -8,3 +8,8 @@ include src/harness/Cargo.lock
 include src/harness/rust-toolchain.toml
 recursive-include src/harness *.rs
 recursive-include src/harness Cargo.toml
+include src/lake/Cargo.toml
+include src/lake/Cargo.lock
+include src/lake/rust-toolchain.toml
+recursive-include src/lake *.rs
+recursive-include src/lake Cargo.toml

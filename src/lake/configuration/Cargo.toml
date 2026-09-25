@@ -1,0 +1,12 @@
+[package]
+name = "lake-configuration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Strict YAML-subset loading, environment overrides, and validated lake settings."
+
+[dependencies]
+lake-contracts.workspace = true
+serde.workspace = true
+serde_json.workspace = true
