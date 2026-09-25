@@ -50,6 +50,7 @@ pub fn base_state(catalog: Arc<dyn CatalogRepository>) -> LakeApiState {
         authorized_force_override: false,
         ensure_wait_deadline_seconds: 1.0,
         bearer_token: Some(TOKEN.to_string()),
+        entra: None,
         now: clock_at(as_of()),
     }
 }

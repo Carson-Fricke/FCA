@@ -75,6 +75,11 @@ impl QueueDelivery {
         Self { message, payload }
     }
 
+    /// Build a delivery from its message metadata and decoded payload.
+    pub fn from_parts(message: QueueMessage, payload: Value) -> Self {
+        Self { message, payload }
+    }
+
     /// The original delivery metadata.
     pub fn message(&self) -> &QueueMessage {
         &self.message

@@ -12,6 +12,7 @@ lake-contracts.workspace = true
 lake-storage.workspace = true
 azure_core.workspace = true
 azure_identity.workspace = true
+azure_storage.workspace = true
 azure_storage_queues.workspace = true
 futures-util.workspace = true
 hex.workspace = true

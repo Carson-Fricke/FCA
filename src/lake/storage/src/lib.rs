@@ -2,15 +2,20 @@
 //!
 //! `lake-storage` owns the value layer of the Python `lake.storage` package:
 //! provider-independent blob ports, the atomic local filesystem store, the
-//! schema-pinned Parquet writer, the storage capacity guard, and symbol-day
-//! lease scopes. Provider-specific stores (Azure Blob, queues, tables) stay out
-//! of this crate.
+//! schema-pinned Parquet writer, the storage capacity guard, symbol-day
+//! lease scopes, and the token-authenticated Azure Blob adapters.
 
+pub mod azure;
 pub mod capacity;
 pub mod leases;
 pub mod local;
 pub mod parquet;
 pub mod ports;
+
+pub use azure::{
+    sas_issuer_from_account_url, AzureBlobContainer, AzureBlobLease, AzureBlobLeaseProvider,
+    AzureBlobSasIssuer, AzureBlobStore, AzureReadableBlobStore, AzureSasBackend,
+};
 
 pub use capacity::{
     sum_byte_sizes, StorageCapGuard, StorageCapPolicy, StorageCapState, StorageCapStatus,

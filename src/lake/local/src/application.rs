@@ -125,6 +125,7 @@ pub fn create_local_app_with(
         ensure_callback: Some(ensure_callback),
         bounded_query: Some(bounded_query),
         authorized_force_override: sql_force_authorized,
+        entra: None,
         ensure_wait_deadline_seconds: deadline,
         bearer_token: Some(bearer_token),
         now,

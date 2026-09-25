@@ -22,16 +22,20 @@
 //!    Alpaca's `end` parameter is inclusive and the closing auction print
 //!    belongs to its session.
 
+mod azure;
 mod common;
 mod crypto;
 mod equities;
+mod leased;
 pub mod options;
 mod providers;
 mod staging;
 
+pub use azure::AzureAtomicIngestCommitter;
 pub use common::{AtomicIngestCommitter, PartitionWriter, StagedParquetObject, TransientRetry};
 pub use crypto::{CryptoClock, CryptoIngestResult, CryptoIngestTransaction};
 pub use equities::{EquityIngestResult, EquityIngestTransaction};
+pub use leased::{scope_for_coverage, LeasedAtomicIngestCommitter};
 pub use options::{
     enqueue_option_backfill, plan_option_backfill, OptionBackfillItem, OptionBackfillPlan,
     OptionBackfillRequest, OptionChainSelector, OptionClock, OptionIngestResult,

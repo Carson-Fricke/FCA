@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::auth;
 use lake_catalog::{
     CatalogRepository, ContractRepository, DailyFrontSetRepository, JobRepository,
     ListingRepository,
@@ -43,6 +44,9 @@ pub struct LakeApiState {
     pub ensure_wait_deadline_seconds: f64,
     /// Static bearer token; `None` fails every protected request closed.
     pub bearer_token: Option<String>,
+    /// Optional Entra JWT validator; a JWT-shaped credential is validated
+    /// against it before the static-token fallback applies.
+    pub entra: Option<Arc<auth::EntraJwtAuthenticator>>,
     /// Coverage clock provider; a test injects a fixed instant.
     pub now: ApiClock,
 }
@@ -64,6 +68,7 @@ impl std::fmt::Debug for LakeApiState {
                 &self.ensure_wait_deadline_seconds,
             )
             .field("bearer_token", &self.bearer_token.is_some())
+            .field("entra", &self.entra.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -96,6 +101,8 @@ pub(crate) struct ApiContext {
     pub state: Arc<LakeApiState>,
     /// Effective static token.
     pub bearer_token: Option<String>,
+    /// Optional Entra JWT validator.
+    pub entra: Option<Arc<auth::EntraJwtAuthenticator>>,
     /// Effective launcher wait deadline in seconds.
     pub ensure_wait_deadline_seconds: f64,
 }
@@ -118,9 +125,11 @@ impl ApiContext {
         } else {
             DEFAULT_ENSURE_WAIT_DEADLINE_SECONDS
         };
+        let entra = state.entra.clone();
         Self {
             state,
             bearer_token,
+            entra,
             ensure_wait_deadline_seconds: deadline,
         }
     }

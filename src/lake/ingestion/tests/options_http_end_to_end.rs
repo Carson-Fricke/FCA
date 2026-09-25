@@ -265,6 +265,7 @@ async fn option_transactions_publish_and_the_coverage_route_serves_them() {
         ensure_callback: None,
         bounded_query: None,
         authorized_force_override: false,
+        entra: None,
         ensure_wait_deadline_seconds: 1.0,
         bearer_token: Some(TOKEN.to_string()),
         now: Arc::new(move || as_of),
