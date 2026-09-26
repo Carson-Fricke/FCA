@@ -133,7 +133,7 @@ fn canonical_preflight_is_byte_identical_to_python() {
 fn canonical_artifact_matches_python_except_code_fingerprint() {
     let directory = temp_dir("artifact");
     let (outcome, artifact_path) =
-        host::backtest::run_backtest_job(&canonical_config_path(), Some(&directory))
+        host::backtest::run_synthetic_parity_job(&canonical_config_path(), Some(&directory))
             .expect("native job");
     assert!(outcome.completed());
     assert_eq!(outcome.dispatched_count, 330);

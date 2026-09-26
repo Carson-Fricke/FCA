@@ -6,6 +6,7 @@
 //! network access is required.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use api::http::clock::{Clock, SystemClock};
@@ -22,11 +23,92 @@ use api::http::store::{
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
+use chrono::{Duration, TimeZone, Utc};
 use http_body_util::BodyExt;
+use marketdata::events::{MarketEvent as LakeEvent, QuoteEvent, TradeEvent};
+use marketdata::time::DateTime as LakeDateTime;
+use marketdata::{write_lake_partition, AssetClass, DataType, Date};
+use num::Decimal18;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
 const BEARER: &str = "test-secret";
+const LAKE_SESSION_COUNT: usize = 3;
+
+fn dec(value: &str) -> Decimal18 {
+    value.parse().unwrap()
+}
+
+/// A small real lake: three XNYS sessions of a rising quote ladder plus one
+/// trade per session, so the momentum strategy enters and liquidates and the
+/// research models observe trades.
+fn materialize_spy_lake() -> PathBuf {
+    let lake = std::env::temp_dir().join(format!(
+        "harness-api-lake-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&lake);
+    std::fs::create_dir_all(&lake).expect("lake dir");
+    let mut sequence = 0u64;
+    for day in 0..LAKE_SESSION_COUNT {
+        let date = Date::from_ymd(2024, 1, 2 + day as u32).expect("date");
+        let open = Utc
+            .with_ymd_and_hms(2024, 1, 2 + day as u32, 13, 30, 0)
+            .unwrap();
+        let mut quotes = Vec::new();
+        for step in 0..12i64 {
+            sequence += 1;
+            let mid = 100.00 + 0.02 * f64::from(step as i32);
+            quotes.push(LakeEvent::Quote(QuoteEvent {
+                event_id: format!("lake-quote-{day}-{step}"),
+                timestamp: LakeDateTime::from_micros(
+                    (open + Duration::minutes(32 * step)).timestamp_micros(),
+                ),
+                sequence,
+                symbol: "SPY".to_string(),
+                bid_price: dec(&format!("{:.2}", mid - 0.01)),
+                ask_price: dec(&format!("{:.2}", mid + 0.01)),
+                bid_size: dec("100"),
+                ask_size: dec("100"),
+                venue: Some("XNYS".to_string()),
+            }));
+        }
+        sequence += 1;
+        let trade = LakeEvent::Trade(TradeEvent {
+            event_id: format!("lake-trade-{day}"),
+            timestamp: LakeDateTime::from_micros((open + Duration::minutes(1)).timestamp_micros()),
+            sequence,
+            symbol: "SPY".to_string(),
+            price: dec("100.02"),
+            quantity: dec("20"),
+            venue: Some("XNYS".to_string()),
+            trade_id: Some(format!("lake-trade-id-{day}")),
+        });
+        write_lake_partition(
+            &lake,
+            date,
+            AssetClass::Equity,
+            DataType::Quote,
+            "SPY",
+            &quotes,
+        )
+        .expect("write quote lake");
+        write_lake_partition(
+            &lake,
+            date,
+            AssetClass::Equity,
+            DataType::Trade,
+            "SPY",
+            std::slice::from_ref(&trade),
+        )
+        .expect("write trade lake");
+    }
+    lake
+}
 
 struct StubRunner {
     fail: bool,
@@ -831,9 +913,13 @@ async fn durable_launch_survives_a_process_restart() {
 #[tokio::test]
 async fn native_engine_launch_reaches_a_terminal_state() {
     let root = temp_root("native");
+    let lake = materialize_spy_lake();
     let router = durable_router(
         &root,
-        Arc::new(api::http::native::NativeBacktestRunner::default()),
+        Arc::new(api::http::native::NativeBacktestRunner::with_data_root(
+            root.join("out"),
+            lake.clone(),
+        )),
     );
     let document = json!({
         "schema_version": 1,
@@ -893,15 +979,20 @@ async fn native_engine_launch_reaches_a_terminal_state() {
         "native-api-run"
     );
 
+    let _ = std::fs::remove_dir_all(&lake);
     let _ = std::fs::remove_dir_all(&root);
 }
 
 #[tokio::test]
 async fn native_research_metrics_are_queryable_over_http() {
     let root = temp_root("native-research");
+    let lake = materialize_spy_lake();
     let router = durable_router(
         &root,
-        Arc::new(api::http::native::NativeBacktestRunner::default()),
+        Arc::new(api::http::native::NativeBacktestRunner::with_data_root(
+            root.join("out"),
+            lake.clone(),
+        )),
     );
     let model_source = "def fit(context):\n    return {'baseline': 0.5}\n\ndef observe(fit, context):\n    return {'trade_observations': len(context['trades'])}\n";
     let document = json!({
@@ -962,5 +1053,6 @@ async fn native_research_metrics_are_queryable_over_http() {
             .and_then(|value| value.parse::<f64>().ok()),
         Some(observed)
     );
+    let _ = std::fs::remove_dir_all(&lake);
     let _ = std::fs::remove_dir_all(&root);
 }

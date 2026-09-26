@@ -141,7 +141,7 @@ fn run_lake_job(lake: &Path, output: &Path) -> (BacktestOutcome, PathBuf) {
         &EngineOptions::default(),
         Some(output),
         strategies,
-        Some(lake),
+        lake,
     )
     .expect("native lake job")
 }
@@ -260,7 +260,7 @@ fn a_configured_lake_that_cannot_serve_the_window_fails_the_job() {
         &EngineOptions::default(),
         None,
         Vec::new(),
-        Some(directory.as_path()),
+        directory.as_path(),
     )
     .expect_err("empty lake must fail the job");
     assert!(

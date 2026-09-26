@@ -12,6 +12,17 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule, PyTuple};
 use serde_json::Value as JsonValue;
 
+/// Initialize the embedded interpreter on the calling thread.
+///
+/// PyO3's `auto-initialize` initializes the interpreter on the first
+/// `Python::attach`, and on Windows that initialization deadlocks when it runs
+/// on a spawned background thread. Serving processes therefore warm the
+/// interpreter on the main thread before handing work to any worker thread;
+/// later attaches only acquire the GIL.
+pub fn warm_interpreter() {
+    Python::attach(|_| {});
+}
+
 /// Serializes every embedded-Python engine run in this process.
 ///
 /// The interpreter, the `harness.data` shim, and the first user-code imports are

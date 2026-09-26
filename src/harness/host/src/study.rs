@@ -184,7 +184,7 @@ pub fn build_study_instances(
 pub fn run_study_config(
     configuration: &BacktestConfig,
     output_dir: Option<&Path>,
-    data_dir: Option<&Path>,
+    data_dir: &Path,
 ) -> Result<(BacktestOutcome, PathBuf), HostError> {
     // A previous run may have panicked while holding the lock; the guard only
     // serializes runs, so recover the guard instead of poisoning every future

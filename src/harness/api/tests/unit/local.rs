@@ -8,6 +8,77 @@ fn repo_root() -> PathBuf {
         .join("..")
 }
 
+/// Build one small real SPY lake shared by every submitting test, and point
+/// `HARNESS_DATA_DIR` at it: the submitters replay actual lake data, never a
+/// substitute fixture. Each session carries a rising quote ladder (so the
+/// momentum strategy enters and liquidates) plus one trade (so research
+/// models observe trades).
+fn use_shared_lake() {
+    static LAKE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let lake = LAKE.get_or_init(|| {
+        use backtest::backtest::errors::ONE_DAY_NS;
+        use marketdata::events::{MarketEvent as LakeEvent, QuoteEvent, TradeEvent};
+        use marketdata::time::DateTime;
+        use marketdata::{write_lake_partition, AssetClass, DataType, Date};
+
+        let lake =
+            std::env::temp_dir().join(format!("harness-api-local-lake-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&lake);
+        for day_offset in 0..3 {
+            let date = Date::from_ymd(2024, 1, 2 + day_offset).expect("date");
+            let day = i64::from(date.days());
+            let base = day * ONE_DAY_NS + (13 * 3_600 + 30 * 60) * 1_000_000_000;
+            let mut quotes = Vec::new();
+            for step in 0..12i64 {
+                let mid = 100.00 + 0.02 * step as f64;
+                quotes.push(LakeEvent::Quote(QuoteEvent {
+                    event_id: format!("lake-quote-{day_offset}-{step}"),
+                    timestamp: DateTime::from_micros(
+                        (base + (32 * 60 * step) * 1_000_000_000) / 1_000,
+                    ),
+                    sequence: step as u64,
+                    symbol: "SPY".to_string(),
+                    bid_price: format!("{:.2}", mid - 0.01).parse().unwrap(),
+                    ask_price: format!("{:.2}", mid + 0.01).parse().unwrap(),
+                    bid_size: "100".parse().unwrap(),
+                    ask_size: "100".parse().unwrap(),
+                    venue: Some("XNYS".to_string()),
+                }));
+            }
+            let trade = LakeEvent::Trade(TradeEvent {
+                event_id: format!("lake-trade-{day_offset}"),
+                timestamp: DateTime::from_micros((base + 60 * 1_000_000_000) / 1_000),
+                sequence: 12,
+                symbol: "SPY".to_string(),
+                price: "100.02".parse().unwrap(),
+                quantity: "20".parse().unwrap(),
+                venue: Some("XNYS".to_string()),
+                trade_id: Some(format!("lake-trade-id-{day_offset}")),
+            });
+            write_lake_partition(
+                &lake,
+                date,
+                AssetClass::Equity,
+                DataType::Quote,
+                "SPY",
+                &quotes,
+            )
+            .expect("write quote lake");
+            write_lake_partition(
+                &lake,
+                date,
+                AssetClass::Equity,
+                DataType::Trade,
+                "SPY",
+                std::slice::from_ref(&trade),
+            )
+            .expect("write trade lake");
+        }
+        lake
+    });
+    std::env::set_var("HARNESS_DATA_DIR", lake);
+}
+
 #[test]
 fn canonical_conversion_tags_floats_as_decimals() {
     assert_eq!(to_canonical_json(&json!(4)), JsonValue::Int(4));
@@ -88,6 +159,7 @@ fn native_backtest_submitter_is_async_and_registers_the_full_result_set() {
     let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
     let submitter = NativeBacktestSubmitter::new(run_store.clone(), jobs.clone());
     let config_path = repo_root().join("config/harness/backtest.yaml");
+    use_shared_lake();
     let output_dir = root.join("output");
     let payload = mcp::tools::BacktestSubmitter::submit(
         &submitter,
@@ -136,7 +208,8 @@ fn native_submitter_persists_research_model_custom_metrics() {
     let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
     let submitter = NativeStudySubmitter::new(run_store.clone(), jobs.clone());
     let config_path = root.join("research.json");
-    let model_source = "def fit(context):\n    return {'baseline': 0.5}\n\ndef observe(fit, context):\n    return {'trade_observations': context['indicators']['workspace_trade_count'], 'global_sma': context['indicators']['spy_sma']['value']}\n";
+    use_shared_lake();
+    let model_source = "def observe(fit, context):\n    sma = (context['indicators'].get('spy_sma') or {}).get('value') or 0.0\n    return {'trade_observations': context['indicators']['workspace_trade_count'], 'global_sma': sma}\n\ndef fit(context):\n    return {'baseline': 0.5}\n";
     let indicator_source =
         "def calculate(context, parameters):\n    return len(context['trades'])\n";
     let document = json!({

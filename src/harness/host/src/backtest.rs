@@ -222,6 +222,18 @@ fn host_to_backtest(error: HostError) -> BacktestError {
     BacktestError::StrategyExecution(error.to_string())
 }
 
+/// The engine carries optional provenance strings as plain strings where a
+/// missing value is the empty string; the Python events validate optional
+/// strings as either `None` or a non-empty value, so the boundary maps the
+/// empty form to `None`.
+fn optional_text<'py>(py: Python<'py>, value: &str) -> PyResult<Bound<'py, PyAny>> {
+    if value.trim().is_empty() {
+        Ok(py.None().into_bound(py))
+    } else {
+        Ok(value.into_pyobject(py)?.into_any())
+    }
+}
+
 pub(crate) fn market_to_python<'py>(
     py: Python<'py>,
     event: &EngineMarket,
@@ -249,7 +261,7 @@ pub(crate) fn market_to_python<'py>(
             kwargs.set_item("bid_quantity", bid_quantity.to_string())?;
             kwargs.set_item("ask_price", ask.to_string())?;
             kwargs.set_item("ask_quantity", ask_quantity.to_string())?;
-            kwargs.set_item("venue", venue)?;
+            kwargs.set_item("venue", optional_text(py, venue)?)?;
             Ok(class.call((), Some(&kwargs))?)
         }
         EngineMarket::Trade {
@@ -270,8 +282,8 @@ pub(crate) fn market_to_python<'py>(
             kwargs.set_item("symbol", symbol)?;
             kwargs.set_item("price", price.to_string())?;
             kwargs.set_item("quantity", quantity.to_string())?;
-            kwargs.set_item("venue", venue)?;
-            kwargs.set_item("trade_id", trade_id)?;
+            kwargs.set_item("venue", optional_text(py, venue)?)?;
+            kwargs.set_item("trade_id", optional_text(py, trade_id)?)?;
             Ok(class.call((), Some(&kwargs))?)
         }
     }
@@ -357,24 +369,6 @@ pub fn build_strategy_instances(
     Ok(instances)
 }
 
-/// Load, run, and write one native backtest job with Python strategies.
-///
-/// # Errors
-///
-/// Returns [`HostError`] when a strategy cannot be built.
-pub fn run_backtest_job(
-    config_path: &std::path::Path,
-    output_dir: Option<&std::path::Path>,
-) -> Result<
-    (
-        backtest::backtest::engine_core::BacktestOutcome,
-        std::path::PathBuf,
-    ),
-    HostError,
-> {
-    run_backtest_job_with_data_dir(config_path, output_dir, None)
-}
-
 /// Load, run, and write one native backtest job over a local Parquet lake.
 ///
 /// # Errors
@@ -384,7 +378,7 @@ pub fn run_backtest_job(
 pub fn run_backtest_job_with_data_dir(
     config_path: &std::path::Path,
     output_dir: Option<&std::path::Path>,
-    data_dir: Option<&std::path::Path>,
+    data_dir: &std::path::Path,
 ) -> Result<
     (
         backtest::backtest::engine_core::BacktestOutcome,
@@ -402,7 +396,9 @@ pub fn run_backtest_job_with_data_dir(
 /// This is the configuration-in-memory twin of
 /// [`run_backtest_job_with_data_dir`]: the caller has already decoded the
 /// configuration document, so the host only builds the Python-backed strategy
-/// instances and drives the native engine.
+/// instances and drives the native engine. The lake directory is required: a
+/// run whose data cannot be read fails instead of replaying a substitute
+/// fixture.
 ///
 /// # Errors
 ///
@@ -411,7 +407,7 @@ pub fn run_backtest_job_with_data_dir(
 pub fn run_backtest_config(
     configuration: &backtest::backtest::config::BacktestConfig,
     output_dir: Option<&std::path::Path>,
-    data_dir: Option<&std::path::Path>,
+    data_dir: &std::path::Path,
 ) -> Result<
     (
         backtest::backtest::engine_core::BacktestOutcome,
@@ -432,6 +428,41 @@ pub fn run_backtest_config(
         output_dir,
         instances,
         data_dir,
+    )
+    .map_err(|error| HostError::Invalid(error.to_string()))
+}
+
+/// Run the canonical synthetic benchmark through the full native engine with
+/// Python strategies. This is the Python-parity harness: the synthetic fixture
+/// is the pinned golden input the Python reference also replays. It is not a
+/// substitute for missing lake data — the serving paths require a lake
+/// directory and fail when one cannot serve the window.
+///
+/// # Errors
+///
+/// Returns [`HostError`] when a strategy cannot be built or the engine rejects
+/// the run.
+pub fn run_synthetic_parity_job(
+    config_path: &std::path::Path,
+    output_dir: Option<&std::path::Path>,
+) -> Result<
+    (
+        backtest::backtest::engine_core::BacktestOutcome,
+        std::path::PathBuf,
+    ),
+    HostError,
+> {
+    let configuration = backtest::backtest::job::load_backtest_config(config_path)
+        .map_err(|error| HostError::Invalid(error.to_string()))?;
+    let _python_owner = crate::python::PYTHON_ENGINE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let instances = build_strategy_instances(&configuration)?;
+    backtest::backtest::job::run_native_synthetic_job(
+        &configuration,
+        &backtest::backtest::engine_core::EngineOptions::default(),
+        output_dir,
+        instances,
     )
     .map_err(|error| HostError::Invalid(error.to_string()))
 }

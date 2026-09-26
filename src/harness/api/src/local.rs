@@ -194,18 +194,20 @@ fn run_background_study_inner(
             return;
         }
     };
-    let env_lake_dir = std::env::var("HARNESS_DATA_DIR")
-        .or_else(|_| std::env::var("LAKE_LOCAL_DATA_DIR"))
-        .ok()
-        .map(PathBuf::from);
-    let default_lake = PathBuf::from(".local").join("market-lake");
-    let candidate_lake = env_lake_dir.or_else(|| {
-        if default_lake.is_dir() {
-            Some(default_lake)
-        } else {
-            None
-        }
-    });
+    let Some(candidate_lake) = resolve_lake_data_dir() else {
+        let message = "no lake data directory configured: set HARNESS_DATA_DIR or \
+                       LAKE_LOCAL_DATA_DIR, or create .local/market-lake"
+            .to_string();
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert(
+            "error.json".to_string(),
+            serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+        );
+        let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
+        let _ = run_store.put(record, artifacts);
+        fail_job(&jobs, &run_id, started, message);
+        return;
+    };
     let configuration_digest = configuration.configuration_hash();
     let mut configuration = configuration;
     let mut actual_data_start = None;
@@ -247,7 +249,7 @@ fn run_background_study_inner(
     match host::study::run_study_config(
         &configuration,
         Some(output_dir.as_path()),
-        candidate_lake.as_deref(),
+        candidate_lake.as_path(),
     ) {
         Ok((outcome, _artifact_path)) => {
             if let Ok(text) = fs::read(&config_path) {
@@ -366,18 +368,20 @@ fn run_background_backtest_inner(
             return;
         }
     };
-    let env_lake_dir = std::env::var("HARNESS_DATA_DIR")
-        .or_else(|_| std::env::var("LAKE_LOCAL_DATA_DIR"))
-        .ok()
-        .map(PathBuf::from);
-    let default_lake = PathBuf::from(".local").join("market-lake");
-    let candidate_lake = env_lake_dir.or_else(|| {
-        if default_lake.is_dir() {
-            Some(default_lake)
-        } else {
-            None
-        }
-    });
+    let Some(candidate_lake) = resolve_lake_data_dir() else {
+        let message = "no lake data directory configured: set HARNESS_DATA_DIR or \
+                       LAKE_LOCAL_DATA_DIR, or create .local/market-lake"
+            .to_string();
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert(
+            "error.json".to_string(),
+            serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+        );
+        let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, strategy_id(&configuration));
+        let _ = run_store.put(record, artifacts);
+        fail_job(&jobs, &run_id, started, message);
+        return;
+    };
     if let Err(message) = ensure_lake_data(&configuration) {
         let mut artifacts = BTreeMap::new();
         artifacts.insert(
@@ -392,7 +396,7 @@ fn run_background_backtest_inner(
     match host::backtest::run_backtest_config(
         &configuration,
         Some(output_dir.as_path()),
-        candidate_lake.as_deref(),
+        candidate_lake.as_path(),
     ) {
         Ok((outcome, _artifact_path)) => {
             // Persist the configuration that produced the run beside the result
@@ -448,12 +452,30 @@ fn run_background_backtest_inner(
 ///
 /// The market-lake process owns provider credentials and the actual fetch; the
 /// harness only asks for the run window's symbols. A missing token or an empty
-/// symbol set leaves the existing synthetic/lake behavior unchanged.
-fn ensure_lake_data(configuration: &BacktestConfig) -> Result<(), String> {
+/// symbol set leaves the existing lake state unchanged.
+pub(crate) fn ensure_lake_data(configuration: &BacktestConfig) -> Result<(), String> {
     let Some(client) = LakeEnsureClient::from_env() else {
         return Ok(());
     };
     ensure_lake_data_with(&client, configuration)
+}
+
+/// Resolve the local lake data directory the way every run path does: the
+/// `HARNESS_DATA_DIR` or `LAKE_LOCAL_DATA_DIR` override, else the repository's
+/// `.local/market-lake` when it exists.
+pub(crate) fn resolve_lake_data_dir() -> Option<std::path::PathBuf> {
+    let env_lake_dir = std::env::var("HARNESS_DATA_DIR")
+        .or_else(|_| std::env::var("LAKE_LOCAL_DATA_DIR"))
+        .ok()
+        .map(std::path::PathBuf::from);
+    let default_lake = std::path::PathBuf::from(".local").join("market-lake");
+    env_lake_dir.or_else(|| {
+        if default_lake.is_dir() {
+            Some(default_lake)
+        } else {
+            None
+        }
+    })
 }
 
 /// Ensure every configured symbol with one already-built client.
@@ -464,7 +486,7 @@ fn ensure_lake_data(configuration: &BacktestConfig) -> Result<(), String> {
 /// up where an interrupted run left off. The requests are independent, so they
 /// are issued concurrently; the run fails only when a request reports a
 /// lake-side failure, naming what completed alongside what did not.
-fn ensure_lake_data_with(
+pub(crate) fn ensure_lake_data_with(
     client: &LakeEnsureClient,
     configuration: &BacktestConfig,
 ) -> Result<(), String> {
@@ -977,7 +999,26 @@ impl SweepJobLauncher for NativeSweepLauncher {
             started,
         ));
         let output_dir = self.output_root.join(run_id);
-        match host::backtest::run_backtest_config(config, Some(output_dir.as_path()), None) {
+        let Some(candidate_lake) = resolve_lake_data_dir() else {
+            let message = "no lake data directory configured: set HARNESS_DATA_DIR or \
+                           LAKE_LOCAL_DATA_DIR, or create .local/market-lake"
+                .to_string();
+            let mut record = RunCatalogRecord::new(run_id, RunStatus::Failed, strategy_id(config));
+            record.configuration_digest = Some(config.configuration_hash());
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert(
+                "error.json".to_string(),
+                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+            );
+            let _ = self.run_store.put(record, artifacts);
+            fail_job(&self.jobs, run_id, started, message);
+            return;
+        };
+        match host::backtest::run_backtest_config(
+            config,
+            Some(output_dir.as_path()),
+            &candidate_lake,
+        ) {
             Ok((outcome, _artifact_path)) => {
                 let mut record = RunCatalogRecord::new(
                     run_id,

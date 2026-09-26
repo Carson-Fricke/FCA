@@ -14,9 +14,9 @@ fn main() {
         .join("backtest.yaml");
     let out = std::env::temp_dir().join("fca-native-parity");
     let _ = std::fs::remove_dir_all(&out);
-    match host::backtest::run_backtest_job(&config, Some(&out)) {
-        Ok((outcome, path)) => {
-            let actual = std::fs::read(&path).expect("read actual");
+    match backtest::backtest::job::run_backtest_job(&config, Some(&out)) {
+        Ok(summary) => {
+            let actual = std::fs::read(&summary.artifact_path).expect("read actual");
             let expected = std::fs::read(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("..")
@@ -27,13 +27,10 @@ fn main() {
             )
             .expect("read golden");
             println!(
-                "counts dispatched={} orders={} fills={} risk={}",
-                outcome.dispatched_count,
-                outcome.order_count,
-                outcome.fills.len(),
-                outcome.risk_decisions.len()
+                "counts dispatched={} orders={} fills={}",
+                summary.market_events, summary.orders, summary.fills,
             );
-            println!("hash {}", outcome.dispatch_hash);
+            println!("hash {}", summary.manifest_hash);
             if actual == expected {
                 println!("BYTE IDENTICAL");
             } else {

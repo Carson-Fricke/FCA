@@ -9,6 +9,9 @@ use api::http::cli::{serve_api_blocking, ApiCli};
 use clap::Parser;
 
 fn main() -> ExitCode {
+    // Warm the embedded interpreter on the main thread: in-process launcher
+    // threads only acquire the GIL after this, never initialize.
+    host::python::warm_interpreter();
     let cli = ApiCli::parse();
     serve_api_blocking(&cli.args)
 }
