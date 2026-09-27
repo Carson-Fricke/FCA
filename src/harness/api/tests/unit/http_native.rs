@@ -24,9 +24,9 @@ fn builds_a_native_configuration_from_a_submitted_document() {
         "seed": 7,
         "strategy_instances": [{
             "instance_id": "spy-momentum",
-            "implementation": "strategies.harness_examples.intraday_momentum:IntradayMomentumStrategy",
+            "implementation": "jit",
             "bundle_hash": "aaaa",
-            "parameters": {"threshold": "0.05"}
+            "parameters": {"source": "pub fn unused() {}"}
         }]
     });
     let yaml = json_to_yaml(&document);

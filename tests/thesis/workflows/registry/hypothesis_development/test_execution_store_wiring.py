@@ -42,7 +42,6 @@ class _CompletedStudyRunner:
                 model_id="momentum-model",
                 content_sha256="a" * 64,
             ),
-            indicator_references=(),
             backtest=BacktestRunResult(
                 job_id="study-1",
                 state="completed",

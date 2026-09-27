@@ -13,7 +13,7 @@ from typing import Annotated
 import typer
 import uvicorn
 
-from harness.configuration import load_yaml_mapping
+from thesis.configuration import load_yaml_mapping
 from thesis.http.application import serving_app_from_environment
 from thesis.identity.invites import (
     InviteError,

@@ -1,0 +1,30 @@
+[package]
+name = "lake-local"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Local composition over filesystem state: layout, ingest, backfill, and the ensure launcher."
+
+[dependencies]
+lake-contracts.workspace = true
+lake-configuration.workspace = true
+lake-catalog.workspace = true
+lake-coverage.workspace = true
+lake-ingestion.workspace = true
+lake-providers.workspace = true
+lake-storage.workspace = true
+lake-query.workspace = true
+lake-http.workspace = true
+axum.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tower.workspace = true

@@ -6,13 +6,13 @@
 resolver = "2"
 members = [
     "native",
-    "py",
     "num",
     "api",
     "marketdata",
     "backtest",
     "live",
     "mcp",
-    "host",
     "config",
+    "strategy-sdk",
+    "strategy-jit",
 ]

@@ -1,15 +1,13 @@
 """Content-addressed statistical research models published per workspace.
 
 A research model is not a strategy. It declares historical data configuration,
-optional global/workspace indicator bindings, source with separate ``fit`` and
-``observe`` entrypoints, and the finite named observations it promises to
-publish. The workspace store owns source, tests, and fitted parameters under
+an authored Rust study program source, and the finite named observations it
+promises to publish. The workspace store owns source, tests, and fitted parameters under
 ``models/``; execution is a separate injected workflow port.
 """
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import math
@@ -24,21 +22,17 @@ from thesis.research.grammar import (
     IDENTIFIER as _IDENTIFIER,
 )
 from thesis.research.grammar import (
-    NAME as _NAME,
-)
-from thesis.research.grammar import (
-    PYTHON_IDENTIFIER as _PYTHON_IDENTIFIER,
-)
-from thesis.research.grammar import (
     VERSION as _VERSION,
 )
-from thesis.research.indicators import (
-    IndicatorRef,
-    IndicatorScope,
-    IndicatorStore,
-    WorkspaceIndicator,
-    WorkspacePathProvider,
-)
+
+
+class WorkspacePathProvider(Protocol):
+    """Workspace path resolver boundary for filesystem-backed stores."""
+
+    def resolve_path(
+        self, workspace_id: str, relative: str, *, must_exist: bool = False
+    ) -> Path: ...
+
 
 MODEL_DIRECTORY = "models"
 _HASH_DOMAIN = b"fca:thesis-research-model:v1\0"
@@ -77,91 +71,11 @@ def _mapping(value: Mapping[str, object], label: str) -> Mapping[str, object]:
 
 
 @dataclass(frozen=True, slots=True)
-class IndicatorBinding:
-    """One explicitly scoped indicator value supplied to a research model."""
-
-    alias: str
-    scope: IndicatorScope
-    name: str
-    symbol: str
-    parameters: Mapping[str, object] = field(default_factory=dict)
-    content_sha256: str | None = None
-    definition: WorkspaceIndicator | None = None
-
-    def __post_init__(self) -> None:
-        for value, label in (
-            (self.alias, "indicator alias"),
-            (self.symbol, "indicator symbol"),
-        ):
-            if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
-                raise ResearchModelError(f"{label} must be a safe identifier")
-        if not isinstance(self.name, str) or _NAME.fullmatch(self.name) is None:
-            raise ResearchModelError("indicator name must match ^[a-z][a-z0-9_]*$")
-        if not isinstance(self.scope, IndicatorScope):
-            raise ResearchModelError("indicator scope must be global or workspace")
-        object.__setattr__(self, "parameters", _mapping(self.parameters, "parameters"))
-        if self.scope is IndicatorScope.GLOBAL:
-            if self.content_sha256 is not None or self.definition is not None:
-                raise ResearchModelError(
-                    "global indicator bindings cannot carry workspace content"
-                )
-            return
-        if self.definition is not None:
-            if not isinstance(self.definition, WorkspaceIndicator):
-                raise ResearchModelError("definition must be a WorkspaceIndicator")
-            if self.definition.name != self.name:
-                raise ResearchModelError(
-                    "workspace indicator binding name does not match"
-                )
-            if self.content_sha256 not in (None, self.definition.content_sha256):
-                raise ResearchModelError(
-                    "workspace indicator content hash does not match"
-                )
-            object.__setattr__(self, "content_sha256", self.definition.content_sha256)
-        if (
-            self.content_sha256 is None
-            or _DIGEST.fullmatch(self.content_sha256) is None
-        ):
-            raise ResearchModelError(
-                "workspace indicator binding requires a definition or content_sha256"
-            )
-
-    @property
-    def canonical_document(self) -> dict[str, object]:
-        """Return the location-independent binding document."""
-        return {
-            "alias": self.alias,
-            "contentSha256": self.content_sha256,
-            "definition": (
-                None if self.definition is None else self.definition.canonical_document
-            ),
-            "name": self.name,
-            "parameters": dict(self.parameters),
-            "scope": self.scope.value,
-            "symbol": self.symbol,
-        }
-
-    def resolve(self, workspace_id: str, store: IndicatorStore) -> IndicatorRef:
-        """Publish or resolve this binding in the selected workspace."""
-        if self.scope is IndicatorScope.GLOBAL:
-            return IndicatorRef.global_indicator(self.name)
-        if self.definition is not None:
-            reference = store.publish(workspace_id, self.definition)
-        else:
-            reference = IndicatorRef.workspace_indicator(
-                workspace_id, self.name, self.content_sha256 or ""
-            )
-        store.load(workspace_id, reference)
-        return reference
-
-
-@dataclass(frozen=True, slots=True)
 class ResearchModel:
-    """One immutable statistical model and its declared observations.
+    """One immutable authored Rust study program and its declared outputs.
 
-    ``fit`` estimates parameters and calibration bounds from historical data.
-    ``observe`` consumes those frozen parameters and produces current model
-    observations. Layer B never calls ``fit``.
+    ``source`` is a Rust program authored against ``harness-strategy-sdk``;
+    the harness JIT-compiles it into a no-order study program at run time.
     """
 
     model_id: str
@@ -170,9 +84,6 @@ class ResearchModel:
     source: str
     outputs: tuple[str, ...]
     harness_configuration: Mapping[str, object]
-    fit_entrypoint: str = "fit"
-    observe_entrypoint: str = "observe"
-    indicators: tuple[IndicatorBinding, ...] = ()
     tests: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -192,36 +103,13 @@ class ResearchModel:
             raise ResearchModelError("model source must be non-empty")
         if len(self.source.encode("utf-8")) > 1_048_576:
             raise ResearchModelError("model source exceeds the 1 MiB limit")
-        for entrypoint, label in (
-            (self.fit_entrypoint, "fit_entrypoint"),
-            (self.observe_entrypoint, "observe_entrypoint"),
-        ):
-            if (
-                not isinstance(entrypoint, str)
-                or _PYTHON_IDENTIFIER.fullmatch(entrypoint) is None
-            ):
-                raise ResearchModelError(f"{label} must be a Python identifier")
-        try:
-            tree = ast.parse(self.source, filename=f"<{self.model_id}>", mode="exec")
-        except SyntaxError as error:
-            raise ResearchModelError(f"model source does not parse: {error}") from None
-        if not any(
-            isinstance(node, ast.FunctionDef)
-            and node.name in {self.fit_entrypoint, self.observe_entrypoint}
-            for node in tree.body
-        ):
+        if "harness_strategy_sdk" not in self.source:
             raise ResearchModelError(
-                "model source must define fit(context) and observe(fit, context)"
+                "model source must be authored against harness-strategy-sdk"
             )
-        defined = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
-        missing = [
-            entrypoint
-            for entrypoint in (self.fit_entrypoint, self.observe_entrypoint)
-            if entrypoint not in defined
-        ]
-        if missing:
+        if "export_study_program!" not in self.source:
             raise ResearchModelError(
-                f"model source is missing entrypoints: {sorted(missing)}"
+                "model source must export its program with export_study_program!"
             )
         outputs = tuple(self.outputs)
         if not outputs or any(
@@ -231,11 +119,6 @@ class ResearchModel:
             raise ResearchModelError("model outputs must be safe identifiers")
         if len(set(outputs)) != len(outputs):
             raise ResearchModelError("model outputs must be unique")
-        indicators = tuple(self.indicators)
-        if not all(isinstance(item, IndicatorBinding) for item in indicators):
-            raise ResearchModelError("model indicators must be IndicatorBinding values")
-        if len({item.alias for item in indicators}) != len(indicators):
-            raise ResearchModelError("model indicator aliases must be unique")
         if (
             not isinstance(self.tests, Mapping)
             or not self.tests
@@ -249,7 +132,6 @@ class ResearchModel:
             )
         object.__setattr__(self, "description", self.description.strip())
         object.__setattr__(self, "outputs", outputs)
-        object.__setattr__(self, "indicators", indicators)
         object.__setattr__(
             self,
             "harness_configuration",
@@ -262,14 +144,11 @@ class ResearchModel:
         """Return the location-independent model artifact."""
         return {
             "description": self.description,
-            "fitEntrypoint": self.fit_entrypoint,
             "harnessConfiguration": dict(self.harness_configuration),
-            "indicators": [item.canonical_document for item in self.indicators],
             "modelId": self.model_id,
             "outputs": list(self.outputs),
-            "schema": "fca-thesis-research-model-v1",
+            "schema": "fca-thesis-research-model-v2",
             "source": self.source,
-            "observeEntrypoint": self.observe_entrypoint,
             "tests": dict(self.tests),
             "version": self.version,
         }
@@ -363,7 +242,6 @@ class ResearchModelStore(Protocol):
         workspace_id: str,
         reference: ResearchModelRef,
         run: Mapping[str, object],
-        indicator_references: Sequence[IndicatorRef],
     ) -> str:
         """Publish one model-run evidence record and return its workspace path."""
 
@@ -411,11 +289,10 @@ class InMemoryResearchModelStore:
         workspace_id: str,
         reference: ResearchModelRef,
         run: Mapping[str, object],
-        indicator_references: Sequence[IndicatorRef],
     ) -> str:
         _require_model_reference(workspace_id, reference)
         self.load(workspace_id, reference)
-        path, payload = _run_record(workspace_id, reference, run, indicator_references)
+        path, payload = _run_record(workspace_id, reference, run)
         self._runs[(workspace_id, path)] = payload
         return path
 
@@ -480,7 +357,7 @@ class WorkspaceResearchModelStore:
             "workspaceId": workspace_id,
         }
         (directory / "definition.json").write_bytes(_canonical_bytes(manifest) + b"\n")
-        (directory / "model.py").write_text(model.source, encoding="utf-8")
+        (directory / "program.rs").write_text(model.source, encoding="utf-8")
         for path, content in model.tests.items():
             target = _confined_path(directory / "tests", path)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -524,13 +401,10 @@ class WorkspaceResearchModelStore:
         workspace_id: str,
         reference: ResearchModelRef,
         run: Mapping[str, object],
-        indicator_references: Sequence[IndicatorRef],
     ) -> str:
         _require_model_reference(workspace_id, reference)
         self.load(workspace_id, reference)
-        relative, payload = _run_record(
-            workspace_id, reference, run, indicator_references
-        )
+        relative, payload = _run_record(workspace_id, reference, run)
         path = self._workspaces.resolve_path(workspace_id, relative)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and path.read_bytes() != payload:
@@ -584,8 +458,6 @@ class WorkspaceResearchModelStore:
 
 
 def _model_from_document(document: Mapping[str, object]) -> ResearchModel:
-    raw_indicators = cast("Sequence[Mapping[str, object]]", document["indicators"])
-    indicators = tuple(_binding_from_document(item) for item in raw_indicators)
     return ResearchModel(
         model_id=cast("str", document["modelId"]),
         version=cast("str", document["version"]),
@@ -595,39 +467,7 @@ def _model_from_document(document: Mapping[str, object]) -> ResearchModel:
         harness_configuration=cast(
             "Mapping[str, object]", document["harnessConfiguration"]
         ),
-        fit_entrypoint=cast("str", document.get("fitEntrypoint", "fit")),
-        observe_entrypoint=cast("str", document.get("observeEntrypoint", "observe")),
-        indicators=indicators,
         tests=cast("Mapping[str, str]", document["tests"]),
-    )
-
-
-def _binding_from_document(document: Mapping[str, object]) -> IndicatorBinding:
-    definition_document = document.get("definition")
-    if definition_document is None:
-        definition = None
-    elif isinstance(definition_document, Mapping):
-        definition = WorkspaceIndicator(
-            name=cast("str", definition_document["name"]),
-            version=cast("str", definition_document["version"]),
-            description=cast("str", definition_document["description"]),
-            source=cast("str", definition_document["source"]),
-            entrypoint=cast("str", definition_document["entrypoint"]),
-            parameter_schema=cast(
-                "Mapping[str, object]", definition_document["parameterSchema"]
-            ),
-            tests=cast("Mapping[str, str]", definition_document["tests"]),
-        )
-    else:
-        raise ResearchModelError("workspace indicator definition must be a mapping")
-    return IndicatorBinding(
-        alias=cast("str", document["alias"]),
-        scope=IndicatorScope(cast("str", document["scope"])),
-        name=cast("str", document["name"]),
-        symbol=cast("str", document["symbol"]),
-        parameters=cast("Mapping[str, object]", document["parameters"]),
-        content_sha256=cast("str | None", document.get("contentSha256")),
-        definition=definition,
     )
 
 
@@ -645,23 +485,16 @@ def _run_record(
     workspace_id: str,
     reference: ResearchModelRef,
     run: Mapping[str, object],
-    indicator_references: Sequence[IndicatorRef],
 ) -> tuple[str, bytes]:
     if not isinstance(run, Mapping):
         raise ResearchModelError("research model run must be a mapping")
     run_id = run.get("jobId")
     if not isinstance(run_id, str) or not run_id.strip():
         raise ResearchModelError("research model run requires a jobId")
-    references = tuple(indicator_references)
-    if not all(isinstance(item, IndicatorRef) for item in references):
-        raise ResearchModelError(
-            "indicator_references must contain IndicatorRef values"
-        )
     body = {
-        "indicatorReferences": [item.as_dict() for item in references],
         "modelReference": reference.key,
         "run": dict(run),
-        "schema": "fca-thesis-research-model-run-v1",
+        "schema": "fca-thesis-research-model-run-v2",
         "workspaceId": workspace_id,
     }
     digest = hashlib.sha256(_canonical_bytes(body)).hexdigest()
@@ -743,7 +576,6 @@ __all__ = [
     "MODEL_DIRECTORY",
     "FittedModelRef",
     "InMemoryResearchModelStore",
-    "IndicatorBinding",
     "ResearchModel",
     "ResearchModelError",
     "ResearchModelRef",

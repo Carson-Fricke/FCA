@@ -1,10 +1,9 @@
-//! Configuration parity against the Python implementation.
+//! Configuration parity goldens.
 //!
-//! The golden hashes were produced by
-//! `harness.configuration.configuration_hash(load_configuration(path))` on the
-//! repo's Python 3.12 environment. Matching them proves the Rust loader,
+//! The golden hashes were originally produced by the retired Python
+//! configuration loader and are now self-pinned: they prove the Rust loader,
 //! strict models, decimal normalization, datetime formatting, and canonical
-//! JSON all reproduce Python byte-for-byte.
+//! JSON stay stable across edits to the loader itself.
 
 use std::path::{Path, PathBuf};
 
@@ -20,11 +19,11 @@ fn config_dir() -> PathBuf {
 }
 
 #[test]
-fn existing_configuration_hashes_match_python() {
+fn existing_configuration_hashes_match_the_goldens() {
     let cases = [
         (
             "backtest.yaml",
-            "9076d70fa89c3624ce292824665f45f5c6e5afa74837f92084ee7d1bd629adf5",
+            "ea59ca33c8c764b0b2304d3e3b0ae15cdb8c71f44bb37493274f347535d89d22",
         ),
         (
             "api.yaml",
@@ -32,11 +31,11 @@ fn existing_configuration_hashes_match_python() {
         ),
         (
             "trader.yaml",
-            "7774d9a90413bb24a2ce1c599443811d483d986e3847637e3975c1e71a9d466b",
+            "ee86c6031c6a6ab00c6539bc6f2f7419a0514c15cc3fbb171944d0344eeb15fe",
         ),
         (
             "trader-crypto.yaml",
-            "19fde4cac40ba5200b73bdd71c53d42fee0d730bf4c13efa4735391e05c9d71e",
+            "e279b8f16aa3a4c78c673d9f2b06d8d92acec26daa4cb4a39be14b2f0f986c5d",
         ),
     ];
     for (name, expected) in cases {
@@ -53,7 +52,7 @@ fn existing_configuration_hashes_match_python() {
 }
 
 #[test]
-fn backtest_canonical_json_matches_python() {
+fn backtest_canonical_json_is_pinned() {
     let path = config_dir().join("backtest.yaml");
     let configuration = load_configuration(&path).expect("load backtest");
     let expected = concat!(
@@ -75,16 +74,11 @@ fn backtest_canonical_json_matches_python() {
         r#""parameters":{"limit":{"$decimal":"50000"}},"rule_id":"max-position-notional"}]},"#,
         r#""run_id":"momentum-spy-2024-01","schema_version":1,"seed":1729,"shell":"backtest","#,
         r#""start":{"$datetime":"2024-01-02T14:30:00.000000Z"},"strategy_instances":[{"#,
-        r#""bundle_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","#,
+        r#""bundle_hash":"a5447b54e9ce7ae0d8be7d5c3271d70cca0fd815791b615beef86394d7296b02","#,
         r#""capital_fraction":{"$decimal":"1"},"#,
-        r#""implementation":"strategies.harness_examples.intraday_momentum:IntradayMomentumStrategy","#,
-        r#""instance_id":"spy-momentum","parameters":{"liquidation_buffer_minutes":40,"#,
-        r#""lookback":4,"order_prefix":"mom-spy","quantity":20,"session_close_times":["#,
-        r#""2024-01-02T19:30:00Z","2024-01-03T19:30:00Z","2024-01-04T19:30:00Z","#,
-        r#""2024-01-05T19:30:00Z","2024-01-08T19:30:00Z","2024-01-09T19:30:00Z","#,
-        r#""2024-01-10T19:30:00Z","2024-01-11T19:30:00Z","2024-01-12T19:30:00Z","#,
-        r#""2024-01-15T19:30:00Z","2024-01-16T19:30:00Z","2024-01-17T19:30:00Z","#,
-        r#""2024-01-18T19:30:00Z","2024-01-19T19:30:00Z"],"threshold":"0.05"},"symbols":["SPY"]}]}"#,
+        r#""implementation":"jit","#,
+        r#""instance_id":"spy-momentum","parameters":{"lookback":4,"quantity":20,"#,
+        r#""source_path":"momentum.rs"},"symbols":["SPY"]}]}"#
     );
     assert_eq!(canonical_json(configuration.canonical_value()), expected);
 }

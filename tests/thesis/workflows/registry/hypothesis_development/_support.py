@@ -89,16 +89,33 @@ def _model() -> dict[str, object]:
         "version": "1.0.0",
         "description": "Estimate the historical momentum continuation regularity.",
         "source": (
-            "def fit(context):\n"
-            "    return {'baseline': 0.5}\n\n"
-            "def observe(fit, context):\n"
-            "    return {'sharpe': 1.0}\n"
+            "use harness_strategy_sdk::{\n"
+            "    export_study_program, MetricPublisher, QuoteEvent, StudyProgram,\n"
+            "    TradeEvent,\n"
+            "};\n"
+            "use harness_strategy_sdk::serde_json::Value;\n"
+            "\n"
+            "struct MomentumModel;\n"
+            "\n"
+            "impl StudyProgram for MomentumModel {\n"
+            "    fn new(_parameters: Value) -> Self {\n"
+            "        Self\n"
+            "    }\n"
+            "\n"
+            "    fn on_quote(&mut self, _event: &QuoteEvent) {}\n"
+            "\n"
+            "    fn on_trade(&mut self, _event: &TradeEvent) {}\n"
+            "\n"
+            "    fn on_stop(&mut self, metrics: &mut MetricPublisher) {\n"
+            '        let _ = metrics.publish("sharpe", 1.0);\n'
+            '        let _ = metrics.publish("fit.baseline", 0.5);\n'
+            "    }\n"
+            "}\n"
+            "\n"
+            "export_study_program!(MomentumModel);\n"
         ),
-        "fitEntrypoint": "fit",
-        "observeEntrypoint": "observe",
         "outputs": ["sharpe"],
-        "indicators": [],
-        "tests": {"test_model.py": "def test_model():\n    assert True\n"},
+        "tests": {"test_model.txt": "Covered by the harness jit suite.\n"},
         "harnessConfiguration": {
             "seed": 7,
             "symbols": ["SPY"],

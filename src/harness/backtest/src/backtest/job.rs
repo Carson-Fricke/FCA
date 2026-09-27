@@ -27,8 +27,7 @@ use crate::backtest::engine_core::{
 };
 use crate::backtest::errors::{BacktestError, ONE_DAY_NS};
 use crate::backtest::fixture::{
-    synthetic_fixture, ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture,
-    SyntheticDataOptions,
+    ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture, SyntheticDataOptions,
 };
 use crate::backtest::manifest::BacktestResult;
 use crate::backtest::preflight::preflight_data;
@@ -311,10 +310,16 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
     if text.trim_start().starts_with('{') {
         let document: serde_json::Value =
             serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        return BacktestConfig::from_yaml_value(&json_to_yaml(&document))
-            .map_err(BacktestJobError::from);
+        return resolve_authored_sources(
+            BacktestConfig::from_yaml_value(&json_to_yaml(&document))
+                .map_err(BacktestJobError::from)?,
+            config_path,
+        );
     }
-    BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
+    resolve_authored_sources(
+        BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
+        config_path,
+    )
 }
 
 /// Load and validate one study configuration document (shell `study`).
@@ -337,10 +342,16 @@ pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJ
     if text.trim_start().starts_with('{') {
         let document: serde_json::Value =
             serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        return BacktestConfig::from_yaml_value(&json_to_yaml(&document))
-            .map_err(BacktestJobError::from);
+        return resolve_authored_sources(
+            BacktestConfig::from_yaml_value(&json_to_yaml(&document))
+                .map_err(BacktestJobError::from)?,
+            config_path,
+        );
     }
-    BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
+    resolve_authored_sources(
+        BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
+        config_path,
+    )
 }
 
 fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
@@ -361,6 +372,46 @@ fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
                 .collect(),
         ),
     }
+}
+
+/// Inline `parameters.source_path` authored sources after parsing.
+///
+/// The repository's non-executable YAML subset cannot carry multi-line
+/// authored sources, so a YAML configuration references the authored file by
+/// path, resolved relative to the configuration document's directory. JSON
+/// documents may carry the source inline and need no resolution.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when a `source_path` parameter is not a
+/// string or the referenced file cannot be read.
+fn resolve_authored_sources(
+    mut configuration: BacktestConfig,
+    config_path: &Path,
+) -> Result<BacktestConfig, BacktestJobError> {
+    for instance in &mut configuration.strategy_instances {
+        if instance.parameters.contains_key("source") {
+            continue;
+        }
+        let Some(JsonValue::String(relative)) = instance.parameters.get("source_path") else {
+            continue;
+        };
+        let resolved = config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(relative.as_str());
+        let source = std::fs::read_to_string(&resolved).map_err(|error| {
+            BacktestJobError::Io(format!(
+                "strategy instance {:?} authored source {} could not be read: {error}",
+                instance.instance_id,
+                resolved.display()
+            ))
+        })?;
+        instance
+            .parameters
+            .insert("source".to_string(), JsonValue::String(source));
+    }
+    Ok(configuration)
 }
 
 /// The seam the `harness-api` binary calls to run one backtest job.
@@ -468,7 +519,7 @@ pub fn run_job_with(
     ))
 }
 
-/// Run one native engine job with injected Python-backed strategy runtimes.
+/// Run one native engine job over a local Parquet lake.
 ///
 /// The engine core, fee schedule, venue, portfolio, and risk pipeline are all
 /// native Rust; the strategies stay Python and are driven through
@@ -477,23 +528,15 @@ pub fn run_job_with(
 ///
 /// # Errors
 ///
-/// Returns [`BacktestJobError`] when the configuration, fixture, engine, or
+/// Returns [`BacktestJobError`] when the configuration, data source, engine, or
 /// artifact write fails.
-pub fn run_native_job(
-    configuration: &BacktestConfig,
-    engine_options: &EngineOptions,
-    output_dir: Option<&Path>,
-    strategies: Vec<StrategyInstance>,
-) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    run_native_job_with_data_dir(configuration, engine_options, output_dir, strategies, None)
-}
-
-/// Run one native engine job over a local Parquet lake or the synthetic fixture.
+/// Run one native engine job over a local Parquet lake.
 ///
-/// When `data_dir` is `Some`, the run window's Hive lake partitions are read
-/// from the directory tree and replayed instead of the synthetic benchmark.
-/// The full-precision scales keep the lake's 18-digit decimals lossless through
-/// the Python-compatible decimal seam.
+/// The run window's Hive lake partitions are read from the directory tree and
+/// replayed. The full-precision scales keep the lake's 18-digit decimals
+/// lossless through the Python-compatible decimal seam. A lake that cannot
+/// serve the configured window fails the job: a run without its market data
+/// must never quietly substitute a different fixture.
 ///
 /// # Errors
 ///
@@ -505,9 +548,16 @@ pub fn run_native_job_with_data_dir(
     engine_options: &EngineOptions,
     output_dir: Option<&Path>,
     strategies: Vec<StrategyInstance>,
-    data_dir: Option<&Path>,
+    data_dir: &Path,
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    let outcome = run_native_engine_outcome(configuration, engine_options, strategies, data_dir)?;
+    let fixture = lake_fixture(configuration, data_dir)?;
+    let outcome = run_native_engine_outcome(
+        configuration,
+        engine_options,
+        strategies,
+        fixture,
+        &lake_scale_options(),
+    )?;
     let artifact_path = write_run_artifacts(
         configuration,
         &outcome,
@@ -531,33 +581,33 @@ pub fn run_native_study_job_with_data_dir(
     engine_options: &EngineOptions,
     output_dir: Option<&Path>,
     programs: Vec<StrategyInstance>,
-    data_dir: Option<&Path>,
+    data_dir: &Path,
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    let outcome = run_native_engine_outcome(configuration, engine_options, programs, data_dir)?;
+    let fixture = lake_fixture(configuration, data_dir)?;
+    let outcome = run_native_engine_outcome(
+        configuration,
+        engine_options,
+        programs,
+        fixture,
+        &lake_scale_options(),
+    )?;
     let artifact_path =
         write_run_artifacts(configuration, &outcome, output_dir, "studies", "study.json")?;
     Ok((outcome, artifact_path))
 }
 
-/// Drive the native engine for one job over a lake directory or synthetic fixture.
+/// Drive the native engine for one job over a lake directory.
+///
+/// The lake directory is load-bearing: when it cannot serve the configured
+/// window the job fails with the reader's error, so a run over missing data
+/// never reports fabricated results.
 fn run_native_engine_outcome(
     configuration: &BacktestConfig,
     engine_options: &EngineOptions,
     strategies: Vec<StrategyInstance>,
-    data_dir: Option<&Path>,
+    fixture: ReplayFixture,
+    synthetic_options: &SyntheticDataOptions,
 ) -> Result<BacktestOutcome, BacktestJobError> {
-    let synthetic_options = if data_dir.is_some() {
-        lake_scale_options()
-    } else {
-        SyntheticDataOptions::default()
-    };
-    let fixture = match data_dir {
-        Some(directory) => match lake_fixture(configuration, directory) {
-            Ok(fixture) => fixture,
-            Err(_) => synthetic_fixture(configuration, &synthetic_options)?,
-        },
-        None => synthetic_fixture(configuration, &synthetic_options)?,
-    };
     let preflight = preflight_data(configuration, &fixture)?;
     let manifest = build_default_manifest(configuration, &fixture, &preflight)?;
     Ok(run_native_engine(
@@ -567,7 +617,7 @@ fn run_native_engine_outcome(
         manifest,
         engine_options,
         strategies,
-        &synthetic_options,
+        synthetic_options,
     )?)
 }
 

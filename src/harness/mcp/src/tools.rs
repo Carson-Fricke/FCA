@@ -1,8 +1,8 @@
 //! Tool catalog and execution boundaries for the harness MCP server.
 //!
-//! The registry mirrors the Python `harness.mcp.tools` surface exactly:
-//! `run_backtest`, `get_backtest_status`, `get_run`, `list_artifacts`,
-//! `read_artifact`, `run_sweep`, and the capability-gated `launch_trader`. Every boundary is
+//! The registry publishes `run_backtest`, `get_backtest_status`, `get_run`,
+//! `list_artifacts`, `read_artifact`, `run_study`, and the capability-gated
+//! `launch_trader`. Every boundary is
 //! injected; the server composes no subprocess or HTTP client itself, and
 //! serialized settings never contain a token value.
 
@@ -29,8 +29,6 @@ pub const TOOL_GET_RUN: &str = "get_run";
 pub const TOOL_LIST_ARTIFACTS: &str = "list_artifacts";
 /// Tool name for artifact content reads.
 pub const TOOL_READ_ARTIFACT: &str = "read_artifact";
-/// Tool name for the local sweep runner.
-pub const TOOL_RUN_SWEEP: &str = "run_sweep";
 /// Tool name for the capability-gated trader launch.
 pub const TOOL_LAUNCH_TRADER: &str = "launch_trader";
 /// Tool name for the study runner.
@@ -147,8 +145,6 @@ pub struct ToolCapabilities {
     pub backtest_status: bool,
     /// Publish `get_run` and `list_artifacts`.
     pub artifacts: bool,
-    /// Publish `run_sweep`.
-    pub sweeps: bool,
     /// Publish `run_study`.
     pub study: bool,
     /// Publish `launch_trader` (opt-in).
@@ -161,7 +157,6 @@ impl Default for ToolCapabilities {
             backtest: true,
             backtest_status: true,
             artifacts: true,
-            sweeps: true,
             study: true,
             trader: false,
         }
@@ -176,7 +171,6 @@ impl ToolCapabilities {
             "backtest": self.backtest,
             "backtest_status": self.backtest_status,
             "artifacts": self.artifacts,
-            "sweeps": self.sweeps,
             "study": self.study,
             "trader": self.trader,
         })
@@ -234,16 +228,6 @@ pub trait RemoteTransport: Send + Sync {
         headers: &BTreeMap<String, String>,
         payload: &Value,
     ) -> Result<RemoteResponse, String>;
-}
-
-/// Injected local sweeps surface for one spec document path.
-pub trait SweepSubmitter: Send + Sync {
-    /// Expand and submit one sweep, returning the submission summary.
-    ///
-    /// # Errors
-    ///
-    /// Returns a reason string when the sweep cannot be completed.
-    fn submit(&self, spec_path: &str) -> Result<Value, String>;
 }
 
 /// Injected local backtest surface for one configuration document path.
@@ -315,8 +299,6 @@ pub struct HarnessToolsContext {
     pub remote_transport: Option<Arc<dyn RemoteTransport>>,
     /// Local process runner.
     pub runner: Option<Arc<dyn ProcessRunner>>,
-    /// Local sweep submitter.
-    pub sweep_submitter: Option<Arc<dyn SweepSubmitter>>,
     /// Local backtest submitter.
     pub backtest_submitter: Option<Arc<dyn BacktestSubmitter>>,
     /// Local study submitter.
@@ -341,7 +323,6 @@ impl HarnessToolsContext {
             api_base_url: None,
             remote_transport: None,
             runner: None,
-            sweep_submitter: None,
             backtest_submitter: None,
             study_submitter: None,
             run_store: None,
@@ -700,27 +681,6 @@ impl HarnessTools {
             "remote artifact reads require the artifact HTTP route; the configured remote \
              transport returns decoded JSON only",
         ))
-    }
-
-    /// Expand and submit one sweep through the injected local runner.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ToolExecutionError`] when no submitter is composed or the
-    /// local runner fails.
-    pub fn run_sweep(&self, arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
-        let spec_path = text_argument(arguments, "spec_path")?;
-        let Some(submitter) = &self.context.sweep_submitter else {
-            return Err(ToolExecutionError::new(
-                "sweep execution is not composed in this MCP server; \
-                 sweeps run through the local sweeps runner only",
-            ));
-        };
-        submitter.submit(&spec_path).map_err(|error| {
-            ToolExecutionError::new(format!(
-                "the local sweep runner could not complete the sweep: {error}"
-            ))
-        })
     }
 
     fn local_job_status(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
@@ -1282,28 +1242,6 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             }),
             "artifacts",
             move |arguments| read_handler.read_artifact(arguments),
-        ));
-    }
-    if capabilities.sweeps {
-        let handler = tools.clone();
-        candidates.push(Tool::new(
-            TOOL_RUN_SWEEP,
-            "Expand and submit one parameter sweep through the local sweeps runner; \
-             returns {sweep_id, requested, expanded, duplicates_skipped, run_ids}.",
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["spec_path"],
-                "properties": {
-                    "spec_path": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Path to the JSON sweep specification document."
-                    }
-                }
-            }),
-            "sweeps",
-            move |arguments| handler.run_sweep(arguments),
         ));
     }
     if capabilities.trader {

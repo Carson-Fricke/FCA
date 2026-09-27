@@ -1,8 +1,23 @@
 # Strategy Authoring and Architecture Guide
 
-Status: implemented. This guide is audited against the current `docs/hardening`
-tree and describes the strategy contract exactly as the native Rust host
-implements it. It is written for an independent author who wants to add a
+Status: retired. This guide describes the embedded-Python authoring surface
+(`harness.strategy`, `module:Class` implementations, and the Python sandbox
+lint), which was deleted in the native-authoring migration. The authoring
+contract is now Rust against the `harness-strategy-sdk` crate with JIT
+compilation through `harness-strategy-jit`; see
+`.github/architecture/rust-native-authoring-plan.md` for the current plan
+and `.github/architecture/repository.md` (`Program Authoring Contract`) for
+the implemented contract. This document is retained only as historical
+reference until the Rust authoring guide replaces it.
+
+The text below describes the retired Python surface and no longer matches
+the repository.
+
+---
+
+The guide below was audited against the former `docs/hardening`
+tree and described the strategy contract exactly as the embedded-Python host
+implemented it. It is written for an independent author who wants to add a
 strategy that passes CI and runs in the harness without changing engine or
 harness code.
 

@@ -1,6 +1,6 @@
 use super::*;
 
-const CANONICAL_HASH: &str = "9076d70fa89c3624ce292824665f45f5c6e5afa74837f92084ee7d1bd629adf5";
+const CANONICAL_HASH: &str = "ea59ca33c8c764b0b2304d3e3b0ae15cdb8c71f44bb37493274f347535d89d22";
 
 fn repo_config_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -13,7 +13,10 @@ fn repo_config_path() -> std::path::PathBuf {
 }
 
 #[test]
-fn canonical_configuration_hash_matches_python() {
+fn canonical_configuration_hash_is_pinned() {
+    // The committed benchmark configuration is content-pinned so accidental
+    // edits are caught; the hash was re-pinned when the benchmark program
+    // became a JIT-authored Rust source.
     let text = std::fs::read_to_string(repo_config_path()).expect("read config");
     let config = BacktestConfig::from_yaml(&text).expect("parse");
     assert_eq!(config.configuration_hash(), CANONICAL_HASH);

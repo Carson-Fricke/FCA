@@ -1,6 +1,6 @@
 # A backtest is fully event-time driven and never reads runtime credentials.
-# Runnable locally with the deterministic synthetic benchmark fixture:
-#   uv run backtest-job --config config/harness/backtest.yaml
+# Runnable locally with the native engine and a JIT-authored program:
+#   cargo run -p api --bin backtest-job -- --config config/harness/backtest.yaml
 schema_version: 1
 shell: backtest
 run_id: momentum-spy-2024-01
@@ -19,39 +19,16 @@ data:
 strategy_instances:
   -
     instance_id: spy-momentum
-    implementation: strategies.harness_examples.intraday_momentum:IntradayMomentumStrategy
-    bundle_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    implementation: jit
+    # SHA-256 of the authored source file; the JIT seam rejects a mismatch.
+    bundle_hash: a5447b54e9ce7ae0d8be7d5c3271d70cca0fd815791b615beef86394d7296b02
     capital_fraction: 1.0
     symbols: [SPY]
     parameters:
       lookback: 4
-      # The synthetic fixture random-walks around 100.00 in small ticks, so a
-      # 5-cent move over four quotes is a meaningful directional signal.
-      threshold: "0.05"
       quantity: 20
-      # The synthetic fixture spaces quotes ~32 minutes apart, so the
-      # liquidation buffer must reach the final quote of each session.
-      liquidation_buffer_minutes: 40
-      order_prefix: mom-spy
-      # The synthetic benchmark fixture runs fixed 13:30-19:30 UTC weekday
-      # sessions; one close entry per session keeps the strategy flat at every
-      # close. The last fixture quote lands ~32 minutes before the close, so
-      # the 40-minute liquidation buffer above must reach it.
-      session_close_times:
-        - "2024-01-02T19:30:00Z"
-        - "2024-01-03T19:30:00Z"
-        - "2024-01-04T19:30:00Z"
-        - "2024-01-05T19:30:00Z"
-        - "2024-01-08T19:30:00Z"
-        - "2024-01-09T19:30:00Z"
-        - "2024-01-10T19:30:00Z"
-        - "2024-01-11T19:30:00Z"
-        - "2024-01-12T19:30:00Z"
-        - "2024-01-15T19:30:00Z"
-        - "2024-01-16T19:30:00Z"
-        - "2024-01-17T19:30:00Z"
-        - "2024-01-18T19:30:00Z"
-        - "2024-01-19T19:30:00Z"
+      # Authored Rust source, resolved relative to this configuration file.
+      source_path: momentum.rs
 risk_pipeline:
   on_reject: reject_order
   rules:

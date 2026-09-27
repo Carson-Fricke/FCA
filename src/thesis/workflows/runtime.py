@@ -44,7 +44,6 @@ from thesis.experiments.ledger import AttemptLedger
 from thesis.integrations.harness import HarnessClientPort, ThesisHarnessClient
 from thesis.persistence.journal import CommandJournal
 from thesis.research.hypothesis import HypothesisStore
-from thesis.research.indicators import IndicatorStore
 from thesis.research.models import ResearchModelStore
 from thesis.strategies.validation import StrategySandboxValidator
 from thesis.workflows.backtests import (
@@ -152,7 +151,6 @@ def build_workflow_runtime(
     strategy_validator: StrategySandboxValidator | None = None,
     hypothesis_store: HypothesisStore | None = None,
     research_model_store: ResearchModelStore | None = None,
-    indicator_store: IndicatorStore | None = None,
     research_runner: ResearchModelRunner | None = None,
     bundle: PolicyBundle | None = None,
     bundle_hashes: Mapping[str, str] | None = None,
@@ -174,18 +172,15 @@ def build_workflow_runtime(
     held for composition consumers; tool dispatch happens through the unified
     session registry.
 
-    ``research_model_store``/``indicator_store`` feed the default
+    ``research_model_store`` feeds the default
     :class:`~thesis.workflows.research_models.BacktestResearchModelRunner` and
-    therefore apply only when ``research_runner`` is omitted; supplying them
+    therefore applies only when ``research_runner`` is omitted; supplying it
     beside an explicit runner is a composition error, never a silent ignore.
     """
 
-    if research_runner is not None and (
-        research_model_store is not None or indicator_store is not None
-    ):
+    if research_runner is not None and research_model_store is not None:
         raise WorkflowRuntimeError(
-            "research_model_store/indicator_store apply only when "
-            "research_runner is omitted"
+            "research_model_store applies only when research_runner is omitted"
         )
 
     if invocation_id_factory is not None:
@@ -219,7 +214,6 @@ def build_workflow_runtime(
         else BacktestResearchModelRunner(
             resolved_runner,
             models=research_model_store,
-            indicators=indicator_store,
         )
     )
     return WorkflowRuntime(

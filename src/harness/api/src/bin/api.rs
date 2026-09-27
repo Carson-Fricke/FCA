@@ -1,7 +1,7 @@
 //! Standalone `api` process entry point.
 //!
-//! Mirrors the `api` console script (`harness.cli.api:main`): serve the
-//! quant-harness HTTP boundary with the axum stack.
+//! Mirrors the `api` console script: serve the quant-harness HTTP boundary
+//! with the axum stack.
 
 use std::process::ExitCode;
 

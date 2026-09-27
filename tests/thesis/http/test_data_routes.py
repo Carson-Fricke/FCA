@@ -9,7 +9,7 @@ are fixed and no network or real harness process is involved.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
 from typing import cast
 
@@ -35,10 +35,8 @@ from thesis.http.workspaces import (
     WorkspaceDataService,
     build_local_workspace_data,
 )
-from thesis.integrations.harness import ProcessResult
 from thesis.integrations.harness_activation import (
     HarnessApiResponse,
-    LocalHarnessProcess,
 )
 from thesis.integrations.runtime_status import RuntimeStatusClient
 from thesis.knowledge.index import PageRecord, build_index
@@ -65,17 +63,6 @@ def counting_ids() -> Callable[[str], str]:
         return f"{prefix}-{counters[prefix]:03d}"
 
     return factory
-
-
-class FakeHarnessRunner:
-    """Injected local process runner; records argv, returns success."""
-
-    def __init__(self) -> None:
-        self.argvs: list[tuple[str, ...]] = []
-
-    def __call__(self, argv: Sequence[str]) -> ProcessResult:
-        self.argvs.append(tuple(argv))
-        return ProcessResult(returncode=0, stdout='{"state": "queued"}', stderr="")
 
 
 class FakeStatusTransport:
@@ -271,14 +258,12 @@ class FakeMarketPort:
 
 def make_bundle(
     *,
-    harness_runner: FakeHarnessRunner | None = None,
     transport: FakeStatusTransport | None = None,
     deployments: tuple[dict[str, object], ...] = (),
     orders: tuple[dict[str, object], ...] = (),
     market: FakeMarketPort | None = None,
 ) -> WorkspaceDataBundle:
     """Compose the local services with in-memory stores and injected fakes."""
-    harness = LocalHarnessProcess(harness_runner) if harness_runner else None
     status_client = RuntimeStatusClient(
         "http://harness.test",
         transport if transport is not None else ClosedStatusTransport(),
@@ -287,7 +272,7 @@ def make_bundle(
         workspaces=WorkspaceDataService(WorkspaceCatalogStore(), clock=clock),
         backtests=BacktestDataService(
             InMemoryBacktestStore(),
-            harness=harness,
+            harness=None,
             clock=clock,
             id_factory=counting_ids(),
         ),
@@ -305,7 +290,7 @@ def make_bundle(
         ),
         state=WorkspaceStateService(InMemoryWorkspaceStateStore()),
         strategies=StrategyDataService(clock=clock, id_factory=counting_ids()),
-        harness=harness,
+        harness=None,
     )
 
 
@@ -347,7 +332,6 @@ def test_workspaces_list_and_create_match_summary_shape() -> None:
 def test_workspace_snapshot_returns_overview_and_real_counts() -> None:
     chat_service = ChatService(clock=lambda: NOW, id_factory=counting_ids())
     bundle = build_local_workspace_data(
-        harness_runner=FakeHarnessRunner(),
         clock=clock,
         id_factory=counting_ids(),
         chat_service=chat_service,
@@ -475,27 +459,8 @@ def test_backtest_detail_unknown_is_404() -> None:
     assert response.json()["error"]["code"] == "backtest_not_found"
 
 
-def test_backtest_launch_delegates_to_local_harness_adapter() -> None:
-    runner = FakeHarnessRunner()
-    client = make_client(make_bundle(harness_runner=runner))
-
-    response = client.post(
-        f"/v1/workspaces/{WORKSPACE}/backtests/launch",
-        headers=HEADERS,
-        json={"bundle_ref": "bundle-1", "config_path": "runs/bt-204.yaml"},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["action"] == "backtest"
-    assert body["bundle_ref"] == "bundle-1"
-    assert body["exit_code"] == 0
-    assert body["request_payload"]["config_path"] == "runs/bt-204.yaml"
-    assert runner.argvs == [("harness", "backtest-job", "--config", "runs/bt-204.yaml")]
-
-
 def test_backtest_launch_without_adapter_fails_closed() -> None:
-    client = make_client(make_bundle(harness_runner=None))
+    client = make_client(make_bundle())
 
     response = client.post(
         f"/v1/workspaces/{WORKSPACE}/backtests/launch",

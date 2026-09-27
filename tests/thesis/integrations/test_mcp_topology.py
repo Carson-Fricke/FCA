@@ -11,17 +11,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import cast
 
 import httpx
 import pytest
 
-from thesis.integrations import mcp
 from thesis.integrations.mcp import (
     HARNESS_API_BEARER_TOKEN_VARIABLE,
-    HARNESS_MCP_COMMAND_VARIABLE,
-    HARNESS_MCP_URL_VARIABLE,
-    THESIS_LOCATION_VARIABLE,
     EnvironmentHarnessTokenSource,
     HarnessMcpAuthError,
     HarnessMcpClient,
@@ -31,8 +26,6 @@ from thesis.integrations.mcp import (
     InProcessMcpTransport,
     McpLocation,
     RemoteHttpMcpTransport,
-    StdioMcpTransport,
-    harness_mcp_topology_from_env,
     open_harness_mcp_client,
 )
 
@@ -186,60 +179,11 @@ def test_local_thesis_and_local_harness_prefers_in_process() -> None:
     assert [tool.name for tool in client.list_tools()] == ["run_backtest"]
 
 
-def test_local_thesis_and_local_harness_uses_the_configured_command(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    created: dict[str, tuple[str, ...]] = {}
-
-    class RecordingStdio:
-        def __init__(self, argv: tuple[str, ...]) -> None:
-            created["argv"] = tuple(argv)
-
-    monkeypatch.setattr(mcp, "StdioMcpTransport", RecordingStdio)
-    client = open_harness_mcp_client(
-        HarnessMcpTopology(harness_command=("custom-harness", "mcp"))
-    )
-
-    assert isinstance(client.transport, RecordingStdio)
-    assert created["argv"] == ("custom-harness", "mcp")
-
-
-def test_remote_thesis_with_local_harness_uses_stdio_not_in_process(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    created: dict[str, tuple[str, ...]] = {}
-
-    class RecordingStdio:
-        def __init__(self, argv: tuple[str, ...]) -> None:
-            created["argv"] = tuple(argv)
-
-    monkeypatch.setattr(mcp, "StdioMcpTransport", RecordingStdio)
-    client = open_harness_mcp_client(
-        HarnessMcpTopology(thesis_location="remote", harness_location="local"),
-        in_process_handler=FakeMcpHandler(),
-    )
-
-    assert isinstance(client.transport, RecordingStdio)
-    assert created["argv"] == ("harness", "mcp")
-
-
-@pytest.mark.parametrize("thesis_location", ["local", "remote"])
-def test_remote_harness_selects_http_for_every_thesis_location(
-    thesis_location: str,
-) -> None:
-    server = FakeHttpMcpServer()
-    client = _remote_client(server, thesis_location=cast(McpLocation, thesis_location))
-
-    assert isinstance(client.transport, RemoteHttpMcpTransport)
-    assert not isinstance(client.transport, StdioMcpTransport)
-
-
-def test_remote_harness_wins_over_injected_local_seams() -> None:
+def test_remote_harness_always_uses_the_hosted_http_transport() -> None:
     server = FakeHttpMcpServer()
     client = open_harness_mcp_client(
         _remote_topology(),
         in_process_handler=FakeMcpHandler(),
-        stdio_transport=StubTransport(),
         http_transport=httpx.MockTransport(server.handler),
     )
 
@@ -435,58 +379,3 @@ def test_notifications_post_without_requiring_a_response_body() -> None:
     assert server.seen[-1][0] == "POST"
     assert server.seen[-1][1] == "/mcp"
     transport.close()
-
-
-def test_config_resolution_prefers_url_and_parses_command(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    for name in (
-        HARNESS_MCP_URL_VARIABLE,
-        HARNESS_MCP_COMMAND_VARIABLE,
-        HARNESS_API_BEARER_TOKEN_VARIABLE,
-        THESIS_LOCATION_VARIABLE,
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    from_url = harness_mcp_topology_from_env(
-        {
-            HARNESS_MCP_URL_VARIABLE: "https://remote-harness.test",
-            HARNESS_API_BEARER_TOKEN_VARIABLE: "token-from-env",
-            HARNESS_MCP_COMMAND_VARIABLE: "ignored mcp",
-        }
-    )
-    assert from_url.harness_location == "remote"
-    assert from_url.harness_url == "https://remote-harness.test"
-    assert from_url.resolved_bearer_token() == "token-from-env"
-
-    from_command = harness_mcp_topology_from_env(
-        {
-            HARNESS_MCP_COMMAND_VARIABLE: '"/opt/harness" mcp --verbose',
-            THESIS_LOCATION_VARIABLE: "remote",
-        }
-    )
-    assert from_command.harness_location == "local"
-    assert from_command.thesis_location == "remote"
-    assert from_command.harness_command == ("/opt/harness", "mcp", "--verbose")
-    assert from_command.resolved_bearer_token() is None
-
-
-def test_config_resolution_defaults_to_local_command_and_rejects_bad_values() -> None:
-    empty = harness_mcp_topology_from_env({})
-    assert empty.harness_location == "local"
-    assert empty.thesis_location == "local"
-    assert empty.harness_command == ("harness", "mcp")
-
-    with pytest.raises(ValueError, match="local' or 'remote"):
-        harness_mcp_topology_from_env({THESIS_LOCATION_VARIABLE: "somewhere"})
-
-    with pytest.raises(ValueError, match="service URL"):
-        HarnessMcpTopology(
-            harness_location="remote", harness_url="https://user:pw@harness.test"
-        )
-
-    with pytest.raises(ValueError, match="harness_url is required"):
-        HarnessMcpTopology(harness_location="remote")
-
-    with pytest.raises(ValueError, match="harness_command"):
-        HarnessMcpTopology(harness_command=("harness", " "))

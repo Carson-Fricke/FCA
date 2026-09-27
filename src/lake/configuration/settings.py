@@ -45,7 +45,9 @@ class RetrySettings(_StrictModel):
 
 
 class ProviderRequestSettings(_StrictModel):
-    max_concurrency: Annotated[int, Field(ge=1, le=64)]
+    # Ceiling for the adaptive per-key in-flight bound (Rust lake), matching
+    # the Rust settings model: the controller ramps toward it and backs off.
+    max_concurrency: Annotated[int, Field(ge=1, le=1024)]
     timeout_seconds: Annotated[int, Field(gt=0, le=3600)]
     retry: RetrySettings
 

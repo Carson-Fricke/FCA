@@ -10,12 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from thesis.research.hypothesis import HypothesisFalsifier
-from thesis.research.indicators import (
-    IndicatorArtifactError,
-    IndicatorScope,
-    WorkspaceIndicator,
-)
-from thesis.research.models import IndicatorBinding, ResearchModel, ResearchModelError
+from thesis.research.models import ResearchModel, ResearchModelError
 from thesis.workflows.research_models import study_window
 
 from ..errors import (
@@ -38,12 +33,13 @@ __all__ = [
 def _compose_research_model(value: object) -> ResearchModel:
     if not isinstance(value, Mapping):
         raise FalsificationComposeError("hypothesis requires a research model object")
-    indicators = value.get("indicators", [])
+    if "indicators" in value:
+        raise FalsificationComposeError(
+            "model indicators are not accepted: authored Rust programs embed their own"
+        )
     outputs = value.get("outputs")
     tests = value.get("tests")
     configuration = value.get("harnessConfiguration", {})
-    if isinstance(indicators, str) or not isinstance(indicators, Sequence):
-        raise FalsificationComposeError("model indicators must be a sequence")
     if isinstance(outputs, str) or not isinstance(outputs, Sequence):
         raise FalsificationComposeError("model outputs must be a sequence")
     if not isinstance(tests, Mapping):
@@ -59,70 +55,11 @@ def _compose_research_model(value: object) -> ResearchModel:
             version=_model_text(value.get("version"), "model version"),
             description=_model_text(value.get("description"), "model description"),
             source=_model_text(value.get("source"), "model source"),
-            fit_entrypoint=_model_text(
-                value.get("fitEntrypoint", "fit"), "model fit entrypoint"
-            ),
-            observe_entrypoint=_model_text(
-                value.get("observeEntrypoint", "observe"),
-                "model observe entrypoint",
-            ),
             outputs=tuple(outputs),
-            indicators=tuple(_compose_indicator_binding(item) for item in indicators),
             tests=dict(tests),
             harness_configuration=dict(configuration),
         )
-    except (IndicatorArtifactError, ResearchModelError, TypeError) as error:
-        raise FalsificationComposeError(str(error)) from error
-
-
-def _compose_indicator_binding(value: object) -> IndicatorBinding:
-    if not isinstance(value, Mapping):
-        raise FalsificationComposeError("each model indicator must be an object")
-    try:
-        scope = IndicatorScope(value.get("scope"))
-    except ValueError as error:
-        raise FalsificationComposeError(
-            "model indicator scope must be global or workspace"
-        ) from error
-    parameters = value.get("parameters", {})
-    if not isinstance(parameters, Mapping):
-        raise FalsificationComposeError("model indicator parameters must be an object")
-    definition_value = value.get("definition")
-    definition: WorkspaceIndicator | None = None
-    if definition_value is not None:
-        if not isinstance(definition_value, Mapping):
-            raise FalsificationComposeError(
-                "workspace indicator definition must be an object"
-            )
-        tests = definition_value.get("tests", {})
-        schema = definition_value.get("parameterSchema", {})
-        if not isinstance(tests, Mapping) or not isinstance(schema, Mapping):
-            raise FalsificationComposeError(
-                "workspace indicator tests and parameterSchema must be objects"
-            )
-        try:
-            definition = WorkspaceIndicator(
-                name=definition_value.get("name", value.get("name")),
-                version=definition_value.get("version"),
-                description=definition_value.get("description"),
-                source=definition_value.get("source"),
-                entrypoint=definition_value.get("entrypoint", "calculate"),
-                parameter_schema=dict(schema),
-                tests=dict(tests),
-            )
-        except (IndicatorArtifactError, TypeError) as error:
-            raise FalsificationComposeError(str(error)) from error
-    try:
-        return IndicatorBinding(
-            alias=_model_text(value.get("alias"), "indicator alias"),
-            scope=scope,
-            name=_model_text(value.get("name"), "indicator name"),
-            symbol=_model_text(value.get("symbol"), "indicator symbol"),
-            parameters=dict(parameters),
-            content_sha256=value.get("contentSha256"),
-            definition=definition,
-        )
-    except (IndicatorArtifactError, ResearchModelError, TypeError) as error:
+    except (ResearchModelError, TypeError) as error:
         raise FalsificationComposeError(str(error)) from error
 
 

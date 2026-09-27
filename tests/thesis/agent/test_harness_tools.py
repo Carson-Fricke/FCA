@@ -22,10 +22,7 @@ from thesis.agent.harness_tools import (
     HarnessToolProvider,
     LaunchTraderArgs,
     ListArtifactsArgs,
-    ReadArtifactArgs,
     RunBacktestArgs,
-    RunStudyArgs,
-    RunSweepArgs,
     harness_mcp_skill,
     open_harness_tool_provider,
 )
@@ -196,55 +193,6 @@ def _remote_provider(
     )
 
 
-def test_local_in_process_provider_discovers_and_calls_every_typed_tool() -> None:
-    provider, handler = _in_process_provider()
-
-    catalog = provider.discover()
-    assert catalog.ok
-    assert [tool.name for tool in catalog.tools] == list(HARNESS_TOOL_NAMES)
-    assert catalog.tools[0].as_dict()["inputSchema"] == {"type": "object"}
-
-    calls = (
-        provider.run_backtest(
-            RunBacktestArgs(config_path="cfg/bt.yaml", workspace="ws")
-        ),
-        provider.run_study(RunStudyArgs(config_path="cfg/study.yaml", workspace="ws")),
-        provider.backtest_config_template(),
-        provider.get_backtest_status(GetBacktestStatusArgs(job_id="job-1")),
-        provider.get_run(GetRunArgs(run_id="run-1")),
-        provider.list_artifacts(ListArtifactsArgs(run_id="run-1")),
-        provider.read_artifact(ReadArtifactArgs(run_id="run-1", name="metrics.json")),
-        provider.run_sweep(RunSweepArgs(spec_path="cfg/sweep.yaml")),
-        provider.launch_trader(LaunchTraderArgs(config_path="cfg/trader.yaml")),
-    )
-    for result in calls:
-        assert result.ok, result.failure
-        assert result.structured["tool"] == result.tool
-        assert result.tool in HARNESS_TOOL_NAMES
-
-    names = [str(call["name"]) for call in handler.calls]
-    assert sorted(names) == sorted(HARNESS_TOOL_NAMES)
-    assert handler.calls[0]["arguments"] == {
-        "config_path": "cfg/bt.yaml",
-        "workspace": "ws",
-    }
-
-
-def test_remote_thesis_local_harness_uses_injected_stdio_transport() -> None:
-    handler = FakeHarnessHandler()
-    transport = FakeTransport(handler)
-    provider = open_harness_tool_provider(
-        HarnessMcpTopology(thesis_location="remote", harness_location="local"),
-        stdio_transport=transport,
-    )
-
-    assert provider.list_tools()
-    result = provider.get_run(GetRunArgs(run_id="run-42"))
-
-    assert result.ok
-    assert handler.calls[-1] == {"name": "get_run", "arguments": {"run_id": "run-42"}}
-
-
 def test_remote_http_provider_discovers_and_calls_tools() -> None:
     server = FakeHttpHarnessServer()
     provider = _remote_provider(server)
@@ -318,20 +266,6 @@ def test_protocol_failure_is_agent_visible() -> None:
     assert result.failure.kind == "protocol"
 
 
-def test_tool_error_result_is_agent_visible() -> None:
-    provider, _ = _in_process_provider(
-        FakeHarnessHandler(is_error=True, error_message="job rejected")
-    )
-
-    result = provider.run_sweep(RunSweepArgs(spec_path="cfg/sweep.yaml"))
-
-    assert result.ok is False
-    assert result.failure is not None
-    assert result.failure.kind == "tool"
-    assert result.failure.message == "job rejected"
-    assert result.as_dict()["structured"] == {"state": "failed"}
-
-
 def test_unknown_tool_reports_failure_before_the_transport() -> None:
     provider, handler = _in_process_provider()
 
@@ -373,7 +307,6 @@ def test_typed_arguments_serialize_and_reject_empty_values() -> None:
     assert GetBacktestStatusArgs("job-1").to_arguments() == {"job_id": "job-1"}
     assert GetRunArgs("run-1").to_arguments() == {"run_id": "run-1"}
     assert ListArtifactsArgs("run-1").to_arguments() == {"run_id": "run-1"}
-    assert RunSweepArgs("sweep.yaml").to_arguments() == {"spec_path": "sweep.yaml"}
     assert LaunchTraderArgs("trader.yaml").to_arguments() == {
         "config_path": "trader.yaml"
     }

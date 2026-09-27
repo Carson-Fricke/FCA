@@ -39,12 +39,12 @@ DEFAULT_SYSTEM_PROMPT = (
 HARNESS_TOOL_SYSTEM_PROMPT = (
     DEFAULT_SYSTEM_PROMPT
     + " You can call the quant-harness tools for deterministic research "
-    "execution: run_backtest and run_sweep launch jobs, get_backtest_status "
+    "execution: run_backtest and run_study launch jobs, get_backtest_status "
     "and get_run report state, list_artifacts enumerates outputs, and "
     "launch_trader starts a supervised session. Call a tool only when the "
     "operator's request needs it, pass typed arguments, and summarize the "
-    "structured results as evidence. For run_backtest and run_sweep, use the "
-    "exact config or spec path the operator provides; never guess or invent a "
+    "structured results as evidence. For run_backtest and run_study, use the "
+    "exact config path the operator provides; never guess or invent a "
     "path, and if none is given, call backtest_config_template to obtain a "
     "starter configuration, adapt it, and pass it inline as the run_backtest "
     "`config` argument rather than searching for a file. When a tool call "

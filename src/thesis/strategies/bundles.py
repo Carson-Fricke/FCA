@@ -1,19 +1,30 @@
-"""Immutable, content-addressed Python strategy bundles."""
+"""Immutable, content-addressed authored-program bundles."""
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, cast
 
-from harness.configuration import canonical_configuration_bytes
-from harness.strategy import CALLBACK_ORDER, Strategy
-
 _HASH_DOMAIN = b"fca:thesis-strategy-bundle:v1\0"
+
+
+def _canonical_json_bytes(payload: Mapping[str, object]) -> bytes:
+    """Return canonical JSON bytes for a configuration mapping."""
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$")
 _VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -207,8 +218,8 @@ class StrategyBundle:
 
     @property
     def harness_contract(self) -> str:
-        """Return the published harness strategy boundary implemented by the bundle."""
-        return f"{Strategy.__module__}.{Strategy.__qualname__}"
+        """Return the authored program boundary implemented by the bundle."""
+        return "harness-strategy-sdk"
 
     @property
     def canonical_document(self) -> dict[str, object]:
@@ -221,7 +232,7 @@ class StrategyBundle:
             "evidenceSummary": _canonical_value(self.evidence_summary),
             "harnessConfiguration": _canonical_value(self.harness_configuration),
             "harnessContract": {
-                "callbacks": list(CALLBACK_ORDER),
+                "kinds": ("strategy", "study"),
                 "name": self.harness_contract,
             },
             "harnessManifestReference": self.harness_manifest_reference,
@@ -238,7 +249,7 @@ class StrategyBundle:
     @property
     def canonical_bytes(self) -> bytes:
         """Return the deterministic UTF-8 bundle representation."""
-        return canonical_configuration_bytes(self.canonical_document)
+        return _canonical_json_bytes(self.canonical_document)
 
     @property
     def bundle_sha256(self) -> str:

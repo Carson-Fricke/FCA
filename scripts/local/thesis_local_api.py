@@ -1,8 +1,8 @@
 """Local Thesis API composition for the no-Azure development stack.
 
 Binds the real chat surface (T211), the workspace DATA routes (T231), and
-the screener router to a single uvicorn process on 127.0.0.1:8000, with a
-LocalHarnessProcess backtest-launch boundary and CORS for the Svelte dev
+the screener router to a single uvicorn process on 127.0.0.1:8000, with the
+harness-hosted MCP boundary and CORS for the Svelte dev
 server.  The serving stack itself (conversations, control tools, workflow
 runtime, launcher) is composed by :func:`thesis.http.serving.build_serving_stack`
 — the same composition `thesis serve` uses — and only the local harness
@@ -51,10 +51,8 @@ from thesis.http.serving import (  # noqa: E402
     open_serving_model_provider,
 )
 from thesis.http.workspaces import build_local_workspace_data  # noqa: E402
-from thesis.integrations.harness import ProcessResult  # noqa: E402
 from thesis.integrations.harness_activation import (  # noqa: E402
     HarnessBoundary,
-    LocalHarnessProcess,
 )
 from thesis.integrations.mcp import (  # noqa: E402
     HarnessMcpError,
@@ -73,27 +71,6 @@ WORKSPACE_ROOT = str(default_workspace_root())
 HARNESS_BASE_URL = "http://127.0.0.1:8001"
 
 
-def _real_subprocess_runner(argv):
-    """Run a real local harness process via the uv-managed interpreter."""
-    import subprocess
-
-    completed = subprocess.run(
-        list(argv),
-        capture_output=True,
-        text=True,
-        shell=False,
-    )
-    return ProcessResult(completed.returncode, completed.stdout, completed.stderr)
-
-
-def _mcp_disabled() -> bool:
-    return os.environ.get("THESIS_HARNESS_MCP", "1").strip().lower() in (
-        "0",
-        "false",
-        "no",
-    )
-
-
 def _is_local_url(topology: HarnessMcpTopology) -> bool:
     """Return True when the MCP URL points at the loopback harness API."""
     url = topology.harness_url or ""
@@ -104,9 +81,7 @@ def _mcp_mode(topology: HarnessMcpTopology) -> str:
     """Return a short label for the selected MCP transport."""
     if _is_local_url(topology):
         return "local-http"
-    if topology.harness_location == "remote":
-        return "remote-http"
-    return "local-stdio"
+    return "remote-http"
 
 
 def _harness_composition() -> tuple[HarnessBoundary | None, HarnessToolProvider | None]:
@@ -118,24 +93,20 @@ def _harness_composition() -> tuple[HarnessBoundary | None, HarnessToolProvider 
     there is one MCP mechanism and no Windows stdio subprocess path.  A single
     topology-aware client is initialized once with a bounded retry, and the
     backtest boundary and chat tool provider are derived from that same client.
-    When MCP is disabled or stays unreachable after retries, the composition
-    falls back to the direct local process boundary (loopback only) and a
-    tool-free chat; the error is logged only after retries are exhausted.
+    When MCP stays unreachable after retries, both surfaces fail closed; the
+    error is logged only after retries are exhausted. Thesis never spawns a
+    harness process.
     """
     os.environ.setdefault("HARNESS_MCP_URL", HARNESS_BASE_URL)
     topology = harness_mcp_topology_from_env()
-    if _mcp_disabled():
-        return LocalHarnessProcess(_real_subprocess_runner), None
     try:
         composition: HarnessMcpComposition = open_harness_mcp_composition(topology)
     except (HarnessMcpError, OSError) as error:
         print(
             f"harness MCP tool catalog unavailable after retries; chat replies "
-            f"without tools: {error}",
+            f"without tools and backtest launches fail closed: {error}",
             file=sys.stderr,
         )
-        if _is_local_url(topology) or topology.harness_location == "local":
-            return LocalHarnessProcess(_real_subprocess_runner), None
         return None, None
     provider = open_harness_tool_provider(client=composition.client)
     print(

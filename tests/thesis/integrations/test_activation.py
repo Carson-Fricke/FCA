@@ -7,12 +7,11 @@ the HTTP transport are fakes, and every timestamp is fixed fixture text.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any, cast
 
 import pytest
 
-from thesis.integrations.harness import ProcessResult
 from thesis.integrations.harness_activation import (
     ActivationAction,
     ActivationAdapter,
@@ -23,8 +22,6 @@ from thesis.integrations.harness_activation import (
     HarnessActivationProtocolError,
     HarnessActivationRequest,
     HarnessApiResponse,
-    HarnessCapabilities,
-    LocalHarnessProcess,
     RemoteHarnessApi,
 )
 from thesis.integrations.runtime_status import (
@@ -44,22 +41,6 @@ BUNDLE_REF = "bundle-sha256-abc123"
 BACKTEST_CONFIG = "config/harness/backtest.yaml"
 TRADER_CONFIG = "config/harness/trader.yaml"
 BEARER = "session-bearer-secret"
-
-
-class FakeRunner:
-    def __init__(self, *, exit_code: int = 0) -> None:
-        self.exit_code = exit_code
-        self.calls: list[tuple[str, ...]] = []
-
-    def __call__(self, argv: Sequence[str]) -> ProcessResult:
-        self.calls.append(tuple(argv))
-        return ProcessResult(self.exit_code, "stdout text", "stderr text")
-
-
-class FailingRunner:
-    def __call__(self, argv: Sequence[str]) -> ProcessResult:
-        del argv
-        raise OSError("spawn failed")
 
 
 class FakeTransport:
@@ -105,103 +86,6 @@ def _expected_payload(
     }
 
 
-def test_run_backtest_builds_one_request_contract_for_local_and_remote() -> None:
-    runner = FakeRunner()
-    transport = FakeTransport(
-        {
-            "/v1/backtests/jobs": HarnessApiResponse(
-                202, {"job_id": "momentum-spy-2024-01", "state": "queued"}
-            )
-        }
-    )
-    local = ActivationAdapter(LocalHarnessProcess(runner))
-    remote = ActivationAdapter(RemoteHarnessApi("https://harness.test", transport))
-
-    local_outcome = local.run_backtest(BUNDLE_REF, BACKTEST_CONFIG)
-    remote_outcome = remote.run_backtest(
-        BUNDLE_REF, BACKTEST_CONFIG, bearer_token=BEARER
-    )
-
-    expected = _expected_payload("backtest", BACKTEST_CONFIG)
-    assert local_outcome.request_payload == expected
-    assert remote_outcome.request_payload == expected
-    assert transport.calls[0][1] == "https://harness.test/v1/backtests/jobs"
-    assert transport.calls[0][3] == expected
-    assert runner.calls == [("harness", "backtest-job", "--config", BACKTEST_CONFIG)]
-    assert remote_outcome.job_id == "momentum-spy-2024-01"
-    assert remote_outcome.state == "queued"
-    assert local_outcome.exit_code == 0
-
-
-def test_launch_trader_builds_one_request_contract_for_local_and_remote() -> None:
-    runner = FakeRunner()
-    transport = FakeTransport(
-        {
-            "/v1/activation/trader": HarnessApiResponse(
-                202, {"job_id": "trader-1", "state": "queued"}
-            )
-        }
-    )
-    local = ActivationAdapter(LocalHarnessProcess(runner))
-    remote = ActivationAdapter(
-        RemoteHarnessApi(
-            "https://harness.test",
-            transport,
-            capabilities=HarnessCapabilities(),
-            routes={
-                "backtest": "/v1/backtests/jobs",
-                "trader": "/v1/activation/trader",
-            },
-        )
-    )
-
-    local_outcome = local.launch_trader(BUNDLE_REF, TRADER_CONFIG)
-    remote_outcome = remote.launch_trader(
-        BUNDLE_REF, TRADER_CONFIG, bearer_token=BEARER
-    )
-
-    expected = _expected_payload("trader", TRADER_CONFIG)
-    assert local_outcome.request_payload == expected
-    assert remote_outcome.request_payload == expected
-    assert runner.calls == [("harness", "trader", "--config", TRADER_CONFIG)]
-    assert transport.calls[0][1] == "https://harness.test/v1/activation/trader"
-    assert transport.calls[0][3] == expected
-    assert remote_outcome.job_id == "trader-1"
-
-
-def test_capability_gating_raises_before_any_invocation() -> None:
-    runner = FakeRunner()
-    local = ActivationAdapter(LocalHarnessProcess(runner))
-
-    with pytest.raises(CapabilityUnavailableError) as live_error:
-        local.launch_trader(BUNDLE_REF, TRADER_CONFIG, environment="live")
-    with pytest.raises(CapabilityUnavailableError) as shadow_error:
-        local.launch_trader(BUNDLE_REF, TRADER_CONFIG, environment="shadow")
-
-    assert live_error.value.capability == "live"
-    assert shadow_error.value.capability == "shadow"
-    assert runner.calls == []
-    assert local.capabilities.as_mapping() == {
-        "backtest": True,
-        "trader": True,
-        "shadow": False,
-        "live": False,
-    }
-    with pytest.raises(ValueError, match="unknown harness capability"):
-        local.capabilities.require_capability("sweep")
-
-
-def test_remote_trader_is_unavailable_until_the_harness_publishes_it() -> None:
-    transport = FakeTransport()
-    remote = ActivationAdapter(RemoteHarnessApi("https://harness.test", transport))
-
-    with pytest.raises(CapabilityUnavailableError) as error:
-        remote.launch_trader(BUNDLE_REF, TRADER_CONFIG, bearer_token=BEARER)
-
-    assert error.value.capability == "trader"
-    assert transport.calls == []
-
-
 def test_remote_bearer_is_injected_per_call_and_never_stored() -> None:
     transport = FakeTransport(
         {
@@ -222,29 +106,6 @@ def test_remote_bearer_is_injected_per_call_and_never_stored() -> None:
     assert transport.calls[0][2] == {"Authorization": f"Bearer {BEARER}"}
     serialized = repr(boundary) + repr(remote) + str(vars(boundary))
     assert BEARER not in serialized
-
-
-def test_local_process_outcomes_are_reported_as_data() -> None:
-    runner = FakeRunner(exit_code=3)
-    local = ActivationAdapter(LocalHarnessProcess(runner))
-
-    outcome = local.launch_trader(BUNDLE_REF, TRADER_CONFIG)
-
-    assert outcome == ActivationOutcome(
-        action="trader",
-        bundle_ref=BUNDLE_REF,
-        environment="paper",
-        request_payload=_expected_payload("trader", TRADER_CONFIG),
-        exit_code=3,
-        stdout="stdout text",
-        stderr="stderr text",
-    )
-    with pytest.raises(HarnessActivationError, match="operator environment"):
-        local.launch_trader(BUNDLE_REF, TRADER_CONFIG, bearer_token=BEARER)
-    with pytest.raises(HarnessActivationError, match="could not be invoked"):
-        ActivationAdapter(LocalHarnessProcess(FailingRunner())).run_backtest(
-            BUNDLE_REF, BACKTEST_CONFIG
-        )
 
 
 def test_remote_error_responses_fail_closed() -> None:

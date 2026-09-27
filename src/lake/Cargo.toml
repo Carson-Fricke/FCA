@@ -1,0 +1,79 @@
+# Market-lake Rust workspace.
+#
+# Every crate is a direct child of this directory, alongside the surviving
+# Python package surface under `src/lake`. The workspace manifest is the Cargo
+# root; the `lake` console script resolves to the `lake-cli` binary through the
+# thin Python shim in `src/lake/cli`.
+[workspace]
+resolver = "2"
+members = [
+    "contracts",
+    "configuration",
+    "catalog",
+    "coverage",
+    "providers",
+    "storage",
+    "ingestion",
+    "queue",
+    "query",
+    "http",
+    "local",
+    "reference",
+    "hosted",
+    "cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+lake-contracts = { path = "contracts" }
+lake-configuration = { path = "configuration" }
+lake-catalog = { path = "catalog" }
+lake-coverage = { path = "coverage" }
+lake-providers = { path = "providers" }
+lake-storage = { path = "storage" }
+lake-ingestion = { path = "ingestion" }
+lake-queue = { path = "queue" }
+lake-query = { path = "query" }
+lake-http = { path = "http" }
+lake-local = { path = "local" }
+lake-reference = { path = "reference" }
+lake-hosted = { path = "hosted" }
+
+arrow-array = "59"
+arrow-buffer = "59"
+arrow-cast = "59"
+arrow-schema = "59"
+arrow-select = "59"
+async-trait = "0.1"
+axum = "0.8"
+azure_core = "0.21"
+azure_identity = "0.21"
+azure_storage = "0.21"
+azure_storage_blobs = "0.21"
+azure_data_tables = "0.21"
+azure_storage_queues = "0.21"
+bytes = "1"
+clap = { version = "4.6", features = ["derive"] }
+futures-util = "0.3"
+hex = "0.4"
+jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
+parquet = { version = "59", features = ["arrow"] }
+percent-encoding = "2"
+rand = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "http2", "gzip", "brotli"] }
+rsa = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+time = "0.3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "net", "fs"] }
+
+http-body-util = "0.1"
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

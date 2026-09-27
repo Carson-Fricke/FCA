@@ -1,0 +1,27 @@
+[package]
+name = "lake-reference"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Point-in-time reference data ingest: SEC EDGAR fundamentals and Nasdaq Trader classification."
+
+[dependencies]
+lake-contracts.workspace = true
+lake-catalog.workspace = true
+lake-configuration.workspace = true
+lake-storage.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+arrow-select.workspace = true
+bytes.workspace = true
+parquet.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

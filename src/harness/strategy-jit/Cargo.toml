@@ -1,0 +1,20 @@
+[package]
+name = "harness-strategy-jit"
+version = "0.1.0"
+edition = "2021"
+description = "JIT compile and load seam for harness-strategy-sdk authored programs."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+backtest = { path = "../backtest" }
+harness-strategy-sdk = { path = "../strategy-sdk" }
+num = { path = "../num" }
+libloading = "0.9"
+serde_json = "1"
+
+[dev-dependencies]
+marketdata = { path = "../marketdata" }

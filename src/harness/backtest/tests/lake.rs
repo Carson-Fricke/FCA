@@ -141,7 +141,7 @@ fn run_lake_job(lake: &Path, output: &Path) -> (BacktestOutcome, PathBuf) {
         &EngineOptions::default(),
         Some(output),
         strategies,
-        Some(lake),
+        lake,
     )
     .expect("native lake job")
 }
@@ -242,5 +242,30 @@ fn missing_lake_events_are_a_clear_error() {
         result,
         Err(backtest::backtest::job::BacktestJobError::Io(_))
     ));
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn a_configured_lake_that_cannot_serve_the_window_fails_the_job() {
+    // A configured data dir is load-bearing: an unreadable lake must fail the
+    // job instead of silently replaying the synthetic benchmark fixture.
+    let directory = temp_dir("empty");
+    let config_ns = i64::from(Date::from_ymd(2024, 1, 2).unwrap().days()) * ONE_DAY_NS;
+    let mut configuration =
+        BacktestConfig::new("empty-lake-job", config_ns, config_ns + ONE_DAY_NS, 1)
+            .expect("config");
+    configuration.symbols = vec!["SPY".to_string()];
+    let error = run_native_job_with_data_dir(
+        &configuration,
+        &EngineOptions::default(),
+        None,
+        Vec::new(),
+        directory.as_path(),
+    )
+    .expect_err("empty lake must fail the job");
+    assert!(
+        matches!(error, backtest::backtest::job::BacktestJobError::Io(_)),
+        "expected the lake reader error, got {error:?}"
+    );
     let _ = std::fs::remove_dir_all(&directory);
 }

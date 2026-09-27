@@ -1,1 +1,0 @@
-"""Thin FastAPI route controllers."""

@@ -1,0 +1,31 @@
+[package]
+name = "lake-hosted"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Azure hosted composition for the published market-lake API and ingest."
+
+[dependencies]
+lake-contracts.workspace = true
+lake-configuration.workspace = true
+lake-catalog.workspace = true
+lake-coverage.workspace = true
+lake-ingestion.workspace = true
+lake-providers.workspace = true
+lake-query.workspace = true
+lake-http.workspace = true
+lake-queue.workspace = true
+lake-storage.workspace = true
+azure_core.workspace = true
+azure_identity.workspace = true
+azure_storage_blobs.workspace = true
+azure_data_tables.workspace = true
+axum.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+tempfile.workspace = true

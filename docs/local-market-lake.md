@@ -75,6 +75,17 @@ correct response if it is pasted into a terminal transcript, issue, or commit.
 
 ## Start The API
 
+The `lake` console script is a thin Python shim that execs the native Rust
+`lake` binary. Build it once from the repository root:
+
+```text
+cargo build --workspace --manifest-path src/lake/Cargo.toml
+```
+
+The shim discovers the binary in `src/lake/target/release`, then
+`src/lake/target/debug`, or in the directory named by `LAKE_RUST_BINARY_DIR`.
+Without a built binary the shim exits with code 2 and an actionable message.
+
 Run the foreground server from the repository root:
 
 ```text
@@ -83,7 +94,7 @@ uv run lake local api --host 127.0.0.1 --port 8000
 
 The bind address defaults to `127.0.0.1`; do not use `0.0.0.0` on an untrusted
 network. Health endpoints are public at `http://127.0.0.1:8000/health` and
-`/healthz`. API documentation is at `/docs`. All `/v1/*` routes require exactly
+`/healthz`. All `/v1/*` routes require exactly
 `Authorization: Bearer <LAKE_API__BEARER_TOKEN>`.
 
 ### Authenticated API Smoke

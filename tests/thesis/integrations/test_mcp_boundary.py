@@ -9,24 +9,19 @@ remote harness never silently falls back to local execution.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
-import httpx
 import pytest
 
-from thesis.integrations import mcp
-from thesis.integrations.harness import ProcessResult
 from thesis.integrations.harness_activation import (
     CapabilityUnavailableError,
     HarnessActivationRequest,
-    LocalHarnessProcess,
 )
 from thesis.integrations.mcp import (
     HarnessMcpBoundary,
     HarnessMcpTopology,
     HarnessMcpTransportError,
     open_harness_mcp_boundary,
-    open_local_harness_boundary,
 )
 
 HARNESS_URL = "http://harness.test:9000"
@@ -94,17 +89,6 @@ class FailingTransport:
         return None
 
 
-class RecordingProcessRunner:
-    """Injected local process boundary that records the rendered argv."""
-
-    def __init__(self) -> None:
-        self.argv: tuple[str, ...] | None = None
-
-    def __call__(self, argv: Sequence[str]) -> ProcessResult:
-        self.argv = tuple(argv)
-        return ProcessResult(returncode=0, stdout="{}", stderr="")
-
-
 def _local_topology() -> HarnessMcpTopology:
     return HarnessMcpTopology(thesis_location="local", harness_location="local")
 
@@ -141,77 +125,3 @@ def test_mcp_boundary_capabilities_follow_the_catalog() -> None:
     assert boundary.capabilities.trader is False
     with pytest.raises(CapabilityUnavailableError):
         boundary.run_backtest(_request())
-
-
-def test_local_composition_prefers_the_mcp_boundary() -> None:
-    handler = CatalogHandler()
-    runner = RecordingProcessRunner()
-
-    boundary = open_local_harness_boundary(
-        topology=_local_topology(),
-        in_process_handler=handler,
-        process_runner=runner,
-    )
-
-    assert isinstance(boundary, HarnessMcpBoundary)
-    assert runner.argv is None
-
-
-def test_local_composition_falls_back_to_the_process_boundary() -> None:
-    runner = RecordingProcessRunner()
-
-    boundary = open_local_harness_boundary(
-        topology=_local_topology(),
-        stdio_transport=FailingTransport(),
-        process_runner=runner,
-    )
-
-    assert isinstance(boundary, LocalHarnessProcess)
-    outcome = boundary.run_backtest(_request())
-
-    assert runner.argv == ("harness", "backtest-job", "--config", "cfg/bt.yaml")
-    assert outcome.exit_code == 0
-    assert outcome.stdout == "{}"
-
-
-def test_local_composition_falls_back_when_the_process_cannot_start(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _raise(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        raise FileNotFoundError("harness executable not found")
-
-    monkeypatch.setattr(mcp, "open_harness_mcp_client", _raise)
-    runner = RecordingProcessRunner()
-
-    boundary = open_local_harness_boundary(process_runner=runner)
-
-    assert isinstance(boundary, LocalHarnessProcess)
-
-
-def test_local_composition_propagates_without_a_fallback_runner() -> None:
-    with pytest.raises(HarnessMcpTransportError):
-        open_local_harness_boundary(
-            topology=_local_topology(),
-            stdio_transport=FailingTransport(),
-        )
-
-
-def test_remote_harness_failure_never_falls_back_to_local() -> None:
-    def _handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("refused", request=request)
-
-    runner = RecordingProcessRunner()
-
-    with pytest.raises(HarnessMcpTransportError):
-        open_local_harness_boundary(
-            topology=HarnessMcpTopology(
-                harness_location="remote",
-                harness_url=HARNESS_URL,
-                bearer_token=BEARER,
-            ),
-            http_transport=httpx.MockTransport(_handler),
-            process_runner=runner,
-        )
-
-    assert runner.argv is None

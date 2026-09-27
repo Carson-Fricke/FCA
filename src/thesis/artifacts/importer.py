@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import tempfile
@@ -13,9 +14,20 @@ from pathlib import Path, PurePosixPath
 from typing import Protocol
 from urllib.parse import urlsplit
 
-from harness.configuration import canonical_configuration_bytes
-
 _DIGEST = "0123456789abcdef"
+
+
+def _canonical_configuration_bytes(payload: Mapping[str, object]) -> bytes:
+    """Canonical JSON bytes for a configuration mapping (sorted keys, compact)."""
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
 _VERSION_CHARS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-+"
 
 
@@ -181,7 +193,7 @@ class HarnessManifest:
     @property
     def canonical_bytes(self) -> bytes:
         """Return deterministic manifest bytes."""
-        return canonical_configuration_bytes(self.canonical_document)
+        return _canonical_configuration_bytes(self.canonical_document)
 
     @property
     def sha256(self) -> str:
@@ -597,7 +609,7 @@ class ArtifactImporter:
             "strategyVersion": strategy_version,
             "workflowExecutionId": workflow_execution_id,
         }
-        provenance_bytes = canonical_configuration_bytes(provenance) + b"\n"
+        provenance_bytes = _canonical_configuration_bytes(provenance) + b"\n"
         self._write_immutable(provenance_path, provenance_bytes, provenance_relative)
         provenance_commit = self.git.commit(
             (provenance_relative,),

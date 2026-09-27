@@ -14,8 +14,8 @@ use mcp::store::{
 };
 use mcp::tools::{
     BacktestSubmitter, Boundary, HarnessToolsContext, ProcessOutcome, ProcessRunner,
-    SweepSubmitter, TOOL_BACKTEST_CONFIG_TEMPLATE, TOOL_BACKTEST_STATUS, TOOL_GET_RUN,
-    TOOL_LIST_ARTIFACTS, TOOL_READ_ARTIFACT, TOOL_RUN_BACKTEST, TOOL_RUN_SWEEP,
+    TOOL_BACKTEST_CONFIG_TEMPLATE, TOOL_BACKTEST_STATUS, TOOL_GET_RUN, TOOL_LIST_ARTIFACTS,
+    TOOL_READ_ARTIFACT, TOOL_RUN_BACKTEST,
 };
 use mcp::{create_server, McpServer};
 use serde_json::{json, Value};
@@ -40,20 +40,6 @@ impl BacktestSubmitter for FixedBacktestSubmitter {
             "boundary": "local-submit",
             "run_id": "run-1",
             "status": "completed",
-        }))
-    }
-}
-
-struct FixedSweepSubmitter;
-
-impl SweepSubmitter for FixedSweepSubmitter {
-    fn submit(&self, _spec_path: &str) -> Result<Value, String> {
-        Ok(json!({
-            "sweep_id": "sweep-1",
-            "requested": 2,
-            "expanded": 2,
-            "duplicates_skipped": 0,
-            "run_ids": ["r1", "r2"],
         }))
     }
 }
@@ -176,7 +162,6 @@ fn local_server(store: Arc<InMemoryRunStore>, jobs: Arc<InMemoryJobRepository>) 
     context.run_store = Some(store);
     context.job_repository = Some(jobs);
     context.backtest_submitter = Some(Arc::new(FixedBacktestSubmitter));
-    context.sweep_submitter = Some(Arc::new(FixedSweepSubmitter));
     create_server(context.validate().expect("context")).expect("server")
 }
 
@@ -302,20 +287,6 @@ fn local_backtest_config_template_is_published() {
         .as_str()
         .unwrap_or_default();
     assert!(template.contains("shell: backtest"), "template: {template}");
-}
-
-#[test]
-fn local_run_sweep_uses_the_composed_submitter() {
-    let store = Arc::new(InMemoryRunStore::new());
-    let jobs = Arc::new(InMemoryJobRepository::new());
-    let server = local_server(store, jobs);
-    let response = call(&server, TOOL_RUN_SWEEP, json!({"spec_path": "spec.json"}));
-    assert_eq!(response["result"]["isError"], false);
-    assert_eq!(
-        response["result"]["structuredContent"]["sweep_id"],
-        "sweep-1"
-    );
-    assert_eq!(response["result"]["structuredContent"]["expanded"], 2);
 }
 
 #[test]

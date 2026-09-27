@@ -1,29 +1,39 @@
-"""Sandbox validation handoff for the published harness strategy boundary."""
+"""Validation handoff for authored program bundles.
+
+The harness JIT seam is the real validator: an authored Rust program either
+compiles and runs, or the submit surface returns the compiler/engine failure.
+This module keeps the injection seam so a composition can add checks (source
+presence, export macro, size limits) before handing a bundle over.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from harness.strategy import CALLBACK_ORDER, Strategy
 from thesis.strategies.bundles import StrategyBundle
 
-ValidationPurpose = Literal["backtest"]
+ValidationPurpose = Literal["backtest", "study"]
+
+#: What an authored program source must contain to be accepted pre-compile.
+REQUIRED_SOURCE_MARKERS: tuple[str, ...] = (
+    "harness_strategy_sdk",
+    "export_strategy_program!",
+)
 
 
 class StrategyValidationError(RuntimeError):
-    """Raised when a sandbox refuses a strategy bundle."""
+    """Raised when a validator refuses a program bundle."""
 
 
 @dataclass(frozen=True, slots=True)
 class StrategyValidationRequest:
-    """Immutable request sent to an injected sandbox validator."""
+    """Immutable request sent to an injected validator."""
 
     bundle: StrategyBundle
     purpose: ValidationPurpose = "backtest"
     network_access: Literal["disabled"] = "disabled"
-    harness_contract: str = f"{Strategy.__module__}.{Strategy.__qualname__}"
-    callback_order: tuple[str, ...] = CALLBACK_ORDER
+    program_boundary: str = "harness-strategy-sdk"
 
     @property
     def bundle_sha256(self) -> str:
@@ -32,12 +42,12 @@ class StrategyValidationRequest:
 
     @property
     def source(self):
-        """Return generated Python source at the harness boundary."""
+        """Return the authored Rust source files in the bundle."""
         return self.bundle.source
 
     @property
     def tests(self):
-        """Return bundle tests for sandbox validation."""
+        """Return bundle tests for validation."""
         return self.bundle.tests
 
 
@@ -57,10 +67,10 @@ class StrategyValidationResult:
 
 
 class StrategySandboxValidator(Protocol):
-    """Published injection boundary for a local or harness-owned validator."""
+    """Published injection boundary for a pre-compile validator."""
 
     def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
-        """Validate source through the public harness strategy contract."""
+        """Validate the authored program source before submission."""
 
 
 def validation_request(

@@ -1,11 +1,12 @@
-"""Thesis activation adapters over the local and remote quant-harness boundaries.
+"""Thesis activation adapters over the hosted quant-harness boundaries.
 
 Thesis asks the quant-harness to run a strategy bundle; the harness owns all
-runtime logic.  This module only renders the shared activation request for the
-two deployment boundaries of :meth:`harness activation`: the local
-``harness`` process boundaries (``backtest-job --config <path>`` and
-``trader --config <path>``) and the authenticated remote harness API
-(``POST /v1/backtests/jobs`` under a bearer credential).
+runtime logic.  Thesis never spawns a harness process: the only activation
+boundary is the authenticated harness HTTP API (``POST /v1/backtests/jobs``
+under a bearer credential), with the harness-hosted MCP tool catalog as the
+agent-facing alternative (``thesis.integrations.mcp``).  Trader activation
+routes through the harness ``launch_trader`` MCP tool, never a Thesis-driven
+process.
 
 The adapters are consent-model-agnostic: an activation request is a plain
 bundle reference, environment, action, and configuration path.  The separately
@@ -16,11 +17,9 @@ serialized adapter state can disclose one.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
-
-from thesis.integrations.harness import ProcessResult
 
 ActivationAction = Literal["backtest", "trader"]
 ActivationEnvironment = Literal["paper", "shadow", "live"]
@@ -62,13 +61,15 @@ class HarnessActivationProtocolError(HarnessActivationError):
 class HarnessCapabilities:
     """Fail-closed declaration of what the target harness actually supports.
 
-    Backtest and paper-trader activation are available by default, matching the
-    implemented local ``backtest-job`` and ``trader`` process boundaries.
-    Shadow and live stay unavailable until the harness publishes their gates.
+    Backtest activation is available by default over the published
+    ``POST /v1/backtests/jobs`` route.  Trader activation routes through the
+    harness ``launch_trader`` MCP tool, so the HTTP boundary declares it
+    unavailable by default; shadow and live stay unavailable until the
+    harness publishes their gates.
     """
 
     backtest: bool = True
-    trader: bool = True
+    trader: bool = False
     shadow: bool = False
     live: bool = False
 
@@ -171,12 +172,6 @@ class HarnessApiTransport(Protocol):
     ) -> HarnessApiResponse: ...
 
 
-class HarnessProcessRunner(Protocol):
-    """Injected local process boundary; no subprocess is created here."""
-
-    def __call__(self, argv: Sequence[str]) -> ProcessResult: ...
-
-
 @dataclass(frozen=True, slots=True)
 class ActivationOutcome:
     """Inert record of one activation invocation; Thesis never interprets it."""
@@ -194,7 +189,7 @@ class ActivationOutcome:
 
 
 class HarnessBoundary(Protocol):
-    """The seam between the local process and remote API harness deployments."""
+    """The seam between Thesis and a hosted harness deployment."""
 
     @property
     def capabilities(self) -> HarnessCapabilities: ...
@@ -206,92 +201,6 @@ class HarnessBoundary(Protocol):
     def launch_trader(
         self, request: HarnessActivationRequest, *, bearer_token: str | None = None
     ) -> ActivationOutcome: ...
-
-
-class LocalHarnessProcess:
-    """Activation boundary invoking the local ``harness`` process commands.
-
-    The runner is injected: it receives the rendered argv for
-    ``backtest-job --config <path>`` or ``trader --config <path>`` and returns
-    a :class:`ProcessResult`.  Nothing about harness runtime behavior is
-    constructed here; a non-zero exit code is reported as data, because the
-    process exit code is the harness-observed outcome.
-    """
-
-    def __init__(
-        self,
-        runner: HarnessProcessRunner,
-        *,
-        program: Sequence[str] = ("harness",),
-        capabilities: HarnessCapabilities | None = None,
-    ) -> None:
-        if not callable(runner):
-            raise TypeError("runner must be a callable taking (argv)")
-        program_tuple = tuple(program)
-        if not program_tuple or any(
-            not isinstance(part, str) or not part.strip() for part in program_tuple
-        ):
-            raise ValueError(
-                "program must be a non-empty sequence of non-empty strings"
-            )
-        self._runner = runner
-        self._program = program_tuple
-        self._capabilities = (
-            HarnessCapabilities() if capabilities is None else capabilities
-        )
-
-    @property
-    def capabilities(self) -> HarnessCapabilities:
-        return self._capabilities
-
-    def run_backtest(
-        self, request: HarnessActivationRequest, *, bearer_token: str | None = None
-    ) -> ActivationOutcome:
-        """Invoke the local ``backtest-job`` process for the request."""
-        self._reject_credential(bearer_token)
-        return self._invoke(request)
-
-    def launch_trader(
-        self, request: HarnessActivationRequest, *, bearer_token: str | None = None
-    ) -> ActivationOutcome:
-        """Invoke the local ``trader`` process for the request."""
-        self._reject_credential(bearer_token)
-        return self._invoke(request)
-
-    def _invoke(self, request: HarnessActivationRequest) -> ActivationOutcome:
-        self._capabilities.require_capability(request.required_capability())
-        argv = self._argv(request)
-        try:
-            result = self._runner(argv)
-        except Exception as error:
-            raise HarnessActivationError(
-                f"the local harness process {argv[1]!r} could not be invoked"
-            ) from error
-        if not isinstance(result, ProcessResult):
-            raise HarnessActivationProtocolError(
-                "the local harness runner returned an invalid process result"
-            )
-        return ActivationOutcome(
-            action=request.action,
-            bundle_ref=request.bundle_ref,
-            environment=request.environment,
-            request_payload=request.to_payload(),
-            exit_code=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
-        )
-
-    def _argv(self, request: HarnessActivationRequest) -> tuple[str, ...]:
-        command = "backtest-job" if request.action == "backtest" else "trader"
-        return (*self._program, command, "--config", request.config_path)
-
-    @staticmethod
-    def _reject_credential(bearer_token: str | None) -> None:
-        if bearer_token is not None:
-            raise HarnessActivationError(
-                "local harness processes take credentials from the operator "
-                "environment, never from Thesis"
-            )
 
 
 _BACKTEST_LAUNCH_ROUTE = "/v1/backtests/jobs"
@@ -496,7 +405,5 @@ __all__ = [
     "HarnessApiResponse",
     "HarnessBoundary",
     "HarnessCapabilities",
-    "HarnessProcessRunner",
-    "LocalHarnessProcess",
     "RemoteHarnessApi",
 ]

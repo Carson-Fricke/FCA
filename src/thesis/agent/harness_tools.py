@@ -1,7 +1,7 @@
 """Harness MCP tool provider for the Thesis agent.
 
-The agent discovers and calls the quant-harness MCP tool catalog (backtests,
-sweeps, run queries, artifacts, and the supervised trader) through a single
+The agent discovers and calls the harness-hosted MCP tool catalog (backtests,
+studies, run queries, artifacts, and the supervised trader) through a single
 :class:`HarnessToolProvider`.  The provider wraps the merged
 :class:`~thesis.integrations.mcp.HarnessMcpClient` and exposes:
 
@@ -42,7 +42,6 @@ from thesis.integrations.mcp import (
     TOOL_READ_ARTIFACT,
     TOOL_RUN_BACKTEST,
     TOOL_RUN_STUDY,
-    TOOL_RUN_SWEEP,
     HarnessMcpAuthError,
     HarnessMcpBoundary,
     HarnessMcpClient,
@@ -52,7 +51,6 @@ from thesis.integrations.mcp import (
     HarnessMcpTopology,
     HarnessMcpTransportError,
     McpToolResult,
-    McpTransport,
     harness_mcp_topology_from_env,
     open_harness_mcp_boundary,
     open_harness_mcp_client,
@@ -67,7 +65,6 @@ HARNESS_TOOL_NAMES: tuple[str, ...] = (
     TOOL_GET_RUN,
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
-    TOOL_RUN_SWEEP,
     TOOL_LAUNCH_TRADER,
 )
 
@@ -77,7 +74,7 @@ HARNESS_MCP_SKILL_VERSION = "1.0.0"
 
 HARNESS_MCP_SKILL_INSTRUCTIONS = (
     "Use the quant-harness MCP tools for deterministic research execution. "
-    "run_backtest and run_sweep launch backtest and sweep jobs; "
+    "run_backtest and run_study launch backtest and study jobs; "
     "backtest_config_template returns a starter configuration to adapt when no "
     "config file exists, and run_backtest accepts that configuration inline as "
     "the `config` argument; get_backtest_status and get_run report job and run "
@@ -292,20 +289,6 @@ class ReadArtifactArgs:
 
 
 @dataclass(frozen=True, slots=True)
-class RunSweepArgs:
-    """Typed arguments for ``run_sweep``."""
-
-    spec_path: str
-
-    def __post_init__(self) -> None:
-        _required_text(self.spec_path, "spec_path")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        return {"spec_path": self.spec_path}
-
-
-@dataclass(frozen=True, slots=True)
 class LaunchTraderArgs:
     """Typed arguments for ``launch_trader``."""
 
@@ -416,10 +399,6 @@ class HarnessToolProvider:
         """Call ``read_artifact`` with typed arguments."""
         return self.call_tool(TOOL_READ_ARTIFACT, args.to_arguments())
 
-    def run_sweep(self, args: RunSweepArgs) -> HarnessToolResult:
-        """Call ``run_sweep`` with typed arguments."""
-        return self.call_tool(TOOL_RUN_SWEEP, args.to_arguments())
-
     def launch_trader(self, args: LaunchTraderArgs) -> HarnessToolResult:
         """Call ``launch_trader`` with typed arguments."""
         return self.call_tool(TOOL_LAUNCH_TRADER, args.to_arguments())
@@ -494,7 +473,6 @@ def open_harness_tool_provider(
     client: HarnessMcpClient | None = None,
     in_process_handler: InProcessMcpHandler | None = None,
     http_transport: httpx.BaseTransport | None = None,
-    stdio_transport: McpTransport | None = None,
 ) -> HarnessToolProvider:
     """Resolve the deployment topology and open a harness tool provider.
 
@@ -502,7 +480,7 @@ def open_harness_tool_provider(
     for example the one behind a :class:`HarnessMcpBoundary` -- and never opens
     or initializes a second transport.  Otherwise ``topology`` takes precedence
     over the process environment, and ``in_process_handler``,
-    ``http_transport``, and ``stdio_transport`` are test/integration seams
+    and ``http_transport`` are test/integration seams
     passed straight to :func:`open_harness_mcp_client`, so the agent never
     selects a transport.
     """
@@ -511,7 +489,6 @@ def open_harness_tool_provider(
             topology is not None
             or in_process_handler is not None
             or http_transport is not None
-            or stdio_transport is not None
         ):
             raise ValueError(
                 "open_harness_tool_provider takes either a client or topology "
@@ -523,7 +500,6 @@ def open_harness_tool_provider(
         resolved,
         in_process_handler=in_process_handler,
         http_transport=http_transport,
-        stdio_transport=stdio_transport,
     )
     return HarnessToolProvider(opened)
 
@@ -533,14 +509,13 @@ def open_harness_mcp_composition(
     *,
     in_process_handler: InProcessMcpHandler | None = None,
     http_transport: httpx.BaseTransport | None = None,
-    stdio_transport: McpTransport | None = None,
     attempts: int = DEFAULT_PROBE_ATTEMPTS,
     backoff_seconds: float = DEFAULT_PROBE_BACKOFF_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
 ) -> HarnessMcpComposition:
     """Open exactly one harness MCP client and connect the boundary over it.
 
-    The topology-aware :func:`open_harness_mcp_client` selects local stdio or
+    The topology-aware :func:`open_harness_mcp_client` selects the harness-hosted
     the remote ``/mcp`` HTTP transport.  The client is initialized once while
     connecting the boundary (with a bounded retry for a flaky first probe), and
     the returned composition shares that same client with its tool provider.
@@ -550,7 +525,6 @@ def open_harness_mcp_composition(
         resolved,
         in_process_handler=in_process_handler,
         http_transport=http_transport,
-        stdio_transport=stdio_transport,
         attempts=attempts,
         backoff_seconds=backoff_seconds,
         sleep=sleep,
@@ -636,7 +610,6 @@ __all__ = [
     "ReadArtifactArgs",
     "RunBacktestArgs",
     "RunStudyArgs",
-    "RunSweepArgs",
     "harness_mcp_skill",
     "harness_mcp_skill_ref",
     "open_harness_mcp_composition",
