@@ -1,7 +1,7 @@
 //! Entry-point flip coverage.
 //!
 //! T278 flips the Python console scripts onto the Rust binaries. The native
-//! `backtest-job` engine is wired through `harness-host` and parity-proven in
+//! `backtest-job` engine is wired through the JIT seam and proven in
 //! `harness-backtest/tests/parity.rs`; `trader` remains on Python until its
 //! supervision runner is ported. This test proves all four Rust process entry
 //! points exist and run.

@@ -32,8 +32,7 @@ fn default_catalog_is_capability_filtered() {
             "get_backtest_status",
             "get_run",
             "list_artifacts",
-            "read_artifact",
-            "run_sweep"
+            "read_artifact"
         ]
     );
     let mut opted_in = local_context();

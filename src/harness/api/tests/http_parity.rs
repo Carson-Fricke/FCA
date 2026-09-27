@@ -921,6 +921,7 @@ async fn native_engine_launch_reaches_a_terminal_state() {
             lake.clone(),
         )),
     );
+    let momentum_source = include_str!("fixtures/parity_momentum.rs");
     let document = json!({
         "schema_version": 1,
         "shell": "backtest",
@@ -930,11 +931,11 @@ async fn native_engine_launch_reaches_a_terminal_state() {
         "seed": 7,
         "strategy_instances": [{
             "instance_id": "spy-momentum",
-            "implementation": "strategies.harness_examples.intraday_momentum:IntradayMomentumStrategy",
-            "bundle_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "implementation": "jit",
+            "bundle_hash": backtest::sha256::digest_hex(momentum_source.as_bytes()),
             "capital_fraction": 1.0,
             "symbols": ["SPY"],
-            "parameters": {}
+            "parameters": {"source": momentum_source}
         }]
     });
 
@@ -994,7 +995,7 @@ async fn native_research_metrics_are_queryable_over_http() {
             lake.clone(),
         )),
     );
-    let model_source = "def fit(context):\n    return {'baseline': 0.5}\n\ndef observe(fit, context):\n    return {'trade_observations': len(context['trades'])}\n";
+    let study_source = include_str!("fixtures/parity_study.rs");
     let document = json!({
         "schema_version": 1,
         "shell": "study",
@@ -1005,16 +1006,11 @@ async fn native_research_metrics_are_queryable_over_http() {
         "data": {"symbols": ["SPY"]},
         "strategy_instances": [{
             "instance_id": "research-model",
-            "implementation": "harness.research.study:ResearchModelProgram",
-            "bundle_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "implementation": "jit",
+            "bundle_hash": backtest::sha256::digest_hex(study_source.as_bytes()),
             "capital_fraction": "1.0",
             "symbols": ["SPY"],
-            "parameters": {
-                "model_source": model_source,
-                "model_fit_entrypoint": "fit",
-                "model_observe_entrypoint": "observe",
-                "indicators": []
-            }
+            "parameters": {"source": study_source}
         }]
     });
 

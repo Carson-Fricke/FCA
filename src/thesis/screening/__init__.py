@@ -23,15 +23,6 @@ from thesis.screening.artifacts import (
     load_study,
     save_study,
 )
-from thesis.screening.context import (
-    CikIndex,
-    ClassificationPort,
-    FundamentalsPort,
-    LakeClassificationFacts,
-    LakeFundamentalsFacts,
-    LakeScreenerContext,
-    StaticCikIndex,
-)
 from thesis.screening.engine import (
     MarketBar,
     ScreenerContext,
@@ -41,12 +32,6 @@ from thesis.screening.engine import (
     ScreenerPortError,
     UniverseEntry,
     run_screener,
-)
-from thesis.screening.indicators import (
-    IndicatorBridgeError,
-    OhlcvBar,
-    OhlcvPort,
-    compute_indicator_value,
 )
 from thesis.screening.presets import (
     FilterError,

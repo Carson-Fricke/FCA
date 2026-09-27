@@ -415,22 +415,6 @@ def test_spawn_uses_trusted_parent_not_model_arguments() -> None:
     assert execution.structured["task"] == "evaluate the sample"
 
 
-def test_spawn_policy_is_permissive_by_default() -> None:
-    decision = SpawnPolicy().authorize(
-        requested_role="anything-goes",
-        requested_tools=("run_backtest", "run_study"),
-        requested_budget=7,
-        caller_tools=("run_backtest", "run_study", "run_sweep"),
-        parent_sub_agent_id=None,
-    )
-
-    assert isinstance(decision, SpawnAuthorization)
-    assert decision.role == "anything-goes"
-    assert decision.allowed_tools == ("run_backtest", "run_study")
-    assert decision.delegated_budget == 7
-    assert decision.dropped_tools == ()
-
-
 def test_spawn_policy_never_widens_the_callers_tools() -> None:
     decision = SpawnPolicy().authorize(
         requested_role="research",

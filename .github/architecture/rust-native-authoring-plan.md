@@ -4,11 +4,24 @@
 
 ## Status
 
-Approved direction, not started. This plan replaces the embedded-Python
-authoring surface (PyO3 `harness-host` adapter, Python strategies,
-indicators, screeners, and research models) with Rust-authored strategies,
-indicators, and studies that are JIT compiled when a model submits one and
-loaded behind the existing native engine seams.
+Wired. The SDK and JIT seam are proven; the embedded-Python authoring surface,
+the `host`/`py` crates, and the harness Python packages are deleted; the
+sweep interface is removed; Thesis emits authored Rust programs only and
+reaches the harness exclusively through the harness-hosted MCP endpoint, the
+HTTP API, and shared workspace files. All gates pass with no Python
+interpreter configured for the harness (`cargo fmt/clippy/test --workspace`
+plus `ruff`, `ruff format`, and the Python suite).
+
+Operator direction (2026-09-26): the phase order was changed so the Python
+deletion happens immediately after the SDK lands. The interpreter is no
+longer tested through, the Python-driven tests are deleted rather than
+maintained, and the repository gates must pass with no Python interpreter
+configured. The reference-strategy ports follow the deletion instead of
+preceding it. The `run_sweep` MCP tool and its local submitter/launcher were
+removed with the sweep surface. Known follow-ups are the remaining N3/N4
+content below: porting `mean_reversion`/`short_put_spread`, the Rust
+screening program kind, and the workflow prompt refinements in
+`prompts/creation.py` already authored above.
 
 ## Why
 
@@ -54,23 +67,52 @@ traits — Python is the replaceable part, not the architecture.
 
 ## Migration phases
 
-**Phase N1 — SDK and seam.** Build the SDK crate and the JIT compile/load
-seam; prove it by running one study through the engine from a JIT-loaded
-dylib. No Python removal yet.
+**Phase N1 — SDK and seam (done).** Built the `harness-strategy-sdk` crate
+(author-facing traits, versioned C ABI, entry-point macros) and the
+`harness-strategy-jit` seam (managed workspace with one shared `target/`,
+`cargo build --release` against the pinned toolchain, `libloading` load with
+ABI-version gating, source-digest caching). Proven by running an authored
+study through the real engine job seam from a JIT-loaded dylib against a
+Parquet lake, plus a strategy smoke run, the capability gate (a study
+runtime has no order path by construction), panic containment, and metric
+rejection handling.
 
-**Phase N2 — Port the reference strategies.** Port
-`strategies/harness_examples` (intraday momentum first) to the SDK and pin
-behavior against the existing tests (lake runs assert event/decision
-counts, not byte parity with the synthetic benchmark).
+**Phase N2 — Delete the embedded Python authoring surface now.** Remove the
+PyO3 adapter, `python.rs`, the Python research adapter, the screening
+sandbox, the Python indicator registry, the `py` extension crate, and the
+harness Python packages; delete the Python-driven tests (synthetic golden
+parity, HTTP parity through the interpreter) and the Python example
+strategies. The serving paths (MCP, HTTP, CLI) run only JIT-compiled
+Rust-authored sources: a configuration names `implementation: "jit"` and
+carries the authored source, whose digest feeds the existing bundle-hash
+provenance flow. Exit: `cargo fmt/clippy/test --workspace` passes with no
+`PYO3_PYTHON` and no interpreter on PATH.
 
-**Phase N3 — Flip the authoring surface.** MCP/HTTP study and backtest
-submission require Rust-authored sources; the Python adapter remains only
-for the legacy example suite until ported.
+**Phase N3 — Port the reference strategies.** Port `strategies/harness_examples`
+(intraday momentum first) to the SDK as authored Rust programs and re-pin
+their behavior with lake-run tests asserting event/decision counts.
 
-**Phase N4 — Delete the embedded interpreter.** Remove `harness-host`'s
-PyO3 adapter, `python.rs`, the research adapter, the screening sandbox, and
-the Python indicator registry; the runtime venv stops being a harness
-dependency (it stays for the lake's retained surface and thesis tooling).
+**Phase N4 — Thesis produces Rust implementations only, over hosted
+surfaces.** Thesis is the authoring platform, so the Python exit is not a
+transport change: every implementation Thesis produces becomes authored
+Rust. Research models store and emit authored Rust study programs
+(`implementation: "jit"`, source in `parameters`, bundle hash equal to the
+source digest) — the Python `model_source`/`fit`/`observe` plumbing and the
+indicator-binding schema are deleted. Strategy bundles persist Rust sources
+and hash those. Screener filters become Rust-authored programs or the
+feature pauses until ported. The hypothesis-workflow phase prompts author
+Rust against the SDK, and the model's edit-compile-run loop is the JIT seam
+itself: submit, read the compiler or engine failure, revise. No Python
+source or Python implementation string ever enters a submitted
+configuration, and the workflow tests assert the Rust emission.
+
+Integration topology (operator direction, 2026-09-26): the only substantive
+Thesis→harness channels are the harness-hosted MCP endpoint and the harness
+HTTP API; file artifacts in the shared workspace are the only filesystem
+overlap, readable by both sides. Thesis never spawns harness processes: the
+stdio MCP transport (Thesis spawning `harness mcp`) and the local
+`backtest-job`/`trader` process-exec boundary are deleted, and every launch
+and status query flows through the hosted MCP tools or the REST routes.
 
 ## Risks
 

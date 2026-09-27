@@ -3,8 +3,8 @@
 The workspace routes serve the catalog and the overview snapshot the UI uses
 to hydrate a workspace page.  This module also owns
 :func:`build_local_workspace_data`, the composition helper that builds the
-local services (local persistence plus a :class:`LocalHarnessProcess` adapter
-with an injected runner) for ``thesis serve`` and for tests.
+local services (local persistence plus the harness MCP tool boundary) for
+``thesis serve`` and for tests.
 """
 
 from __future__ import annotations
@@ -58,9 +58,7 @@ from thesis.http.strategies import StrategyDataService
 from thesis.integrations.harness_activation import (
     HarnessApiTransport,
     HarnessBoundary,
-    HarnessProcessRunner,
 )
-from thesis.integrations.mcp import open_local_harness_boundary
 from thesis.integrations.runtime_status import RuntimeStatusClient
 from thesis.screening.engine import MarketBar, ScreenerPortError, UniverseEntry
 
@@ -575,7 +573,6 @@ def build_local_workspace_data(
     *,
     workspace_root: str | pathlib.Path | None = None,
     workspace_template: str | pathlib.Path | None = None,
-    harness_runner: HarnessProcessRunner | None = None,
     harness_transport: HarnessApiTransport | None = None,
     harness_base_url: str = "http://127.0.0.1:8777",
     harness_boundary: HarnessBoundary | None = None,
@@ -589,8 +586,8 @@ def build_local_workspace_data(
 ) -> WorkspaceDataBundle:
     """Compose the local-mode services behind the workspace DATA routes.
 
-    ``harness_runner`` builds a :class:`LocalHarnessProcess` with an injected
-    process runner; without one the backtest launch surface fails closed.
+    ``harness_boundary`` supplies the harness MCP tool boundary (catalog-derived
+    capabilities); without one the backtest launch surface fails closed.
     ``harness_transport`` builds the status client behind the portfolio and
     risk-decision seams; without one those surfaces fail closed with 503.
     ``backtest_store`` and ``artifact_importer`` inject the backtest run
@@ -605,15 +602,9 @@ def build_local_workspace_data(
     """
     resolved_clock = clock if clock is not None else _utc_now
     ids = id_factory if id_factory is not None else _counting_id_factory()
-    # Local composition prefers the harness MCP tool boundary (catalog-derived
-    # capabilities) and falls back to the direct process boundary when the MCP
-    # server cannot start. An explicit boundary always wins.
-    if harness_boundary is not None:
-        harness: HarnessBoundary | None = harness_boundary
-    elif harness_runner is not None:
-        harness = open_local_harness_boundary(process_runner=harness_runner)
-    else:
-        harness = None
+    # Local composition speaks only to the harness-hosted MCP boundary; there
+    # is no process fallback. An explicit boundary always wins.
+    harness: HarnessBoundary | None = harness_boundary
     status_client = RuntimeStatusClient(
         harness_base_url,
         harness_transport

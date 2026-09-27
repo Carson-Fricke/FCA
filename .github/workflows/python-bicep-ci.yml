@@ -10,11 +10,9 @@ on:
       - "tests/**"
       - "pyproject.toml"
       - "uv.lock"
-      - "setup.py"
       - "src/harness/**"
       - "src/lake/**"
       - "src/ui/**"
-      - "strategies/**"
       - "Dockerfile"
       - ".dockerignore"
       - "infra/**"
@@ -30,11 +28,9 @@ on:
       - "tests/**"
       - "pyproject.toml"
       - "uv.lock"
-      - "setup.py"
       - "src/harness/**"
       - "src/lake/**"
       - "src/ui/**"
-      - "strategies/**"
       - "Dockerfile"
       - ".dockerignore"
       - "infra/**"
@@ -76,10 +72,6 @@ jobs:
       - name: Ruff format check
         run: uv run --extra dev ruff format --check .
 
-      - name: Strategy sandbox lint sweep
-        run: |
-          uv run --extra dev python -c "from harness.strategy.lint import lint_strategy_directory; report = lint_strategy_directory('strategies'); print(report.render()); report.raise_for_status()"
-
       - name: ty type check
         run: uv run --extra dev ty check
 
@@ -102,19 +94,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
-        with:
-          enable-cache: true
-
-      - name: Install Python 3.12
-        run: uv python install 3.12
-        working-directory: ${{ github.workspace }}
-
-      - name: Sync locked development environment
-        run: uv sync --locked --extra dev
-        working-directory: ${{ github.workspace }}
-
       - name: Install pinned Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
@@ -127,9 +106,6 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Run workspace tests
-        env:
-          PYO3_PYTHON: ${{ github.workspace }}/.venv/bin/python
-          PYTHONPATH: ${{ github.workspace }}/.venv/lib/python3.12/site-packages
         run: cargo test --workspace --locked
 
   lake-rust:
@@ -181,8 +157,6 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
 
-      - name: Build Rust native core
-        run: cargo build --locked -p native --manifest-path src/harness/Cargo.toml
 
       - name: Sync locked development environment
         run: uv sync --locked --extra dev

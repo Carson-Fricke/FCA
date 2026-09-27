@@ -23,7 +23,7 @@ use mcp::tools::{
 use mcp::transport::serve_stdio;
 use serde_json::{Map, Value};
 
-use crate::local::{NativeBacktestSubmitter, NativeStudySubmitter, NativeSweepSubmitter};
+use crate::local::{NativeBacktestSubmitter, NativeStudySubmitter};
 
 /// Environment variable consulted for the remote API base URL.
 pub const API_BASE_URL_VARIABLE: &str = "HARNESS_API_BASE_URL";
@@ -177,7 +177,6 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
             run_store.clone(),
             jobs.clone(),
         )));
-        context.sweep_submitter = Some(Arc::new(NativeSweepSubmitter::new(run_store, jobs, root)));
     }
     let context = context
         .validate()

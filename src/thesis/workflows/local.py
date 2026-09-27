@@ -29,7 +29,6 @@ from thesis.agent.router import ModelProfile, ModelProvider, Role, RolePolicy
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.skills import SkillRegistry
 from thesis.integrations.mcp import HarnessMcpClient
-from thesis.research.indicators import IndicatorStore
 from thesis.research.models import ResearchModelStore
 from thesis.workflows.backtests import (
     BacktestMode,
@@ -252,7 +251,6 @@ def build_local_workflow_runtime(
     backtest_mode: BacktestMode = "local",
     metadata: Mapping[str, object] | None = None,
     research_model_store: ResearchModelStore | None = None,
-    indicator_store: IndicatorStore | None = None,
     conversations: Conversations | None = None,
 ) -> WorkflowRuntime:
     """Compose the local workflow runtime over one OpenRouter model profile.
@@ -283,7 +281,6 @@ def build_local_workflow_runtime(
         else BacktestResearchModelRunner(
             McpStudyRunner(harness_tools, mode=backtest_mode, metadata=metadata),
             models=research_model_store,
-            indicators=indicator_store,
         )
     )
     model_profiles = {
@@ -321,7 +318,6 @@ def build_local_workflow_runtime(
         research_model_store=(
             research_model_store if resolved_research_runner is None else None
         ),
-        indicator_store=(indicator_store if resolved_research_runner is None else None),
         research_runner=resolved_research_runner,
         conversations=conversations,
     )

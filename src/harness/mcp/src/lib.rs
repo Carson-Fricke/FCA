@@ -3,7 +3,7 @@
 //! This crate ports `harness.mcp` onto Rust: the capability-filtered tool
 //! catalog, the pure JSON-RPC dispatch, the bearer credential resolution, and
 //! the newline-delimited stdio transport. Every external boundary (process
-//! runner, remote HTTP transport, sweep submitter, configuration loader) is
+//! runner, remote HTTP transport, configuration loader) is
 //! injected, so the server is exercised without spawning processes or
 //! touching the network.
 

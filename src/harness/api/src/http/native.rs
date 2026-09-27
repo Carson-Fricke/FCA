@@ -1,17 +1,18 @@
 //! Native Rust backtest runner for the harness HTTP launch route.
 //!
-//! [`NativeBacktestRunner`] plugs the ported Rust engine into the
+//! [`NativeBacktestRunner`] plugs the Rust engine into the
 //! [`BacktestRunner`] seam used by [`crate::http::launcher::InProcessLauncher`].
 //! The submitted JSON configuration is decoded into the engine's typed
 //! [`BacktestConfig`] through the same YAML value model the file loader uses,
-//! then the engine core drives the configured Python strategies through the
-//! `harness-host` PyO3 adapter — the same entry point the `backtest-job`
+//! then the engine drives the configured JIT-authored Rust programs through
+//! the `harness-strategy-jit` seam — the same entry point the `backtest-job`
 //! command uses.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use backtest::backtest::config::BacktestConfig;
+use backtest::backtest::engine_core::EngineOptions;
 use backtest::backtest::yaml::YamlValue;
 use num::PyDecimal;
 use serde_json::Value;
@@ -90,12 +91,16 @@ impl BacktestRunner for NativeBacktestRunner {
         let data_root = self.resolve_data_root()?;
         let (outcome, _artifact_path) =
             match configuration.document.get("shell").and_then(Value::as_str) {
-                Some("study") => {
-                    host::study::run_study_config(&native, Some(directory.as_path()), &data_root)
-                        .map_err(|error| error.to_string())?
-                }
-                _ => host::backtest::run_backtest_config(
+                Some("study") => harness_strategy_jit::run_study_configuration(
                     &native,
+                    &EngineOptions::default(),
+                    Some(directory.as_path()),
+                    &data_root,
+                )
+                .map_err(|error| error.to_string())?,
+                _ => harness_strategy_jit::run_backtest_configuration(
+                    &native,
+                    &EngineOptions::default(),
                     Some(directory.as_path()),
                     &data_root,
                 )

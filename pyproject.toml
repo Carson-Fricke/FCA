@@ -36,18 +36,14 @@ dev = [
 
 [project.scripts]
 lake = "lake.cli:main"
-harness = "harness.cli:main"
-api = "harness.cli.api:main"
-backtest-job = "harness.cli.backtest_job:main"
-trader = "harness.cli.trader:main"
 thesis = "thesis.cli:main"
 
 [tool.setuptools]
-package-dir = { "" = "src", "strategies" = "strategies" }
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
-where = ["src", "."]
-include = ["harness*", "lake*", "thesis*", "strategies*"]
+where = ["src"]
+include = ["lake*", "thesis*"]
 namespaces = false
 
 [tool.pytest.ini_options]
@@ -56,7 +52,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
-src = ["src", "strategies", "tests"]
+src = ["src", "tests"]
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -66,4 +62,4 @@ select = ["B", "E4", "E7", "E9", "F", "I", "UP"]
 python-version = "3.12"
 
 [tool.ty.src]
-include = ["src", "strategies", "tests"]
+include = ["src", "tests"]

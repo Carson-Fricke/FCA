@@ -9,9 +9,8 @@ use super::server::{
 };
 use super::tools::{
     Boundary, ConfigurationLoader, ContextError, HarnessToolsContext, ProcessOutcome,
-    ProcessRunner, RemoteResponse, RemoteTransport, SweepSubmitter, TOOL_BACKTEST_CONFIG_TEMPLATE,
+    ProcessRunner, RemoteResponse, RemoteTransport, TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_BACKTEST_STATUS, TOOL_GET_RUN, TOOL_LIST_ARTIFACTS, TOOL_READ_ARTIFACT, TOOL_RUN_BACKTEST,
-    TOOL_RUN_SWEEP,
 };
 use super::transport::{decode_message, serve_stdio};
 use super::{create_server, InProcessTransport};
@@ -81,25 +80,10 @@ impl RemoteTransport for RecordingTransport {
     }
 }
 
-struct FixedSubmitter;
-
-impl SweepSubmitter for FixedSubmitter {
-    fn submit(&self, _spec_path: &str) -> Result<Value, String> {
-        Ok(json!({
-            "sweep_id": "sweep-1",
-            "requested": 2,
-            "expanded": 2,
-            "duplicates_skipped": 0,
-            "run_ids": ["r1", "r2"],
-        }))
-    }
-}
-
 fn local_server(runner: Arc<dyn ProcessRunner>) -> super::McpServer {
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
     context.runner = Some(runner);
-    context.sweep_submitter = Some(Arc::new(FixedSubmitter));
     create_server(context.validate().expect("context")).expect("server")
 }
 
@@ -181,8 +165,7 @@ fn ping_and_tools_list_work() {
             TOOL_BACKTEST_STATUS,
             TOOL_GET_RUN,
             TOOL_LIST_ARTIFACTS,
-            TOOL_READ_ARTIFACT,
-            TOOL_RUN_SWEEP
+            TOOL_READ_ARTIFACT
         ]
     );
 }
@@ -297,24 +280,6 @@ fn unknown_tool_is_invalid_params() {
         }),
     );
     assert_eq!(response["error"]["code"], INVALID_PARAMS);
-}
-
-#[test]
-fn run_sweep_uses_the_injected_submitter() {
-    let server = local_server(Arc::new(EchoRunner));
-    let response = call(
-        &server,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": TOOL_RUN_SWEEP, "arguments": {"spec_path": "spec.json"}}
-        }),
-    );
-    assert_eq!(
-        response["result"]["structuredContent"]["sweep_id"],
-        "sweep-1"
-    );
 }
 
 #[test]

@@ -79,59 +79,6 @@ fn use_shared_lake() {
     std::env::set_var("HARNESS_DATA_DIR", lake);
 }
 
-#[test]
-fn canonical_conversion_tags_floats_as_decimals() {
-    assert_eq!(to_canonical_json(&json!(4)), JsonValue::Int(4));
-    assert_eq!(
-        to_canonical_json(&json!("0.05")),
-        JsonValue::String("0.05".to_string())
-    );
-    assert_eq!(
-        normalize_parameter(&to_canonical_json(&json!(0.5))),
-        JsonValue::String("0.5".to_string())
-    );
-}
-
-#[test]
-fn sweep_spec_parses_the_documented_document() {
-    let document = json!({
-        "base_config_path": repo_root().join("config/harness/backtest.yaml").to_string_lossy(),
-        "instance_id": "spy-momentum",
-        "mode": "grid",
-        "space": {"lookback": [4, 8]},
-    });
-    let (spec, _base) = parse_sweep_spec(&document).expect("spec");
-    assert_eq!(spec.expand().len(), 2);
-}
-
-#[test]
-fn sweep_submitter_expands_and_records_a_sweep() {
-    let root = std::env::temp_dir().join(format!(
-        "harness-sweep-submit-{}-{}",
-        std::process::id(),
-        Utc::now().timestamp_nanos_opt().unwrap_or(0)
-    ));
-    let _ = fs::remove_dir_all(&root);
-    let run_store: Arc<dyn RunStore> = Arc::new(FileSystemRunStore::new(&root));
-    let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
-    let submitter = NativeSweepSubmitter::new(run_store, jobs, &root);
-    let spec_path = root.join("spec.json");
-    fs::create_dir_all(&root).expect("dir");
-    let document = json!({
-        "base_config_path": repo_root().join("config/harness/backtest.yaml").to_string_lossy(),
-        "instance_id": "spy-momentum",
-        "mode": "grid",
-        "space": {"lookback": [4]},
-    });
-    fs::write(&spec_path, serde_json::to_vec(&document).expect("json")).expect("write");
-    let payload = mcp::tools::SweepSubmitter::submit(&submitter, spec_path.to_str().unwrap())
-        .expect("submit");
-    assert_eq!(payload["expanded"], 1);
-    assert_eq!(payload["run_ids"].as_array().map(Vec::len), Some(1));
-    assert!(payload["sweep_id"].as_str().map(str::len) == Some(64));
-    let _ = fs::remove_dir_all(&root);
-}
-
 fn poll_terminal(jobs: &Arc<dyn JobRepository>, job_id: &str) -> JobState {
     for _ in 0..600 {
         if let Some(record) = jobs.get(job_id) {
@@ -196,7 +143,7 @@ fn native_backtest_submitter_is_async_and_registers_the_full_result_set() {
 }
 
 #[test]
-fn native_submitter_persists_research_model_custom_metrics() {
+fn native_submitter_persists_authored_study_custom_metrics() {
     let root = std::env::temp_dir().join(format!(
         "harness-research-submit-{}-{}",
         std::process::id(),
@@ -209,9 +156,47 @@ fn native_submitter_persists_research_model_custom_metrics() {
     let submitter = NativeStudySubmitter::new(run_store.clone(), jobs.clone());
     let config_path = root.join("research.json");
     use_shared_lake();
-    let model_source = "def observe(fit, context):\n    sma = (context['indicators'].get('spy_sma') or {}).get('value') or 0.0\n    return {'trade_observations': context['indicators']['workspace_trade_count'], 'global_sma': sma}\n\ndef fit(context):\n    return {'baseline': 0.5}\n";
-    let indicator_source =
-        "def calculate(context, parameters):\n    return len(context['trades'])\n";
+    let study_source = r#"
+use harness_strategy_sdk::{
+    export_study_program, MetricPublisher, QuoteEvent, StudyProgram, TradeEvent,
+};
+use harness_strategy_sdk::serde_json::Value;
+
+/// Count the observed events and publish the mean trade price.
+struct TradeObserver {
+    trades: u64,
+    quotes: u64,
+    price_sum: f64,
+}
+
+impl StudyProgram for TradeObserver {
+    fn new(_parameters: Value) -> Self {
+        Self { trades: 0, quotes: 0, price_sum: 0.0 }
+    }
+
+    fn on_quote(&mut self, _event: &QuoteEvent) {
+        self.quotes += 1;
+    }
+
+    fn on_trade(&mut self, event: &TradeEvent) {
+        self.trades += 1;
+        if let Ok(price) = event.price.to_string().parse::<f64>() {
+            self.price_sum += price;
+        }
+    }
+
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("trade_observations", self.trades as f64);
+        let _ = metrics.publish("quote_observations", self.quotes as f64);
+        if self.trades > 0 {
+            let _ = metrics.publish("global_sma", self.price_sum / self.trades as f64);
+        }
+    }
+}
+
+export_study_program!(TradeObserver);
+"#;
+    let digest = backtest::sha256::digest_hex(study_source.as_bytes());
     let document = json!({
         "schema_version": 1,
         "shell": "study",
@@ -220,34 +205,12 @@ fn native_submitter_persists_research_model_custom_metrics() {
         "data": {"symbols": ["SPY"]},
         "strategy_instances": [{
             "instance_id": "research-model",
-            "implementation": "harness.research.study:ResearchModelProgram",
-            "bundle_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "implementation": "jit",
+            "bundle_hash": digest,
             "capital_fraction": "1.0",
             "symbols": ["SPY"],
             "parameters": {
-                "model_source": model_source,
-                "model_fit_entrypoint": "fit",
-                "model_observe_entrypoint": "observe",
-                "indicators": [
-                    {
-                        "alias": "spy_sma",
-                        "scope": "global",
-                        "name": "sma",
-                        "symbol": "SPY",
-                        "parameters": {"period": 2, "bucket": "1d"},
-                        "reference": "global:sma"
-                    },
-                    {
-                        "alias": "workspace_trade_count",
-                        "scope": "workspace",
-                        "name": "trade_count",
-                        "symbol": "SPY",
-                        "parameters": {},
-                        "reference": "workspace:workspace-one/trade_count@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                        "entrypoint": "calculate",
-                        "source": indicator_source
-                    }
-                ]
+                "source": study_source
             }
         }]
     });

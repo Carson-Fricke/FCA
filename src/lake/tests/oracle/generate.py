@@ -29,12 +29,12 @@ from pathlib import Path
 from typing import Any
 
 from exchange_calendars import get_calendar
-
-from lake.catalog.models import CoverageRecord, CoverageStatus
-from lake.contracts import AssetClass, DataType, partition_path
 from lake.coverage.application import EnsureSpec, ensure_job_id
 from lake.local.state import LocalCatalogRepository
 from lake.storage.parquet import LocalFilesystemStore, ParquetWriter
+
+from lake.catalog.models import CoverageRecord, CoverageStatus
+from lake.contracts import AssetClass, DataType, partition_path
 
 HERE = Path(__file__).resolve().parent
 LAKE_ROOT = HERE.parents[1]

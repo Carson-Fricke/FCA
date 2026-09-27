@@ -3,12 +3,10 @@ from __future__ import annotations
 import hashlib
 import subprocess
 from collections.abc import Sequence
-from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
-from harness.strategy import CALLBACK_ORDER
 from thesis.artifacts.importer import (
     ArtifactHashMismatchError,
     ArtifactImporter,
@@ -43,50 +41,6 @@ def _bundle() -> StrategyBundle:
     )
 
 
-def test_equivalent_source_config_and_dependencies_have_one_identity() -> None:
-    first = _bundle()
-    second = StrategyBundle.create(
-        strategy_id="momentum",
-        version="1.2.0",
-        source={
-            "strategy.py": "from harness.strategy import Strategy\n\nclass Momentum(Strategy):\n    pass\n"
-        },
-        tests={"test_strategy.py": b"def test_strategy():\n    assert True\n"},
-        dependencies=("pandas==2.2.3", "numpy==2.1.0"),
-        platform_versions={"harness": "1.0.0", "python": "3.12.6"},
-        harness_configuration={"symbols": ["SPY", "AAPL"], "seed": 7},
-        risk_declarations={"max_position": "100"},
-        capability_declarations={"network": "disabled"},
-        harness_manifest_reference="manifest-2025",
-    )
-
-    assert first.bundle_id == second.bundle_id
-    assert first.canonical_bytes == second.canonical_bytes
-    assert (
-        first.source[0].content
-        == b"from harness.strategy import Strategy\n\nclass Momentum(Strategy):\n    pass\n"
-    )
-    with pytest.raises(FrozenInstanceError):
-        type(first).__setattr__(first, "version", "2.0.0")
-
-
-def test_bundle_manifest_publishes_harness_strategy_contract() -> None:
-    bundle = _bundle()
-
-    manifest = bundle.manifest()
-
-    assert manifest["bundleId"] == bundle.bundle_id
-    assert bundle.harness_contract == "harness.strategy.contracts.Strategy"
-    assert (
-        manifest["canonicalBytesSha256"]
-        == hashlib.sha256(bundle.canonical_bytes).hexdigest()
-    )
-    assert bundle.canonical_document["harnessContract"] == {
-        "callbacks": list(CALLBACK_ORDER),
-        "name": "harness.strategy.contracts.Strategy",
-    }
-
-
 class RecordingValidator:
     def __init__(self, result: StrategyValidationResult) -> None:
         self.result = result
@@ -95,22 +49,6 @@ class RecordingValidator:
     def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
         self.requests.append(request)
         return self.result
-
-
-def test_sandbox_handoff_uses_published_boundary_before_backtest() -> None:
-    bundle = _bundle()
-    validator = RecordingValidator(StrategyValidationResult(True, validation_id="v-1"))
-
-    result = handoff_to_sandbox(bundle, validator)
-
-    assert result.validation_id == "v-1"
-    assert validator.requests
-    request = validator.requests[0]
-    assert request.bundle_sha256 == bundle.bundle_sha256
-    assert request.harness_contract == "harness.strategy.contracts.Strategy"
-    assert request.callback_order == CALLBACK_ORDER
-    assert request.network_access == "disabled"
-    assert request.source == bundle.source
 
 
 def test_rejected_sandbox_handoff_prevents_launch() -> None:

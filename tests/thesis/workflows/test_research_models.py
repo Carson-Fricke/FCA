@@ -1,19 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from thesis.research.indicators import (
-    IndicatorScope,
-    InMemoryIndicatorStore,
-    WorkspaceIndicator,
-    WorkspaceIndicatorStore,
-)
 from thesis.research.models import (
-    IndicatorBinding,
     InMemoryResearchModelStore,
     ResearchModel,
     ResearchModelError,
@@ -28,6 +22,50 @@ from thesis.workflows.research_models import (
     ResearchModelRunRequest,
     study_window,
 )
+
+_STUDY_SOURCE = """use harness_strategy_sdk::{
+    export_study_program, MetricPublisher, QuoteEvent, StudyProgram, TradeEvent,
+};
+use harness_strategy_sdk::serde_json::Value;
+
+struct PairModel;
+
+impl StudyProgram for PairModel {
+    fn new(_parameters: Value) -> Self {
+        Self
+    }
+
+    fn on_quote(&mut self, _event: &QuoteEvent) {}
+
+    fn on_trade(&mut self, _event: &TradeEvent) {}
+
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("rolling_corr_60d_median", 0.73);
+        let _ = metrics.publish("fit.baseline", 0.5);
+    }
+}
+
+export_study_program!(PairModel);
+"""
+
+
+def _model(**overrides: object) -> ResearchModel:
+    fields: dict[str, object] = {
+        "model_id": "pair-model",
+        "version": "1.0.0",
+        "description": "Pair regularity model.",
+        "source": _STUDY_SOURCE,
+        "outputs": ("rolling_corr_60d_median",),
+        "harness_configuration": {
+            "symbols": ["MSTR", "IBIT"],
+            "seed": 7,
+            "start": "2024-01-01T00:00:00Z",
+            "end": "2024-03-01T00:00:00Z",
+        },
+        "tests": {"test_model.txt": "Covered by the harness jit suite.\n"},
+    }
+    fields.update(overrides)
+    return ResearchModel(**fields)
 
 
 class _Backtests:
@@ -69,53 +107,11 @@ class _Paths:
         return path
 
 
-def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
-    indicator = WorkspaceIndicator(
-        name="rolling_corr",
-        version="1.0.0",
-        description="Pair correlation.",
-        source="def calculate(context, parameters):\n    return 0.73\n",
-        tests={"test_indicator.py": "def test_indicator():\n    assert True\n"},
-    )
-    model = ResearchModel(
-        model_id="pair-model",
-        version="1.0.0",
-        description="Pair regularity model.",
-        source=(
-            "def fit(context):\n"
-            "    return {'baseline': 0.5}\n\n"
-            "def observe(fit, context):\n"
-            "    return {'rolling_corr_60d_median': "
-            "context['indicators']['pair_corr']}\n"
-        ),
-        fit_entrypoint="fit",
-        observe_entrypoint="observe",
-        outputs=("rolling_corr_60d_median",),
-        harness_configuration={
-            "symbols": ["MSTR", "IBIT"],
-            "seed": 7,
-            "start": "2024-01-01T00:00:00Z",
-            "end": "2024-03-01T00:00:00Z",
-        },
-        indicators=(
-            IndicatorBinding(
-                alias="pair_corr",
-                scope=IndicatorScope.WORKSPACE,
-                name="rolling_corr",
-                symbol="MSTR",
-                definition=indicator,
-            ),
-        ),
-        tests={"test_model.py": "def test_model():\n    assert True\n"},
-    )
+def test_runner_publishes_the_authored_rust_program_as_a_jit_study() -> None:
+    model = _model()
     backtests = _Backtests()
     models = InMemoryResearchModelStore()
-    indicators = InMemoryIndicatorStore()
-    runner = BacktestResearchModelRunner(
-        backtests,
-        models=models,
-        indicators=indicators,
-    )
+    runner = BacktestResearchModelRunner(backtests, models=models)
 
     result = runner.run(
         ResearchModelRunRequest(
@@ -134,7 +130,6 @@ def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
         }
     }
     assert result.model_reference.workspace_id == "workspace-one"
-    assert result.indicator_references[0].workspace_id == "workspace-one"
     assert result.fitted_reference is not None
     assert result.fitted_reference.key.startswith("workspace-fit:workspace-one/")
     assert result.workspace_artifact.startswith("models/runs/")
@@ -148,72 +143,30 @@ def test_runner_publishes_workspace_sources_and_uses_platform_adapter() -> None:
     assert config["start"] == "2024-01-01T00:00:00Z"
     assert config["end"] == "2024-03-01T00:00:00Z"
     instances = cast("Sequence[Mapping[str, object]]", config["strategy_instances"])
-    assert instances[0]["implementation"] == (
-        "harness.research.study:ResearchModelProgram"
+    assert instances[0]["implementation"] == "jit"
+    assert (
+        instances[0]["bundle_hash"]
+        == hashlib.sha256(model.source.encode("utf-8")).hexdigest()
     )
     parameters = cast("Mapping[str, object]", instances[0]["parameters"])
-    assert parameters["model_source"] == model.source
-    bindings = cast("Sequence[Mapping[str, object]]", parameters["indicators"])
-    assert bindings[0]["source"] == indicator.source
+    assert parameters["source"] == model.source
     dependencies = cast("Sequence[str]", request.bundle.dependencies)
     assert result.model_reference.key in dependencies
 
 
+def test_runner_rejects_a_model_source_that_is_not_sdk_authored() -> None:
+    with pytest.raises(ResearchModelError, match="harness-strategy-sdk"):
+        _model(source="def fit(context):\n    return {}\n")
+
+    with pytest.raises(ResearchModelError, match="export_study_program!"):
+        _model(source="use harness_strategy_sdk::StudyProgram;\nfn main() {}\n")
+
+
 def test_runner_persists_artifacts_through_workspace_stores(tmp_path: Path) -> None:
-    indicator = WorkspaceIndicator(
-        name="rolling_corr",
-        version="1.0.0",
-        description="Pair correlation.",
-        source="def calculate(context, parameters):\n    return 0.73\n",
-        tests={"test_indicator.py": "def test_indicator():\n    assert True\n"},
-    )
     paths = _Paths(tmp_path)
-    indicators = WorkspaceIndicatorStore(paths)
-    published = indicators.publish("workspace-one", indicator)
-
-    # The binding carries only the content hash: resolution must go through
-    # the workspace store (binding.resolve -> store.load), never an inline
-    # definition.
-    binding = IndicatorBinding(
-        alias="pair_corr",
-        scope=IndicatorScope.WORKSPACE,
-        name="rolling_corr",
-        symbol="MSTR",
-        content_sha256=published.content_sha256,
-    )
-    reference = binding.resolve("workspace-one", indicators)
-    assert reference == published
-    assert indicators.load("workspace-one", reference) == indicator
-
-    model = ResearchModel(
-        model_id="pair-model",
-        version="1.0.0",
-        description="Pair regularity model.",
-        source=(
-            "def fit(context):\n"
-            "    return {'baseline': 0.5}\n\n"
-            "def observe(fit, context):\n"
-            "    return {'rolling_corr_60d_median': "
-            "context['indicators']['pair_corr']}\n"
-        ),
-        fit_entrypoint="fit",
-        observe_entrypoint="observe",
-        outputs=("rolling_corr_60d_median",),
-        harness_configuration={
-            "symbols": ["MSTR", "IBIT"],
-            "seed": 7,
-            "start": "2024-01-01T00:00:00Z",
-            "end": "2024-03-01T00:00:00Z",
-        },
-        indicators=(binding,),
-        tests={"test_model.py": "def test_model():\n    assert True\n"},
-    )
+    model = _model()
     models = WorkspaceResearchModelStore(paths)
-    runner = BacktestResearchModelRunner(
-        _Backtests(),
-        models=models,
-        indicators=indicators,
-    )
+    runner = BacktestResearchModelRunner(_Backtests(), models=models)
 
     result = runner.run(
         ResearchModelRunRequest(
@@ -228,30 +181,20 @@ def test_runner_persists_artifacts_through_workspace_stores(tmp_path: Path) -> N
     workspace = tmp_path / "workspace-one"
     model_directory = workspace / result.model_reference.relative_path
     assert (model_directory / "definition.json").is_file()
-    assert (model_directory / "model.py").read_text(encoding="utf-8") == model.source
+    assert (model_directory / "program.rs").read_text(encoding="utf-8") == model.source
     assert result.fitted_reference is not None
     assert (workspace / result.fitted_reference.relative_path).is_file()
     assert result.workspace_artifact.startswith("models/runs/")
     assert (workspace / result.workspace_artifact).is_file()
-    assert result.indicator_references[0].content_sha256 == indicator.content_sha256
     assert models.load("workspace-one", result.model_reference) == model
 
 
 def test_runner_falls_back_to_request_universe_when_configuration_omits_symbols() -> (
     None
 ):
-    model = ResearchModel(
+    model = _model(
         model_id="relative-value",
-        version="1.0.0",
         description="Relative value model.",
-        source=(
-            "def fit(context):\n"
-            "    return {'baseline': 0.5}\n\n"
-            "def observe(fit, context):\n"
-            "    return {'observed_metric': 1.0}\n"
-        ),
-        fit_entrypoint="fit",
-        observe_entrypoint="observe",
         outputs=("observed_metric",),
         harness_configuration={
             "requiredSymbols": ["MSTR", "IBIT"],
@@ -259,15 +202,9 @@ def test_runner_falls_back_to_request_universe_when_configuration_omits_symbols(
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-03-01T00:00:00Z",
         },
-        indicators=(),
-        tests={"test_model.py": "def test_model():\n    assert True\n"},
     )
     backtests = _Backtests()
-    runner = BacktestResearchModelRunner(
-        backtests,
-        models=InMemoryResearchModelStore(),
-        indicators=InMemoryIndicatorStore(),
-    )
+    runner = BacktestResearchModelRunner(backtests, models=InMemoryResearchModelStore())
 
     runner.run(
         ResearchModelRunRequest(

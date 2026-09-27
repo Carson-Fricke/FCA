@@ -103,9 +103,6 @@ def run_research_model(
         result={
             **result.as_dict(),
             "researchModelReference": model_run.model_reference.key,
-            "indicatorReferences": [
-                reference.key for reference in model_run.indicator_references
-            ],
             "workspaceArtifact": model_run.workspace_artifact,
             "fittedModelReference": (
                 None

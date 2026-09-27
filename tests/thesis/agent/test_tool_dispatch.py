@@ -237,19 +237,6 @@ def test_local_in_process_call_invokes_harness_tool() -> None:
     }
 
 
-def test_stdio_call_invokes_harness_tool() -> None:
-    handler = FakeHandler()
-    provider = open_harness_tool_provider(
-        HarnessMcpTopology(thesis_location="remote", harness_location="local"),
-        stdio_transport=HandlerTransport(handler),
-    )
-
-    result = provider.call_tool("get_run", {"run_id": "run-7"})
-
-    assert result.ok, result.failure
-    assert handler.calls[-1] == {"name": "get_run", "arguments": {"run_id": "run-7"}}
-
-
 def test_remote_http_call_invokes_harness_tool() -> None:
     server = FakeHttpServer()
     provider = _remote_provider(server)

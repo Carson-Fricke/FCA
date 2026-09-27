@@ -1,15 +1,16 @@
 """Execute workspace research models over deterministic harness replay.
 
-The public domain objects stay separate: this port accepts a
-:class:`~thesis.research.models.ResearchModel`, publishes it and its workspace
-indicators, and returns named observations. The current harness implementation
-reuses market-event replay through a platform-owned no-order adapter; workspace
-source is passed as data to that adapter and is never installed as a strategy
-or global indicator.
+The public domain objects stay separate: this runner accepts a
+:class:`~thesis.research.models.ResearchModel` whose ``source`` is an authored
+Rust study program (``harness-strategy-sdk``), publishes it in the workspace,
+and returns named observations. The harness JIT-compiles the program into a
+no-order study at run time; workspace source is data to that compile step and
+is never installed as a strategy.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections.abc import Mapping, Sequence
@@ -17,15 +18,6 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Protocol
 
-from harness.indicators import IndicatorSpec
-from thesis.research.indicators import (
-    IndicatorRef,
-    IndicatorScope,
-    IndicatorStore,
-    InMemoryIndicatorStore,
-    ScopedIndicatorResolver,
-    WorkspaceIndicator,
-)
 from thesis.research.models import (
     FittedModelRef,
     InMemoryResearchModelStore,
@@ -61,7 +53,6 @@ class ResearchModelRunResult:
     """A model publication plus its harness-backed observations."""
 
     model_reference: ResearchModelRef
-    indicator_references: tuple[IndicatorRef, ...]
     backtest: BacktestRunResult
     workspace_artifact: str
     runtime_configuration: Mapping[str, object]
@@ -77,67 +68,26 @@ class ResearchModelRunner(Protocol):
 
 
 class BacktestResearchModelRunner:
-    """Run research source through the platform's no-order replay adapter."""
+    """Run authored Rust study programs through the harness JIT seam."""
 
     def __init__(
         self,
         backtests: BacktestRunner,
         *,
         models: ResearchModelStore | None = None,
-        indicators: IndicatorStore | None = None,
     ) -> None:
         if not callable(getattr(backtests, "run", None)):
             raise TypeError("backtests must implement BacktestRunner")
         self._backtests = backtests
         self._models = models or InMemoryResearchModelStore()
-        self._indicators = indicators or InMemoryIndicatorStore()
-        self._resolver = ScopedIndicatorResolver(self._indicators)
 
     def run(self, request: ResearchModelRunRequest) -> ResearchModelRunResult:
-        """Publish the model/dependencies and execute one deterministic replay."""
+        """Publish the model and execute one deterministic replay."""
         if not isinstance(request, ResearchModelRunRequest):
             raise TypeError("request must be a ResearchModelRunRequest")
         model_reference = self._models.publish(request.workspace_id, request.model)
-        indicator_references: list[IndicatorRef] = []
-        bindings: list[dict[str, object]] = []
-        for binding in request.model.indicators:
-            reference = binding.resolve(request.workspace_id, self._indicators)
-            resolved = self._resolver.resolve(
-                reference, workspace_id=request.workspace_id
-            )
-            indicator_references.append(reference)
-            document: dict[str, object] = {
-                "alias": binding.alias,
-                "name": binding.name,
-                "parameters": dict(binding.parameters),
-                "reference": reference.key,
-                "scope": binding.scope.value,
-                "symbol": binding.symbol,
-            }
-            if binding.scope is IndicatorScope.WORKSPACE:
-                if not isinstance(resolved, WorkspaceIndicator):
-                    raise TypeError("workspace indicator resolved to a global spec")
-                document.update(
-                    {
-                        "entrypoint": resolved.entrypoint,
-                        "source": resolved.source,
-                    }
-                )
-            elif not isinstance(resolved, IndicatorSpec):
-                raise TypeError("global indicator resolved to workspace source")
-            bindings.append(document)
-
-        runtime_configuration: dict[str, object] = {
-            **monitor_configuration(request.model, {}),
-            "indicators": bindings,
-        }
-        runtime_configuration.pop("fit", None)
-        bundle = _adapter_bundle(
-            request,
-            model_reference,
-            tuple(indicator_references),
-            runtime_configuration,
-        )
+        runtime_configuration = {"source": request.model.source}
+        bundle = _adapter_bundle(request, model_reference, runtime_configuration)
         backtest = self._backtests.run(
             BacktestRunRequest(
                 run_id=request.run_id,
@@ -160,16 +110,13 @@ class BacktestResearchModelRunner:
                 None if fitted_reference is None else fitted_reference.key
             ),
         }
-        references = tuple(indicator_references)
         workspace_artifact = self._models.record_run(
             request.workspace_id,
             model_reference,
             evidence,
-            references,
         )
         return ResearchModelRunResult(
             model_reference,
-            references,
             backtest,
             workspace_artifact,
             {
@@ -237,7 +184,6 @@ def _window_bound(
 def _adapter_bundle(
     request: ResearchModelRunRequest,
     model_reference: ResearchModelRef,
-    indicator_references: tuple[IndicatorRef, ...],
     runtime_configuration: Mapping[str, object],
 ) -> StrategyBundle:
     model = request.model
@@ -258,10 +204,6 @@ def _adapter_bundle(
             candidate_symbols = shorthand_symbols
         elif request.universe:
             candidate_symbols = request.universe
-        elif model.indicators:
-            candidate_symbols = list(
-                dict.fromkeys(item.symbol for item in model.indicators)
-            )
         if isinstance(candidate_symbols, Sequence) and not isinstance(
             candidate_symbols, str | bytes
         ):
@@ -279,61 +221,26 @@ def _adapter_bundle(
     configuration["run_id"] = request.run_id
     configuration["strategy_instances"] = [
         {
-            "bundle_hash": model.content_sha256,
+            # The JIT seam rejects a bundle_hash that is not the SHA-256 of
+            # the authored source, so the provenance digest binds exactly
+            # what the engine compiles.
+            "bundle_hash": hashlib.sha256(model.source.encode("utf-8")).hexdigest(),
             "capital_fraction": "1.0",
-            "implementation": "harness.research.study:ResearchModelProgram",
+            "implementation": "jit",
             "instance_id": _instance_id(model.model_id),
             "parameters": dict(runtime_configuration),
             "symbols": list(data["symbols"]),
         }
     ]
-    dependencies = [model_reference.key, *(item.key for item in indicator_references)]
     return StrategyBundle.create(
         strategy_id=_instance_id(f"research-{model.model_id}"),
         version=model.version,
-        source={
-            "adapter.txt": (
-                "Platform-owned harness.research.adapter; workspace model source "
-                "is an isolated input, not a strategy.\n"
-            )
-        },
-        tests={"test_adapter.txt": "Covered by harness research contract tests.\n"},
-        dependencies=dependencies,
+        source={"program.rs": model.source},
+        tests=dict(model.tests),
+        dependencies=[model_reference.key],
         harness_configuration=configuration,
-        limitations=("No order capability is exposed to research source.",),
+        limitations=("No order capability is exposed to a study program.",),
     )
-
-
-def monitor_configuration(
-    model: ResearchModel, fit: Mapping[str, float]
-) -> dict[str, object]:
-    """Return the frozen model configuration consumed by Layer B strategies."""
-    bindings: list[dict[str, object]] = []
-    for binding in model.indicators:
-        document: dict[str, object] = {
-            "alias": binding.alias,
-            "name": binding.name,
-            "parameters": dict(binding.parameters),
-            "scope": binding.scope.value,
-            "symbol": binding.symbol,
-        }
-        if binding.scope is IndicatorScope.WORKSPACE and binding.definition is not None:
-            document.update(
-                {
-                    "entrypoint": binding.definition.entrypoint,
-                    "source": binding.definition.source,
-                }
-            )
-        bindings.append(document)
-    return {
-        # Configuration hashes reject binary floats; the monitor parses these
-        # canonical decimal strings back to numbers at execution time.
-        "fit": {name: str(value) for name, value in fit.items()},
-        "indicators": bindings,
-        "model_fit_entrypoint": model.fit_entrypoint,
-        "model_observe_entrypoint": model.observe_entrypoint,
-        "model_source": model.source,
-    }
 
 
 def _extract_fit(metrics: object | None) -> dict[str, float]:
@@ -386,6 +293,5 @@ __all__ = [
     "ResearchModelRunRequest",
     "ResearchModelRunResult",
     "ResearchModelRunner",
-    "monitor_configuration",
     "study_window",
 ]

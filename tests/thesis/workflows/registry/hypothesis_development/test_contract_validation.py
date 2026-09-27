@@ -359,18 +359,7 @@ _REJECTED_PAYLOADS = [
         },
         id="harness-window-missing-start",
     ),
-    pytest.param(
-        {**_hypothesis_envelope(), "model": {**_model(), "fitEntrypoint": "1fit"}},
-        id="entrypoint-not-identifier",
-    ),
     pytest.param({**_hypothesis_envelope(), "claim": "x" * 8_193}, id="claim-too-long"),
-    pytest.param(
-        {
-            **_hypothesis_envelope(),
-            "model": {**_model(), "indicators": [_indicator(), _indicator()]},
-        },
-        id="indicator-alias-duplicate",
-    ),
     pytest.param(
         {
             **_hypothesis_envelope(),

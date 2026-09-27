@@ -138,33 +138,6 @@ class HarnessBacktestResult:
         return self.capability_status
 
 
-@dataclass(frozen=True, slots=True)
-class ProcessResult:
-    """Minimal result surface returned by an injected local process transport."""
-
-    returncode: int
-    stdout: str
-    stderr: str = ""
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.returncode, int) or isinstance(self.returncode, bool):
-            raise TypeError("returncode must be an integer")
-        if not isinstance(self.stdout, str) or not isinstance(self.stderr, str):
-            raise TypeError("process output must be text")
-
-
-class ProcessTransport(Protocol):
-    """Injected local process boundary; no subprocess is created by this module."""
-
-    def run(
-        self,
-        command: str,
-        payload: Mapping[str, object],
-        *,
-        timeout: float,
-    ) -> ProcessResult: ...
-
-
 class HarnessHttpTransport(Protocol):
     """HTTP request surface implemented by ``httpx.Client`` or a test fake."""
 
@@ -216,84 +189,6 @@ class ThesisHarnessClient:
 
     launch = launch_backtest
     query = query_backtest
-
-
-class LocalHarnessProcessAdapter:
-    """Adapter for a local ``api``/``backtest-job`` process boundary."""
-
-    def __init__(
-        self,
-        transport: ProcessTransport,
-        *,
-        api_command: str = "api",
-        backtest_command: str = "backtest-job",
-        timeout: float = 60.0,
-    ) -> None:
-        if not callable(getattr(transport, "run", None)):
-            raise TypeError("transport must implement ProcessTransport")
-        if timeout <= 0 or isinstance(timeout, bool):
-            raise ValueError("timeout must be positive")
-        self._transport = transport
-        self._api_command = _command(api_command, "api_command")
-        self._backtest_command = _command(backtest_command, "backtest_command")
-        self._timeout = timeout
-
-    def capabilities(self) -> CapabilityReport:
-        """Read capabilities from the local API process, fail-closed on absence."""
-        try:
-            result = self._run(self._api_command, {"operation": "capabilities"})
-        except HarnessError:
-            return unavailable_report(
-                _HARNESS_CAPABILITIES, reason="transport_unavailable"
-            )
-        if result.returncode != 0:
-            return unavailable_report(
-                _HARNESS_CAPABILITIES,
-                reason=(
-                    "not_implemented"
-                    if _looks_unimplemented(result.stderr)
-                    else "transport_unavailable"
-                ),
-            )
-        try:
-            return _capability_report(_json_object(json.loads(result.stdout)))
-        except (ValueError, TypeError, json.JSONDecodeError) as error:
-            raise HarnessProtocolError(
-                "local harness capabilities are invalid"
-            ) from error
-
-    def launch_backtest(self, request: BacktestRequest) -> HarnessBacktestResult:
-        """Submit a local job without emulating an unavailable runner."""
-        report = self.capabilities()
-        if not report.status("backtest").available:
-            raise HarnessCapabilityUnavailable("backtest", report)
-        result = self._run(
-            self._backtest_command,
-            {"operation": "launch_backtest", "request": request.to_payload()},
-        )
-        return _process_result(result, "backtest", fallback=report)
-
-    def query_backtest(self, job_id: str) -> HarnessBacktestResult:
-        """Query a local API job result, retaining all published result fields."""
-        report = self.capabilities()
-        if not report.status("result_query").available:
-            raise HarnessCapabilityUnavailable("result_query", report)
-        result = self._run(
-            self._api_command,
-            {"operation": "query_backtest", "job_id": _job_id(job_id)},
-        )
-        return _process_result(result, "result_query", fallback=report)
-
-    def _run(self, command: str, payload: Mapping[str, object]) -> ProcessResult:
-        try:
-            result = self._transport.run(command, payload, timeout=self._timeout)
-        except Exception as error:
-            raise HarnessError(
-                f"local harness process {command!r} is unavailable"
-            ) from error
-        if not isinstance(result, ProcessResult):
-            raise HarnessProtocolError("process transport returned an invalid result")
-        return result
 
 
 class HarnessApiAdapter:
@@ -401,19 +296,6 @@ class HarnessApiAdapter:
         return _response_object(response)
 
 
-class LocalHarnessApiAdapter(HarnessApiAdapter):
-    """Unauthenticated local HTTP adapter for a loopback harness API."""
-
-    def __init__(
-        self,
-        base_url: str,
-        *,
-        transport: httpx.BaseTransport | None = None,
-        timeout: float | httpx.Timeout = 30.0,
-    ) -> None:
-        super().__init__(base_url, transport=transport, timeout=timeout)
-
-
 class RemoteHarnessApiAdapter(HarnessApiAdapter):
     """Bearer-authenticated remote harness API adapter."""
 
@@ -435,32 +317,6 @@ class RemoteHarnessApiAdapter(HarnessApiAdapter):
             transport=transport,
             timeout=timeout,
         )
-
-
-def _process_result(
-    result: ProcessResult,
-    capability: str,
-    *,
-    fallback: CapabilityReport,
-) -> HarnessBacktestResult:
-    if result.returncode != 0:
-        raise HarnessCapabilityUnavailable(
-            capability,
-            unavailable_report(
-                _HARNESS_CAPABILITIES,
-                reason=(
-                    "not_implemented"
-                    if _looks_unimplemented(result.stderr)
-                    else "unavailable"
-                ),
-            ),
-        )
-    try:
-        return _backtest_result(
-            _json_object(json.loads(result.stdout)), capability, fallback=fallback
-        )
-    except (ValueError, TypeError, json.JSONDecodeError) as error:
-        raise HarnessProtocolError("local harness result is invalid") from error
 
 
 def _api_result(
@@ -682,7 +538,6 @@ def _looks_unimplemented(value: str) -> bool:
     return "not implemented" in lowered or "scaffolded" in lowered
 
 
-LocalHarnessClient = LocalHarnessProcessAdapter
 RemoteHarnessClient = RemoteHarnessApiAdapter
 HarnessBacktest = HarnessBacktestResult
 
@@ -699,11 +554,6 @@ __all__ = [
     "HarnessError",
     "HarnessHttpTransport",
     "HarnessProtocolError",
-    "LocalHarnessApiAdapter",
-    "LocalHarnessClient",
-    "LocalHarnessProcessAdapter",
-    "ProcessResult",
-    "ProcessTransport",
     "RemoteHarnessApiAdapter",
     "RemoteHarnessClient",
     "ThesisHarnessClient",

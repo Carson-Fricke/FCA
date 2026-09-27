@@ -18,11 +18,11 @@
 //!   implementations; `trader` runs the supervised paper/shadow runner in the
 //!   `live` crate.
 //! * The `backtest-job` command is served by the native Rust engine through
-//!   [`NativeBacktestJobRunner`], which drives the configured Python strategies
-//!   via the `harness-host` PyO3 adapter. [`BacktestJobRunner`] remains the
-//!   seam so the command surface is stable and test doubles are possible. A
-//!   `--data-dir` run reads the local Parquet/Arrow lake through the
-//!   `marketdata` crate; `UnportedBacktestJobRunner` remains as the
+//!   [`NativeBacktestJobRunner`], which drives the configured JIT-authored
+//!   Rust programs via the `harness-strategy-jit` seam. [`BacktestJobRunner`]
+//!   remains the seam so the command surface is stable and test doubles are
+//!   possible. A `--data-dir` run reads the local Parquet/Arrow lake through
+//!   the `marketdata` crate; `UnportedBacktestJobRunner` remains as the
 //!   always-failing double.
 
 use std::fmt;

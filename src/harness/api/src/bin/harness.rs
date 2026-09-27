@@ -15,9 +15,6 @@ use clap::Parser;
 
 fn main() -> ExitCode {
     let cli = HarnessCli::parse();
-    // Warm the embedded interpreter on the main thread: background study and
-    // launch threads only acquire the GIL after this, never initialize.
-    host::python::warm_interpreter();
     match run(cli, &NativeBacktestJobRunner, &NativeStudyJobRunner) {
         CommandResult::ServeApi(args) => http::cli::serve_api_blocking(&args),
         CommandResult::ServeMcp(args) => mcp_cli::serve_mcp_blocking(&args),

@@ -215,25 +215,24 @@ _CREATION_FINALIZE_INSTRUCTIONS = (
     "the negative controls, the Layer B monitoring rule and known limitations. "
     "Render its math as LaTeX for KaTeX, exactly as instructed above.",
     "- model (required): a statistical research model, NOT a strategy. Include "
-    "modelId, semantic version, description, source defining "
-    "fit(context) -> dict[str, number] and observe(fit, context) -> "
-    "dict[str, number], fitEntrypoint='fit', observeEntrypoint='observe', "
+    "modelId, semantic version, description, source (an authored Rust study "
+    "program — see the authoring contract below), "
     "outputs (a JSON array of identifier strings listing every falsifier "
     "observable — the observable names themselves, never objects with a type "
     "field), tests, and harnessConfiguration with "
-    "symbols listing every required symbol. The plain context contains quotes, "
-    "trades, trade_prices and returns by symbol; it exposes no orders, positions or "
-    "sizing. The model source may import only math, statistics and numpy. If "
-    "sample data is missing, unidentifiable, or inadequate, fit and observe must "
-    "return explicit numeric failure indicators (such as data_ok=0.0 or sample_valid=0.0) "
-    "rather than crashing with unhandled exceptions, so that falsifiers can cleanly observe "
-    "and record the empirical failure.",
-    "- model.indicators (optional): explicitly scoped reusable inputs. A global "
-    "binding names a built-in indicator (scope, name, alias, symbol, parameters). "
-    "A workspace binding additionally carries either contentSha256 for an "
-    "already-published workspace indicator or a definition with name, version, "
-    "description, source defining calculate(context, parameters), entrypoint, "
-    "parameterSchema and tests. Never encode an indicator as a strategy.",
+    "symbols listing every required symbol. The program receives every market "
+    "event of the replay window and exposes no orders, positions or "
+    "sizing. Author the program against the `harness-strategy-sdk` crate: "
+    "implement `StudyProgram` (on_quote, on_trade, on_stop(publisher)) and "
+    "export it with `export_study_program!(...)`. Fold events into incremental "
+    "state and publish every falsifier observable by name in on_stop via "
+    "publisher.publish_metric(name, value) — the names must match the outputs "
+    "array exactly. Compute failure indicators explicitly (such as "
+    "data_ok=0.0 or sample_valid=0.0) when sample data is missing, "
+    "unidentifiable, or inadequate, rather than panicking, so falsifiers can "
+    "observe and record the empirical failure. Publish fitted parameters as "
+    "metrics named `fit.<parameter>`; the platform freezes them as the model's "
+    "fit.",
     "Omit sizing; it belongs to strategy design. Do not include operator-facing prose.",
 )
 

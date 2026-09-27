@@ -27,8 +27,7 @@ use crate::backtest::engine_core::{
 };
 use crate::backtest::errors::{BacktestError, ONE_DAY_NS};
 use crate::backtest::fixture::{
-    synthetic_fixture, ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture,
-    SyntheticDataOptions,
+    ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture, SyntheticDataOptions,
 };
 use crate::backtest::manifest::BacktestResult;
 use crate::backtest::preflight::preflight_data;
@@ -311,10 +310,16 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
     if text.trim_start().starts_with('{') {
         let document: serde_json::Value =
             serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        return BacktestConfig::from_yaml_value(&json_to_yaml(&document))
-            .map_err(BacktestJobError::from);
+        return resolve_authored_sources(
+            BacktestConfig::from_yaml_value(&json_to_yaml(&document))
+                .map_err(BacktestJobError::from)?,
+            config_path,
+        );
     }
-    BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
+    resolve_authored_sources(
+        BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
+        config_path,
+    )
 }
 
 /// Load and validate one study configuration document (shell `study`).
@@ -337,10 +342,16 @@ pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJ
     if text.trim_start().starts_with('{') {
         let document: serde_json::Value =
             serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        return BacktestConfig::from_yaml_value(&json_to_yaml(&document))
-            .map_err(BacktestJobError::from);
+        return resolve_authored_sources(
+            BacktestConfig::from_yaml_value(&json_to_yaml(&document))
+                .map_err(BacktestJobError::from)?,
+            config_path,
+        );
     }
-    BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)
+    resolve_authored_sources(
+        BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
+        config_path,
+    )
 }
 
 fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
@@ -361,6 +372,46 @@ fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
                 .collect(),
         ),
     }
+}
+
+/// Inline `parameters.source_path` authored sources after parsing.
+///
+/// The repository's non-executable YAML subset cannot carry multi-line
+/// authored sources, so a YAML configuration references the authored file by
+/// path, resolved relative to the configuration document's directory. JSON
+/// documents may carry the source inline and need no resolution.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when a `source_path` parameter is not a
+/// string or the referenced file cannot be read.
+fn resolve_authored_sources(
+    mut configuration: BacktestConfig,
+    config_path: &Path,
+) -> Result<BacktestConfig, BacktestJobError> {
+    for instance in &mut configuration.strategy_instances {
+        if instance.parameters.contains_key("source") {
+            continue;
+        }
+        let Some(JsonValue::String(relative)) = instance.parameters.get("source_path") else {
+            continue;
+        };
+        let resolved = config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(relative.as_str());
+        let source = std::fs::read_to_string(&resolved).map_err(|error| {
+            BacktestJobError::Io(format!(
+                "strategy instance {:?} authored source {} could not be read: {error}",
+                instance.instance_id,
+                resolved.display()
+            ))
+        })?;
+        instance
+            .parameters
+            .insert("source".to_string(), JsonValue::String(source));
+    }
+    Ok(configuration)
 }
 
 /// The seam the `harness-api` binary calls to run one backtest job.
@@ -542,40 +593,6 @@ pub fn run_native_study_job_with_data_dir(
     )?;
     let artifact_path =
         write_run_artifacts(configuration, &outcome, output_dir, "studies", "study.json")?;
-    Ok((outcome, artifact_path))
-}
-
-/// Run the canonical synthetic benchmark through the full native engine with
-/// Python strategies. This is the Python-parity harness: the synthetic fixture
-/// is the pinned golden input the Python reference also replays. It is never a
-/// substitute for missing lake data — the serving paths (HTTP, CLI, MCP) all
-/// require a lake directory and fail when one cannot serve the window.
-///
-/// # Errors
-///
-/// Returns [`BacktestJobError`] when the configuration, fixture, engine, or
-/// artifact write fails.
-pub fn run_native_synthetic_job(
-    configuration: &BacktestConfig,
-    engine_options: &EngineOptions,
-    output_dir: Option<&Path>,
-    strategies: Vec<StrategyInstance>,
-) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    let fixture = synthetic_fixture(configuration, &SyntheticDataOptions::default())?;
-    let outcome = run_native_engine_outcome(
-        configuration,
-        engine_options,
-        strategies,
-        fixture,
-        &SyntheticDataOptions::default(),
-    )?;
-    let artifact_path = write_run_artifacts(
-        configuration,
-        &outcome,
-        output_dir,
-        "backtests",
-        "backtest.json",
-    )?;
     Ok((outcome, artifact_path))
 }
 
