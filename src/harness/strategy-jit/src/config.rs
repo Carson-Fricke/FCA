@@ -75,7 +75,11 @@ fn authored_source(configured: &StrategyInstanceConfig) -> Result<String, JitErr
         )));
     }
     match configured.parameters.get(SOURCE_PARAMETER) {
-        Some(JsonValue::String(text)) if !text.trim().is_empty() => Ok(text.clone()),
+        Some(JsonValue::String(text)) if !text.trim().is_empty() => {
+            // Git checkouts may carry CRLF; normalize so the bundle-hash
+            // provenance digest is checkout-independent.
+            Ok(text.replace("\r\n", "\n"))
+        }
         Some(_) => Err(JitError::Invalid(format!(
             "instance {:?} parameters.{SOURCE_PARAMETER} must be a non-empty string",
             configured.instance_id

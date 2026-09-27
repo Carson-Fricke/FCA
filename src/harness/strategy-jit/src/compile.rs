@@ -115,7 +115,11 @@ pub fn compile(
     if source.trim().is_empty() {
         return Err(JitError::Invalid("authored source is empty".to_string()));
     }
-    let digest = digest_hex(source.as_bytes());
+    // Normalize CRLF so the cache digest is checkout-independent, matching
+    // the bundle-hash provenance digest.
+    let normalized = source.replace("\r\n", "\n");
+    let digest = digest_hex(normalized.as_bytes());
+    let source = normalized;
     let toolchain = resolve_toolchain(workspace.root())?;
     let sdk_version = harness_strategy_sdk::SDK_VERSION.to_string();
 
@@ -141,7 +145,7 @@ pub fn compile(
     }
 
     let crate_name = format!("harness_authored_{}", &digest[..16]);
-    write_authored_crate(workspace, &digest, &crate_name, source)?;
+    write_authored_crate(workspace, &digest, &crate_name, &source)?;
     run_build(workspace, &digest)?;
     let artifact_relpath = artifact_relpath(&crate_name);
     let artifact_path = workspace.target_dir().join(&artifact_relpath);

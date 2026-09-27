@@ -932,7 +932,7 @@ async fn native_engine_launch_reaches_a_terminal_state() {
         "strategy_instances": [{
             "instance_id": "spy-momentum",
             "implementation": "jit",
-            "bundle_hash": backtest::sha256::digest_hex(momentum_source.as_bytes()),
+            "bundle_hash": backtest::sha256::digest_hex(momentum_source.replace("\r\n", "\n").as_bytes()),
             "capital_fraction": 1.0,
             "symbols": ["SPY"],
             "parameters": {"source": momentum_source}
@@ -1007,7 +1007,7 @@ async fn native_research_metrics_are_queryable_over_http() {
         "strategy_instances": [{
             "instance_id": "research-model",
             "implementation": "jit",
-            "bundle_hash": backtest::sha256::digest_hex(study_source.as_bytes()),
+            "bundle_hash": backtest::sha256::digest_hex(study_source.replace("\r\n", "\n").as_bytes()),
             "capital_fraction": "1.0",
             "symbols": ["SPY"],
             "parameters": {"source": study_source}

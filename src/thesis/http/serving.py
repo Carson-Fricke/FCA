@@ -94,10 +94,6 @@ from thesis.research.hypothesis import (
     HypothesisStore,
     WorkspaceHypothesisStore,
 )
-from thesis.research.indicators import (
-    IndicatorStore,
-    WorkspaceIndicatorStore,
-)
 from thesis.research.models import (
     ResearchModelStore,
     WorkspaceResearchModelStore,
@@ -173,28 +169,23 @@ class ServingStack:
 
 def _workspace_stores(
     workspace_root: str | Path | None,
-) -> tuple[
-    ResearchModelStore | None,
-    IndicatorStore | None,
-    HypothesisStore | None,
-]:
+) -> tuple[ResearchModelStore | None, HypothesisStore | None]:
     """Bind durable research stores to a workspace tree, or keep them in memory.
 
     A deployed container has no Azure workspace path provider yet, so a
-    composition without ``workspace_root`` keeps model publications, indicator
-    definitions, and hypothesis artifacts in process memory.  Runs, trials,
+    composition without ``workspace_root`` keeps model publications and
+    hypothesis artifacts in process memory.  Runs, trials,
     and conversations stay durable in the execution store and Cosmos; only the
     workspace-side artifacts are ephemeral until the Azure workspace persists
     that tree.
     """
     if workspace_root is None:
-        return None, None, None
+        return None, None
     from thesis.workspaces.local import LocalWorkspaceProvider
 
     provider = LocalWorkspaceProvider(str(workspace_root))
     return (
         WorkspaceResearchModelStore(provider),
-        WorkspaceIndicatorStore(provider),
         WorkspaceHypothesisStore(str(workspace_root)),
     )
 
@@ -228,7 +219,7 @@ def build_serving_workflow_runtime(
         )
         return with_hypothesis_development_skills(with_harness_mcp(base))
 
-    models, indicators, hypothesis_store = _workspace_stores(workspace_root)
+    models, hypothesis_store = _workspace_stores(workspace_root)
     runner = McpBacktestRunner(harness_tools)
     # Research models always compile to a ``study`` shell, so the falsification
     # phase executes through ``run_study``; the backtest runner would reject
@@ -236,7 +227,6 @@ def build_serving_workflow_runtime(
     research_runner = BacktestResearchModelRunner(
         McpStudyRunner(harness_tools),
         models=models,
-        indicators=indicators,
     )
     return build_workflow_runtime(
         role_policies={
