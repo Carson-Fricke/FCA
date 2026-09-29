@@ -42,6 +42,8 @@ pub enum JitError {
     },
     /// The program could not be constructed from its parameters.
     Create(Option<String>),
+    /// The screening program failed or its result could not be decoded.
+    Screen(Option<String>),
     /// An invalid argument was supplied.
     Invalid(String),
 }
@@ -84,6 +86,13 @@ impl std::fmt::Display for JitError {
                 write!(
                     formatter,
                     "authored program creation failed: {}",
+                    detail.as_deref().unwrap_or("no details reported")
+                )
+            }
+            Self::Screen(detail) => {
+                write!(
+                    formatter,
+                    "screening program failed: {}",
                     detail.as_deref().unwrap_or("no details reported")
                 )
             }

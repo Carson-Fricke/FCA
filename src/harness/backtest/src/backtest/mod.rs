@@ -20,4 +20,5 @@ pub mod manifest;
 pub mod portfolio;
 pub mod preflight;
 pub mod rng;
+pub mod screen;
 pub mod yaml;

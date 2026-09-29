@@ -15,7 +15,11 @@ use std::os::raw::c_void;
 use num::PyDecimal;
 
 /// The ABI version the host and every artifact must agree on.
-pub const SDK_ABI_VERSION: u32 = 1;
+///
+/// Version 2 is the bar cutover: the study vtable folds `CBarEvent` instead
+/// of quote/trade events, so every pre-bar study artifact is rejected by the
+/// loader's version check.
+pub const SDK_ABI_VERSION: u32 = 2;
 
 /// Callback result: the author code completed.
 pub const SDK_OK: i32 = 0;
@@ -155,6 +159,33 @@ pub struct CTradeEvent {
     pub trade_id: CStr,
 }
 
+/// One OHLCV bar crossing the ABI.
+///
+/// This is the study market event; quotes and trades cross only for
+/// strategies.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CBarEvent {
+    /// Event identifier.
+    pub event_id: CStr,
+    /// Event time in epoch nanoseconds.
+    pub timestamp_ns: i64,
+    /// Global sequence.
+    pub sequence: u64,
+    /// Instrument symbol.
+    pub symbol: CStr,
+    /// Interval open.
+    pub open: CDecimal,
+    /// Interval high.
+    pub high: CDecimal,
+    /// Interval low.
+    pub low: CDecimal,
+    /// Interval close.
+    pub close: CDecimal,
+    /// Interval volume.
+    pub volume: CDecimal,
+}
+
 /// One deterministic fill crossing the ABI.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -277,7 +308,8 @@ pub type OrderSubmitFn = unsafe extern "C" fn(ctx: *mut c_void, order: *const CM
 /// The vtable a study artifact exports.
 ///
 /// A study has no order surface by construction: the vtable carries no
-/// order-submit path and its market callbacks return no orders.
+/// order-submit path, its only market callback folds OHLCV bars, and its
+/// market callbacks return no orders.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct StudyProgramVTable {
@@ -287,10 +319,8 @@ pub struct StudyProgramVTable {
     pub reserved: u32,
     /// Construct the program state from a JSON parameters document.
     pub create: StudyCreateFn,
-    /// Fold one quote.
-    pub on_quote: StudyQuoteFn,
-    /// Fold one trade.
-    pub on_trade: StudyTradeFn,
+    /// Fold one OHLCV bar.
+    pub on_bar: StudyBarFn,
     /// Publish final metrics through the host sink.
     pub on_stop: StudyStopFn,
     /// Destroy the program state.
@@ -303,11 +333,8 @@ pub struct StudyProgramVTable {
 /// `harness_sdk_last_error`).
 pub type StudyCreateFn = unsafe extern "C" fn(parameters: CStr) -> *mut c_void;
 
-/// Fold one quote into a study program state.
-pub type StudyQuoteFn = unsafe extern "C" fn(state: *mut c_void, event: *const CQuoteEvent) -> i32;
-
-/// Fold one trade into a study program state.
-pub type StudyTradeFn = unsafe extern "C" fn(state: *mut c_void, event: *const CTradeEvent) -> i32;
+/// Fold one OHLCV bar into a study program state.
+pub type StudyBarFn = unsafe extern "C" fn(state: *mut c_void, event: *const CBarEvent) -> i32;
 
 /// Publish final metrics from a study program state.
 pub type StudyStopFn = unsafe extern "C" fn(state: *mut c_void, metrics: *const CMetricSink) -> i32;
@@ -373,6 +400,52 @@ pub type StrategyStopFn =
 /// Destroy a strategy program state.
 pub type StrategyDestroyFn = unsafe extern "C" fn(state: *mut c_void);
 
+/// The vtable a screening artifact exports.
+///
+/// A screening program has no order surface by construction: the vtable
+/// carries exactly the four one-shot callbacks (`create`, `screen`,
+/// `result`, `destroy`) and nothing else. The host serializes one context
+/// JSON document, calls `screen`, then copies the `result` payload before
+/// the next call or destroy.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ScreeningProgramVTable {
+    /// ABI version this vtable was built for.
+    pub abi_version: u32,
+    /// Reserved for tail growth; must stay zero.
+    pub reserved: u32,
+    /// Construct the program state from a JSON parameters document.
+    pub create: ScreeningCreateFn,
+    /// Evaluate one context JSON document.
+    pub screen: ScreeningScreenFn,
+    /// Borrow the last serialized result payload.
+    pub result: ScreeningResultFn,
+    /// Destroy the program state.
+    pub destroy: ScreeningDestroyFn,
+}
+
+/// Construct a screening program state from a JSON parameters document.
+///
+/// Returns the state pointer, or null on failure (details via
+/// `harness_sdk_last_error`).
+pub type ScreeningCreateFn = unsafe extern "C" fn(parameters: CStr) -> *mut c_void;
+
+/// Evaluate one screening context JSON document into the program state.
+///
+/// Returns [`SDK_OK`], or [`SDK_ERROR`] when the context does not parse, the
+/// authored program fails or panics, or the result cannot be serialized
+/// (details via `harness_sdk_last_error`).
+pub type ScreeningScreenFn = unsafe extern "C" fn(state: *mut c_void, ctx_json: CStr) -> i32;
+
+/// Borrow the last serialized result payload from the program state.
+///
+/// The returned view stays valid until the next `screen` call or `destroy` on
+/// the same state; the host copies the pointer and length immediately.
+pub type ScreeningResultFn = unsafe extern "C" fn(state: *mut c_void) -> CStr;
+
+/// Destroy a screening program state.
+pub type ScreeningDestroyFn = unsafe extern "C" fn(state: *mut c_void);
+
 /// The exported ABI-version symbol.
 pub const ABI_EXPORT: &str = "harness_sdk_abi_version";
 
@@ -381,6 +454,9 @@ pub const STUDY_VTABLE_EXPORT: &str = "harness_sdk_study_vtable";
 
 /// The exported strategy vtable symbol.
 pub const STRATEGY_VTABLE_EXPORT: &str = "harness_sdk_strategy_vtable";
+
+/// The exported screening vtable symbol.
+pub const SCREENING_VTABLE_EXPORT: &str = "harness_sdk_screening_vtable";
 
 /// The exported last-error symbol.
 pub const LAST_ERROR_EXPORT: &str = "harness_sdk_last_error";

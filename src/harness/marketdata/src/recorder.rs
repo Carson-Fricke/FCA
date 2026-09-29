@@ -209,15 +209,19 @@ fn deployment_text(value: &str) -> Result<String, DataError> {
 }
 
 /// Build one live part path below the `live/{deployment}` prefix.
+///
+/// Bars carry their interval partition token; every other data type passes
+/// `None`.
 pub fn live_part_path(
     deployment: &str,
     session_date: Date,
     asset_class: AssetClass,
     data_type: DataType,
+    interval: Option<&str>,
     symbol: &str,
     part: u64,
 ) -> Result<String, DataError> {
-    let directory = partition_path(session_date, asset_class, data_type, symbol)?;
+    let directory = partition_path(session_date, asset_class, data_type, interval, symbol)?;
     let (head, filename) = directory
         .rsplit_once('/')
         .ok_or_else(|| DataError::value("partition path is missing a filename"))?;
@@ -295,6 +299,15 @@ pub fn schema_columns(asset_class: AssetClass, data_type: DataType) -> &'static 
             "ask_exchange",
             "ask_price",
             "ask_size",
+        ],
+        (AssetClass::Equity | AssetClass::Crypto, DataType::Bars) => &[
+            "timestamp",
+            "symbol",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
         ],
         _ => &[],
     }
@@ -426,6 +439,18 @@ pub fn event_row(event: &MarketEvent, asset_class: AssetClass) -> Result<Recorde
             ("size".to_string(), Some(trade.quantity.to_string())),
             ("taker_side".to_string(), None),
         ]),
+        (MarketEvent::Bar(bar), AssetClass::Equity | AssetClass::Crypto) => Ok(vec![
+            ("timestamp".to_string(), timestamp),
+            ("symbol".to_string(), symbol),
+            ("open".to_string(), Some(bar.open.to_string())),
+            ("high".to_string(), Some(bar.high.to_string())),
+            ("low".to_string(), Some(bar.low.to_string())),
+            ("close".to_string(), Some(bar.close.to_string())),
+            ("volume".to_string(), Some(bar.volume.to_string())),
+        ]),
+        (MarketEvent::Bar(_), AssetClass::Option | AssetClass::Reference) => Err(DataError::value(
+            "bars are recorded for equity and crypto asset classes only",
+        )),
         (_, AssetClass::Reference) => Err(DataError::value(
             "reference asset class is not recorded by the live recorder",
         )),
@@ -598,6 +623,18 @@ fn event_row_typed(
             column("size", Cell::Decimal(trade.quantity)),
             column("taker_side", Cell::Text(None)),
         ]),
+        (MarketEvent::Bar(bar), AssetClass::Equity | AssetClass::Crypto) => Ok(vec![
+            column("timestamp", timestamp),
+            column("symbol", symbol),
+            column("open", Cell::Decimal(bar.open)),
+            column("high", Cell::Decimal(bar.high)),
+            column("low", Cell::Decimal(bar.low)),
+            column("close", Cell::Decimal(bar.close)),
+            column("volume", Cell::Decimal(bar.volume)),
+        ]),
+        (MarketEvent::Bar(_), AssetClass::Option | AssetClass::Reference) => Err(DataError::value(
+            "bars are recorded for equity and crypto asset classes only",
+        )),
         (_, AssetClass::Reference) => Err(DataError::value(
             "reference asset class is not recorded by the live recorder",
         )),
@@ -675,6 +712,15 @@ fn arrow_schema(asset_class: AssetClass, data_type: DataType) -> Result<Schema, 
             arrow_field("ask_exchange", ArrowDataType::Utf8, true),
             arrow_field("ask_price", price(), false),
             arrow_field("ask_size", quantity(), false),
+        ],
+        (AssetClass::Equity | AssetClass::Crypto, DataType::Bars) => vec![
+            arrow_field("timestamp", timestamp(), false),
+            arrow_field("symbol", ArrowDataType::Utf8, false),
+            arrow_field("open", price(), false),
+            arrow_field("high", price(), false),
+            arrow_field("low", price(), false),
+            arrow_field("close", price(), false),
+            arrow_field("volume", quantity(), false),
         ],
         _ => return Err(DataError::value("unsupported lake schema")),
     };
@@ -822,6 +868,7 @@ struct PartitionWriter {
     asset_class: AssetClass,
     data_type: DataType,
     deployment: String,
+    interval: Option<String>,
     part: u64,
     pending: Vec<Vec<(String, Cell)>>,
     rows: usize,
@@ -846,6 +893,7 @@ impl PartitionWriter {
             self.session_date,
             self.asset_class,
             self.data_type,
+            self.interval.as_deref(),
             &self.symbol,
             self.part,
         )?;
@@ -874,6 +922,8 @@ pub struct LiveRecorderConfig {
     pub flush_interval: Option<Nanos>,
     /// Session resolver override.
     pub session_resolver: Option<std::rc::Rc<dyn SessionResolver>>,
+    /// Bars interval partition token (`1min` or `1d`); required to record bars.
+    pub bar_interval: Option<String>,
 }
 
 impl fmt::Debug for LiveRecorderConfig {
@@ -907,7 +957,15 @@ impl LiveRecorderConfig {
             batch_size,
             flush_interval: None,
             session_resolver: None,
+            bar_interval: None,
         })
+    }
+
+    /// Attach the bars interval partition token used when bars are recorded.
+    #[must_use]
+    pub fn with_bar_interval(mut self, interval: &str) -> Self {
+        self.bar_interval = Some(interval.to_string());
+        self
     }
 }
 
@@ -980,8 +1038,18 @@ impl LiveRecorder {
         let data_type = match event.event_type() {
             crate::events::EventType::Quote => DataType::Quote,
             crate::events::EventType::Trade => DataType::Trade,
-            _ => return Err(DataError::value("event must be a QuoteEvent or TradeEvent")),
+            crate::events::EventType::Bar => DataType::Bars,
+            _ => {
+                return Err(DataError::value(
+                    "event must be a quote, trade, or bar event",
+                ))
+            }
         };
+        if data_type == DataType::Bars && self.config.bar_interval.is_none() {
+            return Err(DataError::value(
+                "recording bars requires a configured bar interval",
+            ));
+        }
         let symbol = canonical_symbol(event.symbol())?;
         let session = self.resolver.session_date(event.timestamp());
         let partition = (data_type, symbol.clone());
@@ -1046,6 +1114,11 @@ impl LiveRecorder {
             let _ = writer.flush();
             *self.finalized_rows.entry(partition.clone()).or_insert(0) += writer.rows;
         }
+        let interval = if partition.0 == DataType::Bars {
+            self.config.bar_interval.clone()
+        } else {
+            None
+        };
         self.sessions.insert(partition.clone(), session);
         self.writers.insert(
             partition.clone(),
@@ -1053,6 +1126,7 @@ impl LiveRecorder {
                 asset_class: self.asset_class,
                 data_type: partition.0,
                 deployment: self.config.deployment.clone(),
+                interval,
                 part: 0,
                 pending: Vec::new(),
                 rows: 0,

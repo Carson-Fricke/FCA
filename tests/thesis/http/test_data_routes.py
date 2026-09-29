@@ -2,8 +2,8 @@
 
 Every route group is exercised through :func:`create_app` with in-memory
 local fakes for the stores, a fake harness process runner behind the
-:class:`LocalHarnessProcess` adapter, a fake status transport behind the
-``RuntimeStatusClient`` seam, and a fake screener market port.  Timestamps
+:class:`LocalHarnessProcess` adapter, and a fake status transport behind the
+``RuntimeStatusClient`` seam.  Timestamps
 are fixed and no network or real harness process is involved.
 """
 
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
-from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,7 +25,6 @@ from thesis.http.backtests import (
 from thesis.http.dashboards import DashboardDataService
 from thesis.http.deployments import DeploymentDataService, InMemoryDeploymentStore
 from thesis.http.knowledge import KnowledgeSearchService
-from thesis.http.screeners import InMemoryScreenerStore, ScreenerDataService
 from thesis.http.state import InMemoryWorkspaceStateStore, WorkspaceStateService
 from thesis.http.strategies import StrategyDataService
 from thesis.http.workspaces import (
@@ -41,7 +39,6 @@ from thesis.integrations.harness_activation import (
 from thesis.integrations.runtime_status import RuntimeStatusClient
 from thesis.knowledge.index import PageRecord, build_index
 from thesis.knowledge.search import HashingEmbedder, KnowledgeSearch
-from thesis.screening.engine import MarketBar, UniverseEntry
 
 BEARER_TOKEN = "thesis-test-token"
 HEADERS = {"Authorization": f"Bearer {BEARER_TOKEN}"}
@@ -230,38 +227,11 @@ def backtest_record(
     )
 
 
-class FakeMarketPort:
-    """Deterministic screener market ports; no network, no real data."""
-
-    def universe(self, as_of: date) -> list[UniverseEntry]:
-        return [UniverseEntry(symbol="SPY", listing_date=date(2010, 1, 1))]
-
-    def market_data(self, symbol: str, window_end: date) -> list[MarketBar]:
-        return [
-            MarketBar(
-                bar_date=date(2026, 9, 7),
-                volume=41_230_000,
-                close="611.20",
-                dollar_volume="25200000000",
-            ),
-            MarketBar(
-                bar_date=date(2026, 9, 8),
-                volume=41_230_000,
-                close="612.40",
-                dollar_volume="24800000000",
-            ),
-        ]
-
-    def change_pct(self, symbol: str, as_of: date) -> float:
-        return 0.42
-
-
 def make_bundle(
     *,
     transport: FakeStatusTransport | None = None,
     deployments: tuple[dict[str, object], ...] = (),
     orders: tuple[dict[str, object], ...] = (),
-    market: FakeMarketPort | None = None,
 ) -> WorkspaceDataBundle:
     """Compose the local services with in-memory stores and injected fakes."""
     status_client = RuntimeStatusClient(
@@ -281,13 +251,6 @@ def make_bundle(
             status_client=status_client,
         ),
         dashboards=DashboardDataService(clock=clock, id_factory=counting_ids()),
-        screeners=ScreenerDataService(
-            store=InMemoryScreenerStore(),
-            market=market if market is not None else FakeMarketPort(),
-            clock=clock,
-            id_factory=counting_ids(),
-            strategy_matcher=lambda symbol: {"SPY": "str-1"}.get(symbol),
-        ),
         state=WorkspaceStateService(InMemoryWorkspaceStateStore()),
         strategies=StrategyDataService(clock=clock, id_factory=counting_ids()),
         harness=None,
@@ -335,7 +298,6 @@ def test_workspace_snapshot_returns_overview_and_real_counts() -> None:
         clock=clock,
         id_factory=counting_ids(),
         chat_service=chat_service,
-        market_port=FakeMarketPort(),
     )
     bundle.workspaces.create_workspace(
         "Alpha Lab", description="Personal research workspace"
@@ -383,7 +345,6 @@ def test_workspace_snapshot_returns_overview_and_real_counts() -> None:
         "backtests": 0,
         "deployments": 0,
         "dashboards": 1,
-        "screeners": 0,
     }
 
 
@@ -606,70 +567,6 @@ def test_widget_crud_round_trip() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Screeners: engine delegation + study persistence
-# ---------------------------------------------------------------------------
-
-
-def test_screener_run_delegates_to_engine_and_persists_study() -> None:
-    bundle = make_bundle(market=FakeMarketPort())
-    client = make_client(bundle)
-
-    response = client.post(
-        f"/v1/workspaces/{WORKSPACE}/screeners/run",
-        headers=HEADERS,
-        json={
-            "name": "Liquid large caps",
-            "filters": [{"kind": "volume", "op": ">", "value": 1000}],
-            "universe_revision": "u-2026-09-09",
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["as_of"] == "2026-09-09"
-    assert body["items"] == [
-        {
-            "symbol": "SPY",
-            "rank": 1,
-            "last": 612.4,
-            "volume": 41230000.0,
-            "avg_dollar_volume_20d": 25000000000.0,
-            "change_pct": 0.42,
-            "matched_strategy_id": "str-1",
-        }
-    ]
-
-    artifact_path = body["artifact_path"]
-    assert artifact_path.startswith("screeners/studies/liquid-large-caps-")
-    stored = cast(InMemoryScreenerStore, bundle.screeners.store).load_artifact(
-        artifact_path
-    )
-    assert stored is not None
-    assert b'"definition_name":"Liquid large caps"' in stored
-
-    listed = client.get(f"/v1/workspaces/{WORKSPACE}/screeners", headers=HEADERS)
-    assert listed.status_code == 200
-    definition = listed.json()["items"][0]
-    assert definition["name"] == "Liquid large caps"
-    assert definition["filters"] == [{"kind": "volume", "op": ">", "value": 1000}]
-    assert definition["artifact_path"] == artifact_path
-    assert definition["created_at"] == FIXED_CREATED_AT
-
-
-def test_screener_run_with_unknown_filter_kind_is_422() -> None:
-    client = make_client(make_bundle())
-    response = client.post(
-        f"/v1/workspaces/{WORKSPACE}/screeners/run",
-        headers=HEADERS,
-        json={
-            "name": "Broken",
-            "filters": [{"kind": "momentum", "op": ">", "value": 1}],
-        },
-    )
-    assert response.status_code == 422
-
-
-# ---------------------------------------------------------------------------
 # Workspace state: CLEO projection + evidence + consent audit
 # ---------------------------------------------------------------------------
 
@@ -854,7 +751,6 @@ def test_knowledge_search_maps_hits_from_the_index() -> None:
         ("get", f"/v1/workspaces/{WORKSPACE}/deployments/portfolio"),
         ("get", f"/v1/workspaces/{WORKSPACE}/dashboards/widgets"),
         ("get", f"/v1/workspaces/{WORKSPACE}/strategies"),
-        ("get", f"/v1/workspaces/{WORKSPACE}/screeners"),
         ("get", f"/v1/workspaces/{WORKSPACE}/state"),
         ("get", "/v1/knowledge/search?q=x"),
     ],

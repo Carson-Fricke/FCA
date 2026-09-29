@@ -74,11 +74,17 @@ impl PartitionWriter for StagingPartitionWriter {
         session_date: Date,
         asset_class: AssetClass,
         data_type: DataType,
+        interval: Option<&str>,
         symbol: &str,
     ) -> Result<ParquetMetadata, DataError> {
-        let metadata = self
-            .writer
-            .write(records, session_date, asset_class, data_type, symbol)?;
+        let metadata = self.writer.write(
+            records,
+            session_date,
+            asset_class,
+            data_type,
+            interval,
+            symbol,
+        )?;
         lock(&self.staged).push(metadata.clone());
         Ok(metadata)
     }

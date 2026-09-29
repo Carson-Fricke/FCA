@@ -261,6 +261,7 @@ async fn option_transactions_publish_and_the_coverage_route_serves_them() {
         contracts: Some(Arc::clone(&contracts) as Arc<dyn lake_catalog::ContractRepository>),
         front_sets: Some(Arc::clone(&front_sets) as Arc<dyn lake_catalog::DailyFrontSetRepository>),
         sas_issuer: None,
+        read_store: None,
         ensure_launcher: None,
         ensure_callback: None,
         bounded_query: None,

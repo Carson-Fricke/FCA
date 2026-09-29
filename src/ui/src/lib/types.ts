@@ -375,7 +375,14 @@ export interface WorkspaceOverview {
 export interface WorkspaceSnapshot {
 	workspaces: WorkspaceSummary[];
 	overview: WorkspaceOverview;
-	counts: { strategies: number; chats: number; backtests: number; deployments: number; dashboards: number; screeners: number };
+	counts: {
+		strategies: number;
+		chats: number;
+		backtests: number;
+		deployments: number;
+		dashboards: number;
+		screeners: number;
+	};
 }
 
 export interface StrategyVersion {
@@ -632,64 +639,78 @@ export interface WidgetDefinition {
 	data: Record<string, unknown>;
 }
 
-// ---------- Screener (thesis.screening HTTP surface, /v1/workspaces/{ws}/screening) ----------
+// ---------- Screener (thesis.http.screeners, /v1/workspaces/{ws}/screeners) ----------
 
 /**
- * One declarative filter: a preset kind plus validated parameters. The kind
- * vocabulary and per-kind parameter validation mirror
- * `src/thesis/screening/presets.py` (every violation is a backend
- * FilterError at declaration time).
+ * The bar intervals the harness accepts for a screening run, mirroring
+ * `BAR_INTERVALS` in `src/thesis/screening/definitions.py`.
  */
-export interface ScreenerFilterSpec {
-	kind: string;
-	params?: Record<string, string | number | boolean>;
+export type ScreenerBarInterval = '1min' | '1d';
+
+/**
+ * A content-addressed screener definition document as served by the screener
+ * router (`ScreenerDefinition.document()`): authored Rust source plus the
+ * run-defining configuration. `sourceSha256` is the digest the harness verifies
+ * as `bundle_hash`; `definitionSha256` is the domain-separated content address
+ * and `definitionId` its `sha256:<hex>` form.
+ */
+export interface ScreenerDefinition {
+	schema: 'fca-thesis-screener-definition-v1';
+	name: string;
+	lookbackDays: number;
+	barInterval: ScreenerBarInterval;
+	rankMetric: string;
+	universeRevision: string | null;
+	source: string;
+	parameters: Record<string, unknown>;
+	sourceSha256: string;
+	definitionSha256: string;
+	definitionId: string;
 }
 
-/** A saved screener definition document as served by the screening router. */
-export interface ScreenerSavedDefinition {
-	screener_id: string;
-	definition: {
-		schema_version: number;
-		name: string;
-		universe_revision: string;
-		lookback_days: number;
-		filters: ScreenerFilterSpec[];
-	};
-	definition_hash: string;
-	artifact_path: string;
-}
-
-/** One surviving symbol with its evaluated fact sheet (string metrics). */
-export interface ScreenerHitRow {
-	rank: number;
+/** One ranked screening row (`ScreenRow.document()`). */
+export interface ScreenRow {
 	symbol: string;
-	metrics: Record<string, string>;
+	metrics: Record<string, string | number>;
+	rank?: number;
 }
 
-/** One deterministic run result with full provenance. */
-export interface ScreenerRunResult {
-	schema_version: number;
+/**
+ * One imported screening result (`ScreeningRecord.document()`) with its
+ * definition and run provenance. `status` is the terminal harness state the
+ * importer accepted (for example `complete`); a result exists only for a
+ * terminal run whose `screen.json` artifact was readable.
+ */
+export interface ScreeningResult {
 	result_id: string;
-	screener_id: string;
-	definition_name: string;
-	universe_revision: string;
-	as_of: string;
-	data_window_start: string;
-	data_window_end: string;
+	workspace_id: string;
+	definition_id: string;
 	definition_hash: string;
-	hits: ScreenerHitRow[];
+	run_id: string;
+	status: string;
+	as_of: string;
+	rows: ScreenRow[];
+	/**
+	 * Import provenance: the harness artifact entry, artifact index, run
+	 * catalog, and the `screen.json` document without its rows.
+	 */
+	provenance: Record<string, unknown>;
 }
 
-/** Payload to save one screener definition. */
+/** Request body for `POST /v1/workspaces/{ws}/screeners`. */
 export interface ScreenerSaveInput {
 	name: string;
-	universe_revision?: string;
-	lookback_days?: number;
-	filters: ScreenerFilterSpec[];
+	lookback_days: number;
+	bar_interval: ScreenerBarInterval;
+	rank_metric: string;
+	universe_revision?: string | null;
+	source: string;
+	parameters?: Record<string, unknown> | null;
 }
 
-/** Payload to run one screener at an explicit point-in-time as-of date. */
-export interface ScreenerRunInput extends ScreenerSaveInput {
+/** Request body for `POST /v1/workspaces/{ws}/screeners/run`. */
+export interface ScreenerRunInput {
+	definition_id: string;
 	as_of: string;
 }
 

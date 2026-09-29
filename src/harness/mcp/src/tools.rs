@@ -1,8 +1,9 @@
 //! Tool catalog and execution boundaries for the harness MCP server.
 //!
 //! The registry publishes `run_backtest`, `get_backtest_status`, `get_run`,
-//! `list_artifacts`, `read_artifact`, `run_study`, and the capability-gated
-//! `launch_trader`. Every boundary is
+//! `list_artifacts`, `read_artifact`, `run_study`, `run_screener`,
+//! `get_screener_status`, the configuration templates, and the
+//! capability-gated `launch_trader`. Every boundary is
 //! injected; the server composes no subprocess or HTTP client itself, and
 //! serialized settings never contain a token value.
 
@@ -33,11 +34,20 @@ pub const TOOL_READ_ARTIFACT: &str = "read_artifact";
 pub const TOOL_LAUNCH_TRADER: &str = "launch_trader";
 /// Tool name for the study runner.
 pub const TOOL_RUN_STUDY: &str = "run_study";
+/// Tool name for the screening runner.
+pub const TOOL_RUN_SCREENER: &str = "run_screener";
+/// Tool name for screening job status queries.
+pub const TOOL_SCREENER_STATUS: &str = "get_screener_status";
+/// Tool name for the embedded screening configuration template.
+pub const TOOL_SCREENER_CONFIG_TEMPLATE: &str = "screener_config_template";
 
 const LAUNCH_ROUTE: &str = "/v1/backtests/jobs";
 const JOB_STATUS_ROUTE: &str = "/v1/backtests/jobs";
 const RUN_ROUTE: &str = "/v1/backtests/runs";
 const STUDY_LAUNCH_ROUTE: &str = "/v1/studies/jobs";
+/// The screening launch route Thesis and remote MCP clients call.
+pub const SCREENER_LAUNCH_ROUTE: &str = "/v1/screeners/jobs";
+const SCREENER_STATUS_ROUTE: &str = "/v1/screeners/jobs";
 const IDENTIFIER_MAX: usize = 128;
 
 /// Canonical starter configuration embedded at build time so an agent can
@@ -45,6 +55,12 @@ const IDENTIFIER_MAX: usize = 128;
 const BACKTEST_CONFIG_TEMPLATE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../config/harness/backtest.yaml"
+));
+
+/// Canonical starter screening configuration embedded at build time.
+const SCREENER_CONFIG_TEMPLATE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../config/harness/screener.yaml"
 ));
 
 /// Characters left unescaped when encoding a path segment (RFC 3986 unreserved).
@@ -147,6 +163,8 @@ pub struct ToolCapabilities {
     pub artifacts: bool,
     /// Publish `run_study`.
     pub study: bool,
+    /// Publish `run_screener`, `get_screener_status`, and the template.
+    pub screener: bool,
     /// Publish `launch_trader` (opt-in).
     pub trader: bool,
 }
@@ -158,6 +176,7 @@ impl Default for ToolCapabilities {
             backtest_status: true,
             artifacts: true,
             study: true,
+            screener: true,
             trader: false,
         }
     }
@@ -172,6 +191,7 @@ impl ToolCapabilities {
             "backtest_status": self.backtest_status,
             "artifacts": self.artifacts,
             "study": self.study,
+            "screener": self.screener,
             "trader": self.trader,
         })
     }
@@ -250,6 +270,16 @@ pub trait StudySubmitter: Send + Sync {
     fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
 }
 
+/// Injected local screening surface for one screen configuration document path.
+pub trait ScreeningSubmitter: Send + Sync {
+    /// Launch one screening run and return its run summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a reason string when the screening run cannot be launched.
+    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
+}
+
 /// Loads and validates one configuration document as a JSON payload.
 pub trait ConfigurationLoader: Send + Sync {
     /// Load one configuration path into the JSON launch body.
@@ -303,6 +333,8 @@ pub struct HarnessToolsContext {
     pub backtest_submitter: Option<Arc<dyn BacktestSubmitter>>,
     /// Local study submitter.
     pub study_submitter: Option<Arc<dyn StudySubmitter>>,
+    /// Local screening submitter.
+    pub screening_submitter: Option<Arc<dyn ScreeningSubmitter>>,
     /// Durable local results store, queried in `local` mode.
     pub run_store: Option<Arc<dyn RunStore>>,
     /// Durable local job repository, queried in `local` mode.
@@ -325,6 +357,7 @@ impl HarnessToolsContext {
             runner: None,
             backtest_submitter: None,
             study_submitter: None,
+            screening_submitter: None,
             run_store: None,
             job_repository: None,
             configuration_loader: Arc::new(JsonFileConfigurationLoader),
@@ -576,6 +609,43 @@ impl HarnessTools {
         self.invoke_process(&tail, "study-job")
     }
 
+    /// Launch one screening run through the selected local or remote boundary.
+    ///
+    /// A screening run evaluates one JIT-authored cross-sectional program and
+    /// produces a ranked `screen.json` artifact. The local boundary returns the
+    /// derived run id immediately and completes the run in the background; the
+    /// remote boundary posts the configuration to the screener launch route.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolExecutionError`] when the boundary fails.
+    pub fn run_screener(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
+        let config_path = resolve_config(arguments)?;
+        if self.context.mode == Boundary::Remote {
+            return self.launch_remote_screener(&config_path);
+        }
+        if let Some(submitter) = &self.context.screening_submitter {
+            let workspace = workspace_option(arguments)?;
+            return submitter
+                .submit(&config_path, workspace.as_deref())
+                .map_err(|error| {
+                    ToolExecutionError::new(format!(
+                        "the local screening runner could not complete the screening run: {error}"
+                    ))
+                });
+        }
+        let mut tail = vec![
+            "screen-job".to_string(),
+            "--config".to_string(),
+            config_path,
+        ];
+        tail.extend(workspace_arguments(arguments)?);
+        self.invoke_process(&tail, "screen-job")
+    }
+
     /// Return the embedded starter backtest configuration document.
     ///
     /// # Errors
@@ -585,6 +655,23 @@ impl HarnessTools {
         Ok(json!({
             "format": "yaml",
             "template": BACKTEST_CONFIG_TEMPLATE,
+        }))
+    }
+
+    /// Return the embedded starter screening configuration document.
+    ///
+    /// The template is a complete `shell: screen` document with an inline
+    /// example program using `export_screening_program!`; its embedded
+    /// `bundle_hash` matches the example source, and an edited source requires
+    /// recomputing that hash.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolExecutionError`] when the template cannot be serialized.
+    pub fn screener_config_template(&self) -> Result<Value, ToolExecutionError> {
+        Ok(json!({
+            "format": "yaml",
+            "template": SCREENER_CONFIG_TEMPLATE,
         }))
     }
 
@@ -622,6 +709,26 @@ impl HarnessTools {
             utf8_percent_encode(&job_id, PATH_SEGMENT)
         ))?;
         self.remote_get(&url, &format!("backtest job '{job_id}' does not exist"))
+    }
+
+    /// Read one screening job's persisted state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolExecutionError`] when the local or remote lookup fails.
+    pub fn get_screener_status(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
+        let job_id = identifier_argument(arguments, "job_id")?;
+        if self.context.mode == Boundary::Local {
+            return self.local_screener_status(&job_id);
+        }
+        let url = self.remote_url(&format!(
+            "{SCREENER_STATUS_ROUTE}/{}",
+            utf8_percent_encode(&job_id, PATH_SEGMENT)
+        ))?;
+        self.remote_get(&url, &format!("screener job '{job_id}' does not exist"))
     }
 
     /// Read one stored run's catalog row from the remote harness API.
@@ -694,6 +801,21 @@ impl HarnessTools {
                 .map_err(|error| ToolExecutionError::new(error.to_string())),
             None => Err(ToolExecutionError::new(format!(
                 "backtest job '{job_id}' does not exist"
+            ))),
+        }
+    }
+
+    fn local_screener_status(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
+        let repository = self.context.job_repository.as_ref().ok_or_else(|| {
+            ToolExecutionError::new(
+                "local screener jobs require a durable job repository in this MCP server",
+            )
+        })?;
+        match repository.get(job_id) {
+            Some(record) => serde_json::to_value(&record)
+                .map_err(|error| ToolExecutionError::new(error.to_string())),
+            None => Err(ToolExecutionError::new(format!(
+                "screener job '{job_id}' does not exist"
             ))),
         }
     }
@@ -915,6 +1037,68 @@ impl HarnessTools {
         Ok(json!({
             "boundary": "remote",
             "job_id": job_id,
+            "state": state,
+            "location": location,
+        }))
+    }
+
+    fn launch_remote_screener(&self, config_path: &str) -> Result<Value, ToolExecutionError> {
+        let payload = self
+            .context
+            .configuration_loader
+            .load_json(config_path)
+            .map_err(|error| {
+                ToolExecutionError::new(format!(
+                    "could not load the screening configuration '{config_path}': {error}"
+                ))
+            })?;
+        let url = self.remote_url(SCREENER_LAUNCH_ROUTE)?;
+        let response = self.dispatch_remote_post(&url, &payload)?;
+        let status_code = response.status_code;
+        if status_code == 401 || status_code == 403 {
+            return Err(credential_rejected(status_code));
+        }
+        if status_code == 404 || status_code == 501 {
+            return Err(ToolExecutionError::new(format!(
+                "the remote harness API does not implement screening launch (HTTP {status_code})"
+            )));
+        }
+        if !(200..300).contains(&status_code) {
+            return Err(ToolExecutionError::new(format!(
+                "remote screening launch failed (HTTP {status_code})"
+            )));
+        }
+        let job_id = response
+            .body
+            .get("job_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ToolExecutionError::new(
+                    "remote harness screener response requires a non-empty 'job_id' string",
+                )
+            })?;
+        let state = response
+            .body
+            .get("state")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ToolExecutionError::new(
+                    "remote harness screener response requires a non-empty 'state' string",
+                )
+            })?;
+        let location = response
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("location"))
+            .map(|(_, value)| value.clone());
+        Ok(json!({
+            "boundary": "remote",
+            "job_id": job_id,
+            "run_id": job_id,
             "state": state,
             "location": location,
         }))
@@ -1160,6 +1344,46 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             move |arguments| handler.run_study(arguments),
         ));
     }
+    if capabilities.screener {
+        let handler = tools.clone();
+        candidates.push(Tool::new(
+            TOOL_RUN_SCREENER,
+            "Run one deterministic screening run: a local 'harness screen-job' process, \
+             or a bearer-authenticated POST to the remote harness API returning \
+             {job_id, run_id, state}. A screening run evaluates one JIT-authored \
+             cross-sectional Rust program and produces a ranked 'screen.json' artifact; \
+             market data arrives only through the harness data-source port, so an \
+             unavailable lake fails the run loudly. config_path must reference an existing, \
+             readable screen configuration document; do not guess paths. Use \
+             screener_config_template for a starter document.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "anyOf": [
+                    {"required": ["config_path"]},
+                    {"required": ["config"]}
+                ],
+                "properties": {
+                    "config_path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Path to an existing screen configuration document."
+                    },
+                    "config": {
+                        "type": "object",
+                        "description": "An inline screen configuration document, used when no config file exists. Same schema as the configuration file; call screener_config_template for a starter document."
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Local output directory passed as --output-dir; ignored when the remote API executes the launch."
+                    }
+                }
+            }),
+            "screener",
+            move |arguments| handler.run_screener(arguments),
+        ));
+    }
     if capabilities.backtest {
         let handler = tools.clone();
         candidates.push(Tool::new(
@@ -1177,6 +1401,25 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             move |_arguments| handler.backtest_config_template(),
         ));
     }
+    if capabilities.screener {
+        let handler = tools.clone();
+        candidates.push(Tool::new(
+            TOOL_SCREENER_CONFIG_TEMPLATE,
+            "Return a canonical starter screening configuration document (YAML, \
+             `shell: screen`) with an inline example program using \
+             `export_screening_program!`. Adapt name, as_of, lookback_days, and \
+             rank_metric, then recompute bundle_hash/source_sha256 for the edited source \
+             and pass the result as the inline `config` argument of run_screener when no \
+             configuration file exists.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {}
+            }),
+            "screener",
+            move |_arguments| handler.screener_config_template(),
+        ));
+    }
     if capabilities.backtest_status {
         let handler = tools.clone();
         candidates.push(Tool::new(
@@ -1191,6 +1434,22 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             }),
             "backtest_status",
             move |arguments| handler.get_backtest_status(arguments),
+        ));
+    }
+    if capabilities.screener {
+        let handler = tools.clone();
+        candidates.push(Tool::new(
+            TOOL_SCREENER_STATUS,
+            "Read one screening job's persisted state \
+             {job_id, state, created_at, updated_at, error_message} from the remote harness API.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["job_id"],
+                "properties": {"job_id": text_property()}
+            }),
+            "screener",
+            move |arguments| handler.get_screener_status(arguments),
         ));
     }
     if capabilities.artifacts {

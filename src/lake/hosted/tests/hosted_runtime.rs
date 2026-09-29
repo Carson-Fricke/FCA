@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::future::BoxFuture;
 use lake_catalog::JobRepository as _;
-use lake_contracts::{AssetClass, Date, DateTime};
-use lake_hosted::{hosted_overrides, HostedEnsureError, HostedRuntime, IngestSessions};
+use lake_contracts::{AssetClass, BarInterval, Date, DateTime};
+use lake_hosted::{hosted_overrides, HostedEnsureError, HostedRuntime, IngestBars, IngestSessions};
 
 fn environment() -> BTreeMap<String, String> {
     [
@@ -46,6 +46,7 @@ fn equity_spec(start: &str, end: &str) -> lake_coverage::EnsureSpec {
         symbol: "aapl".to_string(),
         start_date: Date::parse(start).expect("start"),
         end_date: Date::parse(end).expect("end"),
+        interval: None,
     }
 }
 
@@ -56,6 +57,7 @@ fn crypto_spec() -> lake_coverage::EnsureSpec {
         symbol: "BTC/USD".to_string(),
         start_date: Date::parse("2026-08-28").expect("start"),
         end_date: Date::parse("2026-08-28").expect("end"),
+        interval: None,
     }
 }
 
@@ -141,6 +143,92 @@ async fn ensure_sessions_ingests_each_closed_equity_session() {
 }
 
 #[tokio::test]
+async fn ensure_sessions_ensures_trades_then_bars() {
+    let environ = environment();
+    let ingested: Ingested = Arc::new(Mutex::new(Vec::new()));
+    type IngestedBars = Arc<Mutex<Vec<(String, BarInterval, Vec<Date>)>>>;
+    let ingested_bars: IngestedBars = Arc::new(Mutex::new(Vec::new()));
+    let bars_recorder = Arc::clone(&ingested_bars);
+    let bars_override: IngestBars = Arc::new(
+        move |symbol: String,
+              interval: BarInterval,
+              sessions: Vec<lake_coverage::CoverageSession>| {
+            let record = Arc::clone(&bars_recorder);
+            Box::pin(async move {
+                record
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push((
+                        symbol,
+                        interval,
+                        sessions
+                            .iter()
+                            .map(|session| session.session_date)
+                            .collect(),
+                    ));
+                Ok(())
+            }) as BoxFuture<'static, Result<(), HostedEnsureError>>
+        },
+    );
+    let runtime = Arc::new(
+        runtime(&environ)
+            .with_ingest_override(recording_ingest(Arc::clone(&ingested)))
+            .with_bars_ingest_override(bars_override),
+    );
+
+    let bars = lake_coverage::EnsureSpec {
+        data_type: lake_contracts::DataType::Bars,
+        interval: Some("1d".to_string()),
+        ..equity_spec("2026-08-28", "2026-08-31")
+    };
+    runtime.ensure_sessions(&bars).await.expect("ensure");
+
+    let ingested = ingested
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert_eq!(
+        ingested,
+        vec![
+            ("AAPL".to_string(), Date::parse("2026-08-28").expect("date")),
+            ("AAPL".to_string(), Date::parse("2026-08-31").expect("date")),
+        ],
+        "trades are ensured before bars"
+    );
+    let bars_calls = ingested_bars
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    assert_eq!(bars_calls.len(), 1);
+    assert_eq!(bars_calls[0].0, "AAPL");
+    assert_eq!(bars_calls[0].1, BarInterval::OneDay);
+    assert_eq!(
+        bars_calls[0].2,
+        vec![
+            Date::parse("2026-08-28").expect("date"),
+            Date::parse("2026-08-31").expect("date"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn ensure_sessions_requires_a_bars_interval() {
+    let environ = environment();
+    let runtime = runtime(&environ);
+    let bars = lake_coverage::EnsureSpec {
+        data_type: lake_contracts::DataType::Bars,
+        interval: None,
+        ..equity_spec("2026-08-28", "2026-08-28")
+    };
+
+    let error = runtime
+        .ensure_sessions(&bars)
+        .await
+        .expect_err("bars without an interval");
+    assert!(error.to_string().contains("bars requires an interval"));
+}
+
+#[tokio::test]
 async fn ensure_sessions_requires_provider_credentials() {
     let mut environ = environment();
     environ.remove("LAKE_PROVIDER__API_KEY");
@@ -185,6 +273,7 @@ async fn job_launcher_marks_the_durable_job_succeeded() {
         symbol: "AAPL".to_string(),
         start_date: Date::parse("2026-08-28").expect("date"),
         end_date: Date::parse("2026-08-28").expect("date"),
+        interval: None,
     };
     launch(lake_coverage::EnsureJob {
         job_id: "ensure-test".to_string(),
@@ -218,6 +307,7 @@ async fn job_launcher_propagates_ingest_failures() {
         symbol: "AAPL".to_string(),
         start_date: Date::parse("2026-08-28").expect("date"),
         end_date: Date::parse("2026-08-28").expect("date"),
+        interval: None,
     };
     let error = launch(lake_coverage::EnsureJob {
         job_id: "ensure-test".to_string(),

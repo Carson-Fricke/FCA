@@ -37,10 +37,27 @@ fn object_names_are_uppercased_and_reuse_symbol_filename_rules() {
 
 #[test]
 fn non_reference_data_types_are_rejected() {
-    for data_type in [DataType::Trade, DataType::Quote] {
-        let error = reference_partition_path(date(2024, 4, 19), data_type, "SNAPSHOT")
-            .expect_err("rejected");
-        assert!(error.to_string().contains("not a reference dataset"));
+    for data_type in [
+        DataType::Trade,
+        DataType::Quote,
+        DataType::Bars,
+        DataType::Classification,
+        DataType::Fundamentals,
+    ] {
+        let is_reference = matches!(data_type, DataType::Classification | DataType::Fundamentals);
+        let result = reference_partition_path(date(2024, 4, 19), data_type, "SNAPSHOT");
+        if is_reference {
+            assert!(
+                result.is_ok(),
+                "reference data type {data_type} must build a path"
+            );
+        } else {
+            let error = result.expect_err("rejected");
+            assert!(
+                error.to_string().contains("not a reference dataset"),
+                "unexpected rejection for {data_type}"
+            );
+        }
     }
 }
 

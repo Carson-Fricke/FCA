@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::auth;
+use crate::error::ApiError;
 use lake_catalog::{
     CatalogRepository, ContractRepository, DailyFrontSetRepository, JobRepository,
     ListingRepository,
@@ -10,6 +11,7 @@ use lake_catalog::{
 use lake_contracts::DateTime;
 use lake_coverage::EnsureJobLauncher;
 use lake_query::{BoundedDuckDbQuery, EnsureCallback, FileUrlIssuer};
+use lake_storage::ReadableBlobStore;
 
 /// The clock provider used to classify currently open sessions.
 pub type ApiClock = Arc<dyn Fn() -> DateTime + Send + Sync>;
@@ -32,6 +34,8 @@ pub struct LakeApiState {
     pub front_sets: Option<Arc<dyn DailyFrontSetRepository>>,
     /// Optional read-URL issuer for file and raw queries.
     pub sas_issuer: Option<Arc<dyn FileUrlIssuer>>,
+    /// Optional blob-read seam backing the streaming read and reference routes.
+    pub read_store: Option<Arc<dyn ReadableBlobStore>>,
     /// Optional ensure launcher; a provider-free no-op when absent.
     pub ensure_launcher: Option<EnsureJobLauncher>,
     /// Optional coverage-ensure callback used by the query route.
@@ -59,6 +63,7 @@ impl std::fmt::Debug for LakeApiState {
             .field("contracts", &self.contracts.is_some())
             .field("front_sets", &self.front_sets.is_some())
             .field("sas_issuer", &self.sas_issuer.is_some())
+            .field("read_store", &self.read_store.is_some())
             .field("ensure_launcher", &self.ensure_launcher.is_some())
             .field("ensure_callback", &self.ensure_callback.is_some())
             .field("bounded_query", &self.bounded_query.is_some())
@@ -137,6 +142,17 @@ impl ApiContext {
     /// The coverage instant for this request.
     pub(crate) fn coverage_as_of(&self) -> DateTime {
         (self.state.now)()
+    }
+
+    /// The injected blob-read seam, or the read-unavailable rejection.
+    pub(crate) fn read_store(&self) -> Result<Arc<dyn ReadableBlobStore>, ApiError> {
+        self.state.read_store.clone().ok_or_else(|| {
+            ApiError::new(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "read_unavailable",
+                "lake read storage is not configured",
+            )
+        })
     }
 }
 

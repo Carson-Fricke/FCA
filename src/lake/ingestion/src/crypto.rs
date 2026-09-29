@@ -239,6 +239,7 @@ impl CryptoIngestTransaction {
                 session.session_date,
                 AssetClass::Crypto,
                 *data_type,
+                None,
                 pair,
             )?);
         }
@@ -271,6 +272,7 @@ impl CryptoIngestTransaction {
                     0,
                     None,
                     Some(message.clone()),
+                    None,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -344,6 +346,7 @@ fn coverage_records(
                 metadata.bytes,
                 Some(metadata.checksum.clone()),
                 None,
+                None,
             )
         })
         .collect()
@@ -394,7 +397,10 @@ fn quote_rows(
 
 /// Compare two crypto trades on the pinned `(timestamp, trade_id or -1,
 /// exchange or "", price, size, taker_side or "")` order.
-fn compare_trades(left: &NormalizedCryptoTrade, right: &NormalizedCryptoTrade) -> Ordering {
+pub(crate) fn compare_trades(
+    left: &NormalizedCryptoTrade,
+    right: &NormalizedCryptoTrade,
+) -> Ordering {
     left.timestamp
         .cmp(&right.timestamp)
         .then_with(|| {

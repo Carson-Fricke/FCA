@@ -19,7 +19,10 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use lake_contracts::{canonical_symbol, AssetClass, DataError, DataType, Date};
 
-use crate::models::{coverage_from_value, CoverageRecord};
+use crate::models::{
+    coverage_from_value, CoverageRecord, COVERAGE_BAR_SOURCE_JSON_KEY,
+    COVERAGE_SOURCE_REVISION_JSON_KEY,
+};
 use crate::ports::{CatalogRepository, CoverageQuery};
 
 /// The catalog schema version Python writes and this store accepts.
@@ -34,7 +37,7 @@ const REPLACE_BACKOFF: Duration = Duration::from_millis(50);
 
 static TEMPORARY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-type CoverageKey = (AssetClass, DataType, String, Date);
+type CoverageKey = (AssetClass, DataType, String, Option<String>, Date);
 
 #[derive(Debug, Default)]
 struct StoreState {
@@ -148,6 +151,7 @@ impl CatalogRepository for JsonCatalogStore {
         &self,
         asset_class: AssetClass,
         data_type: DataType,
+        interval: Option<&str>,
         symbol: &str,
         session_date: Date,
     ) -> Result<Option<CoverageRecord>, DataError> {
@@ -155,7 +159,13 @@ impl CatalogRepository for JsonCatalogStore {
         let state = self.answer()?;
         Ok(state
             .index
-            .get(&(asset_class, data_type, symbol, session_date))
+            .get(&(
+                asset_class,
+                data_type,
+                symbol,
+                interval.map(str::to_string),
+                session_date,
+            ))
             .map(|record| (**record).clone()))
     }
 
@@ -184,6 +194,10 @@ impl CatalogRepository for JsonCatalogStore {
                     && symbol
                         .as_deref()
                         .is_none_or(|value| value == record.symbol.as_str())
+                    && query
+                        .interval
+                        .as_deref()
+                        .is_none_or(|value| record.interval.as_deref() == Some(value))
                     && query.start.is_none_or(|start| record.session_date >= start)
                     && query.end.is_none_or(|end| record.session_date <= end)
             })
@@ -319,6 +333,10 @@ fn write_row(out: &mut String, record: &CoverageRecord) {
     out.push('{');
     write_string_field(out, "asset_class", record.asset_class.value());
     out.push(',');
+    if let Some(bar_source) = &record.bar_source {
+        write_string_field(out, COVERAGE_BAR_SOURCE_JSON_KEY, bar_source.value());
+        out.push(',');
+    }
     write_number_field(out, "byte_size", record.byte_size);
     out.push(',');
     write_optional_string_field(out, "checksum", record.checksum.as_deref());
@@ -327,12 +345,20 @@ fn write_row(out: &mut String, record: &CoverageRecord) {
     out.push(',');
     write_optional_string_field(out, "error_message", record.error_message.as_deref());
     out.push(',');
+    if let Some(interval) = &record.interval {
+        write_string_field(out, "interval", interval);
+        out.push(',');
+    }
     write_optional_string_field(out, "object_path", record.object_path.as_deref());
     out.push(',');
     write_number_field(out, "row_count", record.row_count);
     out.push(',');
     write_string_field(out, "session_date", &record.session_date.isoformat());
     out.push(',');
+    if let Some(source_revision) = &record.source_revision {
+        write_string_field(out, COVERAGE_SOURCE_REVISION_JSON_KEY, source_revision);
+        out.push(',');
+    }
     write_string_field(out, "status", record.status.value());
     out.push(',');
     write_string_field(out, "symbol", &record.symbol);

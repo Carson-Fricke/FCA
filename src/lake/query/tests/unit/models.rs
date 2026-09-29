@@ -19,6 +19,7 @@ fn sample_file() -> FileQueryFile {
         row_count: 12,
         byte_size: 3456,
         checksum: Some("checksum".to_string()),
+        interval: None,
     }
 }
 
@@ -49,6 +50,7 @@ fn file_query_response_serializes_the_route_shape() {
     assert_eq!(value["files"][0]["row_count"], 12);
     assert_eq!(value["files"][0]["byte_size"], 3456);
     assert_eq!(value["files"][0]["checksum"], "checksum");
+    assert!(value["files"][0].get("interval").is_none());
     assert_eq!(
         value["results"],
         json!({
@@ -63,6 +65,27 @@ fn file_query_response_serializes_the_route_shape() {
         value["limitations"],
         json!(["Only complete catalog partitions are returned."])
     );
+}
+
+#[test]
+fn bars_files_serialize_the_interval_only_when_present() {
+    let file = FileQueryFile {
+        data_type: DataType::Bars,
+        object_path: "date=2024-01-18/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet"
+            .to_string(),
+        interval: Some("1min".to_string()),
+        ..sample_file()
+    };
+    let value = serde_json::to_value(&file).expect("serialize file");
+    assert_eq!(value["data_type"], "bars");
+    assert_eq!(
+        value["object_path"],
+        "date=2024-01-18/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet"
+    );
+    assert_eq!(value["interval"], "1min");
+
+    let legacy = serde_json::to_value(sample_file()).expect("serialize file");
+    assert!(legacy.get("interval").is_none());
 }
 
 #[test]

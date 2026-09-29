@@ -28,8 +28,11 @@ fn default_catalog_is_capability_filtered() {
         vec![
             "run_backtest",
             "run_study",
+            "run_screener",
             "backtest_config_template",
+            "screener_config_template",
             "get_backtest_status",
+            "get_screener_status",
             "get_run",
             "list_artifacts",
             "read_artifact"
@@ -39,6 +42,13 @@ fn default_catalog_is_capability_filtered() {
     opted_in.capabilities.trader = true;
     let catalog = build_catalog(opted_in).expect("catalog");
     assert!(catalog.names().contains(&"launch_trader"));
+
+    let mut without_screener = local_context();
+    without_screener.capabilities.screener = false;
+    let catalog = build_catalog(without_screener).expect("catalog");
+    assert!(!catalog.names().contains(&"run_screener"));
+    assert!(!catalog.names().contains(&"screener_config_template"));
+    assert!(!catalog.names().contains(&"get_screener_status"));
 }
 
 #[test]
@@ -54,6 +64,22 @@ fn run_backtest_invokes_the_local_runner() {
     assert_eq!(
         payload["stdout"],
         "harness backtest-job --config backtest.yaml --output-dir out"
+    );
+}
+
+#[test]
+fn run_screener_falls_back_to_the_screen_job_process() {
+    let catalog = build_catalog(local_context()).expect("catalog");
+    let tool = catalog.resolve(TOOL_RUN_SCREENER).expect("tool");
+    let mut arguments = Map::new();
+    arguments.insert("config_path".to_string(), json!("screener.yaml"));
+    arguments.insert("workspace".to_string(), json!("out"));
+    let payload = tool.call(&arguments).expect("call");
+    assert_eq!(payload["boundary"], "local");
+    assert_eq!(payload["exit_code"], 0);
+    assert_eq!(
+        payload["stdout"],
+        "harness screen-job --config screener.yaml --output-dir out"
     );
 }
 

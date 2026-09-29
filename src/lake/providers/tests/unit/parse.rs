@@ -567,3 +567,51 @@ fn option_page_rows_returns_contract_order_without_their_rows() {
     assert_eq!(rows[0].0.symbol, "SPY240119C00510000");
     assert_eq!(token, None);
 }
+
+#[test]
+fn parse_bar_reads_exact_decimals_from_a_recorded_equity_page() {
+    let payload: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/alpaca_equity_bars_page1.json"))
+            .expect("fixture");
+    let (rows, token) = page_rows(&payload, DataType::Bars, "AAPL").expect("page");
+    assert_eq!(token.as_deref(), Some("bars-page-2"));
+    assert_eq!(rows.len(), 2);
+
+    let bar = parse_bar(rows[0], "AAPL").expect("bar");
+    assert_eq!(bar.symbol, "AAPL");
+    assert_eq!(
+        bar.timestamp,
+        DateTime::from_ymd_hms(2024, 11, 27, 14, 30, 0, 0).expect("timestamp")
+    );
+    assert_eq!(bar.open, Decimal18::parse("190.12").expect("open"));
+    assert_eq!(bar.high, Decimal18::parse("190.55").expect("high"));
+    assert_eq!(bar.low, Decimal18::parse("189.98").expect("low"));
+    assert_eq!(bar.close, Decimal18::parse("190.41").expect("close"));
+    assert_eq!(bar.volume, Decimal18::parse("1200").expect("volume"));
+}
+
+#[test]
+fn parse_bar_reads_fractional_crypto_volume() {
+    let payload: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/alpaca_crypto_bars_page.json"))
+            .expect("fixture");
+    let (rows, token) = page_rows(&payload, DataType::Bars, "BTC/USD").expect("page");
+    assert_eq!(token, None);
+    let bar = parse_bar(rows[1], "BTC/USD").expect("bar");
+    assert_eq!(bar.volume, Decimal18::parse("0.25").expect("volume"));
+    assert_eq!(bar.open, Decimal18::parse("41250.00").expect("open"));
+}
+
+#[test]
+fn parse_bar_rejects_missing_and_malformed_fields() {
+    let row = json!({"t": "2024-11-27T14:30:00Z", "o": "1", "h": "2", "l": "0.5", "c": "1.5"});
+    expect_protocol(parse_bar(&row, "AAPL"), "'v'");
+
+    let row =
+        json!({"t": "2024-11-27T14:30:00Z", "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": []});
+    expect_protocol(parse_bar(&row, "AAPL"), "'v'");
+
+    let row =
+        json!({"t": "2024-11-27T14:30:00", "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "1"});
+    expect_protocol(parse_bar(&row, "AAPL"), "timezone");
+}

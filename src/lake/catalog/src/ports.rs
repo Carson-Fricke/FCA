@@ -14,7 +14,8 @@ use crate::models::{
 /// Filters for coverage catalog queries.
 ///
 /// The symbol filter is canonicalised before use and a reversed date range
-/// (`start > end`) is a `ValueError`.
+/// (`start > end`) is a `ValueError`. An `interval` filter keeps only rows
+/// stored under that canonical bars token.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CoverageQuery {
     /// Keep only this asset class.
@@ -23,6 +24,8 @@ pub struct CoverageQuery {
     pub data_type: Option<DataType>,
     /// Keep only this canonical symbol.
     pub symbol: Option<String>,
+    /// Keep only rows stored under this canonical bars interval token.
+    pub interval: Option<String>,
     /// Inclusive first session date.
     pub start: Option<Date>,
     /// Inclusive last session date.
@@ -32,10 +35,14 @@ pub struct CoverageQuery {
 /// Persistence contract for symbol-day coverage metadata.
 pub trait CatalogRepository: Send + Sync {
     /// Return one coverage row by logical key.
+    ///
+    /// The interval is part of the logical key: bars rows are stored under
+    /// their canonical token and every other data type under `None`.
     fn get(
         &self,
         asset_class: AssetClass,
         data_type: DataType,
+        interval: Option<&str>,
         symbol: &str,
         session_date: Date,
     ) -> Result<Option<CoverageRecord>, DataError>;

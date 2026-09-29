@@ -208,6 +208,7 @@ impl EquityIngestTransaction {
                 session.session_date,
                 AssetClass::Equity,
                 *data_type,
+                None,
                 symbol,
             )?);
         }
@@ -240,6 +241,7 @@ impl EquityIngestTransaction {
                     0,
                     None,
                     Some(message.clone()),
+                    None,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -303,6 +305,7 @@ fn coverage_records(
                 metadata.bytes,
                 Some(metadata.checksum.clone()),
                 None,
+                None,
             )
         })
         .collect()
@@ -354,7 +357,7 @@ fn quote_rows(
 
 /// Compare two trades on the pinned `(timestamp, trade_id, exchange, price,
 /// size, conditions, tape, update or "")` order.
-fn compare_trades(left: &NormalizedTrade, right: &NormalizedTrade) -> Ordering {
+pub(crate) fn compare_trades(left: &NormalizedTrade, right: &NormalizedTrade) -> Ordering {
     left.timestamp
         .cmp(&right.timestamp)
         .then_with(|| left.trade_id.cmp(&right.trade_id))

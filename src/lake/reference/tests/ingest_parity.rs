@@ -8,6 +8,7 @@
 //! from `lake.reference.schemas` against the committed fixtures; they prove
 //! Python-written partitions decode through the Rust-written schema.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,11 +17,11 @@ use lake_catalog::MemoryCatalogRepository;
 use lake_contracts::{Date, DateTime, Decimal18, SCHEMA_METADATA_KEY, SCHEMA_VERSION_METADATA_KEY};
 use lake_reference::ingest::stage;
 use lake_reference::{
-    classification_snapshot, fundamentals_facts, latest_fundamentals, ClassificationIngest,
-    FactFilter, FactRow, ReferenceIngestCommitter, ReferenceObjectStore, XbrlFact,
-    CLASSIFICATION_OBJECT_NAME,
+    classification_snapshot, fundamentals_facts, latest_fundamentals, ClassificationExtras,
+    ClassificationIngest, CompanyTickers, FactFilter, FactRow, FundamentalsIngest,
+    ReferenceIngestCommitter, ReferenceObjectStore, XbrlFact, CLASSIFICATION_OBJECT_NAME,
 };
-use lake_storage::{BlobStore, LocalFilesystemStore};
+use lake_storage::{BlobStore, LocalFilesystemStore, ReadableBlobStore};
 use tempfile::TempDir;
 
 fn fixtures_dir() -> PathBuf {
@@ -45,6 +46,11 @@ fn fixture_facts() -> Vec<XbrlFact> {
     lake_reference::parse_companyfacts(&document).expect("facts")
 }
 
+fn fixture_tickers() -> CompanyTickers {
+    let payload = std::fs::read(fixtures_dir().join("company_tickers.json")).expect("fixture");
+    CompanyTickers::from_bytes(&payload).expect("tickers")
+}
+
 fn committer(root: &Path) -> ReferenceIngestCommitter {
     ReferenceIngestCommitter::new(
         Arc::new(LocalFilesystemStore::new(root)),
@@ -59,7 +65,7 @@ fn ingest_classification_fixture(root: &Path, snapshot_date: Option<Date>) -> Ve
         snapshot.snapshot_date = snapshot_date;
     }
     let result = ClassificationIngest::new(committer(root))
-        .run(&snapshot)
+        .run(&snapshot, &CompanyTickers::default())
         .expect("ingest");
     result
         .objects
@@ -99,6 +105,36 @@ fn fixture_classification_snapshot_ingests_into_the_frozen_layout() {
     assert_eq!(rows[0].round_lot_size, decimal("100"));
     assert_eq!(rows[0].listing_exchange, "Q");
     assert_eq!(rows[0].market_category, "Q");
+
+    // The snapshot written without a ticker map must stay pinned: the object
+    // carries exactly the frozen fields and the reader reports no extras, so
+    // pre-join partitions remain byte-compatible.
+    let stored = std::fs::read(
+        root.path()
+            .join("date=2024-04-19")
+            .join("asset_class=reference")
+            .join("data_type=classification")
+            .join(format!("{CLASSIFICATION_OBJECT_NAME}.parquet")),
+    )
+    .expect("object");
+    let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+        bytes::Bytes::from(stored),
+    )
+    .expect("reader");
+    let expected = lake_reference::classification_schema();
+    assert_eq!(builder.schema().fields().len(), expected.fields().len());
+    for (actual, expected) in builder.schema().fields().iter().zip(expected.fields()) {
+        assert_eq!(actual.name(), expected.name());
+        assert_eq!(actual.data_type(), expected.data_type());
+        assert_eq!(actual.is_nullable(), expected.is_nullable());
+    }
+
+    let with_extras =
+        lake_reference::query::classification_snapshot_with_extras(root.path(), date(2024, 4, 19))
+            .expect("rows");
+    assert!(with_extras
+        .iter()
+        .all(|(_, extras)| *extras == ClassificationExtras::default()));
 }
 
 #[test]
@@ -243,6 +279,122 @@ fn classification_replaces_whole_snapshots_and_serves_the_latest_known() {
 
     let before_any = classification_snapshot(root.path(), date(2024, 4, 17));
     assert!(before_any.expect("rows").is_empty());
+}
+
+#[test]
+fn recorded_company_tickers_join_writes_cik_and_stays_idempotent() {
+    let root = TempDir::new().expect("root");
+    let store = Arc::new(LocalFilesystemStore::new(root.path()));
+    let catalog = Arc::new(MemoryCatalogRepository::new());
+    let payload = std::fs::read(fixtures_dir().join("nasdaqtraded.txt")).expect("fixture");
+    let snapshot = lake_reference::parse_nasdaq_traded(&payload).expect("snapshot");
+
+    let ingest = ClassificationIngest::new(ReferenceIngestCommitter::new(
+        store.clone(),
+        catalog.clone(),
+    ));
+    let first = ingest.run(&snapshot, &fixture_tickers()).expect("first");
+    let first_bytes = object_bytes(root.path(), &first.objects);
+
+    let path = &first.objects[0].path;
+    let stored = ReadableBlobStore::read(store.as_ref(), path).expect("read");
+    let rows = lake_reference::schemas::read_classification_rows_with_extras(&stored, path, "test")
+        .expect("rows");
+    let joined: Vec<(String, Option<u64>)> = rows
+        .iter()
+        .map(|(row, extras)| (row.symbol.clone(), extras.cik))
+        .collect();
+    assert_eq!(
+        joined,
+        [
+            ("AAPL".to_string(), Some(320193)),
+            ("GOOG".to_string(), Some(1652044)),
+            ("MSFT".to_string(), Some(789019)),
+            ("ZVZZT".to_string(), None),
+        ]
+    );
+    assert!(rows
+        .iter()
+        .all(|(_, extras)| extras.sic.is_none() && extras.sic_industry.is_none()));
+
+    let second = ingest.run(&snapshot, &fixture_tickers()).expect("second");
+    assert_eq!(first.objects, second.objects);
+    assert_eq!(first.coverage, second.coverage);
+    assert_eq!(object_bytes(root.path(), &second.objects), first_bytes);
+}
+
+#[test]
+fn cik_join_feeds_the_facts_join_for_mapped_symbols() {
+    let root = TempDir::new().expect("root");
+    let store = Arc::new(LocalFilesystemStore::new(root.path()));
+    let payload = std::fs::read(fixtures_dir().join("nasdaqtraded.txt")).expect("fixture");
+    let snapshot = lake_reference::parse_nasdaq_traded(&payload).expect("snapshot");
+    ClassificationIngest::new(ReferenceIngestCommitter::new(
+        store.clone(),
+        Arc::new(MemoryCatalogRepository::new()),
+    ))
+    .run(&snapshot, &fixture_tickers())
+    .expect("classification");
+    FundamentalsIngest::new(ReferenceIngestCommitter::new(
+        store.clone(),
+        Arc::new(MemoryCatalogRepository::new()),
+    ))
+    .run(&fixture_facts())
+    .expect("fundamentals");
+
+    let as_of = date(2024, 5, 3);
+    let snapshot = lake_reference::query::classification_snapshot_with_extras_from_store(
+        store.as_ref(),
+        as_of,
+    )
+    .expect("snapshot");
+    let cik_by_symbol: BTreeMap<String, Option<u64>> = snapshot
+        .iter()
+        .map(|(row, extras)| (row.symbol.clone(), extras.cik))
+        .collect();
+    assert_eq!(cik_by_symbol["AAPL"], Some(320193));
+    assert_eq!(cik_by_symbol["MSFT"], Some(789019));
+    assert_eq!(cik_by_symbol["ZVZZT"], None);
+
+    // This mirrors the facts route join: the classification snapshot supplies
+    // the CIK, and the per-CIK fundamentals become visible at their `filed`
+    // date. A symbol without a CIK resolves no fundamentals.
+    let aapl_cik = cik_by_symbol["AAPL"].expect("mapped");
+    let before_restatement = latest_fundamentals(
+        root.path(),
+        date(2024, 4, 19),
+        FactFilter {
+            cik: Some(aapl_cik),
+            ..FactFilter::none()
+        },
+    )
+    .expect("facts");
+    assert_eq!(
+        before_restatement
+            .iter()
+            .filter(|row| row.tag == "Revenues")
+            .map(|row| (row.filed.isoformat(), row.val))
+            .collect::<Vec<_>>(),
+        [("2024-02-02".to_string(), decimal("119575000000"))]
+    );
+    let as_filed = latest_fundamentals(
+        root.path(),
+        as_of,
+        FactFilter {
+            cik: Some(aapl_cik),
+            ..FactFilter::none()
+        },
+    )
+    .expect("facts");
+    assert_eq!(
+        as_filed
+            .iter()
+            .filter(|row| row.tag == "Revenues")
+            .map(|row| (row.filed.isoformat(), row.val))
+            .collect::<Vec<_>>(),
+        [("2024-05-03".to_string(), decimal("119999000000"))]
+    );
+    assert!(cik_by_symbol["ZVZZT"].is_none());
 }
 
 fn fact(filed: Date, val: &str, tag: &str, accn: &str) -> XbrlFact {
@@ -548,6 +700,19 @@ fn python_written_oracle_parquet_decodes_into_typed_rows() {
     assert!(rows[1].test_issue);
     assert_eq!(rows[1].financial_status, None);
     assert_eq!(rows[0].round_lot_size, decimal("100"));
+
+    // The Python-written oracle predates the CIK join: it must keep decoding
+    // with every extras column absent.
+    let with_extras = lake_reference::schemas::read_classification_rows_with_extras(
+        &classification_payload,
+        "oracle/classification_snapshot.parquet",
+        "oracle",
+    )
+    .expect("rows");
+    assert_eq!(with_extras.len(), 2);
+    assert!(with_extras
+        .iter()
+        .all(|(_, extras)| *extras == ClassificationExtras::default()));
 
     let fundamentals_payload =
         std::fs::read(oracle_dir().join("fundamentals_cik0000320193.parquet")).expect("oracle");

@@ -583,7 +583,7 @@ impl HistoricalView {
         }
         let last_quote = window_quotes.last().and_then(|event| match event {
             MarketEvent::Quote(quote) => Some(quote),
-            MarketEvent::Trade(_) => None,
+            MarketEvent::Trade(_) | MarketEvent::Bar(_) => None,
         });
         let vwap = if volume.is_zero() {
             None

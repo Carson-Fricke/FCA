@@ -35,6 +35,11 @@ class WorkspacePathProvider(Protocol):
 
 
 MODEL_DIRECTORY = "models"
+
+#: Bar intervals the harness study replay accepts. A study replays bars at
+#: exactly one of these intervals over its declared sample window.
+BAR_INTERVALS: tuple[str, ...] = ("1min", "1d")
+
 _HASH_DOMAIN = b"fca:thesis-research-model:v1\0"
 _WORKSPACE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -138,6 +143,17 @@ class ResearchModel:
             _mapping(self.harness_configuration, "harness_configuration"),
         )
         object.__setattr__(self, "tests", MappingProxyType(dict(self.tests)))
+        interval = self.harness_configuration.get("interval")
+        if not isinstance(interval, str) or interval.strip() not in BAR_INTERVALS:
+            raise ResearchModelError(
+                "model harness_configuration must declare its bar interval as "
+                f"one of {', '.join(BAR_INTERVALS)}"
+            )
+
+    @property
+    def bar_interval(self) -> str:
+        """Return the declared bar interval the study replays at."""
+        return str(self.harness_configuration["interval"]).strip()
 
     @property
     def canonical_document(self) -> dict[str, object]:
@@ -573,6 +589,7 @@ def _confined_path(root: Path, relative: str) -> Path:
 
 
 __all__ = [
+    "BAR_INTERVALS",
     "MODEL_DIRECTORY",
     "FittedModelRef",
     "InMemoryResearchModelStore",

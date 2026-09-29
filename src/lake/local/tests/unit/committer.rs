@@ -28,6 +28,7 @@ fn coverage(symbol: &str, session_date: Date) -> CoverageRecord {
         7,
         Some("checksum".to_string()),
         None,
+        None,
     )
     .expect("valid coverage")
 }

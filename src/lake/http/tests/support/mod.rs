@@ -5,8 +5,13 @@
 
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use arrow_array::{
+    BooleanArray, Decimal128Array, RecordBatch, StringArray, TimestampNanosecondArray, UInt64Array,
+};
+use arrow_schema::{DataType as ArrowType, Field, Schema};
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
@@ -15,10 +20,11 @@ use lake_catalog::{
     CatalogRepository, ContractRecord, CoverageRecord, CoverageStatus, MemoryCatalogRepository,
     MemoryJobRepository,
 };
-use lake_contracts::{partition_path, AssetClass, DataError, DataType, Date, DateTime};
+use lake_contracts::{partition_path, AssetClass, DataError, DataType, Date, DateTime, Decimal18};
 use lake_coverage::{EnsureJob, EnsureJobLauncher};
 use lake_http::{create_app, ApiClock, LakeApiConfig, LakeApiState};
 use lake_query::{EnsureCallback, FileUrlIssuer, QueryApplicationError};
+use lake_storage::{BlobStore, LocalFilesystemStore, ParquetMetadata, ParquetWriter};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -44,6 +50,7 @@ pub fn base_state(catalog: Arc<dyn CatalogRepository>) -> LakeApiState {
         contracts: None,
         front_sets: None,
         sas_issuer: None,
+        read_store: None,
         ensure_launcher: None,
         ensure_callback: None,
         bounded_query: None,
@@ -138,7 +145,7 @@ pub fn complete_record(
     session_date: Date,
 ) -> CoverageRecord {
     let object_path =
-        partition_path(session_date, asset_class, data_type, symbol).expect("canonical path");
+        partition_path(session_date, asset_class, data_type, None, symbol).expect("canonical path");
     let status = CoverageStatus::Complete;
     CoverageRecord::new(
         asset_class,
@@ -150,6 +157,7 @@ pub fn complete_record(
         12,
         3456,
         Some("checksum".to_string()),
+        None,
         None,
     )
     .expect("valid record")
@@ -174,6 +182,7 @@ pub fn status_record(
         0,
         None,
         (status == CoverageStatus::Error).then(|| "source unavailable".to_string()),
+        None,
     )
     .expect("valid record")
 }
@@ -248,6 +257,7 @@ pub fn filling_launcher(catalog: Arc<dyn CatalogRepository>) -> EnsureJobLaunche
                     session_date,
                     job.request.asset_class,
                     job.request.data_type,
+                    job.request.interval.as_deref(),
                     &job.request.symbol,
                 )
                 .map_err(|error| DataError::value(error.to_string()))?;
@@ -262,6 +272,7 @@ pub fn filling_launcher(catalog: Arc<dyn CatalogRepository>) -> EnsureJobLaunche
                     3456,
                     None,
                     None,
+                    job.request.interval.clone(),
                 )
                 .map_err(|error| DataError::value(error.to_string()))?;
                 catalog.upsert(&record)?;
@@ -292,7 +303,7 @@ pub fn contract(symbol: &str, underlying: &str, expiration: Date) -> ContractRec
 }
 
 /// One recorded ensure callback invocation.
-pub type RecordedCall = (AssetClass, DataType, String, Date, Date);
+pub type RecordedCall = (AssetClass, DataType, Option<String>, String, Date, Date);
 
 /// An ensure callback recording every request it receives.
 #[derive(Clone, Default)]
@@ -310,12 +321,13 @@ impl RecordingCallback {
     pub fn callback(&self) -> EnsureCallback {
         let calls = Arc::clone(&self.calls);
         Arc::new(
-            move |asset_class, data_type, symbol, start_date, end_date| {
+            move |asset_class, data_type, interval, symbol, start_date, end_date| {
                 let calls = Arc::clone(&calls);
                 Box::pin(async move {
                     calls.lock().expect("lock").push((
                         asset_class,
                         data_type,
+                        interval,
                         symbol,
                         start_date,
                         end_date,
@@ -332,7 +344,7 @@ pub fn filling_callback(
     catalog: Arc<dyn CatalogRepository>,
     records: Vec<CoverageRecord>,
 ) -> EnsureCallback {
-    Arc::new(move |_, _, _, _, _| {
+    Arc::new(move |_, _, _, _, _, _| {
         let catalog = Arc::clone(&catalog);
         let records = records.clone();
         Box::pin(async move {
@@ -358,4 +370,238 @@ pub fn shared_jobs(
     jobs: impl IntoIterator<Item = lake_catalog::JobRecord>,
 ) -> Arc<MemoryJobRepository> {
     Arc::new(MemoryJobRepository::from_records(jobs))
+}
+
+/// Send one request and return its status, headers, and raw body bytes.
+pub async fn send_bytes(
+    router: &Router,
+    request: Request<Body>,
+) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let response = router.clone().oneshot(request).await.expect("oneshot");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    (status, headers, bytes.to_vec())
+}
+
+/// A complete bars coverage record with the canonical interval partition path.
+pub fn complete_bars_record(interval: &str, symbol: &str, session_date: Date) -> CoverageRecord {
+    let object_path = partition_path(
+        session_date,
+        AssetClass::Equity,
+        DataType::Bars,
+        Some(interval),
+        symbol,
+    )
+    .expect("canonical bars path");
+    CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        symbol,
+        session_date,
+        CoverageStatus::Complete,
+        Some(object_path),
+        12,
+        3456,
+        Some("checksum".to_string()),
+        None,
+        Some(interval.to_string()),
+    )
+    .expect("valid bars record")
+}
+
+/// Write one market-data partition with the pinned dataset schema.
+pub fn write_market_partition(
+    store: &Arc<LocalFilesystemStore>,
+    asset_class: AssetClass,
+    data_type: DataType,
+    interval: Option<&str>,
+    symbol: &str,
+    session_date: Date,
+    records: &[Value],
+) -> ParquetMetadata {
+    ParquetWriter::new(Arc::clone(store))
+        .write(
+            records,
+            session_date,
+            asset_class,
+            data_type,
+            interval,
+            symbol,
+        )
+        .expect("market partition write")
+}
+
+/// One recorded classification snapshot row used by the reference fixtures.
+pub struct SnapshotRow {
+    /// Canonical symbol.
+    pub symbol: &'static str,
+    /// Full security name.
+    pub security_name: &'static str,
+    /// Listing exchange code.
+    pub listing_exchange: &'static str,
+    /// Market category code.
+    pub market_category: &'static str,
+    /// Whether the security is an ETF.
+    pub etf: bool,
+    /// Round lot size at lake scale.
+    pub round_lot_size: &'static str,
+    /// Financial status code.
+    pub financial_status: Option<&'static str>,
+    /// The optional symbol-to-CIK mapping column.
+    pub cik: Option<u64>,
+    /// The optional SIC code column.
+    pub sic: Option<&'static str>,
+    /// The optional SIC industry column.
+    pub sic_industry: Option<&'static str>,
+}
+
+/// Write one classification snapshot with the optional reference extras.
+pub fn write_classification_snapshot(
+    store: &Arc<LocalFilesystemStore>,
+    snapshot_date: Date,
+    rows: &[SnapshotRow],
+) -> String {
+    let pinned = lake_reference::classification_schema();
+    let mut fields: Vec<Field> = pinned
+        .fields()
+        .iter()
+        .map(|field| field.as_ref().clone())
+        .collect();
+    fields.push(Field::new("cik", ArrowType::UInt64, true));
+    fields.push(Field::new("sic", ArrowType::Utf8, true));
+    fields.push(Field::new("sic_industry", ArrowType::Utf8, true));
+    let schema = Schema::new_with_metadata(fields, pinned.metadata().clone());
+
+    let created = DateTime::midnight(snapshot_date);
+    let file_creation_time =
+        TimestampNanosecondArray::from(vec![created.to_nanos(); rows.len()]).with_timezone("UTC");
+    let symbol = StringArray::from(rows.iter().map(|row| row.symbol).collect::<Vec<_>>());
+    let security_name =
+        StringArray::from(rows.iter().map(|row| row.security_name).collect::<Vec<_>>());
+    let listing_exchange = StringArray::from(
+        rows.iter()
+            .map(|row| row.listing_exchange)
+            .collect::<Vec<_>>(),
+    );
+    let market_category = StringArray::from(
+        rows.iter()
+            .map(|row| row.market_category)
+            .collect::<Vec<_>>(),
+    );
+    let etf = BooleanArray::from(rows.iter().map(|row| row.etf).collect::<Vec<_>>());
+    let round_lot_size = Decimal128Array::from(
+        rows.iter()
+            .map(|row| {
+                Decimal18::parse(row.round_lot_size)
+                    .expect("round lot")
+                    .unscaled()
+            })
+            .collect::<Vec<_>>(),
+    )
+    .with_precision_and_scale(38, 18)
+    .expect("decimal array");
+    let test_issue = BooleanArray::from(vec![false; rows.len()]);
+    let financial_status = StringArray::from(
+        rows.iter()
+            .map(|row| row.financial_status.map(str::to_string))
+            .collect::<Vec<_>>(),
+    );
+    let cik = UInt64Array::from(rows.iter().map(|row| row.cik).collect::<Vec<_>>());
+    let sic = StringArray::from(
+        rows.iter()
+            .map(|row| row.sic.map(str::to_string))
+            .collect::<Vec<_>>(),
+    );
+    let sic_industry = StringArray::from(
+        rows.iter()
+            .map(|row| row.sic_industry.map(str::to_string))
+            .collect::<Vec<_>>(),
+    );
+    let batch = RecordBatch::try_new(
+        Arc::new(schema),
+        vec![
+            Arc::new(file_creation_time),
+            Arc::new(symbol),
+            Arc::new(security_name),
+            Arc::new(listing_exchange),
+            Arc::new(market_category),
+            Arc::new(etf),
+            Arc::new(round_lot_size),
+            Arc::new(test_issue),
+            Arc::new(financial_status),
+            Arc::new(cik),
+            Arc::new(sic),
+            Arc::new(sic_industry),
+        ],
+    )
+    .expect("classification batch");
+
+    let path = lake_reference::reference_partition_path(
+        snapshot_date,
+        DataType::Classification,
+        lake_reference::CLASSIFICATION_OBJECT_NAME,
+    )
+    .expect("classification path");
+    let staged = lake_reference::ingest::stage(&batch, &path).expect("stage classification");
+    BlobStore::replace(store.as_ref(), &path, &staged.payload).expect("write classification");
+    path
+}
+
+/// Build one fundamentals fact row for a recorded fixture.
+#[allow(clippy::too_many_arguments)]
+pub fn fact(
+    cik: u64,
+    taxonomy: &str,
+    tag: &str,
+    unit: &str,
+    period_end: Date,
+    filed: Date,
+    accn: &str,
+    val: &str,
+) -> lake_reference::FactRow {
+    lake_reference::FactRow {
+        cik,
+        taxonomy: taxonomy.to_string(),
+        tag: tag.to_string(),
+        unit: unit.to_string(),
+        period_end,
+        fy: None,
+        fp: None,
+        form: "10-Q".to_string(),
+        accn: accn.to_string(),
+        filed,
+        frame: None,
+        val: Decimal18::parse(val).expect("fact value"),
+    }
+}
+
+/// Write facts into per-CIK, per-filed fundamentals objects.
+pub fn write_fundamentals(
+    store: &Arc<LocalFilesystemStore>,
+    rows: Vec<lake_reference::FactRow>,
+) -> Vec<String> {
+    let mut grouped: BTreeMap<(u64, Date), Vec<lake_reference::FactRow>> = BTreeMap::new();
+    for row in rows {
+        grouped.entry((row.cik, row.filed)).or_default().push(row);
+    }
+    let mut paths = Vec::new();
+    for ((cik, filed), group) in grouped {
+        let path = lake_reference::reference_partition_path(
+            filed,
+            DataType::Fundamentals,
+            &lake_reference::cik_object_name(cik).expect("cik object name"),
+        )
+        .expect("fundamentals path");
+        let table = lake_reference::fundamentals_table(group).expect("fundamentals table");
+        let staged = lake_reference::ingest::stage(&table, &path).expect("stage fundamentals");
+        BlobStore::replace(store.as_ref(), &path, &staged.payload).expect("write fundamentals");
+        paths.push(path);
+    }
+    paths
 }

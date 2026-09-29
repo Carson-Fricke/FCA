@@ -73,13 +73,23 @@ pub fn preflight_data(
         .iter()
         .filter(|event| matches!(event, super::fixture::MarketEvent::Quote { .. }))
         .count();
-    let trade_count = fixture.events.len() - quote_count;
+    let trade_count = fixture
+        .events
+        .iter()
+        .filter(|event| matches!(event, super::fixture::MarketEvent::Trade { .. }))
+        .count();
+    let bar_count = fixture
+        .events
+        .iter()
+        .filter(|event| matches!(event, super::fixture::MarketEvent::Bar { .. }))
+        .count();
     Ok(DataPreflight {
         source_id: fixture.source_id.clone(),
         session_count: fixture.sessions.len(),
         event_count: fixture.events.len(),
         quote_count,
         trade_count,
+        bar_count,
         file_count: fixture.file_count(),
         symbols,
         fingerprints: fixture.fingerprints.clone(),

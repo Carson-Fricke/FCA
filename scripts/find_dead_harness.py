@@ -49,7 +49,6 @@ EXCLUDED_ROOTS = (SRC / "harness" / "rust", SRC / "ui")
 KEEP_PREFIXES = (
     "harness.indicators",
     "harness.strategy",
-    "harness.screening",
     "harness.testing",
     "harness.cli",
     "harness._native",

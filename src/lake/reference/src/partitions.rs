@@ -58,12 +58,17 @@ pub fn parse_cik_symbol(value: &str) -> Result<u64, ReferenceError> {
 }
 
 /// Build a repository-independent, date-first Hive object path.
+///
+/// Reference data is classification and fundamentals only: bars and every
+/// other market data type are rejected explicitly, never aliased.
 pub fn reference_partition_path(
     knowledge_date: Date,
     data_type: DataType,
     name: &str,
 ) -> Result<String, ReferenceError> {
-    if !matches!(data_type, DataType::Classification | DataType::Fundamentals) {
+    if matches!(data_type, DataType::Bars)
+        || !matches!(data_type, DataType::Classification | DataType::Fundamentals)
+    {
         return Err(ReferenceError::invalid(format!(
             "data_type is not a reference dataset: {}",
             data_type.value()

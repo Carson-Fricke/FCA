@@ -6,38 +6,29 @@
 //! the configured strategies and studies are JIT-authored Rust programs
 //! loaded through the `harness-strategy-jit` seam.
 //!
-//! `--data-dir` is served by the local Parquet/Arrow lake reader in the
-//! `marketdata` crate, so a run reads the materialized Hive partitions
-//! instead of the synthetic benchmark.
+//! Market data streams from the market-lake HTTP routes through
+//! `harness-lakeclient`. The endpoint resolves from `LAKE_API_URL` /
+//! `LAKE_API_BASE_URL` and the bearer token from `LAKE_API__BEARER_TOKEN`; a
+//! run without a configured lake fails loudly and never falls back to local
+//! files or a synthetic fixture.
 
 use std::path::{Path, PathBuf};
 
 use backtest::backtest::engine_core::{BacktestOutcome, EngineOptions};
+use harness_lakeclient::BlockingLakeClient;
 
 use crate::{
-    BacktestJobArgs, BacktestJobError, BacktestJobRunner, BacktestRunSummary, StudyJobArgs,
-    StudyJobRunner,
+    BacktestJobArgs, BacktestJobError, BacktestJobRunner, BacktestRunSummary, ScreenJobArgs,
+    ScreenJobError, ScreenJobRunner, ScreenRunSummary, StudyJobArgs, StudyJobRunner,
 };
 
-/// Resolve the lake data directory for a CLI job: the `--data-dir` flag wins,
-/// then `HARNESS_DATA_DIR` / `LAKE_LOCAL_DATA_DIR`, else the repository's
-/// `.local/market-lake` when it exists.
-#[must_use]
-fn resolve_data_dir(flag: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Some(directory) = flag {
-        return Some(directory.clone());
-    }
-    crate::local::resolve_lake_data_dir()
-}
-
-fn require_data_dir(flag: Option<&PathBuf>) -> Result<PathBuf, BacktestJobError> {
-    resolve_data_dir(flag).ok_or_else(|| {
-        BacktestJobError::Engine(
-            "a lake data directory is required: pass --data-dir, set HARNESS_DATA_DIR or \
-             LAKE_LOCAL_DATA_DIR, or create .local/market-lake"
-                .to_string(),
-        )
-    })
+/// Build the market-lake client from the process environment.
+///
+/// The error names the missing configuration (`LAKE_API__BEARER_TOKEN`), so a
+/// run with no lake URL/token fails loudly before any engine work.
+fn require_lake_client() -> Result<BlockingLakeClient, BacktestJobError> {
+    BlockingLakeClient::from_env()
+        .map_err(|error| BacktestJobError::Engine(format!("market-lake client: {error}")))
 }
 
 /// Run `backtest-job` through the native Rust engine and JIT-authored strategy programs.
@@ -51,14 +42,14 @@ impl BacktestJobRunner for NativeBacktestJobRunner {
                 "A backtest configuration is required: backtest-job --config <path>".to_string(),
             ));
         };
-        let data_dir = require_data_dir(args.data_dir.as_ref())?;
+        let client = require_lake_client()?;
         let configuration = backtest::backtest::job::load_backtest_config(Path::new(config))
             .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
         let (outcome, artifact_path) = harness_strategy_jit::run_backtest_configuration(
             &configuration,
             &EngineOptions::default(),
             args.output_dir.as_deref(),
-            &data_dir,
+            &client,
         )
         .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
         Ok(summary_from_outcome(&outcome, artifact_path))
@@ -76,16 +67,18 @@ impl StudyJobRunner for NativeStudyJobRunner {
                 "A study configuration is required: study-job --config <path>".to_string(),
             ));
         };
-        let data_dir = require_data_dir(args.data_dir.as_ref())?;
-        let configuration = backtest::backtest::job::load_study_config(config)
+        let client = require_lake_client()?;
+        let mut configuration = backtest::backtest::job::load_study_config(config)
             .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
-        crate::local::ensure_lake_data(&configuration)
-            .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+        if !configuration.symbols.is_empty() {
+            crate::local::clamp_study_window(&client, &mut configuration)
+                .map_err(BacktestJobError::Engine)?;
+        }
         let (outcome, artifact_path) = harness_strategy_jit::run_study_configuration(
             &configuration,
             &EngineOptions::default(),
             args.output_dir.as_deref(),
-            &data_dir,
+            &client,
         )
         .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
         Ok(summary_from_outcome(&outcome, artifact_path))
@@ -106,6 +99,43 @@ fn summary_from_outcome(outcome: &BacktestOutcome, artifact_path: PathBuf) -> Ba
         fills: outcome.fills.len() as u64,
         artifact_path,
         reason: outcome.reason.clone(),
+    }
+}
+
+/// Run `screen-job` through the JIT screening seam.
+///
+/// The data source is the real
+/// [`LakeScreeningSource`](harness_strategy_jit::LakeScreeningSource), reading
+/// the market-lake HTTP routes. A missing or rejected lake configuration fails
+/// the command loudly before any run; no synthetic data is ever substituted.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NativeScreenJobRunner;
+
+impl ScreenJobRunner for NativeScreenJobRunner {
+    fn run(&self, args: &ScreenJobArgs) -> Result<ScreenRunSummary, ScreenJobError> {
+        let Some(config) = args.config.as_deref() else {
+            return Err(ScreenJobError::Engine(
+                "A screening configuration is required: screen-job --config <path>".to_string(),
+            ));
+        };
+        let configuration = backtest::backtest::job::load_screen_config(Path::new(config))
+            .map_err(|error| ScreenJobError::Engine(error.to_string()))?;
+        let source = harness_strategy_jit::LakeScreeningSource::from_env()
+            .map_err(|error| ScreenJobError::Engine(error.to_string()))?;
+        let (outcome, artifact_path) = harness_strategy_jit::run_screening_configuration(
+            &configuration,
+            &source,
+            &harness_strategy_jit::ScreenRunOptions::default(),
+            args.output_dir.as_deref(),
+        )
+        .map_err(|error| ScreenJobError::Engine(error.to_string()))?;
+        Ok(ScreenRunSummary {
+            run_id: outcome.run_id.clone(),
+            status: outcome.status.value().to_string(),
+            rows: outcome.row_count() as u64,
+            artifact_path,
+            reason: outcome.error().map(str::to_string),
+        })
     }
 }
 

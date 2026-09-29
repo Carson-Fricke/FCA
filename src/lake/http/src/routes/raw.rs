@@ -30,6 +30,7 @@ pub(crate) async fn raw_object(
         .get(
             requested.asset_class,
             requested.data_type,
+            requested.interval.as_deref(),
             &requested.symbol,
             requested.session_date,
         )
@@ -70,6 +71,7 @@ pub(crate) async fn raw_object(
 struct CatalogObject {
     asset_class: AssetClass,
     data_type: DataType,
+    interval: Option<String>,
     symbol: String,
     session_date: Date,
     object_path: String,
@@ -93,7 +95,7 @@ fn catalog_object(object_path: &str) -> Result<CatalogObject, ApiError> {
         return Err(invalid());
     }
     let segments: Vec<&str> = object_path.split('/').collect();
-    if segments.len() != 4 {
+    if segments.len() != 4 && segments.len() != 5 {
         return Err(invalid());
     }
     let date_text = segments[0].strip_prefix("date=").ok_or_else(invalid)?;
@@ -115,7 +117,23 @@ fn catalog_object(object_path: &str) -> Result<CatalogObject, ApiError> {
             .ok_or_else(invalid)?,
     )
     .ok_or_else(invalid)?;
-    let symbol_text = segments[3]
+    let (interval, symbol_segment) = if data_type == DataType::Bars {
+        if segments.len() != 5 {
+            return Err(invalid());
+        }
+        let interval = segments[3]
+            .strip_prefix("interval=")
+            .filter(|value| !value.is_empty())
+            .ok_or_else(invalid)?
+            .to_string();
+        (Some(interval), segments[4])
+    } else {
+        if segments.len() != 4 {
+            return Err(invalid());
+        }
+        (None, segments[3])
+    };
+    let symbol_text = symbol_segment
         .strip_suffix(".parquet")
         .filter(|value| !value.is_empty())
         .ok_or_else(invalid)?;
@@ -131,14 +149,21 @@ fn catalog_object(object_path: &str) -> Result<CatalogObject, ApiError> {
     {
         return Err(invalid());
     }
-    let canonical =
-        partition_path(session_date, asset_class, data_type, &symbol).map_err(|_| invalid())?;
+    let canonical = partition_path(
+        session_date,
+        asset_class,
+        data_type,
+        interval.as_deref(),
+        &symbol,
+    )
+    .map_err(|_| invalid())?;
     if object_path != canonical {
         return Err(invalid());
     }
     Ok(CatalogObject {
         asset_class,
         data_type,
+        interval,
         symbol,
         session_date,
         object_path: canonical,
@@ -161,6 +186,7 @@ fn is_iso_date(text: &str) -> bool {
 fn authorizes(record: &CoverageRecord, requested: &CatalogObject) -> bool {
     record.asset_class == requested.asset_class
         && record.data_type == requested.data_type
+        && record.interval == requested.interval
         && record.symbol == requested.symbol
         && record.session_date == requested.session_date
         && record.object_path.as_deref() == Some(requested.object_path.as_str())

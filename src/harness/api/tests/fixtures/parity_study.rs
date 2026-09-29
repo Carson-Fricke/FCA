@@ -1,43 +1,38 @@
-//! A minimal study program for the HTTP parity suite: counts observed events
-//! and publishes the trade count and the mean trade price.
+//! A minimal bar study program for the HTTP parity suite: counts observed
+//! OHLCV bars and publishes the bar count and the mean bar close.
 use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{
-    export_study_program, MetricPublisher, QuoteEvent, StudyProgram, TradeEvent,
-};
+use harness_strategy_sdk::{export_study_program, BarEvent, MetricPublisher, StudyProgram};
 
-struct TradeObserver {
-    trades: u64,
-    quotes: u64,
-    price_sum: f64,
+struct BarObserver {
+    bars: u64,
+    close_sum: f64,
+    last_close: f64,
 }
 
-impl StudyProgram for TradeObserver {
+impl StudyProgram for BarObserver {
     fn new(_parameters: Value) -> Self {
         Self {
-            trades: 0,
-            quotes: 0,
-            price_sum: 0.0,
+            bars: 0,
+            close_sum: 0.0,
+            last_close: 0.0,
         }
     }
 
-    fn on_quote(&mut self, _event: &QuoteEvent) {
-        self.quotes += 1;
-    }
-
-    fn on_trade(&mut self, event: &TradeEvent) {
-        self.trades += 1;
-        if let Ok(price) = event.price.to_string().parse::<f64>() {
-            self.price_sum += price;
+    fn on_bar(&mut self, event: &BarEvent) {
+        self.bars += 1;
+        if let Ok(close) = event.close.to_string().parse::<f64>() {
+            self.close_sum += close;
+            self.last_close = close;
         }
     }
 
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("trade_observations", self.trades as f64);
-        let _ = metrics.publish("quote_observations", self.quotes as f64);
-        if self.trades > 0 {
-            let _ = metrics.publish("global_sma", self.price_sum / self.trades as f64);
+        let _ = metrics.publish("bar_observations", self.bars as f64);
+        if self.bars > 0 {
+            let _ = metrics.publish("mean_close", self.close_sum / self.bars as f64);
+            let _ = metrics.publish("last_close", self.last_close);
         }
     }
 }
 
-export_study_program!(TradeObserver);
+export_study_program!(BarObserver);

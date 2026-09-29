@@ -1,14 +1,19 @@
 use super::*;
 
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+const MISSING_INTERVAL_ERROR: &str = "study configuration requires data.bar_interval (1min or 1d)";
+
 fn temp_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "harness-backtest-job-{}-{name}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|value| value.as_nanos())
-            .unwrap_or(0)
-    ))
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "harness-backtest-job-{}-{name}-{unique}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&path).expect("temp dir");
+    path
 }
 
 #[test]
@@ -65,65 +70,116 @@ fn parses_iso_timestamps_to_epoch_nanoseconds() {
 }
 
 #[test]
-fn rejects_wrong_shell_and_missing_config() {
-    let directory = temp_dir("reject");
-    std::fs::create_dir_all(&directory).expect("dir");
-    let api = directory.join("api.yaml");
-    std::fs::write(&api, "shell: api\n").expect("write");
-    assert_eq!(
-        run_backtest_job(&api, None),
-        Err(BacktestJobError::WrongShell("api".to_string()))
+fn study_rejects_a_missing_bar_interval_in_json_and_yaml() {
+    let directory = temp_dir("study-missing-interval");
+    let json_path = directory.join("study.json");
+    std::fs::write(
+        &json_path,
+        r#"{"schema_version":1,"shell":"study","run_id":"study-missing","data":{"symbols":["SPY"]}}"#,
+    )
+    .expect("write json");
+    let error =
+        load_study_config(&json_path).expect_err("a study without data.bar_interval must fail");
+    assert_eq!(error.to_string(), MISSING_INTERVAL_ERROR);
+
+    let yaml_path = directory.join("study.yaml");
+    std::fs::write(
+        &yaml_path,
+        "schema_version: 1\nshell: study\nrun_id: study-missing\ndata:\n  symbols: [SPY]\n",
+    )
+    .expect("write yaml");
+    let error =
+        load_study_config(&yaml_path).expect_err("a study without data.bar_interval must fail");
+    assert_eq!(error.to_string(), MISSING_INTERVAL_ERROR);
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn study_rejects_a_non_string_bar_interval() {
+    let directory = temp_dir("study-scalar-interval");
+    let path = directory.join("study.json");
+    std::fs::write(
+        &path,
+        r#"{"schema_version":1,"shell":"study","run_id":"study-scalar","data":{"symbols":["SPY"],"bar_interval":60}}"#,
+    )
+    .expect("write json");
+    let error = load_study_config(&path).expect_err("a non-string interval must fail");
+    assert_eq!(error.to_string(), MISSING_INTERVAL_ERROR);
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn study_accepts_canonical_bar_interval_tokens() {
+    let directory = temp_dir("study-valid-interval");
+    for token in ["1min", "1d"] {
+        let json_path = directory.join(format!("study-{token}.json"));
+        std::fs::write(
+            &json_path,
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "shell": "study",
+                "run_id": format!("study-{token}"),
+                "data": {"symbols": ["SPY"], "bar_interval": token}
+            }))
+            .expect("config json"),
+        )
+        .expect("write json");
+        let configuration = load_study_config(&json_path).expect("canonical token");
+        assert_eq!(configuration.data_bar_interval, token);
+
+        let yaml_path = directory.join(format!("study-{token}.yaml"));
+        std::fs::write(
+            &yaml_path,
+            format!(
+                "schema_version: 1\nshell: study\nrun_id: study-{token}\ndata:\n  \
+                 symbols: [SPY]\n  bar_interval: {token}\n"
+            ),
+        )
+        .expect("write yaml");
+        let configuration = load_study_config(&yaml_path).expect("canonical token");
+        assert_eq!(configuration.data_bar_interval, token);
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn study_rejects_an_interval_outside_the_canonical_vocabulary() {
+    let directory = temp_dir("study-invalid-interval");
+    let path = directory.join("study.json");
+    std::fs::write(
+        &path,
+        r#"{"schema_version":1,"shell":"study","run_id":"study-invalid","data":{"symbols":["SPY"],"bar_interval":"1h"}}"#,
+    )
+    .expect("write json");
+    let error = load_study_config(&path).expect_err("1h must fail");
+    let message = error.to_string();
+    assert!(
+        message.contains("study data.bar_interval is invalid"),
+        "{message}"
     );
-    assert!(matches!(
-        run_backtest_job(&directory.join("missing.yaml"), None),
-        Err(BacktestJobError::Io(_))
-    ));
+    assert!(message.contains("1min, 1d"), "{message}");
     let _ = std::fs::remove_dir_all(&directory);
 }
 
 #[test]
-fn runs_end_to_end_and_writes_the_artifact_set() {
-    let directory = temp_dir("run");
-    std::fs::create_dir_all(&directory).expect("dir");
-    let config = directory.join("backtest.yaml");
-    std::fs::write(&config, "shell: backtest\nrun_id: bt-e2e\nseed: 7\n").expect("write");
-    let output = directory.join("out");
-    let summary = run_backtest_job(&config, Some(&output)).expect("job");
-    assert_eq!(summary.run_id, "bt-e2e");
-    assert_eq!(summary.status, "completed");
-    assert_eq!(summary.market_events, 36);
-    assert!(summary.artifact_path.exists());
-    let document = std::fs::read_to_string(&summary.artifact_path).expect("read");
-    assert!(document.contains("\"manifest\""));
-    assert!(document.contains("\"counts\""));
-    assert_eq!(summary.artifact_digest.len(), 64);
-    // The summary renders the CLI lines deterministically.
-    assert_eq!(summary.stdout_lines().len(), 9);
-    // The complete end-to-end artifact set is present and self-contained.
-    assert!(summary.metrics_path.exists());
-    assert!(summary.report_path.exists());
-    assert!(summary.artifact_dir.join("manifest.parquet").exists());
-    let metrics = std::fs::read_to_string(&summary.metrics_path).expect("metrics");
-    assert!(metrics.contains("\"equity\""));
-    assert!(metrics.contains("\"execution\""));
-    let report = std::fs::read_to_string(&summary.report_path).expect("report");
-    assert!(report.starts_with("<!doctype html>"));
-    assert_eq!(summary.recorder_digest.len(), 64);
-    assert_eq!(summary.artifact_paths().len(), 4);
-    let _ = std::fs::remove_dir_all(&directory);
-}
+fn backtest_keeps_the_default_bar_interval_when_absent() {
+    let directory = temp_dir("backtest-default-interval");
+    let json_path = directory.join("backtest.json");
+    std::fs::write(
+        &json_path,
+        r#"{"schema_version":1,"shell":"backtest","run_id":"backtest-default","data":{"symbols":["SPY"]}}"#,
+    )
+    .expect("write json");
+    let configuration = load_backtest_config(&json_path).expect("backtests keep the default");
+    assert_eq!(configuration.data_bar_interval, "1min");
 
-#[test]
-fn runner_seam_runs_a_job_with_a_configured_output_dir() {
-    let directory = temp_dir("seam");
-    std::fs::create_dir_all(&directory).expect("dir");
-    let config = directory.join("backtest.yaml");
-    std::fs::write(&config, "shell: backtest\nrun_id: bt-seam\nseed: 3\n").expect("write");
-    let output = directory.join("out");
-    let runner = BacktestJobRunner::with_output_dir(output.clone());
-    assert_eq!(runner.output_dir(), Some(output.as_path()));
-    let summary = runner.run(&config).expect("job");
-    assert_eq!(summary.run_id, "bt-seam");
-    assert!(summary.report_path.starts_with(&output));
+    let yaml_path = directory.join("backtest.yaml");
+    std::fs::write(
+        &yaml_path,
+        "schema_version: 1\nshell: backtest\nrun_id: backtest-default\ndata:\n  symbols: [SPY]\n",
+    )
+    .expect("write yaml");
+    let configuration = load_backtest_config(&yaml_path).expect("backtests keep the default");
+    assert_eq!(configuration.data_bar_interval, "1min");
     let _ = std::fs::remove_dir_all(&directory);
 }

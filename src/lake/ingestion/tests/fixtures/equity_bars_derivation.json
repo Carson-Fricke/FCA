@@ -1,0 +1,105 @@
+{
+  "symbol": "AAPL",
+  "session": {
+    "date": "2024-11-27",
+    "open": "2024-11-27T14:30:00Z",
+    "close": "2024-11-27T21:00:00Z"
+  },
+  "trades": [
+    {
+      "timestamp": "2024-11-27T14:30:30Z",
+      "symbol": "AAPL",
+      "trade_id": 2,
+      "exchange": "XNAS",
+      "price": "190.50",
+      "size": 20,
+      "conditions": ["@"],
+      "tape": "C",
+      "update": null
+    },
+    {
+      "timestamp": "2024-11-27T14:30:00.100000Z",
+      "symbol": "AAPL",
+      "trade_id": 1,
+      "exchange": "XNAS",
+      "price": "189.90",
+      "size": 10,
+      "conditions": ["@"],
+      "tape": "C",
+      "update": null
+    },
+    {
+      "timestamp": "2024-11-27T21:00:00Z",
+      "symbol": "AAPL",
+      "trade_id": 5,
+      "exchange": "XNAS",
+      "price": "190.00",
+      "size": 1,
+      "conditions": [],
+      "tape": "C",
+      "update": null
+    },
+    {
+      "timestamp": "2024-11-27T14:31:30Z",
+      "symbol": "AAPL",
+      "trade_id": 4,
+      "exchange": "XNAS",
+      "price": "190.10",
+      "size": 7,
+      "conditions": [],
+      "tape": "C",
+      "update": null
+    },
+    {
+      "timestamp": "2024-11-27T14:31:00Z",
+      "symbol": "AAPL",
+      "trade_id": 3,
+      "exchange": "XNAS",
+      "price": "190.70",
+      "size": 5,
+      "conditions": [],
+      "tape": "C",
+      "update": null
+    }
+  ],
+  "minute_bars": [
+    {
+      "timestamp": 1732717800000000000,
+      "symbol": "AAPL",
+      "open": "189.9",
+      "high": "190.5",
+      "low": "189.9",
+      "close": "190.5",
+      "volume": "30"
+    },
+    {
+      "timestamp": 1732717860000000000,
+      "symbol": "AAPL",
+      "open": "190.7",
+      "high": "190.7",
+      "low": "190.1",
+      "close": "190.1",
+      "volume": "12"
+    },
+    {
+      "timestamp": 1732741140000000000,
+      "symbol": "AAPL",
+      "open": "190",
+      "high": "190",
+      "low": "190",
+      "close": "190",
+      "volume": "1"
+    }
+  ],
+  "daily_bars": [
+    {
+      "timestamp": 1732717800000000000,
+      "symbol": "AAPL",
+      "open": "189.9",
+      "high": "190.7",
+      "low": "189.9",
+      "close": "190",
+      "volume": "43"
+    }
+  ]
+}

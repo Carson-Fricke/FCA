@@ -22,8 +22,8 @@ pub use error::ProviderError;
 pub use governor::RequestGovernor;
 pub use lane::{lane_for, Lane, LanePermit, LaneTuning};
 pub use records::{
-    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote, NormalizedOptionTrade,
-    NormalizedQuote, NormalizedTrade,
+    NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,
+    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade,
 };
 pub use transport::{
     AlpacaTransport, BoxFuture, ReqwestTransport, TransportFailure, TransportResponse,

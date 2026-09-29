@@ -178,7 +178,7 @@ fn classification_ingest_publishes_snapshot_and_coverage() {
         store.clone(),
         catalog.clone(),
     ))
-    .run(&snapshot())
+    .run(&snapshot(), &CompanyTickers::default())
     .expect("ingest");
 
     assert_eq!(
@@ -221,10 +221,14 @@ fn classification_ingest_is_idempotent() {
         catalog.clone(),
     ));
 
-    let first = ingest.run(&snapshot()).expect("first");
+    let first = ingest
+        .run(&snapshot(), &CompanyTickers::default())
+        .expect("first");
     let first_bytes = store.objects();
 
-    let second = ingest.run(&snapshot()).expect("second");
+    let second = ingest
+        .run(&snapshot(), &CompanyTickers::default())
+        .expect("second");
 
     assert_eq!(first.coverage, second.coverage);
     assert_eq!(first.objects, second.objects);
@@ -241,7 +245,7 @@ fn classification_ingest_with_no_securities_reports_empty() {
     empty.securities.clear();
 
     let result = ClassificationIngest::new(ReferenceIngestCommitter::new(store, catalog))
-        .run(&empty)
+        .run(&empty, &CompanyTickers::default())
         .expect("ingest");
 
     assert_eq!(result.coverage[0].status, CoverageStatus::Empty);
@@ -520,8 +524,13 @@ impl ReferenceFetchClient for FakeClient {
 #[tokio::test]
 async fn ingest_classification_uses_the_client_without_network() {
     let payload = std::fs::read(fixtures_dir().join("nasdaqtraded.txt")).expect("fixture");
+    let tickers_payload =
+        std::fs::read(fixtures_dir().join("company_tickers.json")).expect("fixture");
     let url = settings().classification_url.clone();
-    let client = FakeClient::bytes(BTreeMap::from([(url, payload)]));
+    let client = FakeClient::bytes(BTreeMap::from([
+        (url.clone(), payload),
+        (COMPANY_TICKERS_URL.to_string(), tickers_payload),
+    ]));
     let store = FakeStore::new();
     let catalog = FakeCatalog::new();
 
@@ -530,7 +539,7 @@ async fn ingest_classification_uses_the_client_without_network() {
             .await
             .expect("ingest");
 
-    assert_eq!(client.urls(), vec![settings().classification_url.clone()]);
+    assert_eq!(client.urls(), vec![url, COMPANY_TICKERS_URL.to_string()]);
     assert_eq!(summary.snapshot_date, "2024-04-19");
     assert_eq!(summary.file_creation_time, "2024-04-19T17:20:00-04:00");
     assert_eq!(summary.coverage.len(), 1);
@@ -538,6 +547,27 @@ async fn ingest_classification_uses_the_client_without_network() {
     assert_eq!(summary.coverage[0].session_date, "2024-04-19");
     assert_eq!(summary.coverage[0].status, "complete");
     assert_eq!(summary.coverage[0].symbol, "DIRECTORY");
+
+    let objects = store.objects();
+    let path = "date=2024-04-19/asset_class=reference/data_type=classification/SNAPSHOT.parquet";
+    let rows = crate::schemas::read_classification_rows_with_extras(&objects[path], path, "test")
+        .expect("rows");
+    let joined: Vec<(String, Option<u64>)> = rows
+        .iter()
+        .map(|(row, extras)| (row.symbol.clone(), extras.cik))
+        .collect();
+    assert_eq!(
+        joined,
+        [
+            ("AAPL".to_string(), Some(320193)),
+            ("GOOG".to_string(), Some(1652044)),
+            ("MSFT".to_string(), Some(789019)),
+            ("ZVZZT".to_string(), None),
+        ]
+    );
+    assert!(rows
+        .iter()
+        .all(|(_, extras)| extras.sic.is_none() && extras.sic_industry.is_none()));
 }
 
 #[tokio::test]
@@ -618,7 +648,7 @@ fn summaries_render_the_python_shapes() {
     let catalog = FakeCatalog::new();
 
     let result = ClassificationIngest::new(ReferenceIngestCommitter::new(store, catalog))
-        .run(&snapshot())
+        .run(&snapshot(), &CompanyTickers::default())
         .expect("ingest");
     let summary = classification_summary(&result);
 

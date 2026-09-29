@@ -608,6 +608,7 @@ fn write_uses_the_pinned_partition_path() {
             session_date(),
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "aapl",
         )
         .expect("write");

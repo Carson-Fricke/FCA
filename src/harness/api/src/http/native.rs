@@ -7,36 +7,40 @@
 //! then the engine drives the configured JIT-authored Rust programs through
 //! the `harness-strategy-jit` seam — the same entry point the `backtest-job`
 //! command uses.
+//!
+//! Market data streams from the market-lake HTTP routes through
+//! `harness-lakeclient`; the endpoint resolves from `LAKE_API_URL` /
+//! `LAKE_API_BASE_URL` and `LAKE_API__BEARER_TOKEN`. A run without a
+//! configured lake fails loudly and never falls back to local files or a
+//! synthetic fixture.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::EngineOptions;
+use backtest::backtest::screen::ScreenConfig;
 use backtest::backtest::yaml::YamlValue;
+use harness_lakeclient::BlockingLakeClient;
 use num::PyDecimal;
 use serde_json::Value;
 
-use crate::lake_ensure::LakeEnsureClient;
-
 use super::configuration::ValidatedConfiguration;
 use super::launcher::{BacktestRunner, RunOutcome};
+use super::screener::{ScreenRunOutcome, ScreeningRunner};
 
 /// Native Rust backtest runner used by the durable API composition.
 ///
-/// Every run replays the local lake: the data directory resolves from the
-/// composed root, then `HARNESS_DATA_DIR` / `LAKE_LOCAL_DATA_DIR`, then the
-/// repository's `.local/market-lake`, and a run without one fails. When lake
-/// API credentials are configured the configured symbols are ensured (fetched
-/// or repaired) before the engine replays, exactly like the local study
-/// submitter.
+/// Every run streams the market-lake routes. The production composition leaves
+/// [`NativeBacktestRunner::lake_client`] empty and resolves the client from the
+/// process environment; tests and embedders may inject one explicitly.
 #[derive(Debug, Clone, Default)]
 pub struct NativeBacktestRunner {
     /// Optional directory the engine writes its own artifact set beneath.
     pub output_root: Option<PathBuf>,
-    /// Optional explicit lake data directory; environment detection applies
-    /// when absent.
-    pub data_root: Option<PathBuf>,
+    /// Optional explicit lake client; environment resolution applies when absent.
+    pub lake_client: Option<Arc<BlockingLakeClient>>,
 }
 
 impl NativeBacktestRunner {
@@ -45,64 +49,62 @@ impl NativeBacktestRunner {
     pub fn with_output_root(output_root: PathBuf) -> Self {
         Self {
             output_root: Some(output_root),
-            data_root: None,
+            lake_client: None,
         }
     }
 
-    /// Compose a runner over an explicit lake data directory.
+    /// Compose a runner over an explicit market-lake client.
     #[must_use]
-    pub fn with_data_root(output_root: PathBuf, data_root: PathBuf) -> Self {
+    pub fn with_lake_client(output_root: PathBuf, client: Arc<BlockingLakeClient>) -> Self {
         Self {
             output_root: Some(output_root),
-            data_root: Some(data_root),
+            lake_client: Some(client),
         }
     }
 
-    fn resolve_data_root(&self) -> Result<PathBuf, String> {
-        self.data_root
-            .clone()
-            .or_else(crate::local::resolve_lake_data_dir)
-            .ok_or_else(|| {
-                "no lake data directory configured: set HARNESS_DATA_DIR or \
-                 LAKE_LOCAL_DATA_DIR, or create .local/market-lake"
-                    .to_string()
-            })
-    }
-
-    fn ensure_data(&self, native: &BacktestConfig) -> Result<(), String> {
-        if let Some(client) = LakeEnsureClient::from_env() {
-            crate::local::ensure_lake_data_with(&client, native)?;
+    fn resolved_lake_client(&self) -> Result<Arc<BlockingLakeClient>, String> {
+        match &self.lake_client {
+            Some(client) => Ok(Arc::clone(client)),
+            None => BlockingLakeClient::from_env()
+                .map(Arc::new)
+                .map_err(|error| error.to_string()),
         }
-        Ok(())
     }
 }
 
 impl BacktestRunner for NativeBacktestRunner {
     fn run(&self, configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
         let yaml = json_to_yaml(&configuration.document);
-        let native = BacktestConfig::from_yaml_value(&yaml).map_err(|error| error.to_string())?;
-        self.ensure_data(&native)?;
+        let mut native =
+            BacktestConfig::from_yaml_value(&yaml).map_err(|error| error.to_string())?;
+        let client = self.resolved_lake_client()?;
         let directory = match &self.output_root {
             Some(root) => root.join(&native.run_id),
             None => std::env::temp_dir()
                 .join("harness-api-native")
                 .join(&native.run_id),
         };
-        let data_root = self.resolve_data_root()?;
         let (outcome, _artifact_path) =
             match configuration.document.get("shell").and_then(Value::as_str) {
-                Some("study") => harness_strategy_jit::run_study_configuration(
-                    &native,
-                    &EngineOptions::default(),
-                    Some(directory.as_path()),
-                    &data_root,
-                )
-                .map_err(|error| error.to_string())?,
+                Some("study") => {
+                    // A study replays bars only: its window clamps to the
+                    // lake's complete bar coverage for the configured interval.
+                    if !native.symbols.is_empty() {
+                        crate::local::clamp_study_window(&client, &mut native)?;
+                    }
+                    harness_strategy_jit::run_study_configuration(
+                        &native,
+                        &EngineOptions::default(),
+                        Some(directory.as_path()),
+                        &client,
+                    )
+                    .map_err(|error| error.to_string())?
+                }
                 _ => harness_strategy_jit::run_backtest_configuration(
                     &native,
                     &EngineOptions::default(),
                     Some(directory.as_path()),
-                    &data_root,
+                    &client,
                 )
                 .map_err(|error| error.to_string())?,
             };
@@ -111,6 +113,75 @@ impl BacktestRunner for NativeBacktestRunner {
         Ok(RunOutcome {
             completed: outcome.completed(),
             artifacts,
+        })
+    }
+}
+
+/// Native Rust screening runner used by the durable API composition.
+///
+/// Runs the JIT screening path with the real
+/// [`LakeScreeningSource`](harness_strategy_jit::LakeScreeningSource) reading
+/// the market-lake HTTP routes. A missing or rejected lake configuration fails
+/// the launch loudly; no synthetic data is ever substituted. The runner
+/// gathers every file the run wrote under its output directory so the launcher
+/// can store them.
+#[derive(Debug, Clone, Default)]
+pub struct NativeScreenRunner {
+    /// Optional directory the run writes its `screen.json` beneath.
+    pub output_root: Option<PathBuf>,
+    /// Optional managed JIT workspace root.
+    pub workspace_root: Option<PathBuf>,
+}
+
+impl NativeScreenRunner {
+    /// Compose a runner writing artifacts beneath `output_root`.
+    #[must_use]
+    pub fn with_output_root(output_root: PathBuf) -> Self {
+        Self {
+            output_root: Some(output_root),
+            workspace_root: None,
+        }
+    }
+}
+
+impl ScreeningRunner for NativeScreenRunner {
+    fn run(
+        &self,
+        configuration: &ScreenConfig,
+        output_dir: Option<&Path>,
+    ) -> Result<ScreenRunOutcome, String> {
+        let directory = output_dir.map_or_else(
+            || {
+                self.output_root.as_ref().map_or_else(
+                    || {
+                        std::env::temp_dir()
+                            .join("harness-api-native-screens")
+                            .join(configuration.run_id())
+                    },
+                    |root| root.join(configuration.run_id()),
+                )
+            },
+            Path::to_path_buf,
+        );
+        let options = harness_strategy_jit::ScreenRunOptions {
+            workspace_root: self.workspace_root.clone(),
+        };
+        let source = harness_strategy_jit::LakeScreeningSource::from_env()
+            .map_err(|error| error.to_string())?;
+        let (outcome, _artifact_path) = harness_strategy_jit::run_screening_configuration(
+            configuration,
+            &source,
+            &options,
+            Some(directory.as_path()),
+        )
+        .map_err(|error| error.to_string())?;
+        let mut artifacts = BTreeMap::new();
+        collect_artifacts(&directory, &directory, &mut artifacts);
+        Ok(ScreenRunOutcome {
+            completed: outcome.completed(),
+            rows: outcome.row_count() as u64,
+            artifacts,
+            error: outcome.error().map(str::to_string),
         })
     }
 }

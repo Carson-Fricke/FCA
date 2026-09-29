@@ -2,40 +2,47 @@
 	"alpha-lab": {
 		"items": [
 			{
-				"id": "scr-1",
-				"workspace_id": "alpha-lab",
+				"schema": "fca-thesis-screener-definition-v1",
 				"name": "Liquid large caps",
-				"filters": [
-					{ "kind": "avg_dollar_volume_min", "op": ">", "value": 250000000 },
-					{ "kind": "min_price", "op": ">", "value": 20 }
-				],
-				"created_at": "2026-08-02T09:10:00Z",
-				"artifact_path": "screeners/definitions/liquid-large-caps.json"
+				"lookbackDays": 20,
+				"barInterval": "1d",
+				"rankMetric": "avg_dollar_volume",
+				"universeRevision": "universe:us-listed@2026-09",
+				"source": "use std::collections::BTreeMap;\n\nuse harness_strategy_sdk::serde_json::Value;\nuse harness_strategy_sdk::{\n    export_screening_program, ScreenContext, ScreenRow, ScreeningProgram,\n};\n\n// fca-screener-rows: [{\"kind\":\"avg_dollar_volume_min\",\"params\":{\"min\":\"250000000\"}},{\"kind\":\"price_min\",\"params\":{\"min\":\"20\"}}]\n\nstruct UiScreener;\n\nimpl ScreeningProgram for UiScreener {\n    fn new(_parameters: Value) -> Self {\n        Self\n    }\n\n    fn screen(&mut self, ctx: &ScreenContext) -> Vec<ScreenRow> {\n        let mut rows = Vec::new();\n        for symbol in ctx.universe().iter() {\n            let bars = ctx.bars(symbol);\n            let mut metrics = BTreeMap::new();\n            if let Some(bar) = bars.last() {\n                metrics.insert(\"close\".to_string(), bar.close.clone());\n            }\n            // filter: avg $vol >= 250,000,000\n            {\n                let mut dollar_volume_total = 0.0_f64;\n                let mut dollar_volume_count = 0_u64;\n                for entry in bars.iter() {\n                    if let (Ok(close), Ok(volume)) = (entry.close.parse::<f64>(), entry.volume.parse::<f64>()) {\n                        dollar_volume_total += close * volume;\n                        dollar_volume_count += 1;\n                    }\n                }\n                if dollar_volume_count == 0 { continue; }\n                let avg_dollar_volume = dollar_volume_total / dollar_volume_count as f64;\n                if !(avg_dollar_volume >= 250000000.0) { continue; }\n                metrics.insert(\"avg_dollar_volume\".to_string(), format!(\"{avg_dollar_volume:.4}\"));\n            }\n            // filter: price >= $20\n            {\n                let Some(bar) = bars.last() else { continue; };\n                let Ok(close) = bar.close.parse::<f64>() else { continue; };\n                if !(close >= 20.0) { continue; }\n                metrics.insert(\"close\".to_string(), bar.close.clone());\n            }\n\n            rows.push(ScreenRow {\n                symbol: symbol.clone(),\n                metrics,\n            });\n        }\n        rows\n    }\n}\n\nexport_screening_program!(UiScreener);\n",
+				"parameters": {},
+				"sourceSha256": "2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+				"definitionSha256": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+				"definitionId": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"
 			},
 			{
-				"id": "scr-2",
-				"workspace_id": "alpha-lab",
-				"name": "Volume leaders",
-				"filters": [
-					{ "kind": "avg_volume_percentile_min", "op": ">", "value": 0.8 },
-					{ "kind": "avg_dollar_volume_min", "op": ">", "value": 1000000000 }
-				],
-				"created_at": "2026-08-22T15:45:00Z",
-				"artifact_path": "screeners/definitions/volume-leaders.json"
+				"schema": "fca-thesis-screener-definition-v1",
+				"name": "Oversold quality",
+				"lookbackDays": 30,
+				"barInterval": "1d",
+				"rankMetric": "ind:rsi(period=14)",
+				"universeRevision": "universe:us-listed@2026-09",
+				"source": "use std::collections::BTreeMap;\n\nuse harness_strategy_sdk::serde_json::Value;\nuse harness_strategy_sdk::{\n    export_screening_program, ScreenContext, ScreenRow, ScreeningProgram,\n};\n\n// fca-screener-rows: [{\"kind\":\"rsi_below\",\"params\":{\"period\":\"14\",\"threshold\":\"30\"}},{\"kind\":\"fundamentals_min\",\"params\":{\"field\":\"revenue\",\"min\":\"1000000000\"}}]\n\nstruct UiScreener;\n\nimpl ScreeningProgram for UiScreener {\n    fn new(_parameters: Value) -> Self {\n        Self\n    }\n\n    fn screen(&mut self, ctx: &ScreenContext) -> Vec<ScreenRow> {\n        let mut rows = Vec::new();\n        for symbol in ctx.universe().iter() {\n            let bars = ctx.bars(symbol);\n            let facts = ctx.facts(symbol);\n            let mut metrics = BTreeMap::new();\n            if let Some(bar) = bars.last() {\n                metrics.insert(\"close\".to_string(), bar.close.clone());\n            }\n            // filter: RSI(14) <= 30\n            {\n                if bars.len() <= 14 { continue; }\n                let mut rsi_gain = 0.0_f64;\n                let mut rsi_loss = 0.0_f64;\n                let mut rsi_count = 0_u64;\n                for window in bars.windows(2).rev().take(14) {\n                    if let (Ok(previous), Ok(current)) = (window[0].close.parse::<f64>(), window[1].close.parse::<f64>()) {\n                        let change = current - previous;\n                        if change >= 0.0 { rsi_gain += change; } else { rsi_loss -= change; }\n                        rsi_count += 1;\n                    }\n                }\n                if rsi_count == 0 { continue; }\n                let rsi_14 = if rsi_loss == 0.0 && rsi_gain == 0.0 { 50.0 } else if rsi_loss == 0.0 { 100.0 } else {\n                    100.0 - 100.0 / (1.0 + (rsi_gain / rsi_count as f64) / (rsi_loss / rsi_count as f64))\n                };\n                if !(rsi_14 <= 30.0) { continue; }\n                metrics.insert(\"ind:rsi(period=14)\".to_string(), format!(\"{rsi_14:.6}\"));\n            }\n            // filter: fundamentals.revenue >= 1,000,000,000\n            {\n                let Some(fact) = facts.get(\"revenue\") else { continue; };\n                let Ok(number) = fact.trim().parse::<f64>() else { continue; };\n                if !(number >= 1000000000.0) { continue; }\n                metrics.insert(\"revenue\".to_string(), fact.clone());\n            }\n\n            rows.push(ScreenRow {\n                symbol: symbol.clone(),\n                metrics,\n            });\n        }\n        rows\n    }\n}\n\nexport_screening_program!(UiScreener);\n",
+				"parameters": {},
+				"sourceSha256": "4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c",
+				"definitionSha256": "3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b",
+				"definitionId": "sha256:3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b"
 			}
 		]
 	},
 	"beta-quant": {
 		"items": [
 			{
-				"id": "scr-b1",
-				"workspace_id": "beta-quant",
-				"name": "Liquid futures universe",
-				"filters": [
-					{ "kind": "avg_dollar_volume_min", "op": ">", "value": 1000000000 }
-				],
-				"created_at": "2026-09-05T16:30:00Z",
-				"artifact_path": "screeners/definitions/liquid-futures-universe.json"
+				"schema": "fca-thesis-screener-definition-v1",
+				"name": "Momentum leaders",
+				"lookbackDays": 60,
+				"barInterval": "1d",
+				"rankMetric": "momentum_20d",
+				"universeRevision": "universe:us-listed@2026-09",
+				"source": "use std::collections::BTreeMap;\n\nuse harness_strategy_sdk::serde_json::Value;\nuse harness_strategy_sdk::{\n    export_screening_program, ScreenContext, ScreenRow, ScreeningProgram,\n};\n\n// fca-screener-rows: [{\"kind\":\"momentum_min\",\"params\":{\"period\":\"20\",\"min\":\"5\"}},{\"kind\":\"price_above_sma\",\"params\":{\"period\":\"50\"}}]\n\nstruct UiScreener;\n\nimpl ScreeningProgram for UiScreener {\n    fn new(_parameters: Value) -> Self {\n        Self\n    }\n\n    fn screen(&mut self, ctx: &ScreenContext) -> Vec<ScreenRow> {\n        let mut rows = Vec::new();\n        for symbol in ctx.universe().iter() {\n            let bars = ctx.bars(symbol);\n            let mut metrics = BTreeMap::new();\n            if let Some(bar) = bars.last() {\n                metrics.insert(\"close\".to_string(), bar.close.clone());\n            }\n            // filter: momentum(20d) >= 5%\n            {\n                let Some(bar) = bars.last() else { continue; };\n                let Ok(close) = bar.close.parse::<f64>() else { continue; };\n                if bars.len() <= 20 { continue; }\n                let Ok(past) = bars[bars.len() - 1 - 20].close.parse::<f64>() else { continue; };\n                if !(past > 0.0) { continue; }\n                let momentum_20d = (close / past - 1.0) * 100.0;\n                if !(momentum_20d >= 5.0) { continue; }\n                metrics.insert(\"momentum_20d\".to_string(), format!(\"{momentum_20d:.6}\"));\n            }\n            // filter: price >= SMA(50)\n            {\n                let Some(bar) = bars.last() else { continue; };\n                let Ok(close) = bar.close.parse::<f64>() else { continue; };\n                let mut sma_total = 0.0_f64;\n                let mut sma_count = 0_u64;\n                for entry in bars.iter().rev().take(50) {\n                    if let Ok(value) = entry.close.parse::<f64>() {\n                        sma_total += value;\n                        sma_count += 1;\n                    }\n                }\n                if sma_count == 0 { continue; }\n                let sma = sma_total / sma_count as f64;\n                if !(close >= sma) { continue; }\n                metrics.insert(\"close\".to_string(), bar.close.clone());\n                metrics.insert(\"ind:sma(period=50)\".to_string(), format!(\"{sma:.6}\"));\n            }\n\n            rows.push(ScreenRow {\n                symbol: symbol.clone(),\n                metrics,\n            });\n        }\n        rows\n    }\n}\n\nexport_screening_program!(UiScreener);\n",
+				"parameters": {},
+				"sourceSha256": "6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+				"definitionSha256": "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+				"definitionId": "sha256:5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
 			}
 		]
 	}

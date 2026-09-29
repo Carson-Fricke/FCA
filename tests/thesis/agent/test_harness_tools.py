@@ -18,11 +18,13 @@ from thesis.agent.harness_tools import (
     HARNESS_TOOL_NAMES,
     GetBacktestStatusArgs,
     GetRunArgs,
+    GetScreenerStatusArgs,
     HarnessToolError,
     HarnessToolProvider,
     LaunchTraderArgs,
     ListArtifactsArgs,
     RunBacktestArgs,
+    RunScreenerArgs,
     harness_mcp_skill,
     open_harness_tool_provider,
 )
@@ -213,6 +215,41 @@ def test_remote_http_provider_discovers_and_calls_tools() -> None:
     }
 
 
+def test_screener_tools_are_in_the_frozen_catalog() -> None:
+    assert {
+        "run_screener",
+        "get_screener_status",
+        "screener_config_template",
+    } <= set(HARNESS_TOOL_NAMES)
+
+
+def test_typed_screener_calls_send_frozen_names_and_arguments() -> None:
+    provider, handler = _in_process_provider()
+
+    launched = provider.run_screener(
+        RunScreenerArgs(config_path="cfg/screen.yaml", workspace="ws")
+    )
+    assert launched.ok, launched.failure
+    assert handler.calls[-1] == {
+        "name": "run_screener",
+        "arguments": {"config_path": "cfg/screen.yaml", "workspace": "ws"},
+    }
+
+    status = provider.get_screener_status(GetScreenerStatusArgs(job_id="job-1"))
+    assert status.ok, status.failure
+    assert handler.calls[-1] == {
+        "name": "get_screener_status",
+        "arguments": {"job_id": "job-1"},
+    }
+
+    template = provider.screener_config_template()
+    assert template.ok, template.failure
+    assert handler.calls[-1] == {
+        "name": "screener_config_template",
+        "arguments": {},
+    }
+
+
 def test_environment_topology_selects_remote_without_agent_branching(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -305,6 +342,14 @@ def test_typed_arguments_serialize_and_reject_empty_values() -> None:
         "workspace": "ws",
     }
     assert GetBacktestStatusArgs("job-1").to_arguments() == {"job_id": "job-1"}
+    assert RunScreenerArgs("screen.yaml").to_arguments() == {
+        "config_path": "screen.yaml"
+    }
+    assert RunScreenerArgs("screen.yaml", workspace="ws").to_arguments() == {
+        "config_path": "screen.yaml",
+        "workspace": "ws",
+    }
+    assert GetScreenerStatusArgs("job-1").to_arguments() == {"job_id": "job-1"}
     assert GetRunArgs("run-1").to_arguments() == {"run_id": "run-1"}
     assert ListArtifactsArgs("run-1").to_arguments() == {"run_id": "run-1"}
     assert LaunchTraderArgs("trader.yaml").to_arguments() == {
@@ -313,5 +358,9 @@ def test_typed_arguments_serialize_and_reject_empty_values() -> None:
 
     with pytest.raises(ValueError, match="config_path"):
         RunBacktestArgs("  ")
+    with pytest.raises(ValueError, match="config_path"):
+        RunScreenerArgs("")
     with pytest.raises(ValueError, match="job_id"):
         GetBacktestStatusArgs("")
+    with pytest.raises(ValueError, match="job_id"):
+        GetScreenerStatusArgs("  ")

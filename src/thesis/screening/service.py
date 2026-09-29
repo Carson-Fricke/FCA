@@ -1,164 +1,201 @@
-"""Workspace screening service over the T219 engine.
+"""Workspace screener service over the injected harness MCP tool provider.
 
-The service is the seam between the HTTP screener router and the screening
-engine: it resolves the screener context (universe + market data ports) for
-one workspace, executes declarative definitions, and persists saved
-definitions and results as workspace artifacts.  All wall-clock values come
-from the injected clock; data access goes through the injected ports —
-no network, no lake or harness internals in this module.
-
-The service is workspace-scoped by construction: every method takes the
-workspace id from the caller and keys its stores by it, mirroring the
-residency binding rules.
+The service owns the thin-client lifecycle: persist definitions, materialize
+one run configuration from a definition, launch ``run_screener``, poll
+``get_screener_status`` to a terminal state with a bounded injectable sleep,
+import the harness ``screen.json`` artifact, and persist the result record.
+There is no partial success: an unavailable harness or a failed run raises a
+typed error and no record is stored.  The service never reads market data; the
+harness executes the authored program through its lake routes.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from datetime import date
-from typing import Any, Final, Protocol
+import time
+from collections.abc import Callable, Mapping
 
-from thesis.screening.artifacts import SavedStudy
-from thesis.screening.engine import (
-    ScreenerContext,
-    ScreenerDefinition,
-    ScreenerError,
-    run_screener,
+from thesis.integrations.mcp import HarnessMcpError, McpToolResult
+from thesis.screening.definitions import ScreenerDefinition
+from thesis.screening.runs import (
+    ScreeningRecord,
+    ScreeningRunError,
+    ScreeningToolProvider,
+    import_screening_run,
 )
+from thesis.screening.store import InMemoryScreenerStore, ScreenerStore
+
+#: Screening job states the status tool reports while the run is in flight.
+_PENDING_JOB_STATES = frozenset({"queued", "running"})
+#: Screening job states that ended without a usable result.
+_FAILED_JOB_STATES = frozenset({"failed", "cancelled"})
+#: Screening job states that ended with a result (run status and job state).
+_COMPLETE_JOB_STATES = frozenset({"complete", "succeeded"})
 
 
-class ScreenerServiceError(ScreenerError):
+class ScreenerError(RuntimeError):
     """Base class for screener service failures."""
 
 
-class UnknownScreenerError(ScreenerServiceError, LookupError):
-    """A saved definition or result id does not exist for the workspace."""
-
-
-class ScreenerDataUnavailableError(ScreenerServiceError):
-    """The screening data ports are not configured for this workspace."""
-
-
-class ScreenerStore(Protocol):
-    """Persistence boundary for screener documents, keyed by workspace."""
-
-    def put(
-        self,
-        workspace_id: str,
-        key: str,
-        *,
-        document: Mapping[str, Any],
-    ) -> None: ...
-
-    def get(self, workspace_id: str, key: str) -> Mapping[str, Any]: ...
-
-    def list_prefix(
-        self, workspace_id: str, prefix: str
-    ) -> Sequence[Mapping[str, Any]]: ...
-
-    def head_revision(self, workspace_id: str) -> str: ...
+class ScreenerUnavailableError(ScreenerError):
+    """The harness MCP boundary is not composed or could not be reached."""
 
 
 class ScreenerService:
-    """Workspace-scoped facade over the screening engine and artifacts."""
+    """Workspace-scoped facade over the harness screener MCP tools."""
 
     def __init__(
         self,
         *,
-        data_context: Callable[[str, date], ScreenerContext] | None,
-        store: ScreenerStore,
-        clock: Callable[[], str],
+        tools: ScreeningToolProvider | None = None,
+        store: ScreenerStore | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        poll_interval_seconds: float = 0.25,
+        max_polls: int = 240,
     ) -> None:
-        self._data_context = data_context
-        self._store = store
-        self._clock = clock
+        if poll_interval_seconds < 0:
+            raise ValueError("poll_interval_seconds must be non-negative")
+        if max_polls < 1:
+            raise ValueError("max_polls must be a positive integer")
+        self._tools = tools
+        self._store = store if store is not None else InMemoryScreenerStore()
+        self._sleep = sleep
+        self._poll_interval_seconds = poll_interval_seconds
+        self._max_polls = max_polls
 
-    def run(
-        self,
-        workspace_id: str,
-        payload: Mapping[str, Any],
-        *,
-        as_of: date,
-    ) -> Mapping[str, Any]:
-        """Execute one screening run and persist the result as a study."""
-        if self._data_context is None:
-            raise ScreenerDataUnavailableError(
-                "screening data ports are not configured for this workspace"
-            )
-        definition = _definition_from_payload(payload)
-        context = self._data_context(workspace_id, as_of)
-        result = run_screener(definition, context, as_of=as_of)
-        study = SavedStudy(
-            name=str(payload.get("name") or definition.name),
-            definition=definition,
-            result=result,
-            git_revision=self._store.head_revision(workspace_id),
-            saved_at=as_of,
-        )
-        result_id = f"scr-{study.content_sha256[:16]}"
-        document: dict[str, Any] = {
-            "workspace_id": workspace_id,
-            "result_id": result_id,
-            **study.canonical_document,
-        }
-        self._store.put(
-            workspace_id,
-            f"results/{result_id}.json",
-            document=document,
-        )
-        return document
+    @property
+    def tools(self) -> ScreeningToolProvider | None:
+        """Return the injected harness MCP tool provider, if composed."""
+        return self._tools
+
+    @property
+    def store(self) -> ScreenerStore:
+        """Return the persistence boundary for definitions and records."""
+        return self._store
 
     def save_definition(
-        self, workspace_id: str, payload: Mapping[str, Any]
-    ) -> Mapping[str, Any]:
-        """Persist a screener definition and return its stored document."""
-        definition_id = _definition_id(payload)
-        document: dict[str, Any] = {
-            "workspace_id": workspace_id,
-            "definition_id": definition_id,
-            **dict(payload),
-        }
-        self._store.put(
-            workspace_id,
-            f"definitions/{definition_id}.json",
-            document=document,
+        self, workspace_id: str, definition: ScreenerDefinition
+    ) -> ScreenerDefinition:
+        """Persist one content-addressed definition and return it."""
+        return self._store.save_definition(
+            _required_text(workspace_id, "workspace id"), definition
         )
-        return document
 
-    def list_definitions(self, workspace_id: str) -> Sequence[Mapping[str, Any]]:
-        """List the workspace's saved screener definitions."""
-        return self._store.list_prefix(workspace_id, "definitions/")
+    def list_definitions(self, workspace_id: str) -> tuple[ScreenerDefinition, ...]:
+        """List the workspace's definitions ordered by content address."""
+        return self._store.list_definitions(
+            _required_text(workspace_id, "workspace id")
+        )
 
-    def get_result(self, workspace_id: str, result_id: str) -> Mapping[str, Any]:
-        """Return one stored screening result."""
-        return self._store.get(workspace_id, f"results/{result_id}.json")
+    def run(self, workspace_id: str, definition_id: str, as_of: str) -> ScreeningRecord:
+        """Launch, await, and import one screening run for a definition.
 
-    def get_definition(self, workspace_id: str, screener_id: str) -> Mapping[str, Any]:
-        """Return one saved screener definition."""
-        return self._store.get(workspace_id, f"definitions/{screener_id}.json")
+        Raises :class:`KeyError` for an unknown definition,
+        :class:`ScreenerUnavailableError` when no harness boundary is composed
+        or the launch/poll transport fails, and :class:`ScreeningRunError` for
+        a terminal harness failure, a status timeout, or an unusable result
+        artifact.  A record is stored only after a complete import.
+        """
+        workspace = _required_text(workspace_id, "workspace id")
+        resolved_id = _required_text(definition_id, "definition id")
+        definition = self._store.get_definition(workspace, resolved_id)
+        if definition is None:
+            raise KeyError(resolved_id)
+        if self._tools is None:
+            raise ScreenerUnavailableError(
+                "no harness MCP boundary is composed for screening"
+            )
+        try:
+            config = definition.materialize_config(as_of=as_of)
+            launched = self._tools.run_screener(config=config, workspace=workspace)
+            if launched.is_error:
+                raise ScreenerUnavailableError(_failure(launched, "run_screener"))
+            run_id = _run_id_of(launched)
+            self._await_terminal(run_id)
+            record = import_screening_run(
+                tools=self._tools,
+                workspace_id=workspace,
+                definition=definition,
+                run_id=run_id,
+                as_of=as_of,
+            )
+        except HarnessMcpError as error:
+            raise ScreenerUnavailableError(
+                f"the harness MCP screener boundary is unavailable: {error}"
+            ) from error
+        return self._store.add_record(workspace, record)
+
+    def get_result(self, workspace_id: str, result_id: str) -> ScreeningRecord:
+        """Return one imported result, or raise :class:`KeyError` when absent."""
+        record = self._store.get_record(
+            _required_text(workspace_id, "workspace id"),
+            _required_text(result_id, "result id"),
+        )
+        if record is None:
+            raise KeyError(result_id)
+        return record
+
+    def list_results(self, workspace_id: str) -> tuple[ScreeningRecord, ...]:
+        """List the workspace's results ordered by result id."""
+        return self._store.list_records(_required_text(workspace_id, "workspace id"))
+
+    def _await_terminal(self, run_id: str) -> None:
+        assert self._tools is not None
+        for attempt in range(self._max_polls):
+            status = self._tools.get_screener_status(job_id=run_id)
+            if status.is_error:
+                raise ScreenerUnavailableError(_failure(status, "get_screener_status"))
+            state = _state_of(status.structured)
+            if state in _COMPLETE_JOB_STATES:
+                return
+            if state in _FAILED_JOB_STATES:
+                raise ScreeningRunError(
+                    f"harness screener run {run_id!r} ended in state {state!r}"
+                )
+            if state is None:
+                raise ScreeningRunError(
+                    f"harness screener run {run_id!r} reported no state"
+                )
+            if state not in _PENDING_JOB_STATES:
+                raise ScreeningRunError(
+                    f"harness screener run {run_id!r} reported unknown state {state!r}"
+                )
+            if attempt + 1 < self._max_polls:
+                self._sleep(self._poll_interval_seconds)
+        raise ScreeningRunError(
+            f"harness screener run {run_id!r} did not reach a terminal state "
+            f"within {self._max_polls} status polls"
+        )
 
 
-def _definition_from_payload(payload: Mapping[str, Any]) -> ScreenerDefinition:
-    """Build a validated engine definition from the HTTP payload."""
-    return ScreenerDefinition(
-        name=str(payload["name"]),
-        universe_revision=str(
-            payload.get("universe_revision") or f"asof-{payload['as_of']}"
-        ),
-        filters=tuple(payload["filters"]),
-        lookback_days=int(payload.get("lookback_days", 20)),
-    )
+def _run_id_of(result: McpToolResult) -> str:
+    run_id = result.structured.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ScreeningRunError("run_screener returned no run id")
+    return run_id.strip()
 
 
-def _definition_id(payload: Mapping[str, Any]) -> str:
-    """Derive the stored definition id from the payload name."""
-    name = str(payload.get("name", "screener"))
-    slug = "".join(ch if ch.isalnum() else "-" for ch in name.lower()).strip("-")
-    return slug or "screener"
+def _failure(result: McpToolResult, tool: str) -> str:
+    message = result.text.strip()
+    if message:
+        return f"harness MCP tool {tool!r} failed: {message}"
+    return f"harness MCP tool {tool!r} failed"
 
 
-_REVISION_UNSET: Final = "uncommitted"
+def _state_of(document: Mapping[str, object]) -> str | None:
+    value = document.get("state")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
 
 
-def _fallback_head_revision(workspace_id: str) -> str:  # pragma: no cover
-    return f"{_REVISION_UNSET}:{workspace_id}"
+def _required_text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be non-empty text")
+    return value.strip()
+
+
+__all__ = [
+    "ScreenerError",
+    "ScreenerService",
+    "ScreenerUnavailableError",
+]

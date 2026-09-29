@@ -1,0 +1,20 @@
+# Starter screening configuration for `harness screen-job` and the MCP
+# `run_screener` tool. Adapt name, as_of, lookback_days, and rank_metric, then
+# recompute bundle_hash/source_sha256 as the SHA-256 of the edited authored
+# source (LF-normalized): the JIT seam rejects a mismatched hash before any
+# compile work starts.
+schema_version: 1
+shell: screen
+name: close-screen-example
+as_of: "2024-01-19"
+bar_interval: 1d
+lookback_days: 20
+rank_metric: close
+universe_revision: sp500-2024-01
+definition_id: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+definition_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+bundle_hash: "29396bcb554f561327e258d76384241993bb5c5fcd796127312fe7f8e96bd9cd"
+source_sha256: "29396bcb554f561327e258d76384241993bb5c5fcd796127312fe7f8e96bd9cd"
+parameters:
+  lookback: 20
+source: "use harness_strategy_sdk::{export_screening_program, ScreenContext, ScreenRow, ScreeningProgram};\nuse harness_strategy_sdk::serde_json::Value;\n\nstruct CloseScreen;\n\nimpl ScreeningProgram for CloseScreen {\n    fn new(_parameters: Value) -> Self {\n        Self\n    }\n\n    fn screen(&mut self, ctx: &ScreenContext) -> Vec<ScreenRow> {\n        ctx.universe()\n            .iter()\n            .map(|symbol| {\n                let mut metrics = std::collections::BTreeMap::new();\n                if let Some(bar) = ctx.bars(symbol).last() {\n                    metrics.insert(String::from(\"close\"), bar.close.clone());\n                }\n                ScreenRow {\n                    symbol: symbol.clone(),\n                    metrics,\n                }\n            })\n            .collect()\n    }\n}\n\nexport_screening_program!(CloseScreen);\n"

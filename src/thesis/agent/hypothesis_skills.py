@@ -45,12 +45,19 @@ _HYPOTHESIS_AUTHORING = (
     "predicts, the disagreement as what a no-structure null predicts instead, "
     "the risk factor, the horizon, and the universe. Provide falsifiers with an "
     "observable statistic, a condition, a threshold, and the computation that "
-    "produces it. The model source must separate fit(context), which estimates "
-    "numeric parameters once on history, from observe(fit, context), which "
-    "applies the frozen fit. A fired falsifier refutes the claim on history "
-    "(Layer A); the same observe function on a trailing window becomes the "
-    "strategy's Layer B monitor. Sizing, costs, and execution belong to "
-    "strategy design."
+    "produces it. The model source is an authored Rust study program compiled "
+    "by the harness JIT: implement harness_strategy_sdk::StudyProgram with "
+    "new(parameters), on_bar(&BarEvent), and on_stop(&mut MetricPublisher), and "
+    "export it with export_study_program!. Fold each replayed BarEvent, with "
+    "its exact open, high, low, close and volume decimals, into incremental "
+    "state and publish every falsifier observable by name in on_stop via "
+    "metrics.publish(name, value); the names must match the declared outputs, "
+    "and fitted parameters are published as fit.<parameter> metrics. The study "
+    "replays bars at the interval declared in harnessConfiguration.interval "
+    "(1min or 1d) over the declared window. A fired falsifier refutes the claim "
+    "on history (Layer A); the same published statistic on a trailing window "
+    "becomes the strategy's Layer B monitor. Sizing, costs, and execution "
+    "belong to strategy design."
 )
 
 _FALSIFICATION_PLANNING = (
@@ -70,16 +77,18 @@ _FALSIFICATION_RCA = (
 )
 
 _STRATEGY_AUTHORING = (
-    "Implement the surviving hypothesis as a strategy whose declared exit "
-    "criteria are falsifier re-checks, not profit targets. Make sizing and "
-    "risk limits explicit. Reference the surviving workspace research model "
-    "and indicator hashes rather than copying their definitions into the "
-    "strategy. Load the frozen fit and never call fit again or estimate "
-    "replacement parameters. Publish each Layer B observation under the exact "
-    "falsifier observable with context.publish_metric(name, value). A falsifier "
-    "hit must flatten positions and prevent new entries. The strategy is a "
-    "falsification instrument: an exit means the trade's micro-hypothesis was "
-    "falsified, and PnL is only a guardrail."
+    "Implement the surviving hypothesis as an authored Rust strategy program: "
+    "implement harness_strategy_sdk::StrategyProgram and export it with "
+    "export_strategy_program!, submitting orders through the order sink. Make "
+    "sizing and risk limits explicit, and declare exit criteria that are "
+    "falsifier re-checks, not profit targets. Reference the surviving workspace "
+    "research model and its frozen fit rather than copying the model's "
+    "definition into the strategy or re-estimating its parameters. Publish each "
+    "Layer B observation under the exact falsifier observable in "
+    "on_stop(&mut MetricPublisher) via metrics.publish(name, value). A "
+    "falsifier hit must flatten positions and prevent new entries. The strategy "
+    "is a falsification instrument: an exit means the trade's micro-hypothesis "
+    "was falsified, and PnL is only a guardrail."
 )
 
 HYPOTHESIS_DEVELOPMENT_SKILLS: tuple[ThesisSkill, ...] = (

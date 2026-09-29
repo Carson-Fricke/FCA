@@ -154,6 +154,38 @@ pub fn crypto_quote_schema() -> Schema {
     )
 }
 
+/// `equity.bars`.
+pub fn equity_bars_schema() -> Schema {
+    with_metadata(
+        "equity.bars",
+        vec![
+            required("timestamp", timestamp()),
+            required("symbol", ArrowType::Utf8),
+            required("open", price()),
+            required("high", price()),
+            required("low", price()),
+            required("close", price()),
+            required("volume", price()),
+        ],
+    )
+}
+
+/// `crypto.bars`.
+pub fn crypto_bars_schema() -> Schema {
+    with_metadata(
+        "crypto.bars",
+        vec![
+            required("timestamp", timestamp()),
+            required("symbol", ArrowType::Utf8),
+            required("open", price()),
+            required("high", price()),
+            required("low", price()),
+            required("close", price()),
+            required("volume", price()),
+        ],
+    )
+}
+
 /// The dataset name carried in schema metadata (`equity.trade`).
 pub fn schema_name(asset_class: AssetClass, data_type: DataType) -> Option<&'static str> {
     match (asset_class, data_type) {
@@ -163,6 +195,8 @@ pub fn schema_name(asset_class: AssetClass, data_type: DataType) -> Option<&'sta
         (AssetClass::Option, DataType::Quote) => Some("option.quote"),
         (AssetClass::Crypto, DataType::Trade) => Some("crypto.trade"),
         (AssetClass::Crypto, DataType::Quote) => Some("crypto.quote"),
+        (AssetClass::Equity, DataType::Bars) => Some("equity.bars"),
+        (AssetClass::Crypto, DataType::Bars) => Some("crypto.bars"),
         _ => None,
     }
 }
@@ -176,6 +210,8 @@ pub fn schema_for(asset_class: AssetClass, data_type: DataType) -> Result<Schema
         (AssetClass::Option, DataType::Quote) => Ok(option_quote_schema()),
         (AssetClass::Crypto, DataType::Trade) => Ok(crypto_trade_schema()),
         (AssetClass::Crypto, DataType::Quote) => Ok(crypto_quote_schema()),
+        (AssetClass::Equity, DataType::Bars) => Ok(equity_bars_schema()),
+        (AssetClass::Crypto, DataType::Bars) => Ok(crypto_bars_schema()),
         _ => Err(DataError::Unsupported(format!(
             "no lake schema for {}.{}",
             asset_class, data_type

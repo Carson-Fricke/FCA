@@ -161,8 +161,11 @@ fn ping_and_tools_list_work() {
         vec![
             TOOL_RUN_BACKTEST,
             "run_study",
+            "run_screener",
             TOOL_BACKTEST_CONFIG_TEMPLATE,
+            "screener_config_template",
             TOOL_BACKTEST_STATUS,
+            "get_screener_status",
             TOOL_GET_RUN,
             TOOL_LIST_ARTIFACTS,
             TOOL_READ_ARTIFACT

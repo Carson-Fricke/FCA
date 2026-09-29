@@ -10,6 +10,8 @@ description = "Bounded file queries over ensured lake objects."
 lake-contracts.workspace = true
 lake-catalog.workspace = true
 lake-coverage.workspace = true
+lake-reference.workspace = true
+lake-storage.workspace = true
 duckdb = { version = "1.10505.0", features = ["bundled"] }
 # Same major as duckdb's bundled re-export; the `ipc` feature unifies onto
 # `duckdb::arrow` so the arrow-stream response can be written directly.
@@ -19,6 +21,5 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-lake-storage.workspace = true
 tokio.workspace = true
 tempfile.workspace = true

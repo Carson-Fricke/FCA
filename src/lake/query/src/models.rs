@@ -32,6 +32,8 @@ pub struct FileQueryRequest {
     pub end_date: Date,
     /// Whether a coverage gap may be repaired by the ensure callback.
     pub ensure: bool,
+    /// Canonical bars interval token; required for bars and absent otherwise.
+    pub interval: Option<String>,
 }
 
 /// One complete catalog partition and its read-only download URL.
@@ -57,6 +59,8 @@ pub struct FileQueryFile {
     pub byte_size: u64,
     /// Content digest of the written object, if any.
     pub checksum: Option<String>,
+    /// Canonical bars interval token; omitted for every other data type.
+    pub interval: Option<String>,
 }
 
 impl Serialize for FileQueryFile {
@@ -64,7 +68,8 @@ impl Serialize for FileQueryFile {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("FileQueryFile", 10)?;
+        let fields = 10 + usize::from(self.interval.is_some());
+        let mut state = serializer.serialize_struct("FileQueryFile", fields)?;
         state.serialize_field("asset_class", self.asset_class.value())?;
         state.serialize_field("data_type", self.data_type.value())?;
         state.serialize_field("symbol", &self.symbol)?;
@@ -75,6 +80,9 @@ impl Serialize for FileQueryFile {
         state.serialize_field("row_count", &self.row_count)?;
         state.serialize_field("byte_size", &self.byte_size)?;
         state.serialize_field("checksum", &self.checksum)?;
+        if let Some(interval) = &self.interval {
+            state.serialize_field("interval", interval)?;
+        }
         state.end()
     }
 }
@@ -143,11 +151,12 @@ pub trait FileUrlIssuer: Send + Sync {
 }
 
 /// Injected coverage-ensure callback:
-/// `(asset_class, data_type, symbol, start_date, end_date)`.
+/// `(asset_class, data_type, interval, symbol, start_date, end_date)`.
 pub type EnsureCallback = Arc<
     dyn Fn(
             AssetClass,
             DataType,
+            Option<String>,
             String,
             Date,
             Date,

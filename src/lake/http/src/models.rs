@@ -6,12 +6,14 @@
 use lake_contracts::{AssetClass, DataType, Date, DateTime};
 use lake_coverage::{CoverageReport, SessionCoverage};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::error::ApiError;
 use crate::validate::{
     optional_bool, optional_string, optional_string_list, parse_asset_class, parse_data_type,
-    parse_date, reject_unknown, required_string, validate_date_range, validate_optional_symbol,
-    validate_optional_symbol_list, validate_symbol_field,
+    parse_date, parse_interval, reject_option_data_type, reject_unknown, required_string,
+    validate_date_range, validate_optional_symbol, validate_optional_symbol_list,
+    validate_symbol_field,
 };
 
 /// Serialize a [`Date`] as `YYYY-MM-DD`.
@@ -278,6 +280,142 @@ pub struct RawObjectResponse {
     pub checksum: Option<String>,
 }
 
+/// The raw query parameters of `GET /v1/read`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReadQueryRaw {
+    /// Requested asset class.
+    pub asset_class: String,
+    /// Requested data type.
+    pub data_type: String,
+    /// Requested symbol.
+    #[serde(default)]
+    pub symbol: Option<String>,
+    /// Requested bars interval token.
+    #[serde(default)]
+    pub interval: Option<String>,
+    /// Inclusive first session date.
+    pub start_date: String,
+    /// Inclusive last session date.
+    pub end_date: String,
+}
+
+/// A validated streaming-read request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReadQuery {
+    /// Requested asset class.
+    pub asset_class: AssetClass,
+    /// Requested data type.
+    pub data_type: DataType,
+    /// Requested symbol.
+    pub symbol: String,
+    /// Validated bars interval token.
+    pub interval: Option<String>,
+    /// Inclusive first session date.
+    pub start_date: Date,
+    /// Inclusive last session date.
+    pub end_date: Date,
+}
+
+impl ReadQuery {
+    /// Validate the strict query parameters for the read route.
+    pub(crate) fn parse(raw: ReadQueryRaw) -> Result<Self, ApiError> {
+        let asset_class = parse_asset_class(&raw.asset_class)?;
+        if asset_class == AssetClass::Reference {
+            return Err(ApiError::validation_error(
+                "asset_class",
+                "Input should be 'equity', 'crypto' or 'option'",
+            ));
+        }
+        let data_type = parse_data_type(&raw.data_type)?;
+        if !matches!(
+            data_type,
+            DataType::Trade | DataType::Quote | DataType::Bars
+        ) {
+            return Err(ApiError::validation_error(
+                "data_type",
+                "Input should be 'trade', 'quote' or 'bars'",
+            ));
+        }
+        if asset_class == AssetClass::Option {
+            reject_option_data_type(data_type)?;
+        }
+        let interval = parse_interval(data_type, raw.interval)?;
+        let Some(symbol) = validate_optional_symbol(raw.symbol, "symbol")? else {
+            return Err(ApiError::validation_error(
+                "symbol",
+                "Field required: symbol",
+            ));
+        };
+        let start_date = parse_date(&raw.start_date, "start_date")?;
+        let end_date = parse_date(&raw.end_date, "end_date")?;
+        validate_date_range(start_date, end_date)?;
+        Ok(Self {
+            asset_class,
+            data_type,
+            symbol,
+            interval,
+            start_date,
+            end_date,
+        })
+    }
+}
+
+/// The strict query parameters of `GET /v1/reference/universe`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UniverseQueryRaw {
+    /// The point-in-time as-of date.
+    pub as_of: String,
+}
+
+/// The strict query parameters of `GET /v1/reference/facts`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FactsQueryRaw {
+    /// The point-in-time as-of date.
+    pub as_of: String,
+    /// Comma-separated requested symbols.
+    pub symbols: String,
+}
+
+/// Parse the comma-separated `symbols` query value.
+pub(crate) fn parse_symbols_query(value: &str) -> Result<Vec<String>, ApiError> {
+    let symbols = value
+        .split(',')
+        .map(str::trim)
+        .filter(|symbol| !symbol.is_empty())
+        .map(|symbol| validate_symbol_field(symbol, "symbols"))
+        .collect::<Result<Vec<_>, _>>()?;
+    if symbols.is_empty() || symbols.len() > 100 {
+        return Err(ApiError::validation_error(
+            "symbols",
+            "List should have at least 1 item and at most 100 items",
+        ));
+    }
+    Ok(symbols)
+}
+
+/// The point-in-time equity universe known at one date.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UniverseResponse {
+    /// The requested as-of date.
+    #[serde(serialize_with = "date_ser::serialize")]
+    pub as_of: Date,
+    /// Canonical uppercase symbols in ascending order.
+    pub symbols: Vec<String>,
+}
+
+/// Point-in-time classification and fundamentals facts by symbol.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FactsResponse {
+    /// The requested as-of date.
+    #[serde(serialize_with = "date_ser::serialize")]
+    pub as_of: Date,
+    /// One fact sheet per requested canonical symbol.
+    pub facts: BTreeMap<String, BTreeMap<String, String>>,
+}
+
 /// The raw query parameters of `GET /v1/catalog/coverage`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -302,6 +440,9 @@ pub(crate) struct CoverageQueryRaw {
     /// Alias for `contract_symbols`.
     #[serde(default)]
     pub contracts: Option<Vec<String>>,
+    /// Requested bars interval token.
+    #[serde(default)]
+    pub interval: Option<String>,
 }
 
 /// The strict query parameters of `GET /v1/raw`.
@@ -331,6 +472,8 @@ pub(crate) struct CoverageQuery {
     pub start_date: Date,
     /// Inclusive last session date.
     pub end_date: Date,
+    /// Validated bars interval token.
+    pub interval: Option<String>,
 }
 
 impl CoverageQuery {
@@ -338,6 +481,10 @@ impl CoverageQuery {
     pub(crate) fn parse(raw: CoverageQueryRaw) -> Result<Self, ApiError> {
         let asset_class = parse_asset_class(&raw.asset_class)?;
         let data_type = parse_data_type(&raw.data_type)?;
+        if asset_class == AssetClass::Option {
+            reject_option_data_type(data_type)?;
+        }
+        let interval = parse_interval(data_type, raw.interval)?;
         let start_date = parse_date(&raw.start_date, "start_date")?;
         let end_date = parse_date(&raw.end_date, "end_date")?;
         validate_date_range(start_date, end_date)?;
@@ -387,6 +534,7 @@ impl CoverageQuery {
             contracts,
             start_date,
             end_date,
+            interval,
         })
     }
 }
@@ -404,6 +552,8 @@ pub(crate) struct EquityEnsureRequest {
     pub start_date: Date,
     /// Inclusive last session date.
     pub end_date: Date,
+    /// Validated bars interval token.
+    pub interval: Option<String>,
 }
 
 /// A validated option ensure body.
@@ -459,10 +609,12 @@ fn parse_equity_ensure(
             "symbol",
             "start_date",
             "end_date",
+            "interval",
         ],
     )?;
     let asset_class = parse_asset_class(&required_string(object, "asset_class")?)?;
     let data_type = parse_data_type(&required_string(object, "data_type")?)?;
+    let interval = parse_interval(data_type, optional_string(object, "interval")?)?;
     let symbol = validate_symbol_field(&required_string(object, "symbol")?, "symbol")?;
     let start_date = parse_date(&required_string(object, "start_date")?, "start_date")?;
     let end_date = parse_date(&required_string(object, "end_date")?, "end_date")?;
@@ -473,6 +625,7 @@ fn parse_equity_ensure(
         symbol,
         start_date,
         end_date,
+        interval,
     })
 }
 
@@ -493,6 +646,7 @@ fn parse_option_ensure(
         ],
     )?;
     let data_type = parse_data_type(&required_string(object, "data_type")?)?;
+    reject_option_data_type(data_type)?;
     let symbol = validate_optional_symbol(optional_string(object, "symbol")?, "symbol")?;
     let underlying =
         validate_optional_symbol(optional_string(object, "underlying")?, "underlying")?;
@@ -551,6 +705,8 @@ pub(crate) struct FileQueryBody {
     pub end_date: Date,
     /// Whether a coverage gap may be repaired by the ensure callback.
     pub ensure: bool,
+    /// Validated bars interval token.
+    pub interval: Option<String>,
 }
 
 /// The SQL response representation requested by the client.
@@ -589,6 +745,8 @@ pub(crate) struct SqlQueryBody {
     pub output: SqlOutput,
     /// Whether the caller asked for the authorizing force override.
     pub force: bool,
+    /// Validated bars interval token.
+    pub interval: Option<String>,
 }
 
 /// Either discriminated query body accepted by `POST /v1/query`.
@@ -630,6 +788,7 @@ fn parse_file_query(
             "start_date",
             "end_date",
             "ensure",
+            "interval",
         ],
     )?;
     let body = parse_query_selection(object)?;
@@ -644,6 +803,7 @@ fn parse_file_query(
         start_date: body.start_date,
         end_date: body.end_date,
         ensure,
+        interval: body.interval,
     })
 }
 
@@ -666,6 +826,7 @@ fn parse_sql_query(
             "sql",
             "output",
             "force",
+            "interval",
         ],
     )?;
     let body = parse_query_selection(object)?;
@@ -703,6 +864,7 @@ fn parse_sql_query(
         sql,
         output,
         force,
+        interval: body.interval,
     })
 }
 
@@ -716,6 +878,7 @@ struct QuerySelection {
     contracts: Option<Vec<String>>,
     start_date: Date,
     end_date: Date,
+    interval: Option<String>,
 }
 
 fn parse_query_selection(
@@ -723,6 +886,10 @@ fn parse_query_selection(
 ) -> Result<QuerySelection, ApiError> {
     let asset_class = parse_asset_class(&required_string(object, "asset_class")?)?;
     let data_type = parse_data_type(&required_string(object, "data_type")?)?;
+    if asset_class == AssetClass::Option {
+        reject_option_data_type(data_type)?;
+    }
+    let interval = parse_interval(data_type, optional_string(object, "interval")?)?;
     let symbol = validate_optional_symbol(optional_string(object, "symbol")?, "symbol")?;
     let underlying =
         validate_optional_symbol(optional_string(object, "underlying")?, "underlying")?;
@@ -777,5 +944,6 @@ fn parse_query_selection(
         contracts,
         start_date,
         end_date,
+        interval,
     })
 }

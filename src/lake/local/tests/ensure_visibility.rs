@@ -58,6 +58,7 @@ async fn ensure_commits_become_visible_to_the_coverage_route() {
         LocalProviders {
             equity: Some(equity),
             crypto: Some(crypto),
+            bars: None,
         },
     )
     .expect("local app");

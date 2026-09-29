@@ -29,6 +29,7 @@ fn request() -> super::FileQueryRequest {
         start_date: date(1, 18),
         end_date: date(1, 19),
         ensure: false,
+        interval: None,
     }
 }
 
@@ -42,6 +43,7 @@ fn record(session_date: Date, object_path: Option<&str>) -> CoverageRecord {
         object_path.map(str::to_string),
         3,
         30,
+        None,
         None,
         None,
     )
@@ -64,8 +66,14 @@ fn entry(
 }
 
 fn canonical_entry(session_date: Date) -> SessionCoverage {
-    let path = partition_path(session_date, AssetClass::Equity, DataType::Trade, "AAPL")
-        .expect("canonical path");
+    let path = partition_path(
+        session_date,
+        AssetClass::Equity,
+        DataType::Trade,
+        None,
+        "AAPL",
+    )
+    .expect("canonical path");
     entry(
         CoverageState::Complete,
         session_date,
@@ -108,6 +116,7 @@ fn classify_requires_complete_state_and_canonical_path() {
         ]),
         AssetClass::Equity,
         DataType::Trade,
+        None,
         "aapl",
     );
 
@@ -134,6 +143,7 @@ fn classify_preserves_report_order() {
         &report(vec![first.clone(), second.clone()]),
         AssetClass::Equity,
         DataType::Trade,
+        None,
         "aapl",
     );
 
@@ -148,6 +158,7 @@ fn has_expected_path_rejects_a_missing_record_or_path() {
         &entry(CoverageState::Complete, session_date, None),
         AssetClass::Equity,
         DataType::Trade,
+        None,
         "aapl",
     ));
     assert!(!has_expected_path(
@@ -158,12 +169,14 @@ fn has_expected_path_rejects_a_missing_record_or_path() {
         ),
         AssetClass::Equity,
         DataType::Trade,
+        None,
         "aapl",
     ));
     assert!(has_expected_path(
         &canonical_entry(session_date),
         AssetClass::Equity,
         DataType::Trade,
+        None,
         "aapl"
     ));
 }
@@ -226,8 +239,42 @@ fn validate_request_accepts_equity_and_crypto_symbols() {
         start_date: date(1, 19),
         end_date: date(1, 21),
         ensure: false,
+        interval: None,
     };
     assert_eq!(validate_request(&crypto).expect("valid"), "BTC/USD");
+}
+
+#[test]
+fn validate_request_enforces_the_interval_pairing() {
+    let bars = |interval: Option<&str>| super::FileQueryRequest {
+        data_type: DataType::Bars,
+        interval: interval.map(str::to_string),
+        ..request()
+    };
+
+    let missing = validate_request(&bars(None)).expect_err("bars without interval");
+    assert_eq!(missing.code, "validation_error");
+    assert_eq!(missing.message, "bars requires an interval");
+
+    let unknown = validate_request(&bars(Some("2h"))).expect_err("unknown token");
+    assert_eq!(unknown.code, "validation_error");
+    assert_eq!(
+        unknown.message,
+        "invalid bar interval: \"2h\"; expected one of 1min, 1d"
+    );
+
+    let misplaced = validate_request(&super::FileQueryRequest {
+        interval: Some("1min".to_string()),
+        ..request()
+    })
+    .expect_err("interval on a non-bars type");
+    assert_eq!(misplaced.code, "validation_error");
+    assert_eq!(misplaced.message, "interval is supported for bars only");
+
+    assert_eq!(
+        validate_request(&bars(Some("1min"))).expect("valid"),
+        "aapl"
+    );
 }
 
 #[test]

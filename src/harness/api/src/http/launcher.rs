@@ -17,7 +17,7 @@ use serde_json::Value;
 use super::store::{JobRecord, JobRepository, RunCatalogRecord, RunStatus, RunStore, StoreError};
 
 /// Work description passed to an injected backtest launcher.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LaunchJob {
     /// Job identifier (equal to the configuration's run ID).
     pub job_id: String,

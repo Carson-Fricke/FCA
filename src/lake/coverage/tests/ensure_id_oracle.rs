@@ -25,6 +25,7 @@ fn oracle_ensure_job_ids_match() {
             symbol: entry["symbol"].as_str().expect("symbol").to_string(),
             start_date: Date::parse(entry["start_date"].as_str().expect("start")).expect("start"),
             end_date: Date::parse(entry["end_date"].as_str().expect("end")).expect("end"),
+            interval: None,
         };
         let job_id = ensure_job_id(&spec).expect("job id");
         assert_eq!(
@@ -34,4 +35,30 @@ fn oracle_ensure_job_ids_match() {
             spec.symbol
         );
     }
+}
+
+#[test]
+fn bars_ensure_job_ids_include_the_interval_and_stay_stable() {
+    let spec = |interval: &str| EnsureSpec {
+        asset_class: AssetClass::Equity,
+        data_type: DataType::Bars,
+        symbol: "aapl".to_string(),
+        start_date: Date::parse("2024-01-18").expect("start"),
+        end_date: Date::parse("2024-01-19").expect("end"),
+        interval: Some(interval.to_string()),
+    };
+
+    let minute = ensure_job_id(&spec("1min")).expect("minute job id");
+    let minute_again = ensure_job_id(&spec("1min")).expect("minute job id");
+    let day = ensure_job_id(&spec("1d")).expect("day job id");
+    assert_eq!(minute, minute_again);
+    assert_ne!(minute, day);
+    assert_eq!(
+        minute,
+        "ensure-e8dba7250a507ea78707c479d4aa0b26bb4507e09a638167ae7f7f6d2b6e520e"
+    );
+    assert_eq!(
+        day,
+        "ensure-2c2ba5b9e9ffdc799d2395402992d01f570dd947982bb214bfe7d6865d20b8dc"
+    );
 }

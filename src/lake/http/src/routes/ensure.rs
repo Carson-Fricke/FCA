@@ -71,6 +71,7 @@ async fn ensure_equity(
         symbol: request.symbol.clone(),
         start_date: request.start_date,
         end_date: request.end_date,
+        interval: request.interval.clone(),
     };
     let jobs = Arc::clone(&context.state.jobs);
     let launcher = context
@@ -159,6 +160,7 @@ async fn ensure_option(
         symbol: String::new(),
         start_date: request.start_date,
         end_date: request.end_date,
+        interval: None,
     };
     let task_job_id = job_id.clone();
     let handle = tokio::spawn(async move {

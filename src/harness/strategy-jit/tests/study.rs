@@ -1,32 +1,34 @@
-//! Phase N1 proof: authored Rust programs run through the engine from
-//! JIT-loaded dylibs.
+//! Authored Rust programs through the JIT seam: studies fold bars, strategies
+//! fold ticks.
 //!
-//! Each test materializes the two-event Parquet lake fixture, JIT-compiles an
-//! authored source into the managed workspace, loads the cdylib, and drives
-//! the real engine job seam — the study through
-//! [`run_native_study_job_with_data_dir`], the strategy through
-//! [`run_native_job_with_data_dir`]. The study asserts the capability
-//! contract structurally: the runtime returns no orders and records the
-//! authored program's published metrics in `study.json`.
+//! Each study test JIT-compiles an authored source into the managed workspace,
+//! loads the cdylib through [`JitStudyRuntime`], and drives the explicit bar
+//! host entry — the engine's bar arm lands next wave, so bars are fed directly
+//! here. The contract is bars-only: tick events are rejected with a typed
+//! error, the study vtable carries no order path, and the strategy path still
+//! runs through the real engine job seam end to end. No network and no lake
+//! files are touched by the study tests.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use backtest::backtest::config::{BacktestConfig, StrategyInstanceConfig};
-use backtest::backtest::engine_core::EngineOptions;
-use backtest::backtest::errors::ONE_DAY_NS;
-use backtest::backtest::job::{run_native_job_with_data_dir, run_native_study_job_with_data_dir};
+use backtest::backtest::engine_core::{EngineMarket, EngineOptions, StrategyRuntime};
+use backtest::backtest::errors::{BacktestError, ONE_DAY_NS};
+use backtest::backtest::job::run_native_job_with_lake_client;
+use harness_lakeclient::testing::{
+    quote_stream, trade_stream, FakeLakeConfig, FakeLakeServer, FakeQuoteRow, FakeTradeRow,
+};
+use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
 use harness_strategy_jit::{
-    compile, strategy_instance, study_instance, ManagedWorkspace, ProgramKind,
+    compile, strategy_instance, HostBar, JitStudyRuntime, ManagedWorkspace, ProgramKind,
+    STUDY_BARS_ONLY,
 };
-use marketdata::events::{
-    MarketEvent as LakeEvent, QuoteEvent as LakeQuote, TradeEvent as LakeTrade,
-};
-use marketdata::time::DateTime;
-use marketdata::{write_lake_partition, AssetClass, DataType, Date};
+use marketdata::Date;
 
 const STUDY_SOURCE: &str = include_str!("fixtures/study_program.rs");
 const STRATEGY_SOURCE: &str = include_str!("fixtures/strategy_program.rs");
+const TOKEN: &str = "strategy-jit-lake-token";
 
 fn temp_dir(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
@@ -41,135 +43,308 @@ fn temp_dir(name: &str) -> PathBuf {
     path
 }
 
-/// Materialize the two-event lake fixture and return the run window.
-fn materialize_lake(lake: &Path) -> (i64, i64) {
+/// The exact decimal literals each fixture bar must surface, trailing zeros
+/// included; the authored fixture compares them host-pinned.
+fn expected_parameters() -> serde_json::Value {
+    serde_json::json!({
+        "expected": [
+            {
+                "open": "450.00",
+                "high": "451.250",
+                "low": "449.750",
+                "close": "450.50",
+                "volume": "1000.00",
+            },
+            {
+                "open": "450.50",
+                "high": "452.00",
+                "low": "450.25",
+                "close": "450.01",
+                "volume": "12345.00",
+            },
+        ]
+    })
+}
+
+/// The two-bar stream every study test folds through the host entry.
+fn bars() -> Vec<HostBar<'static>> {
+    vec![
+        HostBar {
+            event_id: "bar-1",
+            timestamp_ns: 1_704_206_400_000_000_000,
+            sequence: 1,
+            symbol: "SPY",
+            open: "450.00".parse().expect("decimal literal"),
+            high: "451.250".parse().expect("decimal literal"),
+            low: "449.750".parse().expect("decimal literal"),
+            close: "450.50".parse().expect("decimal literal"),
+            volume: "1000.00".parse().expect("decimal literal"),
+        },
+        HostBar {
+            event_id: "bar-2",
+            timestamp_ns: 1_704_206_460_000_000_000,
+            sequence: 2,
+            symbol: "SPY",
+            open: "450.50".parse().expect("decimal literal"),
+            high: "452.00".parse().expect("decimal literal"),
+            low: "450.25".parse().expect("decimal literal"),
+            close: "450.01".parse().expect("decimal literal"),
+            volume: "12345.00".parse().expect("decimal literal"),
+        },
+    ]
+}
+
+fn sample_bar() -> HostBar<'static> {
+    HostBar {
+        event_id: "bar-1",
+        timestamp_ns: 1_704_206_400_000_000_000,
+        sequence: 1,
+        symbol: "SPY",
+        open: "450.00".parse().expect("decimal literal"),
+        high: "451.25".parse().expect("decimal literal"),
+        low: "449.75".parse().expect("decimal literal"),
+        close: "450.01".parse().expect("decimal literal"),
+        volume: "1000.00".parse().expect("decimal literal"),
+    }
+}
+
+/// Start the two-event lake fixture and return the run window plus its client.
+fn fake_lake() -> (FakeLakeServer, BlockingLakeClient, i64, i64) {
     let date = Date::from_ymd(2024, 1, 2).unwrap();
     let day = i64::from(date.days());
     let start_ns = day * ONE_DAY_NS + (14 * 3_600 + 30 * 60) * 1_000_000_000;
     let end_ns = (day + 1) * ONE_DAY_NS;
 
-    let quote = LakeEvent::Quote(LakeQuote {
-        event_id: "q-1".to_string(),
-        timestamp: DateTime::from_micros(start_ns / 1_000),
-        sequence: 0,
-        symbol: "SPY".to_string(),
-        bid_price: "450.00".parse().unwrap(),
-        ask_price: "450.02".parse().unwrap(),
-        bid_size: "100".parse().unwrap(),
-        ask_size: "100".parse().unwrap(),
-        venue: Some("XNYS".to_string()),
+    let quotes = vec![FakeQuoteRow::new(
+        start_ns, "450.00", "450.02", 100, 100, "XNYS",
+    )];
+    let trades = vec![FakeTradeRow::new(
+        start_ns + 1_000_000_000,
+        41,
+        "450.01",
+        25,
+        "XNYS",
+    )];
+    let server = FakeLakeServer::start(FakeLakeConfig {
+        read_bodies_by_type: BTreeMap::from([
+            ("quote".to_string(), quote_stream("SPY", &quotes)),
+            ("trade".to_string(), trade_stream("SPY", &trades)),
+        ]),
+        ..FakeLakeConfig::new(TOKEN)
     });
-    let trade = LakeEvent::Trade(LakeTrade {
-        event_id: "t-1".to_string(),
-        timestamp: DateTime::from_micros(start_ns / 1_000 + 1_000_000),
-        sequence: 1,
-        symbol: "SPY".to_string(),
-        price: "450.01".parse().unwrap(),
-        quantity: "50".parse().unwrap(),
-        venue: Some("XNYS".to_string()),
-        trade_id: Some("tid-1".to_string()),
-    });
-    write_lake_partition(
-        lake,
-        date,
-        AssetClass::Equity,
-        DataType::Quote,
-        "SPY",
-        &[quote],
+    let client = BlockingLakeClient::new(
+        LakeClientConfig::new(server.base_url(), TOKEN).expect("client config"),
     )
-    .expect("write quote lake");
-    write_lake_partition(
-        lake,
-        date,
-        AssetClass::Equity,
-        DataType::Trade,
-        "SPY",
-        &[trade],
-    )
-    .expect("write trade lake");
-    (start_ns, end_ns)
+    .expect("blocking client");
+    (server, client, start_ns, end_ns)
 }
 
-fn study_configuration(run_id: &str, start_ns: i64, end_ns: i64, digest: &str) -> BacktestConfig {
-    let mut configuration = BacktestConfig::new(run_id, start_ns, end_ns, 7).expect("config");
-    configuration.shell = "study".to_string();
-    configuration.symbols = vec!["SPY".to_string()];
-    configuration.strategy_instances = vec![StrategyInstanceConfig {
-        instance_id: "jit-study".to_string(),
-        implementation: format!("jit:{digest}"),
-        bundle_hash: digest.to_string(),
-        parameters: BTreeMap::new(),
-        symbols: vec!["SPY".to_string()],
-        capital_fraction: "1.0".to_string(),
-    }];
-    configuration
+/// Compile the source in a fresh workspace, fold the bar stream, and stop.
+fn run_study(
+    name: &str,
+    source: &str,
+    parameters: &serde_json::Value,
+) -> (BTreeMap<String, String>, String) {
+    let directory = temp_dir(name);
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+    let compiled = compile(&workspace, source, ProgramKind::Study).expect("compile study");
+    let mut runtime =
+        JitStudyRuntime::from_source(&workspace, source, parameters).expect("study runtime");
+    for bar in &bars() {
+        runtime.on_bar(bar).expect("bar folds");
+    }
+    runtime.on_stop().expect("stop publishes");
+    let metrics = runtime.published_metrics();
+    let _ = std::fs::remove_dir_all(&directory);
+    (metrics, compiled.digest)
 }
 
 #[test]
-fn runs_a_jit_authored_study_through_the_engine() {
-    let directory = temp_dir("study");
-    let workspace_root = directory.join("jit");
-    let lake = directory.join("lake");
-    let output = directory.join("out");
-    let (start_ns, end_ns) = materialize_lake(&lake);
-    let workspace = ManagedWorkspace::open(&workspace_root).expect("workspace");
+fn an_authored_bar_program_receives_exact_bar_values_and_publishes_metrics() {
+    let directory = temp_dir("bars");
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
 
-    let compiled = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("compile study");
-    let configuration = study_configuration("jit-study", start_ns, end_ns, &compiled.digest);
-    let programs = vec![study_instance(
-        &workspace,
-        STUDY_SOURCE,
-        &serde_json::json!({}),
-        "jit-study",
-    )
-    .expect("study instance")];
+    let mut runtime =
+        JitStudyRuntime::from_source(&workspace, STUDY_SOURCE, &expected_parameters())
+            .expect("study runtime");
+    for bar in &bars() {
+        runtime.on_bar(bar).expect("bar folds");
+    }
+    runtime.on_stop().expect("stop publishes");
 
-    let (outcome, artifact_path) = run_native_study_job_with_data_dir(
-        &configuration,
-        &EngineOptions::default(),
-        Some(output.as_path()),
-        programs,
-        &lake,
-    )
-    .expect("native study job");
-
-    // The engine consumed the two real lake events through the JIT-loaded
-    // dylib, the study never submitted orders, and its metrics landed in the
-    // run outcome.
-    assert!(outcome.completed());
-    assert_eq!(outcome.market_event_count, 2);
-    assert_eq!(outcome.order_count, 0);
-    assert!(outcome.fills.is_empty());
+    let metrics = runtime.published_metrics();
+    // The authored program compared every bar field string-exactly against the
+    // pinned literals, so zero mismatches means the full scale crossed intact.
     assert_eq!(
-        outcome
-            .custom_metrics
-            .get("study_quote_count")
-            .map(String::as_str),
-        Some("1")
+        metrics.get("study_bar_count").map(String::as_str),
+        Some("2")
     );
     assert_eq!(
-        outcome
-            .custom_metrics
-            .get("study_trade_count")
-            .map(String::as_str),
-        Some("1")
+        metrics.get("study_bar_mismatches").map(String::as_str),
+        Some("0"),
+        "{metrics:?}"
+    );
+    // The last bar's reads round-trip through the metric sink.
+    assert_eq!(
+        metrics.get("study_last_open").map(String::as_str),
+        Some("450.5")
     );
     assert_eq!(
-        outcome
-            .custom_metrics
-            .get("study_last_mid")
-            .map(String::as_str),
+        metrics.get("study_last_high").map(String::as_str),
+        Some("452")
+    );
+    assert_eq!(
+        metrics.get("study_last_low").map(String::as_str),
+        Some("450.25")
+    );
+    assert_eq!(
+        metrics.get("study_last_close").map(String::as_str),
         Some("450.01")
     );
+    assert_eq!(
+        metrics.get("study_last_volume").map(String::as_str),
+        Some("12345")
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
 
-    // The run recorded the authored program's provenance and wrote the
-    // canonical study artifact.
-    let document = std::fs::read_to_string(&artifact_path).expect("artifact");
-    assert!(document.contains("\"market_events\":2"), "{document}");
-    assert!(document.contains(&compiled.digest), "{document}");
-    assert!(document.contains("study_quote_count"), "{document}");
-    assert!(output.join("metrics.json").exists(), "metrics.json missing");
-    assert!(output.join("report.html").exists(), "report.html missing");
+#[test]
+fn a_study_rerun_over_the_same_bars_is_byte_identical() {
+    let parameters = expected_parameters();
+    let (first_metrics, first_digest) = run_study("rerun-a", STUDY_SOURCE, &parameters);
+    let (second_metrics, second_digest) = run_study("rerun-b", STUDY_SOURCE, &parameters);
+    assert_eq!(first_digest, second_digest, "source digest must be stable");
+    let first = serde_json::to_string(&first_metrics).expect("serialize metrics");
+    let second = serde_json::to_string(&second_metrics).expect("serialize metrics");
+    assert_eq!(first, second, "published metrics must be byte-identical");
+}
+
+#[test]
+fn a_panic_in_an_authored_bar_callback_fails_the_host_entry() {
+    let directory = temp_dir("panic");
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+
+    let source = r#"
+use harness_strategy_sdk::{export_study_program, BarEvent, StudyProgram};
+use harness_strategy_sdk::serde_json::Value;
+
+struct Boom;
+
+impl StudyProgram for Boom {
+    fn new(_parameters: Value) -> Self { Self }
+    fn on_bar(&mut self, _event: &BarEvent) {
+        panic!("authored program panicked");
+    }
+}
+
+export_study_program!(Boom);
+"#;
+    let mut runtime = JitStudyRuntime::from_source(&workspace, source, &serde_json::json!({}))
+        .expect("study runtime");
+    let error = runtime
+        .on_bar(&sample_bar())
+        .expect_err("a panicking program must fail the host entry");
+    match error {
+        BacktestError::StrategyExecution(message) => assert!(
+            message.contains("authored program panicked"),
+            "expected the panic detail, got {message}"
+        ),
+        other => panic!("expected a strategy execution error, got {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn a_rejected_metric_is_recorded_as_a_stop_error() {
+    let directory = temp_dir("metric");
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+
+    let source = r#"
+use harness_strategy_sdk::{export_study_program, MetricPublisher, StudyProgram};
+use harness_strategy_sdk::serde_json::Value;
+
+struct ReservedMetric;
+
+impl StudyProgram for ReservedMetric {
+    fn new(_parameters: Value) -> Self { Self }
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        // The author ignores the error; the host sink still rejects it and
+        // the run must fail.
+        let _ = metrics.publish("total_return", 1.0);
+    }
+}
+
+export_study_program!(ReservedMetric);
+"#;
+    let mut runtime = JitStudyRuntime::from_source(&workspace, source, &serde_json::json!({}))
+        .expect("study runtime");
+    runtime.on_bar(&sample_bar()).expect("bar folds");
+    let error = runtime
+        .on_stop()
+        .expect_err("a reserved metric must fail the stop");
+    match error {
+        BacktestError::StrategyExecution(message) => assert!(
+            message.contains("reserved by the harness"),
+            "expected the reservation detail, got {message}"
+        ),
+        other => panic!("expected a strategy execution error, got {other:?}"),
+    }
+    assert!(
+        runtime.published_metrics().is_empty(),
+        "a rejected metric must not be published"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn tick_events_fail_loud_for_study_runtimes() {
+    let directory = temp_dir("ticks");
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+    let mut runtime =
+        JitStudyRuntime::from_source(&workspace, STUDY_SOURCE, &serde_json::json!({}))
+            .expect("study runtime");
+
+    let quote = EngineMarket::Quote {
+        event_id: "quote-1".to_string(),
+        timestamp_ns: 1_704_206_400_000_000_000,
+        sequence: 1,
+        symbol: "SPY".to_string(),
+        bid: "450.00".parse().expect("decimal literal"),
+        ask: "450.02".parse().expect("decimal literal"),
+        bid_quantity: "100".parse().expect("decimal literal"),
+        ask_quantity: "100".parse().expect("decimal literal"),
+        venue: "XNYS".to_string(),
+    };
+    let error = runtime
+        .on_market(&quote)
+        .expect_err("a quote must never be silently ignored");
+    match error {
+        BacktestError::StrategyExecution(message) => assert_eq!(message, STUDY_BARS_ONLY),
+        other => panic!("expected a strategy execution error, got {other:?}"),
+    }
+
+    let trade = EngineMarket::Trade {
+        event_id: "trade-1".to_string(),
+        timestamp_ns: 1_704_206_401_000_000_000,
+        sequence: 2,
+        symbol: "SPY".to_string(),
+        price: "450.01".parse().expect("decimal literal"),
+        quantity: "25".parse().expect("decimal literal"),
+        venue: "XNYS".to_string(),
+        trade_id: "trade-1".to_string(),
+    };
+    let error = runtime
+        .on_market(&trade)
+        .expect_err("a trade must never be synthesized into a bar");
+    match error {
+        BacktestError::StrategyExecution(message) => assert_eq!(message, STUDY_BARS_ONLY),
+        other => panic!("expected a strategy execution error, got {other:?}"),
+    }
+
+    assert!(
+        runtime.published_metrics().is_empty(),
+        "a rejected tick must not fold"
+    );
     let _ = std::fs::remove_dir_all(&directory);
 }
 
@@ -177,9 +352,8 @@ fn runs_a_jit_authored_study_through_the_engine() {
 fn runs_a_jit_authored_strategy_through_the_engine() {
     let directory = temp_dir("strategy");
     let workspace_root = directory.join("jit");
-    let lake = directory.join("lake");
     let output = directory.join("out");
-    let (start_ns, end_ns) = materialize_lake(&lake);
+    let (_server, client, start_ns, end_ns) = fake_lake();
     let workspace = ManagedWorkspace::open(&workspace_root).expect("workspace");
 
     let compiled =
@@ -203,12 +377,12 @@ fn runs_a_jit_authored_strategy_through_the_engine() {
     )
     .expect("strategy instance")];
 
-    let (outcome, _artifact_path) = run_native_job_with_data_dir(
+    let (outcome, _artifact_path) = run_native_job_with_lake_client(
         &configuration,
         &EngineOptions::default(),
         Some(output.as_path()),
         strategies,
-        &lake,
+        &client,
     )
     .expect("native strategy job");
 
@@ -261,152 +435,6 @@ fn a_source_without_sdk_exports_fails_to_load() {
     assert!(
         matches!(error, harness_strategy_jit::JitError::Export { ref symbol, .. } if symbol == "harness_sdk_abi_version"),
         "expected a missing-export error, got {error:?}"
-    );
-    let _ = std::fs::remove_dir_all(&directory);
-}
-
-#[test]
-fn a_panic_in_an_authored_program_fails_the_engine_run() {
-    let directory = temp_dir("panic");
-    let workspace_root = directory.join("jit");
-    let lake = directory.join("lake");
-    let (start_ns, end_ns) = materialize_lake(&lake);
-    let workspace = ManagedWorkspace::open(&workspace_root).expect("workspace");
-
-    let source = r#"
-use harness_strategy_sdk::{export_study_program, QuoteEvent, StudyProgram};
-use harness_strategy_sdk::serde_json::Value;
-
-struct Boom;
-
-impl StudyProgram for Boom {
-    fn new(_parameters: Value) -> Self { Self }
-    fn on_quote(&mut self, _event: &QuoteEvent) {
-        panic!("authored program panicked");
-    }
-}
-
-export_study_program!(Boom);
-"#;
-    let configuration = study_configuration("jit-panic", start_ns, end_ns, "digest-panic");
-    let programs = vec![
-        study_instance(&workspace, source, &serde_json::json!({}), "jit-panic")
-            .expect("study instance"),
-    ];
-    let error = run_native_study_job_with_data_dir(
-        &configuration,
-        &EngineOptions::default(),
-        None,
-        programs,
-        &lake,
-    )
-    .expect_err("a panicking program must fail the run");
-    let message = error.to_string();
-    assert!(
-        message.contains("authored program panicked"),
-        "expected the panic detail, got {message}"
-    );
-    let _ = std::fs::remove_dir_all(&directory);
-}
-
-#[test]
-fn the_study_runtime_returns_no_orders_by_construction() {
-    // The capability gate from the Python surface, moved to the SDK: even a
-    // program that would submit orders cannot, because the study runtime has
-    // no order path.
-    let directory = temp_dir("capability");
-    let workspace_root = directory.join("jit");
-    let lake = directory.join("lake");
-    let (start_ns, end_ns) = materialize_lake(&lake);
-    let workspace = ManagedWorkspace::open(&workspace_root).expect("workspace");
-
-    let source = r#"
-use harness_strategy_sdk::{
-    export_study_program, MetricPublisher, OrderSink, QuoteEvent, StudyProgram,
-};
-use harness_strategy_sdk::serde_json::Value;
-
-struct OrderHungry;
-
-impl StudyProgram for OrderHungry {
-    fn new(_parameters: Value) -> Self { Self }
-    fn on_quote(&mut self, _event: &QuoteEvent) {}
-}
-
-export_study_program!(OrderHungry);
-"#;
-    let compiled = compile(&workspace, source, ProgramKind::Study).expect("compile");
-    let configuration = study_configuration("jit-capability", start_ns, end_ns, &compiled.digest);
-    let programs =
-        vec![
-            study_instance(&workspace, source, &serde_json::json!({}), "jit-capability")
-                .expect("study instance"),
-        ];
-    let (outcome, _artifact) = run_native_study_job_with_data_dir(
-        &configuration,
-        &EngineOptions::default(),
-        None,
-        programs,
-        &lake,
-    )
-    .expect("capability run");
-    assert_eq!(outcome.order_count, 0);
-    let _ = std::fs::remove_dir_all(&directory);
-}
-
-#[test]
-fn a_rejected_metric_is_recorded_as_a_teardown_error() {
-    let directory = temp_dir("metric");
-    let workspace_root = directory.join("jit");
-    let lake = directory.join("lake");
-    let (start_ns, end_ns) = materialize_lake(&lake);
-    let workspace = ManagedWorkspace::open(&workspace_root).expect("workspace");
-
-    let source = r#"
-use harness_strategy_sdk::{export_study_program, MetricPublisher, StudyProgram};
-use harness_strategy_sdk::serde_json::Value;
-
-struct ReservedMetric;
-
-impl StudyProgram for ReservedMetric {
-    fn new(_parameters: Value) -> Self { Self }
-    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        // The author ignores the error; the host sink still rejects it and
-        // the run must fail.
-        let _ = metrics.publish("total_return", 1.0);
-    }
-}
-
-export_study_program!(ReservedMetric);
-"#;
-    let configuration = study_configuration("jit-reserved", start_ns, end_ns, "digest-reserved");
-    let programs = vec![
-        study_instance(&workspace, source, &serde_json::json!({}), "jit-reserved")
-            .expect("study instance"),
-    ];
-    let (outcome, _artifact) = run_native_study_job_with_data_dir(
-        &configuration,
-        &EngineOptions::default(),
-        None,
-        programs,
-        &lake,
-    )
-    .expect("study job");
-    // The engine records on-stop failures as teardown errors rather than
-    // aborting the run, exactly as it does for the Python adapter; the
-    // rejected metric must not appear in the published metrics.
-    assert!(
-        outcome
-            .teardown_errors
-            .iter()
-            .any(|error| error.contains("reserved by the harness")),
-        "expected the reservation detail, got {:?}",
-        outcome.teardown_errors
-    );
-    assert!(
-        outcome.custom_metrics.is_empty(),
-        "{:?}",
-        outcome.custom_metrics
     );
     let _ = std::fs::remove_dir_all(&directory);
 }

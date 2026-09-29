@@ -39,6 +39,8 @@ pub struct SqlQueryRequest {
     pub output: BoundedQueryOutput,
     /// Whether the caller asked for the authorizing force override.
     pub force: bool,
+    /// Canonical bars interval token; required for bars and absent otherwise.
+    pub interval: Option<String>,
 }
 
 /// The bounded query result and the representation it was rendered for.
@@ -88,6 +90,7 @@ pub async fn execute_sql_query(
         symbol: request.symbol.clone(),
         start_date: request.start_date,
         end_date: request.end_date,
+        interval: request.interval.clone(),
     };
 
     let mut report = coverage_report(&context, &spec)?;
@@ -95,6 +98,7 @@ pub async fn execute_sql_query(
         &report,
         request.asset_class,
         request.data_type,
+        request.interval.as_deref(),
         &request.symbol,
     );
     if !incomplete.is_empty() && !request.ensure {
@@ -113,6 +117,7 @@ pub async fn execute_sql_query(
         callback(
             spec.asset_class,
             spec.data_type,
+            spec.interval.clone(),
             spec.symbol.clone(),
             spec.start_date,
             spec.end_date,
@@ -130,6 +135,7 @@ pub async fn execute_sql_query(
             &report,
             request.asset_class,
             request.data_type,
+            request.interval.as_deref(),
             &request.symbol,
         );
         if !incomplete.is_empty() {
@@ -172,14 +178,17 @@ fn ensured_files(
         let Some(object_path) = record.object_path.as_deref() else {
             return Err(missing_object_path().into());
         };
-        files.push(EnsuredQueryFile::new(
-            request.asset_class,
-            request.data_type,
-            request.symbol.clone(),
-            entry.session_date(),
-            object_path,
-            record.byte_size,
-        ));
+        files.push(
+            EnsuredQueryFile::new(
+                request.asset_class,
+                request.data_type,
+                request.symbol.clone(),
+                entry.session_date(),
+                object_path,
+                record.byte_size,
+            )
+            .with_interval(request.interval.as_deref()),
+        );
     }
     Ok(files)
 }

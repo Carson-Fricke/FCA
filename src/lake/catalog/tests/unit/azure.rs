@@ -130,8 +130,28 @@ fn coverage(status: CoverageStatus) -> CoverageRecord {
         3456,
         Some("sha256:abc".to_string()),
         (status == CoverageStatus::Error).then(|| "source unavailable".to_string()),
+        None,
     )
     .expect("coverage record")
+}
+
+fn bars_coverage(interval: &str) -> CoverageRecord {
+    CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        "AAPL",
+        session_date(),
+        CoverageStatus::Complete,
+        Some(format!(
+            "date=2024-01-19/asset_class=equity/data_type=bars/interval={interval}/AAPL.parquet"
+        )),
+        7,
+        890,
+        None,
+        None,
+        Some(interval.to_string()),
+    )
+    .expect("bars coverage record")
 }
 
 fn job_created_at() -> DateTime {
@@ -274,6 +294,7 @@ fn azure_adapters_round_trip_without_live_azure() {
             .get(
                 AssetClass::Equity,
                 DataType::Trade,
+                None,
                 "AAPL",
                 record.session_date
             )
@@ -328,6 +349,123 @@ fn azure_adapters_store_the_expected_partition_and_row_keys() {
 }
 
 #[test]
+fn azure_bars_rows_keep_intervals_distinct_and_omit_the_column_otherwise() {
+    let table = Arc::new(FakeTable::default());
+    let repository =
+        AzureTableCatalogRepository::new(Arc::clone(&table) as Arc<dyn TableEntityStore>);
+    repository.upsert(&bars_coverage("1min")).expect("upsert");
+    repository.upsert(&bars_coverage("1d")).expect("upsert");
+
+    let entities = table.entities();
+    assert!(entities.contains_key(&(
+        "coverage|equity|bars|AAPL|interval=1min".to_string(),
+        "2024-01-19|interval=1min".to_string()
+    )));
+    assert!(entities.contains_key(&(
+        "coverage|equity|bars|AAPL|interval=1d".to_string(),
+        "2024-01-19|interval=1d".to_string()
+    )));
+
+    assert_eq!(
+        repository
+            .get(
+                AssetClass::Equity,
+                DataType::Bars,
+                Some("1min"),
+                "AAPL",
+                session_date()
+            )
+            .expect("get"),
+        Some(bars_coverage("1min"))
+    );
+    assert_eq!(
+        repository
+            .get(
+                AssetClass::Equity,
+                DataType::Bars,
+                Some("1d"),
+                "AAPL",
+                session_date()
+            )
+            .expect("get"),
+        Some(bars_coverage("1d"))
+    );
+    assert_eq!(
+        repository
+            .get(
+                AssetClass::Equity,
+                DataType::Bars,
+                None,
+                "AAPL",
+                session_date()
+            )
+            .expect("get"),
+        None
+    );
+
+    let records = repository
+        .list(&CoverageQuery {
+            asset_class: Some(AssetClass::Equity),
+            data_type: Some(DataType::Bars),
+            symbol: Some("AAPL".to_string()),
+            interval: Some("1min".to_string()),
+            start: None,
+            end: None,
+        })
+        .expect("list");
+    assert_eq!(records, vec![bars_coverage("1min")]);
+
+    let legacy = coverage(CoverageStatus::Complete);
+    assert!(!coverage_to_entity(&legacy).contains_key("Interval"));
+    let bars = bars_coverage("1d");
+    let entity = coverage_to_entity(&bars);
+    assert_eq!(entity["Interval"].as_str(), Some("1d"));
+    assert_eq!(coverage_from_entity(&entity), Ok(bars));
+}
+
+#[test]
+fn bars_provenance_round_trips_through_the_entity_mapping() {
+    let record = bars_coverage("1min")
+        .with_bar_provenance(BarSource::Provider, "provider-rev-1")
+        .expect("provenance");
+    let entity = coverage_to_entity(&record);
+    assert_eq!(entity["BarSource"].as_str(), Some("provider"));
+    assert_eq!(entity["SourceRevision"].as_str(), Some("provider-rev-1"));
+    assert_eq!(coverage_from_entity(&entity), Ok(record));
+
+    let legacy = bars_coverage("1min");
+    let entity = coverage_to_entity(&legacy);
+    assert!(!entity.contains_key("BarSource"));
+    assert!(!entity.contains_key("SourceRevision"));
+
+    let mut dangling = coverage_to_entity(&legacy);
+    dangling.insert(
+        "SourceRevision".to_string(),
+        serde_json::Value::String("rev".to_string()),
+    );
+    let error = coverage_from_entity(&dangling).expect_err("dangling revision");
+    assert!(
+        error
+            .to_string()
+            .contains("SourceRevision requires a BarSource"),
+        "{error}"
+    );
+
+    let mut source_only = coverage_to_entity(&legacy);
+    source_only.insert(
+        "BarSource".to_string(),
+        serde_json::Value::String("derived".to_string()),
+    );
+    let error = coverage_from_entity(&source_only).expect_err("source without revision");
+    assert!(
+        error
+            .to_string()
+            .contains("BarSource requires a SourceRevision"),
+        "{error}"
+    );
+}
+
+#[test]
 fn azure_catalog_uses_partition_query_and_deterministic_date_filter() {
     let table = Arc::new(FakeTable::default());
     let repository =
@@ -341,6 +479,7 @@ fn azure_catalog_uses_partition_query_and_deterministic_date_filter() {
             asset_class: Some(AssetClass::Equity),
             data_type: Some(DataType::Trade),
             symbol: Some("AAPL".to_string()),
+            interval: None,
             start: Some(Date::from_ymd(2024, 1, 1).expect("start")),
             end: Some(Date::from_ymd(2024, 1, 31).expect("end")),
         })

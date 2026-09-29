@@ -347,6 +347,7 @@ fn option_planning_persists_daily_front_sets_and_resumes_terminal_coverage() {
                     0,
                     None,
                     None,
+                    None,
                 )
                 .expect("record"),
             )
@@ -599,6 +600,7 @@ async fn shared_queue_worker_composes_the_option_handler_idempotently() {
                 asset_class: Some(lake_contracts::AssetClass::Option),
                 data_type: None,
                 symbol: None,
+                interval: None,
                 start: None,
                 end: None,
             })

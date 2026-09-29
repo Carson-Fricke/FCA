@@ -29,7 +29,7 @@ pub(crate) fn guard<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Deterministic process-local coverage storage.
 #[derive(Debug, Default)]
 pub struct MemoryCatalogRepository {
-    records: Mutex<BTreeMap<(AssetClass, DataType, String, Date), CoverageRecord>>,
+    records: Mutex<BTreeMap<(AssetClass, DataType, String, Option<String>, Date), CoverageRecord>>,
 }
 
 impl MemoryCatalogRepository {
@@ -55,12 +55,19 @@ impl CatalogRepository for MemoryCatalogRepository {
         &self,
         asset_class: AssetClass,
         data_type: DataType,
+        interval: Option<&str>,
         symbol: &str,
         session_date: Date,
     ) -> Result<Option<CoverageRecord>, DataError> {
         let symbol = canonical_symbol(symbol)?;
         Ok(guard(&self.records)
-            .get(&(asset_class, data_type, symbol, session_date))
+            .get(&(
+                asset_class,
+                data_type,
+                symbol,
+                interval.map(str::to_string),
+                session_date,
+            ))
             .cloned())
     }
 
@@ -89,6 +96,10 @@ impl CatalogRepository for MemoryCatalogRepository {
                     && symbol
                         .as_deref()
                         .is_none_or(|value| value == record.symbol.as_str())
+                    && query
+                        .interval
+                        .as_deref()
+                        .is_none_or(|value| record.interval.as_deref() == Some(value))
                     && query.start.is_none_or(|start| record.session_date >= start)
                     && query.end.is_none_or(|end| record.session_date <= end)
             })

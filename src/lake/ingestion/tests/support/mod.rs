@@ -402,6 +402,8 @@ pub struct WriteCall {
     pub asset_class: AssetClass,
     /// Data type passed to the writer.
     pub data_type: DataType,
+    /// Interval passed to the writer, when the dataset carries one.
+    pub interval: Option<String>,
     /// Symbol passed to the writer.
     pub symbol: String,
     /// The rows passed to the writer, in order.
@@ -448,9 +450,10 @@ impl PartitionWriter for RecordingWriter {
         session_date: Date,
         asset_class: AssetClass,
         data_type: DataType,
+        interval: Option<&str>,
         symbol: &str,
     ) -> Result<ParquetMetadata, DataError> {
-        let path = partition_path(session_date, asset_class, data_type, symbol)?;
+        let path = partition_path(session_date, asset_class, data_type, interval, symbol)?;
         let payload = serde_json::to_vec(records).map_err(DataError::io)?;
         let metadata = ParquetMetadata {
             path,
@@ -462,6 +465,7 @@ impl PartitionWriter for RecordingWriter {
             session_date,
             asset_class,
             data_type,
+            interval: interval.map(str::to_string),
             symbol: symbol.to_string(),
             records: records.to_vec(),
         });

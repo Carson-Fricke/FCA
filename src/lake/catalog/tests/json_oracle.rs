@@ -43,6 +43,7 @@ fn oracle_catalog_loads_into_the_index() {
         .get(
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "AAPL",
             Date::from_ymd(2024, 1, 18).expect("date"),
         )
@@ -59,6 +60,7 @@ fn oracle_catalog_loads_into_the_index() {
         .get(
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "SPY",
             Date::from_ymd(2024, 1, 19).expect("date"),
         )

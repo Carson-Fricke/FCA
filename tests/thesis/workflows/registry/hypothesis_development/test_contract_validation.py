@@ -89,6 +89,39 @@ def test_the_model_must_declare_the_window_it_wants_fetched() -> None:
         raise AssertionError("composer accepted a model with no declared window")
 
 
+def test_the_model_must_declare_the_bar_interval() -> None:
+    # Studies replay bars at the declared interval, so a missing or unknown
+    # interval is a contract problem to repair, never a silent default.
+    undeclared = {**_model(), "harnessConfiguration": {"seed": 7, "symbols": ["SPY"]}}
+    payload = {**_hypothesis_envelope(), "model": undeclared}
+    errors = hypothesis_payload_errors(payload)
+
+    assert (
+        "hypothesis.model.harnessConfiguration.interval: required non-empty "
+        "text is missing" in errors
+    )
+    with pytest.raises(FalsificationComposeError):
+        _draft_from_contract(payload)
+
+    configuration = _model()["harnessConfiguration"]
+    assert isinstance(configuration, dict)
+    unknown = {
+        **_hypothesis_envelope(),
+        "model": {
+            **_model(),
+            "harnessConfiguration": {**configuration, "interval": "5min"},
+        },
+    }
+    errors = hypothesis_payload_errors(unknown)
+
+    assert (
+        "hypothesis.model.harnessConfiguration.interval: must be one of 1min, "
+        "1d, got '5min'" in errors
+    )
+    with pytest.raises(FalsificationComposeError):
+        _draft_from_contract(unknown)
+
+
 def test_falsifier_errors_report_every_field_and_index() -> None:
     errors = hypothesis_payload_errors(
         {
@@ -279,12 +312,21 @@ def test_advertised_schema_is_never_weaker_than_the_composer() -> None:
     assert outputs["uniqueItems"] is True
     assert outputs["items"]["pattern"] == IDENTIFIER_PATTERN
     assert model["properties"]["tests"]["minProperties"] == 1
-    assert model["properties"]["harnessConfiguration"]["required"] == [
-        "start",
-        "end",
-    ]
+    configuration = model["properties"]["harnessConfiguration"]
+    assert configuration["required"] == ["start", "end", "interval"]
+    assert configuration["properties"]["interval"]["enum"] == ["1min", "1d"]
+    assert configuration["properties"]["interval"]["minLength"] == 1
     indicators = model["properties"]["indicators"]["items"]
     assert indicators["required"] == ["alias", "scope", "name", "symbol"]
+
+
+def test_the_advertised_model_schema_has_no_retired_python_entrypoints() -> None:
+    """The model source is an authored Rust study program, so the retired
+    Python ``fitEntrypoint`` / ``observeEntrypoint`` keys are not part of the
+    advertised contract."""
+    model = HYPOTHESIS_PAYLOAD_SCHEMA["properties"]["model"]
+    assert "fitEntrypoint" not in model["properties"]
+    assert "observeEntrypoint" not in model["properties"]
 
 
 _REJECTED_PAYLOADS = [
@@ -358,6 +400,33 @@ _REJECTED_PAYLOADS = [
             },
         },
         id="harness-window-missing-start",
+    ),
+    pytest.param(
+        {
+            **_hypothesis_envelope(),
+            "model": {
+                **_model(),
+                "harnessConfiguration": {
+                    "start": "2024-01-01T00:00:00Z",
+                    "end": "2024-03-01T00:00:00Z",
+                },
+            },
+        },
+        id="interval-missing",
+    ),
+    pytest.param(
+        {
+            **_hypothesis_envelope(),
+            "model": {
+                **_model(),
+                "harnessConfiguration": {
+                    "start": "2024-01-01T00:00:00Z",
+                    "end": "2024-03-01T00:00:00Z",
+                    "interval": "5min",
+                },
+            },
+        },
+        id="interval-unknown",
     ),
     pytest.param({**_hypothesis_envelope(), "claim": "x" * 8_193}, id="claim-too-long"),
     pytest.param(

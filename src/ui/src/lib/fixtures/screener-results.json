@@ -1,11 +1,181 @@
 {
-	"items": [
-		{ "symbol": "SPY", "last": 612.4, "volume": 41230000, "avg_dollar_volume_20d": 24800000000 },
-		{ "symbol": "QQQ", "last": 418.2, "volume": 28940000, "avg_dollar_volume_20d": 12100000000 },
-		{ "symbol": "MSFT", "last": 512.7, "volume": 21350000, "avg_dollar_volume_20d": 10900000000 },
-		{ "symbol": "IWM", "last": 233.9, "volume": 18100000, "avg_dollar_volume_20d": 4200000000 },
-		{ "symbol": "AMD", "last": 176.35, "volume": 34520000, "avg_dollar_volume_20d": 6100000000 },
-		{ "symbol": "TLT", "last": 88.7, "volume": 12500000, "avg_dollar_volume_20d": 1100000000 },
-		{ "symbol": "GLD", "last": 244.1, "volume": 7400000, "avg_dollar_volume_20d": 1800000000 }
-	]
+	"alpha-lab": {
+		"items": [
+			{
+				"result_id": "sha256:7a8b9c0d1e2f30415263748596a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f",
+				"workspace_id": "alpha-lab",
+				"definition_id": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+				"definition_hash": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+				"run_id": "screen-7a8b9c0d1e2f3041",
+				"status": "complete",
+				"as_of": "2026-09-25",
+				"rows": [
+					{
+						"symbol": "MSFT",
+						"metrics": {
+							"close": "512.70",
+							"avg_dollar_volume": "10900000000.0000",
+							"revenue": "227000000000"
+						},
+						"rank": 1
+					},
+					{
+						"symbol": "AAPL",
+						"metrics": {
+							"close": "231.40",
+							"avg_dollar_volume": "9800000000.0000",
+							"revenue": "391000000000"
+						},
+						"rank": 2
+					},
+					{
+						"symbol": "SPY",
+						"metrics": {
+							"close": "612.40",
+							"avg_dollar_volume": "24800000000.0000"
+						},
+						"rank": 3
+					},
+					{
+						"symbol": "QQQ",
+						"metrics": {
+							"close": "418.20",
+							"avg_dollar_volume": "12100000000.0000"
+						},
+						"rank": 4
+					},
+					{
+						"symbol": "IWM",
+						"metrics": {
+							"close": "233.90",
+							"avg_dollar_volume": "4200000000.0000"
+						},
+						"rank": 5
+					}
+				],
+				"provenance": {
+					"artifact": {
+						"name": "screen.json",
+						"sha256": "9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+						"size": 4096
+					},
+					"artifacts": [
+						{
+							"name": "screen.json",
+							"sha256": "9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+							"size": 4096
+						}
+					],
+					"catalog": {
+						"run_id": "screen-7a8b9c0d1e2f3041",
+						"status": "complete",
+						"strategy_id": "screener"
+					},
+					"screen": {
+						"schema": "fca-harness-screen-v1",
+						"status": "complete",
+						"run_id": "screen-7a8b9c0d1e2f3041",
+						"as_of": "2026-09-25",
+						"definition_id": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+						"definition_hash": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+						"bundle_hash": "2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+						"rank_metric": "avg_dollar_volume",
+						"bar_interval": "1d",
+						"data_window": {
+							"start": "2026-09-05",
+							"end": "2026-09-25"
+						},
+						"universe_revision": "universe:us-listed@2026-09",
+						"provenance": {
+							"source_digest": "2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+							"toolchain_digest": "7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b",
+							"run_digest": "8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"
+						}
+					}
+				}
+			}
+		]
+	},
+	"beta-quant": {
+		"items": [
+			{
+				"result_id": "sha256:a1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f809",
+				"workspace_id": "beta-quant",
+				"definition_id": "sha256:5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+				"definition_hash": "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+				"run_id": "screen-9d0e1f2a3b4c5d6e",
+				"status": "complete",
+				"as_of": "2026-09-25",
+				"rows": [
+					{
+						"symbol": "NVDA",
+						"metrics": {
+							"close": "176.50",
+							"momentum_20d": "18.400000",
+							"ind:sma(period=50)": "158.320000"
+						},
+						"rank": 1
+					},
+					{
+						"symbol": "AMD",
+						"metrics": {
+							"close": "176.35",
+							"momentum_20d": "12.100000",
+							"ind:sma(period=50)": "161.900000"
+						},
+						"rank": 2
+					},
+					{
+						"symbol": "AVGO",
+						"metrics": {
+							"close": "172.10",
+							"momentum_20d": "8.700000",
+							"ind:sma(period=50)": "168.400000"
+						},
+						"rank": 3
+					}
+				],
+				"provenance": {
+					"artifact": {
+						"name": "screen.json",
+						"sha256": "9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+						"size": 4096
+					},
+					"artifacts": [
+						{
+							"name": "screen.json",
+							"sha256": "9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+							"size": 4096
+						}
+					],
+					"catalog": {
+						"run_id": "screen-9d0e1f2a3b4c5d6e",
+						"status": "complete",
+						"strategy_id": "screener"
+					},
+					"screen": {
+						"schema": "fca-harness-screen-v1",
+						"status": "complete",
+						"run_id": "screen-9d0e1f2a3b4c5d6e",
+						"as_of": "2026-09-25",
+						"definition_id": "sha256:5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+						"definition_hash": "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+						"bundle_hash": "6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+						"rank_metric": "momentum_20d",
+						"bar_interval": "1d",
+						"data_window": {
+							"start": "2026-09-05",
+							"end": "2026-09-25"
+						},
+						"universe_revision": "universe:us-listed@2026-09",
+						"provenance": {
+							"source_digest": "6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+							"toolchain_digest": "7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b",
+							"run_digest": "8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"
+						}
+					}
+				}
+			}
+		]
+	}
 }

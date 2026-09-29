@@ -10,13 +10,13 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use lake_catalog::JsonCatalogStore;
 use lake_configuration::{LakeSettings, UniverseSettings};
-use lake_contracts::{AssetClass, DataError, DateTime};
-use lake_coverage::{EnsureJob, EnsureJobLauncher};
-use lake_ingestion::{CryptoDataProvider, EquityDataProvider};
+use lake_contracts::{AssetClass, BarInterval, DataError, DataType, DateTime};
+use lake_coverage::{EnsureJob, EnsureJobLauncher, EnsureSpec};
+use lake_ingestion::{BarsDataProvider, CryptoDataProvider, EquityDataProvider};
 
 use crate::ingest::{
-    run_local_backfill, run_local_crypto_backfill, LocalBackfillOptions,
-    LocalCryptoBackfillOptions, LocalIngestError,
+    run_local_backfill, run_local_bars_backfill, run_local_crypto_backfill, LocalBackfillOptions,
+    LocalBarsBackfillOptions, LocalCryptoBackfillOptions, LocalIngestError,
 };
 use crate::state::{lookup, LocalLayout};
 
@@ -62,6 +62,7 @@ pub struct LocalEnsureLauncher {
     _universes: UniverseSettings,
     equity: Option<Arc<dyn EquityDataProvider>>,
     crypto: Option<Arc<dyn CryptoDataProvider>>,
+    bars: Option<Arc<dyn BarsDataProvider>>,
     catalog: Option<Arc<JsonCatalogStore>>,
     now: DateTime,
 }
@@ -82,6 +83,7 @@ impl LocalEnsureLauncher {
             _universes: universes,
             equity: None,
             crypto: None,
+            bars: None,
             catalog: None,
             now,
         })
@@ -96,6 +98,13 @@ impl LocalEnsureLauncher {
     ) -> Self {
         self.equity = equity;
         self.crypto = crypto;
+        self
+    }
+
+    /// Install an injected bars provider; absent builds from credentials.
+    #[must_use]
+    pub fn with_bars_provider(mut self, bars: Option<Arc<dyn BarsDataProvider>>) -> Self {
+        self.bars = bars;
         self
     }
 
@@ -124,6 +133,9 @@ impl LocalEnsureLauncher {
     /// Run one ensure request as a bounded backfill.
     pub(crate) async fn run(&self, job: EnsureJob) -> Result<(), LocalIngestError> {
         let request = job.request;
+        if request.data_type == DataType::Bars {
+            return self.run_bars(&request).await;
+        }
         match request.asset_class {
             AssetClass::Equity => run_local_backfill(LocalBackfillOptions {
                 layout: self.layout.clone(),
@@ -156,6 +168,90 @@ impl LocalEnsureLauncher {
             })
             .await
             .map(|_| ()),
+            _ => Err(LocalIngestError::new(
+                "options ingest is not supported by the local launcher",
+            )),
+        }
+    }
+
+    /// Run one bars ensure: ensure trades for the window, then produce bars.
+    ///
+    /// Trades are ensured through the same launchers as any trade request so
+    /// derivation always reads a current partition; the bars backfill then
+    /// prefers provider bars and derives only the sessions the provider did
+    /// not cover.
+    async fn run_bars(&self, request: &EnsureSpec) -> Result<(), LocalIngestError> {
+        let Some(token) = request.interval.as_deref() else {
+            return Err(LocalIngestError::new("bars requires an interval"));
+        };
+        let interval =
+            BarInterval::parse(token).map_err(|error| LocalIngestError::new(error.to_string()))?;
+        let symbol = request.symbol.trim().to_uppercase();
+        match request.asset_class {
+            AssetClass::Equity => {
+                run_local_backfill(LocalBackfillOptions {
+                    layout: self.layout.clone(),
+                    symbols: vec![symbol.clone()],
+                    start_date: request.start_date,
+                    end_date: request.end_date,
+                    data_types: Some(vec![DataType::Trade]),
+                    environ: self.environ.clone(),
+                    now: self.now,
+                    settings: self.settings.clone(),
+                    provider: self.equity.clone(),
+                    retry_settle_seconds: None,
+                    catalog: self.catalog.clone(),
+                })
+                .await?;
+                run_local_bars_backfill(LocalBarsBackfillOptions {
+                    layout: self.layout.clone(),
+                    asset_class: AssetClass::Equity,
+                    symbols: vec![symbol],
+                    interval,
+                    start_date: request.start_date,
+                    end_date: request.end_date,
+                    environ: self.environ.clone(),
+                    now: self.now,
+                    settings: self.settings.clone(),
+                    provider: self.bars.clone(),
+                    retry_settle_seconds: None,
+                    catalog: self.catalog.clone(),
+                })
+                .await
+                .map(|_| ())
+            }
+            AssetClass::Crypto => {
+                run_local_crypto_backfill(LocalCryptoBackfillOptions {
+                    layout: self.layout.clone(),
+                    pairs: vec![symbol.clone()],
+                    start_date: request.start_date,
+                    end_date: request.end_date,
+                    data_types: Some(vec![DataType::Trade]),
+                    environ: self.environ.clone(),
+                    now: self.now,
+                    settings: self.settings.clone(),
+                    provider: self.crypto.clone(),
+                    retry_settle_seconds: None,
+                    catalog: self.catalog.clone(),
+                })
+                .await?;
+                run_local_bars_backfill(LocalBarsBackfillOptions {
+                    layout: self.layout.clone(),
+                    asset_class: AssetClass::Crypto,
+                    symbols: vec![symbol],
+                    interval,
+                    start_date: request.start_date,
+                    end_date: request.end_date,
+                    environ: self.environ.clone(),
+                    now: self.now,
+                    settings: self.settings.clone(),
+                    provider: self.bars.clone(),
+                    retry_settle_seconds: None,
+                    catalog: self.catalog.clone(),
+                })
+                .await
+                .map(|_| ())
+            }
             _ => Err(LocalIngestError::new(
                 "options ingest is not supported by the local launcher",
             )),

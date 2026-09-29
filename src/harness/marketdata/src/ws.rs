@@ -116,7 +116,7 @@ impl InboxKind {
 
     fn canonical_symbol(self, raw: &str) -> Result<String, DataError> {
         match self {
-            Self::Sip => canonical_symbol(raw),
+            Self::Sip => canonical_symbol(raw).map_err(Into::into),
             Self::Crypto => {
                 let symbol = canonical_symbol(raw)?;
                 if !is_crypto_pair(&symbol) {

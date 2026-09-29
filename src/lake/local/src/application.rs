@@ -16,6 +16,7 @@ use lake_http::{create_app, LakeApiConfig, LakeApiState};
 use lake_query::{
     BoundedDuckDbQuery, EnsureCallback, FileUrlIssuer, QueryApplicationError, QueryLimits,
 };
+use lake_storage::{LocalFilesystemStore, ReadableBlobStore};
 
 use crate::ensure::{local_ensure_deadline_seconds, LocalEnsureLauncher};
 use crate::ingest::LocalIngestError;
@@ -30,6 +31,8 @@ pub struct LocalProviders {
     pub equity: Option<Arc<dyn lake_ingestion::EquityDataProvider>>,
     /// Injected crypto provider; built from credentials when absent.
     pub crypto: Option<Arc<dyn lake_ingestion::CryptoDataProvider>>,
+    /// Injected bars provider; built from credentials when absent.
+    pub bars: Option<Arc<dyn lake_ingestion::BarsDataProvider>>,
 }
 
 /// Build the API over local files and catalog state without Azure clients.
@@ -80,15 +83,18 @@ pub fn create_local_app_with(
     let sql_force_authorized = settings.api.sql.authorized_force_override_default;
     let bounded_query: Arc<BoundedDuckDbQuery> =
         Arc::new(BoundedDuckDbQuery::new(layout.objects(), sql_limits));
+    let read_store: Arc<dyn ReadableBlobStore> =
+        Arc::new(LocalFilesystemStore::new(layout.objects()));
     let launcher = Arc::new(
         LocalEnsureLauncher::new(layout.clone(), environ.clone(), settings, universes, now())?
             .with_catalog(Arc::clone(&catalog))
-            .with_providers(providers.equity, providers.crypto),
+            .with_providers(providers.equity, providers.crypto)
+            .with_bars_provider(providers.bars),
     );
     let ensure_launcher: EnsureJobLauncher = launcher.launcher();
     let callback_launcher = Arc::clone(&ensure_launcher);
     let ensure_callback: EnsureCallback = Arc::new(
-        move |asset_class, data_type, symbol, start_date, end_date| {
+        move |asset_class, data_type, interval, symbol, start_date, end_date| {
             let launcher = Arc::clone(&callback_launcher);
             Box::pin(async move {
                 let spec = EnsureSpec {
@@ -97,6 +103,7 @@ pub fn create_local_app_with(
                     symbol,
                     start_date,
                     end_date,
+                    interval,
                 };
                 let job = EnsureJob {
                     job_id: ensure_job_id(&spec).unwrap_or_default(),
@@ -121,6 +128,7 @@ pub fn create_local_app_with(
         contracts: None,
         front_sets: None,
         sas_issuer: Some(issuer),
+        read_store: Some(read_store),
         ensure_launcher: Some(ensure_launcher),
         ensure_callback: Some(ensure_callback),
         bounded_query: Some(bounded_query),

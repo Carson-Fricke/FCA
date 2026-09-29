@@ -57,6 +57,8 @@ pub enum DataType {
     Trade,
     /// Best bid/offer quotes.
     Quote,
+    /// Aggregated OHLCV bars.
+    Bars,
     /// Reference classification snapshots.
     Classification,
     /// Reference fundamentals facts.
@@ -69,6 +71,7 @@ impl DataType {
         match self {
             Self::Trade => "trade",
             Self::Quote => "quote",
+            Self::Bars => "bars",
             Self::Classification => "classification",
             Self::Fundamentals => "fundamentals",
         }
@@ -79,6 +82,7 @@ impl DataType {
         match value {
             "trade" => Some(Self::Trade),
             "quote" => Some(Self::Quote),
+            "bars" => Some(Self::Bars),
             "classification" => Some(Self::Classification),
             "fundamentals" => Some(Self::Fundamentals),
             _ => None,
@@ -87,6 +91,49 @@ impl DataType {
 }
 
 impl fmt::Display for DataType {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.value())
+    }
+}
+
+/// The canonical bar interval partition tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BarInterval {
+    /// One-minute bars.
+    OneMinute,
+    /// One-day bars.
+    OneDay,
+}
+
+impl BarInterval {
+    /// The persisted token.
+    pub const fn value(self) -> &'static str {
+        match self {
+            Self::OneMinute => "1min",
+            Self::OneDay => "1d",
+        }
+    }
+
+    /// Parse a canonical token, or `None` when it is not one of them.
+    pub fn from_value(value: &str) -> Option<Self> {
+        match value {
+            "1min" => Some(Self::OneMinute),
+            "1d" => Some(Self::OneDay),
+            _ => None,
+        }
+    }
+
+    /// Validate a canonical token with an explicit error.
+    pub fn parse(value: &str) -> Result<Self, DataError> {
+        Self::from_value(value).ok_or_else(|| {
+            DataError::value(format!(
+                "invalid bar interval: {value:?}; expected one of 1min, 1d"
+            ))
+        })
+    }
+}
+
+impl fmt::Display for BarInterval {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.value())
     }
@@ -103,6 +150,8 @@ pub const SUPPORTED_DATASETS: &[Dataset] = &[
     (AssetClass::Option, DataType::Quote),
     (AssetClass::Crypto, DataType::Trade),
     (AssetClass::Crypto, DataType::Quote),
+    (AssetClass::Equity, DataType::Bars),
+    (AssetClass::Crypto, DataType::Bars),
 ];
 
 const SYMBOL_PATTERN_FIRST: fn(char) -> bool = |ch| ch.is_ascii_uppercase() || ch.is_ascii_digit();
@@ -135,19 +184,45 @@ pub fn symbol_filename(symbol: &str) -> Result<String, DataError> {
 }
 
 /// Build a repository-independent, date-first Hive object path.
+///
+/// Bars partitions carry an `interval` dimension between the data type and the
+/// symbol: `date=<session>/asset_class=<class>/data_type=bars/interval=<token>/SYMBOL.parquet`.
+/// Every other data type must pass `None`; bars must pass a canonical interval
+/// token.
 pub fn partition_path(
     session_date: crate::time::Date,
     asset_class: AssetClass,
     data_type: DataType,
+    interval: Option<&str>,
     symbol: &str,
 ) -> Result<String, DataError> {
-    Ok(format!(
-        "date={}/asset_class={}/data_type={}/{}",
-        session_date.isoformat(),
-        asset_class.value(),
-        data_type.value(),
-        symbol_filename(symbol)?
-    ))
+    let symbol = symbol_filename(symbol)?;
+    match (data_type, interval) {
+        (DataType::Bars, Some(interval)) => {
+            let interval = BarInterval::parse(interval)?;
+            Ok(format!(
+                "date={}/asset_class={}/data_type={}/interval={}/{}",
+                session_date.isoformat(),
+                asset_class.value(),
+                data_type.value(),
+                interval.value(),
+                symbol
+            ))
+        }
+        (DataType::Bars, None) => Err(DataError::value(
+            "bars partitions require an interval token",
+        )),
+        (_, Some(_)) => Err(DataError::value(
+            "interval is supported for bars partitions only",
+        )),
+        (_, None) => Ok(format!(
+            "date={}/asset_class={}/data_type={}/{}",
+            session_date.isoformat(),
+            asset_class.value(),
+            data_type.value(),
+            symbol
+        )),
+    }
 }
 
 #[cfg(test)]

@@ -3,14 +3,16 @@
 //! The full typed configuration package lands with its own port task; until
 //! then this module provides the route-facing seam. The default parser mirrors
 //! the observable behavior of `parse_backtest_configuration_json`: the body
-//! must be a JSON object, its `shell` must be `backtest`, unknown top-level
-//! fields are rejected, and the fields the HTTP boundary needs (`run_id`,
-//! `strategy_instances`, `start`, `end`) are validated. The configuration
+//! must be a JSON object, its `shell` must be `backtest` (or `study`, or the
+//! frozen `screen` shape), unknown top-level fields are rejected, and the
+//! fields the HTTP boundary needs (`run_id`, `strategy_instances`, `start`,
+//! `end`, and the screening definition) are validated. The configuration
 //! digest uses the same domain-separated canonical JSON convention as
 //! `harness.configuration.hashing`.
 
 use std::fmt;
 
+use backtest::backtest::screen::ScreenConfig;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -37,9 +39,10 @@ const BACKTEST_KEYS: &[&str] = &[
 ];
 
 /// A validated backtest configuration reduced to the HTTP boundary's needs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedConfiguration {
-    /// Run identifier.
+    /// Run identifier; for a screening document this is derived from the
+    /// configuration content.
     pub run_id: String,
     /// Strategy instance identifiers, sorted.
     pub strategy_ids: Vec<String>,
@@ -51,6 +54,8 @@ pub struct ValidatedConfiguration {
     pub configuration_digest: String,
     /// The submitted document, retained for the native engine launcher.
     pub document: Value,
+    /// The typed screening configuration when the shell is `screen`.
+    pub screen: Option<ScreenConfig>,
 }
 
 /// A submitted document that is not a valid backtest configuration.
@@ -120,9 +125,27 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
             .get("shell")
             .and_then(Value::as_str)
             .ok_or_else(|| ConfigurationError("configuration has no 'shell' key".to_string()))?;
+        if shell == "screen" {
+            let screen = ScreenConfig::from_json_value(&document)
+                .map_err(|error| ConfigurationError(error.to_string()))?;
+            let run_id = screen.run_id();
+            let strategy_ids = vec![screen.definition_id.clone()];
+            let data_start = NaiveDate::parse_from_str(&screen.window_start(), "%Y-%m-%d").ok();
+            let data_end = NaiveDate::parse_from_str(&screen.window_end(), "%Y-%m-%d").ok();
+            let configuration_digest = configuration_hash(&document);
+            return Ok(ValidatedConfiguration {
+                run_id,
+                strategy_ids,
+                data_start,
+                data_end,
+                configuration_digest,
+                document,
+                screen: Some(screen),
+            });
+        }
         if shell != "backtest" && shell != "study" {
             return Err(ConfigurationError(format!(
-                "configuration shell must be 'backtest' or 'study', not '{shell}'"
+                "configuration shell must be 'backtest', 'study', or 'screen', not '{shell}'"
             )));
         }
 
@@ -178,6 +201,7 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
             data_end,
             configuration_digest: configuration_hash(&document),
             document,
+            screen: None,
         })
     }
 }

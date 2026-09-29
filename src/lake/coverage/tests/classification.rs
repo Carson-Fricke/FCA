@@ -1,6 +1,6 @@
 //! Classification truth table and terminality for session coverage.
 
-use lake_catalog::{CoverageRecord, CoverageStatus, MemoryCatalogRepository};
+use lake_catalog::{BarSource, CoverageRecord, CoverageStatus, MemoryCatalogRepository};
 use lake_contracts::{AssetClass, DataType, Date, DateTime};
 use lake_coverage::{calculate_coverage, CoverageReport, CoverageState};
 
@@ -24,6 +24,7 @@ fn coverage_record(status: CoverageStatus, session_date: Date) -> CoverageRecord
         0,
         None,
         None,
+        None,
     )
     .expect("valid coverage")
 }
@@ -35,6 +36,7 @@ fn report(records: impl IntoIterator<Item = CoverageRecord>, as_of: DateTime) ->
         AssetClass::Equity,
         &[DataType::Trade],
         &["AAPL".to_string()],
+        None,
         day(2024, 1, 18),
         day(2024, 1, 18),
         as_of,
@@ -135,6 +137,7 @@ fn closed_partial_and_error_rows_remain_actionable_gaps() {
         AssetClass::Equity,
         &[DataType::Trade],
         &["AAPL".to_string()],
+        None,
         day(2024, 1, 18),
         day(2024, 1, 19),
         instant(2024, 1, 22, 12, 0),
@@ -167,6 +170,7 @@ fn report_state_accessors_partition_the_entries() {
         AssetClass::Equity,
         &[DataType::Trade],
         &["AAPL".to_string()],
+        None,
         day(2024, 1, 16),
         day(2024, 1, 22),
         instant(2024, 1, 23, 0, 0),
@@ -210,4 +214,189 @@ fn coverage_state_values_round_trip_and_display() {
     }
     assert_eq!(CoverageState::Delisted.value(), "delisted");
     assert_eq!(CoverageState::from_value("unknown"), None);
+}
+
+/// One bars coverage row with optional provenance.
+fn bars_record(
+    status: CoverageStatus,
+    session_date: Date,
+    source: Option<BarSource>,
+    revision: Option<&str>,
+) -> CoverageRecord {
+    let record = CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        "AAPL",
+        session_date,
+        status,
+        Some(format!(
+            "date={}/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet",
+            session_date.isoformat()
+        )),
+        5,
+        100,
+        None,
+        None,
+        Some("1min".to_string()),
+    )
+    .expect("valid bars coverage");
+    match (source, revision) {
+        (Some(source), Some(revision)) => record
+            .with_bar_provenance(source, revision)
+            .expect("provenance"),
+        _ => record,
+    }
+}
+
+/// One trade coverage row carrying the partition checksum revision.
+fn trade_record(session_date: Date, checksum: Option<&str>) -> CoverageRecord {
+    CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Trade,
+        "AAPL",
+        session_date,
+        CoverageStatus::Complete,
+        Some(format!(
+            "date={}/asset_class=equity/data_type=trade/AAPL.parquet",
+            session_date.isoformat()
+        )),
+        5,
+        100,
+        checksum.map(str::to_string),
+        None,
+        None,
+    )
+    .expect("valid trade coverage")
+}
+
+/// Classify one bars session against the supplied catalog rows.
+fn bars_report(records: Vec<CoverageRecord>, as_of: DateTime) -> CoverageReport {
+    calculate_coverage(
+        &MemoryCatalogRepository::from_records(records),
+        None,
+        AssetClass::Equity,
+        &[DataType::Bars],
+        &["AAPL".to_string()],
+        Some("1min"),
+        day(2024, 1, 18),
+        day(2024, 1, 18),
+        as_of,
+    )
+    .expect("coverage calculation")
+}
+
+#[test]
+fn derived_bars_are_complete_only_while_the_trade_revision_matches() {
+    let session_date = day(2024, 1, 18);
+    let as_of = instant(2024, 1, 19, 0, 0);
+    let derived = bars_record(
+        CoverageStatus::Complete,
+        session_date,
+        Some(BarSource::Derived),
+        Some("trade-rev-1"),
+    );
+
+    let current = bars_report(
+        vec![
+            derived.clone(),
+            trade_record(session_date, Some("trade-rev-1")),
+        ],
+        as_of,
+    );
+    assert_eq!(current.entries[0].state, CoverageState::Complete);
+    assert!(current.is_satisfied());
+
+    let stale = bars_report(
+        vec![
+            derived.clone(),
+            trade_record(session_date, Some("trade-rev-2")),
+        ],
+        as_of,
+    );
+    assert_eq!(stale.entries[0].state, CoverageState::Partial);
+    assert!(stale.entries[0].is_actionable());
+    assert!(!stale.is_satisfied());
+    assert_eq!(stale.gap_plan().gaps.len(), 1);
+
+    let missing_trades = bars_report(vec![derived], as_of);
+    assert_eq!(missing_trades.entries[0].state, CoverageState::Partial);
+}
+
+#[test]
+fn provider_and_legacy_bars_are_trusted_as_written() {
+    let session_date = day(2024, 1, 18);
+    let as_of = instant(2024, 1, 19, 0, 0);
+
+    let provider = bars_record(
+        CoverageStatus::Complete,
+        session_date,
+        Some(BarSource::Provider),
+        Some("provider-rev-1"),
+    );
+    let report = bars_report(
+        vec![
+            provider.clone(),
+            trade_record(session_date, Some("trade-rev-2")),
+        ],
+        as_of,
+    );
+    assert_eq!(report.entries[0].state, CoverageState::Complete);
+    assert!(report.is_satisfied());
+
+    let legacy = bars_record(CoverageStatus::Complete, session_date, None, None);
+    let report = bars_report(vec![legacy, trade_record(session_date, None)], as_of);
+    assert_eq!(report.entries[0].state, CoverageState::Complete);
+    assert!(report.is_satisfied());
+}
+
+#[test]
+fn stale_derived_empty_bars_are_repairable() {
+    let session_date = day(2024, 1, 18);
+    let as_of = instant(2024, 1, 19, 0, 0);
+    let empty_derived = bars_record(
+        CoverageStatus::Empty,
+        session_date,
+        Some(BarSource::Derived),
+        Some("trade-rev-1"),
+    );
+
+    let current = bars_report(
+        vec![
+            empty_derived.clone(),
+            trade_record(session_date, Some("trade-rev-1")),
+        ],
+        as_of,
+    );
+    assert_eq!(current.entries[0].state, CoverageState::Empty);
+    assert!(current.is_satisfied());
+
+    let stale = bars_report(
+        vec![
+            empty_derived,
+            trade_record(session_date, Some("trade-rev-2")),
+        ],
+        as_of,
+    );
+    assert_eq!(stale.entries[0].state, CoverageState::Partial);
+    assert!(stale.entries[0].is_actionable());
+}
+
+#[test]
+fn non_bars_rows_keep_the_plain_status_classification() {
+    let session_date = day(2024, 1, 18);
+    let report = calculate_coverage(
+        &MemoryCatalogRepository::from_records([trade_record(session_date, Some("trade-rev-2"))]),
+        None,
+        AssetClass::Equity,
+        &[DataType::Trade],
+        &["AAPL".to_string()],
+        None,
+        session_date,
+        session_date,
+        instant(2024, 1, 19, 0, 0),
+    )
+    .expect("coverage calculation");
+
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].state, CoverageState::Complete);
 }

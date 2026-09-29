@@ -30,6 +30,8 @@ pub struct EnsureSpec {
     pub start_date: Date,
     /// Inclusive last session date.
     pub end_date: Date,
+    /// Canonical bars interval token; required for bars and absent otherwise.
+    pub interval: Option<String>,
 }
 
 impl EnsureSpec {
@@ -41,6 +43,33 @@ impl EnsureSpec {
             symbol: self.symbol.trim().to_uppercase(),
             start_date: self.start_date,
             end_date: self.end_date,
+            interval: self.interval.clone(),
+        }
+    }
+
+    /// Validate the data type / interval pairing.
+    ///
+    /// Bars requires exactly one canonical token; every other data type must
+    /// not carry an interval.
+    pub fn validate_interval(&self) -> Result<(), CoverageRequestError> {
+        match (self.data_type, self.interval.as_deref()) {
+            (DataType::Bars, None) => Err(CoverageRequestError::new(
+                "invalid_interval",
+                "bars requires an interval",
+                None,
+            )),
+            (DataType::Bars, Some(interval)) => {
+                lake_contracts::BarInterval::parse(interval).map_err(|error| {
+                    CoverageRequestError::new("invalid_interval", error.to_string(), None)
+                })?;
+                Ok(())
+            }
+            (_, Some(_)) => Err(CoverageRequestError::new(
+                "invalid_interval",
+                "interval is supported for bars only",
+                None,
+            )),
+            (_, None) => Ok(()),
         }
     }
 }
@@ -100,12 +129,14 @@ pub fn requested_coverage(
             None,
         ));
     }
+    spec.validate_interval()?;
     calculate_coverage(
         catalog,
         listings,
         spec.asset_class,
         std::slice::from_ref(&spec.data_type),
         std::slice::from_ref(&spec.symbol),
+        spec.interval.as_deref(),
         spec.start_date,
         spec.end_date,
         as_of,
@@ -222,11 +253,15 @@ pub async fn ensure_coverage(
 /// spaces, and Python's `ensure_ascii` escaping, hashed with SHA-256 and
 /// prefixed `ensure-`.
 pub fn ensure_job_id(spec: &EnsureSpec) -> Result<String, CoverageRequestError> {
+    spec.validate_interval()?;
+
     #[derive(Serialize)]
     struct Payload<'a> {
         asset_class: &'a str,
         data_type: &'a str,
         end_date: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        interval: Option<&'a str>,
         start_date: String,
         symbol: String,
     }
@@ -235,6 +270,7 @@ pub fn ensure_job_id(spec: &EnsureSpec) -> Result<String, CoverageRequestError> 
         asset_class: spec.asset_class.value(),
         data_type: spec.data_type.value(),
         end_date: spec.end_date.isoformat(),
+        interval: spec.interval.as_deref(),
         start_date: spec.start_date.isoformat(),
         symbol: spec.symbol.trim().to_uppercase(),
     };

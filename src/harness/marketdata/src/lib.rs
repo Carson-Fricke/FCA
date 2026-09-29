@@ -4,17 +4,20 @@
 //! Python module boundaries so behavior and on-disk contracts can be checked
 //! one module at a time:
 //!
-//! - [`lake`] — synchronous market-lake access, sessions, and Hive paths.
+//! - [`lake`] — market-lake sessions and the Hive partition vocabulary.
 //! - [`bars`] — exact OHLCV derivation from immutable trade events.
 //! - [`history`] — bounded point-in-time history with look-ahead clipping.
 //! - [`security_master`] / [`listing_events`] — point-in-time listings.
 //! - [`options_universe`] / [`universe_view`] — point-in-time universes.
-//! - [`replay`] / [`options_replay`] — deterministic bounded replay.
-//! - [`gap_healing`] — live-feed gap detection and lake backfill.
+//! - [`replay`] — deterministic bounded replay of decoded route events.
+//! - [`gap_healing`] — live-feed gap detection against expected coverage.
 //! - [`ws`] / [`recorder`] — live ingest and recording.
 //!
-//! No code path in this crate reads wall time, consumes randomness, touches
-//! the network, or performs I/O. Every instant comes from an injected clock.
+//! No code path in this crate opens a lake partition path: market-lake reads
+//! stream through `harness-lakeclient`, and the decode boundary here turns the
+//! route's Arrow IPC batches into normalized events. No code path reads wall
+//! time, consumes randomness, touches the network, or performs I/O. Every
+//! instant comes from an injected clock.
 
 pub mod bars;
 pub mod catalog;
@@ -24,9 +27,7 @@ pub mod events;
 pub mod gap_healing;
 pub mod history;
 pub mod lake;
-pub mod lake_reader;
 pub mod listing_events;
-pub mod options_replay;
 pub mod options_universe;
 pub mod recorder;
 pub mod replay;
@@ -44,30 +45,20 @@ pub use catalog::{
 pub use clock::{Clock, ManualClock};
 pub use error::DataError;
 pub use events::{
-    cutoff_key, end_key, ordering_key, start_key, EventType, MarketEvent, OrderingKey, QuoteEvent,
-    TradeEvent,
+    cutoff_key, end_key, ordering_key, start_key, BarEvent, EventType, MarketEvent, OrderingKey,
+    QuoteEvent, TradeEvent,
 };
-pub use gap_healing::{
-    CoverageCalendar, CoverageGap, HealingAction, HealingStatus, LakeGapBackfiller,
-    LakeSessionCalendar, LiveGapDetector, LiveGapHealer, UncoveredGapError,
-};
+pub use gap_healing::{CoverageCalendar, CoverageGap, LakeSessionCalendar, LiveGapDetector};
 pub use history::{
     HistoricalView, HistoryAggregate, HistorySelector, HistorySubscription, StrategyHistory,
     DEFAULT_HISTORY_CAPACITY,
 };
 pub use lake::{
-    crypto_utc_days, partition_path, resolve_sessions, symbol_filename, xnys_sessions, AssetClass,
-    CoverageEntry, CoverageResponse, CoverageState, DataType, DatasetRequest, EnsureAccepted,
-    EnsureResponse, ExchangeSession, FileQueryFile, FileQueryResponse, FileQueryState,
-    FileQuerySummary, JobStatus, LakeClientPort, MarketLakeAdapter, MarketLakeLoad,
-    MarketLakeRequest,
+    crypto_sessions, crypto_utc_days, partition_path, sessions_for, symbol_filename, xnys_sessions,
+    AssetClass, BarInterval, DataType, ExchangeSession,
 };
-pub use lake_reader::{write_lake_partition, LocalLakeReader};
 pub use listing_events::{
     CorporateActionEvent, CorporateActionKind, ListingEventDeriver, PessimisticDelistingSettlement,
-};
-pub use options_replay::{
-    MemoryOptionPartitionPort, OptionPartitionPort, OptionsDayPlan, OptionsReplayFeed,
 };
 pub use options_universe::{
     DteFilter, MoneynessFilter, OptionUniverseSnapshot, OptionUniverseSpec, OptionUniverseView,
@@ -78,8 +69,7 @@ pub use recorder::{
     LocalLiveObjectStore, RecordedRow, SessionResolver, UtcDaySessionResolver, XnysSessionResolver,
 };
 pub use replay::{
-    events_from_parquet, LakeObjectSource, LakeReplayFeed, LocalObjectSource, MemoryObjectSource,
-    ParquetFileReader, ParquetReader, ReplayFingerprints, ReplayStream, StaticReader,
+    events_from_arrow, events_from_parquet, LakeReplayFeed, ReplayFingerprints, ReplayStream,
 };
 pub use security_master::{SecurityMasterView, SecuritySnapshot};
 pub use symbol::{canonical_osi_symbol, canonical_symbol, crypto_pair, is_osi_symbol};

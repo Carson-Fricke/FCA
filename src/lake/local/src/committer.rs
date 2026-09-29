@@ -14,7 +14,7 @@ use lake_contracts::{AssetClass, DataError, DataType, Date};
 use lake_ingestion::{AtomicIngestCommitter, StagedParquetObject};
 use lake_storage::BlobStore;
 
-type CoverageKey = (AssetClass, DataType, String, Date);
+type CoverageKey = (AssetClass, DataType, String, Option<String>, Date);
 
 /// Publish local objects before atomically replacing catalog JSON.
 pub struct LocalIngestCommitter {

@@ -11,17 +11,19 @@ use serde_json::Value;
 
 use crate::error::ProviderError;
 use crate::records::{
-    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote, NormalizedOptionTrade,
-    NormalizedQuote, NormalizedTrade,
+    NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,
+    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade,
 };
 
-/// The two Alpaca data types the client fetches.
+/// The three Alpaca data types the client fetches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DataType {
     /// Trade prints.
     Trades,
     /// Top-of-book quotes.
     Quotes,
+    /// Session-aligned OHLCV bars.
+    Bars,
 }
 
 impl DataType {
@@ -30,6 +32,7 @@ impl DataType {
         match self {
             Self::Trades => "trades",
             Self::Quotes => "quotes",
+            Self::Bars => "bars",
         }
     }
 }
@@ -159,6 +162,23 @@ pub(crate) fn parse_crypto_quote(
         ask_exchange: optional_text(row, "ax")?,
         ask_price: decimal(row, "ap")?,
         ask_size: decimal(row, "as")?,
+    })
+}
+
+/// Parse one equity or crypto bar row.
+///
+/// The provider row carries `t` (bucket start), `o`, `h`, `l`, `c`, and `v`
+/// (volume); `n` and `vw` are ignored because the pinned lake schema has no
+/// trade-count or vwap column. Every numeric field is read as an exact decimal.
+pub(crate) fn parse_bar(row: &Value, symbol: &str) -> Result<NormalizedBar, ProviderError> {
+    Ok(NormalizedBar {
+        timestamp: timestamp(row)?,
+        symbol: symbol.to_string(),
+        open: decimal(row, "o")?,
+        high: decimal(row, "h")?,
+        low: decimal(row, "l")?,
+        close: decimal(row, "c")?,
+        volume: decimal(row, "v")?,
     })
 }
 

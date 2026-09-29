@@ -28,6 +28,7 @@ fn write_stages_one_object_and_drain_returns_it_with_the_payload() {
             session_date(),
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "AAPL",
         )
         .expect("write");
@@ -56,6 +57,7 @@ fn reset_staged_discards_undrained_objects() {
             session_date(),
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "AAPL",
         )
         .expect("write");
@@ -68,6 +70,7 @@ fn reset_staged_discards_undrained_objects() {
             session_date(),
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "AAPL",
         )
         .expect("rewrite");
@@ -93,6 +96,7 @@ fn write_surfaces_validation_errors_without_staging_anything() {
             session_date(),
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "AAPL",
         )
         .expect_err("partition symbol mismatch");

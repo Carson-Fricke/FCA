@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::future::try_join_all;
 use futures_util::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use lake_catalog::ContractRecord;
-use lake_contracts::{format_nanos_utc, parse_iso_nanos, DateTime};
+use lake_contracts::{format_nanos_utc, parse_iso_nanos, AssetClass, BarInterval, DateTime};
 use serde_json::Value;
 
 use crate::config::ProviderConfig;
@@ -28,8 +28,8 @@ use crate::governor::RequestGovernor;
 use crate::lane::{lane_for, Lane};
 use crate::parse::{self, DataType};
 use crate::records::{
-    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote, NormalizedOptionTrade,
-    NormalizedQuote, NormalizedTrade, Timestamped,
+    NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,
+    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade, Timestamped,
 };
 use crate::transport::{
     AlpacaTransport, BoxFuture, ReqwestTransport, TransportFailure, TransportResponse,
@@ -261,6 +261,99 @@ impl AlpacaClient {
             None,
         );
         self.fetch_market(&pairs, &spec).await
+    }
+
+    /// Fetch one symbol's session-aligned OHLCV bars for the inclusive
+    /// `[start, end]` window.
+    ///
+    /// Equities use `/v2/stocks/{symbol}/bars` with the SIP feed and raw
+    /// adjustment; crypto uses `/v1beta3/crypto/us/bars` (crypto bars are
+    /// inherently unadjusted). Paging follows the provider's next page token
+    /// through the same governor, key lane, and retry path as every other
+    /// fetch; records come back in timestamp order. The interval selects the
+    /// provider timeframe (`1Min` / `1Day`).
+    pub async fn fetch_bars(
+        &self,
+        asset_class: AssetClass,
+        symbol: &str,
+        interval: BarInterval,
+        start: DateTime,
+        end: DateTime,
+    ) -> Result<Vec<NormalizedBar>, ProviderError> {
+        let symbol = match asset_class {
+            AssetClass::Equity => normalize_symbols(std::slice::from_ref(&symbol))?
+                .into_iter()
+                .next()
+                .expect("one normalized symbol"),
+            AssetClass::Crypto => normalize_crypto_pairs(std::slice::from_ref(&symbol))?
+                .into_iter()
+                .next()
+                .expect("one normalized pair"),
+            other => {
+                return Err(ProviderError::Configuration(format!(
+                    "bars are unsupported for asset class {}",
+                    other.value()
+                )))
+            }
+        };
+        let path = match asset_class {
+            AssetClass::Equity => format!("/v2/stocks/{symbol}/bars"),
+            _ => "/v1beta3/crypto/us/bars".to_string(),
+        };
+        let base_params = match asset_class {
+            AssetClass::Equity => vec![
+                ("start".to_string(), format_nanos_utc(start.to_nanos_i64())),
+                ("end".to_string(), format_nanos_utc(end.to_nanos_i64())),
+                ("limit".to_string(), PAGE_SIZE.to_string()),
+                ("sort".to_string(), "asc".to_string()),
+                (
+                    "timeframe".to_string(),
+                    timeframe_value(interval).to_string(),
+                ),
+                ("adjustment".to_string(), "raw".to_string()),
+                ("feed".to_string(), EQUITY_FEED.to_string()),
+            ],
+            _ => vec![
+                ("symbols".to_string(), symbol.clone()),
+                ("start".to_string(), format_nanos_utc(start.to_nanos_i64())),
+                ("end".to_string(), format_nanos_utc(end.to_nanos_i64())),
+                ("limit".to_string(), PAGE_SIZE.to_string()),
+                ("sort".to_string(), "asc".to_string()),
+                (
+                    "timeframe".to_string(),
+                    timeframe_value(interval).to_string(),
+                ),
+            ],
+        };
+        let mut page_token: Option<String> = None;
+        let mut seen_tokens: HashSet<String> = HashSet::new();
+        let mut records: Vec<NormalizedBar> = Vec::new();
+        loop {
+            let mut params = base_params.clone();
+            if let Some(token) = &page_token {
+                params.push(("page_token".to_string(), token.clone()));
+            }
+            let response = self.request(&path, &params).await?;
+            let (rows, next_page_token) =
+                parse::page_rows(&response.body, DataType::Bars, &symbol)?;
+            for row in rows {
+                records.push(parse::parse_bar(row, &symbol)?);
+            }
+            match next_page_token {
+                None => break,
+                Some(token) if token.is_empty() => break,
+                Some(token) => {
+                    if !seen_tokens.insert(token.clone()) {
+                        return Err(ProviderError::Protocol(format!(
+                            "repeated Alpaca bars page token for '{symbol}'"
+                        )));
+                    }
+                    page_token = Some(token);
+                }
+            }
+        }
+        records.sort_by_key(Timestamped::timestamp);
+        Ok(records)
     }
 
     /// Fetch historical OPRA trades for selected option contracts.
@@ -861,6 +954,14 @@ fn market_path(market: Market) -> &'static str {
     match market {
         Market::Equity => "/v2/stocks",
         Market::Crypto => "/v1beta3/crypto/us",
+    }
+}
+
+/// The provider timeframe token one lake interval requests.
+fn timeframe_value(interval: BarInterval) -> &'static str {
+    match interval {
+        BarInterval::OneMinute => "1Min",
+        BarInterval::OneDay => "1Day",
     }
 }
 

@@ -38,6 +38,7 @@ fn coverage(status: CoverageStatus) -> CoverageRecord {
         3456,
         Some("sha256:abc".to_string()),
         None,
+        None,
     )
     .expect("valid coverage")
 }
@@ -52,6 +53,7 @@ fn msft_coverage() -> CoverageRecord {
         None,
         0,
         0,
+        None,
         None,
         None,
     )
@@ -175,6 +177,7 @@ fn catalog_memory_matches_the_python_fixture() {
             .get(
                 AssetClass::Equity,
                 DataType::Trade,
+                None,
                 "aapl",
                 day(2024, 1, 19)
             )
@@ -186,6 +189,7 @@ fn catalog_memory_matches_the_python_fixture() {
             .get(
                 AssetClass::Equity,
                 DataType::Trade,
+                None,
                 "AAPL",
                 day(2024, 1, 20)
             )
@@ -243,6 +247,7 @@ fn json_store_behaves_identically_and_persists() {
             .get(
                 AssetClass::Equity,
                 DataType::Trade,
+                None,
                 " aapl ",
                 day(2024, 1, 19)
             )
@@ -251,6 +256,7 @@ fn json_store_behaves_identically_and_persists() {
             .get(
                 AssetClass::Equity,
                 DataType::Trade,
+                None,
                 " aapl ",
                 day(2024, 1, 19)
             )

@@ -19,9 +19,10 @@ use mcp::server::{error_response, McpServer, PARSE_ERROR};
 use mcp::tools::{Boundary, ContextError, HarnessToolsContext};
 use serde_json::{json, Value};
 
-use crate::local::{NativeBacktestSubmitter, NativeStudySubmitter};
+use crate::local::{NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter};
 
 use super::models::error_body;
+use super::native::NativeScreenRunner;
 use super::state::AppState;
 use super::store::{JobRepository, RunStore};
 
@@ -47,6 +48,11 @@ pub fn compose_local_server(
     context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(
         run_store.clone(),
         job_repository.clone(),
+    )));
+    context.screening_submitter = Some(Arc::new(NativeScreeningSubmitter::new(
+        run_store.clone(),
+        job_repository.clone(),
+        Arc::new(NativeScreenRunner::default()),
     )));
     context.run_store = Some(run_store);
     context.job_repository = Some(job_repository);

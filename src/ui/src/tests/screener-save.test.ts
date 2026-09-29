@@ -2,25 +2,24 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { describe, expect, it } from 'vitest';
 import ScreenerPanel from '$lib/components/screener/ScreenerPanel.svelte';
+import { generateScreenerSource, lintScreenerSource, parseFilterRows } from '$lib/components/screener/screenerSource';
 import { fixtures } from '$lib/fixtures';
-import type { ScreenerSavedDefinition } from '$lib/types';
+import {
+	getScreenerResult,
+	listScreeners,
+	runScreener,
+	saveScreener,
+	ThesisApiError
+} from '$lib/api';
+import type { ScreenerDefinition } from '$lib/types';
 
-/** Real-contract saved definition (ScreenerSavedDefinition shape). */
-const etfScreen: ScreenerSavedDefinition = {
-	screener_id: 'scr-9',
-	definition: {
-		schema_version: 1,
-		name: 'ETF liquidity core',
-		universe_revision: 'universe:us-listed@2026-09',
-		lookback_days: 20,
-		filters: [
-			{ kind: 'security_type', params: { value: 'etf' } },
-			{ kind: 'avg_dollar_volume_min', params: { min: 500000000 } }
-		]
-	},
-	definition_hash: '9f2c88a1b0d34e5f6a7b8c9d0e1f2a3b',
-	artifact_path: 'screeners/definitions/etf-liquidity-core.json'
-};
+const definitions = fixtures.screeners['alpha-lab'].items as ScreenerDefinition[];
+
+function fixtureDefinition(name: string): ScreenerDefinition {
+	const found = definitions.find((definition) => definition.name === name);
+	if (!found) throw new Error(`missing fixture definition ${name}`);
+	return found;
+}
 
 function paramInput(container: HTMLElement, name: string): HTMLElement {
 	return container.querySelector(
@@ -28,12 +27,18 @@ function paramInput(container: HTMLElement, name: string): HTMLElement {
 	) as HTMLElement;
 }
 
-describe('Screener filter builder (declarative contract)', () => {
-	it('adds and removes filter rows with per-kind parameter editors', async () => {
-		render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
+describe('Screener filter builder (generated Rust source)', () => {
+	it('adds and removes rows and regenerates the source on every valid edit', async () => {
+		const { container } = render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
 		await tick();
 
 		expect(screen.getAllByTestId('filter-row')).toHaveLength(1);
+		expect(screen.getByTestId('script-source')).toHaveValue(
+			generateScreenerSource([
+				{ uid: 1, kind: 'avg_dollar_volume_min', params: { min: '250000000' } }
+			])
+		);
+
 		await fireEvent.click(screen.getByTestId('add-filter'));
 		await tick();
 		expect(screen.getAllByTestId('filter-row')).toHaveLength(2);
@@ -41,17 +46,28 @@ describe('Screener filter builder (declarative contract)', () => {
 		await fireEvent.click(screen.getAllByTestId('remove-filter')[0]);
 		await tick();
 		expect(screen.getAllByTestId('filter-row')).toHaveLength(1);
-	});
-
-	it('surfaces declaration-time validation and blocks the run', async () => {
-		const { container } = render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
-		await tick();
 
 		await fireEvent.change(screen.getByTestId('filter-kind-select'), {
 			target: { value: 'rsi_below' }
 		});
 		await tick();
 		expect(paramInput(container, 'period')).toHaveValue(14);
+		expect(screen.getByTestId('script-source')).toHaveValue(
+			generateScreenerSource([{ uid: 2, kind: 'rsi_below', params: { period: '14', threshold: '30' } }])
+		);
+	});
+
+	it('surfaces row validation and blocks the run until it is fixed', async () => {
+		const { container } = render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
+		await tick();
+		await fireEvent.input(screen.getByTestId('screener-name-input'), {
+			target: { value: 'Validation screen' }
+		});
+		await fireEvent.change(screen.getByTestId('filter-kind-select'), {
+			target: { value: 'rsi_below' }
+		});
+		await tick();
+		expect(screen.getByTestId('screener-run')).toBeEnabled();
 
 		await fireEvent.input(paramInput(container, 'threshold'), { target: { value: '150' } });
 		await tick();
@@ -64,31 +80,36 @@ describe('Screener filter builder (declarative contract)', () => {
 		expect(screen.getByTestId('screener-run')).toBeEnabled();
 	});
 
-	it('runs with the full filter set and renders provenance-backed results', async () => {
-		const { container } = render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
+	it('keeps manual source edits and regenerates only on request', async () => {
+		render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
 		await tick();
 
-		expect(screen.queryByTestId('screener-row')).toBeNull();
-		const asOfInput = screen.getByTestId('screener-asof') as HTMLInputElement;
-		expect(asOfInput.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		const source = screen.getByTestId('script-source');
+		await fireEvent.input(source, { target: { value: 'fn broken(' } });
+		await tick();
+		expect(screen.getByTestId('script-errors')).toHaveTextContent("unbalanced '('");
+		expect(screen.getByTestId('script-manual')).toBeInTheDocument();
+		expect(screen.getByTestId('screener-run')).toBeDisabled();
 
-		await fireEvent.click(screen.getByTestId('screener-run'));
-		await waitFor(() => {
-			expect(screen.getAllByTestId('screener-row')).toHaveLength(
-				fixtures.screenerResults.items.length
-			);
-		});
-		expect(
-			container.querySelector('[data-testid="screener-row"][data-symbol="SPY"]')
-		).not.toBeNull();
-		const provenance = screen.getByTestId('screener-provenance');
-		expect(provenance).toHaveTextContent('Ad-hoc screen');
-		expect(provenance).toHaveTextContent('fixture-defi');
+		// A filter edit must not clobber the manual source.
+		await fireEvent.input(paramInput(document.body, 'min'), { target: { value: '50000000' } });
+		await tick();
+		expect(screen.getByTestId('script-source')).toHaveValue('fn broken(');
+
+		await fireEvent.click(screen.getByTestId('script-regenerate'));
+		await tick();
+		expect(screen.getByTestId('script-clean')).toBeInTheDocument();
+		expect(screen.getByTestId('script-generated')).toBeInTheDocument();
+		expect(screen.getByTestId('script-source')).toHaveValue(
+			generateScreenerSource([
+				{ uid: 1, kind: 'avg_dollar_volume_min', params: { min: '50000000' } }
+			])
+		);
 	});
 });
 
 describe('Screener save flow (workspace artifacts)', () => {
-	it('saves the validated filter payload and lists the study', async () => {
+	it('saves the authored definition and lists it with its content hash', async () => {
 		render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
 		await tick();
 
@@ -103,26 +124,30 @@ describe('Screener save flow (workspace artifacts)', () => {
 		await waitFor(() => {
 			expect(screen.getByTestId('saved-screeners')).toHaveTextContent('Overnight gap study');
 		});
-		// The saved study chip renders the engine-native filter summary.
-		expect(screen.getByTestId('saved-screeners')).toHaveTextContent('avg $vol ≥ 250,000,000');
+		const hashes = screen.getAllByTestId('saved-study-hash');
+		expect(hashes.at(-1)?.textContent?.trim()).toMatch(/^[0-9a-f]{12}…$/);
+		// The saved row carries the run configuration the generator produced.
+		expect(screen.getByTestId('saved-screeners')).toHaveTextContent('1d · 20d · rank close');
 	});
 });
 
-describe('Saved studies (ScreenerSavedDefinition contract)', () => {
-	it('lists saved studies with filter summaries and definition-hash provenance', async () => {
-		render(ScreenerPanel, { props: { workspaceId: 'alpha-lab', initialSaved: [etfScreen] } });
+describe('Saved definitions (content-addressed contract)', () => {
+	it('lists saved definitions with hash, configuration, and source preview', async () => {
+		render(ScreenerPanel, {
+			props: { workspaceId: 'alpha-lab', initialSaved: [fixtureDefinition('Oversold quality')] }
+		});
 		await tick();
 
 		const list = screen.getByTestId('saved-screeners');
-		expect(list).toHaveTextContent('ETF liquidity core');
-		expect(list).toHaveTextContent('type = etf');
-		expect(list).toHaveTextContent('avg $vol ≥ 500,000,000');
-		expect(list).toHaveTextContent('9f2c88a1b0d3');
+		expect(list).toHaveTextContent('Oversold quality');
+		expect(list).toHaveTextContent('rank ind:rsi(period=14)');
+		expect(list).toHaveTextContent('RSI(14) <= 30');
+		expect(list).toHaveTextContent('3c4d5e6f7081…');
 	});
 
-	it('loads a saved study back into the builder with hydrated parameters', async () => {
+	it('loads a saved definition back into the builder with hydrated rows', async () => {
 		const { container } = render(ScreenerPanel, {
-			props: { workspaceId: 'alpha-lab', initialSaved: [etfScreen] }
+			props: { workspaceId: 'alpha-lab', initialSaved: [fixtureDefinition('Oversold quality')] }
 		});
 		await tick();
 
@@ -130,59 +155,126 @@ describe('Saved studies (ScreenerSavedDefinition contract)', () => {
 		await tick();
 
 		expect(screen.getAllByTestId('filter-row')).toHaveLength(2);
-		expect(screen.getByTestId('screener-name-input')).toHaveValue('ETF liquidity core');
-		expect(paramInput(container, 'value')).toHaveValue('etf');
-		expect(paramInput(container, 'min')).toHaveValue(500000000);
+		expect(screen.getByTestId('screener-name-input')).toHaveValue('Oversold quality');
+		expect(screen.getByTestId('screener-rank-metric')).toHaveValue('ind:rsi(period=14)');
+		expect(paramInput(container, 'period')).toHaveValue(14);
+		expect(paramInput(container, 'threshold')).toHaveValue(30);
+		expect(paramInput(container, 'field')).toHaveValue('revenue');
+		expect(paramInput(container, 'min')).toHaveValue(1000000000);
+	});
+});
+
+describe('Screener run + results render', () => {
+	it('runs a saved definition and renders ranked rows with provenance', async () => {
+		render(ScreenerPanel, {
+			props: { workspaceId: 'alpha-lab', initialSaved: [fixtureDefinition('Liquid large caps')] }
+		});
+		await tick();
+
+		await fireEvent.click(screen.getByTestId('load-study'));
+		await tick();
+		await fireEvent.click(screen.getByTestId('screener-run'));
+
+		await waitFor(() => {
+			expect(screen.getAllByTestId('screener-row')).toHaveLength(
+				fixtures.screenerResults['alpha-lab'].items[0].rows.length
+			);
+		});
+		expect(
+			document.querySelector('[data-testid="screener-row"][data-symbol="MSFT"]')
+		).not.toBeNull();
+
+		const provenance = screen.getByTestId('screener-provenance');
+		expect(provenance).toHaveTextContent('Liquid large caps');
+		expect(provenance).toHaveTextContent('sha256:1a2b3c4d5e6f7081');
+		expect(provenance).toHaveTextContent('hash 1a2b3c4d5e6f…');
+		expect(provenance).toHaveTextContent('as of');
+		expect(provenance).toHaveTextContent('ranked by avg_dollar_volume');
+		expect(provenance).toHaveTextContent('window 2026-09-05 → 2026-09-25');
+		expect(screen.getByTestId('screener-status')).toHaveTextContent('complete');
+		expect(screen.getByTestId('provenance-run-id').textContent).toMatch(/^run screen-/);
 	});
 
-	it('re-runs a saved study as-is at the current as-of date', async () => {
-		render(ScreenerPanel, { props: { workspaceId: 'alpha-lab', initialSaved: [etfScreen] } });
+	it('re-runs a saved definition without loading it into the editor', async () => {
+		render(ScreenerPanel, {
+			props: { workspaceId: 'alpha-lab', initialSaved: [fixtureDefinition('Liquid large caps')] }
+		});
 		await tick();
 
 		await fireEvent.click(screen.getByTestId('rerun-study'));
 		await waitFor(() => {
-			expect(screen.getByTestId('screener-provenance')).toHaveTextContent('ETF liquidity core');
+			expect(screen.getByTestId('screener-provenance')).toHaveTextContent(
+				'sha256:1a2b3c4d5e6f7081'
+			);
 		});
+		expect(screen.getByTestId('screener-name-input')).toHaveValue('');
+	});
+
+	it('surfaces harness failures inline next to the authored source', async () => {
+		const phantom = {
+			...fixtureDefinition('Liquid large caps'),
+			definitionId: 'sha256:missing',
+			definitionSha256: 'f'.repeat(64)
+		};
+		render(ScreenerPanel, { props: { workspaceId: 'alpha-lab', initialSaved: [phantom] } });
+		await tick();
+
+		await fireEvent.click(screen.getByTestId('rerun-study'));
+		await waitFor(() => {
+			expect(screen.getByTestId('screener-error')).toHaveTextContent('does not exist');
+		});
+		expect(screen.getByTestId('script-server-error')).toHaveTextContent('HTTP 404');
 	});
 });
 
-describe('Custom Python screen editor', () => {
-	it('renders the boundary-clean template and flags violations inline', async () => {
-		render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
-		await tick();
-		expect(screen.getByTestId('script-clean')).toBeInTheDocument();
-
-		await fireEvent.input(screen.getByTestId('script-source'), {
-			target: { value: 'import os as o\ndef screen(ctx):\n    return ctx.__class__\n' }
-		});
-		await tick();
-		const errors = screen.getByTestId('script-errors');
-		expect(errors).toHaveTextContent('outside the allowlist');
-		expect(errors).toHaveTextContent('import aliases are not permitted');
-		expect(errors).toHaveTextContent('dunder attribute access is not permitted');
+describe('Fixture mode (no backend)', () => {
+	it('ships fixture definitions that satisfy the pre-flight and marker contract', () => {
+		for (const workspace of Object.values(fixtures.screeners)) {
+			for (const definition of workspace.items) {
+				expect(lintScreenerSource(definition.source), definition.name).toEqual([]);
+				expect(parseFilterRows(definition.source)?.length, definition.name).toBeGreaterThan(0);
+			}
+		}
 	});
 
-	it('mirrors SIC exactly-one validation in the builder', async () => {
-		render(ScreenerPanel, { props: { workspaceId: 'alpha-lab' } });
-		await tick();
+	it('lists, saves, runs, and fetches synthetic complete results', async () => {
+		const listed = await listScreeners('alpha-lab');
+		expect(listed.length).toBeGreaterThanOrEqual(2);
+		const liquid = listed.find((definition) => definition.name === 'Liquid large caps');
+		expect(liquid?.schema).toBe('fca-thesis-screener-definition-v1');
+		expect(liquid?.definitionId).toBe(`sha256:${liquid?.definitionSha256}`);
 
-		await fireEvent.change(screen.getByTestId('filter-kind-select'), {
-			target: { value: 'sic_industry' }
+		const input = {
+			name: 'Fixture API save',
+			lookback_days: 10,
+			bar_interval: '1d' as const,
+			rank_metric: 'close',
+			source: generateScreenerSource([])
+		};
+		const created = await saveScreener('alpha-lab', input);
+		const again = await saveScreener('alpha-lab', input);
+		expect(again.definitionId).toBe(created.definitionId);
+		expect((await listScreeners('alpha-lab')).filter((d) => d.definitionId === created.definitionId)).toHaveLength(1);
+
+		const result = await runScreener('alpha-lab', {
+			definition_id: created.definitionId,
+			as_of: '2026-09-25'
 		});
-		await tick();
-		expect(screen.getByTestId('filter-row-error')).toHaveTextContent('exactly one');
-	});
-});
+		expect(result.status).toBe('complete');
+		expect(result.definition_hash).toBe(created.definitionSha256);
+		expect(result.definition_id).toBe(created.definitionId);
+		expect(result.run_id).toMatch(/^screen-[0-9a-f]{16}$/);
+		expect(result.rows.length).toBeGreaterThan(0);
 
-describe('Fixture contract translation (screening routes)', () => {
-	it('translates saved fixture rows into the real saved-definition contract', async () => {
-		const { listScreeners } = await import('$lib/api');
-		const items = await listScreeners('alpha-lab');
-		expect(items.length).toBeGreaterThanOrEqual(2);
-		const first = items[0];
-		expect(first.definition.schema_version).toBe(1);
-		expect(first.definition.name).toBe('Liquid large caps');
-		expect(first.definition.filters[0].kind).toBe('avg_dollar_volume_min');
-		expect(first.definition_hash).toBe('fixture-scr-1');
+		const fetched = await getScreenerResult('alpha-lab', result.result_id);
+		expect(fetched.result_id).toBe(result.result_id);
+		expect(fetched.rows[0].symbol).toBe(result.rows[0].symbol);
+
+		await expect(
+			runScreener('alpha-lab', { definition_id: 'sha256:missing', as_of: '2026-09-25' })
+		).rejects.toBeInstanceOf(ThesisApiError);
+		await expect(getScreenerResult('alpha-lab', 'sha256:missing')).rejects.toMatchObject({
+			status: 404
+		});
 	});
 });

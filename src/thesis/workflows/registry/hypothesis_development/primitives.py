@@ -70,10 +70,9 @@ _HYPOTHESIS_SCHEMA = (
     'string, "observable": string, "condition": "lt"|"lte"|"gt"|"gte", '
     '"threshold": number, "test": string}], "sizing": string, "body": string, '
     '"model": {"modelId": string, "version": string, "description": string, '
-    '"source": string, "fitEntrypoint": string, "observeEntrypoint": string, '
-    '"outputs": [string], "tests": '
+    '"source": string, "outputs": [string], "tests": '
     '{path: string}, "harnessConfiguration": {"symbols": [string], '
-    '"start": string, "end": string}, "indicators": [{"alias": '
+    '"start": string, "end": string, "interval": "1min"|"1d"}, "indicators": [{"alias": '
     'string, "scope": "global"|"workspace", "name": string, "symbol": string, '
     '"parameters": {}, "contentSha256": string|null, "definition": object|null}]}}'
 )

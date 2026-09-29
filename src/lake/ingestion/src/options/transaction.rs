@@ -232,6 +232,7 @@ impl OptionIngestTransaction {
                 session.session_date,
                 AssetClass::Option,
                 *data_type,
+                None,
                 &contract.symbol,
             )?);
         }
@@ -263,6 +264,7 @@ impl OptionIngestTransaction {
                     0,
                     None,
                     Some(message.clone()),
+                    None,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -334,6 +336,7 @@ fn coverage_records(
                 row_count,
                 metadata.bytes,
                 Some(metadata.checksum.clone()),
+                None,
                 None,
             )
         })

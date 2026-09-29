@@ -47,6 +47,7 @@ lake-hosted = { path = "hosted" }
 arrow-array = "59"
 arrow-buffer = "59"
 arrow-cast = "59"
+arrow-ipc = "59"
 arrow-schema = "59"
 arrow-select = "59"
 async-trait = "0.1"

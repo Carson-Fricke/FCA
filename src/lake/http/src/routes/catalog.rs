@@ -55,6 +55,7 @@ pub(crate) async fn coverage(
         symbol: request.symbol.clone().unwrap_or_default(),
         start_date: request.start_date,
         end_date: request.end_date,
+        interval: request.interval.clone(),
     };
     let report = requested_coverage(
         catalog,

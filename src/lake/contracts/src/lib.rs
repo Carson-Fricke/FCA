@@ -17,7 +17,7 @@ pub mod time;
 pub use decimal::{Decimal18, DecimalError};
 pub use error::DataError;
 pub use partitions::{
-    partition_path, symbol_filename, AssetClass, DataType, Dataset, SUPPORTED_DATASETS,
+    partition_path, symbol_filename, AssetClass, BarInterval, DataType, Dataset, SUPPORTED_DATASETS,
 };
 pub use schemas::{
     schema_for, schema_name, SCHEMA_METADATA_KEY, SCHEMA_VERSION, SCHEMA_VERSION_METADATA_KEY,

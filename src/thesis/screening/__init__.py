@@ -1,101 +1,52 @@
-"""Thesis workspace screening: point-in-time screener engine, preset and
-programmatic filters, and workspace-artifact persistence for definitions and
-saved studies.
+"""Thesis thin screener client.
 
-The engine evaluates screener definitions over the as-of universe snapshot
-with no lookahead: market-data windows end at the screening date and a bar
-after ``as_of`` is invisible.  Filters read a per-symbol fact sheet that
-merges market metrics, point-in-time classification and filed-date
-fundamentals facts, and technical indicator values precomputed through the
-harness indicator registry.  Custom screeners are user-authored Python
-programs executed under a restricted compilation boundary (allowlisted
-imports, one ``screen(ctx)`` function, restricted builtins, no network, no
-wall clock, no file I/O) behind a documented executor seam.  Results are
-deterministic and carry full provenance: universe revision, data window, and
-definition hash.  :mod:`thesis.screening.context` binds the protocol to the
-lake and harness point-in-time surfaces; :mod:`thesis.screening.service`
-serves definitions and results to the HTTP layer.
+Thesis owns screener definitions as content-addressed workspace artifacts and
+delegates execution to the harness-hosted MCP server.  The package has zero
+market-data access: it never imports the lake, the lake client, or the
+harness, and it never evaluates a screen itself.  It launches ``run_screener``
+through the typed MCP client, polls ``get_screener_status`` to terminal, and
+imports the harness ``screen.json`` artifact as a workspace result.
 """
 
-from thesis.screening.artifacts import (
-    ArtifactError,
-    SavedStudy,
-    load_study,
-    save_study,
-)
-from thesis.screening.engine import (
-    MarketBar,
-    ScreenerContext,
+from thesis.screening.definitions import (
+    BAR_INTERVALS,
     ScreenerDefinition,
-    ScreenerError,
-    ScreenerHit,
-    ScreenerPortError,
-    UniverseEntry,
-    run_screener,
+    ScreenerDefinitionError,
 )
-from thesis.screening.presets import (
-    FilterError,
-    FilterEvaluator,
-    IndicatorRequest,
-    and_filters,
-    indicator_metric_key,
-    resolve_filter,
-)
-from thesis.screening.programs import (
-    InProcessProgramExecutor,
-    Program,
-    ProgramExecutor,
-    ProgramViolationError,
-    ScreenContext,
-    compile_program,
-    run_program,
+from thesis.screening.runs import (
+    SCREEN_ARTIFACT,
+    ScreeningArtifactError,
+    ScreeningRecord,
+    ScreeningRunError,
+    ScreeningRunPending,
+    ScreeningToolProvider,
+    ScreenRow,
+    import_screening_run,
+    screening_result_id,
 )
 from thesis.screening.service import (
-    ScreenerDataUnavailableError,
+    ScreenerError,
     ScreenerService,
-    ScreenerServiceError,
-    UnknownScreenerError,
+    ScreenerUnavailableError,
 )
+from thesis.screening.store import InMemoryScreenerStore, ScreenerStore
 
 __all__ = [
-    "ArtifactError",
-    "CikIndex",
-    "ClassificationPort",
-    "FilterError",
-    "FilterEvaluator",
-    "FundamentalsPort",
-    "InProcessProgramExecutor",
-    "IndicatorBridgeError",
-    "IndicatorRequest",
-    "LakeClassificationFacts",
-    "LakeFundamentalsFacts",
-    "LakeScreenerContext",
-    "MarketBar",
-    "OhlcvBar",
-    "OhlcvPort",
-    "Program",
-    "ProgramExecutor",
-    "ProgramViolationError",
-    "ScreenerContext",
-    "ScreenerDataUnavailableError",
+    "BAR_INTERVALS",
+    "SCREEN_ARTIFACT",
+    "InMemoryScreenerStore",
+    "ScreenRow",
     "ScreenerDefinition",
+    "ScreenerDefinitionError",
     "ScreenerError",
-    "ScreenerHit",
-    "ScreenerPortError",
     "ScreenerService",
-    "ScreenerServiceError",
-    "SavedStudy",
-    "ScreenContext",
-    "StaticCikIndex",
-    "UnknownScreenerError",
-    "UniverseEntry",
-    "and_filters",
-    "compile_program",
-    "compute_indicator_value",
-    "indicator_metric_key",
-    "load_study",
-    "resolve_filter",
-    "run_program",
-    "run_screener",
-    "save_study",
+    "ScreenerStore",
+    "ScreenerUnavailableError",
+    "ScreeningArtifactError",
+    "ScreeningRecord",
+    "ScreeningRunError",
+    "ScreeningRunPending",
+    "ScreeningToolProvider",
+    "import_screening_run",
+    "screening_result_id",
 ]

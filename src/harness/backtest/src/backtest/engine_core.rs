@@ -23,6 +23,29 @@ use crate::backtest::portfolio::{portfolio_json, PortfolioHub, PortfolioSnapshot
 use crate::canonical_json::JsonValue;
 use crate::sha256::Sha256;
 
+/// One reconstructed OHLCV bar carrying Python-scale decimals.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EngineBar {
+    /// Event identifier.
+    pub event_id: String,
+    /// Event time in epoch nanoseconds.
+    pub timestamp_ns: i64,
+    /// Global sequence.
+    pub sequence: u64,
+    /// Instrument symbol.
+    pub symbol: String,
+    /// Interval open.
+    pub open: PyDecimal,
+    /// Interval high.
+    pub high: PyDecimal,
+    /// Interval low.
+    pub low: PyDecimal,
+    /// Interval close.
+    pub close: PyDecimal,
+    /// Interval volume.
+    pub volume: PyDecimal,
+}
+
 /// One reconstructed market event carrying Python-scale decimals.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineMarket {
@@ -66,6 +89,11 @@ pub enum EngineMarket {
         /// Trade identifier.
         trade_id: String,
     },
+    /// One OHLCV bar.
+    ///
+    /// Bars are dispatched only to runtimes that consume bars; the simulated
+    /// venue and the last-trade model ignore them by construction.
+    Bar(EngineBar),
 }
 
 impl EngineMarket {
@@ -73,7 +101,9 @@ impl EngineMarket {
     #[must_use]
     pub const fn timestamp_ns(&self) -> i64 {
         match self {
-            Self::Quote { timestamp_ns, .. } | Self::Trade { timestamp_ns, .. } => *timestamp_ns,
+            Self::Quote { timestamp_ns, .. }
+            | Self::Trade { timestamp_ns, .. }
+            | Self::Bar(EngineBar { timestamp_ns, .. }) => *timestamp_ns,
         }
     }
 
@@ -81,7 +111,9 @@ impl EngineMarket {
     #[must_use]
     pub fn symbol(&self) -> &str {
         match self {
-            Self::Quote { symbol, .. } | Self::Trade { symbol, .. } => symbol,
+            Self::Quote { symbol, .. }
+            | Self::Trade { symbol, .. }
+            | Self::Bar(EngineBar { symbol, .. }) => symbol,
         }
     }
 
@@ -89,7 +121,9 @@ impl EngineMarket {
     #[must_use]
     pub fn event_id(&self) -> &str {
         match self {
-            Self::Quote { event_id, .. } | Self::Trade { event_id, .. } => event_id,
+            Self::Quote { event_id, .. }
+            | Self::Trade { event_id, .. }
+            | Self::Bar(EngineBar { event_id, .. }) => event_id,
         }
     }
 
@@ -97,7 +131,9 @@ impl EngineMarket {
     #[must_use]
     pub const fn sequence(&self) -> u64 {
         match self {
-            Self::Quote { sequence, .. } | Self::Trade { sequence, .. } => *sequence,
+            Self::Quote { sequence, .. }
+            | Self::Trade { sequence, .. }
+            | Self::Bar(EngineBar { sequence, .. }) => *sequence,
         }
     }
 
@@ -110,6 +146,7 @@ impl EngineMarket {
                 .and_then(|sum| sum.checked_div(PyDecimal::from_i128(2)))
                 .unwrap_or(*bid),
             Self::Trade { price, .. } => *price,
+            Self::Bar(EngineBar { close, .. }) => *close,
         }
     }
 }
@@ -238,11 +275,15 @@ impl EngineEvent {
     }
 
     /// Class priority used by the queue, mirroring `EVENT_CLASS_PRIORITY`.
+    ///
+    /// Bars carry the explicit tail priority of the bar event class; a study
+    /// replay carries bars and nothing else, so the slot never reorders ticks.
     #[must_use]
     pub const fn class_priority(&self) -> u8 {
         match self {
             Self::Market(EngineMarket::Quote { .. }) => 0,
             Self::Market(EngineMarket::Trade { .. }) => 1,
+            Self::Market(EngineMarket::Bar(_)) => 9,
             Self::Report(_) => 4,
             Self::Fill(_) => 5,
         }
@@ -254,6 +295,7 @@ impl EngineEvent {
         match self {
             Self::Market(EngineMarket::Quote { .. }) => "harness.core.types.events.QuoteEvent",
             Self::Market(EngineMarket::Trade { .. }) => "harness.core.types.events.TradeEvent",
+            Self::Market(EngineMarket::Bar(_)) => "harness.core.types.events.BarEvent",
             Self::Report(_) => "harness.core.types.accounting.ExecutionReport",
             Self::Fill(_) => "harness.core.types.accounting.Fill",
         }
@@ -265,6 +307,7 @@ impl EngineEvent {
         match self {
             Self::Market(EngineMarket::Quote { .. }) => "quote",
             Self::Market(EngineMarket::Trade { .. }) => "trade",
+            Self::Market(EngineMarket::Bar(_)) => "bar",
             Self::Report(_) => "execution_report",
             Self::Fill(_) => "fill",
         }
@@ -454,6 +497,11 @@ impl SimulatedVenue {
     }
 
     fn on_market(&mut self, market: &EngineMarket, clock_ns: i64, bus: &mut EventBus) {
+        // The venue trades book and print events only; a bar is explicitly not
+        // a matchable event and never enters the last-trade book.
+        if matches!(market, EngineMarket::Bar(_)) {
+            return;
+        }
         self.observe(market.timestamp_ns(), market.sequence());
         self.latest_markets
             .insert(market.symbol().to_string(), market.clone());
@@ -620,6 +668,9 @@ fn market_quantity(side: &str, market: &EngineMarket) -> PyDecimal {
                 *bid_quantity
             }
         }
+        // Bars are not tradable book or print events: the venue explicitly
+        // exposes no quantity for them, so no resting order can ever match.
+        EngineMarket::Bar(_) => PyDecimal::ZERO,
     }
 }
 
@@ -657,6 +708,9 @@ fn simple_touch_price(order: &EngineOrder, market: &EngineMarket) -> Option<PyDe
                 }
             }
         }
+        // Bars never fill orders; the simple-touch model explicitly ignores
+        // them just as the book and last-trade models do.
+        EngineMarket::Bar(_) => None,
     }
 }
 
@@ -795,6 +849,10 @@ pub struct StrategyStart {
     pub start_ns: i64,
 }
 
+/// The typed failure every non-bar runtime raises for a bar event.
+pub const RUNTIME_BARS_UNSUPPORTED: &str =
+    "this runtime does not consume bars: bars are only dispatched to study runtimes";
+
 /// The Python plugin seam the engine drives.
 pub trait StrategyRuntime {
     /// Called once before the first market event.
@@ -809,6 +867,21 @@ pub trait StrategyRuntime {
     ///
     /// Returns [`BacktestError`] when the strategy raises.
     fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError>;
+    /// Called for every OHLCV bar; return the orders it submitted.
+    ///
+    /// Only runtimes that consume bars override this. The default fails loud
+    /// so a bar can never be silently dropped or synthesized into a tick.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BacktestError`] when the runtime does not consume bars or the
+    /// runtime raises.
+    fn on_bar(&mut self, bar: &EngineBar) -> Result<Vec<EngineOrder>, BacktestError> {
+        let _ = bar;
+        Err(BacktestError::StrategyExecution(
+            RUNTIME_BARS_UNSUPPORTED.to_string(),
+        ))
+    }
     /// Called for every booked fill owned by this strategy.
     ///
     /// # Errors
@@ -1197,6 +1270,27 @@ pub fn market_event(event: &MarketEvent, options: &SyntheticDataOptions) -> Engi
             venue: venue.clone(),
             trade_id: trade_id.clone(),
         },
+        MarketEvent::Bar {
+            event_id,
+            timestamp_ns,
+            sequence,
+            symbol,
+            open,
+            high,
+            low,
+            close,
+            volume,
+        } => EngineMarket::Bar(EngineBar {
+            event_id: event_id.clone(),
+            timestamp_ns: *timestamp_ns,
+            sequence: *sequence,
+            symbol: symbol.clone(),
+            open: py_from(*open, quote_scale),
+            high: py_from(*high, quote_scale),
+            low: py_from(*low, quote_scale),
+            close: py_from(*close, quote_scale),
+            volume: py_from(*volume, options.quantity_scale),
+        }),
     }
 }
 
@@ -1424,7 +1518,13 @@ fn dispatch_event(
             prices.insert(market.symbol().to_string(), mark);
             hub.mark(market.symbol(), mark);
             for instance in strategies.iter_mut() {
-                let orders = instance.runtime.on_market(market)?;
+                // Bars go through the explicit bar entry; every tick goes
+                // through the tick entry, so a study never sees a tick and a
+                // strategy never sees a bar.
+                let orders = match market {
+                    EngineMarket::Bar(bar) => instance.runtime.on_bar(bar)?,
+                    _ => instance.runtime.on_market(market)?,
+                };
                 for order in orders {
                     process_order(
                         &order,

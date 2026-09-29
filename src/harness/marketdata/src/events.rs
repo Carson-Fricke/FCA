@@ -30,6 +30,12 @@ pub enum EventType {
     Book,
     /// An account update.
     Account,
+    /// One OHLCV bar.
+    ///
+    /// Bars are a distinct lake data type: a study replay carries bars and
+    /// nothing else, so the bar priority is an explicit tail slot that never
+    /// reorders the tick classes the Python bus pinned.
+    Bar,
 }
 
 impl EventType {
@@ -45,6 +51,7 @@ impl EventType {
             Self::Position => 6,
             Self::Book => 7,
             Self::Account => 8,
+            Self::Bar => 9,
         }
     }
 }
@@ -138,6 +145,32 @@ impl QuoteEvent {
     }
 }
 
+/// One OHLCV bar decoded from the lake's frozen `bars` schema.
+///
+/// A study replay carries bars only: the bar stream never mixes with ticks and
+/// every decimal is the exact scale-18 value the lake stored.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BarEvent {
+    /// Stable event identity.
+    pub event_id: String,
+    /// UTC instant of the interval open.
+    pub timestamp: DateTime,
+    /// Canonical symbol.
+    pub symbol: String,
+    /// Deterministic intra-timestamp sequence.
+    pub sequence: u64,
+    /// Interval open.
+    pub open: Decimal18,
+    /// Interval high.
+    pub high: Decimal18,
+    /// Interval low.
+    pub low: Decimal18,
+    /// Interval close.
+    pub close: Decimal18,
+    /// Interval volume.
+    pub volume: Decimal18,
+}
+
 /// The ordering key shared by the event bus and retained history.
 pub type OrderingKey = (Nanos, u64, u8);
 
@@ -146,13 +179,15 @@ pub fn ordering_key(timestamp: DateTime, sequence: u64, event_type: EventType) -
     (timestamp.to_nanos(), sequence, event_type.priority())
 }
 
-/// A quote-or-trade market event.
+/// A quote, trade, or bar market event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MarketEvent {
     /// A quote.
     Quote(QuoteEvent),
     /// A trade.
     Trade(TradeEvent),
+    /// One OHLCV bar.
+    Bar(BarEvent),
 }
 
 impl MarketEvent {
@@ -161,6 +196,7 @@ impl MarketEvent {
         match self {
             Self::Quote(_) => EventType::Quote,
             Self::Trade(_) => EventType::Trade,
+            Self::Bar(_) => EventType::Bar,
         }
     }
 
@@ -169,6 +205,7 @@ impl MarketEvent {
         match self {
             Self::Quote(event) => event.timestamp,
             Self::Trade(event) => event.timestamp,
+            Self::Bar(event) => event.timestamp,
         }
     }
 
@@ -177,6 +214,7 @@ impl MarketEvent {
         match self {
             Self::Quote(event) => &event.symbol,
             Self::Trade(event) => &event.symbol,
+            Self::Bar(event) => &event.symbol,
         }
     }
 
@@ -185,6 +223,7 @@ impl MarketEvent {
         match self {
             Self::Quote(event) => event.sequence,
             Self::Trade(event) => event.sequence,
+            Self::Bar(event) => event.sequence,
         }
     }
 
@@ -193,6 +232,7 @@ impl MarketEvent {
         match self {
             Self::Quote(event) => &event.event_id,
             Self::Trade(event) => &event.event_id,
+            Self::Bar(event) => &event.event_id,
         }
     }
 

@@ -61,3 +61,22 @@ impl From<num::DecimalError> for DataError {
         Self::Arithmetic(error.to_string())
     }
 }
+
+impl From<lake_contracts::DataError> for DataError {
+    fn from(error: lake_contracts::DataError) -> Self {
+        use lake_contracts::DataError as ContractError;
+        match error {
+            ContractError::TypeError(message) => Self::TypeError(message),
+            ContractError::ValueError(message) => Self::ValueError(message),
+            ContractError::Lookahead(message) => Self::Lookahead(message),
+            ContractError::Incomplete(message) => Self::Incomplete(message),
+            ContractError::Unsupported(message) => Self::Unsupported(message),
+            ContractError::EnsureJob(message) => Self::EnsureJob(message),
+            ContractError::Arithmetic(message) => Self::Arithmetic(message),
+            ContractError::Protocol(message) => Self::Protocol(message),
+            ContractError::NotFound(message) => Self::Incomplete(message),
+            ContractError::Conflict(message) => Self::Unsupported(message),
+            ContractError::Io(message) => Self::Incomplete(message),
+        }
+    }
+}

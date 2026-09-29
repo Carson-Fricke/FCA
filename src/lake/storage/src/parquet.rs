@@ -59,12 +59,18 @@ impl<S: BlobStore + 'static> ParquetWriter<S> {
     }
 
     /// Write one zstd-compressed Parquet object and return its metadata.
+    ///
+    /// `interval` carries the bars interval partition dimension; every other
+    /// data type must pass `None`, and bars must pass a canonical token so the
+    /// frozen `.../data_type=bars/interval=<token>/SYMBOL.parquet` path is
+    /// produced.
     pub fn write(
         &self,
         records: &[Value],
         session_date: Date,
         asset_class: AssetClass,
         data_type: DataType,
+        interval: Option<&str>,
         symbol: &str,
     ) -> Result<ParquetMetadata, DataError> {
         let batch = normalize_records(records, asset_class, data_type, symbol)?;
@@ -93,7 +99,7 @@ impl<S: BlobStore + 'static> ParquetWriter<S> {
             writer.write(&batch).map_err(DataError::io)?;
             writer.close().map_err(DataError::io)?;
         }
-        let path = partition_path(session_date, asset_class, data_type, symbol)?;
+        let path = partition_path(session_date, asset_class, data_type, interval, symbol)?;
         let checksum = hex::encode(Sha256::digest(&payload));
         self.store.replace(&path, &payload)?;
         Ok(ParquetMetadata {

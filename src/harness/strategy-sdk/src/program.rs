@@ -1,18 +1,25 @@
 //! Authoring traits and the capability surfaces they may touch.
 //!
 //! The capability split mirrors the Python contract exactly: a
-//! [`StudyProgram`] never sees the order surface — its only context
-//! interaction is publishing metrics through [`MetricPublisher`] — while a
-//! [`StrategyProgram`] submits orders through [`OrderSink`], whose host
-//! stamps the event time on every intent exactly as the Python adapter does.
+//! [`StudyProgram`] never sees the order surface and folds OHLCV bars only —
+//! its only context interaction is publishing metrics through
+//! [`MetricPublisher`] — while a [`StrategyProgram`] submits orders through
+//! [`OrderSink`], whose host stamps the event time on every intent exactly as
+//! the Python adapter does. A [`ScreeningProgram`] is the third kind: one-shot
+//! cross-sectional evaluation over a host-built [`ScreenContext`], returning
+//! ranked rows and having no order surface, file, network, or clock access by
+//! construction.
+
+use std::collections::BTreeMap;
 
 use num::PyDecimal;
+use serde::{Deserialize, Serialize};
 
 use crate::abi::{
     CDecimal, CMarketOrder, CMetricSink, COrderSink, CStr, METRIC_INVALID_NAME, METRIC_NOT_FINITE,
     METRIC_OK, METRIC_RESERVED_NAME, SDK_OK,
 };
-use crate::events::{Fill, ProgramStart, QuoteEvent, TradeEvent};
+use crate::events::{BarEvent, Fill, ProgramStart, QuoteEvent, TradeEvent};
 
 /// The metric names reserved by the harness; publishing them fails.
 pub const RESERVED_METRIC_NAMES: &[&str] = &[
@@ -27,20 +34,17 @@ pub const RESERVED_METRIC_NAMES: &[&str] = &[
 
 /// A study program: fit and observe history, publish metrics, no execution.
 ///
-/// Constructed once per run with the configured JSON parameters; the market
-/// callbacks fold events in replay order and `on_stop` publishes the run's
-/// custom metrics.
+/// Constructed once per run with the configured JSON parameters; the bar
+/// callback folds OHLCV bars in replay order and `on_stop` publishes the
+/// run's custom metrics. Ticks are not part of the study contract.
 pub trait StudyProgram {
     /// Construct the program from the configured JSON parameters.
     fn new(parameters: serde_json::Value) -> Self
     where
         Self: Sized;
 
-    /// Fold one top-of-book quote.
-    fn on_quote(&mut self, _event: &QuoteEvent) {}
-
-    /// Fold one trade print.
-    fn on_trade(&mut self, _event: &TradeEvent) {}
+    /// Fold one OHLCV bar.
+    fn on_bar(&mut self, _event: &BarEvent) {}
 
     /// Publish final metrics once after the replay.
     fn on_stop(&mut self, _metrics: &mut MetricPublisher) {}
@@ -67,6 +71,107 @@ pub trait StrategyProgram {
 
     /// Publish final metrics once after the replay.
     fn on_stop(&mut self, _metrics: &mut MetricPublisher) {}
+}
+
+/// A screening program: one-shot cross-sectional evaluation, no execution.
+///
+/// Constructed once per run with the configured JSON parameters; the host
+/// builds exactly one [`ScreenContext`] (universe, bars, facts, and
+/// precomputed indicators) and [`screen`](ScreeningProgram::screen) returns
+/// the rows the host ranks. The only data surface is the context: a
+/// screening program has no order surface, no file, network, or clock access
+/// by construction.
+pub trait ScreeningProgram {
+    /// Construct the program from the configured JSON parameters.
+    fn new(parameters: serde_json::Value) -> Self
+    where
+        Self: Sized;
+
+    /// Evaluate one host-built cross-sectional context and return its rows.
+    fn screen(&mut self, ctx: &ScreenContext) -> Vec<ScreenRow>;
+}
+
+/// One daily OHLCV bar as the host provides it.
+///
+/// Every decimal field crosses as the exact decimal string the host built
+/// (no float roundtrip); [`volume`](Bar::volume) is exact as well.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Bar {
+    /// Session date (`YYYY-MM-DD`).
+    pub date: String,
+    /// Session open.
+    pub open: String,
+    /// Session high.
+    pub high: String,
+    /// Session low.
+    pub low: String,
+    /// Session close.
+    pub close: String,
+    /// Session volume.
+    pub volume: String,
+}
+
+/// The one data surface a screening program may read.
+///
+/// The host builds one context per run: the as-of date, the universe
+/// symbols, their bars, their engine fact sheets, and the indicator values
+/// precomputed by the harness under their canonical `ind:<name>(<params>)`
+/// keys. Maps are [`BTreeMap`]s, so iteration and serialization order are
+/// deterministic.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenContext {
+    /// The as-of date (`YYYY-MM-DD`) the context was built for.
+    pub as_of: String,
+    /// The as-of universe symbols.
+    pub universe: Vec<String>,
+    /// Daily bars per symbol; symbols without bars are absent.
+    pub bars: BTreeMap<String, Vec<Bar>>,
+    /// Engine fact-sheet entries per symbol.
+    pub facts: BTreeMap<String, BTreeMap<String, String>>,
+    /// Precomputed indicator values per symbol, keyed by metric key.
+    pub indicators: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl ScreenContext {
+    /// The as-of universe symbols.
+    #[must_use]
+    pub fn universe(&self) -> &[String] {
+        &self.universe
+    }
+
+    /// The symbol's bars, or an empty slice when it has none.
+    #[must_use]
+    pub fn bars(&self, symbol: &str) -> &[Bar] {
+        self.bars.get(symbol).map_or(&[], Vec::as_slice)
+    }
+
+    /// The symbol's fact-sheet entries, or an empty map when it has none.
+    #[must_use]
+    pub fn facts(&self, symbol: &str) -> &BTreeMap<String, String> {
+        static EMPTY: BTreeMap<String, String> = BTreeMap::new();
+        self.facts.get(symbol).unwrap_or(&EMPTY)
+    }
+
+    /// The symbol's precomputed indicator values, or an empty map when it has
+    /// none.
+    #[must_use]
+    pub fn indicators(&self, symbol: &str) -> &BTreeMap<String, String> {
+        static EMPTY: BTreeMap<String, String> = BTreeMap::new();
+        self.indicators.get(symbol).unwrap_or(&EMPTY)
+    }
+}
+
+/// One screening result row.
+///
+/// Metrics are exact decimal strings where the value is decimal; the host
+/// ranks on the caller-named metric with exact decimal comparison, so
+/// authored programs never round.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenRow {
+    /// Instrument symbol.
+    pub symbol: String,
+    /// Row metrics by name; the rank metric is whichever the host names.
+    pub metrics: BTreeMap<String, String>,
 }
 
 /// Why a metric publish was rejected.

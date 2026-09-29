@@ -286,7 +286,7 @@ fn option_entry(
 ) -> Result<SessionCoverage, CoverageRequestError> {
     let session_date = session.session_date;
     let record = catalog
-        .get(AssetClass::Option, data_type, symbol, session_date)
+        .get(AssetClass::Option, data_type, None, symbol, session_date)
         .map_err(CoverageRequestError::from)?;
     let state = match &record {
         Some(record) if record.status == CoverageStatus::Empty => CoverageState::Empty,

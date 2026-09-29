@@ -5,10 +5,10 @@ mod support;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lake_catalog::{CatalogRepository, CoverageQuery, CoverageStatus, JsonCatalogStore};
+use lake_catalog::{BarSource, CatalogRepository, CoverageQuery, CoverageStatus, JsonCatalogStore};
 use lake_contracts::{AssetClass, DataType};
 use lake_coverage::{EnsureJob, EnsureSpec};
-use lake_ingestion::EquityDataProvider;
+use lake_ingestion::{BarsDataProvider, EquityDataProvider};
 use lake_local::{
     local_ensure_deadline_seconds, LocalEnsureLauncher, LocalLayout,
     DEFAULT_ENSURE_DEADLINE_SECONDS,
@@ -25,9 +25,59 @@ fn job(asset_class: AssetClass, data_type: DataType, symbol: &str) -> EnsureJob 
             symbol: symbol.to_string(),
             start_date: day(2024, 1, 19),
             end_date: day(2024, 1, 19),
+            interval: None,
         },
         gaps: Vec::new(),
     }
+}
+
+fn bars_job(symbol: &str, interval: &str) -> EnsureJob {
+    EnsureJob {
+        job_id: format!("ensure-bars-{symbol}-{interval}"),
+        request: EnsureSpec {
+            asset_class: AssetClass::Equity,
+            data_type: DataType::Bars,
+            symbol: symbol.to_string(),
+            start_date: day(2024, 1, 19),
+            end_date: day(2024, 1, 19),
+            interval: Some(interval.to_string()),
+        },
+        gaps: Vec::new(),
+    }
+}
+
+fn bars_launcher(
+    layout: &LocalLayout,
+    environ: &BTreeMap<String, String>,
+    provider: &Arc<FakeAlpaca>,
+) -> Arc<LocalEnsureLauncher> {
+    let equity: Arc<dyn EquityDataProvider> = provider.clone();
+    let bars: Arc<dyn BarsDataProvider> = provider.clone();
+    Arc::new(
+        LocalEnsureLauncher::new(
+            layout.clone(),
+            environ.clone(),
+            load_settings(environ),
+            load_universes(environ),
+            instant(2024, 1, 22, 0, 0),
+        )
+        .expect("launcher")
+        .with_providers(Some(equity), None)
+        .with_bars_provider(Some(bars)),
+    )
+}
+
+fn listed_bars(layout: &LocalLayout) -> Vec<lake_catalog::CoverageRecord> {
+    let catalog = JsonCatalogStore::open(layout.catalog_path()).expect("catalog");
+    catalog
+        .list(&CoverageQuery {
+            symbol: Some("GLD".to_string()),
+            ..CoverageQuery::default()
+        })
+        .expect("list")
+        .into_iter()
+        .filter(|record| record.data_type == DataType::Bars)
+        .collect()
 }
 
 #[tokio::test]
@@ -134,6 +184,119 @@ async fn launcher_rejects_option_requests() {
     assert!(error
         .to_string()
         .contains("options ingest is not supported by the local launcher"));
+}
+
+#[tokio::test]
+async fn launcher_ensures_trades_then_provider_bars_and_resumes() {
+    let temporary = tempfile::tempdir().expect("tempdir");
+    let layout = LocalLayout::new(temporary.path().join("local"));
+    let environ = credentials();
+    let provider = Arc::new(FakeAlpaca::new());
+    let launch = bars_launcher(&layout, &environ, &provider).launcher();
+
+    launch(bars_job("GLD", "1min")).await.expect("bars ensure");
+    assert_eq!(
+        provider.calls(),
+        vec![
+            ("trade".to_string(), "GLD".to_string()),
+            ("bars".to_string(), "GLD".to_string()),
+        ],
+        "trades are ensured before the bars transaction runs"
+    );
+
+    let bars = listed_bars(&layout);
+    assert_eq!(bars.len(), 1);
+    assert_eq!(bars[0].status, CoverageStatus::Complete);
+    assert_eq!(bars[0].interval.as_deref(), Some("1min"));
+    assert_eq!(bars[0].bar_source, Some(BarSource::Provider));
+    assert_eq!(bars[0].source_revision, bars[0].checksum);
+    let path = bars[0].object_path.clone().expect("object path");
+    assert!(path.contains("interval=1min"));
+    assert!(layout.objects().join(path).is_file());
+
+    // A covered bars window returns immediately: no provider call is repeated.
+    launch(bars_job("GLD", "1min")).await.expect("bars resume");
+    assert_eq!(provider.calls().len(), 2);
+}
+
+#[tokio::test]
+async fn launcher_derives_bars_when_the_provider_has_none() {
+    let temporary = tempfile::tempdir().expect("tempdir");
+    let layout = LocalLayout::new(temporary.path().join("local"));
+    let environ = credentials();
+    let provider = Arc::new(FakeAlpaca::new().empty_bars());
+    let launch = bars_launcher(&layout, &environ, &provider).launcher();
+
+    launch(bars_job("GLD", "1min")).await.expect("bars ensure");
+    assert_eq!(
+        provider.calls(),
+        vec![
+            ("trade".to_string(), "GLD".to_string()),
+            ("bars".to_string(), "GLD".to_string()),
+        ]
+    );
+
+    let catalog = JsonCatalogStore::open(layout.catalog_path()).expect("catalog");
+    let records = catalog
+        .list(&CoverageQuery {
+            symbol: Some("GLD".to_string()),
+            ..CoverageQuery::default()
+        })
+        .expect("list");
+    let trade = records
+        .iter()
+        .find(|record| record.data_type == DataType::Trade)
+        .expect("trade record");
+    let bars = records
+        .iter()
+        .find(|record| record.data_type == DataType::Bars)
+        .expect("bars record");
+    assert_eq!(bars.status, CoverageStatus::Complete);
+    assert_eq!(bars.row_count, 1);
+    assert_eq!(bars.bar_source, Some(BarSource::Derived));
+    assert_eq!(
+        bars.source_revision, trade.checksum,
+        "derived bars record the trade partition revision"
+    );
+}
+
+#[tokio::test]
+async fn launcher_derives_bars_when_the_provider_range_is_unsupported() {
+    let temporary = tempfile::tempdir().expect("tempdir");
+    let layout = LocalLayout::new(temporary.path().join("local"));
+    let environ = credentials();
+    let provider = Arc::new(FakeAlpaca::new().unsupported_bars());
+    let launch = bars_launcher(&layout, &environ, &provider).launcher();
+
+    launch(bars_job("GLD", "1d")).await.expect("bars ensure");
+    let bars = listed_bars(&layout);
+    assert_eq!(bars.len(), 1);
+    assert_eq!(bars[0].status, CoverageStatus::Complete);
+    assert_eq!(bars[0].bar_source, Some(BarSource::Derived));
+    assert!(bars[0].error_message.is_none());
+}
+
+#[tokio::test]
+async fn launcher_rejects_bars_without_an_interval() {
+    let temporary = tempfile::tempdir().expect("tempdir");
+    let layout = LocalLayout::new(temporary.path().join("local"));
+    let environ = credentials();
+    let launcher = Arc::new(
+        LocalEnsureLauncher::new(
+            layout,
+            environ.clone(),
+            load_settings(&environ),
+            load_universes(&environ),
+            instant(2024, 1, 22, 0, 0),
+        )
+        .expect("launcher"),
+    );
+    let mut bars = bars_job("AAPL", "1min");
+    bars.request.interval = None;
+    let error = launcher.launcher()(bars)
+        .await
+        .expect_err("bars without interval");
+    assert!(error.to_string().contains("bars requires an interval"));
 }
 
 #[test]

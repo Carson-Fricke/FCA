@@ -2,14 +2,14 @@
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import ScreenerPanel from '$lib/components/screener/ScreenerPanel.svelte';
 	import { listScreeners } from '$lib/api';
-	import type { ScreenerSavedDefinition } from '$lib/types';
+	import type { ScreenerDefinition } from '$lib/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const workspaceId = $derived(data.workspaceId);
 
-	let saved = $state<ScreenerSavedDefinition[] | null>(null);
+	let saved = $state<ScreenerDefinition[] | null>(null);
 	let loadError = $state<string | null>(null);
 
 	$effect(() => {
@@ -31,17 +31,9 @@
 
 <svelte:head><title>Screener — Thesis</title></svelte:head>
 
-<div class="mx-auto max-w-6xl space-y-4">
-	<header>
-		<h1 class="text-xl font-semibold text-slate-800">Screener</h1>
-		<p class="text-sm text-slate-500">
-			Declarative point-in-time screens with definition-hash provenance; saved studies persist as
-			workspace artifacts.
-		</p>
-	</header>
-
+<div class="space-y-4">
 	{#if loadError}
-		<EmptyState title="Saved studies unavailable" hint={loadError} />
+		<EmptyState title="Saved screeners unavailable" hint={loadError} />
 	{/if}
 	{#key workspaceId}
 		<ScreenerPanel {workspaceId} initialSaved={saved ?? []} />

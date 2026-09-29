@@ -13,7 +13,7 @@ pub mod runtime;
 pub mod worker;
 
 pub use runtime::{
-    hosted_overrides, HostedEnsureError, HostedOverrides, HostedRuntime, IngestSessions,
-    DEFAULT_COVERAGE_TABLE, DEFAULT_JOBS_TABLE, DEFAULT_STORAGE_CONTAINER,
+    hosted_overrides, HostedEnsureError, HostedOverrides, HostedRuntime, IngestBars,
+    IngestSessions, DEFAULT_COVERAGE_TABLE, DEFAULT_JOBS_TABLE, DEFAULT_STORAGE_CONTAINER,
 };
 pub use worker::{compose_option_queue_worker, queue_worker_policy, OptionQueueHandlerAdapter};

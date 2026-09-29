@@ -33,12 +33,16 @@ pub struct StagedParquetObject {
 /// externally visible before the committer publishes them.
 pub trait PartitionWriter: Send + Sync {
     /// Serialize one dataset and stage its object.
+    ///
+    /// `interval` is the bars interval partition dimension; bars datasets pass
+    /// their canonical token and every other data type passes `None`.
     fn write(
         &self,
         records: &[Value],
         session_date: Date,
         asset_class: AssetClass,
         data_type: DataType,
+        interval: Option<&str>,
         symbol: &str,
     ) -> Result<ParquetMetadata, DataError>;
 

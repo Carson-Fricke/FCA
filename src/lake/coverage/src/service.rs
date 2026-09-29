@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use lake_catalog::{
-    CatalogRepository, CoverageQuery, CoverageRecord, CoverageStatus, ListingRecord,
+    BarSource, CatalogRepository, CoverageQuery, CoverageRecord, CoverageStatus, ListingRecord,
     ListingRepository,
 };
 use lake_contracts::{symbol_filename, AssetClass, DataType, Date, DateTime, ExchangeSession};
@@ -334,6 +334,9 @@ pub fn sessions_for(
 /// instead of `missing`, keeping sessions before a listing or after a delisting
 /// out of the gap plan. Persisted catalog rows keep their own classification
 /// regardless of listing knowledge.
+///
+/// `interval` selects the bars interval dimension: bars rows are keyed by
+/// their canonical token, and every other data type is matched with `None`.
 #[allow(clippy::too_many_arguments)]
 pub fn calculate_coverage(
     catalog: &dyn CatalogRepository,
@@ -341,6 +344,7 @@ pub fn calculate_coverage(
     asset_class: AssetClass,
     data_types: &[DataType],
     symbols: &[String],
+    interval: Option<&str>,
     start_date: Date,
     end_date: Date,
     as_of: DateTime,
@@ -350,20 +354,27 @@ pub fn calculate_coverage(
     let normalized_data_types = normalize_data_types(data_types)?;
     let sessions = sessions_for(asset_class, start_date, end_date, as_of)?;
 
+    // The query intentionally does not filter by interval: a bars request
+    // still needs the session's trade rows (their checksum is the derived-bars
+    // revision), and the keyed lookup below already selects the requested
+    // interval for bars rows.
     let records = catalog
         .list(&CoverageQuery {
             asset_class: Some(asset_class),
             data_type: None,
             symbol: None,
+            interval: None,
             start: Some(start_date),
             end: Some(end_date),
         })
         .map_err(CoverageRequestError::from)?;
-    let mut records_by_key: BTreeMap<(DataType, &str, Date), &CoverageRecord> = BTreeMap::new();
+    let mut records_by_key: BTreeMap<(DataType, Option<&str>, &str, Date), &CoverageRecord> =
+        BTreeMap::new();
     for record in &records {
         records_by_key.insert(
             (
                 record.data_type,
+                record.interval.as_deref(),
                 record.symbol.as_str(),
                 record.session_date,
             ),
@@ -375,13 +386,35 @@ pub fn calculate_coverage(
 
     let mut entries = Vec::new();
     for data_type in &normalized_data_types {
+        let requested_interval = if *data_type == DataType::Bars {
+            interval
+        } else {
+            None
+        };
         for symbol in &normalized_symbols {
             let episodes = visible_listings.get(symbol).map_or(&[][..], Vec::as_slice);
             for session in &sessions {
                 let record = records_by_key
-                    .get(&(*data_type, symbol.as_str(), session.session_date))
+                    .get(&(
+                        *data_type,
+                        requested_interval,
+                        symbol.as_str(),
+                        session.session_date,
+                    ))
                     .copied();
-                let mut state = coverage_state(record, session);
+                // A derived bars row is only current while its recorded trade
+                // revision matches the session's live trade partition; a trade
+                // repair replaces that partition's checksum and invalidates
+                // the derived bars on the next classification.
+                let trade_revision = if *data_type == DataType::Bars {
+                    records_by_key
+                        .get(&(DataType::Trade, None, symbol.as_str(), session.session_date))
+                        .copied()
+                        .and_then(|trade| trade.checksum.as_deref())
+                } else {
+                    None
+                };
+                let mut state = coverage_state(record, session, trade_revision);
                 if record.is_none()
                     && !episodes.is_empty()
                     && !listing_covers(episodes, session.session_date, as_of.date())
@@ -413,9 +446,20 @@ pub fn calculate_coverage(
 /// Precedence mirrors Python: a persisted `empty` row wins even for an open
 /// session; otherwise an open session is `partial`; otherwise a missing row is
 /// `missing`; otherwise the persisted status is kept.
-fn coverage_state(record: Option<&CoverageRecord>, session: &CoverageSession) -> CoverageState {
+///
+/// Bars provenance adds one revision rule: a `derived` bars row is complete
+/// (or terminally empty) only while its recorded `source_revision` still
+/// matches the current trade partition revision. A mismatch means a trade
+/// repair replaced the derivation input, so the row is reclassified `partial`
+/// and re-derived or replaced by provider bars on the next ensure. Provider
+/// bars and legacy rows without provenance are trusted as written.
+fn coverage_state(
+    record: Option<&CoverageRecord>,
+    session: &CoverageSession,
+    trade_revision: Option<&str>,
+) -> CoverageState {
     if let Some(record) = record {
-        if record.status == CoverageStatus::Empty {
+        if record.status == CoverageStatus::Empty && !derived_bars_stale(record, trade_revision) {
             return CoverageState::Empty;
         }
     }
@@ -425,12 +469,31 @@ fn coverage_state(record: Option<&CoverageRecord>, session: &CoverageSession) ->
     match record {
         None => CoverageState::Missing,
         Some(record) => match record.status {
-            CoverageStatus::Complete => CoverageState::Complete,
-            CoverageStatus::Empty => CoverageState::Empty,
+            CoverageStatus::Complete => {
+                if derived_bars_stale(record, trade_revision) {
+                    CoverageState::Partial
+                } else {
+                    CoverageState::Complete
+                }
+            }
+            CoverageStatus::Empty => {
+                if derived_bars_stale(record, trade_revision) {
+                    CoverageState::Partial
+                } else {
+                    CoverageState::Empty
+                }
+            }
             CoverageStatus::Partial => CoverageState::Partial,
             CoverageStatus::Error => CoverageState::Error,
         },
     }
+}
+
+/// Whether a derived bars row no longer matches its trade partition revision.
+fn derived_bars_stale(record: &CoverageRecord, trade_revision: Option<&str>) -> bool {
+    record.data_type == DataType::Bars
+        && record.bar_source == Some(BarSource::Derived)
+        && record.source_revision.as_deref() != trade_revision
 }
 
 /// Return listing episodes known on `as_of` keyed by canonical symbol.

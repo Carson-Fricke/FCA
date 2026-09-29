@@ -8,13 +8,47 @@
 
 use futures_util::future::BoxFuture;
 use lake_catalog::ContractRecord;
-use lake_contracts::DateTime;
+use lake_contracts::{AssetClass, BarInterval, DateTime};
 use lake_providers::{
-    AlpacaClient, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,
-    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade, ProviderError,
+    AlpacaClient, NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade,
+    NormalizedOptionQuote, NormalizedOptionTrade, NormalizedQuote, NormalizedTrade, ProviderError,
 };
 
 use crate::options::transaction::OptionMarketDataClient;
+
+/// Provider boundary for the session-aligned bars fetch.
+///
+/// One call covers one symbol or pair and one inclusive window; the interval
+/// selects the provider timeframe (`1Min` / `1Day`).
+pub trait BarsDataProvider: Send + Sync {
+    /// Fetch normalized bars for one symbol and inclusive window.
+    fn fetch_bars<'a>(
+        &'a self,
+        asset_class: AssetClass,
+        symbol: &'a str,
+        interval: BarInterval,
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedBar>, ProviderError>>;
+}
+
+impl BarsDataProvider for AlpacaClient {
+    fn fetch_bars<'a>(
+        &'a self,
+        asset_class: AssetClass,
+        symbol: &'a str,
+        interval: BarInterval,
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedBar>, ProviderError>> {
+        Box::pin(async move {
+            let client: &AlpacaClient = self;
+            client
+                .fetch_bars(asset_class, symbol, interval, start, end)
+                .await
+        })
+    }
+}
 
 /// Provider boundary for the two equity one-symbol fetches.
 pub trait EquityDataProvider: Send + Sync {

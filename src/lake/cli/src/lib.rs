@@ -115,6 +115,7 @@ pub fn build_api_router(environ: &BTreeMap<String, String>) -> Result<Router, Co
         contracts: Some(Arc::new(MemoryContractRepository::new())),
         front_sets: Some(Arc::new(MemoryDailyFrontSetRepository::new())),
         sas_issuer: None,
+        read_store: None,
         ensure_launcher: None,
         ensure_callback: None,
         bounded_query: None,

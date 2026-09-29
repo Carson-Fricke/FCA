@@ -12,8 +12,28 @@ fn sample_coverage() -> CoverageRecord {
         3456,
         Some("sha256:abc".to_string()),
         None,
+        None,
     )
     .expect("valid coverage")
+}
+
+fn sample_bars(interval: &str) -> CoverageRecord {
+    CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        "AAPL",
+        Date::from_ymd(2024, 1, 19).expect("date"),
+        CoverageStatus::Complete,
+        Some(format!(
+            "date=2024-01-19/asset_class=equity/data_type=bars/interval={interval}/AAPL.parquet"
+        )),
+        12,
+        3456,
+        None,
+        None,
+        Some(interval.to_string()),
+    )
+    .expect("valid bars coverage")
 }
 
 fn sample_listing() -> ListingRecord {
@@ -50,6 +70,10 @@ fn persisted_enums_round_trip_their_values() {
     ] {
         assert_eq!(CoverageStatus::from_value(status.value()), Some(status));
         assert_eq!(status.to_string(), status.value());
+    }
+    for source in [BarSource::Provider, BarSource::Derived] {
+        assert_eq!(BarSource::from_value(source.value()), Some(source));
+        assert_eq!(source.to_string(), source.value());
     }
     for state in [
         JobState::Queued,
@@ -111,10 +135,47 @@ fn persisted_enums_round_trip_their_values() {
             0,
             None,
             None,
+            None,
         )
         .expect_err("empty symbol"),
         DataError::value("symbol must not be empty")
     );
+}
+
+#[test]
+fn coverage_record_rejects_bars_interval_pairing_errors() {
+    let date = Date::from_ymd(2024, 1, 19).expect("date");
+    let build = |data_type: DataType, interval: Option<&str>| {
+        CoverageRecord::new(
+            AssetClass::Equity,
+            data_type,
+            "AAPL",
+            date,
+            CoverageStatus::Complete,
+            None,
+            0,
+            0,
+            None,
+            None,
+            interval.map(str::to_string),
+        )
+    };
+
+    assert_eq!(
+        build(DataType::Bars, None).expect_err("bars without interval"),
+        DataError::value("bars coverage requires an interval")
+    );
+    assert_eq!(
+        build(DataType::Bars, Some("1h")).expect_err("unknown token"),
+        DataError::value("invalid bar interval: \"1h\"; expected one of 1min, 1d")
+    );
+    assert_eq!(
+        build(DataType::Trade, Some("1min")).expect_err("trade with interval"),
+        DataError::value("coverage interval is supported for bars only")
+    );
+    assert!(build(DataType::Bars, Some("1min")).is_ok());
+    assert!(build(DataType::Bars, Some("1d")).is_ok());
+    assert!(build(DataType::Trade, None).is_ok());
 }
 
 #[test]
@@ -127,6 +188,7 @@ fn coverage_record_canonicalizes_and_exposes_keys() {
             AssetClass::Equity,
             DataType::Trade,
             "AAPL".to_string(),
+            None,
             Date::from_ymd(2024, 1, 19).expect("date"),
         )
     );
@@ -146,6 +208,7 @@ fn coverage_record_canonicalizes_and_exposes_keys() {
         0,
         None,
         None,
+        None,
     )
     .expect("valid");
     assert!(!partial.is_terminal());
@@ -162,11 +225,141 @@ fn coverage_record_canonicalizes_and_exposes_keys() {
             0,
             None,
             None,
+            None,
         )
         .expect("valid");
         assert_eq!(record.is_terminal(), status != CoverageStatus::Error);
         assert!(!record.replace_existing());
     }
+}
+
+#[test]
+fn bars_coverage_keys_include_the_interval() {
+    let minute = sample_bars("1min");
+    let day = sample_bars("1d");
+
+    assert_eq!(
+        minute.key(),
+        (
+            AssetClass::Equity,
+            DataType::Bars,
+            "AAPL".to_string(),
+            Some("1min".to_string()),
+            Date::from_ymd(2024, 1, 19).expect("date"),
+        )
+    );
+    assert_ne!(minute.key(), day.key());
+    assert_ne!(minute.partition_key(), day.partition_key());
+    assert_ne!(minute.row_key(), day.row_key());
+    assert_eq!(
+        minute.partition_key(),
+        "coverage|equity|bars|AAPL|interval=1min"
+    );
+    assert_eq!(minute.row_key(), "2024-01-19|interval=1min");
+    assert_eq!(day.partition_key(), "coverage|equity|bars|AAPL|interval=1d");
+    assert_eq!(day.row_key(), "2024-01-19|interval=1d");
+}
+
+#[test]
+fn bars_coverage_serializes_with_the_interval_key_and_round_trips() {
+    let record = sample_bars("1min");
+    let json = serde_json::to_string(&record).expect("serialize");
+    assert_eq!(
+        json,
+        concat!(
+            "{\"asset_class\":\"equity\",\"byte_size\":3456,\"checksum\":null,",
+            "\"data_type\":\"bars\",\"error_message\":null,\"interval\":\"1min\",",
+            "\"object_path\":\"date=2024-01-19/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet\",",
+            "\"row_count\":12,\"session_date\":\"2024-01-19\",\"status\":\"complete\",",
+            "\"symbol\":\"AAPL\"}"
+        )
+    );
+    let parsed: CoverageRecord = serde_json::from_str(&json).expect("round trip");
+    assert_eq!(parsed, record);
+    assert_eq!(parsed.interval.as_deref(), Some("1min"));
+
+    let day = sample_bars("1d");
+    let json = serde_json::to_string(&day).expect("serialize");
+    assert!(json.contains("\"interval\":\"1d\""));
+    let parsed: CoverageRecord = serde_json::from_str(&json).expect("round trip");
+    assert_eq!(parsed, day);
+}
+
+#[test]
+fn legacy_coverage_json_round_trips_without_an_interval_key() {
+    let record = sample_coverage();
+    let json = serde_json::to_string(&record).expect("serialize");
+    assert!(!json.contains("interval"));
+    let parsed: CoverageRecord = serde_json::from_str(&json).expect("round trip");
+    assert_eq!(parsed, record);
+    assert_eq!(parsed.interval, None);
+}
+
+#[test]
+fn bars_provenance_serializes_in_sorted_key_order_and_round_trips() {
+    let record = sample_bars("1min")
+        .with_bar_provenance(BarSource::Derived, "trade-rev-1")
+        .expect("provenance");
+    let json = serde_json::to_string(&record).expect("serialize");
+    assert_eq!(
+        json,
+        concat!(
+            "{\"asset_class\":\"equity\",\"bar_source\":\"derived\",\"byte_size\":3456,",
+            "\"checksum\":null,\"data_type\":\"bars\",\"error_message\":null,\"interval\":\"1min\",",
+            "\"object_path\":\"date=2024-01-19/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet\",",
+            "\"row_count\":12,\"session_date\":\"2024-01-19\",\"source_revision\":\"trade-rev-1\",",
+            "\"status\":\"complete\",\"symbol\":\"AAPL\"}"
+        )
+    );
+    let parsed: CoverageRecord = serde_json::from_str(&json).expect("round trip");
+    assert_eq!(parsed, record);
+    assert_eq!(parsed.bar_source, Some(BarSource::Derived));
+    assert_eq!(parsed.source_revision.as_deref(), Some("trade-rev-1"));
+}
+
+#[test]
+fn bars_provenance_requires_bars_and_a_non_empty_revision() {
+    assert_eq!(
+        sample_coverage()
+            .with_bar_provenance(BarSource::Provider, "rev")
+            .expect_err("non-bars provenance"),
+        DataError::value("bar source is supported for bars coverage only")
+    );
+    assert_eq!(
+        sample_bars("1d")
+            .with_bar_provenance(BarSource::Provider, "   ")
+            .expect_err("empty revision"),
+        DataError::value("bar source requires a source revision")
+    );
+}
+
+#[test]
+fn coverage_json_rejects_dangling_provenance_keys() {
+    let base = serde_json::to_value(sample_bars("1d")).expect("value");
+    let mut with_revision = base.as_object().expect("object").clone();
+    with_revision.insert(
+        "source_revision".to_string(),
+        serde_json::json!("trade-rev-1"),
+    );
+    let error = serde_json::from_value::<CoverageRecord>(serde_json::Value::Object(with_revision))
+        .expect_err("revision without source");
+    assert!(
+        error
+            .to_string()
+            .contains("source_revision requires a bar_source"),
+        "{error}"
+    );
+
+    let mut with_source = base.as_object().expect("object").clone();
+    with_source.insert("bar_source".to_string(), serde_json::json!("provider"));
+    let error = serde_json::from_value::<CoverageRecord>(serde_json::Value::Object(with_source))
+        .expect_err("source without revision");
+    assert!(
+        error
+            .to_string()
+            .contains("bar_source requires a source_revision"),
+        "{error}"
+    );
 }
 
 #[test]

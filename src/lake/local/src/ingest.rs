@@ -17,16 +17,17 @@ use lake_catalog::{
 };
 use lake_configuration::{ConfigError, LakeSettings, UniverseSettings};
 use lake_contracts::{
-    canonical_symbol, crypto_sessions, symbol_filename, xnys_sessions, DataError, DataType, Date,
-    DateTime,
+    canonical_symbol, crypto_sessions, symbol_filename, xnys_sessions, AssetClass, BarInterval,
+    DataError, DataType, Date, DateTime,
 };
-use lake_coverage::CoverageSession;
+use lake_coverage::{calculate_coverage, CoverageSession};
 use lake_ingestion::{
-    AtomicIngestCommitter, CryptoDataProvider, CryptoIngestResult, CryptoIngestTransaction,
+    AtomicIngestCommitter, BarsDataProvider, BarsIngestResult, BarsIngestTransaction,
+    CatalogTradeReader, CryptoDataProvider, CryptoIngestResult, CryptoIngestTransaction,
     EquityDataProvider, EquityIngestResult, EquityIngestTransaction, StagingPartitionWriter,
 };
 use lake_providers::{AlpacaClient, ProviderConfig, RequestGovernor};
-use lake_storage::{BlobStore, LocalFilesystemStore};
+use lake_storage::{BlobStore, LocalFilesystemStore, ReadableBlobStore};
 use serde::Serialize;
 use tokio::sync::Semaphore;
 
@@ -562,6 +563,222 @@ pub async fn run_local_crypto_backfill(
     })
 }
 
+/// Inputs for one local bars backfill.
+pub struct LocalBarsBackfillOptions {
+    /// Local layout the backfill writes into.
+    pub layout: LocalLayout,
+    /// Equity or crypto; options are rejected.
+    pub asset_class: AssetClass,
+    /// Symbols (equities) or pairs (crypto), canonicalized and deduplicated.
+    pub symbols: Vec<String>,
+    /// The bars interval to produce.
+    pub interval: BarInterval,
+    /// Inclusive first session date.
+    pub start_date: Date,
+    /// Inclusive last session date.
+    pub end_date: Date,
+    /// Environment overrides used for credential checks and provider config.
+    pub environ: BTreeMap<String, String>,
+    /// Injected current instant used for session clocks.
+    pub now: DateTime,
+    /// Loaded lake settings providing provider credentials.
+    pub settings: LakeSettings,
+    /// Injected bars provider; otherwise built from the provider settings.
+    pub provider: Option<Arc<dyn BarsDataProvider>>,
+    /// Settle delay before the in-run retry pass; two seconds when absent.
+    pub retry_settle_seconds: Option<f64>,
+    /// Shared catalog store; the layout's file is opened when absent.
+    pub catalog: Option<Arc<JsonCatalogStore>>,
+}
+
+/// Produce every session-aligned bars partition a symbol set still misses.
+///
+/// Sessions with terminal coverage are skipped (the bars classification
+/// already invalidates derived rows whose trade revision changed), the
+/// provider is tried first, and the stored trades derive the remainder. One
+/// transaction commits a whole symbol window atomically; transient provider
+/// failures get at most one settle-delayed retry pass in the same run.
+pub async fn run_local_bars_backfill(
+    options: LocalBarsBackfillOptions,
+) -> Result<BackfillResult, LocalIngestError> {
+    if !matches!(options.asset_class, AssetClass::Equity | AssetClass::Crypto) {
+        return Err(LocalIngestError::new(
+            "bars backfill supports equity and crypto only",
+        ));
+    }
+    let symbols = match options.asset_class {
+        AssetClass::Equity => normalize_symbols(&options.symbols)?,
+        AssetClass::Crypto => normalize_pairs(&options.symbols)?,
+        _ => unreachable!("asset class validated above"),
+    };
+    if options.end_date < options.start_date {
+        return Err(LocalIngestError::new(
+            "start_date must be on or before end_date",
+        ));
+    }
+    require_credentials(&options.settings, "backfill")?;
+    options.layout.initialize()?;
+
+    let catalog: Arc<JsonCatalogStore> = match options.catalog.clone() {
+        Some(catalog) => catalog,
+        None => Arc::new(JsonCatalogStore::open(options.layout.catalog_path())?),
+    };
+    let repository: Arc<dyn CatalogRepository> = catalog.clone();
+    let store = Arc::new(LocalFilesystemStore::new(options.layout.objects()));
+    let blob: Arc<dyn BlobStore> = store.clone();
+    let readable: Arc<dyn ReadableBlobStore> = store;
+    let committer = Arc::new(LocalIngestCommitter::new(blob, Arc::clone(&repository)));
+    let reader: Arc<dyn lake_ingestion::TradePartitionReader> =
+        Arc::new(CatalogTradeReader::new(Arc::clone(&repository), readable));
+    let provider = bars_provider(options.provider, &options.settings)?;
+
+    let mut entries: Vec<SessionIngestEntry> = Vec::new();
+    let mut succeeded = 0usize;
+    for symbol in &symbols {
+        let report = calculate_coverage(
+            catalog.as_ref(),
+            None,
+            options.asset_class,
+            &[DataType::Bars],
+            std::slice::from_ref(symbol),
+            Some(options.interval.value()),
+            options.start_date,
+            options.end_date,
+            options.now,
+        )
+        .map_err(|error| LocalIngestError::new(error.to_string()))?;
+        let sessions: Vec<CoverageSession> = report
+            .entries
+            .iter()
+            .filter(|entry| entry.is_actionable())
+            .map(|entry| entry.session)
+            .collect();
+        if sessions.is_empty() {
+            continue;
+        }
+        let transaction = BarsIngestTransaction::new(
+            Arc::clone(&provider),
+            Arc::clone(&reader),
+            Arc::new(StagingPartitionWriter::new()),
+            committer.clone(),
+        );
+        let result = run_bars_window(
+            &transaction,
+            options.asset_class,
+            symbol,
+            options.interval,
+            &sessions,
+            options.retry_settle_seconds,
+        )
+        .await?;
+        for session in &sessions {
+            let record = result
+                .coverage
+                .iter()
+                .find(|record| record.session_date == session.session_date)
+                .expect("every planned session publishes one bars coverage row");
+            let entry = SessionIngestEntry {
+                data_type_rows: BTreeMap::from([(
+                    DataType::Bars.value().to_string(),
+                    record.row_count,
+                )]),
+                error: (record.status == CoverageStatus::Error).then(|| {
+                    record
+                        .error_message
+                        .clone()
+                        .unwrap_or_else(|| "provider request failed".to_string())
+                }),
+                retryable: result.retryable && record.status == CoverageStatus::Error,
+                session_date: session.session_date.isoformat(),
+                statuses: vec![record.status.value().to_string()],
+                symbol: symbol.clone(),
+            };
+            if entry.error.is_none() {
+                succeeded += 1;
+            }
+            entries.push(entry);
+        }
+    }
+
+    let failures: Vec<SessionIngestEntry> = entries
+        .iter()
+        .filter(|entry| entry.error.is_some())
+        .cloned()
+        .collect();
+    if !failures.is_empty() && succeeded == 0 {
+        let detail = failures[0].error.clone().unwrap_or_default();
+        return Err(LocalIngestError::new(format!(
+            "Alpaca bars backfill failed: {detail}"
+        )));
+    }
+    Ok(BackfillResult {
+        data_root: options.layout.root().to_string_lossy().into_owned(),
+        errors: failures,
+        requested_end: options.end_date.isoformat(),
+        requested_start: options.start_date.isoformat(),
+        sessions: entries,
+        symbols,
+    })
+}
+
+/// Run one bars window with at most one settle-delayed retry over failures.
+async fn run_bars_window(
+    transaction: &BarsIngestTransaction,
+    asset_class: AssetClass,
+    symbol: &str,
+    interval: BarInterval,
+    sessions: &[CoverageSession],
+    retry_settle_seconds: Option<f64>,
+) -> Result<BarsIngestResult, LocalIngestError> {
+    let result = transaction
+        .run(asset_class, symbol, interval, sessions)
+        .await?;
+    if !result.retryable {
+        return Ok(result);
+    }
+    let failed: Vec<CoverageSession> = sessions
+        .iter()
+        .filter(|session| {
+            result.coverage.iter().any(|record| {
+                record.session_date == session.session_date
+                    && record.status == CoverageStatus::Error
+            })
+        })
+        .copied()
+        .collect();
+    if failed.is_empty() {
+        return Ok(result);
+    }
+    let settle = retry_settle_seconds.unwrap_or(RETRY_SETTLE_SECONDS);
+    if settle > 0.0 {
+        tokio::time::sleep(Duration::from_secs_f64(settle)).await;
+    }
+    let retried = transaction
+        .run(asset_class, symbol, interval, &failed)
+        .await?;
+    let mut coverage: BTreeMap<Date, CoverageRecord> = result
+        .coverage
+        .iter()
+        .map(|record| (record.session_date, record.clone()))
+        .collect();
+    let mut objects = result.objects;
+    for record in retried.coverage {
+        coverage.insert(record.session_date, record);
+    }
+    objects.extend(retried.objects);
+    Ok(BarsIngestResult {
+        symbol: result.symbol,
+        asset_class,
+        interval,
+        coverage: sessions
+            .iter()
+            .filter_map(|session| coverage.remove(&session.session_date))
+            .collect(),
+        objects,
+        retryable: false,
+    })
+}
+
 /// Run the planned sessions, retrying transiently-failed ones once in-run.
 async fn execute_backfill(
     plan: BackfillPlan,
@@ -930,6 +1147,22 @@ fn crypto_provider(
     provider: Option<Arc<dyn CryptoDataProvider>>,
     settings: &LakeSettings,
 ) -> Result<Arc<dyn CryptoDataProvider>, LocalIngestError> {
+    match provider {
+        Some(provider) => Ok(provider),
+        None => {
+            let client =
+                AlpacaClient::with_reqwest(provider_config(settings), shared_governor(settings))
+                    .map_err(|error| LocalIngestError::new(error.to_string()))?;
+            Ok(Arc::new(client))
+        }
+    }
+}
+
+/// Build the bars provider, constructing the production client when absent.
+fn bars_provider(
+    provider: Option<Arc<dyn BarsDataProvider>>,
+    settings: &LakeSettings,
+) -> Result<Arc<dyn BarsDataProvider>, LocalIngestError> {
     match provider {
         Some(provider) => Ok(provider),
         None => {

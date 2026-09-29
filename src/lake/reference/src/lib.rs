@@ -27,6 +27,7 @@
 //! lands; this crate's `query` module exists so the written partitions can be
 //! asserted against the same point-in-time contract in Rust.
 
+pub mod company_tickers;
 pub mod configuration;
 pub mod edgar;
 pub mod error;
@@ -37,6 +38,7 @@ pub mod partitions;
 pub mod query;
 pub mod schemas;
 
+pub use company_tickers::{CompanyTickers, COMPANY_TICKERS_URL};
 pub use configuration::{
     load_reference_settings, reference_config_dir, ReferenceHttpSettings, ReferenceRetrySettings,
     ReferenceSettings,
@@ -58,8 +60,13 @@ pub use partitions::{
     cik_object_name, cik_symbol, parse_cik_symbol, reference_partition_path,
     CLASSIFICATION_OBJECT_NAME,
 };
-pub use query::{classification_snapshot, fundamentals_facts, latest_fundamentals, FactFilter};
+pub use query::{
+    classification_snapshot, classification_snapshot_from_store,
+    classification_snapshot_with_extras_from_store, fundamentals_facts,
+    fundamentals_facts_from_store, latest_fundamentals, latest_fundamentals_from_store, FactFilter,
+};
 pub use schemas::{
-    classification_schema, classification_table, fundamentals_schema, fundamentals_table,
-    ClassificationRow, FactRow, REFERENCE_SCHEMA_VERSION,
+    classification_schema, classification_table, classification_table_with_extras,
+    fundamentals_schema, fundamentals_table, read_classification_rows_with_extras,
+    ClassificationExtras, ClassificationRow, FactRow, REFERENCE_SCHEMA_VERSION,
 };

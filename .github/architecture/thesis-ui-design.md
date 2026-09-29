@@ -31,7 +31,8 @@ implement the UI and does not modify any backend contract.
   sidebar navigation, workspace switcher, collapsible copilot panel, command
   palette, and the Overview / AI chats / Strategies / Backtests / Deployments /
   Dashboards page set. It is extended with two pages this specification adds:
-  **Screener** and **Workspace state**.
+  **Screener** (Rust-authored, executed by the harness) and **Workspace
+  state**.
 - **Visual source: the workspace-app mockup** ("svelte-trading-workspace-ui").
   Product decision 2026-09-09: the UI adopts the mockup's **light sage/cream
   design language across the board** — white cards on an off-white canvas,
@@ -66,7 +67,10 @@ implement the UI and does not modify any backend contract.
 6. **Custom widgets/dashboards** — host widgets and dashboards created inside
    the workspace.
 7. **Screeners** — screen symbols by volume or advanced programmatic custom
-   screeners; save filters/studies to the workspace.
+   screeners authored as Rust programs against the harness authoring SDK; the
+   filter builder generates the source, execution is delegated to the harness
+   MCP, and saved definitions and imported results stay in the workspace with
+   bundle-hash provenance.
 8. **Train/test split** — backtest results expose the train/test split.
 
 ## Information Architecture
@@ -85,7 +89,8 @@ implement the UI and does not modify any backend contract.
   the full-page chats view; expand-to-full-chat affordance; workspace scope
   indicator ("In context: <workspace>").
 - **Command palette (`⌘K`):** go-to-page, strategies, dashboards, quick
-  actions (create strategy / create workspace / new chat / new screener).
+  actions (create strategy / create workspace / new chat / new screener with
+  the Rust filter builder).
 
 ### Pages
 
@@ -97,7 +102,7 @@ implement the UI and does not modify any backend contract.
 | **Backtests** | Run history + results | Summary strip (count, best return, average Sharpe), filterable history table, **detail view with train/test split** (below). |
 | **Deployments** | Paper/live monitoring | Running/paused cards with health, allocated capital, P&L; orders and fills table with mode badges (paper/live); risk panel. |
 | **Dashboards** | Custom widgets | Widget grid, pin/unpin to sidebar, create/remove widgets, widget cards for equity, P&L, allocation, win rate, orders. |
-| **Screener** | Symbol screening | Volume/liquidity filters plus programmatic custom screeners authored in the workspace; save screeners/studies as workspace artifacts. |
+| **Screener** | Symbol screening | Volume/liquidity filters plus custom screeners authored as Rust programs (the filter builder generates SDK source and compiler errors render inline); definitions saved as content-addressed workspace artifacts; imported results carry bundle-hash provenance. |
 | **Workspace state** | CLEO projection | Workspace CLEO state: plan/workflow timelines, evidence index, strategy lineage graph, knowledge search, consent/audit trail. |
 
 ### Requirement mapping
@@ -125,8 +130,11 @@ implement the UI and does not modify any backend contract.
   repository). The UI renders declared widget types plus sandboxed custom
   widgets; definitions are fetched, never authored client-side as state.
 - **R7 (screener):** Screener page: volume/liquidity preset filters, custom
-  programmatic screener authoring (code artifact in the workspace), saved
-  screeners/studies listed and re-runnable; results link into strategies.
+  screener authoring through the Rust SDK/JIT seam (the filter builder
+  generates source; compiler errors render inline), saved content-addressed
+  definitions listed and re-runnable, and imported results with bundle-hash
+  provenance; execution is delegated to the harness MCP. Results link into
+  strategies.
 
 ### Chats view detail (investigations, uploads, timelines, steering, CLEO, evidence)
 

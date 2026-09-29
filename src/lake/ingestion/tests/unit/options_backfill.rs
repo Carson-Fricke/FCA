@@ -225,6 +225,7 @@ fn partial_coverage_requests_replacement_and_terminal_rows_do_not() {
         0,
         None,
         None,
+        None,
     )
     .expect("record");
     coverage.insert(
@@ -244,6 +245,7 @@ fn partial_coverage_requests_replacement_and_terminal_rows_do_not() {
         None,
         0,
         0,
+        None,
         None,
         None,
     )
@@ -276,6 +278,7 @@ fn partial_coverage_requests_replacement_and_terminal_rows_do_not() {
         None,
         1,
         1,
+        None,
         None,
         None,
     )

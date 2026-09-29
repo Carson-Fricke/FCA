@@ -16,8 +16,8 @@ use lake_contracts::{
 use serde_json::Value;
 
 use crate::models::{
-    table_key, ContractRecord, CoverageRecord, CoverageStatus, DelistingType, JobRecord, JobState,
-    ListingRecord, ListingType, OptionType, RunRecord, RunState,
+    table_key, BarSource, ContractRecord, CoverageRecord, CoverageStatus, DelistingType, JobRecord,
+    JobState, ListingRecord, ListingType, OptionType, RunRecord, RunState,
 };
 use crate::ports::{
     CatalogRepository, ContractRepository, CoverageQuery, JobRepository, ListingRepository,
@@ -206,6 +206,21 @@ pub fn coverage_to_entity(record: &CoverageRecord) -> TableEntity {
             Value::String(error_message.clone()),
         );
     }
+    if let Some(interval) = &record.interval {
+        entity.insert("Interval".to_string(), Value::String(interval.clone()));
+    }
+    if let Some(bar_source) = &record.bar_source {
+        entity.insert(
+            "BarSource".to_string(),
+            Value::String(bar_source.value().to_string()),
+        );
+    }
+    if let Some(source_revision) = &record.source_revision {
+        entity.insert(
+            "SourceRevision".to_string(),
+            Value::String(source_revision.clone()),
+        );
+    }
     entity
 }
 
@@ -227,7 +242,7 @@ pub fn coverage_from_entity(entity: &TableEntity) -> Result<CoverageRecord, Data
         "CoverageStatus",
         CoverageStatus::from_value,
     )?;
-    CoverageRecord::new(
+    let record = CoverageRecord::new(
         asset_class,
         data_type,
         entity_string(entity, "Symbol")?,
@@ -238,7 +253,25 @@ pub fn coverage_from_entity(entity: &TableEntity) -> Result<CoverageRecord, Data
         entity_integer(entity, "ByteSize", 0)?,
         optional_string(entity, "Checksum"),
         optional_string(entity, "ErrorMessage"),
-    )
+        optional_string(entity, "Interval"),
+    )?;
+    match optional_string(entity, "BarSource") {
+        Some(raw) => {
+            let source = BarSource::from_value(&raw)
+                .ok_or_else(|| DataError::value(format!("{raw:?} is not a valid BarSource")))?;
+            let revision = optional_string(entity, "SourceRevision")
+                .ok_or_else(|| DataError::value("coverage BarSource requires a SourceRevision"))?;
+            record.with_bar_provenance(source, revision)
+        }
+        None => {
+            if optional_string(entity, "SourceRevision").is_some() {
+                return Err(DataError::value(
+                    "coverage SourceRevision requires a BarSource",
+                ));
+            }
+            Ok(record)
+        }
+    }
 }
 
 /// Map job state and UTC timestamps to an Azure Table-compatible entity.
@@ -571,37 +604,52 @@ fn is_active(record: &ContractRecord, as_of: Option<Date>) -> bool {
 ///
 /// Mirrors `_coverage_partition_for_filters`: with all three filters present
 /// the scan targets the exact partition; otherwise it covers the prefixed
-/// partitions with a range query.
+/// partitions with a range query. Bars rows append their interval token so
+/// distinct intervals never share a partition.
 fn coverage_partition_for_filters(
     asset_class: Option<AssetClass>,
     data_type: Option<DataType>,
     symbol: Option<&str>,
+    interval: Option<&str>,
 ) -> Result<String, DataError> {
     match (asset_class, data_type, symbol) {
         (Some(asset_class), Some(data_type), Some(symbol)) => {
             let symbol = canonical_symbol(symbol)?;
-            Ok(format!(
+            let base = format!(
                 "{COVERAGE_PARTITION_PREFIX}|{}|{}|{}",
                 asset_class.value(),
                 data_type.value(),
                 table_key(&symbol)
-            ))
+            );
+            Ok(match interval {
+                Some(interval) => format!("{base}|interval={}", table_key(interval)),
+                None => base,
+            })
         }
         _ => Ok(COVERAGE_PARTITION_PREFIX.to_string()),
     }
 }
 
 /// The coverage query mirroring `_coverage_query`.
+///
+/// A bars scan only targets an exact partition when the interval filter is
+/// present; without it the prefixed range query is used.
 fn coverage_query(
     asset_class: Option<AssetClass>,
     data_type: Option<DataType>,
     symbol: Option<&str>,
+    interval: Option<&str>,
 ) -> Result<TableQuery, DataError> {
-    if asset_class.is_some() && data_type.is_some() && symbol.is_some() {
+    let exact = asset_class.is_some()
+        && data_type.is_some()
+        && symbol.is_some()
+        && (data_type != Some(DataType::Bars) || interval.is_some());
+    if exact {
         return Ok(TableQuery::partition_eq(&coverage_partition_for_filters(
             asset_class,
             data_type,
             symbol,
+            interval,
         )?));
     }
     Ok(TableQuery::partition_range("coverage|", "coverage}"))
@@ -624,17 +672,24 @@ impl CatalogRepository for AzureTableCatalogRepository {
         &self,
         asset_class: AssetClass,
         data_type: DataType,
+        interval: Option<&str>,
         symbol: &str,
         session_date: Date,
     ) -> Result<Option<CoverageRecord>, DataError> {
-        let symbol = canonical_symbol(symbol)?;
-        let partition = format!(
-            "{COVERAGE_PARTITION_PREFIX}|{}|{}|{}",
-            asset_class.value(),
-            data_type.value(),
-            table_key(&symbol)
-        );
-        let row = session_date.isoformat();
+        let partition = coverage_partition_for_filters(
+            Some(asset_class),
+            Some(data_type),
+            Some(symbol),
+            interval,
+        )?;
+        let row = match interval {
+            Some(interval) => format!(
+                "{}|interval={}",
+                session_date.isoformat(),
+                table_key(interval)
+            ),
+            None => session_date.isoformat(),
+        };
         match self.table.get_entity(&partition, &row) {
             Ok(entity) => Ok(Some(coverage_from_entity(&entity)?)),
             Err(DataError::NotFound(_)) => Ok(None),
@@ -651,6 +706,7 @@ impl CatalogRepository for AzureTableCatalogRepository {
             asset_class,
             data_type,
             symbol,
+            interval,
             start,
             end,
         } = query;
@@ -659,7 +715,12 @@ impl CatalogRepository for AzureTableCatalogRepository {
                 return Err(DataError::value("start must be on or before end"));
             }
         }
-        let table_query = coverage_query(*asset_class, *data_type, symbol.as_deref())?;
+        let table_query = coverage_query(
+            *asset_class,
+            *data_type,
+            symbol.as_deref(),
+            interval.as_deref(),
+        )?;
         let entities = self.table.query_entities(&table_query)?;
         let mut records = entities
             .iter()
@@ -673,6 +734,9 @@ impl CatalogRepository for AzureTableCatalogRepository {
                 && canonical
                     .as_deref()
                     .is_none_or(|filter| record.symbol == filter)
+                && interval
+                    .as_deref()
+                    .is_none_or(|filter| record.interval.as_deref() == Some(filter))
                 && start.is_none_or(|filter| record.session_date >= filter)
                 && end.is_none_or(|filter| record.session_date <= filter)
         });

@@ -11,6 +11,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 num = { path = "../num" }
+lake-contracts = { path = "../../lake/contracts" }
 arrow-array = "59"
 arrow-buffer = "59"
 arrow-schema = "59"

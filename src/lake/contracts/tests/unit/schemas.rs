@@ -76,3 +76,66 @@ fn unsupported_datasets_have_no_schema() {
     );
     assert_eq!(schema_name(AssetClass::Reference, DataType::Trade), None);
 }
+
+#[test]
+fn equity_bars_schema_pins_fields_types_and_metadata() {
+    let schema = schema_for(AssetClass::Equity, DataType::Bars).expect("schema");
+    assert_eq!(
+        schema
+            .metadata()
+            .get(SCHEMA_METADATA_KEY)
+            .map(String::as_str),
+        Some("equity.bars")
+    );
+    assert_eq!(
+        schema
+            .metadata()
+            .get(SCHEMA_VERSION_METADATA_KEY)
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        field_types(&schema),
+        vec![
+            ("timestamp".into(), "Timestamp(ns, \"UTC\")".into(), false),
+            ("symbol".into(), "Utf8".into(), false),
+            ("open".into(), "Decimal128(38, 18)".into(), false),
+            ("high".into(), "Decimal128(38, 18)".into(), false),
+            ("low".into(), "Decimal128(38, 18)".into(), false),
+            ("close".into(), "Decimal128(38, 18)".into(), false),
+            ("volume".into(), "Decimal128(38, 18)".into(), false),
+        ]
+    );
+    assert_eq!(
+        schema_name(AssetClass::Equity, DataType::Bars),
+        Some("equity.bars")
+    );
+}
+
+#[test]
+fn crypto_bars_schema_mirrors_equity_bars_metadata() {
+    let schema = schema_for(AssetClass::Crypto, DataType::Bars).expect("schema");
+    assert_eq!(
+        schema
+            .metadata()
+            .get(SCHEMA_METADATA_KEY)
+            .map(String::as_str),
+        Some("crypto.bars")
+    );
+    assert_eq!(
+        schema
+            .metadata()
+            .get(SCHEMA_VERSION_METADATA_KEY)
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(schema.fields().len(), 7);
+    let expected = schema_for(AssetClass::Equity, DataType::Bars).expect("equity bars");
+    assert_eq!(field_types(&schema), field_types(&expected));
+    assert_eq!(
+        schema_name(AssetClass::Crypto, DataType::Bars),
+        Some("crypto.bars")
+    );
+    assert!(schema_name(AssetClass::Option, DataType::Bars).is_none());
+    assert!(schema_for(AssetClass::Option, DataType::Bars).is_err());
+}

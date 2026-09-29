@@ -90,8 +90,7 @@ def _model() -> dict[str, object]:
         "description": "Estimate the historical momentum continuation regularity.",
         "source": (
             "use harness_strategy_sdk::{\n"
-            "    export_study_program, MetricPublisher, QuoteEvent, StudyProgram,\n"
-            "    TradeEvent,\n"
+            "    export_study_program, BarEvent, MetricPublisher, StudyProgram,\n"
             "};\n"
             "use harness_strategy_sdk::serde_json::Value;\n"
             "\n"
@@ -102,9 +101,7 @@ def _model() -> dict[str, object]:
             "        Self\n"
             "    }\n"
             "\n"
-            "    fn on_quote(&mut self, _event: &QuoteEvent) {}\n"
-            "\n"
-            "    fn on_trade(&mut self, _event: &TradeEvent) {}\n"
+            "    fn on_bar(&mut self, _event: &BarEvent) {}\n"
             "\n"
             "    fn on_stop(&mut self, metrics: &mut MetricPublisher) {\n"
             '        let _ = metrics.publish("sharpe", 1.0);\n'
@@ -121,6 +118,7 @@ def _model() -> dict[str, object]:
             "symbols": ["SPY"],
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-03-01T00:00:00Z",
+            "interval": "1min",
         },
     }
 

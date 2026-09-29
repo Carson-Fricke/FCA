@@ -11,7 +11,7 @@ from thesis.research.models import (
 )
 
 _STUDY_SOURCE = """use harness_strategy_sdk::{
-    export_study_program, MetricPublisher, QuoteEvent, StudyProgram, TradeEvent,
+    export_study_program, BarEvent, MetricPublisher, StudyProgram,
 };
 use harness_strategy_sdk::serde_json::Value;
 
@@ -22,9 +22,7 @@ impl StudyProgram for PairModel {
         Self
     }
 
-    fn on_quote(&mut self, _event: &QuoteEvent) {}
-
-    fn on_trade(&mut self, _event: &TradeEvent) {}
+    fn on_bar(&mut self, _event: &BarEvent) {}
 
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {
         let _ = metrics.publish("observed_metric", 1.0);
@@ -35,21 +33,24 @@ export_study_program!(PairModel);
 """
 
 
-def _model() -> ResearchModel:
-    return ResearchModel(
-        model_id="pair-model",
-        version="1.0.0",
-        description="Pair regularity model.",
-        source=_STUDY_SOURCE,
-        outputs=("observed_metric",),
-        harness_configuration={
+def _model(**overrides: object) -> ResearchModel:
+    fields: dict[str, object] = {
+        "model_id": "pair-model",
+        "version": "1.0.0",
+        "description": "Pair regularity model.",
+        "source": _STUDY_SOURCE,
+        "outputs": ("observed_metric",),
+        "harness_configuration": {
             "symbols": ["MSTR", "IBIT"],
             "seed": 7,
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-03-01T00:00:00Z",
+            "interval": "1min",
         },
-        tests={"test_model.txt": "Covered by the harness jit suite.\n"},
-    )
+        "tests": {"test_model.txt": "Covered by the harness jit suite.\n"},
+    }
+    fields.update(overrides)
+    return ResearchModel(**fields)
 
 
 def test_workspace_model_publication_is_visible_and_content_addressed(
@@ -62,13 +63,13 @@ def test_workspace_model_publication_is_visible_and_content_addressed(
         def resolve_path(
             self,
             workspace_id: str,
-            relative_path: str | Path = ".",
+            relative: str | Path = ".",
             *,
             must_exist: bool = False,
         ) -> Path:
             boundary = (self.root / workspace_id).resolve(strict=False)
             boundary.mkdir(parents=True, exist_ok=True)
-            path = (boundary / relative_path).resolve(strict=must_exist)
+            path = (boundary / relative).resolve(strict=must_exist)
             if not path.is_relative_to(boundary):
                 raise ValueError("escaped")
             return path
@@ -89,23 +90,30 @@ def test_workspace_model_publication_is_visible_and_content_addressed(
 
 def test_model_source_must_be_sdk_authored() -> None:
     with pytest.raises(ResearchModelError, match="harness-strategy-sdk"):
-        ResearchModel(
-            model_id="pair-model",
-            version="1.0.0",
-            description="Pair regularity model.",
-            source="def fit(context):\n    return {}\n",
-            outputs=("observed_metric",),
-            harness_configuration={},
-            tests={},
-        )
+        _model(source="def fit(context):\n    return {}\n")
 
     with pytest.raises(ResearchModelError, match="export_study_program!"):
-        ResearchModel(
-            model_id="pair-model",
-            version="1.0.0",
-            description="Pair regularity model.",
-            source="use harness_strategy_sdk::StudyProgram;\nfn main() {}\n",
-            outputs=("observed_metric",),
-            harness_configuration={},
-            tests={},
+        _model(source="use harness_strategy_sdk::StudyProgram;\nfn main() {}\n")
+
+
+def test_model_requires_a_declared_bar_interval() -> None:
+    # A study replays bars at the declared interval; a model without one is
+    # invalid rather than silently defaulted.
+    with pytest.raises(ResearchModelError, match="bar interval"):
+        _model(
+            harness_configuration={
+                "symbols": ["MSTR", "IBIT"],
+                "start": "2024-01-01T00:00:00Z",
+                "end": "2024-03-01T00:00:00Z",
+            }
+        )
+
+    with pytest.raises(ResearchModelError, match="bar interval"):
+        _model(
+            harness_configuration={
+                "symbols": ["MSTR", "IBIT"],
+                "start": "2024-01-01T00:00:00Z",
+                "end": "2024-03-01T00:00:00Z",
+                "interval": "1h",
+            }
         )

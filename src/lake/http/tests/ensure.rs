@@ -511,3 +511,85 @@ async fn ensure_rejects_unsupported_requests() {
     assert_eq!(unknown.0, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(unknown.2["error"]["code"], "validation_error");
 }
+
+#[tokio::test]
+async fn bars_ensure_requires_the_interval_and_keeps_job_ids_distinct() {
+    let catalog = shared_catalog([]);
+    let launcher = RecordingLauncher::default();
+    let mut state = base_state(catalog);
+    state.ensure_launcher = Some(launcher.launcher());
+    let router = build_app(state);
+
+    let body = |interval: &str| {
+        json!({
+            "asset_class": "equity",
+            "data_type": "bars",
+            "symbol": "AAPL",
+            "interval": interval,
+            "start_date": "2024-01-18",
+            "end_date": "2024-01-19",
+        })
+    };
+    let (minute_status, _, minute) = send(
+        &router,
+        post_json("/v1/catalog/ensure", Some(TOKEN), body("1min")),
+    )
+    .await;
+    let (day_status, _, day) = send(
+        &router,
+        post_json("/v1/catalog/ensure", Some(TOKEN), body("1d")),
+    )
+    .await;
+
+    assert_eq!(minute_status, StatusCode::ACCEPTED);
+    assert_eq!(day_status, StatusCode::ACCEPTED);
+    assert_ne!(minute["job_id"], day["job_id"]);
+    let launched = launcher.jobs();
+    assert_eq!(launched.len(), 2);
+    assert_eq!(launched[0].request.interval.as_deref(), Some("1min"));
+    assert_eq!(launched[1].request.interval.as_deref(), Some("1d"));
+
+    let missing = send(
+        &router,
+        post_json(
+            "/v1/catalog/ensure",
+            Some(TOKEN),
+            json!({
+                "asset_class": "equity",
+                "data_type": "bars",
+                "symbol": "AAPL",
+                "start_date": "2024-01-18",
+                "end_date": "2024-01-19",
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(missing.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(missing.2["error"]["code"], "validation_error");
+    assert_eq!(
+        missing.2["error"]["details"][0]["msg"],
+        "Value error, interval is required for bars"
+    );
+
+    let option_bars = send(
+        &router,
+        post_json(
+            "/v1/catalog/ensure",
+            Some(TOKEN),
+            json!({
+                "asset_class": "option",
+                "data_type": "bars",
+                "underlying": "SPY",
+                "start_date": "2024-01-18",
+                "end_date": "2024-01-19",
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(option_bars.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(option_bars.2["error"]["code"], "validation_error");
+    assert!(option_bars.2["error"]["details"][0]["msg"]
+        .as_str()
+        .expect("message")
+        .contains("not supported for options"));
+}

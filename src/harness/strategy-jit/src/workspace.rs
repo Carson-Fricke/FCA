@@ -31,6 +31,8 @@ pub struct WorkspaceManifest {
     pub toolchain_digest: String,
     /// The SDK crate version compiled into the artifact.
     pub sdk_version: String,
+    /// The SDK ABI version compiled into the artifact.
+    pub sdk_abi_version: u32,
     /// The build completion time as seconds since the Unix epoch.
     pub built_at_unix: u64,
 }
@@ -124,6 +126,8 @@ impl ManagedWorkspace {
                         artifact_relpath: value.get("artifact_relpath")?.as_str()?.to_string(),
                         toolchain_digest: value.get("toolchain_digest")?.as_str()?.to_string(),
                         sdk_version: value.get("sdk_version")?.as_str()?.to_string(),
+                        sdk_abi_version: u32::try_from(value.get("sdk_abi_version")?.as_u64()?)
+                            .ok()?,
                         built_at_unix: value.get("built_at_unix")?.as_u64()?,
                     },
                 ))
@@ -150,6 +154,7 @@ impl ManagedWorkspace {
                         "artifact_relpath": entry.artifact_relpath,
                         "toolchain_digest": entry.toolchain_digest,
                         "sdk_version": entry.sdk_version,
+                        "sdk_abi_version": entry.sdk_abi_version,
                         "built_at_unix": entry.built_at_unix,
                     });
                     (digest.clone(), value)

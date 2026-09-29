@@ -44,11 +44,6 @@ from thesis.http.deployments import (
 from thesis.http.deployments import (
     _UnavailableTransport as _UnavailableStatusTransport,
 )
-from thesis.http.screeners import (
-    InMemoryScreenerStore,
-    ScreenerDataService,
-    ScreenerMarketPort,
-)
 from thesis.http.state import (
     InMemoryWorkspaceStateStore,
     WorkspaceStateService,
@@ -60,10 +55,12 @@ from thesis.integrations.harness_activation import (
     HarnessBoundary,
 )
 from thesis.integrations.runtime_status import RuntimeStatusClient
-from thesis.screening.engine import MarketBar, ScreenerPortError, UniverseEntry
+from thesis.screening.service import ScreenerService
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobServiceClient
+
+    from thesis.screening.runs import ScreeningToolProvider
 
 
 def _utc_now() -> datetime:
@@ -163,7 +160,6 @@ _COUNT_KEYS = (
     "backtests",
     "deployments",
     "dashboards",
-    "screeners",
 )
 
 
@@ -494,19 +490,6 @@ class _LocalStateStore:
         _JsonFile(self._directory / f"{workspace_id}.json").write(document)
 
 
-class _UnavailableMarketPort:
-    """Fail-closed market port used when none is configured."""
-
-    def universe(self, as_of: object) -> tuple[UniverseEntry, ...]:
-        raise ScreenerPortError("no screener market port is configured")
-
-    def market_data(self, symbol: str, window_end: object) -> tuple[MarketBar, ...]:
-        raise ScreenerPortError("no screener market port is configured")
-
-    def change_pct(self, symbol: str, as_of: object) -> float:
-        raise ScreenerPortError("no screener market port is configured")
-
-
 @dataclass(frozen=True, slots=True)
 class WorkspaceDataBundle:
     """The composed local services injected into the application state."""
@@ -515,10 +498,10 @@ class WorkspaceDataBundle:
     backtests: BacktestDataService
     deployments: DeploymentDataService
     dashboards: DashboardDataService
-    screeners: ScreenerDataService
     state: WorkspaceStateService
     strategies: StrategyDataService
     harness: HarnessBoundary | None = None
+    screeners: ScreenerService | None = None
 
 
 def _workspace_template_path(
@@ -576,9 +559,9 @@ def build_local_workspace_data(
     harness_transport: HarnessApiTransport | None = None,
     harness_base_url: str = "http://127.0.0.1:8777",
     harness_boundary: HarnessBoundary | None = None,
+    screener_tools: ScreeningToolProvider | None = None,
     chat_service: ChatService | None = None,
     workspace_store: WorkspaceStore | None = None,
-    market_port: ScreenerMarketPort | None = None,
     backtest_store: BacktestStore | None = None,
     artifact_importer: ArtifactImporter | None = None,
     clock: Callable[[], datetime] | None = None,
@@ -588,6 +571,10 @@ def build_local_workspace_data(
 
     ``harness_boundary`` supplies the harness MCP tool boundary (catalog-derived
     capabilities); without one the backtest launch surface fails closed.
+    ``screener_tools`` supplies the typed harness MCP surface screener runs
+    launch, poll, and import through; without one (and without a composed
+    boundary carrying an MCP client) the screener run route fails closed while
+    definitions still persist.
     ``harness_transport`` builds the status client behind the portfolio and
     risk-decision seams; without one those surfaces fail closed with 503.
     ``backtest_store`` and ``artifact_importer`` inject the backtest run
@@ -622,8 +609,14 @@ def build_local_workspace_data(
         if workspace_root is not None
         else InMemoryWorkspaceStateStore()
     )
-    screener_store = InMemoryScreenerStore()
     strategies = StrategyDataService(clock=resolved_clock, id_factory=ids)
+    # The screener client is the typed MCP surface for the harness screener
+    # tools: an explicit provider wins, else the composed boundary's MCP
+    # client is reused. Without one the run route fails closed with 503.
+    screener_provider: ScreeningToolProvider | None = screener_tools
+    if screener_provider is None and harness is not None:
+        screener_provider = getattr(harness, "client", None)
+    screeners = ScreenerService(tools=screener_provider)
 
     backtests = BacktestDataService(
         backtest_store,
@@ -635,12 +628,6 @@ def build_local_workspace_data(
     deployments = DeploymentDataService(status_client=status_client)
     dashboards = DashboardDataService(
         widget_store, clock=resolved_clock, id_factory=ids
-    )
-    screeners = ScreenerDataService(
-        store=screener_store,
-        market=market_port if market_port is not None else _UnavailableMarketPort(),
-        clock=resolved_clock,
-        id_factory=ids,
     )
     chat = chat_service if chat_service is not None else ChatService()
 
@@ -669,7 +656,6 @@ def build_local_workspace_data(
                 deployments.store.list_deployments(workspace_id)
             ),
             "dashboards": lambda workspace_id: len(widget_store.list(workspace_id)),
-            "screeners": lambda workspace_id: len(screener_store.list(workspace_id)),
             "chats": lambda workspace_id: len(open_chats(workspace_id)),
             "strategies": lambda workspace_id: len(strategies.store.list(workspace_id)),
         },
@@ -680,10 +666,10 @@ def build_local_workspace_data(
         backtests=backtests,
         deployments=deployments,
         dashboards=dashboards,
-        screeners=screeners,
         state=WorkspaceStateService(state_store),
         strategies=strategies,
         harness=harness,
+        screeners=screeners,
     )
 
 

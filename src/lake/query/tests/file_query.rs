@@ -35,6 +35,7 @@ fn equity_request(symbol: &str, start_date: Date, end_date: Date) -> FileQueryRe
         start_date,
         end_date,
         ensure: false,
+        interval: None,
     }
 }
 
@@ -46,6 +47,7 @@ fn crypto_request(symbol: &str, start_date: Date, end_date: Date) -> FileQueryRe
         start_date,
         end_date,
         ensure: false,
+        interval: None,
     }
 }
 
@@ -73,13 +75,20 @@ fn coverage_record(
             None
         },
         None,
+        None,
     )
     .expect("valid coverage record")
 }
 
 fn complete_equity_record(symbol: &str, session_date: Date) -> CoverageRecord {
-    let object_path = partition_path(session_date, AssetClass::Equity, DataType::Trade, symbol)
-        .expect("canonical path");
+    let object_path = partition_path(
+        session_date,
+        AssetClass::Equity,
+        DataType::Trade,
+        None,
+        symbol,
+    )
+    .expect("canonical path");
     coverage_record(
         AssetClass::Equity,
         DataType::Trade,
@@ -91,8 +100,14 @@ fn complete_equity_record(symbol: &str, session_date: Date) -> CoverageRecord {
 }
 
 fn complete_crypto_quote_record(session_date: Date) -> CoverageRecord {
-    let object_path = partition_path(session_date, AssetClass::Crypto, DataType::Quote, "BTC/USD")
-        .expect("canonical path");
+    let object_path = partition_path(
+        session_date,
+        AssetClass::Crypto,
+        DataType::Quote,
+        None,
+        "BTC/USD",
+    )
+    .expect("canonical path");
     coverage_record(
         AssetClass::Crypto,
         DataType::Quote,
@@ -159,7 +174,7 @@ impl FileUrlIssuer for FailingIssuer {
 }
 
 fn counting_callback(calls: Arc<AtomicUsize>) -> EnsureCallback {
-    Arc::new(move |_, _, _, _, _| {
+    Arc::new(move |_, _, _, _, _, _| {
         let calls = Arc::clone(&calls);
         Box::pin(async move {
             calls.fetch_add(1, Ordering::SeqCst);
@@ -169,7 +184,7 @@ fn counting_callback(calls: Arc<AtomicUsize>) -> EnsureCallback {
 }
 
 fn failing_callback(calls: Arc<AtomicUsize>) -> EnsureCallback {
-    Arc::new(move |_, _, _, _, _| {
+    Arc::new(move |_, _, _, _, _, _| {
         let calls = Arc::clone(&calls);
         Box::pin(async move {
             calls.fetch_add(1, Ordering::SeqCst);
@@ -187,7 +202,7 @@ fn ensuring_callback(
     records: Vec<CoverageRecord>,
     calls: Arc<AtomicUsize>,
 ) -> EnsureCallback {
-    Arc::new(move |_, _, _, _, _| {
+    Arc::new(move |_, _, _, _, _, _| {
         let catalog = Arc::clone(&catalog);
         let records = records.clone();
         let calls = Arc::clone(&calls);
@@ -226,7 +241,7 @@ async fn complete_coverage_returns_canonical_files_and_issued_urls() {
     .expect("complete query");
 
     let expected_path =
-        partition_path(jan_18, AssetClass::Equity, DataType::Trade, "AAPL").expect("path");
+        partition_path(jan_18, AssetClass::Equity, DataType::Trade, None, "AAPL").expect("path");
     assert_eq!(
         response.results,
         lake_query::FileQueryResults {
@@ -344,9 +359,14 @@ async fn ensure_requested_with_an_empty_session_stays_pending() {
     );
     assert_eq!(
         issuer.paths(),
-        vec![
-            partition_path(date(1, 18), AssetClass::Equity, DataType::Trade, "AAPL").expect("path")
-        ]
+        vec![partition_path(
+            date(1, 18),
+            AssetClass::Equity,
+            DataType::Trade,
+            None,
+            "AAPL"
+        )
+        .expect("path")]
     );
 }
 
@@ -454,7 +474,7 @@ async fn satisfied_after_ensure_returns_complete() {
 }
 
 /// Recorded ensure-callback arguments.
-type CapturedCalls = Arc<Mutex<Vec<(AssetClass, DataType, String, Date, Date)>>>;
+type CapturedCalls = Arc<Mutex<Vec<(AssetClass, DataType, Option<String>, String, Date, Date)>>>;
 
 #[tokio::test]
 async fn ensure_callback_receives_the_request_identity() {
@@ -462,12 +482,13 @@ async fn ensure_callback_receives_the_request_identity() {
     let captured: CapturedCalls = Arc::new(Mutex::new(Vec::new()));
     let callback: EnsureCallback = Arc::new({
         let captured = Arc::clone(&captured);
-        move |asset_class, data_type, symbol, start_date, end_date| {
+        move |asset_class, data_type, interval, symbol, start_date, end_date| {
             let captured = Arc::clone(&captured);
             Box::pin(async move {
                 captured.lock().expect("lock").push((
                     asset_class,
                     data_type,
+                    interval,
                     symbol,
                     start_date,
                     end_date,
@@ -499,6 +520,7 @@ async fn ensure_callback_receives_the_request_identity() {
         [(
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "aapl".to_string(),
             date(1, 18),
             date(1, 19)
@@ -767,6 +789,7 @@ async fn crypto_weekend_window_uses_canonical_pairs() {
                 *session_date,
                 AssetClass::Crypto,
                 DataType::Quote,
+                None,
                 "BTC/USD",
             )
             .expect("path")
@@ -788,6 +811,132 @@ async fn crypto_weekend_window_uses_canonical_pairs() {
         .all(|path| path.ends_with("/BTC%2FUSD.parquet")));
     assert!(response.files.iter().all(|file| file.symbol == "BTC/USD"));
     assert_eq!(issuer.paths(), expected_paths);
+}
+
+fn complete_equity_bars_record(interval: &str, session_date: Date) -> CoverageRecord {
+    let object_path = partition_path(
+        session_date,
+        AssetClass::Equity,
+        DataType::Bars,
+        Some(interval),
+        "AAPL",
+    )
+    .expect("canonical path");
+    CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        "AAPL",
+        session_date,
+        CoverageStatus::Complete,
+        Some(object_path),
+        12,
+        3456,
+        Some("checksum".to_string()),
+        None,
+        Some(interval.to_string()),
+    )
+    .expect("valid bars record")
+}
+
+#[tokio::test]
+async fn bars_queries_return_the_interval_partition_and_reject_bad_intervals() {
+    let jan_18 = date(1, 18);
+    let catalog =
+        MemoryCatalogRepository::from_records([complete_equity_bars_record("1min", jan_18)]);
+    let issuer = RecordingIssuer::default();
+    let request = FileQueryRequest {
+        data_type: DataType::Bars,
+        interval: Some("1min".to_string()),
+        ..equity_request("aapl", jan_18, jan_18)
+    };
+
+    let response = execute_file_query(
+        FileQueryContext {
+            catalog: &catalog,
+            listings: None,
+            sas_issuer: Some(&issuer),
+            ensure_callback: None,
+            bounded_query: None,
+            force_authorized: false,
+            as_of: as_of_monday(),
+        },
+        &request,
+    )
+    .await
+    .expect("bars query");
+
+    assert_eq!(response.files.len(), 1);
+    assert_eq!(response.files[0].data_type, DataType::Bars);
+    assert_eq!(response.files[0].interval.as_deref(), Some("1min"));
+    assert_eq!(
+        response.files[0].object_path,
+        "date=2024-01-18/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet"
+    );
+
+    let day = FileQueryRequest {
+        interval: Some("1d".to_string()),
+        ..request.clone()
+    };
+    let error = execute_file_query(
+        FileQueryContext {
+            catalog: &catalog,
+            listings: None,
+            sas_issuer: Some(&issuer),
+            ensure_callback: None,
+            bounded_query: None,
+            force_authorized: false,
+            as_of: as_of_monday(),
+        },
+        &day,
+    )
+    .await
+    .expect_err("1d is a different partition");
+    assert_eq!(error.code, "coverage_incomplete");
+
+    let missing = FileQueryRequest {
+        interval: None,
+        ..request.clone()
+    };
+    let error = execute_file_query(
+        FileQueryContext {
+            catalog: &catalog,
+            listings: None,
+            sas_issuer: Some(&issuer),
+            ensure_callback: None,
+            bounded_query: None,
+            force_authorized: false,
+            as_of: as_of_monday(),
+        },
+        &missing,
+    )
+    .await
+    .expect_err("bars without an interval");
+    assert_eq!(error.code, "validation_error");
+    assert_eq!(error.message, "bars requires an interval");
+
+    let unknown = FileQueryRequest {
+        interval: Some("5m".to_string()),
+        ..request
+    };
+    let error = execute_file_query(
+        FileQueryContext {
+            catalog: &catalog,
+            listings: None,
+            sas_issuer: Some(&issuer),
+            ensure_callback: None,
+            bounded_query: None,
+            force_authorized: false,
+            as_of: as_of_monday(),
+        },
+        &unknown,
+    )
+    .await
+    .expect_err("unknown interval token");
+    assert_eq!(error.code, "validation_error");
+    assert_eq!(
+        error.message,
+        "invalid bar interval: \"5m\"; expected one of 1min, 1d"
+    );
 }
 
 #[tokio::test]

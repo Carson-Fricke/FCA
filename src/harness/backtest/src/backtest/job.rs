@@ -1,27 +1,25 @@
 //! End-to-end backtest job on the Rust stack.
 //!
 //! Mirrors the `backtest-job` console script: read a configuration document,
-//! require the `backtest` shell, run one deterministic backtest through the
-//! Rust kernels, and write the complete artifact set — the canonical
+//! require the `backtest` shell, ensure and stream the run window's market data
+//! from the market-lake routes, run one deterministic backtest through the Rust
+//! kernels, and write the complete artifact set — the canonical
 //! `backtest.json` document, `metrics.json`, the offline `report.html`, and the
 //! results recorder's linked Parquet artifact trail plus its run manifest.
 //!
-//! [`BacktestJobRunner`] is the seam the `harness-api` binary calls: it owns
-//! the optional output directory and runs one job against a configuration
-//! path. The integration crate adapts it behind its own command surface.
+//! The routes are read through the injected [`BlockingLakeClient`]. There is no
+//! data-directory parameter and no synthetic fallback: a run whose lake cannot
+//! serve the window fails loudly.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use harness_lakeclient::{BlockingLakeClient, EnsureSpec, ReadSpec};
 use num::Decimal18;
 
-use marketdata::{Date, LocalLakeReader};
+use marketdata::{BarInterval, DataType, Date};
 
 use crate::backtest::config::BacktestConfig;
-use crate::backtest::engine::{
-    run_backtest, ApproveAll, BacktestOptions, ExecutionModel, ImmediateFill, RiskModel,
-    StrategyRuntime, TradeBuyStrategy,
-};
 use crate::backtest::engine_core::{
     build_default_manifest, run_native_engine, BacktestOutcome, EngineOptions, StrategyInstance,
 };
@@ -29,8 +27,8 @@ use crate::backtest::errors::{BacktestError, ONE_DAY_NS};
 use crate::backtest::fixture::{
     ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture, SyntheticDataOptions,
 };
-use crate::backtest::manifest::BacktestResult;
 use crate::backtest::preflight::preflight_data;
+use crate::backtest::screen::ScreenConfig;
 use crate::backtest::yaml::YamlValue;
 use crate::canonical_json::JsonValue;
 use crate::results::metrics::{
@@ -50,6 +48,8 @@ pub enum BacktestJobError {
     MissingShell,
     /// The shell is not `backtest`.
     WrongShell(String),
+    /// The shell is not `screen`.
+    WrongScreenShell(String),
     /// The engine rejected the run.
     Engine(String),
     /// An artifact could not be written.
@@ -67,6 +67,12 @@ impl std::fmt::Display for BacktestJobError {
                     "configuration shell must be 'backtest', not '{shell}'"
                 )
             }
+            Self::WrongScreenShell(shell) => {
+                write!(
+                    formatter,
+                    "configuration shell must be 'screen', not '{shell}'"
+                )
+            }
             Self::Engine(message) => write!(formatter, "{message}"),
             Self::Artifact(message) => write!(formatter, "{message}"),
         }
@@ -78,68 +84,6 @@ impl std::error::Error for BacktestJobError {}
 impl From<BacktestError> for BacktestJobError {
     fn from(error: BacktestError) -> Self {
         Self::Engine(error.to_string())
-    }
-}
-
-/// The canonical summary the job prints after a run.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BacktestJobSummary {
-    /// Run identifier.
-    pub run_id: String,
-    /// Terminal status (`completed` or `aborted`).
-    pub status: String,
-    /// Canonical manifest hash.
-    pub manifest_hash: String,
-    /// Artifact digest.
-    pub artifact_digest: String,
-    /// Outcome digest.
-    pub outcome_digest: String,
-    /// Number of market events consumed.
-    pub market_events: u64,
-    /// Number of orders submitted.
-    pub orders: u64,
-    /// Number of fills produced.
-    pub fills: u64,
-    /// Path of the written `backtest.json` artifact.
-    pub artifact_path: PathBuf,
-    /// Path of the written `metrics.json` artifact.
-    pub metrics_path: PathBuf,
-    /// Path of the written `report.html` artifact.
-    pub report_path: PathBuf,
-    /// Directory holding the recorder's linked artifact trail.
-    pub artifact_dir: PathBuf,
-    /// Recorder run digest over the linked artifact trail.
-    pub recorder_digest: String,
-    /// Failure reason, present when the run did not complete.
-    pub reason: Option<String>,
-}
-
-impl BacktestJobSummary {
-    /// Render the summary exactly as the CLI writes it to stdout.
-    #[must_use]
-    pub fn stdout_lines(&self) -> Vec<String> {
-        vec![
-            format!("run_id: {}", self.run_id),
-            format!("status: {}", self.status),
-            format!("manifest_hash: {}", self.manifest_hash),
-            format!("artifact_digest: {}", self.artifact_digest),
-            format!("outcome_digest: {}", self.outcome_digest),
-            format!("market_events: {}", self.market_events),
-            format!("orders: {}", self.orders),
-            format!("fills: {}", self.fills),
-            format!("artifacts: {}", self.artifact_path.display()),
-        ]
-    }
-
-    /// Every artifact path written for this run, in canonical order.
-    #[must_use]
-    pub fn artifact_paths(&self) -> Vec<PathBuf> {
-        vec![
-            self.artifact_path.clone(),
-            self.metrics_path.clone(),
-            self.report_path.clone(),
-            self.artifact_dir.clone(),
-        ]
     }
 }
 
@@ -268,28 +212,6 @@ pub fn parse_timestamp_ns(value: &str) -> Option<i64> {
 pub(crate) const DEFAULT_START_NS: i64 = 19_723 * ONE_DAY_NS;
 pub(crate) const DEFAULT_END_NS: i64 = 19_725 * ONE_DAY_NS;
 
-/// Run one backtest job using the built-in deterministic strategy seam.
-///
-/// # Errors
-///
-/// Returns [`BacktestJobError`] when the configuration is missing or invalid,
-/// the engine rejects the run, or an artifact cannot be written.
-pub fn run_backtest_job(
-    config_path: &Path,
-    output_dir: Option<&Path>,
-) -> Result<BacktestJobSummary, BacktestJobError> {
-    let configuration = load_backtest_config(config_path)?;
-    let options = BacktestOptions::default();
-    run_job_with(
-        &configuration,
-        &options,
-        output_dir,
-        &mut TradeBuyStrategy::default(),
-        &mut ApproveAll,
-        &mut ImmediateFill,
-    )
-}
-
 /// Load and validate the resolved fields one backtest job reads.
 ///
 /// The full Python loader in `harness.configuration` validates the whole schema
@@ -326,12 +248,16 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
 ///
 /// A study reuses the replay configuration shape but declares the `study`
 /// shell, so it is never confused with a backtest. The strategy-instance list
-/// names platform study programs rather than user strategies.
+/// names platform study programs rather than user strategies, and the raw
+/// document must declare `data.bar_interval` explicitly — a study never falls
+/// back to the backtest default token. The declared interval must be a string
+/// holding a canonical bar token (`1min`, `1d`).
 ///
 /// # Errors
 ///
 /// Returns [`BacktestJobError`] when the document is missing a `study` shell,
-/// carries an invalid window, or cannot be read.
+/// omits a string `data.bar_interval`, carries an invalid window or bar
+/// interval, or cannot be read.
 pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJobError> {
     let text = std::fs::read_to_string(config_path)
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
@@ -339,19 +265,52 @@ pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJ
     if shell != "study" {
         return Err(BacktestJobError::WrongShell(shell));
     }
+    let value = if text.trim_start().starts_with('{') {
+        let document: serde_json::Value =
+            serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        json_to_yaml(&document)
+    } else {
+        crate::backtest::yaml::load_yaml(&text)
+            .map_err(|error| BacktestJobError::from(BacktestError::Configuration(error.0)))?
+    };
+    require_study_bar_interval(&value)?;
+    let configuration = resolve_authored_sources(
+        BacktestConfig::from_yaml_value(&value).map_err(BacktestJobError::from)?,
+        config_path,
+    )?;
+    study_bar_interval(&configuration)?;
+    Ok(configuration)
+}
+
+/// Load and validate one screening configuration document (shell `screen`).
+///
+/// The frozen wire shape carries the authored Rust source (or a
+/// `source_path` resolved relative to the document) plus its `bundle_hash`,
+/// and the definition provenance Thesis attaches to the run. A document whose
+/// shell is not `screen`, whose keys are unknown, or whose `bundle_hash` does
+/// not match the LF-normalized source fails before any JIT work starts.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when the document is missing a `screen` shell,
+/// carries an invalid or mismatched configuration, or cannot be read.
+pub fn load_screen_config(config_path: &Path) -> Result<ScreenConfig, BacktestJobError> {
+    let text = std::fs::read_to_string(config_path)
+        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
+    if shell != "screen" {
+        return Err(BacktestJobError::WrongScreenShell(shell));
+    }
+    let base_dir = config_path.parent();
     if text.trim_start().starts_with('{') {
         let document: serde_json::Value =
             serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        return resolve_authored_sources(
-            BacktestConfig::from_yaml_value(&json_to_yaml(&document))
-                .map_err(BacktestJobError::from)?,
-            config_path,
-        );
+        return ScreenConfig::from_json_value_with_base(&document, base_dir)
+            .map_err(BacktestJobError::from);
     }
-    resolve_authored_sources(
-        BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
-        config_path,
-    )
+    let value = crate::backtest::yaml::load_yaml(&text)
+        .map_err(|error| BacktestJobError::from(BacktestError::Configuration(error.0)))?;
+    ScreenConfig::from_yaml_value_with_base(&value, base_dir).map_err(BacktestJobError::from)
 }
 
 fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
@@ -414,143 +373,31 @@ fn resolve_authored_sources(
     Ok(configuration)
 }
 
-/// The seam the `harness-api` binary calls to run one backtest job.
-#[derive(Clone, Debug, Default)]
-pub struct BacktestJobRunner {
-    output_dir: Option<PathBuf>,
-}
-
-impl BacktestJobRunner {
-    /// Create a runner using the default output directory.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create a runner writing artifacts under `output_dir`.
-    #[must_use]
-    pub fn with_output_dir(output_dir: PathBuf) -> Self {
-        Self {
-            output_dir: Some(output_dir),
-        }
-    }
-
-    /// The configured output directory, if any.
-    #[must_use]
-    pub fn output_dir(&self) -> Option<&Path> {
-        self.output_dir.as_deref()
-    }
-
-    /// Run one backtest job for a configuration document.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`BacktestJobError`] under the same conditions as
-    /// [`run_backtest_job`].
-    pub fn run(&self, config_path: &Path) -> Result<BacktestJobSummary, BacktestJobError> {
-        run_backtest_job(config_path, self.output_dir.as_deref())
-    }
-}
-
-/// Run one backtest job with injected strategy, risk, and execution seams.
-///
-/// # Errors
-///
-/// Returns [`BacktestJobError`] when the engine rejects the run or an artifact
-/// cannot be written.
-pub fn run_job_with(
-    configuration: &BacktestConfig,
-    options: &BacktestOptions,
-    output_dir: Option<&Path>,
-    strategy: &mut dyn StrategyRuntime,
-    risk: &mut dyn RiskModel,
-    execution: &mut dyn ExecutionModel,
-) -> Result<BacktestJobSummary, BacktestJobError> {
-    let result = run_backtest(configuration, None, options, strategy, risk, execution)?;
-    let directory = output_dir.map_or_else(
-        || {
-            PathBuf::from(".local")
-                .join("backtests")
-                .join(&configuration.run_id)
-        },
-        Path::to_path_buf,
-    );
-    std::fs::create_dir_all(&directory).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-    let artifact_path = write_artifact(&directory, &configuration.run_id, &result)?;
-    let fills = ledger_fills_from_result(&result);
-    let orders = ledger_orders_from_result(&result);
-    let ledger = build_ledger(configuration, &fills, &orders);
-    let counts = JobCounts {
-        market_events: result.market_event_count,
-        dispatched: result.dispatched_count,
-        orders: result.order_count,
-        fills: result.fill_count,
-    };
-    let metrics_path = write_metrics(
-        &directory,
-        &configuration.run_id,
-        result.status.value(),
-        &counts,
-        &ledger,
-        &BTreeMap::new(),
-    )?;
-    let report_path = write_report(
-        &directory,
-        &configuration.run_id,
-        configuration.seed,
-        &ledger,
-    )?;
-    let artifact_dir = directory.join("artifacts");
-    let recorder = record_artifacts(
-        &artifact_dir,
-        configuration,
-        &orders,
-        &fills,
-        &ledger,
-        &BTreeMap::new(),
-    )?;
-    Ok(summarize(
-        &result,
-        artifact_path,
-        metrics_path,
-        report_path,
-        artifact_dir,
-        recorder,
-    ))
-}
-
-/// Run one native engine job over a local Parquet lake.
+/// Run one native engine job over the market-lake routes.
 ///
 /// The engine core, fee schedule, venue, portfolio, and risk pipeline are all
-/// native Rust; the strategies stay Python and are driven through
+/// native Rust; the strategies are JIT-authored Rust programs driven through
 /// [`StrategyInstance`]. Writes the canonical `backtest.json` artifact and
 /// returns the outcome with its path.
 ///
-/// # Errors
-///
-/// Returns [`BacktestJobError`] when the configuration, data source, engine, or
-/// artifact write fails.
-/// Run one native engine job over a local Parquet lake.
-///
-/// The run window's Hive lake partitions are read from the directory tree and
-/// replayed. The full-precision scales keep the lake's 18-digit decimals
-/// lossless through the Python-compatible decimal seam. A lake that cannot
-/// serve the configured window fails the job: a run without its market data
-/// must never quietly substitute a different fixture.
+/// The run window's quote and trade data is ensured and streamed through the
+/// injected [`BlockingLakeClient`]; a lake that cannot serve the configured
+/// window fails the job. A run without a configured lake endpoint never reaches
+/// this function: the client cannot be built.
 ///
 /// # Errors
 ///
 /// Returns [`BacktestJobError`] when the configuration, data source, engine, or
 /// artifact write fails.
 #[allow(clippy::too_many_arguments)]
-pub fn run_native_job_with_data_dir(
+pub fn run_native_job_with_lake_client(
     configuration: &BacktestConfig,
     engine_options: &EngineOptions,
     output_dir: Option<&Path>,
     strategies: Vec<StrategyInstance>,
-    data_dir: &Path,
+    client: &BlockingLakeClient,
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    let fixture = lake_fixture(configuration, data_dir)?;
+    let fixture = lake_fixture(configuration, client)?;
     let outcome = run_native_engine_outcome(
         configuration,
         engine_options,
@@ -576,14 +423,14 @@ pub fn run_native_job_with_data_dir(
 ///
 /// Returns [`BacktestJobError`] when the configuration, fixture, engine, or
 /// artifact write fails.
-pub fn run_native_study_job_with_data_dir(
+pub fn run_native_study_job_with_lake_client(
     configuration: &BacktestConfig,
     engine_options: &EngineOptions,
     output_dir: Option<&Path>,
     programs: Vec<StrategyInstance>,
-    data_dir: &Path,
+    client: &BlockingLakeClient,
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    let fixture = lake_fixture(configuration, data_dir)?;
+    let fixture = lake_fixture(configuration, client)?;
     let outcome = run_native_engine_outcome(
         configuration,
         engine_options,
@@ -596,11 +443,11 @@ pub fn run_native_study_job_with_data_dir(
     Ok((outcome, artifact_path))
 }
 
-/// Drive the native engine for one job over a lake directory.
+/// Drive the native engine for one job over a lake fixture.
 ///
-/// The lake directory is load-bearing: when it cannot serve the configured
-/// window the job fails with the reader's error, so a run over missing data
-/// never reports fabricated results.
+/// The fixture is load-bearing: the route reads that built it already failed
+/// loudly when the lake could not serve the configured window, so a run never
+/// reports fabricated results.
 fn run_native_engine_outcome(
     configuration: &BacktestConfig,
     engine_options: &EngineOptions,
@@ -711,66 +558,45 @@ fn lake_scale_options() -> SyntheticDataOptions {
     }
 }
 
-/// Build a replay fixture from a local Parquet lake directory.
+/// Build a replay fixture from the market-lake read route.
 ///
-/// Every configured symbol is read from the equity asset class, and symbols
-/// shaped like a crypto pair (`BTC-USD`) additionally read their `BASE/QUOTE`
-/// crypto partition. Fetched crypto events are re-keyed to the configured
-/// dashed symbol so the fixture, preflight, and research context all agree.
+/// The configuration shell selects the replay data type. A `study` run
+/// ensures and reads `data.bar_interval` bars for every configured symbol and
+/// replays bars only; a backtest ensures and reads the run window's trades and
+/// quotes exactly as before. Equity symbols use the `equity` asset class;
+/// symbols shaped like a crypto pair (`BTC-USD`) use the `crypto` asset class
+/// with their canonical `BASE/QUOTE` symbol. Fetched crypto events are re-keyed
+/// to the configured dashed symbol so the fixture, preflight, and research
+/// context all agree.
 ///
 /// # Errors
 ///
-/// Returns [`BacktestJobError`] when the directory holds no in-window events or
-/// cannot be read.
+/// Returns [`BacktestJobError`] when the lake cannot serve the configured
+/// window, the study bar interval is not a canonical token, or the route
+/// payload cannot be decoded. There is no synthetic fallback.
 pub fn lake_fixture(
     configuration: &BacktestConfig,
-    data_dir: &Path,
+    client: &BlockingLakeClient,
 ) -> Result<ReplayFixture, BacktestJobError> {
-    let lake_root = if data_dir.join("objects").is_dir() {
-        data_dir.join("objects")
-    } else {
-        data_dir.to_path_buf()
-    };
     let start_date = Date::from_days(configuration.start_ns.div_euclid(ONE_DAY_NS) as i32);
     let end_date = Date::from_days(configuration.end_ns.div_euclid(ONE_DAY_NS) as i32);
-    let reader = LocalLakeReader::new(&lake_root);
-    let mut events: Vec<MarketEvent> = Vec::new();
-    for symbol in &configuration.symbols {
-        let equity = reader
-            .read(
-                marketdata::AssetClass::Equity,
-                start_date,
-                end_date,
-                std::slice::from_ref(symbol),
-            )
-            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        events.extend(
-            equity
-                .iter()
-                .filter(|event| in_window(event, configuration))
-                .map(|event| lake_event(event, symbol)),
-        );
-        if let Some(pair) = marketdata::crypto_pair(symbol) {
-            let crypto = reader
-                .read(
-                    marketdata::AssetClass::Crypto,
-                    start_date,
-                    end_date,
-                    std::slice::from_ref(&pair),
-                )
-                .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-            events.extend(
-                crypto
-                    .iter()
-                    .filter(|event| in_window(event, configuration))
-                    .map(|event| lake_event(event, symbol)),
-            );
-        }
-    }
+    let start_text = start_date.isoformat();
+    let end_text = end_date.isoformat();
+    let mut events = if configuration.shell == "study" {
+        lake_study_bar_events(configuration, client, &start_text, &end_text)?
+    } else {
+        lake_tick_events(configuration, client, &start_text, &end_text)?
+    };
     if events.is_empty() {
+        let expected = if configuration.shell == "study" {
+            "bar"
+        } else {
+            "quote or trade"
+        };
         return Err(BacktestJobError::Io(format!(
-            "no market-lake events found under {} for the configured window",
-            data_dir.display()
+            "the market lake served no {expected} events for the configured window \
+             {start_text}..{end_text} (symbols: {}); ensure the lake covers the run window",
+            configuration.symbols.join(", ")
         )));
     }
     events.sort_by(|left, right| {
@@ -784,11 +610,148 @@ pub fn lake_fixture(
     Ok(ReplayFixture {
         sessions,
         events,
-        source_id: format!("lake:{}", data_dir.display()),
+        source_id: format!("lake:{}", client.base_url()),
         symbols: configuration.symbols.clone(),
         fingerprints,
         expected_data_fingerprint: None,
     })
+}
+
+/// Require an explicitly declared `data.bar_interval` in a raw study document.
+///
+/// A study must name its data source: unlike a backtest it has no default bar
+/// token, so an absent or non-string interval fails loudly before any typed
+/// parsing or lake traffic. The canonical token vocabulary is enforced
+/// afterwards by [`study_bar_interval`].
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError::Engine`] when `data.bar_interval` is absent or
+/// is not a string.
+fn require_study_bar_interval(value: &YamlValue) -> Result<(), BacktestJobError> {
+    let interval = value
+        .as_mapping()
+        .and_then(|root| root.get("data"))
+        .and_then(YamlValue::as_mapping)
+        .and_then(|data| data.get("bar_interval"))
+        .and_then(YamlValue::as_str);
+    if interval.is_some() {
+        return Ok(());
+    }
+    Err(BacktestJobError::Engine(
+        "study configuration requires data.bar_interval (1min or 1d)".to_string(),
+    ))
+}
+
+/// The canonical bar interval a study configuration must carry.
+///
+/// Backtests keep their existing behavior: the interval only constrains study
+/// bar replay, so a backtest with an out-of-vocabulary `bar_interval` is left
+/// untouched.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError::Engine`] when the configured interval is not one
+/// of the canonical tokens (`1min`, `1d`).
+fn study_bar_interval(configuration: &BacktestConfig) -> Result<BarInterval, BacktestJobError> {
+    BarInterval::parse(&configuration.data_bar_interval).map_err(|error| {
+        BacktestJobError::Engine(format!("study data.bar_interval is invalid: {error}"))
+    })
+}
+
+/// Ensure and read the study window's bars for every configured symbol.
+fn lake_study_bar_events(
+    configuration: &BacktestConfig,
+    client: &BlockingLakeClient,
+    start_text: &str,
+    end_text: &str,
+) -> Result<Vec<MarketEvent>, BacktestJobError> {
+    let interval = study_bar_interval(configuration)?;
+    let mut events: Vec<MarketEvent> = Vec::new();
+    for symbol in &configuration.symbols {
+        let (asset_class, lake_symbol) = match marketdata::crypto_pair(symbol) {
+            Some(pair) => ("crypto", pair),
+            None => ("equity", symbol.trim().to_uppercase()),
+        };
+        let ensure = EnsureSpec::new(
+            asset_class,
+            DataType::Bars.value(),
+            &lake_symbol,
+            start_text,
+            end_text,
+        )
+        .with_interval(interval.value());
+        client
+            .ensure(&ensure)
+            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        let read = ReadSpec::new(
+            asset_class,
+            DataType::Bars.value(),
+            &lake_symbol,
+            start_text,
+            end_text,
+        )
+        .with_interval(interval.value());
+        let batches = client
+            .read_arrow(&read)
+            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        let decoded = marketdata::events_from_arrow(DataType::Bars, &lake_symbol, &batches)
+            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        events.extend(
+            decoded
+                .iter()
+                .filter(|event| in_window(event, configuration))
+                .map(|event| lake_event(event, symbol)),
+        );
+    }
+    Ok(events)
+}
+
+/// Ensure and read the backtest window's trades and quotes per symbol.
+fn lake_tick_events(
+    configuration: &BacktestConfig,
+    client: &BlockingLakeClient,
+    start_text: &str,
+    end_text: &str,
+) -> Result<Vec<MarketEvent>, BacktestJobError> {
+    let mut events: Vec<MarketEvent> = Vec::new();
+    for symbol in &configuration.symbols {
+        let (asset_class, lake_symbol) = match marketdata::crypto_pair(symbol) {
+            Some(pair) => ("crypto", pair),
+            None => ("equity", symbol.trim().to_uppercase()),
+        };
+        for data_type in [DataType::Quote, DataType::Trade] {
+            let ensure = EnsureSpec::new(
+                asset_class,
+                data_type.value(),
+                &lake_symbol,
+                start_text,
+                end_text,
+            );
+            client
+                .ensure(&ensure)
+                .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+            let read = ReadSpec::new(
+                asset_class,
+                data_type.value(),
+                &lake_symbol,
+                start_text,
+                end_text,
+            );
+            let batches = client
+                .read_arrow(&read)
+                .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+            let decoded = marketdata::events_from_arrow(data_type, &lake_symbol, &batches)
+                .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+            events.extend(
+                decoded
+                    .iter()
+                    .filter(|event| in_window(event, configuration))
+                    .map(|event| lake_event(event, symbol)),
+            );
+        }
+    }
+    Ok(events)
 }
 
 fn in_window(event: &marketdata::MarketEvent, configuration: &BacktestConfig) -> bool {
@@ -820,6 +783,17 @@ fn lake_event(event: &marketdata::MarketEvent, symbol: &str) -> MarketEvent {
             venue: trade.venue.clone().unwrap_or_default(),
             trade_id: trade.trade_id.clone().unwrap_or_default(),
         },
+        marketdata::MarketEvent::Bar(bar) => MarketEvent::Bar {
+            event_id: bar.event_id.clone(),
+            timestamp_ns: bar.timestamp.to_nanos(),
+            sequence: bar.sequence,
+            symbol: symbol.to_string(),
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            volume: bar.volume,
+        },
     }
 }
 
@@ -827,6 +801,7 @@ const fn class_priority(event: &MarketEvent) -> u8 {
     match event {
         MarketEvent::Quote { .. } => 0,
         MarketEvent::Trade { .. } => 1,
+        MarketEvent::Bar { .. } => marketdata::EventType::Bar.priority(),
     }
 }
 
@@ -845,22 +820,6 @@ fn sessions_from_events(events: &[MarketEvent]) -> Vec<ExchangeSession> {
             close_ns: (day + 1) * ONE_DAY_NS,
         })
         .collect()
-}
-
-fn write_artifact(
-    directory: &Path,
-    run_id: &str,
-    result: &BacktestResult,
-) -> Result<PathBuf, BacktestJobError> {
-    let path = directory.join("backtest.json");
-    let mut payload = result.artifact_json().into_bytes();
-    payload.push(b'\n');
-    // The run identifier is embedded in the manifest, so the written document
-    // is self-describing and independent of the directory name.
-    debug_assert_eq!(result.manifest.run_id, run_id);
-    std::fs::write(&path, payload)
-        .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
-    Ok(path)
 }
 
 /// One point of the deterministic job ledger derived from the run's fills.
@@ -912,37 +871,6 @@ struct LedgerOrder {
 
 fn parse_dec(value: &str) -> Decimal18 {
     value.parse::<Decimal18>().unwrap_or(Decimal18::ZERO)
-}
-
-fn ledger_fills_from_result(result: &BacktestResult) -> Vec<LedgerFill> {
-    result
-        .fills
-        .iter()
-        .map(|fill| LedgerFill {
-            fill_id: fill.fill_id.clone(),
-            order_id: fill.order_id.clone(),
-            symbol: fill.symbol.clone(),
-            side: fill.side.value().to_string(),
-            quantity: fill.quantity.clone(),
-            price: fill.price.clone(),
-            fee: fill.fee.clone(),
-            timestamp_ns: fill.timestamp_ns,
-            sequence: fill.sequence,
-        })
-        .collect()
-}
-
-fn ledger_orders_from_result(result: &BacktestResult) -> Vec<LedgerOrder> {
-    result
-        .orders
-        .iter()
-        .map(|order| LedgerOrder {
-            order_id: order.order_id.clone(),
-            symbol: order.symbol.clone(),
-            side: order.side.value().to_string(),
-            quantity: order.quantity.clone(),
-        })
-        .collect()
 }
 
 fn ledger_fills_from_outcome(outcome: &BacktestOutcome) -> Vec<LedgerFill> {
@@ -1286,32 +1214,6 @@ fn record_artifacts(
     recorder
         .close()
         .map_err(|error| BacktestJobError::Engine(error.to_string()))
-}
-
-fn summarize(
-    result: &BacktestResult,
-    artifact_path: PathBuf,
-    metrics_path: PathBuf,
-    report_path: PathBuf,
-    artifact_dir: PathBuf,
-    recorder: RunManifest,
-) -> BacktestJobSummary {
-    BacktestJobSummary {
-        run_id: result.manifest.run_id.clone(),
-        status: result.status.value().to_string(),
-        manifest_hash: result.manifest.manifest_hash(),
-        artifact_digest: result.artifact_digest(),
-        outcome_digest: result.outcome_digest(),
-        market_events: result.market_event_count,
-        orders: result.order_count,
-        fills: result.fill_count,
-        artifact_path,
-        metrics_path,
-        report_path,
-        artifact_dir,
-        recorder_digest: recorder.run_digest,
-        reason: result.reason.clone(),
-    }
 }
 
 #[cfg(test)]

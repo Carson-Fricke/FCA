@@ -1,126 +1,72 @@
-//! Deterministic, bounded replay of market-lake quote and trade partitions.
+//! Deterministic, bounded replay of market-lake quote and trade events.
 //!
 //! Port of `harness.data.replay`. The feed is an adapter rather than a storage
-//! client: callers provide already-normalized event streams or a reader for the
-//! file objects returned by the market-lake contract. Replay owns at most one
+//! client: callers provide already-normalized event streams decoded from the
+//! market-lake read route's Arrow IPC batches. Replay owns at most one
 //! lookahead event per active source and merges events by the deterministic
 //! `(timestamp, sequence, event-class priority, source order)` key.
 //!
 //! Fingerprints reproduce the Python reference exactly: a framed SHA-256 over
-//! the selected sources/files, the ordered emitted rows, and the complete data
+//! the selected sources, the ordered emitted rows, and the complete data
 //! run. Frames are `u64` big-endian length prefixes of UTF-8 field text, exactly
 //! matching `harness.data.replay._canonical_fields` and `_update_frame`.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::rc::Rc;
-
 use arrow_array::{
-    Array, Decimal128Array, Int64Array, StringArray, TimestampMicrosecondArray,
+    Array, Decimal128Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
     TimestampNanosecondArray, UInt64Array,
 };
-use bytes::Bytes;
 use num::Decimal18;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use sha2::{Digest, Sha256};
 
 use crate::error::DataError;
-use crate::events::{EventType, MarketEvent, QuoteEvent, TradeEvent};
-use crate::lake::{DataType, ExchangeSession, FileQueryFile};
+use crate::events::{BarEvent, EventType, MarketEvent, QuoteEvent, TradeEvent};
+use crate::lake::{DataType, ExchangeSession};
 use crate::symbol::canonical_symbol;
 use crate::time::DateTime;
 
-/// Injected reader for one complete lake file.
-pub trait ParquetReader {
-    /// Return the events normalized from one lake file.
-    fn read(&self, file: &FileQueryFile) -> Result<Vec<MarketEvent>, DataError>;
-}
-
-/// A simple reader that returns a fixed event vector for every file.
-#[derive(Clone, Debug, Default)]
-pub struct StaticReader {
-    /// Events returned for each file.
-    pub events: Vec<MarketEvent>,
-}
-
-impl ParquetReader for StaticReader {
-    fn read(&self, _file: &FileQueryFile) -> Result<Vec<MarketEvent>, DataError> {
-        Ok(self.events.clone())
+/// Decode one Arrow IPC batch stream into normalized market events.
+///
+/// Row semantics mirror `harness.data.replay._row_event`: missing `event_id`
+/// values fall back to `{symbol}#{row}`, `trade_id`/row-number fall back for
+/// `sequence`, and the real lake schemas' provider column names (`bid_size`,
+/// `size`, `exchange`, `bid_exchange`) are honored, so a route read decodes
+/// exactly like the Python reference.
+///
+/// # Errors
+///
+/// Returns [`DataError`] when a batch is missing a required column, carries a
+/// value of the wrong Arrow type, or the data type is not quote, trade, or bars.
+pub fn events_from_arrow(
+    data_type: DataType,
+    symbol: &str,
+    batches: &[RecordBatch],
+) -> Result<Vec<MarketEvent>, DataError> {
+    let mut events = Vec::new();
+    let mut row_number = 0usize;
+    for batch in batches {
+        for row in 0..batch.num_rows() {
+            events.push(row_event(data_type, symbol, batch, row, row_number)?);
+            row_number += 1;
+        }
     }
-}
-
-/// Byte-level read boundary for one lake object.
-pub trait LakeObjectSource {
-    /// Return the complete bytes of one lake object.
-    fn read(&self, file: &FileQueryFile) -> Result<Vec<u8>, DataError>;
-}
-
-/// An in-memory object source keyed by canonical object path.
-#[derive(Clone, Debug, Default)]
-pub struct MemoryObjectSource {
-    /// Object bytes keyed by `FileQueryFile::object_path`.
-    pub objects: HashMap<String, Vec<u8>>,
-}
-
-impl LakeObjectSource for MemoryObjectSource {
-    fn read(&self, file: &FileQueryFile) -> Result<Vec<u8>, DataError> {
-        self.objects.get(&file.object_path).cloned().ok_or_else(|| {
-            DataError::value(format!("no object registered for {}", file.object_path))
-        })
-    }
-}
-
-/// A filesystem object source rooted at one directory.
-#[derive(Clone, Debug)]
-pub struct LocalObjectSource {
-    root: PathBuf,
-}
-
-impl LocalObjectSource {
-    /// Build a source rooted at `root`.
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
-    }
-}
-
-impl LakeObjectSource for LocalObjectSource {
-    fn read(&self, file: &FileQueryFile) -> Result<Vec<u8>, DataError> {
-        let target = self.root.join(&file.object_path);
-        std::fs::read(&target)
-            .map_err(|error| DataError::value(format!("read object {}: {error}", file.object_path)))
-    }
-}
-
-/// A real Parquet reader that decodes the lake Arrow schemas into market events.
-pub struct ParquetFileReader {
-    /// Object byte source.
-    pub source: Rc<dyn LakeObjectSource>,
-}
-
-impl ParquetFileReader {
-    /// Build a reader over `source`.
-    pub fn new(source: Rc<dyn LakeObjectSource>) -> Self {
-        Self { source }
-    }
-}
-
-impl ParquetReader for ParquetFileReader {
-    fn read(&self, file: &FileQueryFile) -> Result<Vec<MarketEvent>, DataError> {
-        let bytes = self.source.read(file)?;
-        events_from_parquet(file, &bytes)
-    }
+    Ok(events)
 }
 
 /// Decode one Parquet object into normalized market events.
 ///
-/// Row semantics mirror `harness.data.replay._row_event`, including the
-/// generated `{object_path}#{row}` event id and `trade_id`/row sequence
-/// fallbacks, so fingerprints computed over file-backed replay match Python.
+/// This decodes the live recorder's own part format; market-lake reads go
+/// through the Arrow IPC read route and [`events_from_arrow`] instead.
+///
+/// # Errors
+///
+/// Returns [`DataError`] under the same conditions as [`events_from_arrow`].
 pub fn events_from_parquet(
-    file: &FileQueryFile,
+    data_type: DataType,
+    symbol: &str,
     bytes: &[u8],
 ) -> Result<Vec<MarketEvent>, DataError> {
-    let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(bytes))
+    let builder = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::copy_from_slice(bytes))
         .map_err(|error| DataError::value(format!("open parquet: {error}")))?;
     let reader = builder
         .build()
@@ -130,33 +76,35 @@ pub fn events_from_parquet(
     for batch in reader {
         let batch = batch.map_err(|error| DataError::value(format!("parquet batch: {error}")))?;
         for row in 0..batch.num_rows() {
-            events.push(parquet_row_event(file, &batch, row, row_number)?);
+            events.push(row_event(data_type, symbol, &batch, row, row_number)?);
             row_number += 1;
         }
     }
     Ok(events)
 }
 
-fn parquet_row_event(
-    file: &FileQueryFile,
-    batch: &arrow_array::RecordBatch,
+/// Normalize one source row into the event model.
+fn row_event(
+    data_type: DataType,
+    source_symbol: &str,
+    batch: &RecordBatch,
     row: usize,
     row_number: usize,
 ) -> Result<MarketEvent, DataError> {
     let timestamp = read_timestamp(batch, "timestamp", row)?
-        .ok_or_else(|| DataError::value("Parquet replay rows must contain datetime timestamps"))?;
+        .ok_or_else(|| DataError::value("lake replay rows must contain datetime timestamps"))?;
     let raw_symbol = string_value(batch, "symbol", row)?
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| file.symbol.clone());
+        .unwrap_or_else(|| source_symbol.to_string());
     let symbol = canonical_symbol(&raw_symbol)?;
     let event_id = string_value(batch, "event_id", row)?
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| format!("{}#{}", file.object_path, row_number));
+        .unwrap_or_else(|| format!("{source_symbol}#{row_number}"));
     let sequence = integer_value(batch, "sequence", row)?
         .or(integer_value(batch, "trade_id", row)?)
         .unwrap_or(row_number as i64);
     let sequence = u64::try_from(sequence).unwrap_or(row_number as u64);
-    match file.data_type {
+    match data_type {
         DataType::Quote => {
             let bid_price = decimal_value(batch, "bid_price", row)?
                 .ok_or_else(|| DataError::value("quote row is missing bid_price"))?;
@@ -205,8 +153,31 @@ fn parquet_row_event(
                 trade_id,
             }))
         }
+        DataType::Bars => {
+            let open = decimal_value(batch, "open", row)?
+                .ok_or_else(|| DataError::value("bar row is missing open"))?;
+            let high = decimal_value(batch, "high", row)?
+                .ok_or_else(|| DataError::value("bar row is missing high"))?;
+            let low = decimal_value(batch, "low", row)?
+                .ok_or_else(|| DataError::value("bar row is missing low"))?;
+            let close = decimal_value(batch, "close", row)?
+                .ok_or_else(|| DataError::value("bar row is missing close"))?;
+            let volume = decimal_value(batch, "volume", row)?
+                .ok_or_else(|| DataError::value("bar row is missing volume"))?;
+            Ok(MarketEvent::Bar(BarEvent {
+                event_id,
+                timestamp,
+                sequence,
+                symbol,
+                open,
+                high,
+                low,
+                close,
+                volume,
+            }))
+        }
         _ => Err(DataError::value(
-            "replay files must be quote or trade partitions",
+            "replay files must be quote, trade, or bars partitions",
         )),
     }
 }
@@ -442,12 +413,13 @@ pub struct LakeReplayFeed {
 }
 
 impl LakeReplayFeed {
-    /// Build a feed over explicit sessions, optional streams, and files.
+    /// Build a feed over explicit sessions and decoded event streams.
+    ///
+    /// Route reads are decoded with [`events_from_arrow`] and passed as
+    /// [`ReplayStream`]s; the feed owns no file or path surface.
     pub fn new(
         sessions: Vec<ExchangeSession>,
         streams: Vec<ReplayStream>,
-        files: Vec<FileQueryFile>,
-        reader: Option<Rc<dyn ParquetReader>>,
     ) -> Result<Self, DataError> {
         let sessions = normalize_sessions(sessions)?;
         let mut stream_entries: Vec<StreamEntry> = Vec::new();
@@ -468,48 +440,12 @@ impl LakeReplayFeed {
                 cursor: 0,
             });
         }
-        let mut sorted_files = files;
-        for file in &sorted_files {
-            validate_file(file)?;
-        }
-        sorted_files.sort_by(|a, b| {
-            (
-                a.session_date,
-                &a.symbol,
-                a.data_type.value(),
-                &a.object_path,
-            )
-                .cmp(&(
-                    b.session_date,
-                    &b.symbol,
-                    b.data_type.value(),
-                    &b.object_path,
-                ))
-        });
-        validate_file_sessions(&sorted_files, &sessions)?;
-        if !sorted_files.is_empty() && reader.is_none() {
-            return Err(DataError::type_error(
-                "reader is required when files are provided",
-            ));
-        }
-        let file_fingerprint = file_fingerprint(&stream_entries, &sorted_files)?;
+        let file_fingerprint = file_fingerprint(&stream_entries);
         let last_fingerprints = ReplayFingerprints {
             file: file_fingerprint.clone(),
             row: hex_string(&Sha256::new().finalize()),
             data: empty_data_fingerprint(&file_fingerprint, &sessions),
         };
-        if let Some(reader) = reader {
-            for (index, file) in sorted_files.iter().enumerate() {
-                sources.push(Source {
-                    symbol: canonical_symbol(&file.symbol)?,
-                    data_type: Some(file.data_type),
-                    session_date: Some(file.session_date),
-                    order: stream_entries.len() + index,
-                    events: reader.read(file)?,
-                    cursor: 0,
-                });
-            }
-        }
         Ok(Self {
             file_fingerprint,
             last_fingerprints,
@@ -611,6 +547,7 @@ fn validate_stream(stream: &ReplayStream) -> Result<(), DataError> {
     let expected = match stream.data_type {
         Some(DataType::Quote) => Some(EventType::Quote),
         Some(DataType::Trade) => Some(EventType::Trade),
+        Some(DataType::Bars) => Some(EventType::Bar),
         _ => None,
     };
     let mut last = None;
@@ -653,6 +590,7 @@ fn validate_source_event(event: &MarketEvent, source: &Source) -> Result<(), Dat
     let expected = match source.data_type {
         Some(DataType::Quote) => Some(EventType::Quote),
         Some(DataType::Trade) => Some(EventType::Trade),
+        Some(DataType::Bars) => Some(EventType::Bar),
         _ => None,
     };
     if let Some(expected) = expected {
@@ -661,53 +599,6 @@ fn validate_source_event(event: &MarketEvent, source: &Source) -> Result<(), Dat
                 "replay event type does not match its source data type",
             ));
         }
-    }
-    Ok(())
-}
-
-fn validate_file(file: &FileQueryFile) -> Result<(), DataError> {
-    if !matches!(file.data_type, DataType::Quote | DataType::Trade) {
-        return Err(DataError::value(
-            "replay files must be quote or trade partitions",
-        ));
-    }
-    let expected = crate::lake::partition_path(
-        file.session_date,
-        file.asset_class,
-        file.data_type,
-        &file.symbol,
-    )?;
-    if file.object_path != expected {
-        return Err(DataError::value(
-            "replay file has a non-canonical lake partition path",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_file_sessions(
-    files: &[FileQueryFile],
-    sessions: &[ExchangeSession],
-) -> Result<(), DataError> {
-    let expected: Vec<crate::time::Date> = sessions
-        .iter()
-        .map(|session| session.session_date)
-        .collect();
-    let mut seen: Vec<(crate::time::Date, String, DataType)> = Vec::new();
-    for file in files {
-        if !expected.contains(&file.session_date) {
-            return Err(DataError::value(
-                "replay file session is not part of the replay",
-            ));
-        }
-        let symbol = canonical_symbol(&file.symbol)?;
-        let key = (file.session_date, symbol, file.data_type);
-        if seen.contains(&key) {
-            return Err(DataError::value(
-                "replay files must not duplicate a symbol/data-type session",
-            ));
-        }
-        seen.push(key);
     }
     Ok(())
 }
@@ -801,10 +692,22 @@ fn event_fingerprint(event: &MarketEvent) -> Vec<u8> {
             trade.venue.clone().unwrap_or_default(),
             trade.trade_id.clone().unwrap_or_default(),
         ]),
+        MarketEvent::Bar(bar) => canonical_fields(&[
+            "bar".to_string(),
+            bar.event_id.clone(),
+            bar.timestamp.isoformat_micros_utc(),
+            bar.sequence.to_string(),
+            bar.symbol.clone(),
+            bar.open.to_string(),
+            bar.high.to_string(),
+            bar.low.to_string(),
+            bar.close.to_string(),
+            bar.volume.to_string(),
+        ]),
     }
 }
 
-fn file_fingerprint(streams: &[StreamEntry], files: &[FileQueryFile]) -> Result<String, DataError> {
+fn file_fingerprint(streams: &[StreamEntry]) -> String {
     let mut digest = Sha256::new();
     digest.update(b"fca-lake-replay-files-v1\0");
     for stream in streams {
@@ -821,25 +724,7 @@ fn file_fingerprint(streams: &[StreamEntry], files: &[FileQueryFile]) -> Result<
             ]),
         );
     }
-    for file in files {
-        update_frame(
-            &mut digest,
-            &canonical_fields(&[
-                "file".to_string(),
-                file.session_date.isoformat(),
-                canonical_symbol(&file.symbol)?,
-                file.data_type.value().to_string(),
-                file.object_path.clone(),
-                file.row_count.to_string(),
-                file.byte_size.to_string(),
-                // The Rust lake model does not carry the optional checksum the
-                // Python FileQueryFile exposes; `checksum or ""` is the empty
-                // string whenever the provider did not issue one.
-                String::new(),
-            ]),
-        );
-    }
-    Ok(hex_string(&digest.finalize()))
+    hex_string(&digest.finalize())
 }
 
 fn empty_data_fingerprint(file_fingerprint: &str, sessions: &[ExchangeSession]) -> String {

@@ -22,7 +22,18 @@ fn canonical_path(
     data_type: DataType,
     symbol: &str,
 ) -> String {
-    partition_path(session_date, asset_class, data_type, symbol).expect("canonical path")
+    partition_path(session_date, asset_class, data_type, None, symbol).expect("canonical path")
+}
+
+fn bars_path(session_date: Date, interval: &str, symbol: &str) -> String {
+    partition_path(
+        session_date,
+        AssetClass::Equity,
+        DataType::Bars,
+        Some(interval),
+        symbol,
+    )
+    .expect("canonical bars path")
 }
 
 fn raw_record(object_path: Option<String>) -> CoverageRecord {
@@ -40,6 +51,7 @@ fn raw_record(object_path: Option<String>) -> CoverageRecord {
         12,
         3456,
         Some("checksum".to_string()),
+        None,
         None,
     )
     .expect("valid record")
@@ -62,6 +74,7 @@ async fn authenticated_raw_object_returns_catalog_and_sas_metadata() {
         24,
         6789,
         Some("crypto-checksum".to_string()),
+        None,
         None,
     )
     .expect("valid record");
@@ -203,6 +216,52 @@ async fn the_catalog_row_must_match_the_requested_path() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["error"]["code"], "raw_object_not_found");
     assert!(issuer.paths().is_empty());
+}
+
+#[tokio::test]
+async fn bars_raw_paths_carry_the_interval_and_reject_bad_shapes() {
+    let session_date = date(1, 18);
+    let object_path = bars_path(session_date, "1min", "AAPL");
+    let record = CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        "AAPL",
+        session_date,
+        CoverageStatus::Complete,
+        Some(object_path.clone()),
+        7,
+        890,
+        Some("bars-checksum".to_string()),
+        None,
+        Some("1min".to_string()),
+    )
+    .expect("valid bars record");
+    let catalog = Arc::new(MemoryCatalogRepository::from_records([record]));
+    let issuer = Arc::new(RecordingIssuer::default());
+    let mut state = base_state(catalog);
+    state.sas_issuer = Some(Arc::clone(&issuer) as Arc<dyn lake_query::FileUrlIssuer>);
+    let router = build_app(state);
+
+    let (status, _, body) = send(&router, get_auth(&raw_path(&object_path))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data_type"], "bars");
+    assert_eq!(body["object_path"], object_path);
+    assert_eq!(issuer.paths(), vec![object_path]);
+
+    let day = bars_path(session_date, "1d", "AAPL");
+    let (status, _, body) = send(&router, get_auth(&raw_path(&day))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"]["code"], "raw_object_not_found");
+
+    for path in [
+        "date=2024-01-18/asset_class=equity/data_type=bars/AAPL.parquet",
+        "date=2024-01-18/asset_class=equity/data_type=bars/interval=5m/AAPL.parquet",
+        "date=2024-01-18/asset_class=equity/data_type=bars/interval=1min/interval=1d/AAPL.parquet",
+    ] {
+        let (status, _, body) = send(&router, get_auth(&raw_path(path))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "path: {path}");
+        assert_eq!(body["error"]["code"], "invalid_object_path", "path: {path}");
+    }
 }
 
 #[tokio::test]

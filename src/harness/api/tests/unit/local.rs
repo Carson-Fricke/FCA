@@ -1,4 +1,8 @@
 use super::*;
+use harness_lakeclient::testing::{
+    bars_stream, quote_stream, trade_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer,
+    FakeQuoteRow, FakeTradeRow,
+};
 use mcp::store::{FileSystemJobRepository, FileSystemRunStore};
 
 fn repo_root() -> PathBuf {
@@ -8,75 +12,130 @@ fn repo_root() -> PathBuf {
         .join("..")
 }
 
-/// Build one small real SPY lake shared by every submitting test, and point
-/// `HARNESS_DATA_DIR` at it: the submitters replay actual lake data, never a
-/// substitute fixture. Each session carries a rising quote ladder (so the
-/// momentum strategy enters and liquidates) plus one trade (so research
-/// models observe trades).
-fn use_shared_lake() {
-    static LAKE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    let lake = LAKE.get_or_init(|| {
-        use backtest::backtest::errors::ONE_DAY_NS;
-        use marketdata::events::{MarketEvent as LakeEvent, QuoteEvent, TradeEvent};
-        use marketdata::time::DateTime;
-        use marketdata::{write_lake_partition, AssetClass, DataType, Date};
+/// One small real SPY route fixture: each session carries a rising quote
+/// ladder (so the momentum strategy enters and liquidates) plus one trade (so
+/// research models observe trades). The submitters replay actual lake route
+/// events, never a substitute fixture.
+fn spy_quote_rows() -> Vec<FakeQuoteRow> {
+    use backtest::backtest::errors::ONE_DAY_NS;
+    use marketdata::Date;
 
-        let lake =
-            std::env::temp_dir().join(format!("harness-api-local-lake-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&lake);
-        for day_offset in 0..3 {
-            let date = Date::from_ymd(2024, 1, 2 + day_offset).expect("date");
-            let day = i64::from(date.days());
-            let base = day * ONE_DAY_NS + (13 * 3_600 + 30 * 60) * 1_000_000_000;
-            let mut quotes = Vec::new();
-            for step in 0..12i64 {
-                let mid = 100.00 + 0.02 * step as f64;
-                quotes.push(LakeEvent::Quote(QuoteEvent {
-                    event_id: format!("lake-quote-{day_offset}-{step}"),
-                    timestamp: DateTime::from_micros(
-                        (base + (32 * 60 * step) * 1_000_000_000) / 1_000,
-                    ),
-                    sequence: step as u64,
-                    symbol: "SPY".to_string(),
-                    bid_price: format!("{:.2}", mid - 0.01).parse().unwrap(),
-                    ask_price: format!("{:.2}", mid + 0.01).parse().unwrap(),
-                    bid_size: "100".parse().unwrap(),
-                    ask_size: "100".parse().unwrap(),
-                    venue: Some("XNYS".to_string()),
-                }));
-            }
-            let trade = LakeEvent::Trade(TradeEvent {
-                event_id: format!("lake-trade-{day_offset}"),
-                timestamp: DateTime::from_micros((base + 60 * 1_000_000_000) / 1_000),
-                sequence: 12,
-                symbol: "SPY".to_string(),
-                price: "100.02".parse().unwrap(),
-                quantity: "20".parse().unwrap(),
-                venue: Some("XNYS".to_string()),
-                trade_id: Some(format!("lake-trade-id-{day_offset}")),
-            });
-            write_lake_partition(
-                &lake,
-                date,
-                AssetClass::Equity,
-                DataType::Quote,
-                "SPY",
-                &quotes,
-            )
-            .expect("write quote lake");
-            write_lake_partition(
-                &lake,
-                date,
-                AssetClass::Equity,
-                DataType::Trade,
-                "SPY",
-                std::slice::from_ref(&trade),
-            )
-            .expect("write trade lake");
+    let mut rows = Vec::new();
+    for day_offset in 0..3 {
+        let date = Date::from_ymd(2024, 1, 2 + day_offset).expect("date");
+        let base = i64::from(date.days()) * ONE_DAY_NS + (13 * 3_600 + 30 * 60) * 1_000_000_000;
+        for step in 0..12i64 {
+            let mid = 100.00 + 0.02 * step as f64;
+            rows.push(FakeQuoteRow::new(
+                base + (32 * 60 * step) * 1_000_000_000,
+                &format!("{:.2}", mid - 0.01),
+                &format!("{:.2}", mid + 0.01),
+                100,
+                100,
+                "XNYS",
+            ));
         }
-        lake
-    });
-    std::env::set_var("HARNESS_DATA_DIR", lake);
+    }
+    rows
+}
+
+fn spy_trade_rows() -> Vec<FakeTradeRow> {
+    use backtest::backtest::errors::ONE_DAY_NS;
+    use marketdata::Date;
+
+    let mut rows = Vec::new();
+    for day_offset in 0..3 {
+        let date = Date::from_ymd(2024, 1, 2 + day_offset).expect("date");
+        let base = i64::from(date.days()) * ONE_DAY_NS + (13 * 3_600 + 30 * 60 + 1) * 1_000_000_000;
+        rows.push(FakeTradeRow::new(
+            base,
+            u64::from(day_offset) + 1,
+            "100.02",
+            20,
+            "XNYS",
+        ));
+    }
+    rows
+}
+
+/// Three one-minute SPY bars inside the default study window.
+fn spy_bar_rows() -> Vec<FakeBarRow> {
+    use backtest::backtest::errors::ONE_DAY_NS;
+    use marketdata::Date;
+
+    let date = Date::from_ymd(2024, 1, 2).expect("date");
+    let base = i64::from(date.days()) * ONE_DAY_NS + (14 * 3_600 + 30 * 60) * 1_000_000_000;
+    vec![
+        FakeBarRow::new(base, "100.00", "100.50", "99.50", "100.25", "1000.00"),
+        FakeBarRow::new(
+            base + 60 * 1_000_000_000,
+            "100.25",
+            "101.00",
+            "100.00",
+            "100.75",
+            "1200.00",
+        ),
+        FakeBarRow::new(
+            base + 120 * 1_000_000_000,
+            "100.75",
+            "101.25",
+            "100.50",
+            "101.00",
+            "800.00",
+        ),
+    ]
+}
+
+/// Point the process lake environment at one fake route server.
+///
+/// The environment is process-wide, so the shared test lock serializes the
+/// tests that mutate it and the guard restores the prior values on drop.
+struct LakeEnvGuard {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    _server: FakeLakeServer,
+    saved: [(&'static str, Option<String>); 3],
+}
+
+impl LakeEnvGuard {
+    fn set() -> Self {
+        let guard = crate::tests::LAKE_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let saved = [
+            ("LAKE_API_URL", std::env::var("LAKE_API_URL").ok()),
+            ("LAKE_API_BASE_URL", std::env::var("LAKE_API_BASE_URL").ok()),
+            (
+                "LAKE_API__BEARER_TOKEN",
+                std::env::var("LAKE_API__BEARER_TOKEN").ok(),
+            ),
+        ];
+        let server = FakeLakeServer::start(FakeLakeConfig {
+            read_bodies_by_type: std::collections::BTreeMap::from([
+                ("quote".to_string(), quote_stream("SPY", &spy_quote_rows())),
+                ("trade".to_string(), trade_stream("SPY", &spy_trade_rows())),
+                ("bars".to_string(), bars_stream("SPY", &spy_bar_rows())),
+            ]),
+            ..FakeLakeConfig::new("local-submitter-token")
+        });
+        std::env::set_var("LAKE_API_URL", server.base_url());
+        std::env::set_var("LAKE_API__BEARER_TOKEN", "local-submitter-token");
+        Self {
+            _guard: guard,
+            _server: server,
+            saved,
+        }
+    }
+}
+
+impl Drop for LakeEnvGuard {
+    fn drop(&mut self) {
+        for (name, value) in &self.saved {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
 }
 
 fn poll_terminal(jobs: &Arc<dyn JobRepository>, job_id: &str) -> JobState {
@@ -106,7 +165,7 @@ fn native_backtest_submitter_is_async_and_registers_the_full_result_set() {
     let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
     let submitter = NativeBacktestSubmitter::new(run_store.clone(), jobs.clone());
     let config_path = repo_root().join("config/harness/backtest.yaml");
-    use_shared_lake();
+    let _lake = LakeEnvGuard::set();
     let output_dir = root.join("output");
     let payload = mcp::tools::BacktestSubmitter::submit(
         &submitter,
@@ -155,46 +214,41 @@ fn native_submitter_persists_authored_study_custom_metrics() {
     let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
     let submitter = NativeStudySubmitter::new(run_store.clone(), jobs.clone());
     let config_path = root.join("research.json");
-    use_shared_lake();
+    let _lake = LakeEnvGuard::set();
     let study_source = r#"
-use harness_strategy_sdk::{
-    export_study_program, MetricPublisher, QuoteEvent, StudyProgram, TradeEvent,
-};
+use harness_strategy_sdk::{export_study_program, BarEvent, MetricPublisher, StudyProgram};
 use harness_strategy_sdk::serde_json::Value;
 
-/// Count the observed events and publish the mean trade price.
-struct TradeObserver {
-    trades: u64,
-    quotes: u64,
-    price_sum: f64,
+/// Count the observed bars and publish the mean bar close.
+struct BarObserver {
+    bars: u64,
+    close_sum: f64,
+    last_close: f64,
 }
 
-impl StudyProgram for TradeObserver {
+impl StudyProgram for BarObserver {
     fn new(_parameters: Value) -> Self {
-        Self { trades: 0, quotes: 0, price_sum: 0.0 }
+        Self { bars: 0, close_sum: 0.0, last_close: 0.0 }
     }
 
-    fn on_quote(&mut self, _event: &QuoteEvent) {
-        self.quotes += 1;
-    }
-
-    fn on_trade(&mut self, event: &TradeEvent) {
-        self.trades += 1;
-        if let Ok(price) = event.price.to_string().parse::<f64>() {
-            self.price_sum += price;
+    fn on_bar(&mut self, event: &BarEvent) {
+        self.bars += 1;
+        if let Ok(close) = event.close.to_string().parse::<f64>() {
+            self.close_sum += close;
+            self.last_close = close;
         }
     }
 
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("trade_observations", self.trades as f64);
-        let _ = metrics.publish("quote_observations", self.quotes as f64);
-        if self.trades > 0 {
-            let _ = metrics.publish("global_sma", self.price_sum / self.trades as f64);
+        let _ = metrics.publish("bar_observations", self.bars as f64);
+        if self.bars > 0 {
+            let _ = metrics.publish("mean_close", self.close_sum / self.bars as f64);
+            let _ = metrics.publish("last_close", self.last_close);
         }
     }
 }
 
-export_study_program!(TradeObserver);
+export_study_program!(BarObserver);
 "#;
     let digest = backtest::sha256::digest_hex(study_source.as_bytes());
     let document = json!({
@@ -202,7 +256,7 @@ export_study_program!(TradeObserver);
         "shell": "study",
         "run_id": "workspace-research-metric",
         "seed": 1729,
-        "data": {"symbols": ["SPY"]},
+        "data": {"symbols": ["SPY"], "bar_interval": "1min"},
         "strategy_instances": [{
             "instance_id": "research-model",
             "implementation": "jit",
@@ -232,29 +286,119 @@ export_study_program!(TradeObserver);
     let record = run_store.get(run_id).expect("run row");
     let observed = record
         .metrics
-        .get("trade_observations")
+        .get("bar_observations")
         .and_then(|value| value.parse::<f64>().ok())
         .expect("custom metric");
-    assert!(observed > 0.0);
+    assert_eq!(observed, 3.0, "the three served bars must fold");
     assert!(record
         .metrics
-        .get("global_sma")
+        .get("mean_close")
         .and_then(|value| value.parse::<f64>().ok())
         .is_some());
     let stored = run_store.fetch(run_id).expect("stored run");
+    assert!(
+        stored.artifacts.contains_key("study.json"),
+        "artifacts: {:?}",
+        stored.artifacts.keys().collect::<Vec<_>>()
+    );
     let metrics = stored
         .artifacts
         .get("metrics.json")
         .expect("metrics artifact");
     let document: Value = serde_json::from_slice(metrics).expect("metrics json");
     assert_eq!(
-        document["custom"]["trade_observations"]
+        document["custom"]["bar_observations"]
             .as_str()
             .and_then(|value| value.parse::<f64>().ok()),
         Some(observed)
     );
     assert!(stored.artifacts.contains_key("artifacts/emissions.parquet"));
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_study_runtime_rejects_tick_events_through_the_engine() {
+    use backtest::backtest::engine_core::{
+        build_default_manifest, run_native_engine, EngineOptions,
+    };
+    use backtest::backtest::errors::{BacktestError, ONE_DAY_NS};
+    use backtest::backtest::fixture::{
+        ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture, SyntheticDataOptions,
+    };
+    use backtest::backtest::preflight::preflight_data;
+    use harness_strategy_jit::{study_instance, ManagedWorkspace, STUDY_BARS_ONLY};
+    use marketdata::Date;
+
+    let directory = std::env::temp_dir().join(format!(
+        "harness-study-tick-reject-{}-{}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    ));
+    fs::create_dir_all(&directory).expect("dir");
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+
+    let source = r#"
+use harness_strategy_sdk::{export_study_program, BarEvent, StudyProgram};
+use harness_strategy_sdk::serde_json::Value;
+
+struct Bars;
+impl StudyProgram for Bars {
+    fn new(_parameters: Value) -> Self { Self }
+    fn on_bar(&mut self, _event: &BarEvent) {}
+}
+export_study_program!(Bars);
+"#;
+    let runtime = study_instance(&workspace, source, &serde_json::json!({}), "tick-study")
+        .expect("study instance");
+
+    let date = Date::from_ymd(2024, 1, 2).expect("date");
+    let open_ns = i64::from(date.days()) * ONE_DAY_NS + 14 * 3_600 * 1_000_000_000;
+    let end_ns = open_ns + 60 * 1_000_000_000;
+    let mut configuration =
+        backtest::backtest::config::BacktestConfig::new("tick-reject", open_ns, end_ns, 1)
+            .expect("config");
+    configuration.symbols = vec!["SPY".to_string()];
+    let events = vec![MarketEvent::Trade {
+        event_id: "t-1".to_string(),
+        timestamp_ns: open_ns + 1_000_000_000,
+        sequence: 1,
+        symbol: "SPY".to_string(),
+        price: num::Decimal18::from_i64(450),
+        quantity: num::Decimal18::from_i64(10),
+        venue: "XNYS".to_string(),
+        trade_id: "1".to_string(),
+    }];
+    let fingerprints = ReplayFingerprints::of_events(&events);
+    let fixture = ReplayFixture {
+        sessions: vec![ExchangeSession {
+            session_date_days: i64::from(date.days()),
+            open_ns: open_ns - 3_600 * 1_000_000_000,
+            close_ns: end_ns,
+        }],
+        events,
+        source_id: "tick-fixture".to_string(),
+        symbols: vec!["SPY".to_string()],
+        fingerprints,
+        expected_data_fingerprint: None,
+    };
+    let preflight = preflight_data(&configuration, &fixture).expect("preflight");
+    let manifest = build_default_manifest(&configuration, &fixture, &preflight).expect("manifest");
+
+    let error = run_native_engine(
+        &configuration,
+        &fixture,
+        &preflight,
+        manifest,
+        &EngineOptions::default(),
+        vec![runtime],
+        &SyntheticDataOptions::default(),
+    )
+    .expect_err("a tick must never reach a study runtime");
+    match error {
+        BacktestError::StrategyExecution(message) => assert_eq!(message, STUDY_BARS_ONLY),
+        other => panic!("expected a strategy execution error, got {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&directory);
 }
 
 #[test]

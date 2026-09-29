@@ -112,11 +112,17 @@ fn classification_schema_pins_the_field_contracts() {
         ]
     );
     assert_eq!(
-        schema.field_with_name("file_creation_time").expect("field").data_type(),
+        schema
+            .field_with_name("file_creation_time")
+            .expect("field")
+            .data_type(),
         &DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()))
     );
     assert_eq!(
-        schema.field_with_name("round_lot_size").expect("field").data_type(),
+        schema
+            .field_with_name("round_lot_size")
+            .expect("field")
+            .data_type(),
         &DataType::Decimal128(38, 18)
     );
 }
@@ -142,7 +148,10 @@ fn fundamentals_schema_pins_the_field_contracts() {
         ]
     );
     assert_eq!(
-        schema.field_with_name("period_end").expect("field").data_type(),
+        schema
+            .field_with_name("period_end")
+            .expect("field")
+            .data_type(),
         &DataType::Date32
     );
     assert_eq!(
@@ -172,9 +181,8 @@ fn classification_table_sorts_deterministically_by_symbol() {
     let financial_status: Vec<Option<&str>> =
         arrow_downcast::<StringArray>(&table, "financial_status")
             .iter()
-            .map(|value| value.map(str::to_string))
             .collect();
-    assert_eq!(financial_status, [None, Some("Q".to_string())]);
+    assert_eq!(financial_status, [None, Some("Q")]);
     let round_lot: Vec<i128> = arrow_downcast::<Decimal128Array>(&table, "round_lot_size")
         .values()
         .to_vec();
@@ -206,9 +214,7 @@ fn fundamentals_table_sorts_deterministically_by_identity() {
             Date::from_ymd(2023, 12, 30).expect("date").days(),
         ]
     );
-    let fy: Vec<Option<i32>> = arrow_downcast::<Int32Array>(&table, "fy")
-        .iter()
-        .collect();
+    let fy: Vec<Option<i32>> = arrow_downcast::<Int32Array>(&table, "fy").iter().collect();
     assert_eq!(fy, [None, Some(2024)]);
     let filed: Vec<i32> = arrow_downcast::<Date32Array>(&table, "filed")
         .values()
@@ -227,9 +233,11 @@ fn fundamentals_table_round_trips_through_the_reader() {
     let table = fundamentals_table(fundamentals_rows()).expect("table");
     let staged = crate::ingest::stage(&table, "test/fundamentals.parquet").expect("staged");
 
-    let rows = read_fundamentals_rows(&staged.payload, "test/fundamentals.parquet", "test")
-        .expect("rows");
-    assert_eq!(rows, fundamentals_rows());
+    let rows =
+        read_fundamentals_rows(&staged.payload, "test/fundamentals.parquet", "test").expect("rows");
+    let mut expected = fundamentals_rows();
+    expected.sort();
+    assert_eq!(rows, expected);
 }
 
 #[test]
@@ -237,9 +245,11 @@ fn classification_table_round_trips_through_the_reader() {
     let table = classification_table(classification_rows()).expect("table");
     let staged = crate::ingest::stage(&table, "test/snapshot.parquet").expect("staged");
 
-    let rows = read_classification_rows(&staged.payload, "test/snapshot.parquet", "test")
-        .expect("rows");
-    assert_eq!(rows, classification_rows());
+    let rows =
+        read_classification_rows(&staged.payload, "test/snapshot.parquet", "test").expect("rows");
+    let mut expected = classification_rows();
+    expected.sort_by(|left, right| left.symbol.cmp(&right.symbol));
+    assert_eq!(rows, expected);
 }
 
 #[test]
@@ -248,8 +258,8 @@ fn objects_with_unexpected_schemas_are_rejected() {
     let batch = RecordBatch::new_empty(Arc::new(foreign_schema));
     let staged = crate::ingest::stage(&batch, "foreign.parquet").expect("staged");
 
-    let error =
-        read_fundamentals_rows(&staged.payload, "foreign.parquet", "reference").expect_err("rejected");
+    let error = read_fundamentals_rows(&staged.payload, "foreign.parquet", "reference")
+        .expect_err("rejected");
     assert!(error.to_string().contains("unexpected schema"));
 }
 
@@ -268,7 +278,7 @@ fn fact_rows_sort_with_nulls_after_values() {
 #[test]
 fn nasdaq_rows_convert_to_classification_rows() {
     let payload = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../tests/lake/reference/fixtures")
+        .join("tests/fixtures")
         .join("nasdaqtraded.txt");
     let snapshot = crate::nasdaq::parse_nasdaq_traded(&std::fs::read(payload).expect("fixture"))
         .expect("snapshot");
@@ -289,6 +299,146 @@ fn nasdaq_rows_convert_to_classification_rows() {
         .collect();
     let table = classification_table(rows).expect("table");
     assert_eq!(table.num_rows(), 4);
+}
+
+#[test]
+fn classification_rows_without_extras_stage_byte_identically() {
+    let pinned = classification_table(classification_rows()).expect("table");
+    let delegated = classification_table_with_extras(
+        classification_rows()
+            .into_iter()
+            .map(|row| (row, ClassificationExtras::default()))
+            .collect(),
+    )
+    .expect("table");
+
+    assert_eq!(delegated.schema(), pinned.schema());
+    let pinned = crate::ingest::stage(&pinned, "test/snapshot.parquet").expect("staged");
+    let delegated = crate::ingest::stage(&delegated, "test/snapshot.parquet").expect("staged");
+    assert_eq!(delegated.payload, pinned.payload);
+    assert_eq!(delegated.metadata, pinned.metadata);
+}
+
+#[test]
+fn classification_table_with_extras_appends_cik_after_the_pinned_fields() {
+    let rows: Vec<(ClassificationRow, ClassificationExtras)> = classification_rows()
+        .into_iter()
+        .map(|row| {
+            let cik = (row.symbol == "AAPL").then_some(320193);
+            (
+                row,
+                ClassificationExtras {
+                    cik,
+                    ..ClassificationExtras::default()
+                },
+            )
+        })
+        .collect();
+    let table = classification_table_with_extras(rows).expect("table");
+
+    let schema = table.schema();
+    let pinned = classification_schema();
+    let mut expected = column_names(&pinned);
+    expected.push(("cik", true));
+    assert_eq!(column_names(&schema), expected);
+    assert_eq!(
+        schema.metadata().get(SCHEMA_METADATA_KEY),
+        Some(&"reference.classification".to_string())
+    );
+    assert_eq!(
+        schema.metadata().get(SCHEMA_VERSION_METADATA_KEY),
+        Some(&REFERENCE_SCHEMA_VERSION.to_string())
+    );
+    let cik: Vec<Option<u64>> = arrow_downcast::<UInt64Array>(&table, "cik")
+        .iter()
+        .collect();
+    assert_eq!(cik, [Some(320193), None]);
+
+    let staged = crate::ingest::stage(&table, "test/snapshot.parquet").expect("staged");
+    let rows =
+        read_classification_rows_with_extras(&staged.payload, "test/snapshot.parquet", "test")
+            .expect("rows");
+    assert_eq!(rows[0].0.symbol, "AAPL");
+    assert_eq!(rows[0].1.cik, Some(320193));
+    assert_eq!(rows[1].0.symbol, "MSFT");
+    assert_eq!(rows[1].1.cik, None);
+    assert_eq!(rows[1].1, ClassificationExtras::default());
+}
+
+#[test]
+fn classification_table_with_extras_writes_sic_columns_when_carried() {
+    let rows: Vec<(ClassificationRow, ClassificationExtras)> = classification_rows()
+        .into_iter()
+        .map(|row| {
+            let extras = if row.symbol == "AAPL" {
+                ClassificationExtras {
+                    cik: Some(320193),
+                    sic: Some("3571".to_string()),
+                    sic_industry: Some("ELECTRONIC COMPUTERS".to_string()),
+                }
+            } else {
+                ClassificationExtras::default()
+            };
+            (row, extras)
+        })
+        .collect();
+    let table = classification_table_with_extras(rows).expect("table");
+
+    let pinned = classification_schema();
+    let mut expected = column_names(&pinned);
+    expected.extend([("cik", true), ("sic", true), ("sic_industry", true)]);
+    assert_eq!(column_names(&table.schema()), expected);
+
+    let staged = crate::ingest::stage(&table, "test/snapshot.parquet").expect("staged");
+    let rows =
+        read_classification_rows_with_extras(&staged.payload, "test/snapshot.parquet", "test")
+            .expect("rows");
+    assert_eq!(
+        rows[0].1,
+        ClassificationExtras {
+            cik: Some(320193),
+            sic: Some("3571".to_string()),
+            sic_industry: Some("ELECTRONIC COMPUTERS".to_string()),
+        }
+    );
+    assert_eq!(rows[1].1, ClassificationExtras::default());
+}
+
+#[test]
+fn pinned_snapshots_read_with_absent_extras() {
+    let table = classification_table(classification_rows()).expect("table");
+    let staged = crate::ingest::stage(&table, "test/snapshot.parquet").expect("staged");
+
+    let rows =
+        read_classification_rows_with_extras(&staged.payload, "test/snapshot.parquet", "test")
+            .expect("rows");
+    assert_eq!(rows.len(), 2);
+    assert!(rows
+        .iter()
+        .all(|(_, extras)| *extras == ClassificationExtras::default()));
+}
+
+#[test]
+fn mistyped_or_unknown_extras_are_rejected() {
+    let cases = [
+        Field::new("cik", DataType::Utf8, true),
+        Field::new("sic", DataType::Int64, true),
+        Field::new("mystery", DataType::Utf8, true),
+    ];
+
+    for extra in cases {
+        let base = classification_schema();
+        let mut fields: Vec<FieldRef> = base.fields().iter().cloned().collect();
+        fields.push(Arc::new(extra));
+        let schema = Schema::new_with_metadata(fields, base.metadata().clone());
+        let batch = RecordBatch::new_empty(Arc::new(schema));
+        let staged = crate::ingest::stage(&batch, "test/snapshot.parquet").expect("staged");
+
+        let error =
+            read_classification_rows_with_extras(&staged.payload, "test/snapshot.parquet", "test")
+                .expect_err("rejected");
+        assert!(error.to_string().contains("unexpected schema"), "{error}");
+    }
 }
 
 fn arrow_downcast<'a, A: arrow_array::Array + 'static>(

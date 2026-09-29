@@ -6,9 +6,14 @@
 //! `harness.cli.trader`, and `harness.mcp.__main__`:
 //!
 //! * `harness` — the process facade that groups `api`, `backtest-job`,
-//!   `trader`, and `mcp` (root help is printed when no group is selected).
+//!   `study-job`, `screen-job`, `trader`, and `mcp` (root help is printed when
+//!   no group is selected).
 //! * `backtest-job` — the standalone entry point for one deterministic
 //!   backtest job.
+//! * `study-job` — the standalone entry point for one deterministic study
+//!   job.
+//! * `screen-job` — the standalone entry point for one deterministic
+//!   screening job (`shell: screen`), writing `screen.json`.
 //!
 //! Parity scope for this task:
 //!
@@ -21,9 +26,10 @@
 //!   [`NativeBacktestJobRunner`], which drives the configured JIT-authored
 //!   Rust programs via the `harness-strategy-jit` seam. [`BacktestJobRunner`]
 //!   remains the seam so the command surface is stable and test doubles are
-//!   possible. A `--data-dir` run reads the local Parquet/Arrow lake through
-//!   the `marketdata` crate; `UnportedBacktestJobRunner` remains as the
-//!   always-failing double.
+//!   possible. Market data streams from the market-lake HTTP routes through
+//!   `harness-lakeclient`; the endpoint resolves from `LAKE_API_URL` /
+//!   `LAKE_API_BASE_URL` and `LAKE_API__BEARER_TOKEN`. There is no local data
+//!   directory surface.
 
 use std::fmt;
 use std::fs;
@@ -33,12 +39,11 @@ use std::process::ExitCode;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
 pub mod http;
-pub mod lake_ensure;
 pub mod local;
 pub mod mcp_cli;
 pub mod native;
 
-pub use native::{NativeBacktestJobRunner, NativeStudyJobRunner};
+pub use native::{NativeBacktestJobRunner, NativeScreenJobRunner, NativeStudyJobRunner};
 
 /// Root help/`about` text for the `harness` facade.
 ///
@@ -81,6 +86,9 @@ pub enum HarnessCommand {
     /// Run one deterministic study job (replay for indicators and models).
     #[command(name = "study-job")]
     StudyJob(StudyJobArgs),
+    /// Run one deterministic screening job (one cross-sectional evaluation).
+    #[command(name = "screen-job")]
+    ScreenJob(ScreenJobArgs),
     /// Run one supervised paper or shadow trading session to completion.
     #[command(name = "trader")]
     Trader(TraderArgs),
@@ -91,18 +99,14 @@ pub enum HarnessCommand {
 
 /// Options for `harness backtest-job` / the `backtest-job` entry point.
 ///
-/// Mirrors the Typer callback in `harness.cli.backtest.run_job`.
+/// Mirrors the Typer callback in `harness.cli.backtest.run_job`. Market data
+/// streams from the market-lake routes configured by `LAKE_API_URL` /
+/// `LAKE_API_BASE_URL` and `LAKE_API__BEARER_TOKEN`.
 #[derive(Debug, Clone, Default, Args)]
 pub struct BacktestJobArgs {
     /// Path to a typed backtest configuration document.
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
-
-    /// Optional local Parquet lake directory
-    /// (date=/asset_class=/data_type=/SYMBOL.parquet). Omit for the
-    /// deterministic synthetic benchmark fixture.
-    #[arg(long = "data-dir", value_name = "PATH")]
-    pub data_dir: Option<PathBuf>,
 
     /// Directory for the canonical run artifact document. Defaults to
     /// `.local/backtests/<run_id>`.
@@ -113,21 +117,35 @@ pub struct BacktestJobArgs {
 /// Options for `harness study-job` / the `study-job` entry point.
 ///
 /// A study reuses the replay window and data options but runs platform study
-/// programs with no order execution and writes a `study.json` artifact.
+/// programs with no order execution and writes a `study.json` artifact. The
+/// lake endpoint comes from `LAKE_API_URL` / `LAKE_API_BASE_URL` and
+/// `LAKE_API__BEARER_TOKEN`.
 #[derive(Debug, Clone, Default, Args)]
 pub struct StudyJobArgs {
     /// Path to a typed study configuration document.
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// Optional local Parquet lake directory
-    /// (date=/asset_class=/data_type=/SYMBOL.parquet). Omit for the
-    /// deterministic synthetic benchmark fixture.
-    #[arg(long = "data-dir", value_name = "PATH")]
-    pub data_dir: Option<PathBuf>,
-
     /// Directory for the canonical study artifact document. Defaults to
     /// `.local/studies/<run_id>`.
+    #[arg(long = "output-dir", value_name = "PATH")]
+    pub output_dir: Option<PathBuf>,
+}
+
+/// Options for `harness screen-job` / the `screen-job` entry point.
+///
+/// A screening run evaluates one authored Rust program once over an as-of
+/// cross-section and writes a `screen.json` artifact. Market data arrives only
+/// through the injected data-source port; the CLI composes the fail-loud
+/// placeholder until the lake-route adapter lands.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Args)]
+pub struct ScreenJobArgs {
+    /// Path to a typed screening configuration document (`shell: screen`).
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
+    /// Directory for the canonical `screen.json` artifact. Defaults to
+    /// `.local/screens/<run_id>`.
     #[arg(long = "output-dir", value_name = "PATH")]
     pub output_dir: Option<PathBuf>,
 }
@@ -225,6 +243,19 @@ pub struct StudyJobCli {
     /// The shared study job options.
     #[command(flatten)]
     pub args: StudyJobArgs,
+}
+
+/// Standalone `screen-job` entry point.
+#[derive(Debug, Parser)]
+#[command(
+    name = "screen-job",
+    about = "Run one deterministic screening job (one cross-sectional evaluation).",
+    disable_help_subcommand = true
+)]
+pub struct ScreenJobCli {
+    /// The shared screening job options.
+    #[command(flatten)]
+    pub args: ScreenJobArgs,
 }
 
 /// The canonical summary the Python `backtest-job` prints after a run.
@@ -343,6 +374,74 @@ impl StudyJobRunner for UnportedStudyJobRunner {
     }
 }
 
+/// The canonical summary the `screen-job` surface prints after a run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenRunSummary {
+    /// Deterministic run identifier derived from the configuration content.
+    pub run_id: String,
+    /// Terminal status (`complete` or `failed`).
+    pub status: String,
+    /// Number of ranked rows.
+    pub rows: u64,
+    /// Path of the written `screen.json` artifact.
+    pub artifact_path: PathBuf,
+    /// Failure reason, present when the run did not complete.
+    pub reason: Option<String>,
+}
+
+impl ScreenRunSummary {
+    /// Render the summary exactly as the CLI writes it to stdout.
+    #[must_use]
+    pub fn stdout_lines(&self) -> Vec<String> {
+        vec![
+            format!("run_id: {}", self.run_id),
+            format!("status: {}", self.status),
+            format!("rows: {}", self.rows),
+            format!("artifacts: {}", self.artifact_path.display()),
+        ]
+    }
+}
+
+/// Failures a [`ScreenJobRunner`] can report to the CLI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScreenJobError {
+    /// The runner rejected the run before an artifact could be written.
+    Engine(String),
+}
+
+impl fmt::Display for ScreenJobError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Engine(reason) => formatter.write_str(reason),
+        }
+    }
+}
+
+impl std::error::Error for ScreenJobError {}
+
+/// Execution seam between the parsed `screen-job` surface and the screening
+/// run path.
+pub trait ScreenJobRunner {
+    /// Run one screening configuration for the already-validated arguments.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScreenJobError`] when no run artifact could be produced.
+    fn run(&self, args: &ScreenJobArgs) -> Result<ScreenRunSummary, ScreenJobError>;
+}
+
+/// Always-failing screening runner double used to test CLI error handling.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UnavailableScreenJobRunner;
+
+impl ScreenJobRunner for UnavailableScreenJobRunner {
+    fn run(&self, _args: &ScreenJobArgs) -> Result<ScreenRunSummary, ScreenJobError> {
+        Err(ScreenJobError::Engine(
+            "the screening runner is not composed for this process".to_string(),
+        ))
+    }
+}
+
 /// The channel and exit code of one command invocation.
 ///
 /// Encodes the Typer behavior precisely: help and success write stdout and
@@ -401,18 +500,21 @@ pub fn root_help() -> String {
 
 /// Dispatch a parsed facade invocation to its process group.
 ///
-/// `runner` is the injected backtest engine seam; the `api`, `mcp`, and
-/// `trader` groups return their process requests for the binary to execute.
+/// `runner`, `study_runner`, and `screen_runner` are the injected engine
+/// seams; the `api`, `mcp`, and `trader` groups return their process requests
+/// for the binary to execute.
 #[must_use]
 pub fn run(
     cli: HarnessCli,
     runner: &dyn BacktestJobRunner,
     study_runner: &dyn StudyJobRunner,
+    screen_runner: &dyn ScreenJobRunner,
 ) -> CommandResult {
     match cli.command {
         None => CommandResult::Help(root_help()),
         Some(HarnessCommand::BacktestJob(args)) => execute_backtest_job(&args, runner),
         Some(HarnessCommand::StudyJob(args)) => execute_study_job(&args, study_runner),
+        Some(HarnessCommand::ScreenJob(args)) => execute_screen_job(&args, screen_runner),
         Some(HarnessCommand::Api(args)) => CommandResult::ServeApi(args),
         Some(HarnessCommand::Trader(args)) => CommandResult::RunTrader(args),
         Some(HarnessCommand::Mcp(args)) => CommandResult::ServeMcp(args),
@@ -423,6 +525,12 @@ pub fn run(
 #[must_use]
 pub fn run_study_job(cli: StudyJobCli, runner: &dyn StudyJobRunner) -> CommandResult {
     execute_study_job(&cli.args, runner)
+}
+
+/// Dispatch the standalone `screen-job` entry point.
+#[must_use]
+pub fn run_screen_job(cli: ScreenJobCli, runner: &dyn ScreenJobRunner) -> CommandResult {
+    execute_screen_job(&cli.args, runner)
 }
 
 /// Dispatch the standalone `backtest-job` entry point.
@@ -521,6 +629,52 @@ pub fn execute_study_job(args: &StudyJobArgs, runner: &dyn StudyJobRunner) -> Co
         Err(error) => CommandResult::Failed {
             stdout: String::new(),
             stderr: format!("Study failed: {error}"),
+        },
+    }
+}
+
+/// Validate and execute one screening job.
+///
+/// A missing `--config` and a configuration whose `shell` is not `screen` both
+/// exit `2`; a failed screening run prints its summary and exits `1` after the
+/// runner records the failed `screen.json` artifact.
+#[must_use]
+pub fn execute_screen_job(args: &ScreenJobArgs, runner: &dyn ScreenJobRunner) -> CommandResult {
+    let Some(config) = args.config.as_deref() else {
+        return CommandResult::UsageError(
+            "A screening configuration is required: screen-job --config <path>".to_string(),
+        );
+    };
+
+    let shell = match configuration_shell(config) {
+        Ok(shell) => shell,
+        Err(error) => {
+            return CommandResult::UsageError(format!(
+                "configuration could not be loaded: {error}"
+            ));
+        }
+    };
+    if shell != "screen" {
+        return CommandResult::UsageError(format!(
+            "configuration shell must be 'screen', not '{shell}'"
+        ));
+    }
+
+    match runner.run(args) {
+        Ok(summary) => {
+            let stdout = summary.stdout_lines().join("\n");
+            if summary.status != "complete" {
+                let reason = summary.reason.unwrap_or_else(|| summary.status.clone());
+                return CommandResult::Failed {
+                    stdout,
+                    stderr: format!("reason: {reason}"),
+                };
+            }
+            CommandResult::Completed { stdout }
+        }
+        Err(error) => CommandResult::Failed {
+            stdout: String::new(),
+            stderr: format!("Screening failed: {error}"),
         },
     }
 }

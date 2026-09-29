@@ -49,6 +49,9 @@ def _compose_research_model(value: object) -> ResearchModel:
     try:
         # The fetch window is the model's to declare; validating it here keeps
         # the composer accepting exactly what the contract collector accepts.
+        # Stored executions created before the bar-interval migration carry no
+        # ``interval`` in their harnessConfiguration and will not re-compose:
+        # ResearchModel requires it and no fallback is provided.
         study_window(configuration)
         return ResearchModel(
             model_id=_model_text(value.get("modelId"), "modelId"),

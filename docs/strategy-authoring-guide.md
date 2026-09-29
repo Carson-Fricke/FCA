@@ -13,6 +13,36 @@ reference until the Rust authoring guide replaces it.
 The text below describes the retired Python surface and no longer matches
 the repository.
 
+## Current Rust authoring contract
+
+The current surface is Rust source authored against `harness-strategy-sdk`
+and JIT compiled through `harness-strategy-jit`. The SDK ABI is version 2,
+and the loader rejects an artifact built against a different version.
+
+- **Strategies remain tick-based.** A strategy implements `StrategyProgram`
+  (`new(parameters)`, `on_start`, `on_quote`/`on_trade` receiving a
+  `QuoteEvent`/`TradeEvent` and an `OrderSink`, `on_fill`,
+  `on_stop(&mut MetricPublisher)`) and exports itself with
+  `export_strategy_program!`. Every event price and quantity is an exact
+  `Decimal`, never a float.
+- **Studies replay bars only.** A study implements `StudyProgram`
+  (`new(parameters)`, `on_bar(&BarEvent)`, `on_stop(&mut MetricPublisher)`)
+  and exports itself with `export_study_program!`; tick callbacks are not
+  part of the study contract. `BarEvent` carries `event_id`, `timestamp_ns`,
+  `sequence`, `symbol`, and the exact `Decimal` open, high, low, close, and
+  volume of one interval.
+- **Interval selection.** A `study`-shell configuration must declare
+  `data.bar_interval` as `1min` or `1d`; the harness ensures that interval's
+  bars through the market lake (which ensures the trades the bars derive
+  from) and streams them from the lake's `GET /v1/read` route. A missing or
+  invalid interval fails the run before replay. Backtests keep replaying
+  trades and quotes.
+- **Metrics.** A study or strategy publishes final metrics in `on_stop`
+  through `MetricPublisher::publish(name, value)`. A rejected publication is
+  recorded host-side and fails the run even when the program ignores the
+  returned error. Study artifacts keep their shape (`study.json`,
+  `metrics.json`); only the replayed event type changed.
+
 ---
 
 The guide below was audited against the former `docs/hardening`

@@ -28,6 +28,7 @@ fn canonical_path(day: u32) -> String {
         session_date(day),
         AssetClass::Equity,
         DataType::Trade,
+        None,
         "AAPL",
     )
     .expect("canonical path")
@@ -60,6 +61,7 @@ fn write_fixture(root: &TempDir, day: u32, trade_ids: &[i64]) -> (String, u64) {
             session_date(day),
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "AAPL",
         )
         .expect("fixture written");

@@ -22,6 +22,7 @@ use parquet::file::metadata::KeyValue;
 use parquet::file::properties::{WriterProperties, WriterVersion};
 use sha2::{Digest, Sha256};
 
+use crate::company_tickers::{CompanyTickers, COMPANY_TICKERS_URL};
 use crate::configuration::ReferenceSettings;
 use crate::edgar::{company_facts_url, parse_companyfacts, XbrlFact};
 use crate::error::ReferenceError;
@@ -31,7 +32,8 @@ use crate::partitions::{
     cik_object_name, cik_symbol, reference_partition_path, CLASSIFICATION_OBJECT_NAME,
 };
 use crate::schemas::{
-    classification_table, fundamentals_table, read_fundamentals_rows, ClassificationRow, FactRow,
+    classification_table_with_extras, fundamentals_table, read_fundamentals_rows,
+    ClassificationExtras, ClassificationRow, FactRow,
 };
 
 /// The catalog symbol covering the whole classification snapshot.
@@ -167,26 +169,42 @@ impl ClassificationIngest {
     }
 
     /// Normalize, stage, and commit the snapshot for its knowledge date.
+    ///
+    /// Every security is joined against the SEC ticker map and the resolved
+    /// CIK lands in the snapshot's additive `cik` column, so the mapping is
+    /// stored under the same knowledge date as the directory rows it came
+    /// with. `sic` and `sic_industry` stay absent: the only EDGAR source for
+    /// them is the per-CIK submissions document, which would add thousands of
+    /// requests to every directory ingest (decision D006 defers that).
     pub fn run(
         &self,
         snapshot: &NasdaqSnapshot,
+        tickers: &CompanyTickers,
     ) -> Result<ClassificationIngestResult, ReferenceError> {
-        let records: Vec<ClassificationRow> = snapshot
+        let records: Vec<(ClassificationRow, ClassificationExtras)> = snapshot
             .securities
             .iter()
-            .map(|security| ClassificationRow {
-                file_creation_time: snapshot.file_creation_time.utc(),
-                symbol: security.symbol.clone(),
-                security_name: security.security_name.clone(),
-                listing_exchange: security.listing_exchange.clone(),
-                market_category: security.market_category.clone(),
-                etf: security.etf,
-                round_lot_size: security.round_lot_size,
-                test_issue: security.test_issue,
-                financial_status: security.financial_status.clone(),
+            .map(|security| {
+                let row = ClassificationRow {
+                    file_creation_time: snapshot.file_creation_time.utc(),
+                    symbol: security.symbol.clone(),
+                    security_name: security.security_name.clone(),
+                    listing_exchange: security.listing_exchange.clone(),
+                    market_category: security.market_category.clone(),
+                    etf: security.etf,
+                    round_lot_size: security.round_lot_size,
+                    test_issue: security.test_issue,
+                    financial_status: security.financial_status.clone(),
+                };
+                let extras = ClassificationExtras {
+                    cik: tickers.cik_for(&security.symbol),
+                    sic: None,
+                    sic_industry: None,
+                };
+                (row, extras)
             })
             .collect();
-        let table = classification_table(records)?;
+        let table = classification_table_with_extras(records)?;
         let path = reference_partition_path(
             snapshot.snapshot_date,
             DataType::Classification,
@@ -207,6 +225,7 @@ impl ClassificationIngest {
             staged.metadata.rows,
             staged.metadata.bytes,
             Some(staged.metadata.checksum.clone()),
+            None,
             None,
         )?];
         self.committer
@@ -264,6 +283,7 @@ impl FundamentalsIngest {
                 staged.metadata.rows,
                 staged.metadata.bytes,
                 Some(staged.metadata.checksum.clone()),
+                None,
                 None,
             )?);
         }
@@ -364,7 +384,12 @@ pub(crate) fn merged_rows(
     rows
 }
 
-/// Fetch the current symbol directory and publish its snapshot partition.
+/// Fetch the current symbol directory and the SEC ticker map, then publish the
+/// joined classification snapshot partition.
+///
+/// Both requests go through the caller's fair-access client, so the SEC
+/// User-Agent and rate limit apply to the ticker map exactly as they do to
+/// every other reference fetch.
 pub async fn ingest_classification(
     client: &dyn ReferenceFetchClient,
     settings: &ReferenceSettings,
@@ -373,8 +398,10 @@ pub async fn ingest_classification(
 ) -> Result<ClassificationSummary, ReferenceError> {
     let payload = client.get_bytes(&settings.classification_url).await?;
     let snapshot = crate::nasdaq::parse_nasdaq_traded(&payload)?;
+    let tickers_payload = client.get_bytes(COMPANY_TICKERS_URL).await?;
+    let tickers = CompanyTickers::from_bytes(&tickers_payload)?;
     let result = ClassificationIngest::new(ReferenceIngestCommitter::new(object_store, catalog))
-        .run(&snapshot)?;
+        .run(&snapshot, &tickers)?;
     Ok(classification_summary(&result))
 }
 

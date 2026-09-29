@@ -8,10 +8,11 @@ use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use lake_configuration::{LakeSettings, UniverseSettings};
-use lake_contracts::{Date, DateTime, Decimal18};
-use lake_ingestion::{CryptoDataProvider, EquityDataProvider};
+use lake_contracts::{AssetClass, BarInterval, Date, DateTime, Decimal18};
+use lake_ingestion::{BarsDataProvider, CryptoDataProvider, EquityDataProvider};
 use lake_providers::{
-    NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedQuote, NormalizedTrade, ProviderError,
+    NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedQuote, NormalizedTrade,
+    ProviderError,
 };
 
 /// Build a calendar date.
@@ -55,6 +56,8 @@ pub struct FakeAlpaca {
     poison_message: Option<String>,
     blips: Mutex<BTreeMap<Date, u32>>,
     delay: Option<Duration>,
+    bars_empty: bool,
+    bars_unsupported: bool,
 }
 
 impl FakeAlpaca {
@@ -80,6 +83,20 @@ impl FakeAlpaca {
     /// Delay every fetch, so concurrency becomes observable.
     pub fn slow(mut self, delay: Duration) -> Self {
         self.delay = Some(delay);
+        self
+    }
+
+    /// Serve empty bars pages, forcing trade derivation.
+    #[must_use]
+    pub fn empty_bars(mut self) -> Self {
+        self.bars_empty = true;
+        self
+    }
+
+    /// Fail every bars fetch permanently, forcing trade derivation.
+    #[must_use]
+    pub fn unsupported_bars(mut self) -> Self {
+        self.bars_unsupported = true;
         self
     }
 
@@ -187,6 +204,33 @@ impl EquityDataProvider for FakeAlpaca {
             let symbol = symbols.first().cloned().unwrap_or_default();
             self.end();
             Ok(vec![quote(&symbol, start)])
+        })
+    }
+}
+
+impl BarsDataProvider for FakeAlpaca {
+    fn fetch_bars<'a>(
+        &'a self,
+        _asset_class: AssetClass,
+        symbol: &'a str,
+        _interval: BarInterval,
+        start: DateTime,
+        _end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedBar>, ProviderError>> {
+        Box::pin(async move {
+            self.begin("bars", &[symbol.to_string()], start);
+            if self.bars_unsupported {
+                self.end();
+                return Err(ProviderError::Configuration(
+                    "bars are unsupported for this range".to_string(),
+                ));
+            }
+            self.pause().await;
+            self.end();
+            if self.bars_empty {
+                return Ok(Vec::new());
+            }
+            Ok(vec![bar(symbol, start)])
         })
     }
 }
@@ -328,5 +372,18 @@ pub fn crypto_quote(pair: &str, start: DateTime) -> NormalizedCryptoQuote {
         ask_exchange: Some("CBSE".to_string()),
         ask_price: Decimal18::parse("42001").expect("ask"),
         ask_size: Decimal18::parse("0.5").expect("ask size"),
+    }
+}
+
+/// One valid session-aligned bar at `start`.
+pub fn bar(symbol: &str, start: DateTime) -> NormalizedBar {
+    NormalizedBar {
+        timestamp: start,
+        symbol: symbol.to_string(),
+        open: Decimal18::parse("190.12").expect("open"),
+        high: Decimal18::parse("190.55").expect("high"),
+        low: Decimal18::parse("189.95").expect("low"),
+        close: Decimal18::parse("190.41").expect("close"),
+        volume: Decimal18::parse("1200").expect("volume"),
     }
 }

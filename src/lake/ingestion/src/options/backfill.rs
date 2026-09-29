@@ -358,6 +358,7 @@ fn coverage_index(
         asset_class: Some(AssetClass::Option),
         data_type: None,
         symbol: None,
+        interval: None,
         start: Some(start),
         end: Some(end),
     })?;

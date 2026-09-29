@@ -77,6 +77,9 @@ TOOL_GET_RUN = "get_run"
 TOOL_LIST_ARTIFACTS = "list_artifacts"
 TOOL_READ_ARTIFACT = "read_artifact"
 TOOL_RUN_STUDY = "run_study"
+TOOL_RUN_SCREENER = "run_screener"
+TOOL_GET_SCREENER_STATUS = "get_screener_status"
+TOOL_SCREENER_CONFIG_TEMPLATE = "screener_config_template"
 TOOL_LAUNCH_TRADER = "launch_trader"
 
 
@@ -431,6 +434,23 @@ class HarnessMcpClient:
     def read_artifact(self, *, run_id: str, name: str) -> McpToolResult:
         """Call the ``read_artifact`` tool."""
         return self.call_tool(TOOL_READ_ARTIFACT, {"run_id": run_id, "name": name})
+
+    def run_screener(
+        self, *, config: Mapping[str, object], workspace: str | None = None
+    ) -> McpToolResult:
+        """Call the ``run_screener`` tool with one materialized run config."""
+        arguments: dict[str, object] = {"config": dict(config)}
+        if workspace is not None:
+            arguments["workspace"] = workspace
+        return self.call_tool(TOOL_RUN_SCREENER, arguments)
+
+    def get_screener_status(self, *, job_id: str) -> McpToolResult:
+        """Call the ``get_screener_status`` tool."""
+        return self.call_tool(TOOL_GET_SCREENER_STATUS, {"job_id": job_id})
+
+    def screener_config_template(self) -> McpToolResult:
+        """Call the ``screener_config_template`` tool."""
+        return self.call_tool(TOOL_SCREENER_CONFIG_TEMPLATE, {})
 
     def close(self) -> None:
         """Close the underlying transport exactly once."""
@@ -828,11 +848,14 @@ __all__ = [
     "TOOL_BACKTEST_CONFIG_TEMPLATE",
     "TOOL_GET_BACKTEST_STATUS",
     "TOOL_GET_RUN",
+    "TOOL_GET_SCREENER_STATUS",
     "TOOL_LAUNCH_TRADER",
     "TOOL_LIST_ARTIFACTS",
     "TOOL_READ_ARTIFACT",
     "TOOL_RUN_BACKTEST",
+    "TOOL_RUN_SCREENER",
     "TOOL_RUN_STUDY",
+    "TOOL_SCREENER_CONFIG_TEMPLATE",
     "EnvironmentHarnessTokenSource",
     "HarnessMcpAuthError",
     "HarnessMcpBoundary",

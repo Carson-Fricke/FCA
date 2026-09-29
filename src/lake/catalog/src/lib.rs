@@ -29,8 +29,8 @@ pub use memory::{
     MemoryListingRepository, MemoryRunRepository,
 };
 pub use models::{
-    table_key, ContractRecord, CoverageRecord, CoverageStatus, DelistingType, JobRecord, JobState,
-    ListingRecord, ListingType, OptionType, RunRecord, RunState,
+    table_key, BarSource, ContractRecord, CoverageRecord, CoverageStatus, DelistingType, JobRecord,
+    JobState, ListingRecord, ListingType, OptionType, RunRecord, RunState,
 };
 pub use ports::{
     CatalogRepository, ContractRepository, CoverageQuery, DailyFrontSetRepository, JobRepository,

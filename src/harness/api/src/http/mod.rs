@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod models;
 pub mod native;
 pub mod routes;
+pub mod screener;
 pub mod server;
 pub mod state;
 pub mod store;
@@ -41,6 +42,7 @@ pub fn create_app(config: AppConfig) -> Result<Router, AuthError> {
 
     let protected = routes::runs_router()
         .merge(routes::launch_router())
+        .merge(routes::screeners_router())
         .route("/v1/auth/check", get(routes::auth_check))
         .route("/mcp", post(mcp::mcp_post))
         .route("/mcp/health", get(mcp::mcp_health))

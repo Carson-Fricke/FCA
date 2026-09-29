@@ -46,6 +46,8 @@ pub enum ProgramKind {
     Study,
     /// A strategy program (`harness_sdk_strategy_vtable`).
     Strategy,
+    /// A screening program (`harness_sdk_screening_vtable`).
+    Screening,
 }
 
 impl ProgramKind {
@@ -55,6 +57,7 @@ impl ProgramKind {
         match self {
             Self::Study => "study",
             Self::Strategy => "strategy",
+            Self::Screening => "screening",
         }
     }
 
@@ -64,6 +67,7 @@ impl ProgramKind {
         match self {
             Self::Study => harness_strategy_sdk::STUDY_VTABLE_EXPORT,
             Self::Strategy => harness_strategy_sdk::STRATEGY_VTABLE_EXPORT,
+            Self::Screening => harness_strategy_sdk::SCREENING_VTABLE_EXPORT,
         }
     }
 
@@ -73,6 +77,7 @@ impl ProgramKind {
         match value {
             "study" => Some(Self::Study),
             "strategy" => Some(Self::Strategy),
+            "screening" => Some(Self::Screening),
             _ => None,
         }
     }
@@ -100,8 +105,10 @@ pub struct CompiledArtifact {
 /// Compile (or fetch from cache) one authored program source.
 ///
 /// The digest is the SHA-256 of the source; a cached artifact is reused when
-/// the recorded kind, toolchain digest, and SDK version all match and the
-/// artifact file still exists.
+/// the recorded kind, toolchain digest, SDK version, and SDK ABI version all
+/// match and the artifact file still exists. An entry whose ABI version is
+/// stale is a cache miss, not an error; the loader's ABI check remains as
+/// defense for artifacts that bypass this cache.
 ///
 /// # Errors
 ///
@@ -122,12 +129,14 @@ pub fn compile(
     let source = normalized;
     let toolchain = resolve_toolchain(workspace.root())?;
     let sdk_version = harness_strategy_sdk::SDK_VERSION.to_string();
+    let sdk_abi_version = harness_strategy_sdk::SDK_ABI_VERSION;
 
     let entries = workspace.read_manifest();
     if let Some(entry) = entries.get(&digest) {
         if entry.kind == kind.as_str()
             && entry.toolchain_digest == toolchain.digest
             && entry.sdk_version == sdk_version
+            && entry.sdk_abi_version == sdk_abi_version
         {
             let artifact = workspace.target_dir().join(&entry.artifact_relpath);
             if artifact.is_file() {
@@ -162,6 +171,7 @@ pub fn compile(
             artifact_relpath: artifact_relpath.clone(),
             toolchain_digest: toolchain.digest.clone(),
             sdk_version: sdk_version.clone(),
+            sdk_abi_version,
             built_at_unix: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |value| value.as_secs()),

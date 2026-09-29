@@ -270,9 +270,48 @@ pub(crate) fn parse_data_type(value: &str) -> Result<lake_contracts::DataType, A
     lake_contracts::DataType::from_value(value).ok_or_else(|| {
         ApiError::validation_error(
             "data_type",
-            "Input should be 'trade', 'quote', 'classification' or 'fundamentals'",
+            "Input should be 'trade', 'quote', 'bars', 'classification' or 'fundamentals'",
         )
     })
+}
+
+/// Validate the `(data_type, interval)` pairing the way the strict models do.
+///
+/// Bars requires exactly one canonical token; every other data type must not
+/// carry an interval. `None` input stays `None`.
+pub(crate) fn parse_interval(
+    data_type: lake_contracts::DataType,
+    interval: Option<String>,
+) -> Result<Option<String>, ApiError> {
+    use lake_contracts::{BarInterval, DataType};
+    match (data_type, interval) {
+        (DataType::Bars, None) => Err(ApiError::validation_error(
+            "interval",
+            "Value error, interval is required for bars",
+        )),
+        (DataType::Bars, Some(interval)) => {
+            BarInterval::parse(&interval).map_err(|error| {
+                ApiError::validation_error("interval", format!("Value error, {error}"))
+            })?;
+            Ok(Some(interval))
+        }
+        (_, Some(_)) => Err(ApiError::validation_error(
+            "interval",
+            "Value error, interval is supported for bars only",
+        )),
+        (_, None) => Ok(None),
+    }
+}
+
+/// Reject option data types that have no option partition layout.
+pub(crate) fn reject_option_data_type(data_type: lake_contracts::DataType) -> Result<(), ApiError> {
+    if data_type == lake_contracts::DataType::Bars {
+        return Err(ApiError::validation_error(
+            "data_type",
+            "Value error, data_type 'bars' is not supported for options",
+        ));
+    }
+    Ok(())
 }
 
 /// Parse an ISO calendar date.

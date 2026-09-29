@@ -17,6 +17,8 @@ pub enum ReferenceError {
     Edgar(String),
     /// The symbol directory payload is not a parsable nasdaqtraded.txt file.
     Nasdaq(String),
+    /// The payload is not a parsable SEC company tickers document.
+    Tickers(String),
     /// A non-successful provider response after the retry policy is exhausted,
     /// or an undecodable payload.
     Http {
@@ -48,6 +50,11 @@ impl ReferenceError {
         Self::Nasdaq(message.into())
     }
 
+    /// Build a [`ReferenceError::Tickers`].
+    pub fn tickers(message: impl Into<String>) -> Self {
+        Self::Tickers(message.into())
+    }
+
     /// Build a [`ReferenceError::Invalid`].
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::Invalid(message.into())
@@ -59,6 +66,7 @@ impl fmt::Display for ReferenceError {
         match self {
             Self::Edgar(message)
             | Self::Nasdaq(message)
+            | Self::Tickers(message)
             | Self::Transport(message)
             | Self::Configuration(message)
             | Self::Invalid(message) => formatter.write_str(message),

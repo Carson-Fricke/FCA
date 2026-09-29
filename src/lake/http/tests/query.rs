@@ -7,6 +7,7 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use lake_catalog::{CoverageRecord, MemoryCatalogRepository, MemoryContractRepository};
 use lake_contracts::{partition_path, AssetClass, DataType, Date};
+use lake_query::{BoundedDuckDbQuery, QueryLimits};
 use serde_json::json;
 use support::*;
 
@@ -28,6 +29,115 @@ fn file_request() -> serde_json::Value {
 
 fn complete_equity(session_date: Date) -> CoverageRecord {
     complete_record(AssetClass::Equity, DataType::Trade, "AAPL", session_date)
+}
+
+fn complete_bars(interval: &str, session_date: Date) -> CoverageRecord {
+    let object_path = partition_path(
+        session_date,
+        AssetClass::Equity,
+        DataType::Bars,
+        Some(interval),
+        "AAPL",
+    )
+    .expect("canonical bars path");
+    CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        "AAPL",
+        session_date,
+        lake_catalog::CoverageStatus::Complete,
+        Some(object_path),
+        12,
+        3456,
+        Some("checksum".to_string()),
+        None,
+        Some(interval.to_string()),
+    )
+    .expect("valid bars record")
+}
+
+#[tokio::test]
+async fn bars_file_query_threads_the_interval_through_the_response() {
+    let catalog = shared_catalog([complete_bars("1min", date(1, 18))]);
+    let issuer = Arc::new(RecordingIssuer::default());
+    let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
+    state.sas_issuer = Some(Arc::clone(&issuer) as Arc<dyn lake_query::FileUrlIssuer>);
+    let router = build_app(state);
+
+    let request = json!({
+        "mode": "file",
+        "asset_class": "equity",
+        "data_type": "bars",
+        "symbol": "aapl",
+        "interval": "1min",
+        "start_date": "2024-01-18",
+        "end_date": "2024-01-18",
+        "ensure": false,
+    });
+    let (status, _, body) = send(&router, post_json("/v1/query", Some(TOKEN), request)).await;
+
+    let object_path =
+        "date=2024-01-18/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet";
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["files"][0]["data_type"], "bars");
+    assert_eq!(body["files"][0]["interval"], "1min");
+    assert_eq!(body["files"][0]["object_path"], object_path);
+    assert_eq!(issuer.paths(), vec![object_path.to_string()]);
+
+    let day = json!({
+        "mode": "file",
+        "asset_class": "equity",
+        "data_type": "bars",
+        "symbol": "aapl",
+        "interval": "1d",
+        "start_date": "2024-01-18",
+        "end_date": "2024-01-18",
+        "ensure": false,
+    });
+    let (status, _, body) = send(&router, post_json("/v1/query", Some(TOKEN), day)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"]["code"], "coverage_incomplete");
+    assert_eq!(issuer.paths().len(), 1);
+}
+
+#[tokio::test]
+async fn sql_query_over_bars_registers_the_interval_partition() {
+    let temporary = tempfile::tempdir().expect("tempdir");
+    let store = Arc::new(lake_storage::LocalFilesystemStore::new(temporary.path()));
+    write_market_partition(
+        &store,
+        AssetClass::Equity,
+        DataType::Bars,
+        Some("1min"),
+        "AAPL",
+        date(1, 18),
+        &[
+            json!({"timestamp": "2024-01-18T14:31:00Z", "open": "190.12", "high": "190.55", "low": "189.95", "close": "190.41", "volume": "1200"}),
+            json!({"timestamp": "2024-01-18T14:32:00Z", "open": "190.41", "high": "190.60", "low": "190.30", "close": "190.55", "volume": "1500"}),
+        ],
+    );
+    let catalog = shared_catalog([complete_bars("1min", date(1, 18))]);
+    let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
+    state.bounded_query = Some(Arc::new(BoundedDuckDbQuery::new(
+        temporary.path(),
+        QueryLimits::new(1_000_000, 500_000).expect("limits"),
+    )));
+    let router = build_app(state);
+
+    let request = json!({
+        "mode": "sql",
+        "asset_class": "equity",
+        "data_type": "bars",
+        "symbol": "aapl",
+        "interval": "1min",
+        "sql": "SELECT symbol, count(*) AS n FROM data GROUP BY symbol",
+        "start_date": "2024-01-18",
+        "end_date": "2024-01-18",
+    });
+    let (status, _, body) = send(&router, post_json("/v1/query", Some(TOKEN), request)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["rows"], json!([{"symbol": "AAPL", "n": 2}]));
 }
 
 #[tokio::test]
@@ -211,6 +321,7 @@ async fn ensure_callback_receives_the_request_identity() {
         vec![(
             AssetClass::Equity,
             DataType::Trade,
+            None,
             "aapl".to_string(),
             date(1, 18),
             date(1, 19),
@@ -275,6 +386,7 @@ async fn crypto_file_query_returns_canonical_files_for_every_utc_day() {
                 *session_date,
                 AssetClass::Crypto,
                 DataType::Quote,
+                None,
                 "BTC/USD",
             )
             .expect("path")

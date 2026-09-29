@@ -31,10 +31,10 @@ pub use ensure::{
     local_ensure_deadline_seconds, LocalEnsureLauncher, DEFAULT_ENSURE_DEADLINE_SECONDS,
 };
 pub use ingest::{
-    run_local_backfill, run_local_crypto_backfill, run_local_ingest, BackfillResult,
-    CryptoBackfillResult, IngestCoverageEntry, IngestObjectEntry, IngestResult,
-    LocalBackfillOptions, LocalCryptoBackfillOptions, LocalIngestError, LocalIngestOptions,
-    SessionIngestEntry,
+    run_local_backfill, run_local_bars_backfill, run_local_crypto_backfill, run_local_ingest,
+    BackfillResult, CryptoBackfillResult, IngestCoverageEntry, IngestObjectEntry, IngestResult,
+    LocalBackfillOptions, LocalBarsBackfillOptions, LocalCryptoBackfillOptions, LocalIngestError,
+    LocalIngestOptions, SessionIngestEntry,
 };
 pub use state::{
     LocalCatalog, LocalFileIssuer, LocalLayout, LocalStateError, MARKER_CONTENT, MARKER_NAME,

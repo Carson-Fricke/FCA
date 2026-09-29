@@ -1,369 +1,258 @@
-"""Screener service and HTTP route tests against the committed T224 service
-facade: auth, response shapes, provenance, idempotency, and error mapping."""
+"""Screener service lifecycle tests over a fake MCP tool provider."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from datetime import date
-from typing import Any
+from collections.abc import Mapping
 
 import pytest
-from fastapi.testclient import TestClient
 
-from thesis.http.application import create_app
 from thesis.screening import (
-    MarketBar,
-    UniverseEntry,
-)
-from thesis.screening.service import (
-    ScreenerDataUnavailableError,
+    InMemoryScreenerStore,
     ScreenerService,
-    ScreenerServiceError,
-    UnknownScreenerError,
+    ScreenerUnavailableError,
+    ScreeningArtifactError,
+    ScreeningRecord,
+    ScreeningRunError,
+    ScreenRow,
 )
 
-AS_OF = date(2026, 9, 9)
-BEARER_TOKEN = "thesis-test-token"
+WORKSPACE = "alpha-lab"
+RUN_ID = "scr-run-001"
+AS_OF = "2026-09-28"
 
 
-class StubContext:
-    """Minimal extended-protocol context over canned data."""
+def _service(provider, *, max_polls: int = 240) -> tuple[ScreenerService, list[float]]:
+    slept: list[float] = []
 
-    def universe(self, as_of: date) -> tuple[UniverseEntry, ...]:
-        return tuple(
-            UniverseEntry(symbol=symbol, listing_date=date(2025, 1, 2))
-            for symbol in ("AAA", "BBB")
-        )
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
 
-    def market_data(self, symbol: str, window_end: date) -> tuple[MarketBar, ...]:
-        return tuple(
-            MarketBar(
-                bar_date=date(2026, 9, 1 + offset),
-                volume=1_000_000,
-                close="12.00",
-                dollar_volume="12000000.00",
-            )
-            for offset in range(9)
-        )
-
-    def classification(self, symbol: str, as_of: date) -> dict[str, str]:
-        return {"security_type": "stock", "exchange": "NASDAQ"}
-
-    def indicator_value(
-        self,
-        name: str,
-        params: dict[str, object],
-        symbol: str,
-        *,
-        window_start: date,
-        window_end: date,
-    ) -> str:
-        return "11.00"
-
-
-class MemoryStore:
-    """In-memory ScreenerStore with fail-closed reads, like the adapters."""
-
-    def __init__(self) -> None:
-        self._docs: dict[tuple[str, str], dict[str, Any]] = {}
-
-    def put(self, workspace_id: str, key: str, *, document: Mapping[str, Any]) -> None:
-        self._docs[(workspace_id, key)] = dict(document)
-
-    def get(self, workspace_id: str, key: str) -> Mapping[str, Any]:
-        document = self._docs.get((workspace_id, key))
-        if document is None:
-            raise UnknownScreenerError(f"unknown screener document {key!r}")
-        return dict(document)
-
-    def list_prefix(
-        self, workspace_id: str, prefix: str
-    ) -> Sequence[Mapping[str, Any]]:
-        return tuple(
-            dict(document)
-            for (workspace, key), document in sorted(self._docs.items())
-            if workspace == workspace_id and key.startswith(prefix)
-        )
-
-    def head_revision(self, workspace_id: str) -> str:
-        del workspace_id
-        return "test-revision"
-
-
-def _service(
-    data_context: Any = None, *, store: MemoryStore | None = None
-) -> ScreenerService:
-    return ScreenerService(
-        data_context=(lambda workspace_id, as_of: StubContext())
-        if data_context is None
-        else data_context,
-        store=store if store is not None else MemoryStore(),
-        clock=lambda: "2026-09-09T12:00:00Z",
+    return (
+        ScreenerService(
+            tools=provider,
+            sleep=sleep,
+            poll_interval_seconds=0.01,
+            max_polls=max_polls,
+        ),
+        slept,
     )
 
 
-def _client(service: ScreenerService) -> TestClient:
-    return TestClient(create_app(bearer_token=BEARER_TOKEN, screener_service=service))
+def test_save_and_list_definitions_are_content_addressed_and_ordered(
+    definition_factory,
+) -> None:
+    store = InMemoryScreenerStore()
+    service = ScreenerService(store=store)
+    first = definition_factory(name="A screen")
+    second = definition_factory(name="B screen", rank_metric="value")
 
+    saved = service.save_definition(WORKSPACE, first)
+    assert saved.definition_id == first.definition_id
+    service.save_definition(WORKSPACE, first)
 
-def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {BEARER_TOKEN}"}
+    listed = service.list_definitions(WORKSPACE)
+    assert listed == (first,)
+    assert service.list_definitions("other-workspace") == ()
 
-
-def _run_body(**overrides: object) -> dict[str, object]:
-    return {
-        "name": "liquid-stocks",
-        "as_of": AS_OF.isoformat(),
-        "lookback_days": 20,
-        "filters": [{"kind": "avg_dollar_volume_min", "params": {"min": 1000000}}],
-        **overrides,
-    }
-
-
-def test_run_returns_provenance_and_deterministic_ordering() -> None:
-    client = _client(_service())
-
-    response = client.post(
-        "/v1/workspaces/workspace-a/screening/run", headers=_headers(), json=_run_body()
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["workspace_id"] == "workspace-a"
-    assert body["result_id"].startswith("scr-")
-    assert body["definition_hash"]
-    assert body["git_revision"] == "test-revision"
-    result = body["result"]
-    assert result["definition_name"] == "liquid-stocks"
-    assert result["as_of"] == AS_OF.isoformat()
-    assert result["data_window_start"] == "2026-08-21"
-    assert result["data_window_end"] == AS_OF.isoformat()
-    assert [hit["rank"] for hit in result["hits"]] == [1, 2]
-    assert [hit["symbol"] for hit in result["hits"]] == ["AAA", "BBB"]
-    assert all("avg_dollar_volume" in hit["metrics"] for hit in result["hits"])
-
-    again = client.post(
-        "/v1/workspaces/workspace-a/screening/run", headers=_headers(), json=_run_body()
-    ).json()
-    assert again["result_id"] == body["result_id"]
-
-
-def test_run_is_idempotent_and_results_are_fetchable_by_id() -> None:
-    client = _client(_service())
-
-    body = client.post(
-        "/v1/workspaces/workspace-a/screening/run", headers=_headers(), json=_run_body()
-    ).json()
-    fetched = client.get(
-        f"/v1/workspaces/workspace-a/screening/results/{body['result_id']}",
-        headers=_headers(),
-    )
-
-    assert fetched.status_code == 200
-    assert fetched.json()["definition_hash"] == body["definition_hash"]
-    assert fetched.json()["result"]["hits"] == body["result"]["hits"]
-
-
-def test_run_defaults_the_universe_revision_to_the_as_of_date() -> None:
-    client = _client(_service())
-
-    body = client.post(
-        "/v1/workspaces/workspace-a/screening/run", headers=_headers(), json=_run_body()
-    ).json()
-
-    assert body["definition"]["universe_revision"] == f"asof-{AS_OF.isoformat()}"
-
-
-def test_saved_definitions_round_trip_with_definition_hash() -> None:
-    client = _client(_service())
-
-    saved = client.post(
-        "/v1/workspaces/workspace-a/screening",
-        headers=_headers(),
-        json={
-            "name": "saved-one",
-            "lookback_days": 20,
-            "filters": [{"kind": "min_price", "params": {"min": 1.0}}],
-        },
-    )
-
-    assert saved.status_code == 200
-    document = saved.json()
-    assert document["definition_id"] == "saved-one"
-
-    listed = client.get(
-        "/v1/workspaces/workspace-a/screening", headers=_headers()
-    ).json()
-    assert [item["definition_id"] for item in listed["items"]] == ["saved-one"]
-
-    fetched = client.get(
-        "/v1/workspaces/workspace-a/screening/saved-one", headers=_headers()
-    )
-    assert fetched.status_code == 200
-    assert fetched.json()["definition_id"] == "saved-one"
-
-
-def test_unknown_definition_and_result_ids_return_404() -> None:
-    client = _client(_service())
-
-    assert (
-        client.get(
-            "/v1/workspaces/workspace-a/screening/does-not-exist", headers=_headers()
-        ).status_code
-        == 404
-    )
-    assert (
-        client.get(
-            "/v1/workspaces/workspace-a/screening/results/does-not-exist",
-            headers=_headers(),
-        ).status_code
-        == 404
+    service.save_definition(WORKSPACE, second)
+    assert service.list_definitions(WORKSPACE) == tuple(
+        sorted((first, second), key=lambda item: item.definition_id)
     )
 
 
-def test_invalid_filter_kind_returns_422() -> None:
-    client = _client(_service())
+def test_run_launches_polls_and_imports_the_record(
+    fake_provider, definition_factory
+) -> None:
+    definition = definition_factory()
+    provider = fake_provider(states=("running", "running", "complete"))
+    service, slept = _service(provider)
+    service.save_definition(WORKSPACE, definition)
 
-    response = client.post(
-        "/v1/workspaces/workspace-a/screening/run",
-        headers=_headers(),
-        json=_run_body(filters=[{"kind": "moon_phase", "params": {}}]),
+    record = service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+    assert provider.tool_names() == (
+        "run_screener",
+        "get_screener_status",
+        "get_screener_status",
+        "get_screener_status",
+        "get_run",
+        "list_artifacts",
+        "read_artifact",
+    )
+    launch = provider.configs[0]
+    assert launch["as_of"] == AS_OF
+    assert launch["bundle_hash"] == definition.source_sha256
+    assert launch["definition_id"] == definition.definition_id
+    assert provider.calls[0][1]["workspace"] == WORKSPACE
+    assert slept == [0.01, 0.01]
+
+    assert record.run_id == RUN_ID
+    assert record.workspace_id == WORKSPACE
+    assert record.definition_id == definition.definition_id
+    assert record.definition_hash == definition.definition_sha256
+    assert record.status == "complete"
+    assert record.as_of == AS_OF
+    assert [row.symbol for row in record.rows] == ["AAPL", "MSFT"]
+    assert record.rows[0].metrics == {"momentum_12_1": "0.44"}
+    artifact = record.provenance["artifact"]
+    catalog_entry = record.provenance["catalog"]
+    assert isinstance(artifact, Mapping)
+    assert isinstance(catalog_entry, Mapping)
+    assert artifact["name"] == "screen.json"
+    assert catalog_entry["run_id"] == RUN_ID
+
+    assert service.get_result(WORKSPACE, record.result_id) is record
+    assert service.list_results(WORKSPACE) == (record,)
+    document = record.document()
+    rows = document["rows"]
+    assert isinstance(rows, list)
+    assert isinstance(rows[0], Mapping)
+    assert document["result_id"] == record.result_id
+    assert rows[0]["symbol"] == "AAPL"
+
+
+def test_succeeded_job_state_is_terminal(fake_provider, definition_factory) -> None:
+    definition = definition_factory()
+    provider = fake_provider(states=("running", "succeeded"))
+    service, slept = _service(provider)
+    service.save_definition(WORKSPACE, definition)
+
+    record = service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+    assert record.status == "complete"
+    assert slept == [0.01]
+
+
+def test_status_tool_state_alias_fails_closed(
+    fake_provider, definition_factory
+) -> None:
+    definition = definition_factory()
+    provider = fake_provider(states=("complete",), status_alias=True)
+    service, _ = _service(provider)
+    service.save_definition(WORKSPACE, definition)
+
+    with pytest.raises(ScreeningRunError, match="no state"):
+        service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+
+def test_run_without_a_boundary_fails_closed(definition_factory) -> None:
+    definition = definition_factory()
+    service, _ = _service(None)
+    service.save_definition(WORKSPACE, definition)
+
+    with pytest.raises(ScreenerUnavailableError):
+        service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+    assert service.list_results(WORKSPACE) == ()
+
+
+def test_launch_failure_is_unavailable_and_stores_nothing(
+    fake_provider, definition_factory
+) -> None:
+    definition = definition_factory()
+    service, _ = _service(fake_provider(launch_error=True))
+    service.save_definition(WORKSPACE, definition)
+
+    with pytest.raises(ScreenerUnavailableError):
+        service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+    assert service.list_results(WORKSPACE) == ()
+
+
+def test_status_failure_is_unavailable(fake_provider, definition_factory) -> None:
+    definition = definition_factory()
+    service, _ = _service(fake_provider(states=("running",), status_error=True))
+    service.save_definition(WORKSPACE, definition)
+
+    with pytest.raises(ScreenerUnavailableError):
+        service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+
+def test_terminal_failure_stores_nothing(fake_provider, definition_factory) -> None:
+    definition = definition_factory()
+    service, _ = _service(fake_provider(states=("running", "failed")))
+    service.save_definition(WORKSPACE, definition)
+
+    with pytest.raises(ScreeningRunError, match="failed") as failure:
+        service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+    assert not isinstance(failure.value, ScreenerUnavailableError)
+    assert service.list_results(WORKSPACE) == ()
+
+
+def test_status_polling_is_bounded(fake_provider, definition_factory) -> None:
+    definition = definition_factory()
+    provider = fake_provider(states=("running", "running", "running"))
+    service, slept = _service(provider, max_polls=2)
+    service.save_definition(WORKSPACE, definition)
+
+    with pytest.raises(ScreeningRunError, match="terminal"):
+        service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+    assert provider.tool_names() == (
+        "run_screener",
+        "get_screener_status",
+        "get_screener_status",
+    )
+    assert slept == [0.01]
+    assert service.list_results(WORKSPACE) == ()
+
+
+def test_unknown_definition_is_a_key_error() -> None:
+    service, _ = _service(None)
+    with pytest.raises(KeyError):
+        service.run(WORKSPACE, "sha256:missing", AS_OF)
+
+
+def test_missing_artifact_fails_closed(fake_provider, definition_factory) -> None:
+    definition = definition_factory()
+    service, _ = _service(fake_provider(states=("complete",), artifact_present=False))
+    service.save_definition(WORKSPACE, definition)
+
+    with pytest.raises(ScreeningArtifactError):
+        service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+    assert service.list_results(WORKSPACE) == ()
+
+
+def test_unreadable_artifact_fails_closed(fake_provider, definition_factory) -> None:
+    definition = definition_factory()
+    service, _ = _service(fake_provider(states=("complete",), artifact_readable=False))
+    service.save_definition(WORKSPACE, definition)
+
+    with pytest.raises(ScreeningArtifactError):
+        service.run(WORKSPACE, definition.definition_id, AS_OF)
+
+
+def test_unknown_result_is_a_key_error() -> None:
+    service, _ = _service(None)
+    with pytest.raises(KeyError):
+        service.get_result(WORKSPACE, "sha256:missing")
+
+
+def _record(result_id: str) -> ScreeningRecord:
+    return ScreeningRecord(
+        result_id=result_id,
+        workspace_id=WORKSPACE,
+        definition_id="sha256:" + "a" * 64,
+        definition_hash="a" * 64,
+        run_id="run-" + result_id,
+        status="complete",
+        as_of=AS_OF,
+        rows=(ScreenRow(symbol="AAPL", metrics={"momentum": "0.4"}),),
+        provenance={"run_id": "run-" + result_id},
     )
 
-    assert response.status_code == 422
 
+def test_store_orders_records_by_result_id() -> None:
+    store = InMemoryScreenerStore()
+    later = _record("sha256:" + "b" * 64)
+    earlier = _record("sha256:" + "a" * 64)
+    store.add_record(WORKSPACE, later)
+    store.add_record(WORKSPACE, earlier)
+    store.add_record(WORKSPACE, later)
 
-def test_invalid_payload_shape_returns_422() -> None:
-    client = _client(_service())
-
-    response = client.post(
-        "/v1/workspaces/workspace-a/screening/run",
-        headers=_headers(),
-        json={"name": "x", "as_of": "2026-09-09", "filters": [], "extra": True},
-    )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "validation_error"
-
-
-def test_screening_routes_require_the_bearer_token() -> None:
-    client = _client(_service())
-
-    assert (
-        client.post(
-            "/v1/workspaces/workspace-a/screening/run", json=_run_body()
-        ).status_code
-        == 401
-    )
-    assert client.get("/v1/workspaces/workspace-a/screening").status_code == 401
-    assert client.get("/v1/workspaces/workspace-a/screening/xyz").status_code == 401
-    rejected = client.post(
-        "/v1/workspaces/workspace-a/screening/run",
-        headers={"Authorization": "Bearer wrong"},
-        json=_run_body(),
-    )
-    assert rejected.status_code == 401
-    assert rejected.json()["error"]["code"] == "unauthorized"
-
-
-def test_service_without_data_ports_answers_503() -> None:
-    service = ScreenerService(
-        data_context=None, store=MemoryStore(), clock=lambda: "2026-09-09T00:00:00Z"
-    )
-    client = _client(service)
-
-    response = client.post(
-        "/v1/workspaces/workspace-a/screening/run", headers=_headers(), json=_run_body()
-    )
-
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "screener_unavailable"
-
-
-def test_app_without_a_screener_service_answers_503() -> None:
-    client = TestClient(create_app(bearer_token=BEARER_TOKEN))
-
-    response = client.post(
-        "/v1/workspaces/workspace-a/screening/run", headers=_headers(), json=_run_body()
-    )
-
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "screener_unavailable"
-
-
-def test_run_wraps_port_failures_as_422() -> None:
-    class Broken:
-        """Protocol-conformant context whose universe port fails closed."""
-
-        def universe(self, as_of: date) -> tuple[UniverseEntry, ...]:
-            raise OSError("backend down")
-
-        def market_data(self, symbol: str, window_end: date) -> tuple[MarketBar, ...]:
-            raise AssertionError("universe must fail before market_data is reached")
-
-    service = ScreenerService(
-        data_context=lambda workspace_id, as_of: Broken(),
-        store=MemoryStore(),
-        clock=lambda: "2026-09-09T00:00:00Z",
-    )
-    client = _client(service)
-
-    response = client.post(
-        "/v1/workspaces/workspace-a/screening/run", headers=_headers(), json=_run_body()
-    )
-
-    assert response.status_code == 422
-
-
-def test_unknown_result_error_maps_to_404_at_service_level() -> None:
-    service = _service()
-
-    with pytest.raises(UnknownScreenerError):
-        service.get_result("ws", "missing")
-
-
-def test_definitions_are_ordered_deterministically() -> None:
-    service = _service()
-    for name in ("zulu", "alpha", "mike"):
-        service.save_definition(
-            "ws",
-            {
-                "name": name,
-                "filters": [{"kind": "min_price", "params": {"min": 1.0}}],
-            },
-        )
-
-    ids = [document["definition_id"] for document in service.list_definitions("ws")]
-
-    assert ids == sorted(ids)
-
-
-def test_indicator_filters_run_through_the_api() -> None:
-    client = _client(_service())
-
-    response = client.post(
-        "/v1/workspaces/workspace-a/screening/run",
-        headers=_headers(),
-        json=_run_body(filters=[{"kind": "price_above_sma", "params": {"period": 5}}]),
-    )
-
-    assert response.status_code == 200
-    hits = response.json()["result"]["hits"]
-    assert all("ind:sma(period=5)" in hit["metrics"] for hit in hits)
-
-
-def test_run_rejects_an_empty_definition_name() -> None:
-    client = _client(_service())
-
-    response = client.post(
-        "/v1/workspaces/workspace-a/screening/run",
-        headers=_headers(),
-        json=_run_body(name=""),
-    )
-
-    assert response.status_code == 422
-
-
-def test_error_hierarchy_is_stable() -> None:
-    assert issubclass(ScreenerDataUnavailableError, ScreenerServiceError)
-    assert issubclass(UnknownScreenerError, ScreenerServiceError)
+    assert store.list_records(WORKSPACE) == (earlier, later)
+    assert store.get_record(WORKSPACE, later.result_id) is later
+    assert store.get_record(WORKSPACE, "sha256:" + "c" * 64) is None
+    assert store.list_records("other-workspace") == ()

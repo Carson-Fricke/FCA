@@ -29,20 +29,12 @@ VERSION_PATTERN = r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
 
 VERSION = re.compile(VERSION_PATTERN)
 
-#: ASCII Python entrypoint names (the subset of ``str.isidentifier`` accepted
-#: everywhere the provider contract is machine-checked).
-PYTHON_IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
-
-PYTHON_IDENTIFIER = re.compile(PYTHON_IDENTIFIER_PATTERN)
-
 
 __all__ = [
     "IDENTIFIER",
     "IDENTIFIER_PATTERN",
     "NAME",
     "NAME_PATTERN",
-    "PYTHON_IDENTIFIER",
-    "PYTHON_IDENTIFIER_PATTERN",
     "VERSION",
     "VERSION_PATTERN",
 ]

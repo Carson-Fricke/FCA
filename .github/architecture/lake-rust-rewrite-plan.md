@@ -11,10 +11,18 @@ HTTP contract is served byte-compatibly. Phase 5 landed the remainder —
 option ingestion, the `lake-reference` ingest crate, DuckDB-backed bounded
 SQL, the `lake-queue` worker with dead letters, the Azure hosted boundaries
 (tables, blobs, SAS, leases, Entra JWT validation) with the
-`lake ingest`/`lake operations` commands — and Thesis reads reference data
-through `harness.data.reference`. Phase 6 deleted every Python module the
-Rust crates replaced, keeping only the retained library surface below for
-code that is not the lake service.
+`lake ingest`/`lake operations` commands — and the harness reads reference
+data through the lake's `universe` and `facts` routes. Phase 6 deleted every
+Python module the Rust crates replaced, keeping only the retained library
+surface below for code that is not the lake service.
+
+The screener migration (`screener-rust-migration.md`) added `bars` as a lake
+data type with the `interval=1min|1d` partition dimension: bars are fetched
+provider-first and derived from stored trades otherwise, with the derivation
+invalidated and re-derived when the trade partition revision changes. The
+streaming `GET /v1/read` route serves `trade`, `quote`, and `bars`
+partitions as Arrow IPC, and `GET /v1/reference/universe` /
+`GET /v1/reference/facts` publish the point-in-time reference views.
 
 ## Why rewrite
 
@@ -113,7 +121,11 @@ The harness and Thesis consume the lake over HTTP and must not need changes:
 * `GET /v1/jobs/{job_id}` — persisted ensure-job state.
 * `GET /v1/catalog/coverage` — the entries the harness classifies.
 * `GET /v1/catalog/files` — the file query that feeds replay.
-* The query and reference routes (phase 5).
+* `GET /v1/read` — bounded Arrow IPC streaming reads of `trade`, `quote`,
+  and `bars` partitions (bars select their `interval`).
+* `GET /v1/reference/universe` and `GET /v1/reference/facts` — the
+  point-in-time classification universe and reference facts.
+* The query and raw routes (`GET /v1/query`, `GET /v1/raw`).
 
 Two semantics are load-bearing and must be reproduced exactly:
 
@@ -123,8 +135,9 @@ Two semantics are load-bearing and must be reproduced exactly:
    closed session left `partial` or `error` is not satisfied, but it is a
    repairable gap: it fails an ensure only once the ensure job has settled.
 
-Object layout, file naming, and Parquet schemas are frozen: the harness reads
-them directly from disk.
+Object layout, file naming, and Parquet schemas are frozen, but they are
+lake-internal: the harness never reads lake files and consumes the lake only
+through its HTTP routes.
 
 ## Porting order
 
@@ -280,6 +293,18 @@ published client until its consumers migrate.
   and `src/lake/target/{release,debug}` discovery. The Dockerfile compiles
   the binary in a `lake` stage and ships it under `/opt/rust/bin`; CI gates
   the workspace in the `lake-rust` job.
+* **Screener migration (bars and route-only reads).** `lake-contracts` added
+  `DataType::Bars` with the `interval=1min|1d` partition dimension and the
+  bars Arrow schemas; `lake-providers` fetches provider bars and
+  `lake-ingestion`/`lake-coverage` derive bars from stored trades otherwise,
+  recording optional `interval`, `bar_source` (`provider | derived`), and
+  `source_revision` on coverage records; derived bars are invalidated and
+  re-derived when the trade partition revision changes, and provider bars
+  replace derived bars when they become available. `lake-http` added the
+  streaming `GET /v1/read` route and the `GET /v1/reference/universe` /
+  `GET /v1/reference/facts` routes. The existing parity oracles (catalog
+  bytes, ensure job ids, Parquet bytes, and reference ingest) remain
+  byte-identical.
 
 ## Out of scope
 

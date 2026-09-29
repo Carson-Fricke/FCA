@@ -74,9 +74,15 @@ fn http_app() -> Router {
     ));
     create_app(AppConfig {
         bearer_token: Some(BEARER.to_string()),
-        run_store: store,
-        job_repository: jobs,
+        run_store: store.clone(),
+        job_repository: jobs.clone(),
         launcher,
+        screener_launcher: Arc::new(api::http::screener::InProcessScreenLauncher::new(
+            store,
+            jobs,
+            Arc::new(api::http::screener::UnavailableScreeningRunner),
+            clock.clone(),
+        )),
         sas_issuer: None,
         clock,
         configuration_parser: Arc::new(StrictJsonConfigurationParser),

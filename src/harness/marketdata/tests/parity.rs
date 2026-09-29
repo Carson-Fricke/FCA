@@ -9,14 +9,11 @@ use std::rc::Rc;
 
 use marketdata::{
     crypto_utc_days, interval_delta, live_part_path, partition_path, schema_columns, xnys_sessions,
-    AssetClass, BarAggregator, CoverageEntry, CoverageResponse, CoverageState, DataType,
-    DatasetRequest, Date, DateTime, DelistingType, EnsureResponse, ExchangeSession, FileQueryFile,
-    FileQueryResponse, FileQueryState, FileQuerySummary, HistoricalView, HistorySelector,
-    JobStatus, LakeClientPort, ListingRecord, ListingType, LiveRecorder, LiveRecorderConfig,
-    LocalLiveObjectStore, ManualClock, MarketEvent, MarketLakeAdapter, MarketLakeRequest,
-    MemoryContractsCatalog, MemoryListingsCatalog, OptionType, QuoteEvent, ReplayStream,
-    SecurityMasterView, StaticReader, TradeEvent, UniverseComposition, UniverseMember,
-    UniverseSnapshot,
+    AssetClass, BarAggregator, DataType, Date, DateTime, DelistingType, ExchangeSession,
+    HistoricalView, HistorySelector, ListingRecord, ListingType, LiveRecorder, LiveRecorderConfig,
+    LocalLiveObjectStore, ManualClock, MarketEvent, MemoryContractsCatalog, MemoryListingsCatalog,
+    OptionType, QuoteEvent, ReplayStream, SecurityMasterView, TradeEvent, UniverseComposition,
+    UniverseMember, UniverseSnapshot,
 };
 use num::Decimal18;
 use std::str::FromStr;
@@ -54,7 +51,7 @@ fn trade(symbol: &str, seconds: i64, sequence: u64, price: &str, quantity: &str)
 fn partition_paths_match_python_contract() {
     let day = date(2024, 1, 5);
     assert_eq!(
-        partition_path(day, AssetClass::Equity, DataType::Trade, "aapl").unwrap(),
+        partition_path(day, AssetClass::Equity, DataType::Trade, None, "aapl").unwrap(),
         "date=2024-01-05/asset_class=equity/data_type=trade/AAPL.parquet"
     );
     assert_eq!(
@@ -62,14 +59,26 @@ fn partition_paths_match_python_contract() {
             day,
             AssetClass::Option,
             DataType::Quote,
+            None,
             "AAPL240119C00150000"
         )
         .unwrap(),
         "date=2024-01-05/asset_class=option/data_type=quote/AAPL240119C00150000.parquet"
     );
     assert_eq!(
-        partition_path(day, AssetClass::Crypto, DataType::Trade, "BTC/USD").unwrap(),
+        partition_path(day, AssetClass::Crypto, DataType::Trade, None, "BTC/USD").unwrap(),
         "date=2024-01-05/asset_class=crypto/data_type=trade/BTC%2FUSD.parquet"
+    );
+    assert_eq!(
+        partition_path(
+            day,
+            AssetClass::Equity,
+            DataType::Bars,
+            Some("1min"),
+            "AAPL"
+        )
+        .unwrap(),
+        "date=2024-01-05/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet"
     );
 }
 
@@ -252,8 +261,7 @@ fn replay_merge_matches_python_ordering() {
         ],
     )
     .unwrap();
-    let mut feed =
-        marketdata::LakeReplayFeed::new(vec![session], vec![stream], Vec::new(), None).unwrap();
+    let mut feed = marketdata::LakeReplayFeed::new(vec![session], vec![stream]).unwrap();
     let events = feed.events().unwrap();
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].sequence(), 1);
@@ -265,7 +273,16 @@ fn replay_merge_matches_python_ordering() {
 fn recorder_layout_matches_python_contract() {
     let day = date(2024, 1, 5);
     assert_eq!(
-        live_part_path("prod", day, AssetClass::Equity, DataType::Trade, "AAPL", 7).unwrap(),
+        live_part_path(
+            "prod",
+            day,
+            AssetClass::Equity,
+            DataType::Trade,
+            None,
+            "AAPL",
+            7
+        )
+        .unwrap(),
         "live/prod/date=2024-01-05/asset_class=equity/data_type=trade/AAPL.part-000007.parquet"
     );
     assert_eq!(
@@ -351,96 +368,9 @@ fn session_resolution_matches_python_contract() {
     assert_eq!(days.len(), 3);
 }
 
-struct FakeClient;
-
-impl LakeClientPort for FakeClient {
-    fn ensure(&self, request: &DatasetRequest) -> Result<EnsureResponse, marketdata::DataError> {
-        let date = request.start_date;
-        let session = xnys_sessions(date, date).expect("xnys")[0];
-        Ok(EnsureResponse::Coverage(CoverageResponse {
-            asset_class: request.asset_class,
-            data_type: request.data_type,
-            symbol: request.symbol.clone(),
-            start_date: request.start_date,
-            end_date: request.end_date,
-            entries: vec![CoverageEntry {
-                session_date: date,
-                open_time: session.open_time,
-                close_time: session.close_time,
-                status: CoverageState::Complete,
-                is_partial: false,
-                object_path: Some(
-                    partition_path(
-                        date,
-                        request.asset_class,
-                        request.data_type,
-                        request.symbol.as_deref().unwrap_or("AAPL"),
-                    )
-                    .unwrap(),
-                ),
-            }],
-        }))
-    }
-
-    fn wait_for_job(
-        &self,
-        _job_id: &str,
-        _timeout: f64,
-        _poll_interval: f64,
-    ) -> Result<JobStatus, marketdata::DataError> {
-        Err(marketdata::DataError::value("no jobs"))
-    }
-
-    fn query_files(
-        &self,
-        request: &DatasetRequest,
-        _ensure: bool,
-    ) -> Result<FileQueryResponse, marketdata::DataError> {
-        let date = request.start_date;
-        let symbol = request.symbol.clone().unwrap_or_default();
-        Ok(FileQueryResponse {
-            results: FileQuerySummary {
-                state: FileQueryState::Complete,
-                pending_sessions: 0,
-                requested_sessions: 1,
-                complete_sessions: 1,
-                returned_files: 1,
-            },
-            files: vec![FileQueryFile {
-                asset_class: request.asset_class,
-                data_type: request.data_type,
-                symbol: symbol.clone(),
-                session_date: date,
-                object_path: partition_path(date, request.asset_class, request.data_type, &symbol)
-                    .unwrap(),
-                read_url: "https://example.invalid/part".to_string(),
-                byte_size: 16,
-                row_count: 1,
-            }],
-        })
-    }
-}
-
 /// A downstream consumer drives the composed data layer end to end.
 #[test]
 fn downstream_pipeline_consumes_the_data_layer() {
-    let request = MarketLakeRequest::new(
-        AssetClass::Equity,
-        DataType::Trade,
-        vec!["AAPL".to_string()],
-        date(2024, 1, 2),
-        date(2024, 1, 2),
-    )
-    .unwrap();
-    let adapter = MarketLakeAdapter::with_client(
-        Rc::new(FakeClient),
-        Box::new(|files: &[FileQueryFile]| files.len()),
-        None,
-    )
-    .unwrap();
-    let load = adapter.load(&request).unwrap();
-    assert_eq!(load.data, 1);
-
     let clock = ManualClock::new(DateTime::from_micros(100 * 1_000_000));
     let mut view = HistoricalView::new(Box::new(clock));
     view.subscribe("AAPL", HistorySelector::All, None).unwrap();
@@ -483,13 +413,4 @@ fn downstream_pipeline_consumes_the_data_layer() {
     recorder.record(&MarketEvent::Trade(event)).unwrap();
     recorder.close().unwrap();
     assert_eq!(recorder.row_counts().get("trade/AAPL").copied(), Some(1));
-}
-
-/// A static reader is available for downstream replay fixtures.
-#[test]
-fn static_reader_is_usable_downstream() {
-    let reader = StaticReader {
-        events: vec![trade("AAPL", 1, 1, "10", "1")],
-    };
-    assert_eq!(reader.events.len(), 1);
 }

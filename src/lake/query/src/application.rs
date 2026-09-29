@@ -16,7 +16,7 @@
 //! The bounded DuckDB SQL path shares these classification helpers and lives
 //! in [`crate::sql`].
 
-use lake_contracts::{partition_path, AssetClass, DataType};
+use lake_contracts::{partition_path, AssetClass, BarInterval, DataType};
 use lake_coverage::{
     requested_coverage, CoverageReport, CoverageState, EnsureSpec, SessionCoverage,
 };
@@ -52,11 +52,17 @@ pub async fn execute_file_query(
         symbol: symbol.to_string(),
         start_date: request.start_date,
         end_date: request.end_date,
+        interval: request.interval.clone(),
     };
 
     let mut report = coverage_report(&context, &spec)?;
-    let (mut usable, mut incomplete) =
-        classify_sessions(&report, request.asset_class, request.data_type, symbol);
+    let (mut usable, mut incomplete) = classify_sessions(
+        &report,
+        request.asset_class,
+        request.data_type,
+        request.interval.as_deref(),
+        symbol,
+    );
     if !incomplete.is_empty() && !request.ensure {
         return Err(incomplete_error(&incomplete, false));
     }
@@ -72,6 +78,7 @@ pub async fn execute_file_query(
         callback(
             spec.asset_class,
             spec.data_type,
+            spec.interval.clone(),
             spec.symbol.clone(),
             spec.start_date,
             spec.end_date,
@@ -85,8 +92,13 @@ pub async fn execute_file_query(
             )
         })?;
         report = coverage_report(&context, &spec)?;
-        (usable, incomplete) =
-            classify_sessions(&report, request.asset_class, request.data_type, symbol);
+        (usable, incomplete) = classify_sessions(
+            &report,
+            request.asset_class,
+            request.data_type,
+            request.interval.as_deref(),
+            symbol,
+        );
     }
 
     let pending_sessions = incomplete.len() as u64;
@@ -94,7 +106,7 @@ pub async fn execute_file_query(
 
     let mut files = Vec::new();
     if let Some(issuer) = context.sas_issuer {
-        files = build_files(&usable, issuer)?;
+        files = build_files(&usable, request.interval.as_deref(), issuer)?;
     } else if !usable.is_empty() {
         return Err(sas_unavailable());
     }
@@ -137,6 +149,28 @@ fn validate_request(request: &FileQueryRequest) -> Result<&str, QueryApplication
             None,
         ));
     }
+    match (request.data_type, request.interval.as_deref()) {
+        (DataType::Bars, None) => {
+            return Err(QueryApplicationError::new(
+                "validation_error",
+                "bars requires an interval",
+                None,
+            ));
+        }
+        (DataType::Bars, Some(interval)) => {
+            BarInterval::parse(interval).map_err(|error| {
+                QueryApplicationError::new("validation_error", error.to_string(), None)
+            })?;
+        }
+        (_, Some(_)) => {
+            return Err(QueryApplicationError::new(
+                "validation_error",
+                "interval is supported for bars only",
+                None,
+            ));
+        }
+        (_, None) => {}
+    }
     let symbol = request.symbol.as_deref().unwrap_or("");
     if symbol.trim().is_empty() {
         return Err(QueryApplicationError::new(
@@ -156,13 +190,14 @@ pub(crate) fn classify_sessions(
     report: &CoverageReport,
     asset_class: AssetClass,
     data_type: DataType,
+    interval: Option<&str>,
     symbol: &str,
 ) -> (Vec<SessionCoverage>, Vec<SessionCoverage>) {
     let mut usable = Vec::new();
     let mut incomplete = Vec::new();
     for entry in &report.entries {
         if entry.state == CoverageState::Complete
-            && has_expected_path(entry, asset_class, data_type, symbol)
+            && has_expected_path(entry, asset_class, data_type, interval, symbol)
         {
             usable.push(entry.clone());
         } else {
@@ -177,6 +212,7 @@ fn has_expected_path(
     entry: &SessionCoverage,
     asset_class: AssetClass,
     data_type: DataType,
+    interval: Option<&str>,
     symbol: &str,
 ) -> bool {
     let Some(record) = entry.record.as_ref() else {
@@ -185,8 +221,14 @@ fn has_expected_path(
     let Some(object_path) = record.object_path.as_deref() else {
         return false;
     };
-    partition_path(entry.session_date(), asset_class, data_type, symbol)
-        .is_ok_and(|expected| object_path == expected)
+    partition_path(
+        entry.session_date(),
+        asset_class,
+        data_type,
+        interval,
+        symbol,
+    )
+    .is_ok_and(|expected| object_path == expected)
 }
 
 /// Compute one coverage report with the Python `"query"` operation.
@@ -242,6 +284,7 @@ fn sas_unavailable() -> QueryApplicationError {
 /// Map complete entries to files with one issued URL each.
 fn build_files(
     entries: &[SessionCoverage],
+    interval: Option<&str>,
     issuer: &dyn FileUrlIssuer,
 ) -> Result<Vec<FileQueryFile>, QueryApplicationError> {
     let mut files = Vec::with_capacity(entries.len());
@@ -270,6 +313,7 @@ fn build_files(
             row_count: record.row_count,
             byte_size: record.byte_size,
             checksum: record.checksum.clone(),
+            interval: interval.map(str::to_string),
         });
     }
     Ok(files)

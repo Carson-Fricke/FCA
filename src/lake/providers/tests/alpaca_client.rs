@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lake_contracts::{format_nanos_utc, parse_iso_nanos, DateTime};
+use lake_contracts::{
+    format_nanos_utc, parse_iso_nanos, AssetClass, BarInterval, DateTime, Decimal18,
+};
 use lake_providers::{
     plan_time_slices, AlpacaClient, AlpacaTransport, BoxFuture, ProviderConfig, ProviderError,
     RequestGovernor, TransportFailure, TransportResponse,
@@ -1071,4 +1073,206 @@ async fn option_repeated_page_token_is_a_protocol_error() {
         other => panic!("expected protocol error, got {other:?}"),
     }
     assert_eq!(transport.requests().len(), 2);
+}
+
+fn equity_bars_page1() -> Value {
+    serde_json::from_str(include_str!("fixtures/alpaca_equity_bars_page1.json"))
+        .expect("equity bars page 1 fixture")
+}
+
+fn equity_bars_page2() -> Value {
+    serde_json::from_str(include_str!("fixtures/alpaca_equity_bars_page2.json"))
+        .expect("equity bars page 2 fixture")
+}
+
+fn crypto_bars_page() -> Value {
+    serde_json::from_str(include_str!("fixtures/alpaca_crypto_bars_page.json"))
+        .expect("crypto bars fixture")
+}
+
+#[tokio::test]
+async fn equity_bars_use_the_symbol_path_with_raw_adjustment() {
+    let page = equity_bars_page1();
+    let transport = FakeTransport::new(move |_| {
+        let mut body = page.clone();
+        body["next_page_token"] = Value::Null;
+        ok(body)
+    });
+    let client = client(fast_config(), transport.clone());
+    let start = instant(14, 30);
+    let records = client
+        .fetch_bars(
+            AssetClass::Equity,
+            " aapl ",
+            BarInterval::OneMinute,
+            start,
+            at_15_00(),
+        )
+        .await
+        .expect("fetch");
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].symbol, "AAPL");
+    assert_eq!(records[0].timestamp, start);
+    assert_eq!(records[0].open, Decimal18::parse("190.12").expect("open"));
+    assert_eq!(records[1].volume, Decimal18::parse("900").expect("volume"));
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].url,
+        "https://data.alpaca.markets/v2/stocks/AAPL/bars"
+    );
+    assert_eq!(
+        requests[0].params,
+        pairs(&[
+            ("start", "2024-11-27T14:30:00Z"),
+            ("end", "2024-11-27T15:00:00Z"),
+            ("limit", "10000"),
+            ("sort", "asc"),
+            ("timeframe", "1Min"),
+            ("adjustment", "raw"),
+            ("feed", "sip"),
+        ])
+    );
+}
+
+#[tokio::test]
+async fn equity_bars_follow_the_next_page_token() {
+    let first = equity_bars_page1();
+    let second = equity_bars_page2();
+    let transport = FakeTransport::new(move |request| match request.param("page_token") {
+        None => ok(first.clone()),
+        Some("bars-page-2") => ok(second.clone()),
+        Some(other) => panic!("unexpected page token {other}"),
+    });
+    let client = client(fast_config(), transport.clone());
+    let records = client
+        .fetch_bars(
+            AssetClass::Equity,
+            "AAPL",
+            BarInterval::OneMinute,
+            at_14_30(),
+            at_15_00(),
+        )
+        .await
+        .expect("fetch");
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.timestamp)
+            .collect::<Vec<_>>(),
+        vec![instant(14, 30), instant(14, 31), instant(14, 32)]
+    );
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].param("page_token"), None);
+    assert_eq!(requests[1].param("page_token"), Some("bars-page-2"));
+}
+
+#[tokio::test]
+async fn equity_daily_bars_request_the_day_timeframe() {
+    let transport = FakeTransport::new(|_| {
+        ok(
+            serde_json::from_str(include_str!("fixtures/alpaca_equity_daily_bars.json"))
+                .expect("daily fixture"),
+        )
+    });
+    let client = client(fast_config(), transport.clone());
+    client
+        .fetch_bars(
+            AssetClass::Equity,
+            "AAPL",
+            BarInterval::OneDay,
+            at_14_30(),
+            at_15_00(),
+        )
+        .await
+        .expect("fetch");
+    assert_eq!(transport.requests()[0].param("timeframe"), Some("1Day"));
+    assert_eq!(transport.requests()[0].param("adjustment"), Some("raw"));
+}
+
+#[tokio::test]
+async fn crypto_bars_use_the_crypto_endpoint_without_feed_or_adjustment() {
+    let transport = FakeTransport::new(|_| ok(crypto_bars_page()));
+    let client = client(fast_config(), transport.clone());
+    let records = client
+        .fetch_bars(
+            AssetClass::Crypto,
+            "btc/usd",
+            BarInterval::OneMinute,
+            at_14_30(),
+            at_14_31(),
+        )
+        .await
+        .expect("fetch");
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].symbol, "BTC/USD");
+    assert_eq!(records[1].volume, Decimal18::parse("0.25").expect("volume"));
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].url,
+        "https://data.alpaca.markets/v1beta3/crypto/us/bars"
+    );
+    assert_eq!(
+        requests[0].params,
+        pairs(&[
+            ("symbols", "BTC/USD"),
+            ("start", "2024-11-27T14:30:00Z"),
+            ("end", "2024-11-27T14:31:00Z"),
+            ("limit", "10000"),
+            ("sort", "asc"),
+            ("timeframe", "1Min"),
+        ])
+    );
+}
+
+#[tokio::test]
+async fn repeated_bars_page_token_is_a_protocol_error() {
+    let transport =
+        FakeTransport::new(|_| ok(json!({"bars": {"AAPL": []}, "next_page_token": "loop"})));
+    let client = client(fast_config(), transport.clone());
+    let error = client
+        .fetch_bars(
+            AssetClass::Equity,
+            "AAPL",
+            BarInterval::OneDay,
+            at_14_30(),
+            at_14_31(),
+        )
+        .await
+        .expect_err("looping cursor");
+    match error {
+        ProviderError::Protocol(message) => {
+            assert!(
+                message.contains("repeated Alpaca bars page token"),
+                "{message}"
+            );
+            assert!(message.contains("AAPL"), "{message}");
+        }
+        other => panic!("expected protocol error, got {other:?}"),
+    }
+    assert_eq!(transport.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn bars_reject_option_and_reference_asset_classes_before_any_request() {
+    let transport = FakeTransport::new(|_| ok(json!({"bars": []})));
+    let client = client(fast_config(), transport.clone());
+    for asset_class in [AssetClass::Option, AssetClass::Reference] {
+        let error = client
+            .fetch_bars(
+                asset_class,
+                "SPY",
+                BarInterval::OneDay,
+                at_14_30(),
+                at_14_31(),
+            )
+            .await
+            .expect_err("unsupported asset class");
+        assert!(matches!(error, ProviderError::Configuration(_)));
+    }
+    assert!(transport.requests().is_empty());
 }

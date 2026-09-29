@@ -19,7 +19,7 @@ use lake_contracts::{
 
 const TABLE_KEY_SAFE: &[u8] = b"_.-~";
 
-/// The exact JSON key set of one coverage row in `catalog.json`.
+/// The exact JSON key set of one legacy coverage row in `catalog.json`.
 pub(crate) const COVERAGE_JSON_KEYS: [&str; 10] = [
     "asset_class",
     "byte_size",
@@ -32,6 +32,15 @@ pub(crate) const COVERAGE_JSON_KEYS: [&str; 10] = [
     "status",
     "symbol",
 ];
+
+/// The optional JSON key carrying a bars interval; absent for every other row.
+pub(crate) const COVERAGE_INTERVAL_JSON_KEY: &str = "interval";
+
+/// The optional JSON key carrying the bars provenance source.
+pub(crate) const COVERAGE_BAR_SOURCE_JSON_KEY: &str = "bar_source";
+
+/// The optional JSON key carrying the bars source revision.
+pub(crate) const COVERAGE_SOURCE_REVISION_JSON_KEY: &str = "source_revision";
 
 /// Encode a value for use in Azure Table keys without changing its identity.
 ///
@@ -115,6 +124,14 @@ persisted_enum! {
         Empty => "empty",
         Partial => "partial",
         Error => "error",
+    }
+}
+
+persisted_enum! {
+    /// How one bars partition was produced.
+    BarSource {
+        Provider => "provider",
+        Derived => "derived",
     }
 }
 
@@ -245,6 +262,15 @@ pub struct CoverageRecord {
     pub checksum: Option<String>,
     /// Failure detail when the status is `error`.
     pub error_message: Option<String>,
+    /// Canonical bar interval token for bars partitions; `None` otherwise.
+    pub interval: Option<String>,
+    /// How a bars partition was produced; `None` for every non-bars row and
+    /// for legacy bars rows written before provenance existed.
+    pub bar_source: Option<BarSource>,
+    /// The revision the bars partition was built from: the provider response
+    /// revision for fetched bars and the trade partition revision for derived
+    /// bars. Present exactly when `bar_source` is.
+    pub source_revision: Option<String>,
 }
 
 impl CoverageRecord {
@@ -252,7 +278,9 @@ impl CoverageRecord {
     ///
     /// The symbol is canonicalised and empty symbols are rejected, mirroring
     /// Python's `canonical_symbol`. Counts are unsigned, so they can never be
-    /// negative, and a session date can never be a `datetime`.
+    /// negative, and a session date can never be a `datetime`. Bars rows must
+    /// carry exactly one canonical interval token; every other data type must
+    /// not carry one.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         asset_class: AssetClass,
@@ -265,7 +293,23 @@ impl CoverageRecord {
         byte_size: u64,
         checksum: Option<String>,
         error_message: Option<String>,
+        interval: Option<String>,
     ) -> Result<Self, DataError> {
+        let interval = match (data_type, interval) {
+            (DataType::Bars, Some(interval)) => {
+                lake_contracts::BarInterval::parse(&interval)?;
+                Some(interval)
+            }
+            (DataType::Bars, None) => {
+                return Err(DataError::value("bars coverage requires an interval"));
+            }
+            (_, Some(_)) => {
+                return Err(DataError::value(
+                    "coverage interval is supported for bars only",
+                ));
+            }
+            (_, None) => None,
+        };
         Ok(Self {
             asset_class,
             data_type,
@@ -277,32 +321,76 @@ impl CoverageRecord {
             byte_size,
             checksum,
             error_message,
+            interval,
+            bar_source: None,
+            source_revision: None,
         })
     }
 
+    /// Attach bars provenance to a coverage row.
+    ///
+    /// Only bars rows carry a source, and a source always names the revision
+    /// it was built from: `provider` rows record the fetched partition
+    /// revision and `derived` rows record the trade partition revision, so a
+    /// later trade repair can be detected as a revision mismatch. Rows without
+    /// provenance stay byte-identical to the legacy serialization.
+    pub fn with_bar_provenance(
+        mut self,
+        source: BarSource,
+        revision: impl Into<String>,
+    ) -> Result<Self, DataError> {
+        if self.data_type != DataType::Bars {
+            return Err(DataError::value(
+                "bar source is supported for bars coverage only",
+            ));
+        }
+        let revision = revision.into();
+        if revision.trim().is_empty() {
+            return Err(DataError::value("bar source requires a source revision"));
+        }
+        self.bar_source = Some(source);
+        self.source_revision = Some(revision);
+        Ok(self)
+    }
+
     /// The deterministic logical key for this coverage row.
-    pub fn key(&self) -> (AssetClass, DataType, String, Date) {
+    pub fn key(&self) -> (AssetClass, DataType, String, Option<String>, Date) {
         (
             self.asset_class,
             self.data_type,
             self.symbol.clone(),
+            self.interval.clone(),
             self.session_date,
         )
     }
 
     /// The Azure Table partition key shared by memory and Table adapters.
+    ///
+    /// Bars rows append their interval so two intervals of the same
+    /// symbol-day never collide; every other row keeps the legacy shape.
     pub fn partition_key(&self) -> String {
-        format!(
+        let base = format!(
             "coverage|{}|{}|{}",
             self.asset_class.value(),
             self.data_type.value(),
             table_key(&self.symbol)
-        )
+        );
+        match &self.interval {
+            Some(interval) => format!("{base}|interval={}", table_key(interval)),
+            None => base,
+        }
     }
 
-    /// The Azure Table row key: the ISO session date.
+    /// The Azure Table row key: the ISO session date, plus the bars interval.
     pub fn row_key(&self) -> String {
-        self.session_date.isoformat()
+        match &self.interval {
+            Some(interval) => format!(
+                "{}|interval={}",
+                self.session_date.isoformat(),
+                table_key(interval)
+            ),
+            None => self.session_date.isoformat(),
+        }
     }
 
     /// Whether the status is terminal: `complete` or `empty`.
@@ -318,11 +406,12 @@ impl CoverageRecord {
         self.status == CoverageStatus::Partial
     }
 
-    pub(crate) fn sort_key(&self) -> (&'static str, &'static str, &str, Date) {
+    pub(crate) fn sort_key(&self) -> (&'static str, &'static str, &str, Option<&str>, Date) {
         (
             self.asset_class.value(),
             self.data_type.value(),
             self.symbol.as_str(),
+            self.interval.as_deref(),
             self.session_date,
         )
     }
@@ -333,7 +422,11 @@ pub(crate) fn coverage_from_value(value: &Value) -> Result<CoverageRecord, DataE
     let object = value
         .as_object()
         .ok_or_else(|| DataError::value("coverage row has unexpected fields"))?;
-    if object.len() != COVERAGE_JSON_KEYS.len()
+    let expected_keys = COVERAGE_JSON_KEYS.len()
+        + usize::from(object.contains_key(COVERAGE_INTERVAL_JSON_KEY))
+        + usize::from(object.contains_key(COVERAGE_BAR_SOURCE_JSON_KEY))
+        + usize::from(object.contains_key(COVERAGE_SOURCE_REVISION_JSON_KEY));
+    if object.len() != expected_keys
         || !COVERAGE_JSON_KEYS
             .iter()
             .all(|key| object.contains_key(*key))
@@ -353,6 +446,9 @@ pub(crate) fn coverage_from_value(value: &Value) -> Result<CoverageRecord, DataE
     let object_path = coverage_optional_string(object, "object_path")?;
     let checksum = coverage_optional_string(object, "checksum")?;
     let error_message = coverage_optional_string(object, "error_message")?;
+    let interval = coverage_interval(object)?;
+    let bar_source = coverage_bar_source(object)?;
+    let source_revision = coverage_optional_key_string(object, COVERAGE_SOURCE_REVISION_JSON_KEY)?;
     let asset_class =
         coverage_enum::<AssetClass>(object, "asset_class", "AssetClass", AssetClass::from_value)?;
     let data_type =
@@ -363,7 +459,7 @@ pub(crate) fn coverage_from_value(value: &Value) -> Result<CoverageRecord, DataE
         "CoverageStatus",
         CoverageStatus::from_value,
     )?;
-    CoverageRecord::new(
+    let record = CoverageRecord::new(
         asset_class,
         data_type,
         symbol.to_string(),
@@ -374,7 +470,58 @@ pub(crate) fn coverage_from_value(value: &Value) -> Result<CoverageRecord, DataE
         byte_size,
         checksum,
         error_message,
+        interval,
+    )?;
+    match bar_source {
+        Some(source) => {
+            let revision = source_revision.ok_or_else(|| {
+                DataError::value("coverage bar_source requires a source_revision")
+            })?;
+            record.with_bar_provenance(source, revision)
+        }
+        None => {
+            if source_revision.is_some() {
+                return Err(DataError::value(
+                    "coverage source_revision requires a bar_source",
+                ));
+            }
+            Ok(record)
+        }
+    }
+}
+
+fn coverage_bar_source(object: &Map<String, Value>) -> Result<Option<BarSource>, DataError> {
+    if !object.contains_key(COVERAGE_BAR_SOURCE_JSON_KEY) {
+        return Ok(None);
+    }
+    coverage_enum::<BarSource>(
+        object,
+        COVERAGE_BAR_SOURCE_JSON_KEY,
+        "BarSource",
+        BarSource::from_value,
     )
+    .map(Some)
+}
+
+fn coverage_optional_key_string(
+    object: &Map<String, Value>,
+    name: &str,
+) -> Result<Option<String>, DataError> {
+    match object.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(DataError::type_error(format!(
+            "coverage {name} must be a string or null"
+        ))),
+    }
+}
+
+fn coverage_interval(object: &Map<String, Value>) -> Result<Option<String>, DataError> {
+    match object.get(COVERAGE_INTERVAL_JSON_KEY) {
+        None => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(DataError::type_error("coverage interval must be a string")),
+    }
 }
 
 fn coverage_integer(object: &Map<String, Value>, name: &str) -> Result<u64, DataError> {
@@ -413,15 +560,28 @@ impl Serialize for CoverageRecord {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("CoverageRecord", COVERAGE_JSON_KEYS.len())?;
+        let fields = COVERAGE_JSON_KEYS.len()
+            + usize::from(self.interval.is_some())
+            + usize::from(self.bar_source.is_some())
+            + usize::from(self.source_revision.is_some());
+        let mut state = serializer.serialize_struct("CoverageRecord", fields)?;
         state.serialize_field("asset_class", self.asset_class.value())?;
+        if let Some(bar_source) = &self.bar_source {
+            state.serialize_field(COVERAGE_BAR_SOURCE_JSON_KEY, bar_source.value())?;
+        }
         state.serialize_field("byte_size", &self.byte_size)?;
         state.serialize_field("checksum", &self.checksum)?;
         state.serialize_field("data_type", self.data_type.value())?;
         state.serialize_field("error_message", &self.error_message)?;
+        if let Some(interval) = &self.interval {
+            state.serialize_field(COVERAGE_INTERVAL_JSON_KEY, interval)?;
+        }
         state.serialize_field("object_path", &self.object_path)?;
         state.serialize_field("row_count", &self.row_count)?;
         state.serialize_field("session_date", &self.session_date.isoformat())?;
+        if let Some(source_revision) = &self.source_revision {
+            state.serialize_field(COVERAGE_SOURCE_REVISION_JSON_KEY, source_revision)?;
+        }
         state.serialize_field("status", self.status.value())?;
         state.serialize_field("symbol", &self.symbol)?;
         state.end()

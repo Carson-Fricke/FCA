@@ -6,7 +6,6 @@
 //! network access is required.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use api::http::clock::{Clock, SystemClock};
@@ -23,91 +22,104 @@ use api::http::store::{
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
-use chrono::{Duration, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
+use harness_lakeclient::testing::{
+    bars_stream, quote_stream, trade_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer,
+    FakeQuoteRow, FakeTradeRow,
+};
+use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
 use http_body_util::BodyExt;
-use marketdata::events::{MarketEvent as LakeEvent, QuoteEvent, TradeEvent};
-use marketdata::time::DateTime as LakeDateTime;
-use marketdata::{write_lake_partition, AssetClass, DataType, Date};
-use num::Decimal18;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
 const BEARER: &str = "test-secret";
 const LAKE_SESSION_COUNT: usize = 3;
+const LAKE_TOKEN: &str = "http-parity-lake-token";
 
-fn dec(value: &str) -> Decimal18 {
-    value.parse().unwrap()
-}
-
-/// A small real lake: three XNYS sessions of a rising quote ladder plus one
-/// trade per session, so the momentum strategy enters and liquidates and the
-/// research models observe trades.
-fn materialize_spy_lake() -> PathBuf {
-    let lake = std::env::temp_dir().join(format!(
-        "harness-api-lake-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|value| value.as_nanos())
-            .unwrap_or(0)
-    ));
-    let _ = std::fs::remove_dir_all(&lake);
-    std::fs::create_dir_all(&lake).expect("lake dir");
-    let mut sequence = 0u64;
+/// A small real route fixture: three XNYS sessions of a rising quote ladder
+/// plus one trade per session, so the momentum strategy enters and liquidates
+/// and the research models observe trades.
+fn spy_quote_rows() -> Vec<FakeQuoteRow> {
+    let mut rows = Vec::new();
     for day in 0..LAKE_SESSION_COUNT {
-        let date = Date::from_ymd(2024, 1, 2 + day as u32).expect("date");
         let open = Utc
             .with_ymd_and_hms(2024, 1, 2 + day as u32, 13, 30, 0)
             .unwrap();
-        let mut quotes = Vec::new();
         for step in 0..12i64 {
-            sequence += 1;
             let mid = 100.00 + 0.02 * f64::from(step as i32);
-            quotes.push(LakeEvent::Quote(QuoteEvent {
-                event_id: format!("lake-quote-{day}-{step}"),
-                timestamp: LakeDateTime::from_micros(
-                    (open + Duration::minutes(32 * step)).timestamp_micros(),
-                ),
-                sequence,
-                symbol: "SPY".to_string(),
-                bid_price: dec(&format!("{:.2}", mid - 0.01)),
-                ask_price: dec(&format!("{:.2}", mid + 0.01)),
-                bid_size: dec("100"),
-                ask_size: dec("100"),
-                venue: Some("XNYS".to_string()),
-            }));
+            rows.push(FakeQuoteRow::new(
+                open.timestamp_micros() * 1_000 + (32 * 60 * step) * 1_000_000_000,
+                &format!("{:.2}", mid - 0.01),
+                &format!("{:.2}", mid + 0.01),
+                100,
+                100,
+                "XNYS",
+            ));
         }
-        sequence += 1;
-        let trade = LakeEvent::Trade(TradeEvent {
-            event_id: format!("lake-trade-{day}"),
-            timestamp: LakeDateTime::from_micros((open + Duration::minutes(1)).timestamp_micros()),
-            sequence,
-            symbol: "SPY".to_string(),
-            price: dec("100.02"),
-            quantity: dec("20"),
-            venue: Some("XNYS".to_string()),
-            trade_id: Some(format!("lake-trade-id-{day}")),
-        });
-        write_lake_partition(
-            &lake,
-            date,
-            AssetClass::Equity,
-            DataType::Quote,
-            "SPY",
-            &quotes,
-        )
-        .expect("write quote lake");
-        write_lake_partition(
-            &lake,
-            date,
-            AssetClass::Equity,
-            DataType::Trade,
-            "SPY",
-            std::slice::from_ref(&trade),
-        )
-        .expect("write trade lake");
     }
-    lake
+    rows
+}
+
+fn spy_trade_rows() -> Vec<FakeTradeRow> {
+    let mut rows = Vec::new();
+    for day in 0..LAKE_SESSION_COUNT {
+        let open = Utc
+            .with_ymd_and_hms(2024, 1, 2 + day as u32, 13, 30, 0)
+            .unwrap();
+        rows.push(FakeTradeRow::new(
+            open.timestamp_micros() * 1_000 + 60 * 1_000_000_000,
+            day as u64 + 1,
+            "100.02",
+            20,
+            "XNYS",
+        ));
+    }
+    rows
+}
+
+/// Three one-minute SPY bars inside the study run window.
+fn spy_bar_rows() -> Vec<FakeBarRow> {
+    let open = Utc.with_ymd_and_hms(2024, 1, 2, 14, 30, 0).unwrap();
+    let base = open.timestamp_micros() * 1_000;
+    vec![
+        FakeBarRow::new(base, "100.00", "100.50", "99.50", "100.25", "1000.00"),
+        FakeBarRow::new(
+            base + 60 * 1_000_000_000,
+            "100.25",
+            "101.00",
+            "100.00",
+            "100.75",
+            "1200.00",
+        ),
+        FakeBarRow::new(
+            base + 120 * 1_000_000_000,
+            "100.75",
+            "101.25",
+            "100.50",
+            "101.00",
+            "800.00",
+        ),
+    ]
+}
+
+fn spy_lake() -> FakeLakeServer {
+    FakeLakeServer::start(FakeLakeConfig {
+        read_bodies_by_type: BTreeMap::from([
+            ("quote".to_string(), quote_stream("SPY", &spy_quote_rows())),
+            ("trade".to_string(), trade_stream("SPY", &spy_trade_rows())),
+            ("bars".to_string(), bars_stream("SPY", &spy_bar_rows())),
+        ]),
+        ..FakeLakeConfig::new(LAKE_TOKEN)
+    })
+}
+
+fn lake_client(server: &FakeLakeServer) -> Arc<BlockingLakeClient> {
+    Arc::new(
+        BlockingLakeClient::new(
+            LakeClientConfig::new(server.base_url(), LAKE_TOKEN).expect("client config"),
+        )
+        .expect("blocking client"),
+    )
 }
 
 struct StubRunner {
@@ -186,6 +198,12 @@ fn build(
         run_store: store.clone(),
         job_repository: jobs.clone(),
         launcher,
+        screener_launcher: Arc::new(api::http::screener::InProcessScreenLauncher::new(
+            store.clone(),
+            jobs.clone(),
+            Arc::new(api::http::screener::UnavailableScreeningRunner),
+            clock.clone(),
+        )),
         sas_issuer: sas,
         clock,
         configuration_parser: Arc::new(StrictJsonConfigurationParser),
@@ -776,9 +794,15 @@ async fn injected_launcher_keeps_asynchronous_job_semantics() {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let config = AppConfig {
         bearer_token: Some(BEARER.to_string()),
-        run_store: store,
-        job_repository: jobs,
+        run_store: store.clone(),
+        job_repository: jobs.clone(),
         launcher,
+        screener_launcher: Arc::new(api::http::screener::InProcessScreenLauncher::new(
+            store,
+            jobs,
+            Arc::new(api::http::screener::UnavailableScreeningRunner),
+            clock.clone(),
+        )),
         sas_issuer: None,
         clock,
         configuration_parser: Arc::new(StrictJsonConfigurationParser),
@@ -913,12 +937,12 @@ async fn durable_launch_survives_a_process_restart() {
 #[tokio::test]
 async fn native_engine_launch_reaches_a_terminal_state() {
     let root = temp_root("native");
-    let lake = materialize_spy_lake();
+    let server = spy_lake();
     let router = durable_router(
         &root,
-        Arc::new(api::http::native::NativeBacktestRunner::with_data_root(
+        Arc::new(api::http::native::NativeBacktestRunner::with_lake_client(
             root.join("out"),
-            lake.clone(),
+            lake_client(&server),
         )),
     );
     let momentum_source = include_str!("fixtures/parity_momentum.rs");
@@ -980,19 +1004,18 @@ async fn native_engine_launch_reaches_a_terminal_state() {
         "native-api-run"
     );
 
-    let _ = std::fs::remove_dir_all(&lake);
     let _ = std::fs::remove_dir_all(&root);
 }
 
 #[tokio::test]
 async fn native_research_metrics_are_queryable_over_http() {
     let root = temp_root("native-research");
-    let lake = materialize_spy_lake();
+    let server = spy_lake();
     let router = durable_router(
         &root,
-        Arc::new(api::http::native::NativeBacktestRunner::with_data_root(
+        Arc::new(api::http::native::NativeBacktestRunner::with_lake_client(
             root.join("out"),
-            lake.clone(),
+            lake_client(&server),
         )),
     );
     let study_source = include_str!("fixtures/parity_study.rs");
@@ -1003,7 +1026,7 @@ async fn native_research_metrics_are_queryable_over_http() {
         "start": "2024-01-02T14:30:00Z",
         "end": "2024-01-04T21:00:00Z",
         "seed": 7,
-        "data": {"symbols": ["SPY"]},
+        "data": {"symbols": ["SPY"], "bar_interval": "1min"},
         "strategy_instances": [{
             "instance_id": "research-model",
             "implementation": "jit",
@@ -1028,11 +1051,11 @@ async fn native_research_metrics_are_queryable_over_http() {
     )
     .await;
     assert_eq!(run_status, StatusCode::OK);
-    let observed = json_body(&run_body)["metrics"]["trade_observations"]
+    let observed = json_body(&run_body)["metrics"]["bar_observations"]
         .as_str()
         .and_then(|value| value.parse::<f64>().ok())
         .expect("custom metric");
-    assert!(observed > 0.0);
+    assert_eq!(observed, 3.0, "the three served bars must fold");
 
     let (artifact_status, _, artifact_body) = send(
         &router,
@@ -1044,11 +1067,10 @@ async fn native_research_metrics_are_queryable_over_http() {
     .await;
     assert_eq!(artifact_status, StatusCode::OK);
     assert_eq!(
-        json_body(&artifact_body)["custom"]["trade_observations"]
+        json_body(&artifact_body)["custom"]["bar_observations"]
             .as_str()
             .and_then(|value| value.parse::<f64>().ok()),
         Some(observed)
     );
-    let _ = std::fs::remove_dir_all(&lake);
     let _ = std::fs::remove_dir_all(&root);
 }

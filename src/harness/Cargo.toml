@@ -15,4 +15,5 @@ members = [
     "config",
     "strategy-sdk",
     "strategy-jit",
+    "lakeclient",
 ]

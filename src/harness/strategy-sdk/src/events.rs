@@ -74,6 +74,34 @@ impl<'a> TradeEvent<'a> {
     }
 }
 
+/// One OHLCV bar as the engine dispatched it.
+///
+/// This is the only market event a study program folds; quotes and trades
+/// remain on [`StrategyProgram`](crate::program::StrategyProgram) and the
+/// indicator surface. Every decimal field is exact, so a study reads bar
+/// values without a float roundtrip.
+#[derive(Clone, Copy, Debug)]
+pub struct BarEvent<'a> {
+    /// Event identifier.
+    pub event_id: &'a str,
+    /// Event time in epoch nanoseconds.
+    pub timestamp_ns: i64,
+    /// Global sequence.
+    pub sequence: u64,
+    /// Instrument symbol.
+    pub symbol: &'a str,
+    /// Interval open.
+    pub open: PyDecimal,
+    /// Interval high.
+    pub high: PyDecimal,
+    /// Interval low.
+    pub low: PyDecimal,
+    /// Interval close.
+    pub close: PyDecimal,
+    /// Interval volume.
+    pub volume: PyDecimal,
+}
+
 /// One booked fill owned by the program.
 #[derive(Clone, Copy, Debug)]
 pub struct Fill<'a> {

@@ -37,11 +37,14 @@ from thesis.integrations.mcp import (
     TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_GET_BACKTEST_STATUS,
     TOOL_GET_RUN,
+    TOOL_GET_SCREENER_STATUS,
     TOOL_LAUNCH_TRADER,
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
     TOOL_RUN_BACKTEST,
+    TOOL_RUN_SCREENER,
     TOOL_RUN_STUDY,
+    TOOL_SCREENER_CONFIG_TEMPLATE,
     HarnessMcpAuthError,
     HarnessMcpBoundary,
     HarnessMcpClient,
@@ -60,8 +63,11 @@ from thesis.integrations.mcp import (
 HARNESS_TOOL_NAMES: tuple[str, ...] = (
     TOOL_RUN_BACKTEST,
     TOOL_RUN_STUDY,
+    TOOL_RUN_SCREENER,
     TOOL_BACKTEST_CONFIG_TEMPLATE,
+    TOOL_SCREENER_CONFIG_TEMPLATE,
     TOOL_GET_BACKTEST_STATUS,
+    TOOL_GET_SCREENER_STATUS,
     TOOL_GET_RUN,
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
@@ -74,10 +80,12 @@ HARNESS_MCP_SKILL_VERSION = "1.0.0"
 
 HARNESS_MCP_SKILL_INSTRUCTIONS = (
     "Use the quant-harness MCP tools for deterministic research execution. "
-    "run_backtest and run_study launch backtest and study jobs; "
-    "backtest_config_template returns a starter configuration to adapt when no "
-    "config file exists, and run_backtest accepts that configuration inline as "
-    "the `config` argument; get_backtest_status and get_run report job and run "
+    "run_backtest and run_study launch backtest and study jobs; run_screener "
+    "launches a screening run of an authored Rust program; "
+    "backtest_config_template and screener_config_template return starter "
+    "configurations to adapt when no config file exists, and run_backtest and "
+    "run_screener accept those configurations inline as the `config` argument; "
+    "get_backtest_status, get_screener_status, and get_run report job and run "
     "state; list_artifacts enumerates a run's immutable outputs and read_artifact "
     "reads one artifact's text or hex-encoded bytes; and launch_trader "
     "starts a supervised trader session. Pass typed arguments, rely on the "
@@ -231,8 +239,42 @@ class RunStudyArgs:
 
 
 @dataclass(frozen=True, slots=True)
+class RunScreenerArgs:
+    """Typed arguments for ``run_screener``."""
+
+    config_path: str
+    workspace: str | None = None
+
+    def __post_init__(self) -> None:
+        _required_text(self.config_path, "config_path")
+        if self.workspace is not None:
+            _required_text(self.workspace, "workspace")
+
+    def to_arguments(self) -> dict[str, object]:
+        """Return the MCP ``tools/call`` arguments for this request."""
+        arguments: dict[str, object] = {"config_path": self.config_path}
+        if self.workspace is not None:
+            arguments["workspace"] = self.workspace
+        return arguments
+
+
+@dataclass(frozen=True, slots=True)
 class GetBacktestStatusArgs:
     """Typed arguments for ``get_backtest_status``."""
+
+    job_id: str
+
+    def __post_init__(self) -> None:
+        _required_text(self.job_id, "job_id")
+
+    def to_arguments(self) -> dict[str, object]:
+        """Return the MCP ``tools/call`` arguments for this request."""
+        return {"job_id": self.job_id}
+
+
+@dataclass(frozen=True, slots=True)
+class GetScreenerStatusArgs:
+    """Typed arguments for ``get_screener_status``."""
 
     job_id: str
 
@@ -379,13 +421,25 @@ class HarnessToolProvider:
         """Call ``run_study`` with typed arguments."""
         return self.call_tool(TOOL_RUN_STUDY, args.to_arguments())
 
+    def run_screener(self, args: RunScreenerArgs) -> HarnessToolResult:
+        """Call ``run_screener`` with typed arguments."""
+        return self.call_tool(TOOL_RUN_SCREENER, args.to_arguments())
+
     def backtest_config_template(self) -> HarnessToolResult:
         """Call ``backtest_config_template`` for a starter configuration."""
         return self.call_tool(TOOL_BACKTEST_CONFIG_TEMPLATE, {})
 
+    def screener_config_template(self) -> HarnessToolResult:
+        """Call ``screener_config_template`` for a starter screen configuration."""
+        return self.call_tool(TOOL_SCREENER_CONFIG_TEMPLATE, {})
+
     def get_backtest_status(self, args: GetBacktestStatusArgs) -> HarnessToolResult:
         """Call ``get_backtest_status`` with typed arguments."""
         return self.call_tool(TOOL_GET_BACKTEST_STATUS, args.to_arguments())
+
+    def get_screener_status(self, args: GetScreenerStatusArgs) -> HarnessToolResult:
+        """Call ``get_screener_status`` with typed arguments."""
+        return self.call_tool(TOOL_GET_SCREENER_STATUS, args.to_arguments())
 
     def get_run(self, args: GetRunArgs) -> HarnessToolResult:
         """Call ``get_run`` with typed arguments."""
@@ -597,6 +651,7 @@ __all__ = [
     "FailureKind",
     "GetBacktestStatusArgs",
     "GetRunArgs",
+    "GetScreenerStatusArgs",
     "HarnessToolCatalog",
     "HarnessToolError",
     "HarnessToolFailure",
@@ -609,6 +664,7 @@ __all__ = [
     "ListArtifactsArgs",
     "ReadArtifactArgs",
     "RunBacktestArgs",
+    "RunScreenerArgs",
     "RunStudyArgs",
     "harness_mcp_skill",
     "harness_mcp_skill_ref",

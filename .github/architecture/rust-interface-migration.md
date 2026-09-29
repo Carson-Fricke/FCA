@@ -9,14 +9,14 @@ workspace under `src/harness/`. The engine core — clock, event bus, replay,
 matching/fills, fees, portfolio, risk, results, sweeps, and the backtest runtime
 — is Rust, and the Python engine that used to mirror it has been deleted.
 
-User-authored strategies, indicators, and screener programs remain Python. The
-Rust engine drives them through the PyO3 plugin host in `host`; the
-host owns the strategy context natively (clock, universe, books, orders, state,
-seeded random, emissions, logging, and finite named metric publication) and duck-types it to the documented
-`harness.strategy.contracts.StrategyContext` protocol, so strategies run
-unmodified without importing an engine. Strategies and indicators keep
-authoring against `src/harness/strategy/**`, `src/harness/indicators/**`, and
-the example strategies under `strategies/`.
+User-authored strategies, indicators, studies, and screening programs are
+authored in Rust against `harness-strategy-sdk` and compiled and loaded on
+submit through `harness-strategy-jit`. The embedded interpreter, the PyO3
+strategy host, the `py` extension crate, and the harness Python packages were
+deleted; the SDK exposes the authoring traits (strategy, indicator, study, and
+screening programs) over the engine's event and context types, and the
+versioned C ABI is the only contract that crosses a dylib boundary. A study or
+screening program has no order surface by construction.
 
 The native `backtest-job` runs the Rust engine end to end over the configured
 `strategy_instances` and is parity-proven byte-for-byte against the Python
@@ -24,36 +24,42 @@ reference under the agreed definition (see below).
 
 ## Entrypoints
 
-Every harness console script is a thin shim that execs the matching Rust
-binary. The shims live in `src/harness/cli/` and resolve binaries through
-`harness.cli.rust_entrypoints`.
+Every harness process is a Rust binary invoked directly; the Python
+console-script shims were deleted with the harness Python packages, and the
+runtime image puts the binaries on `PATH` under `/opt/rust/bin`.
 
-| Console script | Rust binary | Rust crate | Status |
+| Entry point | Rust binary | Rust crate | Status |
 | --- | --- | --- | --- |
-| `harness` | `harness` | `api` | flipped; facade dispatches `api`, `mcp`, and `backtest-job` |
+| `harness` | `harness` | `api` | flipped; facade dispatches `api`, `mcp`, `backtest-job`, `study-job`, `screen-job`, and `trader` |
 | `api` | `api` | `api` | flipped (axum HTTP boundary, bearer auth, provenance) |
 | `backtest-job` | `backtest-job` | `api` | flipped (native engine, parity-proven) |
+| `screen-job` | `screen-job` | `api` | flipped (JIT-authored screening programs, `screen.json`) |
 | `trader` | `trader` | `live` | flipped (native supervision runner: config, sessions, feed supervision, reconciler, kill-switch, snapshots) |
 | `harness mcp` | `harness` | `api` | flipped (JSON-RPC dispatch, tool catalog, stdio transport) |
 
 Configuration is ported behavior-identically in `config` (loader,
-strict models, canonical hashing) and the strategy host surface in
-`host` (PyO3 strategy/indicator/screener hosts).
+strict models, canonical hashing); the authoring surface is the
+`harness-strategy-sdk` / `harness-strategy-jit` pair, and `harness-lakeclient`
+carries every market-data read over the lake routes.
 
-Binary discovery, in order:
+A missing binary fails with an actionable message; it never falls back to a
+deleted Python implementation.
 
-1. `HARNESS_RUST_BINARY_DIR`.
-2. `src/harness/target/release`.
-3. `src/harness/target/debug`.
+### Backtest lake data (HTTP routes)
 
-A shim exits with code 2 and an actionable message when the binary has not been
-built; it never falls back to a deleted Python implementation.
+The harness has no local lake path: `--data-dir`, `HARNESS_DATA_DIR`,
+`LAKE_LOCAL_DATA_DIR`, `.local/market-lake`, and `marketdata::LocalLakeReader`
+were deleted. Every market-data read streams from the market-lake HTTP routes
+through `harness-lakeclient` (async `reqwest`, with a blocking facade for the
+JIT path): ensure, job status, and coverage for the run window; `GET /v1/read`
+for the Arrow IPC stream of trades, quotes, and bars (bars select their
+`interval`); and `GET /v1/reference/universe` / `GET /v1/reference/facts` for
+screening context. The lake endpoint resolves from `LAKE_API_URL` (then
+`LAKE_API_BASE_URL`) and `LAKE_API__BEARER_TOKEN`; a missing or rejected lake
+configuration fails the run loudly and never falls back to local files or a
+synthetic fixture.
 
-### Backtest lake data (--data-dir)
-
-`backtest-job --data-dir <dir>` reads a local Hive-partitioned Parquet lake through `marketdata::LocalLakeReader` and drives the native engine over the real data instead of the synthetic fixture. Symbols shaped like a crypto pair (`BTC-USD`) additionally read their `BASE/QUOTE` crypto partition and are re-keyed to the configured dashed symbol. The canonical parity test is unchanged.
-
-Before a local run, the harness API asks the market-lake ensure contract (`LAKE_API_URL`, `LAKE_API__BEARER_TOKEN`) to fetch every configured symbol/data-type for the run window, then polls coverage until every session is terminal. One request covers the whole window: the lake plans, resumes, and retries its own fetches server-side, so callers never split ranges and a repeat request continues an interrupted ensure. Coverage polling has no overall deadline and backs off to a fixed ceiling; it ends only on a lake-reported failure. The lake pages each fetch until the provider cursor is exhausted, so a closed session is complete rather than truncated. The lake owns provider credentials and the fetch; the harness never reads them. A symbol set the lake has not ingested before is thus fetched on demand rather than failing preflight with a missing-symbol error.
+Before a run, the harness API asks the market-lake ensure contract (`LAKE_API_URL`, `LAKE_API__BEARER_TOKEN`) to fetch every configured symbol/data-type for the run window, then polls coverage until every session is terminal. One request covers the whole window: the lake plans, resumes, and retries its own fetches server-side, so callers never split ranges and a repeat request continues an interrupted ensure. Coverage polling has no overall deadline and backs off to a fixed ceiling; it ends only on a lake-reported failure. The lake pages each fetch until the provider cursor is exhausted, so a closed session is complete rather than truncated. The lake owns provider credentials and the fetch; the harness never reads them. A symbol set the lake has not ingested before is thus fetched on demand rather than failing preflight with a missing-symbol error.
 
 A closed session left `partial`, or an errored fetch, is a repairable gap rather than a terminal failure: the lake classifies both as actionable and re-fetches them inside the running ensure job, and the harness keeps polling while that job is in flight. Only a job that settles with coverage still short fails the ensure, naming the sessions the lake could not complete. A session that is still trading is accepted as partial.
 
@@ -67,29 +73,14 @@ in both payloads and newline-normalizes them before comparing.
 
 ## Python surface retained
 
-The Python engine was deleted. What remains under `src/harness` is the plugin
-surface and the market-data views the surviving products consume:
-
-* `harness.configuration` and `harness.core` — strict configuration and the
-  decimal-safe records, symbols, clocks, and event bus.
-* `harness.strategy` — the protocol-only plugin contract (`StrategyContext`),
-  the callback contract, the sandbox lint, and the reference fixture. The
-  engine-bound context and binding were deleted; the native Rust context
-  replaces them.
-* `harness.indicators` — the immutable global registry and tick-native built-in
-  kernels. Private mutable registries remain available for tests and injected
-  extensions, but workspace publication never mutates the global registry.
-* `harness.research` — the no-order adapter and restricted namespace for
-  workspace statistical models and workspace indicator functions. Source
-  receives plain event/series mappings and returns finite numeric outputs.
-* `harness.screening` — user screener kernels and their process-isolated sandbox.
-* `harness.data` — the point-in-time views and option filters retained for the
-  plugin surface and the thesis product: bars, history, listing events, the
-  option contract universe (`DteFilter`, `StrikeFilter`, `MoneynessFilter`),
-  the SecurityMaster view, and the composite universe view.
-* `harness.testing` — canonical artifact support, the Rust-core parity oracle,
-  and the cross-mode indicator parity oracle.
-* `harness.cli` — the console-script shims into the Rust binaries.
+No harness Python surface remains: the plugin host, the `py` extension crate,
+and every harness Python package (`harness.configuration`, `harness.core`,
+`harness.strategy`, `harness.indicators`, `harness.research`,
+`harness.screening`, `harness.data`, `harness.testing`, and `harness.cli`)
+were deleted in the native-authoring wave. The Python products that remain are
+the lake service shim and its retained library surface (`src/lake`, see
+`lake-rust-rewrite-plan.md`), the consumer-facing `lakeclient` client
+(`src/lakeclient`), and Thesis (`src/thesis`).
 
 Deleted engine modules: `harness.runtime`, `harness.oms`, `harness.fills`,
 `harness.portfolio`, `harness.risk`, `harness.venues`, `harness.results`,

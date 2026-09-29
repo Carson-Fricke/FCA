@@ -11,7 +11,8 @@ use super::launcher::{
     BacktestLauncher, BacktestRunner, InProcessLauncher, UnportedBacktestRunner,
 };
 use super::mcp::compose_local_server;
-use super::native::NativeBacktestRunner;
+use super::native::{NativeBacktestRunner, NativeScreenRunner};
+use super::screener::{InProcessScreenLauncher, ScreenLauncher};
 use super::store::{
     FileSystemJobRepository, FileSystemRunStore, InMemoryJobRepository, InMemoryRunStore,
     JobRepository, RunStore, SasIssuer,
@@ -44,6 +45,8 @@ pub struct AppState {
     pub job_repository: Arc<dyn JobRepository>,
     /// Backtest launcher.
     pub launcher: Arc<dyn BacktestLauncher>,
+    /// Screening launcher.
+    pub screener_launcher: Arc<dyn ScreenLauncher>,
     /// Optional artifact SAS issuer.
     pub sas_issuer: Option<Arc<dyn SasIssuer>>,
     /// Clock used for job timestamps.
@@ -64,6 +67,8 @@ pub struct AppConfig {
     pub job_repository: Arc<dyn JobRepository>,
     /// Backtest launcher.
     pub launcher: Arc<dyn BacktestLauncher>,
+    /// Screening launcher.
+    pub screener_launcher: Arc<dyn ScreenLauncher>,
     /// Optional artifact SAS issuer.
     pub sas_issuer: Option<Arc<dyn SasIssuer>>,
     /// Clock used for job timestamps.
@@ -91,11 +96,18 @@ impl AppConfig {
             Arc::new(UnportedBacktestRunner),
             clock.clone(),
         ));
+        let screener_launcher = Arc::new(InProcessScreenLauncher::new(
+            run_store.clone(),
+            job_repository.clone(),
+            Arc::new(NativeScreenRunner::default()),
+            clock.clone(),
+        ));
         Self {
             bearer_token: None,
             run_store,
             job_repository,
             launcher,
+            screener_launcher,
             sas_issuer: None,
             clock,
             configuration_parser: Arc::new(StrictJsonConfigurationParser),
@@ -125,11 +137,18 @@ impl AppConfig {
             runner,
             clock.clone(),
         ));
+        let screener_launcher = Arc::new(InProcessScreenLauncher::new(
+            run_store.clone(),
+            job_repository.clone(),
+            Arc::new(NativeScreenRunner::default()),
+            clock.clone(),
+        ));
         Self {
             bearer_token: None,
             run_store,
             job_repository,
             launcher,
+            screener_launcher,
             sas_issuer: None,
             clock,
             configuration_parser: Arc::new(StrictJsonConfigurationParser),
@@ -153,6 +172,7 @@ impl AppConfig {
             run_store: self.run_store,
             job_repository: self.job_repository,
             launcher: self.launcher,
+            screener_launcher: self.screener_launcher,
             sas_issuer: self.sas_issuer,
             clock: self.clock,
             configuration_parser: self.configuration_parser,

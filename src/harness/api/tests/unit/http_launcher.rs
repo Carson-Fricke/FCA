@@ -27,6 +27,7 @@ fn config() -> ValidatedConfiguration {
         data_end: None,
         configuration_digest: "digest".to_string(),
         document: serde_json::Value::Null,
+        screen: None,
     }
 }
 

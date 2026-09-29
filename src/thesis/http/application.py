@@ -53,8 +53,7 @@ from thesis.http.dashboards import create_dashboard_router
 from thesis.http.deployments import create_deployment_router
 from thesis.http.harness import HarnessDataService, create_harness_router
 from thesis.http.knowledge import create_knowledge_router
-from thesis.http.screeners import create_screeners_router
-from thesis.http.screening import create_screener_router
+from thesis.http.screeners import create_screener_router
 from thesis.http.state import create_workspace_state_router
 from thesis.http.strategies import create_strategy_router
 from thesis.http.streaming import (
@@ -318,7 +317,6 @@ def create_app(
     stream_sleeper: StreamSleeper | None = None,
     provider_delta_source: ProviderDeltaSource | None = None,
     stream_max_poll_cycles: int | None = None,
-    screener_service: ScreenerService | None = None,
     workspace_data: WorkspaceDataBundle | None = None,
     workflow_runtime: WorkflowRuntime | None = None,
     harness_data_service: HarnessDataService | None = None,
@@ -338,11 +336,8 @@ def create_app(
 
     The chat and streaming routers resolve their :class:`ChatService` from
     ``app.state.chat_service``; pass ``chat_service`` to inject one, otherwise
-    the first request constructs an in-memory service.  The screener router
-    resolves its :class:`ScreenerService` from ``app.state.screener_service``;
-    without an injected service the screener surface answers 503 (fail closed
-    when no data source is configured).  The workspace DATA routers
-    (workspaces, backtests, deployments, dashboards, screeners, and workspace
+    the first request constructs an in-memory service.  The workspace DATA
+    routers (workspaces, backtests, deployments, dashboards, and workspace
     state) resolve their services from ``app.state`` the same way; pass
     ``workspace_data`` — typically built by
     :func:`thesis.http.workspaces.build_local_workspace_data` — to compose the
@@ -497,9 +492,22 @@ def create_app(
         application.state.backtest_service = workspace_data.backtests
         application.state.deployment_service = workspace_data.deployments
         application.state.dashboard_service = workspace_data.dashboards
-        application.state.screener_data_service = workspace_data.screeners
         application.state.workspace_state_service = workspace_data.state
         application.state.strategy_service = workspace_data.strategies
+        screener_service = workspace_data.screeners
+        if (
+            screener_service is not None
+            and screener_service.tools is None
+            and harness_tool_provider is not None
+        ):
+            # Reuse the already-open MCP client so the screener surface is live
+            # whenever the serving composition has a harness tool boundary, even
+            # when the workspace bundle was built without one.
+            screener_service = ScreenerService(
+                tools=harness_tool_provider.client, store=screener_service.store
+            )
+        if screener_service is not None:
+            application.state.screener_service = screener_service
         if workspace_data.harness is not None:
             application.state.harness_boundary = workspace_data.harness
         if chat_service is not None:
@@ -512,8 +520,6 @@ def create_app(
                     # state before the process serves requests.
                     chat_service.stop_active_executions(workspace_id)
                     reconcile_stranded_sub_agents(chat_service, workspace_id)
-    if screener_service is not None:
-        application.state.screener_service = screener_service
     if workflow_runtime is not None:
         application.state.workflow_runtime = workflow_runtime
     if harness_data_service is not None:
@@ -592,7 +598,6 @@ def create_app(
         create_harness_router(),
         create_deployment_router(),
         create_dashboard_router(),
-        create_screeners_router(),
         create_workspace_state_router(),
         create_strategy_router(),
         create_screener_router(),

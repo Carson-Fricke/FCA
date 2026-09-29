@@ -1,0 +1,86 @@
+{
+  "symbol": "BTC/USD",
+  "session": {
+    "date": "2024-11-27",
+    "open": "2024-11-27T00:00:00Z",
+    "close": "2024-11-28T00:00:00Z"
+  },
+  "trades": [
+    {
+      "timestamp": "2024-11-27T00:00:30Z",
+      "symbol": "BTC/USD",
+      "trade_id": 10,
+      "exchange": "CBSE",
+      "price": "41234.12",
+      "size": "0.5",
+      "taker_side": "B"
+    },
+    {
+      "timestamp": "2024-11-27T00:00:00.500000Z",
+      "symbol": "BTC/USD",
+      "trade_id": 9,
+      "exchange": "CBSE",
+      "price": "41230.00",
+      "size": "0.25",
+      "taker_side": "S"
+    },
+    {
+      "timestamp": "2024-11-27T23:59:30Z",
+      "symbol": "BTC/USD",
+      "trade_id": 12,
+      "exchange": "CBSE",
+      "price": "41280.00",
+      "size": "0.10",
+      "taker_side": "S"
+    },
+    {
+      "timestamp": "2024-11-27T00:01:00Z",
+      "symbol": "BTC/USD",
+      "trade_id": 11,
+      "exchange": "CBSE",
+      "price": "41250.00",
+      "size": "0.75",
+      "taker_side": "B"
+    }
+  ],
+  "minute_bars": [
+    {
+      "timestamp": 1732665600000000000,
+      "symbol": "BTC/USD",
+      "open": "41230",
+      "high": "41234.12",
+      "low": "41230",
+      "close": "41234.12",
+      "volume": "0.75"
+    },
+    {
+      "timestamp": 1732665660000000000,
+      "symbol": "BTC/USD",
+      "open": "41250",
+      "high": "41250",
+      "low": "41250",
+      "close": "41250",
+      "volume": "0.75"
+    },
+    {
+      "timestamp": 1732751940000000000,
+      "symbol": "BTC/USD",
+      "open": "41280",
+      "high": "41280",
+      "low": "41280",
+      "close": "41280",
+      "volume": "0.1"
+    }
+  ],
+  "daily_bars": [
+    {
+      "timestamp": 1732665600000000000,
+      "symbol": "BTC/USD",
+      "open": "41230",
+      "high": "41280",
+      "low": "41230",
+      "close": "41280",
+      "volume": "1.6"
+    }
+  ]
+}

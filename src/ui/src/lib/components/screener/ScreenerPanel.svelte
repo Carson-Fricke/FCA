@@ -1,165 +1,321 @@
 <script lang="ts">
 	/**
-	 * Screener: declarative filter builder (engine-native vocabulary with
-	 * declaration-time validation), point-in-time runs with an as-of date,
-	 * a provenance-backed results table, saved studies (load / re-run), and
-	 * a custom Python screen editor with boundary feedback. Definitions
-	 * persist as workspace artifacts through the screening HTTP surface.
+	 * Screener page composition: one authored definition (name, as-of date,
+	 * lookback, bar interval, rank metric, filter builder, Rust editor) saved
+	 * as a content-addressed workspace artifact, run against the as-of date
+	 * through the Thesis screener route, and rendered with full provenance.
+	 *
+	 * There is no server-side filter interpreter: the builder generates Rust
+	 * source, the harness JIT compiles it, and the definition hash binds the
+	 * saved artifact to those exact source bytes.
 	 */
 	import { runScreener, saveScreener } from '$lib/api';
 	import { notify } from '$lib/workspace.svelte';
 	import FilterBuilder from './FilterBuilder.svelte';
-	import PythonScreenerEditor from './PythonScreenerEditor.svelte';
+	import RustScreenerEditor from './RustScreenerEditor.svelte';
 	import SavedStudies from './SavedStudies.svelte';
 	import ScreenerResultsTable from './ScreenerResultsTable.svelte';
 	import {
+		BAR_INTERVALS,
 		DEFAULT_KIND,
-		buildFilters,
 		describeScreenerError,
+		metricsForRows,
 		newRow,
-		validateRow,
-		specToRow
+		validateRow
 	} from './filterCatalog';
 	import type { FilterRow } from './filterCatalog';
-	import type { ScreenerRunResult, ScreenerSavedDefinition } from '$lib/types';
+	import { generateScreenerSource, lintScreenerSource, parseFilterRows } from './screenerSource';
+	import type { ScreenerBarInterval, ScreenerDefinition, ScreeningResult } from '$lib/types';
 
 	let {
 		workspaceId,
-		initialSaved = []
+		initialSaved = [],
+		initialResult = null
 	}: {
 		workspaceId: string;
-		initialSaved?: ScreenerSavedDefinition[];
+		initialSaved?: ScreenerDefinition[];
+		initialResult?: ScreeningResult | null;
 	} = $props();
 
-	let rows = $state<FilterRow[]>([newRow(DEFAULT_KIND)]);
+	const initialRows: FilterRow[] = [newRow(DEFAULT_KIND)];
+	let rows = $state<FilterRow[]>(initialRows);
+	let source = $state(generateScreenerSource(initialRows));
+	let sourceDirty = $state(false);
+	let name = $state('');
 	let asOf = $state(new Date().toISOString().slice(0, 10));
-	let saveName = $state('');
-	let lookbackDays = $state<number | null>(20);
-	let saved = $state<ScreenerSavedDefinition[]>([]);
-	let result = $state<ScreenerRunResult | null>(null);
+	let lookbackDays = $state(20);
+	let barInterval = $state<ScreenerBarInterval>('1d');
+	let rankMetric = $state('close');
+	let saved = $state<ScreenerDefinition[]>([]);
+	let selectedId = $state<string | null>(null);
+	let result = $state<ScreeningResult | null>(null);
 	let running = $state(false);
 	let saving = $state(false);
 	let serverError = $state<string | null>(null);
 
-	// The page resolves the saved list asynchronously; seed once when the
-	// initial documents arrive and the local list is still untouched.
+	// The page resolves the saved list asynchronously; seed once the initial
+	// documents arrive and the local list is still untouched.
 	$effect(() => {
-		if (initialSaved.length && !saved.length) saved = initialSaved;
+		if (initialSaved.length && saved.length === 0) {
+			saved = initialSaved;
+			if (!selectedId) selectedId = initialSaved[0]?.definitionId ?? null;
+		}
 	});
 
-	const validFilters = $derived(buildFilters(rows));
-	const rowsValid = $derived(rows.length > 0 && rows.every((row) => validateRow(row) === null));
-	const lookbackValid = $derived(lookbackDays === null || (lookbackDays >= 1 && lookbackDays <= 365));
-	const canRun = $derived(rowsValid && !running);
-	const canSave = $derived(
-		rowsValid && saveName.trim().length > 0 && lookbackValid && !saving
+	$effect(() => {
+		if (initialResult && !result) result = initialResult;
+	});
+
+	const sourceIssues = $derived(lintScreenerSource(source));
+	const sourceValid = $derived(!sourceIssues.some((issue) => issue.severity === 'error'));
+	const rowsValid = $derived(rows.every((row) => validateRow(row) === null));
+	const nameValid = $derived(name.trim().length > 0 && name.trim().length <= 256);
+	const lookbackValid = $derived(
+		Number.isInteger(lookbackDays) && lookbackDays >= 1 && lookbackDays <= 3650
 	);
+	const asOfValid = $derived(/^\d{4}-\d{2}-\d{2}$/.test(asOf));
+	const rankValid = $derived(rankMetric.trim().length > 0);
+	const draftValid = $derived(sourceValid && rowsValid && nameValid && lookbackValid && rankValid);
+	const canSave = $derived(draftValid && !saving && !running);
+	const canRun = $derived(draftValid && asOfValid && !saving && !running);
 
-	async function run(): Promise<void> {
-		running = true;
+	const metricOptions = $derived.by(() => {
+		const options = ['close', ...metricsForRows(rows)];
+		if (rankMetric && !options.includes(rankMetric)) options.push(rankMetric);
+		return [...new Set(options)];
+	});
+
+	function onRowsChange(next: FilterRow[]): void {
+		rows = next;
+		// Filter edits regenerate the source while it is still generated;
+		// manual source edits are never clobbered by the builder.
+		if (!sourceDirty) source = generateScreenerSource(next);
+	}
+
+	function regenerate(): void {
+		source = generateScreenerSource(rows);
+		sourceDirty = false;
+	}
+
+	function onSourceEdited(): void {
+		sourceDirty = true;
+	}
+
+	function loadDefinition(definition: ScreenerDefinition): void {
+		name = definition.name;
+		lookbackDays = definition.lookbackDays;
+		barInterval = definition.barInterval;
+		rankMetric = definition.rankMetric;
+		source = definition.source;
+		selectedId = definition.definitionId;
 		serverError = null;
-		try {
-			result = await runScreener(workspaceId, {
-				name: saveName.trim() || 'Ad-hoc screen',
-				as_of: asOf,
-				lookback_days: lookbackDays ?? 20,
-				filters: validFilters
-			});
-		} catch (error) {
-			serverError = describeScreenerError(error);
-		} finally {
-			running = false;
+		const parsed = parseFilterRows(definition.source);
+		if (parsed) {
+			rows = parsed;
+			sourceDirty = false;
+		} else {
+			rows = [];
+			sourceDirty = true;
 		}
 	}
 
-	async function rerunStudy(study: ScreenerSavedDefinition): Promise<void> {
-		running = true;
-		serverError = null;
-		try {
-			result = await runScreener(workspaceId, {
-				name: study.definition.name,
-				as_of: asOf,
-				lookback_days: study.definition.lookback_days,
-				filters: study.definition.filters
-			});
-		} catch (error) {
-			serverError = describeScreenerError(error);
-		} finally {
-			running = false;
-		}
+	function draftDiffers(definition: ScreenerDefinition): boolean {
+		return (
+			definition.name !== name.trim() ||
+			definition.lookbackDays !== lookbackDays ||
+			definition.barInterval !== barInterval ||
+			definition.rankMetric !== rankMetric.trim() ||
+			definition.source !== source
+		);
 	}
 
-	function loadStudy(study: ScreenerSavedDefinition): void {
-		rows = study.definition.filters.map((filter) => specToRow(filter));
-		saveName = study.definition.name;
-		lookbackDays = study.definition.lookback_days;
-		serverError = null;
-	}
-
-	async function save(): Promise<void> {
-		if (!canSave) return;
+	async function saveDraft(announce = true): Promise<ScreenerDefinition | null> {
+		if (!draftValid || saving) return null;
 		saving = true;
 		serverError = null;
 		try {
 			const created = await saveScreener(workspaceId, {
-				name: saveName.trim(),
-				lookback_days: lookbackDays ?? 20,
-				filters: validFilters
+				name: name.trim(),
+				lookback_days: lookbackDays,
+				bar_interval: barInterval,
+				rank_metric: rankMetric.trim(),
+				source
 			});
-			saved = [...saved, created];
-			saveName = '';
-			notify(`Screener saved as workspace artifact ${created.artifact_path}`);
+			saved = [created, ...saved.filter((item) => item.definitionId !== created.definitionId)];
+			selectedId = created.definitionId;
+			if (announce) notify(`Screener saved · ${created.definitionId}`);
+			return created;
 		} catch (error) {
 			serverError = describeScreenerError(error);
+			return null;
 		} finally {
 			saving = false;
 		}
 	}
+
+	async function save(): Promise<void> {
+		await saveDraft(true);
+	}
+
+	async function runDefinition(definition: ScreenerDefinition): Promise<void> {
+		if (running || saving) return;
+		running = true;
+		serverError = null;
+		selectedId = definition.definitionId;
+		try {
+			result = await runScreener(workspaceId, {
+				definition_id: definition.definitionId,
+				as_of: asOf
+			});
+			notify(`Screener run ${result.run_id} · ${result.status}`);
+		} catch (error) {
+			serverError = describeScreenerError(error);
+		} finally {
+			running = false;
+		}
+	}
+
+	async function run(): Promise<void> {
+		if (!canRun) return;
+		const selected = saved.find((item) => item.definitionId === selectedId) ?? null;
+		// A definition is immutable content: a dirty draft is saved first so
+		// the run always compiles exactly the bytes the operator sees.
+		const definition =
+			selected && !draftDiffers(selected) ? selected : await saveDraft(false);
+		if (!definition) return;
+		await runDefinition(definition);
+	}
 </script>
 
-<div class="grid gap-4 lg:grid-cols-[1fr_320px]" data-testid="screener-panel">
-	<div class="space-y-4">
-		<FilterBuilder bind:rows bind:asOf {running} {canRun} onRun={run} {serverError} />
-		<ScreenerResultsTable {result} {running} />
-	</div>
+<svelte:head><title>Screener — Thesis</title></svelte:head>
 
-	<aside class="space-y-4">
-		<section class="rounded-xl border border-surface-700 bg-surface-900 p-4" data-testid="screener-save">
-			<h3 class="text-sm font-semibold text-slate-800">Save as workspace artifact</h3>
-			<input
-				type="text"
-				class="mt-2 w-full rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-500 focus:border-accent/50"
-				placeholder="Screener name…"
-				bind:value={saveName}
-				data-testid="screener-name-input"
-			/>
-			<label class="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
+<div class="mx-auto max-w-6xl space-y-4" data-testid="screener-panel">
+	<header class="flex flex-wrap items-center gap-3">
+		<div>
+			<h1 class="text-xl font-semibold text-slate-800">Screener</h1>
+			<p class="text-sm text-slate-500">
+				Rust-authored point-in-time screens: the builder generates source, the harness compiles
+				and ranks it, and the definition hash binds every result to its bytes.
+			</p>
+		</div>
+	</header>
+
+	<section class="rounded-xl border border-surface-700 bg-surface-900 p-4" data-testid="screener-definition">
+		<div class="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+			<label class="flex flex-col gap-1 text-[10px] text-slate-500 lg:col-span-2">
+				Definition name
+				<input
+					type="text"
+					class="rounded-lg border border-surface-600 bg-surface-950 px-3 py-1.5 text-sm text-slate-800 outline-none placeholder:text-slate-500 focus:border-accent/50"
+					placeholder="e.g. Liquid large caps"
+					bind:value={name}
+					data-testid="screener-name-input"
+				/>
+			</label>
+			<label class="flex flex-col gap-1 text-[10px] text-slate-500">
+				As-of date
+				<input
+					type="date"
+					class="rounded-lg border border-surface-600 bg-surface-950 px-2 py-1.5 font-mono text-xs text-slate-700 outline-none"
+					bind:value={asOf}
+					data-testid="screener-asof"
+				/>
+			</label>
+			<label class="flex flex-col gap-1 text-[10px] text-slate-500">
 				Lookback days
 				<input
 					type="number"
 					min="1"
-					max="365"
-					class="w-16 rounded border border-surface-600 bg-surface-950 px-2 py-1 font-mono text-xs text-slate-700 outline-none"
+					max="3650"
+					class="rounded-lg border border-surface-600 bg-surface-950 px-2 py-1.5 font-mono text-xs text-slate-700 outline-none"
 					bind:value={lookbackDays}
 					data-testid="screener-lookback"
 				/>
 			</label>
+			<label class="flex flex-col gap-1 text-[10px] text-slate-500">
+				Bar interval
+				<select
+					class="rounded-lg border border-surface-600 bg-surface-950 px-2 py-1.5 font-mono text-xs text-slate-700 outline-none"
+					bind:value={barInterval}
+					data-testid="screener-interval"
+				>
+					{#each BAR_INTERVALS as interval (interval)}
+						<option value={interval}>{interval}</option>
+					{/each}
+				</select>
+			</label>
+			<label class="flex flex-col gap-1 text-[10px] text-slate-500 md:col-span-2 lg:col-span-2">
+				Rank metric
+				<select
+					class="rounded-lg border border-surface-600 bg-surface-950 px-2 py-1.5 font-mono text-xs text-slate-700 outline-none"
+					bind:value={rankMetric}
+					data-testid="screener-rank-metric"
+				>
+					{#each metricOptions as metric (metric)}
+						<option value={metric}>{metric}</option>
+					{/each}
+				</select>
+			</label>
+		</div>
+
+		<div class="mt-3 flex flex-wrap items-center gap-3 border-t border-surface-700 pt-3">
 			<button
 				type="button"
-				class="mt-3 w-full rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-40"
+				class="rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
 				disabled={!canSave}
 				onclick={save}
 				data-testid="screener-save-button"
 			>
-				{saving ? 'Saving…' : 'Save screener'}
+				{saving ? 'Saving…' : 'Save definition'}
 			</button>
-			<p class="mt-1.5 font-mono text-[10px] text-slate-500">
-				{validFilters.length} validated filter{validFilters.length === 1 ? '' : 's'} in the payload
+			<button
+				type="button"
+				class="rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
+				disabled={!canRun}
+				onclick={run}
+				data-testid="screener-run"
+			>
+				{running ? 'Screening…' : 'Run screener'}
+			</button>
+			<span class="font-mono text-[10px] text-slate-500">
+				{sourceIssues.length
+					? `${sourceIssues.length} pre-flight issue${sourceIssues.length === 1 ? '' : 's'}`
+					: 'pre-flight clean'} · point-in-time run: no lookahead past the as-of date
+			</span>
+			<span class="ml-auto font-mono text-[10px] text-slate-500" title={metricsForRows(rows).join(', ')}>
+				{selectedId ? `selected ${selectedId.slice(0, 19)}…` : 'unsaved draft'}
+			</span>
+		</div>
+		{#if serverError}
+			<p
+				class="mt-2 rounded-lg border border-loss/40 bg-loss/10 px-2 py-1.5 font-mono text-[10px] text-loss"
+				data-testid="screener-error"
+			>
+				{serverError}
 			</p>
-		</section>
+		{/if}
+	</section>
 
-		<SavedStudies {saved} onLoad={loadStudy} onRerun={rerunStudy} />
+	<div class="grid gap-4 lg:grid-cols-[1fr_320px]">
+		<div class="space-y-4">
+			<FilterBuilder {rows} onChange={onRowsChange} metricOptions={metricsForRows(rows)} />
+			<RustScreenerEditor
+				bind:source
+				{sourceDirty}
+				{serverError}
+				onEdited={onSourceEdited}
+				onGenerate={regenerate}
+			/>
+			<ScreenerResultsTable
+				{result}
+				{running}
+				error={serverError}
+				definitionName={saved.find((item) => item.definitionId === selectedId)?.name ?? null}
+			/>
+		</div>
 
-		<PythonScreenerEditor {serverError} />
-	</aside>
+		<aside class="space-y-4">
+			<SavedStudies {saved} {selectedId} onLoad={loadDefinition} onRun={runDefinition} />
+		</aside>
+	</div>
 </div>

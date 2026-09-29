@@ -32,14 +32,51 @@ fn coverage_record(
         session_date,
         status,
         complete.then(|| {
-            partition_path(session_date, asset_class, data_type, symbol).expect("canonical path")
+            partition_path(session_date, asset_class, data_type, None, symbol)
+                .expect("canonical path")
         }),
         if complete { 12 } else { 0 },
         if complete { 3456 } else { 0 },
         None,
         (status == CoverageStatus::Error).then(|| "source unavailable".to_string()),
+        None,
     )
     .expect("valid record")
+}
+
+fn bars_coverage_record(interval: &str, session_date: Date) -> CoverageRecord {
+    CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        "AAPL",
+        session_date,
+        CoverageStatus::Complete,
+        Some(
+            partition_path(
+                session_date,
+                AssetClass::Equity,
+                DataType::Bars,
+                Some(interval),
+                "AAPL",
+            )
+            .expect("canonical bars path"),
+        ),
+        7,
+        890,
+        None,
+        None,
+        Some(interval.to_string()),
+    )
+    .expect("valid bars record")
+}
+
+fn bars_coverage_path(interval: Option<&str>) -> String {
+    match interval {
+        Some(interval) => format!(
+            "/v1/catalog/coverage?asset_class=equity&data_type=bars&symbol=AAPL&interval={interval}&start_date=2024-11-27&end_date=2024-11-27"
+        ),
+        None => "/v1/catalog/coverage?asset_class=equity&data_type=bars&symbol=AAPL&start_date=2024-11-27&end_date=2024-11-27".to_string(),
+    }
 }
 
 fn coverage_path(
@@ -467,4 +504,80 @@ async fn option_coverage_requires_a_selection() {
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"]["code"], "validation_error");
+}
+
+#[tokio::test]
+async fn bars_coverage_requires_the_interval_and_keeps_intervals_distinct() {
+    let session_date = date(11, 27);
+    let catalog = Arc::new(MemoryCatalogRepository::from_records([
+        bars_coverage_record("1min", session_date),
+    ]));
+    let mut state = base_state(catalog);
+    state.now = clock_at(
+        lake_contracts::DateTime::from_ymd_hms(2024, 12, 3, 0, 0, 0, 0).expect("datetime"),
+    );
+    let router = build_app(state);
+
+    let (status, _, body) = send(&router, get_auth(&bars_coverage_path(Some("1min")))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data_type"], "bars");
+    assert_eq!(body["entries"][0]["status"], "complete");
+    assert_eq!(
+        body["entries"][0]["object_path"],
+        "date=2024-11-27/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet"
+    );
+
+    let (status, _, body) = send(&router, get_auth(&bars_coverage_path(Some("1d")))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["entries"][0]["status"], "missing");
+    assert_eq!(body["entries"][0]["object_path"], json!(null));
+
+    let (status, _, body) = send(&router, get_auth(&bars_coverage_path(None))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "validation_error");
+    assert_eq!(
+        body["error"]["details"][0]["msg"],
+        "Value error, interval is required for bars"
+    );
+
+    let (status, _, body) = send(&router, get_auth(&bars_coverage_path(Some("5m")))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "validation_error");
+    assert!(body["error"]["details"][0]["msg"]
+        .as_str()
+        .expect("message")
+        .contains("invalid bar interval"));
+}
+
+#[tokio::test]
+async fn option_bars_and_misplaced_intervals_are_rejected() {
+    let router = build_app(base_state(Arc::new(MemoryCatalogRepository::new())));
+
+    let (status, _, body) = send(
+        &router,
+        get_auth(
+            "/v1/catalog/coverage?asset_class=option&data_type=bars&underlying=spy&interval=1d&start_date=2024-01-19&end_date=2024-01-19",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "validation_error");
+    assert!(body["error"]["details"][0]["msg"]
+        .as_str()
+        .expect("message")
+        .contains("not supported for options"));
+
+    let (status, _, body) = send(
+        &router,
+        get_auth(
+            "/v1/catalog/coverage?asset_class=equity&data_type=trade&symbol=AAPL&interval=1min&start_date=2024-01-19&end_date=2024-01-19",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "validation_error");
+    assert_eq!(
+        body["error"]["details"][0]["msg"],
+        "Value error, interval is supported for bars only"
+    );
 }

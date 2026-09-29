@@ -1,23 +1,25 @@
 //! Engine runtime adapters over loaded authored programs.
 //!
 //! These implement the engine's `StrategyRuntime` seam with the exact
-//! capability split the Python adapters established: a study runtime never
-//! returns orders, a strategy runtime submits intents the host stamps with
-//! the event time, and every metric publish is validated host-side so a
-//! rejected metric fails the run.
+//! capability split the Python adapters established: a study runtime folds
+//! OHLCV bars only and never returns orders, a strategy runtime submits
+//! intents the host stamps with the event time, and every metric publish is
+//! validated host-side so a rejected metric fails the run.
 
 use std::collections::BTreeMap;
 use std::os::raw::c_void;
 
 use backtest::backtest::engine_core::{
-    EngineFill, EngineMarket, EngineOrder, StrategyInstance, StrategyRuntime, StrategyStart,
+    EngineBar, EngineFill, EngineMarket, EngineOrder, StrategyInstance, StrategyRuntime,
+    StrategyStart,
 };
 use backtest::backtest::errors::BacktestError;
 use harness_strategy_sdk::{
-    CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent,
-    MetricPublishFn, OrderSubmitFn, METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK,
+    CBarEvent, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent, CStart, CStr,
+    CTradeEvent, MetricPublishFn, OrderSubmitFn, METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK,
     METRIC_RESERVED_NAME, RESERVED_METRIC_NAMES, SDK_OK,
 };
+use num::PyDecimal;
 
 use crate::compile::{compile, ProgramKind};
 use crate::error::JitError;
@@ -28,6 +30,42 @@ use crate::workspace::ManagedWorkspace;
 const METRIC_REJECTED: i32 = 4;
 /// The order sink result code for any rejection.
 const ORDER_REJECTED: i32 = 1;
+
+/// The typed failure every tick event raises for a study program.
+///
+/// Studies consume bars only: the host never silently ignores a quote or
+/// trade and never synthesizes a bar from ticks.
+pub const STUDY_BARS_ONLY: &str =
+    "studies consume bars only: quote and trade events are not part of the study contract";
+
+/// One bar as the host dispatches it into a study runtime.
+///
+/// This mirrors the engine's future `EngineMarket::Bar` field set with
+/// borrowed strings and exact decimals; that engine arm converts its fields
+/// into this view and calls [`JitStudyRuntime::on_bar`]. The crossing into
+/// the artifact is the `#[repr(C)]` `CBarEvent`, which the SDK trampoline
+/// turns into the exact [`BarEvent`](harness_strategy_sdk::BarEvent) view.
+#[derive(Clone, Copy, Debug)]
+pub struct HostBar<'a> {
+    /// Event identifier.
+    pub event_id: &'a str,
+    /// Event time in epoch nanoseconds.
+    pub timestamp_ns: i64,
+    /// Global sequence.
+    pub sequence: u64,
+    /// Instrument symbol.
+    pub symbol: &'a str,
+    /// Interval open.
+    pub open: PyDecimal,
+    /// Interval high.
+    pub high: PyDecimal,
+    /// Interval low.
+    pub low: PyDecimal,
+    /// Interval close.
+    pub close: PyDecimal,
+    /// Interval volume.
+    pub volume: PyDecimal,
+}
 
 struct MetricCollector {
     values: BTreeMap<String, String>,
@@ -156,10 +194,44 @@ impl JitStudyRuntime {
         })
     }
 
-    /// The digest of the authored source backing this runtime.
+    /// The recorded last error from the artifact, if any.
     #[must_use]
     pub fn last_error(&self) -> Option<String> {
         unsafe { self.loaded.last_error() }
+    }
+
+    /// Fold one host-dispatched bar into the study program.
+    ///
+    /// This is the explicit host entry for the bar data type: the next wave's
+    /// `EngineMarket::Bar` arm converts its fields into a [`HostBar`] and
+    /// calls this method. Ticks never reach a study: the engine seam rejects
+    /// them in [`on_market`](StrategyRuntime::on_market).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BacktestError::StrategyExecution`] when the authored callback
+    /// fails, panics, or reports malformed bar data.
+    pub fn on_bar(&mut self, bar: &HostBar<'_>) -> Result<(), BacktestError> {
+        let vtable = self.loaded.vtable();
+        let event = CBarEvent {
+            event_id: CStr::from_slice(bar.event_id),
+            timestamp_ns: bar.timestamp_ns,
+            sequence: bar.sequence,
+            symbol: CStr::from_slice(bar.symbol),
+            open: CDecimal::from_decimal(bar.open),
+            high: CDecimal::from_decimal(bar.high),
+            low: CDecimal::from_decimal(bar.low),
+            close: CDecimal::from_decimal(bar.close),
+            volume: CDecimal::from_decimal(bar.volume),
+        };
+        let code = unsafe { (vtable.on_bar)(self.loaded.state(), &event) };
+        if code != SDK_OK {
+            return Err(BacktestError::StrategyExecution(study_failure(
+                self,
+                "study bar callback failed",
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -172,24 +244,35 @@ impl StrategyRuntime for JitStudyRuntime {
     }
 
     fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
-        let vtable = self.loaded.vtable();
-        let code = match event {
-            EngineMarket::Quote { .. } => {
-                let quote = quote_event(event);
-                unsafe { (vtable.on_quote)(self.loaded.state(), &quote) }
-            }
-            EngineMarket::Trade { .. } => {
-                let trade = trade_event(event);
-                unsafe { (vtable.on_trade)(self.loaded.state(), &trade) }
-            }
-        };
-        if code != SDK_OK {
-            return Err(BacktestError::StrategyExecution(study_failure(
-                self,
-                "study event callback failed",
-            )));
+        // A study consumes bars only. Ticks must fail loud rather than be
+        // silently ignored or synthesized into a bar, and bars never arrive
+        // here: the engine dispatches them through `on_bar`.
+        match event {
+            EngineMarket::Quote { .. } | EngineMarket::Trade { .. } => Err(
+                BacktestError::StrategyExecution(STUDY_BARS_ONLY.to_string()),
+            ),
+            EngineMarket::Bar(_) => Err(BacktestError::StrategyExecution(
+                "bar events must be dispatched through the study bar entry".to_string(),
+            )),
         }
-        // A study never submits orders.
+    }
+
+    fn on_bar(&mut self, bar: &EngineBar) -> Result<Vec<EngineOrder>, BacktestError> {
+        // The engine's bar arm converts its fields into the host view and the
+        // authored program folds them through the SDK bar callback. A study
+        // has no order surface, so the returned order list is always empty.
+        let view = HostBar {
+            event_id: &bar.event_id,
+            timestamp_ns: bar.timestamp_ns,
+            sequence: bar.sequence,
+            symbol: &bar.symbol,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            volume: bar.volume,
+        };
+        JitStudyRuntime::on_bar(self, &view)?;
         Ok(Vec::new())
     }
 
@@ -306,6 +389,11 @@ impl StrategyRuntime for JitStrategyRuntime {
             EngineMarket::Trade { .. } => {
                 let trade = trade_event(event);
                 unsafe { (vtable.on_trade)(self.loaded.state(), &trade, &sink) }
+            }
+            EngineMarket::Bar(_) => {
+                return Err(BacktestError::StrategyExecution(
+                    "bar events are not part of the strategy contract".to_string(),
+                ))
             }
         };
         if code != SDK_OK || collector.rejection.is_some() {

@@ -403,6 +403,7 @@ impl ExecutionModel for ImmediateFill {
                 .and_then(|sum| sum.checked_div(Decimal18::from_i64(2)))
                 .map_or_else(|_| bid.to_string(), |value| value.to_string()),
             MarketEvent::Trade { price, .. } => price.to_string(),
+            MarketEvent::Bar { close, .. } => close.to_string(),
         };
         vec![Fill {
             fill_id: format!("fill-{}", order.order_id),

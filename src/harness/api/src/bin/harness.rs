@@ -9,13 +9,18 @@ use std::process::ExitCode;
 
 use api::{
     emit, http, mcp_cli, run, CommandResult, HarnessCli, NativeBacktestJobRunner,
-    NativeStudyJobRunner,
+    NativeScreenJobRunner, NativeStudyJobRunner,
 };
 use clap::Parser;
 
 fn main() -> ExitCode {
     let cli = HarnessCli::parse();
-    match run(cli, &NativeBacktestJobRunner, &NativeStudyJobRunner) {
+    match run(
+        cli,
+        &NativeBacktestJobRunner,
+        &NativeStudyJobRunner,
+        &NativeScreenJobRunner,
+    ) {
         CommandResult::ServeApi(args) => http::cli::serve_api_blocking(&args),
         CommandResult::ServeMcp(args) => mcp_cli::serve_mcp_blocking(&args),
         CommandResult::RunTrader(args) => api::run_trader(&args),

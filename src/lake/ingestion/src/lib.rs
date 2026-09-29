@@ -23,6 +23,7 @@
 //!    belongs to its session.
 
 mod azure;
+mod bars;
 mod common;
 mod crypto;
 mod equities;
@@ -32,6 +33,10 @@ mod providers;
 mod staging;
 
 pub use azure::AzureAtomicIngestCommitter;
+pub use bars::{
+    derive_crypto_bars, derive_equity_bars, BarsIngestResult, BarsIngestTransaction,
+    CatalogTradeReader, StoredTrade, StoredTradePartition, TradePartitionReader,
+};
 pub use common::{AtomicIngestCommitter, PartitionWriter, StagedParquetObject, TransientRetry};
 pub use crypto::{CryptoClock, CryptoIngestResult, CryptoIngestTransaction};
 pub use equities::{EquityIngestResult, EquityIngestTransaction};
@@ -42,5 +47,5 @@ pub use options::{
     OptionIngestTransaction, OptionMarketDataClient, OptionQueueHandler, OptionSpotProvider,
     OptionWorker, QueueSender, SpotValues,
 };
-pub use providers::{CryptoDataProvider, EquityDataProvider};
+pub use providers::{BarsDataProvider, CryptoDataProvider, EquityDataProvider};
 pub use staging::StagingPartitionWriter;

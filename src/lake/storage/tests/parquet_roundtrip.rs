@@ -157,6 +157,7 @@ fn write_case(
             session_date(),
             case.asset_class,
             case.data_type,
+            None,
             case.symbol,
         )
         .expect("write");
@@ -228,6 +229,7 @@ fn every_pinned_dataset_round_trips_schema_values_metadata_and_checksum() {
             session_date(),
             case.asset_class,
             case.data_type,
+            None,
             case.symbol,
         )
         .expect("path");

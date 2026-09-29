@@ -11,6 +11,7 @@ lake-contracts.workspace = true
 lake-catalog.workspace = true
 lake-coverage.workspace = true
 lake-query.workspace = true
+lake-storage.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 hex.workspace = true
@@ -23,7 +24,12 @@ sha2.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+arrow-array.workspace = true
+arrow-ipc.workspace = true
+arrow-schema.workspace = true
 http-body-util.workspace = true
+lake-reference.workspace = true
+parquet.workspace = true
 rand.workspace = true
 rsa.workspace = true
 tempfile.workspace = true

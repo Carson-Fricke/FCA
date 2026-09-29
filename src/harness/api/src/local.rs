@@ -17,12 +17,11 @@ use serde_json::{json, Value};
 
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::EngineOptions;
+use backtest::backtest::screen::ScreenConfig;
 
-use crate::lake_ensure::LakeEnsureClient;
+use crate::http::screener::ScreeningRunner;
+use harness_lakeclient::{BlockingLakeClient, EnsureSpec};
 use mcp::store::{JobRepository, JobState, RunCatalogRecord, RunStatus, RunStore};
-
-/// The lake data types every configured symbol is ensured for.
-const LAKE_DATA_TYPES: [&str; 2] = ["trade", "quote"];
 
 /// Local backtest submitter that runs the native engine and records the run.
 pub struct NativeBacktestSubmitter {
@@ -131,6 +130,201 @@ impl mcp::tools::StudySubmitter for NativeStudySubmitter {
     }
 }
 
+/// Local screening submitter that runs the injected screening runner and
+/// records the run.
+pub struct NativeScreeningSubmitter {
+    run_store: Arc<dyn RunStore>,
+    jobs: Arc<dyn JobRepository>,
+    runner: Arc<dyn ScreeningRunner>,
+}
+
+impl NativeScreeningSubmitter {
+    /// Compose a submitter over the shared durable store and runner.
+    #[must_use]
+    pub fn new(
+        run_store: Arc<dyn RunStore>,
+        jobs: Arc<dyn JobRepository>,
+        runner: Arc<dyn ScreeningRunner>,
+    ) -> Self {
+        Self {
+            run_store,
+            jobs,
+            runner,
+        }
+    }
+}
+
+impl mcp::tools::ScreeningSubmitter for NativeScreeningSubmitter {
+    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String> {
+        let configuration = backtest::backtest::job::load_screen_config(Path::new(config_path))
+            .map_err(|error| error.to_string())?;
+        let run_id = configuration.run_id();
+        let started = Utc::now();
+        self.jobs.upsert(mcp::store::JobRecord::new(
+            &run_id,
+            JobState::Running,
+            started,
+            started,
+        ));
+        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join("harness-mcp-screens")
+                .join(&run_id)
+        });
+        let run_store = self.run_store.clone();
+        let jobs = self.jobs.clone();
+        let runner = self.runner.clone();
+        let background_run_id = run_id.clone();
+        let _handle = std::thread::spawn(move || {
+            run_background_screen(
+                run_store,
+                jobs,
+                runner,
+                background_run_id,
+                configuration,
+                output_dir,
+                started,
+            );
+        });
+        Ok(json!({
+            "boundary": "local",
+            "run_id": run_id,
+            "state": "running",
+            "kind": "screening",
+        }))
+    }
+}
+
+/// Run one screening job on a detached worker and persist its result set.
+fn run_background_screen(
+    run_store: Arc<dyn RunStore>,
+    jobs: Arc<dyn JobRepository>,
+    runner: Arc<dyn ScreeningRunner>,
+    run_id: String,
+    configuration: ScreenConfig,
+    output_dir: PathBuf,
+    started: DateTime<Utc>,
+) {
+    let guard = BackgroundJobGuard::new(jobs.clone(), &run_id, started);
+    let outcome = catch_unwind(AssertUnwindSafe({
+        let run_store = run_store.clone();
+        let jobs = jobs.clone();
+        let runner = runner.clone();
+        let run_id = run_id.clone();
+        let output_dir = output_dir.clone();
+        move || {
+            run_background_screen_inner(
+                run_store,
+                jobs,
+                runner,
+                run_id,
+                configuration,
+                output_dir,
+                started,
+            );
+        }
+    }));
+    if let Err(payload) = outcome {
+        fail_job(
+            &jobs,
+            &run_id,
+            started,
+            format!(
+                "the background screening run panicked: {}",
+                panic_message(payload.as_ref())
+            ),
+        );
+    }
+    drop(guard);
+}
+
+/// The screening body. Every exit path writes a terminal job record.
+fn run_background_screen_inner(
+    run_store: Arc<dyn RunStore>,
+    jobs: Arc<dyn JobRepository>,
+    runner: Arc<dyn ScreeningRunner>,
+    run_id: String,
+    configuration: ScreenConfig,
+    output_dir: PathBuf,
+    started: DateTime<Utc>,
+) {
+    let definition_id = configuration.definition_id.clone();
+    let configuration_digest = configuration.configuration_digest();
+    let data_start = date_of_text(&configuration.window_start());
+    let data_end = date_of_text(&configuration.window_end());
+    match runner.run(&configuration, Some(output_dir.as_path())) {
+        Ok(outcome) => {
+            let rows = outcome.rows;
+            let mut artifacts = outcome.artifacts;
+            if artifacts.is_empty() {
+                artifacts.insert(
+                    "error.json".to_string(),
+                    serde_json::to_vec(&json!({
+                        "error": outcome
+                            .error
+                            .clone()
+                            .unwrap_or_else(|| "the screening run produced no artifacts".to_string())
+                    }))
+                    .unwrap_or_else(|_| b"{}".to_vec()),
+                );
+            }
+            let mut record =
+                RunCatalogRecord::new(&run_id, run_status(outcome.completed), &definition_id);
+            record.configuration_digest = Some(configuration_digest);
+            record.data_start = data_start;
+            record.data_end = data_end;
+            record.metrics = screen_metrics(&configuration, rows);
+            if let Err(error) = run_store.put(record, artifacts) {
+                fail_job(&jobs, &run_id, started, error.to_string());
+                return;
+            }
+            let mut job = mcp::store::JobRecord::new(
+                &run_id,
+                job_state(outcome.completed),
+                started,
+                Utc::now(),
+            );
+            job.error_message = outcome.error;
+            jobs.upsert(job);
+        }
+        Err(message) => {
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert(
+                "error.json".to_string(),
+                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+            );
+            let mut record = RunCatalogRecord::new(&run_id, RunStatus::Failed, &definition_id);
+            record.configuration_digest = Some(configuration_digest);
+            record.data_start = data_start;
+            record.data_end = data_end;
+            let _ = run_store.put(record, artifacts);
+            fail_job(&jobs, &run_id, started, message);
+        }
+    }
+}
+
+/// Extract the headline screening fields into the catalog row.
+fn screen_metrics(configuration: &ScreenConfig, rows: u64) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("as_of".to_string(), configuration.as_of.clone()),
+        (
+            "bar_interval".to_string(),
+            configuration.bar_interval.clone(),
+        ),
+        (
+            "definition_id".to_string(),
+            configuration.definition_id.clone(),
+        ),
+        ("rank_metric".to_string(), configuration.rank_metric.clone()),
+        ("row_count".to_string(), rows.to_string()),
+    ])
+}
+
+/// Parse a `YYYY-MM-DD` session date into a calendar date.
+fn date_of_text(value: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
+}
+
 /// Run one study on a detached worker and persist its complete result set.
 fn run_background_study(
     run_store: Arc<dyn RunStore>,
@@ -189,55 +383,27 @@ fn run_background_study_inner(
             return;
         }
     };
-    let Some(candidate_lake) = resolve_lake_data_dir() else {
-        let message = "no lake data directory configured: set HARNESS_DATA_DIR or \
-                       LAKE_LOCAL_DATA_DIR, or create .local/market-lake"
-            .to_string();
-        let mut artifacts = BTreeMap::new();
-        artifacts.insert(
-            "error.json".to_string(),
-            serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-        );
-        let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
-        let _ = run_store.put(record, artifacts);
-        fail_job(&jobs, &run_id, started, message);
-        return;
+    let client = match BlockingLakeClient::from_env() {
+        Ok(client) => client,
+        Err(error) => {
+            let message = format!("market-lake client: {error}");
+            record_failed_run(&run_store, &jobs, &run_id, "study", started, message);
+            return;
+        }
     };
     let configuration_digest = configuration.configuration_hash();
     let mut configuration = configuration;
     let mut actual_data_start = None;
     let mut actual_data_end = None;
     if !configuration.symbols.is_empty() {
-        if let Some(client) = LakeEnsureClient::from_env() {
-            if let Err(message) = ensure_lake_data_with(&client, &configuration) {
-                let mut artifacts = BTreeMap::new();
-                artifacts.insert(
-                    "error.json".to_string(),
-                    serde_json::to_vec(&json!({"error": message}))
-                        .unwrap_or_else(|_| b"{}".to_vec()),
-                );
-                let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
-                let _ = run_store.put(record, artifacts);
-                fail_job(&jobs, &run_id, started, message);
-                return;
+        match clamp_study_window(&client, &mut configuration) {
+            Ok((start, end)) => {
+                actual_data_start = Some(start);
+                actual_data_end = Some(end);
             }
-            match clamp_study_window(&client, &mut configuration) {
-                Ok((start, end)) => {
-                    actual_data_start = Some(start);
-                    actual_data_end = Some(end);
-                }
-                Err(message) => {
-                    let mut artifacts = BTreeMap::new();
-                    artifacts.insert(
-                        "error.json".to_string(),
-                        serde_json::to_vec(&json!({"error": message}))
-                            .unwrap_or_else(|_| b"{}".to_vec()),
-                    );
-                    let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
-                    let _ = run_store.put(record, artifacts);
-                    fail_job(&jobs, &run_id, started, message);
-                    return;
-                }
+            Err(message) => {
+                record_failed_run(&run_store, &jobs, &run_id, "study", started, message);
+                return;
             }
         }
     }
@@ -245,7 +411,7 @@ fn run_background_study_inner(
         &configuration,
         &EngineOptions::default(),
         Some(output_dir.as_path()),
-        candidate_lake.as_path(),
+        &client,
     ) {
         Ok((outcome, _artifact_path)) => {
             if let Ok(text) = fs::read(&config_path) {
@@ -364,36 +530,26 @@ fn run_background_backtest_inner(
             return;
         }
     };
-    let Some(candidate_lake) = resolve_lake_data_dir() else {
-        let message = "no lake data directory configured: set HARNESS_DATA_DIR or \
-                       LAKE_LOCAL_DATA_DIR, or create .local/market-lake"
-            .to_string();
-        let mut artifacts = BTreeMap::new();
-        artifacts.insert(
-            "error.json".to_string(),
-            serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-        );
-        let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, strategy_id(&configuration));
-        let _ = run_store.put(record, artifacts);
-        fail_job(&jobs, &run_id, started, message);
-        return;
+    let client = match BlockingLakeClient::from_env() {
+        Ok(client) => client,
+        Err(error) => {
+            let message = format!("market-lake client: {error}");
+            record_failed_run(
+                &run_store,
+                &jobs,
+                &run_id,
+                &strategy_id(&configuration),
+                started,
+                message,
+            );
+            return;
+        }
     };
-    if let Err(message) = ensure_lake_data(&configuration) {
-        let mut artifacts = BTreeMap::new();
-        artifacts.insert(
-            "error.json".to_string(),
-            serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-        );
-        let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, strategy_id(&configuration));
-        let _ = run_store.put(record, artifacts);
-        fail_job(&jobs, &run_id, started, message);
-        return;
-    }
     match harness_strategy_jit::run_backtest_configuration(
         &configuration,
         &EngineOptions::default(),
         Some(output_dir.as_path()),
-        candidate_lake.as_path(),
+        &client,
     ) {
         Ok((outcome, _artifact_path)) => {
             // Persist the configuration that produced the run beside the result
@@ -445,115 +601,48 @@ fn run_background_backtest_inner(
     }
 }
 
-/// Ensure every configured symbol is fetched into the local lake before a run.
-///
-/// The market-lake process owns provider credentials and the actual fetch; the
-/// harness only asks for the run window's symbols. A missing token or an empty
-/// symbol set leaves the existing lake state unchanged.
-pub(crate) fn ensure_lake_data(configuration: &BacktestConfig) -> Result<(), String> {
-    let Some(client) = LakeEnsureClient::from_env() else {
-        return Ok(());
-    };
-    ensure_lake_data_with(&client, configuration)
-}
-
-/// Resolve the local lake data directory the way every run path does: the
-/// `HARNESS_DATA_DIR` or `LAKE_LOCAL_DATA_DIR` override, else the repository's
-/// `.local/market-lake` when it exists.
-pub(crate) fn resolve_lake_data_dir() -> Option<std::path::PathBuf> {
-    let env_lake_dir = std::env::var("HARNESS_DATA_DIR")
-        .or_else(|_| std::env::var("LAKE_LOCAL_DATA_DIR"))
-        .ok()
-        .map(std::path::PathBuf::from);
-    let default_lake = std::path::PathBuf::from(".local").join("market-lake");
-    env_lake_dir.or_else(|| {
-        if default_lake.is_dir() {
-            Some(default_lake)
-        } else {
-            None
-        }
-    })
-}
-
-/// Ensure every configured symbol with one already-built client.
-///
-/// Each symbol/data-type pair gets a single ensure request spanning the whole
-/// run window: the lake plans and resumes its own fetches server-side, so a
-/// full-history window is never split into ranges and a repeat request picks
-/// up where an interrupted run left off. The requests are independent, so they
-/// are issued concurrently; the run fails only when a request reports a
-/// lake-side failure, naming what completed alongside what did not.
-pub(crate) fn ensure_lake_data_with(
-    client: &LakeEnsureClient,
-    configuration: &BacktestConfig,
-) -> Result<(), String> {
-    if configuration.symbols.is_empty() {
-        return Ok(());
-    }
-    let start = date_string(configuration.start_ns);
-    let end = date_string(configuration.end_ns.saturating_sub(1));
-    let mut requests = Vec::new();
-    for symbol in &configuration.symbols {
-        let (asset_class, lake_symbol) = lake_asset_class(symbol);
-        for data_type in LAKE_DATA_TYPES {
-            requests.push((asset_class, lake_symbol.clone(), data_type));
-        }
-    }
-    let handles: Vec<_> = requests
-        .into_iter()
-        .map(|(asset_class, lake_symbol, data_type)| {
-            let label = format!("{lake_symbol} {asset_class}/{data_type}");
-            let client = client.clone();
-            let start = start.clone();
-            let end = end.clone();
-            let handle = std::thread::spawn(move || {
-                client.ensure(asset_class, data_type, &lake_symbol, &start, &end)
-            });
-            (label, handle)
-        })
-        .collect();
-    let mut completed = Vec::new();
-    let mut failures = Vec::new();
-    for (label, handle) in handles {
-        match handle.join() {
-            Ok(Ok(())) => completed.push(label),
-            Ok(Err(message)) => failures.push(message),
-            Err(payload) => {
-                failures.push(format!("{}: {}", label, panic_message(payload.as_ref())));
-            }
-        }
-    }
-    if failures.is_empty() {
-        return Ok(());
-    }
-    let mut message = format!(
-        "market-lake ensure failed for {} of {} requests",
-        failures.len(),
-        completed.len() + failures.len(),
+/// Record one pre-run failure and fail the job in one place.
+fn record_failed_run(
+    run_store: &Arc<dyn RunStore>,
+    jobs: &Arc<dyn JobRepository>,
+    run_id: &str,
+    definition_id: &str,
+    started: DateTime<Utc>,
+    message: String,
+) {
+    let mut artifacts = BTreeMap::new();
+    artifacts.insert(
+        "error.json".to_string(),
+        serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
     );
-    if !completed.is_empty() {
-        message.push_str(&format!(" (completed: {})", completed.join(", ")));
-    }
-    message.push_str("; ");
-    message.push_str(&failures.join("; "));
-    Err(message)
+    let record = RunCatalogRecord::new(run_id, RunStatus::Failed, definition_id);
+    let _ = run_store.put(record, artifacts);
+    fail_job(jobs, run_id, started, message);
 }
 
-/// Clamp a study's data-window start to the lake's complete coverage.
+/// Clamp a study's data-window start to the lake's complete bar coverage.
 ///
 /// Returns the actual `(start, end)` session dates the study will replay. The
-/// start moves to the earliest session with complete data when the lake's
+/// start moves to the earliest session with complete bars when the lake's bar
 /// coverage begins after the requested start, so a model contract reaching
 /// back before the provider's history no longer launches a study that can only
 /// replay empty data. The requested window is kept when the lake reports no
 /// complete session inside it.
-fn clamp_study_window(
-    client: &LakeEnsureClient,
+///
+/// # Errors
+///
+/// Returns a reason string when the configured bar interval is not a canonical
+/// token or the lake coverage query fails.
+pub(crate) fn clamp_study_window(
+    client: &BlockingLakeClient,
     configuration: &mut BacktestConfig,
 ) -> Result<(NaiveDate, NaiveDate), String> {
+    let interval = marketdata::lake::BarInterval::parse(&configuration.data_bar_interval)
+        .map_err(|error| error.to_string())?;
     let earliest = earliest_complete_session_ns(
         client,
         &configuration.symbols,
+        interval.value(),
         configuration.start_ns,
         configuration.end_ns,
     )?;
@@ -570,14 +659,16 @@ fn clamp_study_window(
     Ok((start_date, end_date))
 }
 
-/// The earliest fully covered session across a symbol set, in epoch nanos.
+/// The earliest fully covered bars session across a symbol set, in epoch nanos.
 ///
-/// Each symbol resolves to the earliest session where either lake data type is
+/// Each symbol resolves to the earliest session where its `interval` bars are
 /// complete, and the result is the latest of those per-symbol dates: the
-/// study's data window starts only where every configured symbol carries data.
+/// study's data window starts only where every configured symbol carries bar
+/// data.
 fn earliest_complete_session_ns(
-    client: &LakeEnsureClient,
+    client: &BlockingLakeClient,
     symbols: &[String],
+    interval: &str,
     start_ns: i64,
     end_ns: i64,
 ) -> Result<Option<i64>, String> {
@@ -586,32 +677,18 @@ fn earliest_complete_session_ns(
     let mut window_start: Option<i64> = None;
     for symbol in symbols {
         let (asset_class, lake_symbol) = lake_asset_class(symbol);
-        let mut symbol_start: Option<i64> = None;
-        for data_type in LAKE_DATA_TYPES {
-            let Some(session) = client.earliest_complete_session(
-                asset_class,
-                data_type,
-                &lake_symbol,
-                &start,
-                &end,
-            )?
-            else {
-                continue;
-            };
-            let Some(session_ns) = date_ns(&session) else {
-                continue;
-            };
-            symbol_start = Some(match symbol_start {
-                Some(current) => current.min(session_ns),
-                None => session_ns,
-            });
-        }
-        if let Some(symbol_ns) = symbol_start {
-            window_start = Some(match window_start {
-                Some(current) => current.max(symbol_ns),
-                None => symbol_ns,
-            });
-        }
+        let spec = EnsureSpec::new(asset_class, "bars", &lake_symbol, &start, &end)
+            .with_interval(interval);
+        let session = client
+            .earliest_complete_session(&spec)
+            .map_err(|error| error.to_string())?;
+        let Some(session_ns) = session.as_deref().and_then(date_ns) else {
+            continue;
+        };
+        window_start = Some(match window_start {
+            Some(current) => current.max(session_ns),
+            None => session_ns,
+        });
     }
     Ok(window_start)
 }

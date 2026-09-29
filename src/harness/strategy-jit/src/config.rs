@@ -50,6 +50,13 @@ pub fn build_instances(
             ProgramKind::Strategy => {
                 strategy_instance(workspace, &source, &parameters, &configured.instance_id)?
             }
+            ProgramKind::Screening => {
+                return Err(JitError::Invalid(format!(
+                    "instance {:?} is a screening program; screening runs through the one-shot \
+                     screen seam, not a backtest configuration",
+                    configured.instance_id
+                )));
+            }
         };
         instances.push(runtime);
     }

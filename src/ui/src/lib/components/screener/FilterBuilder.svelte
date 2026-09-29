@@ -1,14 +1,15 @@
 <script lang="ts">
 	/**
-	 * Declarative filter builder: one row per filter with a grouped kind
-	 * selector, per-kind parameter editors driven by the filter catalog,
-	 * client-side validation feedback, and the run control (full filter set
-	 * + as-of date, defaulting to today).
+	 * Filter builder: one row per condition with a grouped kind selector and
+	 * per-kind parameter editors driven by the filter catalog. Every edit is
+	 * emitted as a fresh row list so the panel can regenerate the screening
+	 * source deterministically; row validation mirrors the declaration-time
+	 * checks that guard the generated Rust fragment.
 	 */
 	import {
+		DEFAULT_KIND,
 		FILTER_GROUPS,
 		FILTER_KINDS,
-		DEFAULT_KIND,
 		defaultParams,
 		kindSpec,
 		newRow,
@@ -17,32 +18,43 @@
 	import type { FilterRow } from './filterCatalog';
 
 	let {
-		rows = $bindable(),
-		asOf = $bindable(),
-		running = false,
-		canRun = false,
-		onRun,
-		serverError = null
+		rows,
+		onChange,
+		metricOptions = []
 	}: {
 		rows: FilterRow[];
-		asOf: string;
-		running?: boolean;
-		canRun?: boolean;
-		onRun: () => void;
-		serverError?: string | null;
+		onChange: (rows: FilterRow[]) => void;
+		metricOptions?: string[];
 	} = $props();
 
+	function replace(next: FilterRow[]): void {
+		onChange(next);
+	}
+
 	function changeKind(row: FilterRow, kind: string): void {
-		row.kind = kind;
-		row.params = defaultParams(kind);
+		replace(
+			rows.map((candidate) =>
+				candidate.uid === row.uid ? { uid: candidate.uid, kind, params: defaultParams(kind) } : candidate
+			)
+		);
+	}
+
+	function updateParam(row: FilterRow, name: string, value: string): void {
+		replace(
+			rows.map((candidate) =>
+				candidate.uid === row.uid
+					? { ...candidate, params: { ...candidate.params, [name]: value } }
+					: candidate
+			)
+		);
 	}
 
 	function addRow(): void {
-		rows = [...rows, newRow(DEFAULT_KIND)];
+		replace([...rows, newRow(DEFAULT_KIND)]);
 	}
 
 	function removeRow(uid: number): void {
-		rows = rows.filter((row) => row.uid !== uid);
+		replace(rows.filter((row) => row.uid !== uid));
 	}
 </script>
 
@@ -50,7 +62,7 @@
 	<div class="flex flex-wrap items-center gap-2">
 		<h3 class="text-sm font-semibold text-slate-800">Filters</h3>
 		<span class="font-mono text-[10px] text-slate-500">
-			{rows.length} filter{rows.length === 1 ? '' : 's'} declared
+			{rows.length} row{rows.length === 1 ? '' : 's'} · generated source reads the SDK context only
 		</span>
 		<button
 			type="button"
@@ -67,10 +79,9 @@
 			{@const spec = kindSpec(row.kind)}
 			{@const error = validateRow(row)}
 			<div
-				class="rounded-lg border bg-surface-950 px-3 py-2 {error
-					? 'border-loss/50'
-					: 'border-surface-700'}"
+				class="rounded-lg border bg-surface-950 px-3 py-2 {error ? 'border-loss/50' : 'border-surface-700'}"
 				data-testid="filter-row"
+				data-kind={row.kind}
 			>
 				<div class="flex flex-wrap items-center gap-2">
 					<select
@@ -85,8 +96,8 @@
 						{/if}
 						{#each FILTER_GROUPS as group (group.id)}
 							<optgroup label={group.label}>
-								{#each FILTER_KINDS.filter((k) => k.group === group.id) as kindSpecEntry (kindSpecEntry.kind)}
-									<option value={kindSpecEntry.kind}>{kindSpecEntry.label}</option>
+								{#each FILTER_KINDS.filter((entry) => entry.group === group.id) as entry (entry.kind)}
+									<option value={entry.kind}>{entry.label}</option>
 								{/each}
 							</optgroup>
 						{/each}
@@ -107,7 +118,9 @@
 							{#if field.type === 'choice'}
 								<select
 									class="rounded border border-surface-600 bg-surface-900 px-1.5 py-1 text-xs text-slate-700 outline-none"
-									bind:value={row.params[field.name]}
+									value={row.params[field.name] ?? field.def}
+									onchange={(event) =>
+										updateParam(row, field.name, (event.target as HTMLSelectElement).value)}
 									data-testid="filter-param"
 									data-param={field.name}
 								>
@@ -119,8 +132,10 @@
 								<input
 									type={field.type === 'text' ? 'text' : 'number'}
 									class="w-28 rounded border border-surface-600 bg-surface-900 px-1.5 py-1 font-mono text-xs text-slate-700 outline-none"
-									bind:value={row.params[field.name]}
+									value={row.params[field.name] ?? ''}
 									placeholder={field.optional ? 'optional' : ''}
+									oninput={(event) =>
+										updateParam(row, field.name, (event.target as HTMLInputElement).value)}
 									data-testid="filter-param"
 									data-param={field.name}
 								/>
@@ -133,37 +148,15 @@
 				{/if}
 			</div>
 		{:else}
-			<p class="text-[11px] text-slate-500">No filters — add one to screen the universe.</p>
+			<p class="text-[11px] text-slate-500">
+				No filters — the program records every symbol's last close.
+			</p>
 		{/each}
 	</div>
 
-	<div class="mt-3 flex flex-wrap items-center gap-3 border-t border-surface-700 pt-3">
-		<button
-			type="button"
-			class="rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-40"
-			onclick={onRun}
-			disabled={!canRun}
-			data-testid="screener-run"
-		>
-			{running ? 'Screening…' : 'Run screener'}
-		</button>
-		<label class="flex items-center gap-1.5 text-[11px] text-slate-500">
-			As of
-			<input
-				type="date"
-				class="rounded border border-surface-600 bg-surface-950 px-2 py-1 font-mono text-xs text-slate-700 outline-none"
-				bind:value={asOf}
-				data-testid="screener-asof"
-			/>
-		</label>
-		<span class="font-mono text-[10px] text-slate-500">point-in-time run: no lookahead past the as-of date</span>
-	</div>
-	{#if serverError}
-		<p
-			class="mt-2 rounded-lg border border-loss/40 bg-loss/10 px-2 py-1.5 font-mono text-[10px] text-loss"
-			data-testid="screener-error"
-		>
-			{serverError}
+	{#if metricOptions.length}
+		<p class="mt-3 border-t border-surface-700 pt-2 font-mono text-[10px] text-slate-500" data-testid="filter-metrics">
+			metrics recorded: {metricOptions.join(', ')}
 		</p>
 	{/if}
 </section>

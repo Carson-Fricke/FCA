@@ -129,6 +129,8 @@ pub struct EnsuredQueryFile {
     pub object_path: String,
     /// Catalog byte size of the object.
     pub byte_size: u64,
+    /// Canonical bars interval token; bars files must carry it.
+    pub interval: Option<String>,
 }
 
 impl EnsuredQueryFile {
@@ -149,7 +151,15 @@ impl EnsuredQueryFile {
             session_date,
             object_path: object_path.into(),
             byte_size,
+            interval: None,
         }
+    }
+
+    /// Set the canonical bars interval token for this file.
+    #[must_use]
+    pub fn with_interval(mut self, interval: Option<&str>) -> Self {
+        self.interval = interval.map(str::to_string);
+        self
     }
 
     /// Return the only object path valid for this request partition.
@@ -158,6 +168,7 @@ impl EnsuredQueryFile {
             self.session_date,
             self.asset_class,
             self.data_type,
+            self.interval.as_deref(),
             &self.symbol,
         )
         .map_err(|error| BoundedQueryError::storage_path_not_allowed(error.to_string()))

@@ -45,6 +45,10 @@ import type {
 	PortfolioSummary,
 	PostMessageResult,
 	RiskDecisionRecord,
+	ScreenerDefinition,
+	ScreenerRunInput,
+	ScreenerSaveInput,
+	ScreeningResult,
 	StatusSurface,
 	Strategy,
 	StrategyStatus,
@@ -55,66 +59,6 @@ import type {
 	WorkspaceStateData,
 	WorkspaceSummary
 } from './types';
-
-// ---------------------------------------------------------------------------
-// Screener contract (thesis.screening HTTP surface, `/v1/workspaces/{ws}/screening`).
-// The UX agent owns moving these into `types.ts` and rebuilding the panel;
-// they are declared here so the client functions carry the real shapes today.
-// ---------------------------------------------------------------------------
-
-/** One declarative filter: a preset kind plus validated parameters. */
-export interface ScreenerFilterSpec {
-	kind: string;
-	params?: Record<string, string | number | boolean>;
-}
-
-/** A saved screener definition document as served by the screening router. */
-export interface ScreenerSavedDefinition {
-	screener_id: string;
-	definition: {
-		schema_version: number;
-		name: string;
-		universe_revision: string;
-		lookback_days: number;
-		filters: ScreenerFilterSpec[];
-	};
-	definition_hash: string;
-	artifact_path: string;
-}
-
-/** One surviving symbol with its evaluated fact sheet (string metrics). */
-export interface ScreenerHitRow {
-	rank: number;
-	symbol: string;
-	metrics: Record<string, string>;
-}
-
-/** One deterministic run result with full provenance. */
-export interface ScreenerRunResult {
-	schema_version: number;
-	result_id: string;
-	screener_id: string;
-	definition_name: string;
-	universe_revision: string;
-	as_of: string;
-	data_window_start: string;
-	data_window_end: string;
-	definition_hash: string;
-	hits: ScreenerHitRow[];
-}
-
-/** Payload to save one screener definition. */
-export interface ScreenerSaveInput {
-	name: string;
-	universe_revision?: string;
-	lookback_days?: number;
-	filters: ScreenerFilterSpec[];
-}
-
-/** Payload to run one screener at an explicit point-in-time as-of date. */
-export interface ScreenerRunInput extends ScreenerSaveInput {
-	as_of: string;
-}
 
 /**
  * The same-origin API prefix the shipped SPA targets. Azure Static Web Apps'
@@ -372,8 +316,31 @@ function plain<T>(value: T): T {
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Deterministic fixture-only content digest (64 lowercase hex).
+ *
+ * Fixture mode has no crypto dependency, so definitions saved without a
+ * backend get a stable FNV-1a expansion of their exact content: identical
+ * content addresses identically, which keeps the definition id, the saved
+ * list, and a fixture run's provenance coherent. It is not SHA-256 and never
+ * leaves fixture mode; the Thesis definition hasher stays authoritative.
+ */
+function fixtureDigest(content: string): string {
+	let digest = '';
+	let state = 0x811c9dc5;
+	for (let round = 0; round < 4; round += 1) {
+		for (let index = 0; index < content.length; index += 1) {
+			state ^= content.charCodeAt(index);
+			state = Math.imul(state, 0x01000193) >>> 0;
+		}
+		state = (state ^ Math.imul(round + 1, 0x9e3779b9)) >>> 0;
+		digest += state.toString(16).padStart(8, '0');
+	}
+	return digest;
+}
+
+/**
  * In-memory working copy of the fixtures. Mutations performed in fixture
- * mode (posting a message, saving a screener, removing a widget) live only
+ * mode (posting a message, removing a widget) live only
  * for this page-load â€” the client never pretends to be durable state.
  */
 function itemsOf<T>(doc: Record<string, { items: T[] }>): Record<string, T[]> {
@@ -382,12 +349,14 @@ function itemsOf<T>(doc: Record<string, { items: T[] }>): Record<string, T[]> {
 
 const store: {
 	widgets: Record<string, WidgetDefinition[]>;
-	screeners: Record<string, ScreenerSavedDefinition[]>;
+	screeners: Record<string, ScreenerDefinition[]>;
+	screenerResults: Record<string, ScreeningResult[]>;
 	messages: Record<string, ChatMessage[]>;
 	nextId: number;
 } = {
 	widgets: itemsOf(fixtures.widgets),
-	screeners: {},
+	screeners: itemsOf(fixtures.screeners),
+	screenerResults: itemsOf(fixtures.screenerResults),
 	messages: itemsOf(fixtures.chatMessages),
 	nextId: 1
 };
@@ -459,7 +428,14 @@ export function getSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
 						activity: [],
 						openChats: []
 					},
-					counts: { strategies: 0, chats: 0, backtests: 0, deployments: 0, dashboards: 0, screeners: 0 }
+					counts: {
+						strategies: 0,
+						chats: 0,
+						backtests: 0,
+						deployments: 0,
+						dashboards: 0,
+						screeners: 0
+					}
 				};
 			}
 			throw new Error(`unknown workspace ${workspaceId}`);
@@ -1248,149 +1224,176 @@ export function removeWidget(workspaceId: string, widgetId: string): Promise<voi
 	);
 }
 
-/**
- * Legacy fixture rows use a flat `{kind, op, value}` vocabulary; translate
- * them into the engine-native `{kind, params}` presets so fixture mode
- * exercises the real contract. The UX agent owns regenerating fixtures.
- */
-function nativeFilter(kind: string, op: string | undefined, value: number): ScreenerFilterSpec {
-	const preset =
-		kind === 'price'
-			? 'min_price'
-			: kind === 'volume' || kind === 'liquidity'
-				? 'avg_dollar_volume_min'
-				: kind;
-	if (op === '<' || op === '<=') {
-		return { kind: preset, params: { max: value } };
-	}
-	return { kind: preset, params: { min: value } };
+// ---------------------------------------------------------------------------
+// Screener definitions and runs (thesis.http.screeners).
+//
+// Definitions are content-addressed workspace artifacts authored as Rust
+// source; a run materializes the definition's config through the Thesis MCP
+// boundary and returns the imported terminal record. Fixture mode mirrors the
+// same shapes from bundled documents: saves address by content and a run
+// returns a synthetic complete result whose provenance matches the definition
+// it ran, so the page renders with no backend.
+// ---------------------------------------------------------------------------
+
+function screenerPath(workspaceId: string): string {
+	return `/v1/workspaces/${encodeURIComponent(workspaceId)}/screeners`;
 }
 
-function toNativeFilters(legacy: unknown): ScreenerFilterSpec[] {
-	if (!Array.isArray(legacy)) return [];
-	return legacy
-		.filter((row) => typeof row === 'object' && row !== null)
-		.map((row) => {
-			const record = row as { kind?: unknown; op?: unknown; value?: unknown };
-			if (typeof record.value === 'number') {
-				return nativeFilter(String(record.kind), record.op as string | undefined, record.value);
-			}
-			return { kind: String(record.kind ?? ''), params: {} };
-		});
-}
-
-function legacyToSaved(row: Record<string, unknown>): ScreenerSavedDefinition {
-	const id = String(row.id ?? 'scr');
-	return {
-		screener_id: id,
-		definition: {
-			schema_version: 1,
-			name: String(row.name ?? id),
-			universe_revision: 'universe:fixture',
-			lookback_days: 20,
-			filters: toNativeFilters(row.filters)
-		},
-		definition_hash: `fixture-${id}`,
-		artifact_path: String(row.artifact_path ?? `screeners/${id}.json`)
-	};
-}
-
-export function listScreeners(workspaceId: string): Promise<ScreenerSavedDefinition[]> {
+/** List the workspace's saved screener definitions. */
+export function listScreeners(workspaceId: string): Promise<ScreenerDefinition[]> {
 	if (fixtureMode) {
-		return wait(5).then(() => {
-			const legacy = plain(fixtures.screeners[workspaceId]?.items ?? []);
-			const created = plain(store.screeners[workspaceId] ?? []);
-			return [
-				...legacy.map((row) => legacyToSaved(row as unknown as Record<string, unknown>)),
-				...created
-			];
-		});
+		return wait(5).then(() => plain(store.screeners[workspaceId] ?? []));
 	}
-	return apiFetch<{ items: ScreenerSavedDefinition[] }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screening`
-	).then((r) => r.items);
+	return apiFetch<{ items: ScreenerDefinition[] }>(screenerPath(workspaceId)).then((r) => r.items);
 }
 
+/**
+ * Save one authored definition. The Thesis API validates the definition
+ * (HTTP 422), hashes the LF-normalized source, and returns the content
+ * addressed document; saving the same content twice yields the same id.
+ */
 export function saveScreener(
 	workspaceId: string,
 	input: ScreenerSaveInput
-): Promise<ScreenerSavedDefinition> {
+): Promise<ScreenerDefinition> {
+	const path = screenerPath(workspaceId);
 	if (fixtureMode) {
 		return wait(15).then(() => {
-			const created: ScreenerSavedDefinition = {
-				screener_id: `scr-local-${store.nextId++}`,
-				definition: {
-					schema_version: 1,
-					name: input.name,
-					universe_revision: input.universe_revision ?? 'universe:fixture',
-					lookback_days: input.lookback_days ?? 20,
-					filters: input.filters
-				},
-				definition_hash: `fixture-${Date.now()}`,
-				artifact_path: `screeners/definitions/${input.name
-					.toLowerCase()
-					.replace(/[^a-z0-9]+/g, '-')}.json`
+			const name = input.name.trim();
+			if (!name || name.length > 256) throw new ThesisApiError(422, path);
+			if (!Number.isInteger(input.lookback_days) || input.lookback_days < 1 || input.lookback_days > 3650) {
+				throw new ThesisApiError(422, path);
+			}
+			if (input.bar_interval !== '1min' && input.bar_interval !== '1d') {
+				throw new ThesisApiError(422, path);
+			}
+			if (!input.rank_metric.trim() || !input.source.trim()) throw new ThesisApiError(422, path);
+			const parameters = plain(input.parameters ?? {});
+			const universeRevision = input.universe_revision ?? null;
+			const definitionSha256 = fixtureDigest(
+				JSON.stringify([
+					name,
+					input.lookback_days,
+					input.bar_interval,
+					input.rank_metric.trim(),
+					universeRevision,
+					input.source,
+					parameters
+				])
+			);
+			const created: ScreenerDefinition = {
+				schema: 'fca-thesis-screener-definition-v1',
+				name,
+				lookbackDays: input.lookback_days,
+				barInterval: input.bar_interval,
+				rankMetric: input.rank_metric.trim(),
+				universeRevision,
+				source: input.source,
+				parameters,
+				sourceSha256: fixtureDigest(input.source),
+				definitionSha256,
+				definitionId: `sha256:${definitionSha256}`
 			};
-			store.screeners[workspaceId] = [...(store.screeners[workspaceId] ?? []), created];
-			return created;
+			const existing = store.screeners[workspaceId] ?? [];
+			store.screeners[workspaceId] = [
+				created,
+				...existing.filter((item) => item.definitionId !== created.definitionId)
+			];
+			return plain(created);
 		});
 	}
-	return apiFetch<ScreenerSavedDefinition>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screening`,
-		{ method: 'POST', body: JSON.stringify(input) }
-	);
+	return apiFetch<ScreenerDefinition>(path, {
+		method: 'POST',
+		body: JSON.stringify({
+			name: input.name,
+			lookback_days: input.lookback_days,
+			bar_interval: input.bar_interval,
+			rank_metric: input.rank_metric,
+			universe_revision: input.universe_revision ?? null,
+			source: input.source,
+			parameters: input.parameters ?? null
+		})
+	});
 }
 
+/**
+ * Run one saved definition at an explicit as-of date. The Thesis route blocks
+ * until the harness run imports (or fails): unknown definitions raise 404, an
+ * unavailable harness raises 503, and a failed run raises 502.
+ */
 export function runScreener(
 	workspaceId: string,
 	input: ScreenerRunInput
-): Promise<ScreenerRunResult> {
+): Promise<ScreeningResult> {
+	const path = `${screenerPath(workspaceId)}/run`;
 	if (fixtureMode) {
-		return wait(15).then(() => {
-			const rows = plain(fixtures.screenerResults.items);
-			return {
-				schema_version: 1,
-				result_id: 'fixture-run',
-				screener_id: 'fixture',
-				definition_name: input.name,
-				universe_revision: input.universe_revision ?? 'universe:fixture',
+		return wait(20).then(() => {
+			const definition = (store.screeners[workspaceId] ?? []).find(
+				(item) => item.definitionId === input.definition_id
+			);
+			if (!definition) throw new ThesisApiError(404, path);
+			const template = fixtures.screenerResults[workspaceId]?.items?.[0];
+			const rows = plain(template?.rows ?? []).map((row, index) => ({
+				...row,
+				rank: row.rank ?? index + 1
+			}));
+			const resultId = `sha256:${fixtureDigest(
+				`${workspaceId}\u0000${definition.definitionId}\u0000${input.as_of}`
+			)}`;
+			const created: ScreeningResult = {
+				result_id: resultId,
+				workspace_id: workspaceId,
+				definition_id: definition.definitionId,
+				definition_hash: definition.definitionSha256,
+				run_id: `screen-${resultId.slice(7, 23)}`,
+				status: 'complete',
 				as_of: input.as_of,
-				data_window_start: input.as_of,
-				data_window_end: input.as_of,
-				definition_hash: 'fixture-definition-hash',
-				hits: rows.map((row, index) => ({
-					rank: index + 1,
-					symbol: row.symbol,
-					metrics: {
-						last_close: String(row.last),
-						avg_volume: String(row.volume),
-						avg_dollar_volume: String(row.avg_dollar_volume_20d)
+				rows,
+				provenance: {
+					...(template ? plain(template.provenance) : {}),
+					screen: {
+						...(plain((template?.provenance?.screen as Record<string, unknown>) ?? {})),
+						as_of: input.as_of,
+						bar_interval: definition.barInterval,
+						bundle_hash: definition.sourceSha256,
+						definition_hash: definition.definitionSha256,
+						definition_id: definition.definitionId,
+						rank_metric: definition.rankMetric,
+						universe_revision: definition.universeRevision
 					}
-				}))
+				}
 			};
+			store.screenerResults[workspaceId] = [
+				created,
+				...(store.screenerResults[workspaceId] ?? []).filter(
+					(item) => item.result_id !== created.result_id
+				)
+			];
+			return plain(created);
 		});
 	}
-	return apiFetch<ScreenerRunResult>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screening/run`,
-		{ method: 'POST', body: JSON.stringify(input) }
-	);
+	return apiFetch<ScreeningResult>(path, {
+		method: 'POST',
+		body: JSON.stringify({ definition_id: input.definition_id, as_of: input.as_of })
+	});
 }
 
-/** Fetch one stored run result (with provenance) by its content id. */
+/** Fetch one stored screening result (with provenance) by its content id. */
 export function getScreenerResult(
 	workspaceId: string,
 	resultId: string
-): Promise<ScreenerRunResult> {
+): Promise<ScreeningResult> {
+	const path = `${screenerPath(workspaceId)}/results/${encodeURIComponent(resultId)}`;
 	if (fixtureMode) {
-		return runScreener(workspaceId, {
-			name: 'fixture-screen',
-			as_of: new Date().toISOString().slice(0, 10),
-			filters: []
+		return wait(5).then(() => {
+			const found = (store.screenerResults[workspaceId] ?? []).find(
+				(item) => item.result_id === resultId
+			);
+			if (!found) throw new ThesisApiError(404, path);
+			return plain(found);
 		});
 	}
-	return apiFetch<ScreenerRunResult>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/screening/results/${encodeURIComponent(resultId)}`
-	);
+	return apiFetch<ScreeningResult>(path);
 }
 
 export function getWorkspaceState(workspaceId: string): Promise<WorkspaceStateData | null> {

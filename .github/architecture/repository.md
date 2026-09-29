@@ -21,10 +21,11 @@ venue commands, provenance-restricted scheduling), live-feed gap healing, the
 SecurityMaster listings view, the PaperShell shared paper simulation runtime,
 and the local `backtest-job` CLI are implemented; offline reports, the harness
 query API, shadow/live runtimes, and CI/deployment orchestration remain
-planned. The `harness.signal` pure-NumPy wavelet and analytic-signal kernels
-(MODWT with circular/reflection boundaries, additive MRA, wavelet variance,
-Hilbert envelope/phase features, and an exploratory Morlet CWT scalogram) are
-implemented for the intraday-pattern research scripts. The native core is the
+planned. The signal kernels (MODWT with circular/reflection boundaries,
+additive MRA, wavelet variance, Hilbert envelope/phase features, and an
+exploratory Morlet CWT scalogram) are implemented natively in the `backtest`
+crate under `backtest::signal`, ported from the retired `harness.signal`
+module. The native core is the
 Rust `native` crate (C ABI v2 with the Arrow C Data Interface bridge,
 pinned scale-18 fixed point, and the ported event kernel, OMS state machine,
 virtual book accounting, K-way replay merge, bar derivation, resting-order
@@ -34,21 +35,22 @@ Cox-Ross-Rubinstein option pricer with tree greeks plus bracketed implied
 time-to-expiry and implied-underlying inversions). The pinned Zig toolchain and
 every `.zig` source were retired in T253; the shared image compiles the native
 library in a Rust build stage, and CI gates it with `cargo fmt --all --check`,
-`cargo clippy`, and `cargo test`. The cross-language parity oracle drives the
-native core through `harness.runtime.zig_backtest` (retained module name) and
-`harness.testing.rust_oracle`, asserting byte-identical determinism artifacts
-against the pure-Python engine.
+`cargo clippy`, and `cargo test`. The native-core parity suites assert
+byte-identical determinism artifacts against the pinned Python-reference
+goldens (masking the per-engine `manifest.code_fingerprint`); the Python
+oracle modules (`harness.runtime.zig_backtest`, `harness.testing.rust_oracle`)
+were deleted with the harness Python packages.
 
 The Rust migration is complete. The engine workspace lives under
 `src/harness/` and provides the authoritative engine core (clock, event
 bus, replay, matching/fills, fees, portfolio, risk, results, sweeps, and the
-backtest runtime) plus the `harness`, `api`, `mcp`, and `backtest-job`
-processes. The Python engine and the embedded-Python authoring surface have
-been deleted: strategies, indicators, and studies are authored in Rust
-against the `harness-strategy-sdk` crate and are JIT compiled and loaded
+backtest runtime) plus the `harness`, `api`, `mcp`, `backtest-job`, and
+`screen-job` processes. The Python engine and the embedded-Python authoring surface have
+been deleted: strategies, indicators, studies, and screeners are authored in
+Rust against the `harness-strategy-sdk` crate and are JIT compiled and loaded
 through `harness-strategy-jit` when a configuration runs (see
-`rust-native-authoring-plan.md`). The interpreter is no longer a harness
-build or test dependency. Zig was retired in T253, the Python engine paths
+`rust-native-authoring-plan.md` and `screener-rust-migration.md`). The
+interpreter is no longer a harness build or test dependency. Zig was retired in T253, the Python engine paths
 were removed in the final decommission wave, and the Python authoring
 surface (host adapter, `py` extension, and the harness Python packages) was
 removed in the native-authoring deletion; only the `trader` supervision
@@ -62,13 +64,14 @@ runner remains deferred (see below).
 | `quant-harness` | `src/harness` | Deterministic simulation, OMS and portfolio behavior, results, paper and shadow runtimes, and capability-gated live execution. |
 | `lakeclient` | `src/lakeclient` | Consumer-facing authenticated ensure, polling, file-query, and Parquet access without provider or Azure credentials. |
 | `thesis` | `src/thesis` | Workspace-scoped research, coordination, persistence, authorization, and model-provider boundaries. |
-| Authored programs | `config/harness/*.rs` and inline `parameters.source` | User-authored Rust strategies, indicators, and study programs compiled against the authoring SDK. |
+| Authored programs | `config/harness/*.rs` and inline `parameters.source` | User-authored Rust strategies, indicators, studies, and screening programs compiled against the authoring SDK. |
 
 Dependency direction is from the harness and strategies toward published
-contracts, never from the lake into harness runtime code. The harness may use
-lake schemas, catalog records, APIs, and clients, but the lake must remain
-operable without the harness. Strategies depend on the harness contract rather
-than engine internals.
+contracts, never from the lake into harness runtime code. The harness consumes
+the lake only through its HTTP routes — ensure, coverage, jobs, read, and
+reference — via the `harness-lakeclient` crate; it never reads lake files or
+links lake storage, and the lake must remain operable without the harness.
+Strategies depend on the harness contract rather than engine internals.
 
 ## Market-Lake Packages
 
@@ -93,8 +96,10 @@ The harness Python packages (`harness.configuration`, `harness.core`,
 and the `strategies/` authoring tree) were deleted with the embedded
 interpreter; their behavior is native Rust in the `harness` workspace crates
 (`config`, `num`, `marketdata`, `backtest`, `live`, `api`, `mcp`,
-`strategy-sdk`, `strategy-jit`). Thesis code that still imports the removed
-packages is expected to break until it migrates to the new surfaces.
+`strategy-sdk`, `strategy-jit`, `lakeclient`). Thesis reaches the harness
+exclusively through the harness-hosted MCP endpoint and HTTP API;
+`thesis.screening` is import-tested to never import the lake, the lake client,
+or the harness.
 
 The lake service Python packages (`lake.local`, `lake.http`, `lake.ingestion`,
 `lake.storage`, `lake.query`, `lake.queue`, `lake.hosted`, `lake.operations`,
@@ -119,12 +124,13 @@ The deterministic backtest runner is the native Rust engine: it composes lake
 replay, the simulated venue, fees, risk, portfolio accounting, and the fail-loud
 look-ahead abort behind one engine clock, and emits a reproducibility manifest
 covering configuration, code, seed, data, fill-model, fee, and risk
-fingerprints. `backtest-job --config` runs it over a lake data directory with
-JIT-authored programs, writing canonical run artifacts under `.local/`.
+fingerprints. `backtest-job --config` runs it against the market-lake HTTP
+routes with JIT-authored programs, streaming market data through
+`harness-lakeclient` and writing canonical run artifacts under `.local/`.
 
-The `harness`, `api`, `mcp`, and `backtest-job` processes are served by the Rust
-binaries directly; the Python console-script shims were deleted with the
-harness Python packages. `trader` is the one
+The `harness`, `api`, `mcp`, `backtest-job`, and `screen-job` processes are
+served by the Rust binaries directly; the Python console-script shims were
+deleted with the harness Python packages. `trader` is the one
 deferred process: the Rust binary runs the deterministic live-core session demo
 until the configured supervision runner is ported.
 
@@ -133,7 +139,8 @@ until the configured supervision runner is ported.
 `src/harness/` is a Cargo workspace providing the quant-harness engine and
 its interfaces, and it contains no Python: the engine, the process binaries,
 and the authoring surface are all native Rust. The native engine core and the
-`harness`, `api`, `mcp`, and `backtest-job` processes are authoritative. The
+`harness`, `api`, `mcp`, `backtest-job`, and `screen-job` processes are
+authoritative. The
 embedded-Python host, the `py` extension crate, and the harness Python
 packages were deleted in the native-authoring wave.
 
@@ -150,34 +157,55 @@ src/harness/
 |-- mcp/                       JSON-RPC 2.0 / MCP server and tool catalog
 |-- strategy-sdk/              Authoring SDK: traits, versioned C ABI, entry-point macros
 |-- strategy-jit/              JIT seam: managed workspace, cargo build, libloading, engine adapters
+|-- lakeclient/                Async lake HTTP client: ensure, coverage, jobs, Arrow reads, reference
 `-- config/                    YAML-subset loader, models, canonical hashing
 ```
 
-- `api` owns the `harness`, `api`, `backtest-job`, and `mcp` process
-  binaries; its axum routes, bearer authentication, and provenance fields
-  mirror the retired `harness.http` module. The `backtest-job` binary drives
-  the native engine through the `harness-strategy-jit` seam.
+- `api` owns the `harness`, `api`, `backtest-job`, `screen-job`, and `mcp`
+  process binaries; its axum routes, bearer authentication, and provenance
+  fields mirror the retired `harness.http` module. The `backtest-job` binary
+  drives the native engine through the `harness-strategy-jit` seam, the
+  `harness study-job` entry point runs one authored study configuration over
+  replayed lake bars through the same seam, and the `screen-job` binary runs
+  one authored screening program through it.
 - `mcp` owns the pure JSON-RPC dispatch, the capability-filtered tool
   catalog, bearer credential resolution, and newline-delimited stdio framing.
-- `strategy-sdk` exposes the authoring traits (strategy, indicator, study
-  program) over the engine's event types with the capability split enforced
-  by construction: a study program has no order surface. Its versioned C ABI
-  is the only contract that crosses a dylib boundary, and the loader rejects
+- `strategy-sdk` exposes the authoring traits (strategy, indicator, study,
+  and screening program) over the engine's event types with the capability
+  split enforced by construction: a study program folds bars only and has no
+  order surface, and a screening program sees only its `ScreenContext`
+  (universe, bars, facts, and precomputed indicators). Its versioned C ABI is
+  the only contract that crosses a dylib boundary, and the loader rejects
   artifacts whose ABI version differs.
 - `strategy-jit` writes authored sources into a content-addressed managed
   cargo workspace with one shared `target/`, compiles them with the pinned
   toolchain, caches by source digest, loads the cdylib through `libloading`,
-  and adapts it to the engine's `StrategyRuntime` seam. Compilation output,
-  the toolchain digest, and the source digest feed the bundle-hash provenance
-  flow; a configuration's `bundle_hash` must equal the source digest.
+  and adapts it to the engine's `StrategyRuntime` seam. Screening programs
+  bypass the engine: they run one-shot over the injected screening data source
+  (the `harness-lakeclient`-backed adapter) and the host ranks the returned
+  rows. Compilation output, the toolchain digest, and the source digest feed
+  the bundle-hash provenance flow; a configuration's `bundle_hash` must equal
+  the source digest.
+- `lakeclient` is the harness's only lake boundary: an async `reqwest` client
+  (with a blocking facade for the JIT screening path) covering ensure,
+  coverage, job status, streaming Arrow IPC reads, and the reference
+  universe/facts views over the published lake routes. It replaces the
+  retired `LakeEnsureClient`; there is no local lake path or data directory.
 - `config` reproduces the retired Python loader's strict models,
   exact-decimal normalization, datetime formatting, and domain-separated
   hashes; its parity suite asserts the exact hashes of every committed config
   file.
 - `marketdata`, `backtest`, and `live` are engine ports with
-  focused unit tests. `backtest` backs the flipped `backtest-job`;
-  `live` provides the deterministic live core the deferred `trader`
-  binary runs, but its configured supervision runner is not yet ported.
+  focused unit tests. `marketdata` path-depends on `lake-contracts` and
+  re-exports its `time`, `symbol`, `AssetClass`, `DataType` (including
+  `Bars`), `ExchangeSession`, `partition_path` (with the interval dimension),
+  and session calendars, so the harness and the lake share one value layer;
+  the duplicated harness holiday tables were deleted and the harness honors
+  the lake's ad-hoc closures and early closes. `backtest` backs the flipped
+  `backtest-job` and replays bars for `study` shells and trades and quotes for
+  backtests; `live` provides the deterministic live core the deferred
+  `trader` binary runs, but its configured supervision runner is not yet
+  ported.
 
 The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, and `cargo test --workspace`; no Python
@@ -188,15 +216,24 @@ interpreter is required.
 `src/lake/` is a Cargo workspace at the product root whose `Cargo.toml` and the
 Python package `lake/` coexist, exactly as `src/harness/` does. The lake
 service is authoritative: the `lake` binary serves the published catalog,
-ensure, jobs, query, and raw routes, and the `lake` console script is a thin
-Python shim (`lake.cli`) that execs it, with binary discovery through
-`LAKE_RUST_BINARY_DIR` and `src/lake/target/{release,debug}`.
+ensure, jobs, read, reference, query, and raw routes, and the `lake` console
+script is a thin Python shim (`lake.cli`) that execs it, with binary discovery
+through `LAKE_RUST_BINARY_DIR` and `src/lake/target/{release,debug}`.
+
+The lake's data types are `trade`, `quote`, and `bars`, plus the reference
+snapshots. `bars` partitions carry the `interval=1min|1d` dimension and are
+fetched provider-first, falling back to derivation from stored trades; a trade
+partition revision invalidates its derived bars, and provider bars replace
+derived bars when available. `GET /v1/read` streams `trade`, `quote`, and
+`bars` partitions as Arrow IPC, and `GET /v1/reference/universe` /
+`GET /v1/reference/facts` serve the point-in-time classification universe and
+facts.
 
 ```text
 src/lake/
 |-- Cargo.toml                 Workspace manifest (resolver 2)
 |-- rust-toolchain.toml        Pinned stable toolchain
-|-- contracts/                 Asset classes, data types, sessions, partitions, Arrow schemas
+|-- contracts/                 Asset classes, data types (including bars), sessions, partitions (including the interval dimension), Arrow schemas
 |-- configuration/             Strict YAML-subset loader, environment overrides, settings models
 |-- catalog/                   Coverage/job/run/contract/listing records, repositories, JSON store
 |-- coverage/                  Coverage classification, gap planning, ensure application
@@ -221,18 +258,27 @@ oracles load it. The workspace is gated by `cargo fmt --all --check`,
 ## Program Authoring Contract
 
 A program is Rust source authored against `harness-strategy-sdk`, carried by
-a configuration, JIT compiled on submit, and driven by the native engine
-through the versioned C ABI. The implemented contract is:
+a configuration, JIT compiled on submit, and driven through the versioned C
+ABI by the native engine or, for screening, by the one-shot screening runner.
+The implemented contract is:
 
-- Authoring. A study program implements `StudyProgram` (`on_quote`,
-  `on_trade`, `on_stop(publisher)`) and exports itself with
-  `export_study_program!`; a strategy program implements `StrategyProgram`
-  (`on_start`, `on_quote`/`on_trade` with an order sink, `on_fill`,
-  `on_stop`) and exports itself with `export_strategy_program!`. One
-  authored crate exports exactly one program. The SDK exposes only the
-  capability surface the author is allowed: a study has no order surface by
-  construction (the vtable carries no order path), mirroring the retired
-  `ResearchModelProgram` contract.
+- Authoring. A study program implements `StudyProgram` (`new(parameters)`,
+  `on_bar(&BarEvent)`, `on_stop(&mut MetricPublisher)`) and exports itself
+  with `export_study_program!`; it folds OHLCV bars only — ticks are not part
+  of the study contract — and every `BarEvent` carries the exact `Decimal`
+  open, high, low, close, and volume. A strategy program implements
+  `StrategyProgram` (`new(parameters)`, `on_start`, `on_quote`/`on_trade`
+  with an order sink, `on_fill`, `on_stop(&mut MetricPublisher)`) and exports
+  itself with `export_strategy_program!`; strategies remain tick-based. A
+  screening
+  program implements `ScreeningProgram` (`new(parameters)`, `screen(ctx)`)
+  and exports itself with `export_screening_program!`. One authored crate
+  exports exactly one program. The SDK exposes only the capability surface
+  the author is allowed: a study has no order surface by construction (the
+  vtable carries no order path), mirroring the retired
+  `ResearchModelProgram` contract, and a screening program sees only its
+  `ScreenContext` — universe, bars, engine fact sheets, and precomputed
+  indicators — with no order, file, network, or clock access.
 - Submission. `strategy_instances[].implementation` must be `"jit"`. The
   authored source travels as `parameters.source` (inline, for JSON
   configurations) or as `parameters.source_path` (a file relative to the
@@ -240,21 +286,49 @@ through the versioned C ABI. The implemented contract is:
   the SHA-256 of the authored source; the JIT seam rejects a mismatch.
 - Loading. On submit the seam writes the authored crate into the managed
   workspace, compiles it with the pinned toolchain (cached by source digest,
-  SDK version, and toolchain digest), loads the cdylib through `libloading`,
-  checks the exported ABI version against the host's, constructs the program
-  state from the configured `parameters`, and drives it through the engine's
-  `StrategyRuntime` trait. A panic or failure inside authored code is
-  contained and reported as a strategy-execution error.
-- Metrics. `publish_metric(name, value)` accepts a finite numeric value
-  under a non-reserved stable name; every rejection is recorded host-side and
-  fails the run even when the author ignores the returned error. Repeated
-  publication replaces the prior value; final values are written to
-  `metrics.json.custom`, the canonical run artifact, the recorder's
-  `emissions.parquet`, and the local/HTTP run catalog. Metric names are run
-  outputs, not indicator registrations.
+  program kind, SDK version, toolchain digest, and SDK ABI version; a
+  stale-ABI entry is a cache miss and is rebuilt), loads the cdylib through
+  `libloading`, checks the exported SDK ABI version (2) against the host's
+  and rejects an artifact built against an older version, constructs the
+  program state from the configured `parameters`, and drives it through the
+  engine's `StrategyRuntime` trait. A panic or failure inside authored code
+  is contained and reported as a strategy-execution error.
+- Study runs. A study configuration declares `shell: study` and requires
+  `data.bar_interval` to be one of `1min` or `1d`; a missing or invalid
+  interval fails the run loudly before any replay. The harness ensures the
+  window's bars through the lake (which ensures the trades the bars derive
+  from), streams them from `GET /v1/read`, and drives the authored study
+  program over bars only. Study artifacts keep their shape (`study.json`,
+  `metrics.json`); only the replayed event type changed. Backtests keep
+  replaying trades and quotes.
+- Screening. A screening configuration declares `shell: screen` and carries
+  the LF-normalized authored source and its `bundle_hash`, the `as_of` date,
+  `bar_interval`, `lookback_days`, `rank_metric`, an optional
+  `universe_revision`, and the Thesis `definition_id`/`definition_hash`
+  provenance. `harness screen-job` / the `screen-job` binary compiles the
+  source through the JIT cache, builds one `ScreenContext` (as-of universe,
+  bars, engine fact sheets, and precomputed indicators) from the
+  `harness-lakeclient` data source over the lake routes, runs the program
+  once, and ranks rows by `rank_metric` descending with symbol ascending on
+  ties. The result is written as `screen.json` (schema
+  `fca-harness-screen-v1`) carrying the ranked rows, bundle hash, rank
+  metric, data window, definition provenance, and the source/toolchain/run
+  digests; a failed run records its reason. The same path is published as
+  `POST /v1/screeners/jobs` / `GET /v1/screeners/jobs/{job_id}` and as the
+  `run_screener`, `get_screener_status`, and `screener_config_template` MCP
+  tools.
+- Metrics. `MetricPublisher::publish(name, value)` accepts a finite numeric
+  value under a non-reserved stable name; every rejection is recorded
+  host-side and fails the run even when the author ignores the returned
+  error. Repeated publication replaces the prior value; final values are
+  written to `metrics.json.custom`, the canonical run artifact, the
+  recorder's `emissions.parquet`, and the local/HTTP run catalog. Metric
+  names are run outputs, not indicator registrations.
 - Guidance. The plan and status live in
-  `.github/architecture/rust-native-authoring-plan.md`; the reference port
-  and re-pinned parity expectations are the next phases.
+  `.github/architecture/rust-native-authoring-plan.md`; the screener
+  migration is specified in `.github/architecture/screener-rust-migration.md`;
+  the remaining reference port and re-pinned parity expectations are the next
+  phases.
 
 ## Decommission Status
 
@@ -271,15 +345,16 @@ harness build or test needs a Python interpreter.
 1. `backtest-job` executes the Rust engine end to end. The `api` binary
    drives `harness_strategy_jit::run_backtest_configuration` over the
    configured `strategy_instances`.
-2. Authored Rust programs run through the engine from JIT-loaded dylibs,
-   proven by the `strategy-jit` suite (study and strategy runs over a real
-   Parquet lake, capability gate, panic containment, metric rejection).
+2. Authored Rust programs run through the JIT seam from loaded dylibs,
+   proven by the `strategy-jit` suite (study, strategy, and screening runs,
+   the lake-route adapter, capability gate, panic containment, metric
+   rejection).
 3. The authoring surface is decoupled from the engine. The SDK owns the
    authoring traits and the versioned C ABI; the engine consumes only the
    `StrategyRuntime` seam.
-4. The harness process binaries (`harness`, `api`, `mcp`, `backtest-job`)
-   are the only serving surfaces; the Python console-script shims were
-   deleted with no dangling harness imports.
+4. The harness process binaries (`harness`, `api`, `mcp`, `backtest-job`,
+   `screen-job`) are the only serving surfaces; the Python console-script
+   shims were deleted with no dangling harness imports.
 
 ### Deferred: `trader`
 
@@ -290,14 +365,13 @@ the engine; restoring full trader function requires porting the supervision
 runner (config loading, session resolution, feed supervision, boot reconciler,
 kill-switch polling, and state snapshots) into `live`.
 
-### Retained Python engines
+### Retained Python products
 
-`pyproject.toml` keeps the dependencies the surviving Python product surfaces
-require (`lake`, `lakeclient`, `thesis`, `ui`) plus the plugin surface
-(`harness.configuration`, `harness.core`, `harness.data` views,
-`harness.indicators`, `harness.screening`, `harness.strategy`,
-`harness.testing`). The Python test suite covers those retained surfaces; the
-Rust suites cover the engine.
+`pyproject.toml` keeps the dependencies the surviving Python products
+require: the lake service shim and its retained library surface (`lake`), the
+`lakeclient` product, and Thesis. No harness Python surface remains installed
+or tested. The Python test suite covers the retained lake and Thesis
+surfaces; the Rust suites cover the engine and the harness.
 
 ## Thesis Packages
 
@@ -307,20 +381,22 @@ planning mutations; `thesis.persistence` journals accepted commands and fences
 Git publication; `thesis.auth` binds operator sessions to workspaces;
 `thesis.chat`, `thesis.execution`, and `thesis.http` define the UI-facing
 workflow boundary; `thesis.agent` owns policy-driven model context and
-provenance; `thesis.integrations` owns lake and harness adapters;
+provenance; `thesis.integrations` owns the harness HTTP and MCP adapters;
 `thesis.identity` owns durable accounts, one-time invite links, and
 server-side sessions for the invite-only public release (ADR-001);
-`thesis.research` owns content-addressed research models, explicit
-`IndicatorRef` scope, and workspace indicator publication. The immutable
-global indicator registry remains in `harness.indicators`; workspace indicator
-source is published under `indicators/<name>/<content-sha>/` and never mutates
-or shadows that registry. Research models are published under
-`models/<model-id>/<content-sha>/`, compose explicitly scoped indicator refs,
-and publish each run's evidence under `models/runs/`. `thesis.strategies` owns
+`thesis.research` owns content-addressed research models that carry an authored
+Rust study program source, published under `models/<model-id>/<content-sha>/`
+with each run's evidence under `models/runs/`; workspace indicator definitions
+remain content-addressed under `indicators/<name>/<content-sha>/`, and the
+Python `harness.indicators` registry was deleted with the native-authoring
+wave. `thesis.strategies` owns
 content-addressed strategy bundles; `thesis.artifacts`
 owns reproducibility-critical result imports; `thesis.backtests` imports
 completed harness runs into workspace backtest records (equity, trades, stats)
-linked to the originating chat and workflow execution; and `thesis.providers`
+linked to the originating chat and workflow execution; `thesis.screening` owns
+content-addressed screener definitions and imports harness screening runs as
+workspace results — it launches `run_screener` through the harness MCP and
+never reads market data; and `thesis.providers`
 keeps model credentials behind backend-only protocols.
 Workspace identity remains `.thesis/workspace.yaml`; publication state is
 written separately to `.thesis/publication.json`.
@@ -332,25 +408,24 @@ operational drift:
 
 - `pyproject.toml` defines the Python project and common quality tooling.
 - `src/harness/` is a Cargo workspace with a pinned stable toolchain. It
-  builds `native` (the native core the Python loader consumes) and the
-  harness interface binaries. CI enforces `cargo fmt --all --check`,
+  builds the `native` C ABI core and the harness interface binaries. CI
+  enforces `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`, and
   `cargo test --workspace` alongside the Python gates. The pinned Zig toolchain
   from the earlier native-core effort was retired in T253.
 - `Dockerfile` builds one immutable image with distinct runtime commands. A
   Rust build stage compiles and tests the workspace and produces the native
   core library plus the `harness`, `api`, `backtest-job`, `mcp`, and `trader`
-  binaries; the runtime stage carries the library under `/opt/rust` and the
-  binaries under `/opt/rust/bin` (discoverable through
-  `HARNESS_RUST_BINARY_DIR`).
+  binaries; the runtime stage carries the authoring SDK under `/opt/rust/sdk`
+  and the binaries on `PATH` under `/opt/rust/bin`.
 - `config` contains versioned, non-secret YAML grouped by product or concern.
 - `infra` contains reusable Bicep modules, environment parameters, identity,
   storage, observability, and Container Apps definitions.
 - `.github/workflows` provides path-filtered checks, image publication, and
   OIDC-based deployment.
-- `tests/lake` and `tests/harness` mirror their product capability boundaries.
-  `tests` also holds explicit cross-product contract tests where integration is
-  intentional.
+- `tests/lake`, `tests/lakeclient`, and `tests/thesis` mirror their product
+  capability boundaries. `tests` also holds explicit cross-product contract
+  tests where integration is intentional.
 
 ## Market-Lake Deployment
 

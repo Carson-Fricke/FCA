@@ -1,9 +1,8 @@
 """Local Thesis API composition for the no-Azure development stack.
 
-Binds the real chat surface (T211), the workspace DATA routes (T231), and
-the screener router to a single uvicorn process on 127.0.0.1:8000, with the
-harness-hosted MCP boundary and CORS for the Svelte dev
-server.  The serving stack itself (conversations, control tools, workflow
+Binds the real chat surface (T211) and the workspace DATA routes (T231) to a
+single uvicorn process on 127.0.0.1:8000, with the harness-hosted MCP
+boundary and CORS for the Svelte dev server.  The serving stack itself (conversations, control tools, workflow
 runtime, launcher) is composed by :func:`thesis.http.serving.build_serving_stack`
 — the same composition `thesis serve` uses — and only the local harness
 transport and logging differ here; see .github/runbooks/thesis-local-stack.md.

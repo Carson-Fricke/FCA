@@ -18,10 +18,12 @@ longer tested through, the Python-driven tests are deleted rather than
 maintained, and the repository gates must pass with no Python interpreter
 configured. The reference-strategy ports follow the deletion instead of
 preceding it. The `run_sweep` MCP tool and its local submitter/launcher were
-removed with the sweep surface. Known follow-ups are the remaining N3/N4
-content below: porting `mean_reversion`/`short_put_spread`, the Rust
-screening program kind, and the workflow prompt refinements in
-`prompts/creation.py` already authored above.
+removed with the sweep surface. Known follow-ups are the remaining N3
+content below: porting `mean_reversion`/`short_put_spread` and the workflow
+prompt refinements in `prompts/creation.py` already authored above. N4 is
+delivered, including the Rust screening program kind: screener filters are
+Rust-authored `ScreeningProgram` programs submitted through the harness MCP
+(see `screener-rust-migration.md`).
 
 ## Why
 
@@ -46,10 +48,12 @@ traits — Python is the replaceable part, not the architecture.
 ## Target shape
 
 * **Authoring SDK** — `harness-strategy-sdk`: a small crate exposing the
-  authoring traits (strategy, indicator, study program) over the engine's
-  event and context types, with an entry-point macro. The SDK exposes only
-  the capability surface the author is allowed: studies never see the order
-  surface (same contract as `ResearchModelProgram` today).
+  authoring traits (strategy, indicator, study, and screening program) over
+  the engine's event and context types, with an entry-point macro. The SDK
+  exposes only the capability surface the author is allowed: studies never see
+  the order surface (same contract as `ResearchModelProgram` today) and fold
+  `BarEvent`s only through `on_bar`, and screening programs see only the
+  `ScreenContext` cross-section.
 * **JIT seam** — on submit, the platform writes the authored crate to a
   managed workspace, runs `cargo build --release` against the pinned
   toolchain, and loads the produced cdylib through `libloading`. The dylib
@@ -71,11 +75,11 @@ traits — Python is the replaceable part, not the architecture.
 (author-facing traits, versioned C ABI, entry-point macros) and the
 `harness-strategy-jit` seam (managed workspace with one shared `target/`,
 `cargo build --release` against the pinned toolchain, `libloading` load with
-ABI-version gating, source-digest caching). Proven by running an authored
-study through the real engine job seam from a JIT-loaded dylib against a
-Parquet lake, plus a strategy smoke run, the capability gate (a study
-runtime has no order path by construction), panic containment, and metric
-rejection handling.
+ABI-version gating, source-digest caching). Proven by running an authored bar
+study through the real engine job seam from a JIT-loaded dylib over the
+market-lake bar read route, plus a strategy smoke run, the capability gate (a
+study runtime folds `BarEvent`s only and has no order path by construction),
+panic containment, and metric rejection handling.
 
 **Phase N2 — Delete the embedded Python authoring surface now.** Remove the
 PyO3 adapter, `python.rs`, the Python research adapter, the screening
@@ -93,16 +97,24 @@ provenance flow. Exit: `cargo fmt/clippy/test --workspace` passes with no
 their behavior with lake-run tests asserting event/decision counts.
 
 **Phase N4 — Thesis produces Rust implementations only, over hosted
-surfaces.** Thesis is the authoring platform, so the Python exit is not a
+surfaces (done).** Thesis is the authoring platform, so the Python exit is not a
 transport change: every implementation Thesis produces becomes authored
 Rust. Research models store and emit authored Rust study programs
 (`implementation: "jit"`, source in `parameters`, bundle hash equal to the
-source digest) — the Python `model_source`/`fit`/`observe` plumbing and the
-indicator-binding schema are deleted. Strategy bundles persist Rust sources
-and hash those. Screener filters become Rust-authored programs or the
-feature pauses until ported. The hypothesis-workflow phase prompts author
-Rust against the SDK, and the model's edit-compile-run loop is the JIT seam
-itself: submit, read the compiler or engine failure, revise. No Python
+source digest) that fold `BarEvent`s at the interval the hypothesis declares
+in `harnessConfiguration.interval` (`1min` or `1d`, emitted as
+`data.bar_interval` in the study configuration) and publish their Layer A
+observables as metrics — the Python `model_source`/`fit`/`observe` plumbing
+and the indicator-binding schema are deleted. Strategy bundles persist Rust
+sources and hash those. Screener filters are Rust-authored `ScreeningProgram`
+programs (SDK `ScreeningProgram` and `export_screening_program!`) submitted
+through the harness MCP: the harness JIT-compiles them, builds the screening
+context from the lake routes, ranks the returned rows, and writes the
+`screen.json` artifact, while Thesis owns the definitions as content-addressed
+workspace artifacts. The design of record is `screener-rust-migration.md`.
+The hypothesis-workflow phase prompts author Rust against the SDK, and the
+model's edit-compile-run loop is the JIT seam itself: submit, read the
+compiler or engine failure, revise. No Python
 source or Python implementation string ever enters a submitted
 configuration, and the workflow tests assert the Rust emission.
 
@@ -128,15 +140,16 @@ and status query flows through the hosted MCP tools or the REST routes.
 * **Authoring ergonomics** — model authors lose the Python REPL loop; the
   compile-cache and the bar-feed (see below) are what keep iteration fast.
 
-## Bar feeds (adjacent, unchanged)
+## Bar feeds (delivered)
 
-`data.bar_interval` already exists in the backtest configuration schema but
-nothing implements it. Deriving 1-minute (or 1-second) bars natively from
-fetched tick partitions — as a derived lake data type or a query-time view —
-shrinks study replay by two to three orders of magnitude and is the
-prototyping-speed lever regardless of authoring language. Tick replay stays
-for final validation. Explicitly out of scope for the N-phases above until
-the authoring surface lands.
+`data.bar_interval` (`1min` or `1d`) is now a required study configuration
+field: the lake owns bars as a first-class data type (fetched provider-first,
+derived from stored trades otherwise), the harness ensures and streams the
+window's bars from the `GET /v1/read` route, and study replay folds
+`BarEvent`s only. Deriving bars in the lake instead of replaying ticks
+shrinks study replay by orders of magnitude and keeps iteration fast;
+backtests still replay trades and quotes, and tick replay remains for final
+strategy validation.
 
 ## Out of scope
 

@@ -60,9 +60,48 @@ fn the_workspace_records_provenance_for_every_artifact() {
     assert_eq!(entry.crate_name, compiled.crate_name);
     assert_eq!(entry.toolchain_digest, compiled.toolchain_digest);
     assert_eq!(entry.sdk_version, harness_strategy_sdk::SDK_VERSION);
+    assert_eq!(entry.sdk_abi_version, harness_strategy_sdk::SDK_ABI_VERSION);
     assert!(workspace
         .target_dir()
         .join(&entry.artifact_relpath)
         .is_file());
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn a_matching_manifest_is_a_cache_hit() {
+    let directory = temp_dir("cache-hit");
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+    let first = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("initial compile");
+    assert!(!first.cached);
+    let second = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("cached compile");
+    assert!(second.cached);
+    assert_eq!(second.digest, first.digest);
+    assert_eq!(second.artifact_path, first.artifact_path);
+    assert_eq!(
+        second.sdk_version,
+        harness_strategy_sdk::SDK_VERSION.to_string()
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn an_older_manifest_abi_version_forces_a_rebuild() {
+    let directory = temp_dir("stale-abi");
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+    let first = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("initial compile");
+    assert!(!first.cached);
+
+    let mut entries = workspace.read_manifest();
+    let entry = entries.get_mut(&first.digest).expect("manifest entry");
+    entry.sdk_abi_version = harness_strategy_sdk::SDK_ABI_VERSION - 1;
+    workspace.write_manifest(&entries).expect("manifest write");
+
+    let rebuilt = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("rebuild");
+    assert!(!rebuilt.cached);
+    assert_eq!(rebuilt.digest, first.digest);
+    let entries = workspace.read_manifest();
+    let entry = entries.get(&first.digest).expect("manifest entry");
+    assert_eq!(entry.sdk_abi_version, harness_strategy_sdk::SDK_ABI_VERSION);
     let _ = std::fs::remove_dir_all(&directory);
 }

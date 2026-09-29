@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::{BacktestOutcome, EngineOptions};
 use backtest::backtest::job::BacktestJobError;
-use backtest::backtest::job::{run_native_job_with_data_dir, run_native_study_job_with_data_dir};
+use backtest::backtest::job::{
+    run_native_job_with_lake_client, run_native_study_job_with_lake_client,
+};
+use harness_lakeclient::BlockingLakeClient;
 
 use crate::config::build_instances;
 use crate::error::JitError;
@@ -51,6 +54,9 @@ impl From<BacktestJobError> for ConfigurationRunError {
 /// programs and the native engine, writing the canonical `study.json`
 /// artifact set.
 ///
+/// The run window's market data is ensured and streamed through `client`; the
+/// lake can never be bypassed with a local path.
+///
 /// # Errors
 ///
 /// Returns [`ConfigurationRunError`] when an authored program cannot be
@@ -59,16 +65,16 @@ pub fn run_study_configuration(
     configuration: &BacktestConfig,
     engine_options: &EngineOptions,
     output_dir: Option<&Path>,
-    data_dir: &Path,
+    client: &BlockingLakeClient,
 ) -> Result<(BacktestOutcome, PathBuf), ConfigurationRunError> {
     let workspace = ManagedWorkspace::open_default()?;
     let programs = build_instances(configuration, &workspace)?;
-    Ok(run_native_study_job_with_data_dir(
+    Ok(run_native_study_job_with_lake_client(
         configuration,
         engine_options,
         output_dir,
         programs,
-        data_dir,
+        client,
     )?)
 }
 
@@ -84,15 +90,15 @@ pub fn run_backtest_configuration(
     configuration: &BacktestConfig,
     engine_options: &EngineOptions,
     output_dir: Option<&Path>,
-    data_dir: &Path,
+    client: &BlockingLakeClient,
 ) -> Result<(BacktestOutcome, PathBuf), ConfigurationRunError> {
     let workspace = ManagedWorkspace::open_default()?;
     let strategies = build_instances(configuration, &workspace)?;
-    Ok(run_native_job_with_data_dir(
+    Ok(run_native_job_with_lake_client(
         configuration,
         engine_options,
         output_dir,
         strategies,
-        data_dir,
+        client,
     )?)
 }

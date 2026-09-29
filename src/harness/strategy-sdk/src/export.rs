@@ -1,12 +1,13 @@
 //! The entry-point macros and their panic-guarded trampolines.
 //!
-//! [`export_study_program!`] and [`export_strategy_program!`] turn one
-//! authored type into the exported dylib symbols. Every author callback runs
-//! inside [`std::panic::catch_unwind`]; a panic or an explicit failure is
+//! [`export_study_program!`], [`export_strategy_program!`], and
+//! [`export_screening_program!`] turn one authored type into the exported
+//! dylib symbols. Every author callback runs inside
+//! [`std::panic::catch_unwind`]; a panic or an explicit failure is
 //! recorded in a thread-local slot readable through the exported
 //! `harness_sdk_last_error` symbol and mapped to [`SDK_ERROR`] by the host.
 //!
-//! One authored crate exports exactly one program kind: the two macros both
+//! One authored crate exports exactly one program kind: the three macros all
 //! define the handshake symbols, so combining them in one crate is a duplicate
 //! symbol error by construction.
 
@@ -21,10 +22,13 @@ use std::ffi::{c_char, CString};
 use std::panic::AssertUnwindSafe;
 
 use crate::abi::{
-    CFill, CMetricSink, COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent, SDK_ERROR, SDK_OK,
+    CBarEvent, CFill, CMetricSink, COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent, SDK_ERROR,
+    SDK_OK,
 };
-use crate::events::{Fill, ProgramStart, QuoteEvent, TradeEvent};
-use crate::program::{MetricPublisher, OrderSink, StrategyProgram, StudyProgram};
+use crate::events::{BarEvent, Fill, ProgramStart, QuoteEvent, TradeEvent};
+use crate::program::{
+    MetricPublisher, OrderSink, ScreenContext, ScreeningProgram, StrategyProgram, StudyProgram,
+};
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
@@ -115,6 +119,25 @@ pub unsafe fn trade_view<'a>(event: *const CTradeEvent) -> Option<TradeEvent<'a>
 
 /// # Safety
 ///
+/// `event` must point to a valid `CBarEvent` whose string views remain
+/// readable for the callback duration.
+pub unsafe fn bar_view<'a>(event: *const CBarEvent) -> Option<BarEvent<'a>> {
+    let raw = unsafe { event.as_ref()? };
+    Some(BarEvent {
+        event_id: unsafe { raw.event_id.as_str() }?,
+        timestamp_ns: raw.timestamp_ns,
+        sequence: raw.sequence,
+        symbol: unsafe { raw.symbol.as_str() }?,
+        open: raw.open.to_decimal(),
+        high: raw.high.to_decimal(),
+        low: raw.low.to_decimal(),
+        close: raw.close.to_decimal(),
+        volume: raw.volume.to_decimal(),
+    })
+}
+
+/// # Safety
+///
 /// `fill` must point to a valid `CFill` whose string views remain readable
 /// for the callback duration.
 pub unsafe fn fill_view<'a>(fill: *const CFill) -> Option<Fill<'a>> {
@@ -175,48 +198,25 @@ pub unsafe extern "C" fn __study_create<T: StudyProgram>(
     }
 }
 
-/// Trampoline: fold one quote into a study program.
+/// Trampoline: fold one OHLCV bar into a study program.
 ///
 /// # Safety
 ///
 /// `state` must be the pointer [`__study_create`] returned and `event` must
-/// point to a valid `CQuoteEvent`.
-pub unsafe extern "C" fn __study_on_quote<T: StudyProgram>(
+/// point to a valid `CBarEvent`.
+pub unsafe extern "C" fn __study_on_bar<T: StudyProgram>(
     state: *mut std::os::raw::c_void,
-    event: *const CQuoteEvent,
+    event: *const CBarEvent,
 ) -> i32 {
     let Some(program) = (unsafe { borrow_state::<T>(state, "study program") }) else {
         return SDK_ERROR;
     };
-    let Some(quote) = (unsafe { quote_view(event) }) else {
-        record_error("study quote event is malformed".to_string());
+    let Some(bar) = (unsafe { bar_view(event) }) else {
+        record_error("study bar event is malformed".to_string());
         return SDK_ERROR;
     };
     run_guarded(|| {
-        program.on_quote(&quote);
-        SDK_OK
-    })
-}
-
-/// Trampoline: fold one trade into a study program.
-///
-/// # Safety
-///
-/// `state` must be the pointer [`__study_create`] returned and `event` must
-/// point to a valid `CTradeEvent`.
-pub unsafe extern "C" fn __study_on_trade<T: StudyProgram>(
-    state: *mut std::os::raw::c_void,
-    event: *const CTradeEvent,
-) -> i32 {
-    let Some(program) = (unsafe { borrow_state::<T>(state, "study program") }) else {
-        return SDK_ERROR;
-    };
-    let Some(trade) = (unsafe { trade_view(event) }) else {
-        record_error("study trade event is malformed".to_string());
-        return SDK_ERROR;
-    };
-    run_guarded(|| {
-        program.on_trade(&trade);
+        program.on_bar(&bar);
         SDK_OK
     })
 }
@@ -452,6 +452,142 @@ pub unsafe extern "C" fn __strategy_destroy<T: StrategyProgram>(state: *mut std:
     }));
 }
 
+/// The state a screening trampoline owns: the authored program plus the last
+/// serialized result payload.
+///
+/// The result buffer is what [`__screening_result`] borrows; it stays valid
+/// until the next `screen` call or `destroy`.
+struct ScreeningState<T: ScreeningProgram> {
+    program: T,
+    result: Option<CString>,
+}
+
+/// Trampoline: construct a screening program from JSON parameters.
+///
+/// # Safety
+///
+/// `parameters` must be a valid [`CStr`].
+pub unsafe extern "C" fn __screening_create<T: ScreeningProgram>(
+    parameters: CStr,
+) -> *mut std::os::raw::c_void {
+    let outcome =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match parse_parameters(parameters) {
+                Ok(value) => Box::into_raw(Box::new(ScreeningState {
+                    program: T::new(value),
+                    result: None,
+                }))
+                .cast::<std::os::raw::c_void>(),
+                Err(message) => {
+                    record_error(format!("screening program creation failed: {message}"));
+                    std::ptr::null_mut()
+                }
+            }
+        }));
+    match outcome {
+        Ok(pointer) => pointer,
+        Err(payload) => {
+            record_panic(&*payload);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Trampoline: evaluate one screening context into the program state.
+///
+/// A context that does not parse or a result that cannot be serialized is
+/// recorded through [`record_error`] and mapped to [`SDK_ERROR`]; the
+/// authored program itself runs inside `run_guarded`, so it never panics
+/// across the boundary.
+///
+/// # Safety
+///
+/// `state` must be the pointer [`__screening_create`] returned and
+/// `ctx_json` must be a valid [`CStr`].
+pub unsafe extern "C" fn __screening_screen<T: ScreeningProgram>(
+    state: *mut std::os::raw::c_void,
+    ctx_json: CStr,
+) -> i32 {
+    let Some(state) = (unsafe { borrow_state::<ScreeningState<T>>(state, "screening program") })
+    else {
+        return SDK_ERROR;
+    };
+    let Some(text) = (unsafe { ctx_json.as_str() }) else {
+        record_error("screening context is not valid UTF-8".to_string());
+        return SDK_ERROR;
+    };
+    let context = match serde_json::from_str::<ScreenContext>(text) {
+        Ok(context) => context,
+        Err(error) => {
+            record_error(format!("screening context is not valid JSON: {error}"));
+            return SDK_ERROR;
+        }
+    };
+    run_guarded(|| {
+        let rows = state.program.screen(&context);
+        match serde_json::to_string(&rows) {
+            Ok(document) => match CString::new(document) {
+                Ok(result) => {
+                    state.result = Some(result);
+                    SDK_OK
+                }
+                Err(error) => {
+                    record_error(format!("screening result could not be encoded: {error}"));
+                    SDK_ERROR
+                }
+            },
+            Err(error) => {
+                record_error(format!("screening result could not be serialized: {error}"));
+                SDK_ERROR
+            }
+        }
+    })
+}
+
+/// Trampoline: borrow the last serialized screening result payload.
+///
+/// The returned view stays valid until the next `screen` call or `destroy`
+/// on the same state; the host copies the pointer and length immediately.
+///
+/// # Safety
+///
+/// `state` must be the pointer [`__screening_create`] returned.
+pub unsafe extern "C" fn __screening_result<T: ScreeningProgram>(
+    state: *mut std::os::raw::c_void,
+) -> CStr {
+    let Some(state) = (unsafe { borrow_state::<ScreeningState<T>>(state, "screening program") })
+    else {
+        return CStr::from_slice("");
+    };
+    match &state.result {
+        Some(result) => CStr {
+            ptr: result.as_ptr().cast::<u8>(),
+            len: result.as_bytes().len(),
+        },
+        None => {
+            record_error("screening result requested before screen completed".to_string());
+            CStr::from_slice("")
+        }
+    }
+}
+
+/// Trampoline: destroy a screening program state.
+///
+/// # Safety
+///
+/// `state` must be the pointer [`__screening_create`] returned, and it must
+/// not be used again afterwards.
+pub unsafe extern "C" fn __screening_destroy<T: ScreeningProgram>(
+    state: *mut std::os::raw::c_void,
+) {
+    if state.is_null() {
+        return;
+    }
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        drop(Box::from_raw(state.cast::<ScreeningState<T>>()));
+    }));
+}
+
 /// Export one authored [`StudyProgram`] as the artifact's program surface.
 ///
 /// Generates the handshake exports (`harness_sdk_abi_version`,
@@ -476,8 +612,7 @@ macro_rules! export_study_program {
                 abi_version: $crate::SDK_ABI_VERSION,
                 reserved: 0,
                 create: $crate::export::__study_create::<$ty>,
-                on_quote: $crate::export::__study_on_quote::<$ty>,
-                on_trade: $crate::export::__study_on_trade::<$ty>,
+                on_bar: $crate::export::__study_on_bar::<$ty>,
                 on_stop: $crate::export::__study_on_stop::<$ty>,
                 destroy: $crate::export::__study_destroy::<$ty>,
             };
@@ -514,6 +649,42 @@ macro_rules! export_strategy_program {
                 on_fill: $crate::export::__strategy_on_fill::<$ty>,
                 on_stop: $crate::export::__strategy_on_stop::<$ty>,
                 destroy: $crate::export::__strategy_destroy::<$ty>,
+            };
+            &VTABLE
+        }
+    };
+}
+
+/// Export one authored [`ScreeningProgram`] as the artifact's program surface.
+///
+/// Generates the handshake exports (`harness_sdk_abi_version`,
+/// `harness_sdk_last_error`, `harness_sdk_screening_vtable`) and the vtable
+/// trampolines for the type. The screening vtable carries no order surface by
+/// construction.
+///
+/// See [`export_study_program!`] for the one-program-per-crate contract.
+#[macro_export]
+macro_rules! export_screening_program {
+    ($ty:ty) => {
+        #[no_mangle]
+        pub extern "C" fn harness_sdk_abi_version() -> u32 {
+            $crate::SDK_ABI_VERSION
+        }
+
+        #[no_mangle]
+        pub extern "C" fn harness_sdk_last_error() -> *const ::std::os::raw::c_char {
+            $crate::export::last_error_ptr()
+        }
+
+        #[no_mangle]
+        pub extern "C" fn harness_sdk_screening_vtable() -> *const $crate::ScreeningProgramVTable {
+            static VTABLE: $crate::ScreeningProgramVTable = $crate::ScreeningProgramVTable {
+                abi_version: $crate::SDK_ABI_VERSION,
+                reserved: 0,
+                create: $crate::export::__screening_create::<$ty>,
+                screen: $crate::export::__screening_screen::<$ty>,
+                result: $crate::export::__screening_result::<$ty>,
+                destroy: $crate::export::__screening_destroy::<$ty>,
             };
             &VTABLE
         }

@@ -24,7 +24,7 @@ from thesis.workflows.research_models import (
 )
 
 _STUDY_SOURCE = """use harness_strategy_sdk::{
-    export_study_program, MetricPublisher, QuoteEvent, StudyProgram, TradeEvent,
+    export_study_program, BarEvent, MetricPublisher, StudyProgram,
 };
 use harness_strategy_sdk::serde_json::Value;
 
@@ -35,9 +35,7 @@ impl StudyProgram for PairModel {
         Self
     }
 
-    fn on_quote(&mut self, _event: &QuoteEvent) {}
-
-    fn on_trade(&mut self, _event: &TradeEvent) {}
+    fn on_bar(&mut self, _event: &BarEvent) {}
 
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {
         let _ = metrics.publish("rolling_corr_60d_median", 0.73);
@@ -61,6 +59,7 @@ def _model(**overrides: object) -> ResearchModel:
             "seed": 7,
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-03-01T00:00:00Z",
+            "interval": "1min",
         },
         "tests": {"test_model.txt": "Covered by the harness jit suite.\n"},
     }
@@ -95,13 +94,13 @@ class _Paths:
     def resolve_path(
         self,
         workspace_id: str,
-        relative_path: str | Path = ".",
+        relative: str | Path = ".",
         *,
         must_exist: bool = False,
     ) -> Path:
         boundary = (self.root / workspace_id).resolve(strict=False)
         boundary.mkdir(parents=True, exist_ok=True)
-        path = (boundary / relative_path).resolve(strict=must_exist)
+        path = (boundary / relative).resolve(strict=must_exist)
         if not path.is_relative_to(boundary):
             raise ValueError("escaped")
         return path
@@ -138,10 +137,14 @@ def test_runner_publishes_the_authored_rust_program_as_a_jit_study() -> None:
     request = backtests.requests[0]
     assert request.workspace_id == "workspace-one"
     config = cast("Mapping[str, object]", request.bundle.harness_configuration)
-    # The model's declared window is piped through to the fetch verbatim, so
-    # the study never reads a period the hypothesis did not ask for.
+    # The model's declared window and bar interval are piped through to the
+    # study's data block verbatim, so the study replays exactly the bars the
+    # hypothesis asked for.
     assert config["start"] == "2024-01-01T00:00:00Z"
     assert config["end"] == "2024-03-01T00:00:00Z"
+    data = cast("Mapping[str, object]", config["data"])
+    assert data["bar_interval"] == "1min"
+    assert "interval" not in config
     instances = cast("Sequence[Mapping[str, object]]", config["strategy_instances"])
     assert instances[0]["implementation"] == "jit"
     assert (
@@ -201,6 +204,7 @@ def test_runner_falls_back_to_request_universe_when_configuration_omits_symbols(
             "seed": 7,
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-03-01T00:00:00Z",
+            "interval": "1min",
         },
     )
     backtests = _Backtests()
@@ -221,8 +225,63 @@ def test_runner_falls_back_to_request_universe_when_configuration_omits_symbols(
     config = cast("Mapping[str, object]", request.bundle.harness_configuration)
     data = cast("Mapping[str, object]", config["data"])
     assert list(cast("Sequence[object]", data["symbols"])) == ["MSTR", "IBIT"]
+    assert data["bar_interval"] == "1min"
+    assert "interval" not in config
     instances = cast("Sequence[Mapping[str, object]]", config["strategy_instances"])
     assert list(cast("Sequence[object]", instances[0]["symbols"])) == ["MSTR", "IBIT"]
+
+
+def test_runner_emits_the_models_bar_interval_into_the_study_data() -> None:
+    model = _model(
+        harness_configuration={
+            "symbols": ["SPY"],
+            "start": "2024-01-01T00:00:00Z",
+            "end": "2024-03-01T00:00:00Z",
+            "interval": "1d",
+        }
+    )
+    backtests = _Backtests()
+    runner = BacktestResearchModelRunner(backtests, models=InMemoryResearchModelStore())
+
+    runner.run(
+        ResearchModelRunRequest(
+            run_id="run-daily-model",
+            workspace_id="workspace-daily",
+            model=model,
+            workflow_execution_id="execution-daily",
+            experiment_id="experiment-daily",
+        )
+    )
+
+    bundle = backtests.requests[0].bundle
+    config = cast("Mapping[str, object]", bundle.harness_configuration)
+    data = cast("Mapping[str, object]", config["data"])
+    assert data["bar_interval"] == "1d"
+    # The interval is emitted exactly once, as the harness reads it.
+    assert "interval" not in config
+
+
+def test_model_requires_a_declared_bar_interval() -> None:
+    # A model without an interval cannot be replayed as a bar study, so it is
+    # invalid rather than silently defaulted.
+    with pytest.raises(ResearchModelError, match="bar interval"):
+        _model(
+            harness_configuration={
+                "symbols": ["SPY"],
+                "start": "2024-01-01T00:00:00Z",
+                "end": "2024-03-01T00:00:00Z",
+            }
+        )
+
+    with pytest.raises(ResearchModelError, match="bar interval"):
+        _model(
+            harness_configuration={
+                "symbols": ["SPY"],
+                "start": "2024-01-01T00:00:00Z",
+                "end": "2024-03-01T00:00:00Z",
+                "interval": "5min",
+            }
+        )
 
 
 def test_study_window_requires_the_model_to_declare_both_bounds() -> None:

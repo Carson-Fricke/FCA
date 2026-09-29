@@ -187,6 +187,30 @@ pub enum MarketEvent {
         /// Trade identifier.
         trade_id: String,
     },
+    /// One OHLCV bar.
+    ///
+    /// Bars replay only in study runs; a study fixture carries bars and
+    /// nothing else.
+    Bar {
+        /// Event identifier.
+        event_id: String,
+        /// Event time in epoch nanoseconds.
+        timestamp_ns: i64,
+        /// Global sequence.
+        sequence: u64,
+        /// Instrument symbol.
+        symbol: String,
+        /// Interval open.
+        open: Decimal18,
+        /// Interval high.
+        high: Decimal18,
+        /// Interval low.
+        low: Decimal18,
+        /// Interval close.
+        close: Decimal18,
+        /// Interval volume.
+        volume: Decimal18,
+    },
 }
 
 impl MarketEvent {
@@ -194,7 +218,9 @@ impl MarketEvent {
     #[must_use]
     pub const fn timestamp_ns(&self) -> i64 {
         match self {
-            Self::Quote { timestamp_ns, .. } | Self::Trade { timestamp_ns, .. } => *timestamp_ns,
+            Self::Quote { timestamp_ns, .. }
+            | Self::Trade { timestamp_ns, .. }
+            | Self::Bar { timestamp_ns, .. } => *timestamp_ns,
         }
     }
 
@@ -202,7 +228,9 @@ impl MarketEvent {
     #[must_use]
     pub fn symbol(&self) -> &str {
         match self {
-            Self::Quote { symbol, .. } | Self::Trade { symbol, .. } => symbol,
+            Self::Quote { symbol, .. } | Self::Trade { symbol, .. } | Self::Bar { symbol, .. } => {
+                symbol
+            }
         }
     }
 
@@ -210,7 +238,9 @@ impl MarketEvent {
     #[must_use]
     pub const fn sequence(&self) -> u64 {
         match self {
-            Self::Quote { sequence, .. } | Self::Trade { sequence, .. } => *sequence,
+            Self::Quote { sequence, .. }
+            | Self::Trade { sequence, .. }
+            | Self::Bar { sequence, .. } => *sequence,
         }
     }
 
@@ -258,6 +288,28 @@ impl MarketEvent {
                 ("quantity", JsonValue::String(quantity.to_string())),
                 ("venue", JsonValue::String(venue.clone())),
                 ("trade_id", JsonValue::String(trade_id.clone())),
+            ]),
+            Self::Bar {
+                event_id,
+                timestamp_ns,
+                sequence,
+                symbol,
+                open,
+                high,
+                low,
+                close,
+                volume,
+            } => JsonValue::object([
+                ("kind", JsonValue::string("bar")),
+                ("event_id", JsonValue::String(event_id.clone())),
+                ("timestamp_ns", JsonValue::Int(*timestamp_ns)),
+                ("sequence", JsonValue::UInt(*sequence)),
+                ("symbol", JsonValue::String(symbol.clone())),
+                ("open", JsonValue::String(open.to_string())),
+                ("high", JsonValue::String(high.to_string())),
+                ("low", JsonValue::String(low.to_string())),
+                ("close", JsonValue::String(close.to_string())),
+                ("volume", JsonValue::String(volume.to_string())),
             ]),
         }
     }
@@ -435,6 +487,28 @@ fn event_framed_fields(
             venue.clone(),
             trade_id.clone(),
         ]),
+        MarketEvent::Bar {
+            event_id,
+            timestamp_ns,
+            sequence,
+            symbol,
+            open,
+            high,
+            low,
+            close,
+            volume,
+        } => canonical_fields(&[
+            "bar".to_string(),
+            event_id.clone(),
+            timestamp_isoformat_micros(*timestamp_ns),
+            sequence.to_string(),
+            symbol.clone(),
+            python_decimal(*open, trade_scale),
+            python_decimal(*high, trade_scale),
+            python_decimal(*low, trade_scale),
+            python_decimal(*close, trade_scale),
+            python_decimal(*volume, options.quantity_scale),
+        ]),
     }
 }
 
@@ -558,6 +632,8 @@ pub struct DataPreflight {
     pub quote_count: usize,
     /// Number of trade events.
     pub trade_count: usize,
+    /// Number of bar events.
+    pub bar_count: usize,
     /// Number of addressed files.
     pub file_count: usize,
     /// Instrument symbols.
@@ -576,6 +652,7 @@ impl DataPreflight {
             ("event_count", JsonValue::UInt(self.event_count as u64)),
             ("quote_count", JsonValue::UInt(self.quote_count as u64)),
             ("trade_count", JsonValue::UInt(self.trade_count as u64)),
+            ("bar_count", JsonValue::UInt(self.bar_count as u64)),
             ("file_count", JsonValue::UInt(self.file_count as u64)),
             (
                 "symbols",

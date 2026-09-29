@@ -14,8 +14,9 @@ use mcp::store::{
 };
 use mcp::tools::{
     BacktestSubmitter, Boundary, HarnessToolsContext, ProcessOutcome, ProcessRunner,
-    TOOL_BACKTEST_CONFIG_TEMPLATE, TOOL_BACKTEST_STATUS, TOOL_GET_RUN, TOOL_LIST_ARTIFACTS,
-    TOOL_READ_ARTIFACT, TOOL_RUN_BACKTEST,
+    ScreeningSubmitter, TOOL_BACKTEST_CONFIG_TEMPLATE, TOOL_BACKTEST_STATUS, TOOL_GET_RUN,
+    TOOL_LIST_ARTIFACTS, TOOL_READ_ARTIFACT, TOOL_RUN_BACKTEST, TOOL_RUN_SCREENER,
+    TOOL_SCREENER_CONFIG_TEMPLATE, TOOL_SCREENER_STATUS,
 };
 use mcp::{create_server, McpServer};
 use serde_json::{json, Value};
@@ -287,6 +288,124 @@ fn local_backtest_config_template_is_published() {
         .as_str()
         .unwrap_or_default();
     assert!(template.contains("shell: backtest"), "template: {template}");
+}
+
+struct FixedScreeningSubmitter;
+
+impl ScreeningSubmitter for FixedScreeningSubmitter {
+    fn submit(&self, _config_path: &str, _workspace: Option<&str>) -> Result<Value, String> {
+        Ok(json!({
+            "boundary": "local",
+            "run_id": "screen-0123456789abcdef",
+            "state": "running",
+            "kind": "screening",
+        }))
+    }
+}
+
+#[test]
+fn local_run_screener_uses_the_composed_submitter() {
+    let mut context =
+        HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
+    context.runner = Some(Arc::new(EchoRunner));
+    context.screening_submitter = Some(Arc::new(FixedScreeningSubmitter));
+    let server = create_server(context.validate().expect("context")).expect("server");
+
+    let response = call(
+        &server,
+        TOOL_RUN_SCREENER,
+        json!({"config_path": "screen.yaml"}),
+    );
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(response["result"]["structuredContent"]["boundary"], "local");
+    assert_eq!(
+        response["result"]["structuredContent"]["run_id"],
+        "screen-0123456789abcdef"
+    );
+    assert_eq!(response["result"]["structuredContent"]["state"], "running");
+}
+
+#[test]
+fn local_run_screener_surfaces_the_submitter_error() {
+    struct FailingScreeningSubmitter;
+
+    impl ScreeningSubmitter for FailingScreeningSubmitter {
+        fn submit(&self, _config_path: &str, _workspace: Option<&str>) -> Result<Value, String> {
+            Err("no lake data directory configured".to_string())
+        }
+    }
+
+    let mut context =
+        HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
+    context.runner = Some(Arc::new(EchoRunner));
+    context.screening_submitter = Some(Arc::new(FailingScreeningSubmitter));
+    let server = create_server(context.validate().expect("context")).expect("server");
+    let response = call(
+        &server,
+        TOOL_RUN_SCREENER,
+        json!({"config_path": "screen.yaml"}),
+    );
+    assert_eq!(response["result"]["isError"], true);
+    let text = response["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("no lake data directory"),
+        "unexpected: {text}"
+    );
+}
+
+#[test]
+fn local_get_screener_status_reads_the_job_repository() {
+    let store = Arc::new(InMemoryRunStore::new());
+    let jobs = Arc::new(InMemoryJobRepository::new());
+    let now = chrono::Utc::now();
+    jobs.upsert(JobRecord::new(
+        "screen-0123456789abcdef",
+        JobState::Running,
+        now,
+        now,
+    ));
+    let mut context =
+        HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
+    context.run_store = Some(store);
+    context.job_repository = Some(jobs);
+    let server = create_server(context.validate().expect("context")).expect("server");
+
+    let response = call(
+        &server,
+        TOOL_SCREENER_STATUS,
+        json!({"job_id": "screen-0123456789abcdef"}),
+    );
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(response["result"]["structuredContent"]["state"], "running");
+
+    let missing = call(
+        &server,
+        TOOL_SCREENER_STATUS,
+        json!({"job_id": "screen-unknown"}),
+    );
+    assert_eq!(missing["result"]["isError"], true);
+}
+
+#[test]
+fn screener_config_template_embeds_the_screen_shell() {
+    let store = Arc::new(InMemoryRunStore::new());
+    let jobs = Arc::new(InMemoryJobRepository::new());
+    let server = local_server(store, jobs);
+    let response = call(&server, TOOL_SCREENER_CONFIG_TEMPLATE, json!({}));
+
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(response["result"]["structuredContent"]["format"], "yaml");
+    let template = response["result"]["structuredContent"]["template"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(template.contains("shell: screen"), "template: {template}");
+    assert!(
+        template.contains("export_screening_program!"),
+        "template: {template}"
+    );
+    assert!(template.contains("bundle_hash:"), "template: {template}");
 }
 
 #[test]

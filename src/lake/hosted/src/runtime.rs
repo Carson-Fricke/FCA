@@ -15,15 +15,19 @@ use lake_catalog::{
     JobRepository, JobState,
 };
 use lake_configuration::{ConfigError, LakeSettings};
-use lake_contracts::{AssetClass, DataError, DateTime};
+use lake_contracts::{AssetClass, BarInterval, DataError, DataType, DateTime};
 use lake_coverage::{sessions_for, CoverageSession, EnsureJob, EnsureJobLauncher, EnsureSpec};
 use lake_ingestion::{
-    AzureAtomicIngestCommitter, EquityDataProvider, EquityIngestTransaction,
-    LeasedAtomicIngestCommitter, StagingPartitionWriter,
+    AzureAtomicIngestCommitter, BarsDataProvider, BarsIngestTransaction, CatalogTradeReader,
+    EquityDataProvider, EquityIngestTransaction, LeasedAtomicIngestCommitter,
+    StagingPartitionWriter,
 };
 use lake_providers::{AlpacaClient, ProviderConfig, RequestGovernor};
 use lake_query::{EnsureCallback, FileUrlIssuer, QueryApplicationError};
-use lake_storage::{sas_issuer_from_account_url, AzureBlobSasIssuer, LeaseProvider, SasIssuer};
+use lake_storage::{
+    sas_issuer_from_account_url, AzureBlobSasIssuer, AzureReadableBlobStore, LeaseProvider,
+    ReadableBlobStore, SasIssuer,
+};
 
 /// The default storage container name.
 pub const DEFAULT_STORAGE_CONTAINER: &str = "lake";
@@ -79,6 +83,17 @@ pub type IngestSessions = Arc<
         + Sync,
 >;
 
+/// The injectable seam replacing the hosted bars side effect in tests.
+pub type IngestBars = Arc<
+    dyn Fn(
+            String,
+            BarInterval,
+            Vec<CoverageSession>,
+        ) -> BoxFuture<'static, Result<(), HostedEnsureError>>
+        + Send
+        + Sync,
+>;
+
 /// Azure-backed catalog, job, query, and ingest boundaries for hosting.
 pub struct HostedRuntime {
     /// Loaded lake settings.
@@ -86,11 +101,13 @@ pub struct HostedRuntime {
     catalog: Arc<AzureTableCatalogRepository>,
     jobs: Arc<dyn JobRepository>,
     sas_issuer: Arc<AzureBlobSasIssuer>,
+    read_store: Arc<AzureReadableBlobStore>,
     blob_url: String,
     container_name: String,
     credential: Arc<dyn azure_core::auth::TokenCredential>,
     clock: Arc<dyn Fn() -> DateTime + Send + Sync>,
     ingest: Option<IngestSessions>,
+    bars_ingest: Option<IngestBars>,
 }
 
 impl std::fmt::Debug for HostedRuntime {
@@ -164,16 +181,23 @@ impl HostedRuntime {
             Arc::clone(&credential),
             i64::try_from(settings.api.sas.ttl_seconds).unwrap_or(900),
         )?);
+        let read_store = Arc::new(AzureReadableBlobStore::from_account_url(
+            &blob_url,
+            &container_name,
+            Arc::clone(&credential),
+        )?);
         Ok(Self {
             settings,
             catalog: Arc::new(catalog),
             jobs: Arc::new(jobs),
             sas_issuer,
+            read_store,
             blob_url,
             container_name,
             credential,
             clock: clock.unwrap_or_else(|| Arc::new(system_now)),
             ingest: None,
+            bars_ingest: None,
         })
     }
 
@@ -207,6 +231,12 @@ impl HostedRuntime {
         &self.sas_issuer
     }
 
+    /// The identity-based blob-read seam for this process.
+    #[must_use]
+    pub fn read_store(&self) -> Arc<dyn ReadableBlobStore> {
+        self.read_store.clone()
+    }
+
     /// Replace the durable job repository (test seam).
     #[must_use]
     pub fn with_jobs(mut self, jobs: Arc<dyn JobRepository>) -> Self {
@@ -222,12 +252,19 @@ impl HostedRuntime {
         self
     }
 
+    /// Replace the bars side effect (test seam).
+    #[must_use]
+    pub fn with_bars_ingest_override(mut self, bars_ingest: IngestBars) -> Self {
+        self.bars_ingest = Some(bars_ingest);
+        self
+    }
+
     /// The file-query ensure callback used by the query route.
     #[must_use]
     pub fn ensure_callback(self: &Arc<Self>) -> EnsureCallback {
         let runtime = Arc::clone(self);
         Arc::new(
-            move |asset_class, data_type, symbol, start_date, end_date| {
+            move |asset_class, data_type, interval, symbol, start_date, end_date| {
                 let runtime = Arc::clone(&runtime);
                 Box::pin(async move {
                     let spec = EnsureSpec {
@@ -236,6 +273,7 @@ impl HostedRuntime {
                         symbol,
                         start_date,
                         end_date,
+                        interval,
                     };
                     runtime.ensure_sessions(&spec).await.map_err(|error| {
                         QueryApplicationError::new(
@@ -265,6 +303,10 @@ impl HostedRuntime {
     }
 
     /// Ingest every planned equity session in one bounded request range.
+    ///
+    /// A bars request first ensures trades for the same window through the
+    /// regular ingest path, then produces session-aligned bars provider-first
+    /// with trade derivation for the remainder.
     pub async fn ensure_sessions(&self, request: &EnsureSpec) -> Result<(), HostedEnsureError> {
         if request.asset_class != AssetClass::Equity {
             return Err(HostedEnsureError::new(format!(
@@ -281,6 +323,16 @@ impl HostedRuntime {
         )
         .map_err(|error| HostedEnsureError::new(error.to_string()))?;
         let symbol = request.symbol.trim().to_uppercase();
+        if request.data_type == DataType::Bars {
+            let interval = request
+                .interval
+                .as_deref()
+                .ok_or_else(|| HostedEnsureError::new("bars requires an interval"))?;
+            let interval = BarInterval::parse(interval)
+                .map_err(|error| HostedEnsureError::new(error.to_string()))?;
+            self.ingest_sessions(&symbol, sessions.clone()).await?;
+            return self.ingest_bars(&symbol, interval, sessions).await;
+        }
         self.ingest_sessions(&symbol, sessions).await
     }
 
@@ -337,6 +389,44 @@ impl HostedRuntime {
     }
 
     fn equity_provider(&self) -> Result<Arc<dyn EquityDataProvider>, HostedEnsureError> {
+        let client = AlpacaClient::with_reqwest(
+            provider_config(&self.settings),
+            shared_governor(&self.settings),
+        )
+        .map_err(|error| HostedEnsureError::new(error.to_string()))?;
+        Ok(Arc::new(client))
+    }
+
+    /// Produce bars for every planned session after trades are ensured.
+    async fn ingest_bars(
+        &self,
+        symbol: &str,
+        interval: BarInterval,
+        sessions: Vec<CoverageSession>,
+    ) -> Result<(), HostedEnsureError> {
+        if sessions.is_empty() {
+            return Ok(());
+        }
+        if let Some(bars) = &self.bars_ingest {
+            return bars(symbol.to_string(), interval, sessions).await;
+        }
+        let provider: Arc<dyn BarsDataProvider> = self.bars_provider()?;
+        let writer: Arc<dyn lake_ingestion::PartitionWriter> =
+            Arc::new(StagingPartitionWriter::new());
+        let committer: Arc<dyn lake_ingestion::AtomicIngestCommitter> =
+            Arc::new(self.leased_committer()?);
+        let store: Arc<dyn ReadableBlobStore> = self.read_store();
+        let catalog: Arc<dyn CatalogRepository> = self.catalog.clone();
+        let reader = Arc::new(CatalogTradeReader::new(catalog, store));
+        let transaction = BarsIngestTransaction::new(provider, reader, writer, committer);
+        transaction
+            .run(AssetClass::Equity, symbol, interval, &sessions)
+            .await
+            .map_err(|error| HostedEnsureError::new(error.to_string()))?;
+        Ok(())
+    }
+
+    fn bars_provider(&self) -> Result<Arc<dyn BarsDataProvider>, HostedEnsureError> {
         let client = AlpacaClient::with_reqwest(
             provider_config(&self.settings),
             shared_governor(&self.settings),
@@ -402,6 +492,8 @@ pub struct HostedOverrides {
     pub jobs: Arc<dyn JobRepository>,
     /// The hosted read-URL issuer.
     pub sas_issuer: Arc<dyn FileUrlIssuer>,
+    /// The hosted blob-read seam.
+    pub read_store: Arc<dyn ReadableBlobStore>,
     /// The query-route ensure callback.
     pub ensure_callback: EnsureCallback,
     /// The ensure-route launcher.
@@ -428,6 +520,7 @@ pub fn hosted_overrides(
         catalog,
         jobs: Arc::clone(runtime.jobs()),
         sas_issuer,
+        read_store: runtime.read_store(),
         ensure_callback: runtime.ensure_callback(),
         job_launcher: runtime.job_launcher(),
     }))

@@ -95,6 +95,7 @@ fn report(
         AssetClass::Equity,
         &[DataType::Trade],
         &symbols,
+        None,
         start_date,
         end_date,
         as_of,
@@ -274,6 +275,7 @@ fn delisted_sessions_are_terminal_and_keep_persisted_rows() {
         None,
         0,
         0,
+        None,
         None,
         None,
     )

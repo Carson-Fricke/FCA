@@ -10,16 +10,22 @@
 //!
 //! * [`events`] — the author-facing event and start views (borrowed strings,
 //!   exact [`Decimal`]s) mirroring the engine's `EngineMarket`/`EngineFill`.
+//!   A study program folds [`BarEvent`](events::BarEvent)s only; quote and
+//!   trade events remain on the strategy and indicator surfaces.
 //! * [`program`] — the authoring traits ([`StudyProgram`](program::StudyProgram),
-//!   [`StrategyProgram`](program::StrategyProgram), [`Indicator`](indicator::Indicator))
-//!   and the capability surfaces they may touch. A study program never sees
-//!   the order surface; a strategy program submits through [`OrderSink`].
+//!   [`StrategyProgram`](program::StrategyProgram),
+//!   [`ScreeningProgram`], [`Indicator`](indicator::Indicator)) and the
+//!   capability surfaces they may touch. A study program never sees the order
+//!   surface; a strategy program submits through [`OrderSink`]; a screening
+//!   program is a one-shot cross-sectional evaluation over [`ScreenContext`]
+//!   with no execution surface at all.
 //! * [`abi`] — the versioned C ABI: `#[repr(C)]` argument shapes, result
 //!   codes, and the vtable contract. Rust trait objects never cross the
 //!   boundary; every crossing is a plain extern function over these structs.
 //! * [`export`] — the entry-point macros ([`export_study_program!`],
-//!   [`export_strategy_program!`], both available at the crate root) that
-//!   turn one authored type into the exported dylib symbols.
+//!   [`export_strategy_program!`], [`export_screening_program!`], all
+//!   available at the crate root) that turn one authored type into the
+//!   exported dylib symbols.
 //!
 //! ABI stability rules: the vtable shapes and argument structs in [`abi`]
 //! only ever grow at the tail with a version bump; the loader rejects any
@@ -35,20 +41,22 @@ mod indicator;
 mod program;
 
 pub use abi::{
-    CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent, CSlice, CStart, CStr,
-    CTradeEvent, MetricPublishFn, OrderSubmitFn, StrategyProgramVTable, StudyProgramVTable,
-    ABI_EXPORT, LAST_ERROR_EXPORT, METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK,
-    METRIC_REJECTED, METRIC_RESERVED_NAME, SDK_ABI_VERSION, SDK_ERROR, SDK_OK,
-    STRATEGY_VTABLE_EXPORT, STUDY_VTABLE_EXPORT,
+    CBarEvent, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent, CSlice, CStart,
+    CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn, ScreeningCreateFn, ScreeningDestroyFn,
+    ScreeningProgramVTable, ScreeningResultFn, ScreeningScreenFn, StrategyProgramVTable,
+    StudyBarFn, StudyProgramVTable, ABI_EXPORT, LAST_ERROR_EXPORT, METRIC_INVALID_NAME,
+    METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED, METRIC_RESERVED_NAME, SCREENING_VTABLE_EXPORT,
+    SDK_ABI_VERSION, SDK_ERROR, SDK_OK, STRATEGY_VTABLE_EXPORT, STUDY_VTABLE_EXPORT,
 };
-pub use events::{Fill, ProgramStart, QuoteEvent, TradeEvent};
+pub use events::{BarEvent, Fill, ProgramStart, QuoteEvent, TradeEvent};
 pub use indicator::{
     indicator_add, indicator_context, indicator_div, indicator_mul, indicator_sub, Indicator,
     INDICATOR_CONTEXT_PRECISION,
 };
 pub use program::{
-    MetricPublisher, OrderSink, OrderType, PublishError, Side, StrategyProgram, StudyProgram,
-    SubmitError, SubmittedOrder, TimeInForce, RESERVED_METRIC_NAMES,
+    Bar, MetricPublisher, OrderSink, OrderType, PublishError, ScreenContext, ScreenRow,
+    ScreeningProgram, Side, StrategyProgram, StudyProgram, SubmitError, SubmittedOrder,
+    TimeInForce, RESERVED_METRIC_NAMES,
 };
 
 /// The SDK crate version, compiled into every authored artifact manifest.

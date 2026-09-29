@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::CoverageStatus;
+use crate::models::{BarSource, CoverageStatus};
 
 const AAPL_ROW: &str = concat!(
     "{\"asset_class\":\"equity\",\"byte_size\":3456,\"checksum\":\"sha256:abc\",",
@@ -96,6 +96,7 @@ fn coverage(symbol: &str, status: CoverageStatus) -> CoverageRecord {
         7,
         None,
         None,
+        None,
     )
     .expect("valid coverage")
 }
@@ -112,6 +113,7 @@ fn aapl() -> CoverageRecord {
         3456,
         Some("sha256:abc".to_string()),
         None,
+        None,
     )
     .expect("valid coverage")
 }
@@ -126,6 +128,7 @@ fn msft() -> CoverageRecord {
         None,
         0,
         0,
+        None,
         None,
         None,
     )
@@ -144,8 +147,28 @@ fn wb() -> CoverageRecord {
         64,
         None,
         Some("source unavailable caf\u{e9} \u{7f} / \u{e9}".to_string()),
+        None,
     )
     .expect("valid coverage")
+}
+
+fn aapl_bars(interval: &str) -> CoverageRecord {
+    CoverageRecord::new(
+        AssetClass::Equity,
+        DataType::Bars,
+        "AAPL",
+        day(2024, 1, 19),
+        CoverageStatus::Complete,
+        Some(format!(
+            "date=2024-01-19/asset_class=equity/data_type=bars/interval={interval}/AAPL.parquet"
+        )),
+        12,
+        3456,
+        None,
+        None,
+        Some(interval.to_string()),
+    )
+    .expect("valid bars coverage")
 }
 
 fn temp_directory(label: &str) -> PathBuf {
@@ -186,6 +209,7 @@ fn migration_reads_python_catalog_and_reserializes_exactly() {
             .get(
                 AssetClass::Equity,
                 DataType::Trade,
+                None,
                 "aapl",
                 day(2024, 1, 19)
             )
@@ -197,6 +221,7 @@ fn migration_reads_python_catalog_and_reserializes_exactly() {
             .get(
                 AssetClass::Equity,
                 DataType::Trade,
+                None,
                 "AAPL",
                 day(2024, 1, 18)
             )
@@ -256,6 +281,7 @@ fn in_memory_store_never_touches_the_filesystem() {
             .get(
                 AssetClass::Equity,
                 DataType::Trade,
+                None,
                 "AAPL",
                 day(2024, 1, 19)
             )
@@ -321,6 +347,86 @@ fn malformed_documents_are_rejected_without_overwriting() {
 }
 
 #[test]
+fn bars_rows_round_trip_and_keep_intervals_distinct() {
+    let directory = temp_directory("bars");
+    let path = directory.join("catalog.json");
+    let store = JsonCatalogStore::open(&path).expect("open");
+    store
+        .upsert_many([&aapl_bars("1min"), &aapl_bars("1d")])
+        .expect("upsert");
+
+    let listed = store.list(&CoverageQuery::default()).expect("list");
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].interval.as_deref(), Some("1d"));
+    assert_eq!(listed[1].interval.as_deref(), Some("1min"));
+
+    let date = day(2024, 1, 19);
+    assert_eq!(
+        store
+            .get(
+                AssetClass::Equity,
+                DataType::Bars,
+                Some("1min"),
+                "AAPL",
+                date
+            )
+            .expect("get"),
+        Some(aapl_bars("1min"))
+    );
+    assert_eq!(
+        store
+            .get(AssetClass::Equity, DataType::Bars, Some("1d"), "AAPL", date)
+            .expect("get"),
+        Some(aapl_bars("1d"))
+    );
+    assert_eq!(
+        store
+            .get(AssetClass::Equity, DataType::Bars, None, "AAPL", date)
+            .expect("get"),
+        None
+    );
+
+    let text = fs::read_to_string(&path).expect("read");
+    assert!(text.contains("\"interval\":\"1min\""));
+    assert!(text.contains("\"interval\":\"1d\""));
+    let reopened = JsonCatalogStore::open(&path).expect("reopen");
+    assert_eq!(
+        reopened.list(&CoverageQuery::default()).expect("list"),
+        vec![aapl_bars("1d"), aapl_bars("1min")]
+    );
+    cleanup(&directory);
+}
+
+#[test]
+fn bars_provenance_rows_serialize_byte_exactly_and_round_trip() {
+    let directory = temp_directory("bars-provenance");
+    let path = directory.join("catalog.json");
+    let store = JsonCatalogStore::open(&path).expect("open");
+    let record = aapl_bars("1min")
+        .with_bar_provenance(BarSource::Derived, "trade-rev-1")
+        .expect("provenance");
+    store.upsert(&record).expect("upsert");
+
+    let expected = concat!(
+        "{\"coverage\":[",
+        "{\"asset_class\":\"equity\",\"bar_source\":\"derived\",\"byte_size\":3456,",
+        "\"checksum\":null,\"data_type\":\"bars\",\"error_message\":null,\"interval\":\"1min\",",
+        "\"object_path\":\"date=2024-01-19/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet\",",
+        "\"row_count\":12,\"session_date\":\"2024-01-19\",\"source_revision\":\"trade-rev-1\",",
+        "\"status\":\"complete\",\"symbol\":\"AAPL\"}",
+        "],\"schema_version\":1}\n"
+    );
+    assert_eq!(fs::read_to_string(&path).expect("read"), expected);
+
+    let reopened = JsonCatalogStore::open(&path).expect("reopen");
+    let listed = reopened.list(&CoverageQuery::default()).expect("list");
+    assert_eq!(listed, vec![record]);
+    assert_eq!(listed[0].bar_source, Some(BarSource::Derived));
+    assert_eq!(listed[0].source_revision.as_deref(), Some("trade-rev-1"));
+    cleanup(&directory);
+}
+
+#[test]
 fn upsert_many_rejects_duplicate_keys_before_writing() {
     let directory = temp_directory("duplicates");
     let path = directory.join("catalog.json");
@@ -381,6 +487,7 @@ fn list_sorts_by_persisted_values_and_rejects_reversed_ranges() {
             0,
             None,
             None,
+            None,
         )
         .expect("valid"),
         CoverageRecord::new(
@@ -394,6 +501,7 @@ fn list_sorts_by_persisted_values_and_rejects_reversed_ranges() {
             0,
             None,
             None,
+            None,
         )
         .expect("valid"),
         CoverageRecord::new(
@@ -405,6 +513,7 @@ fn list_sorts_by_persisted_values_and_rejects_reversed_ranges() {
             None,
             0,
             0,
+            None,
             None,
             None,
         )

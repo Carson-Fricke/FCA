@@ -87,18 +87,23 @@ The `hypothesis_development` workflow is now a nested package
 their tests were removed.
 
 The harness `run_study` tool is implemented across the Rust workspace and the
-Python bridge:
+harness-hosted MCP endpoint:
 
 - `run_study` is a capability-gated MCP tool with a `StudySubmitter` boundary,
   a remote `POST /v1/studies/jobs` route, and a `harness study-job` entrypoint
   that writes a `study.json` artifact with the `study` shell;
-- the native engine gained a study execution mode (`host::study::PyStudyRuntime`)
-  that reuses the replay substrate and returns no orders, so a study never
-  submits an order and is never recorded as a backtest;
-- `ResearchModelAdapter(Strategy)` was removed and replaced by the platform
-  `ResearchModelProgram`, whose only context interaction is `publish_metric`;
-- Thesis now calls `run_study` through `McpStudyRunner`, and its research-model
-  bundle declares the `study` shell and the study program implementation.
+- the study execution mode is Rust-JIT: the authored source compiles through
+  `harness-strategy-jit` against `harness-strategy-sdk` ABI v2 and implements
+  `StudyProgram` (`new(parameters)`, `on_bar(&BarEvent)`,
+  `on_stop(&mut MetricPublisher)`), so a study folds replayed lake bars only,
+  has no order path by construction, never submits an order, and is never
+  recorded as a backtest;
+- a research model is an authored Rust study program published as a workspace
+  artifact whose `on_stop` publishes its fitted parameters as `fit.<parameter>`
+  metrics; Thesis freezes them as the content-addressed fitted-model artifact;
+- Thesis now calls `run_study` through `McpStudyRunner` over the harness-hosted
+  MCP endpoint, and its research-model bundle declares the `study` shell, the
+  declared bar interval, and the authored Rust study program.
 
 Still to implement: wiring conversation-phase gate failures through durable
 repair turns, which changes the current "gate failure pauses immediately"
@@ -178,7 +183,7 @@ attribution requirements.
 | Construction | Parsing, validating, and normalizing a completion contract into a typed domain object. |
 | Acceptance gate | Deterministic code that validates a constructed contract against durable workflow state and evidence. |
 | Repair turn | A durable system turn that explains why no completion request was accepted and asks the same sub-agent to try again. |
-| Study | A durable replay execution with no order execution, used to run indicators and research models. A study may fit and observe one research model, or run indicators alone. It is never represented as a backtest or a strategy. |
+| Study | A durable bar replay execution with no order execution. It runs one authored Rust `StudyProgram` over lake bars; a research-model program publishes its fitted parameters as `fit.<parameter>` metrics in `on_stop`. It is never represented as a backtest or a strategy. |
 | Tool context | Trusted attribution attached by the runtime to a tool invocation. Models cannot provide or override it. |
 
 ## Requirements
@@ -538,19 +543,25 @@ never a delayed tool response.
 
 ## Harness Study Tool
 
-Quant-harness MUST publish `run_study` as a real MCP tool. A **study** is a
-durable replay execution with no order execution, used to run indicators and
-research models: it may fit and observe one research model, or run indicators
-alone. The tool replaces the synthetic `harness.research_model` label and
-Thesis-side direct invocation of `ResearchModelRunner` from workflow code.
+Quant-harness MUST publish `run_study` as a real MCP tool, served by the
+harness-hosted MCP endpoint. A **study** is a durable bar replay execution with
+no order execution. The tool replaces the synthetic `harness.research_model`
+label and Thesis-side direct invocation of `ResearchModelRunner` from workflow
+code.
 
 ### A Study Is Not A Backtest
 
-A study is a statistical replay, not a trading strategy. When it runs a research
-model, that model's contract is `fit(context)` plus `observe(fit, context)`
-returning finite named statistics, and its context MUST expose no order,
-position, sizing, portfolio, or venue capability. A backtest's contract is entry
-and exit logic producing fills with portfolio accounting, costs, and risk.
+A study is a statistical replay, not a trading strategy. When it runs a
+research model, that model is an authored Rust program compiled through
+`harness-strategy-jit` against `harness-strategy-sdk` ABI v2 that implements
+`StudyProgram` (`new(parameters)`, `on_bar(&BarEvent)`,
+`on_stop(&mut MetricPublisher)`) and publishes its fitted parameters and
+observables as `fit.<parameter>` metrics in `on_stop`. The only context
+capability a study program may use is `MetricPublisher`; it sees no order,
+position, sizing, portfolio, or venue surface, and ticks are not part of the
+study contract. Strategies remain tick-based: a `StrategyProgram` receives
+quotes and trades with an order sink and produces fills with portfolio
+accounting, costs, and risk.
 
 Running a study through the backtest boundary is prohibited because it conflates
 two different contracts and produces a "backtest run" record, manifest, artifact
@@ -560,67 +571,115 @@ experiment ledger, the evidence-grade taxonomy, and the operator-visible report.
 The deterministic point-in-time replay substrate (data ensure, point-in-time
 resolution, session calendars, corporate actions, artifact publication, and run
 persistence) MAY be reused. Reuse MUST be through a distinct study execution
-mode that binds a no-order context and a distinct study run kind. A research
-model MUST NOT be represented as a `Strategy`, and
-`ResearchModelAdapter(Strategy)` is debt that MUST be removed. Studies MUST have
-their own study record, manifest, and artifact kind so the ledger, evidence
-grade, and UI label them as studies.
+mode that binds a no-order study program and a distinct study run kind. A
+research model MUST NOT be represented as a `Strategy`, and
+`ResearchModelAdapter(Strategy)` stays removed. Studies MUST have their own
+study record, manifest, and artifact kind so the ledger, evidence grade, and UI
+label them as studies.
 
 The phase acceptance gate MUST bind falsifiers to the study's recorded metric
 references, never to a backtest run.
 
-### Implementation Plan
+### Execution Path
 
-The study tool spans the harness Rust MCP crate and the harness execution
-entrypoint, so it lands as one harness change:
+The tool spans the harness Rust workspace and the harness-hosted MCP endpoint:
 
-1. Add `TOOL_RUN_STUDY` (`run_study`) to the MCP tool catalog with a study input
-   schema (model ref, indicator refs, experiment contract ref, data window,
-   requested observables) and result schema.
-2. Add a study execution mode to the harness engine that runs the point-in-time
-   replay without binding order, position, sizing, portfolio, or venue
-   capability. Reuse the replay substrate; do not reuse the strategy contract.
-3. Add a `study` subcommand/entrypoint alongside `backtest-job`, and a durable
-   study run record, manifest, and artifact kind distinct from backtest runs.
-4. Remove `ResearchModelAdapter(Strategy)` and route research-model execution
-   through the study mode.
-5. Record trusted attribution (workspace, chat, conversation, sub-agent,
-   workflow, phase, invocation) and an idempotency key on every study.
-6. Update the Thesis harness adapter to call `run_study` and bind phase
-   completion to the returned study run's metric references.
+1. `run_study` (`TOOL_RUN_STUDY`) is a capability-gated MCP tool with a
+   `StudySubmitter` boundary. The local submitter compiles and runs the
+   authored study configuration through
+   `harness-strategy-jit::run_study_configuration`; the remote boundary posts
+   the configuration to `POST /v1/studies/jobs`; and the `harness study-job`
+   entrypoint runs one configuration and writes the canonical `study.json`.
+2. The study execution mode is Rust-JIT: the authored source compiles against
+   the pinned SDK ABI (the loader rejects an artifact built against a different
+   version) and is driven over replayed bars only, never binding order,
+   position, sizing, portfolio, or venue capability.
+3. The study configuration declares `shell: study` and `data.bar_interval`
+   (`1min` or `1d`). The harness ensures the window's bars through the market
+   lake and streams them from the lake read route through
+   `harness-lakeclient`; the harness never reads lake files or links lake
+   storage, and the lake can never be bypassed with a local path.
+4. Thesis's research-model adapter takes the model's declared
+   `harnessConfiguration.interval` (`1min` or `1d`) and its declared window and
+   re-homes them into the emitted study configuration as `data.bar_interval`
+   and the run window; a missing or invalid interval fails the run loudly
+   before any replay.
+5. Thesis calls `run_study` through `McpStudyRunner` over the hosted MCP
+   endpoint and binds phase completion to the returned study's metric
+   references; the `fit.<parameter>` metrics freeze as the content-addressed
+   fitted-model artifact.
 
 ### Input
 
-```json
-{
-  "model_ref": "models/<model-id>/<content-sha>",
-  "experiment_contract_ref": "experiments/<contract-id>/<sha>",
-  "data": {
-    "symbols": ["SPY"],
-    "start": "2020-01-01",
-    "end": "2025-12-31",
-    "frequency": "1d"
-  },
-  "requested_observables": ["sample_valid", "trend_strength"],
-  "configuration": {}
-}
+An existing study configuration document is passed by path (`config_path`) or
+inline (`config`), exactly like `run_backtest`. The configuration declares the
+`study` shell, the `data` block with the symbol universe, the sample window,
+and `data.bar_interval`, and one JIT-authored program instance whose
+`parameters.source` is the Rust study program and whose `bundle_hash` equals
+the SHA-256 of that source:
+
+```yaml
+shell: study
+run_id: study-...
+start: "2020-01-01T00:00:00Z"
+end: "2025-12-31T00:00:00Z"
+data:
+  symbols: [SPY]
+  bar_interval: 1d
+strategy_instances:
+  - instance_id: research-model-...
+    implementation: jit
+    bundle_hash: "<sha256 of the authored source>"
+    capital_fraction: "1.0"
+    symbols: [SPY]
+    parameters:
+      source: |
+        use harness_strategy_sdk::serde_json::Value;
+        use harness_strategy_sdk::{
+            export_study_program, BarEvent, MetricPublisher, StudyProgram,
+        };
+
+        struct Model;
+
+        impl StudyProgram for Model {
+            fn new(_parameters: Value) -> Self {
+                Self
+            }
+
+            fn on_bar(&mut self, _bar: &BarEvent) {}
+
+            fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+                let _ = metrics.publish("fit.baseline", 0.5);
+            }
+        }
+
+        export_study_program!(Model);
 ```
 
-The trusted tool context supplies attribution and idempotency. Those fields
-MUST NOT appear in model-controlled arguments.
+Trusted tool context supplies attribution and idempotency. Those fields MUST
+NOT appear in model-controlled arguments.
 
 ### Execution
 
 The tool MUST:
 
-1. Resolve and verify the content-addressed research model and indicator refs.
-2. Resolve point-in-time data under the experiment contract.
-3. Run `fit(context)` exactly once.
-4. Publish immutable fitted parameters and calibration bounds.
-5. Run `observe(fit, context)` against the same resolved historical context.
-6. Validate that requested outputs are finite named numeric values.
-7. Publish run, data-manifest, fit, metric, sample, and diagnostic artifacts.
-8. Record trusted chat, conversation, sub-agent, workflow, phase, and
+1. Compile the configuration's authored Rust program through the JIT seam and
+   load it behind the SDK ABI (cached by source digest, program kind, SDK
+   version, toolchain digest, and SDK ABI version).
+2. Resolve point-in-time data under the experiment contract: ensure the
+   interval's bars through the market lake, then stream them from the lake read
+   route; no direct lake-file access exists.
+3. Replay the bars in event order through `on_bar`, then run `on_stop` once
+   after the replay.
+4. Collect the metrics published by `on_stop`: every publication is validated
+   host-side (finite value, non-reserved name), a rejected publication fails
+   the run even when the program ignores it, and the model's fitted parameters
+   are the `fit.<parameter>` metrics.
+5. Freeze immutable fitted parameters and calibration bounds as the
+   content-addressed fitted-model artifact.
+6. Publish the canonical `study.json` run artifact and its result set
+   (including `metrics.json`) under the study artifact kind.
+7. Record trusted chat, conversation, sub-agent, workflow, phase, and
    invocation attribution.
 
 An inadequate sample or unidentifiable fit SHOULD return explicit model-defined
@@ -630,38 +689,13 @@ metrics.
 
 ### Result
 
-```json
-{
-  "study_id": "study-...",
-  "state": "succeeded",
-  "study_digest": "<sha256>",
-  "model_ref": "models/<model-id>/<content-sha>",
-  "model_artifact_ref": "artifacts/...",
-  "indicator_refs": [],
-  "fitted_model_ref": "models/fits/<fit-sha>.json",
-  "fitted_parameters_ref": "artifacts/...",
-  "data_manifest_ref": "artifacts/...",
-  "runtime_configuration": {},
-  "observations": {
-    "sample_valid": 1.0,
-    "trend_strength": 0.18
-  },
-  "observation_artifacts": [],
-  "failure": null,
-  "attribution": {
-    "chat_id": "...",
-    "conversation_id": "...",
-    "sub_agent_id": "...",
-    "workflow_execution_id": "...",
-    "phase_attempt_id": "...",
-    "tool_invocation_id": "..."
-  }
-}
-```
-
-The result MAY omit large parameter and sample values in favor of immutable
-references. The completion gate MUST resolve refs and metrics from the durable
+The result names the study run, its state, and the recorded metric references.
+A large parameter or sample value MAY be omitted in favor of an immutable
+reference. The completion gate MUST resolve refs and metrics from the durable
 run store; it MUST NOT trust copied values in model prose or completion JSON.
+The workflow's falsification trials bind every falsifier and control to a
+recorded metric reference from a successful or explicitly failed study, never
+to a backtest run.
 
 ## Hypothesis Development Workflow
 
@@ -687,11 +721,13 @@ and falsification-plan fields. It MUST include:
 
 - claim, disagreement, risk factor, horizon, and universe;
 - falsifiers with id, observable, condition, threshold, and exact test;
-- the content-addressable research model source, outputs, tests, indicators,
-  and harness configuration; the adapter materializes the study window (symbols,
-  start, end) into the harness configuration and defaults a missing window to
-  the closed-session lake history instead of the harness's two-day synthetic
-  default; the strategy bundle materializes the universe symbols and the same
+- the content-addressable research model source, outputs, tests, and harness
+  configuration; the adapter requires the model's declared window
+  (`harnessConfiguration.start`/`end`) and bar interval
+  (`harnessConfiguration.interval`, `1min` or `1d`), re-homes the interval into
+  the emitted study configuration as `data.bar_interval`, and materializes the
+  window (symbols, start, end) into the study run instead of silently defaulting
+  it; the strategy bundle materializes the universe symbols and the same
   window so a strategy backtest never relies on the design agent to declare
   them;
 - negative or placebo controls;
@@ -1156,7 +1192,7 @@ src/thesis/workflows/
         rca.py
       gates/
         falsifiability.py
-        research_model.py
+        model.py
         plan.py
         evidence.py
         strategy.py

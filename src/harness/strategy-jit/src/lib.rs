@@ -5,7 +5,15 @@
 //! the pinned toolchain, and loads the produced `cdylib` through `libloading`
 //! behind the existing [`StrategyRuntime`](backtest::backtest::engine_core::StrategyRuntime)
 //! engine seam. Identical source, SDK version, and toolchain produce an
-//! identical digest, and the compile step is cached by that digest.
+//! identical digest, and the compile step is cached by that digest. Study
+//! programs fold OHLCV bars only: [`JitStudyRuntime::on_bar`] is the explicit
+//! host entry the engine's bar arm will call, and tick events fail loud with
+//! [`STUDY_BARS_ONLY`].
+//!
+//! Screening programs do not run through the engine: they are one-shot
+//! cross-sectional evaluations, so the host builds one
+//! [`ScreenContext`](harness_strategy_sdk::ScreenContext) and calls
+//! [`run_screening_source`], which ranks the returned rows host-side.
 
 mod compile;
 mod config;
@@ -13,14 +21,28 @@ mod error;
 mod load;
 mod run;
 mod runtime;
+mod screen;
+mod screen_run;
+mod source;
 mod toolchain;
 mod workspace;
 
 pub use compile::{compile, CompiledArtifact, ProgramKind};
 pub use config::{build_instances, program_kind, JIT_IMPLEMENTATION, SOURCE_PARAMETER};
 pub use error::JitError;
-pub use load::{LoadedStrategy, LoadedStudy};
+pub use load::{LoadedScreening, LoadedStrategy, LoadedStudy};
 pub use run::{run_backtest_configuration, run_study_configuration, ConfigurationRunError};
-pub use runtime::{strategy_instance, study_instance, JitStrategyRuntime, JitStudyRuntime};
+pub use runtime::{
+    strategy_instance, study_instance, HostBar, JitStrategyRuntime, JitStudyRuntime,
+    STUDY_BARS_ONLY,
+};
+pub use screen::{rank_rows, run_screening_source};
+pub use screen_run::{
+    run_screening_configuration, ScreenOutcome, ScreenRunError, ScreenRunOptions, ScreenStatus,
+    SCREEN_ARTIFACT, SCREEN_SCHEMA,
+};
+pub use source::{
+    LakeScreeningSource, ScreeningDataSource, ScreeningDataSourceError, ScreeningLakeReads,
+};
 pub use toolchain::{resolve_toolchain, Toolchain};
 pub use workspace::{ManagedWorkspace, WorkspaceManifest};

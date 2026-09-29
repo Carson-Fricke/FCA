@@ -30,8 +30,62 @@ fn enumerated_values_are_parsed_by_persisted_name() {
         parse_data_type("trade").expect("trade"),
         lake_contracts::DataType::Trade
     );
+    assert_eq!(
+        parse_data_type("bars").expect("bars"),
+        lake_contracts::DataType::Bars
+    );
     assert!(parse_asset_class("futures").is_err());
-    assert!(parse_data_type("bars").is_err());
+    assert!(parse_data_type("candles").is_err());
+}
+
+#[test]
+fn intervals_are_validated_against_the_data_type() {
+    use lake_contracts::DataType;
+
+    assert_eq!(parse_interval(DataType::Trade, None).expect("none"), None);
+    assert_eq!(
+        parse_interval(DataType::Bars, Some("1min".to_string())).expect("minute"),
+        Some("1min".to_string())
+    );
+    assert_eq!(
+        parse_interval(DataType::Bars, Some("1d".to_string())).expect("day"),
+        Some("1d".to_string())
+    );
+
+    let missing = parse_interval(DataType::Bars, None).expect_err("bars needs an interval");
+    assert_eq!(
+        missing.details,
+        Some(json!([{
+            "loc": ["interval"],
+            "msg": "Value error, interval is required for bars",
+            "type": "value_error",
+        }]))
+    );
+
+    let unknown =
+        parse_interval(DataType::Bars, Some("5m".to_string())).expect_err("unknown token");
+    assert!(unknown
+        .details
+        .expect("details")
+        .to_string()
+        .contains("invalid bar interval: \\\"5m\\\"; expected one of 1min, 1d"));
+
+    let misplaced =
+        parse_interval(DataType::Quote, Some("1min".to_string())).expect_err("quote interval");
+    assert!(misplaced
+        .details
+        .expect("details")
+        .to_string()
+        .contains("interval is supported for bars only"));
+
+    assert!(reject_option_data_type(DataType::Trade).is_ok());
+    let option_bars =
+        reject_option_data_type(DataType::Bars).expect_err("option bars are unsupported");
+    assert!(option_bars
+        .details
+        .expect("details")
+        .to_string()
+        .contains("not supported for options"));
 }
 
 #[test]

@@ -126,7 +126,9 @@ contracts rather than importing engine internals.
 A harness backtest never fails merely because a requested symbol was not
 ingested before: the harness asks the published market-lake ensure contract to
 fetch the run window's configured symbols, then polls coverage until it is
-satisfied before reading the local Parquet lake. One ensure request covers the
+satisfied before reading the window over the lake's `GET /v1/read` and
+reference routes through the `harness-lakeclient` crate; the harness never
+reads lake files or links lake storage. One ensure request covers the
 whole window — the lake plans, resumes, and retries its own fetches — and the
 lake pages every fetch until the provider cursor is exhausted. A closed
 session left `partial`, or an errored fetch, is a repairable gap the lake
@@ -670,7 +672,7 @@ The model serves two falsification layers:
 - **Layer B** runs while a position is open. The strategy applies the same
   model's frozen Layer A fit to a trailing window and exits when observations
   leave the calibrated range: the idea behind the entry has been refuted. It
-  does not call `fit()` again or estimate replacement parameters. A strategy is
+  does not re-estimate the model or replacement parameters. A strategy is
   therefore a falsification instrument whose declared exit criteria are
   monitor re-checks, and PnL is only a guardrail.
 
@@ -683,14 +685,16 @@ design.
 
 Indicators and strategies are separate contracts. The immutable global
 indicator registry contains platform implementations such as `sma`, `rsi`,
-and `realized_vol`. Workspace-authored indicators are content-addressed Python
-artifacts under `indicators/<name>/<content-sha>/`. Every `IndicatorRef`
+and `realized_vol`. Workspace indicator definitions remain content-addressed
+under `indicators/<name>/<content-sha>/`. Every `IndicatorRef`
 explicitly declares `global` or `workspace` scope; workspace refs also carry
 the owning workspace and content hash, so they cannot shadow a built-in or
-resolve from a sibling workspace. A statistical research model composes those
-refs and is published independently under
-`models/<model-id>/<content-sha>/`. The artifact contains `model.py`, whose
-contract is `fit(context)` plus `observe(fit, context)`, and `fits/<fit-sha>.json`
+resolve from a sibling workspace. A statistical research model is published
+independently under
+`models/<model-id>/<content-sha>/` as an authored Rust program whose source
+implements the SDK `StudyProgram` contract (`new(parameters)`,
+`on_bar(&BarEvent)`, `on_stop(&mut MetricPublisher)`): it folds the replayed
+bars and publishes its Layer A observables as metrics, and `fits/<fit-sha>.json`
 contains the immutable numeric Layer A parameters and calibration bounds. The
 fitted reference is workspace-local and is the only model state a Layer B
 strategy may consume; the model is never represented as a strategy.
@@ -716,21 +720,23 @@ Every request for operator input or direction is model-authored from a structure
    falsifier with `{observable, condition, threshold, test}`. No departure
    from the null or no falsifier cannot advance; without a regularity there is
    nothing to trade. **Gate (model):** the separate research model must declare
-   every falsifier observable as a finite named output. **Gate (plan):** at
-   least one falsifier test bound to a declared falsifier and at least one
-   negative/placebo control.
+   every falsifier observable as a finite named output and declare its
+   `harnessConfiguration` window (`start`/`end`) and bar interval (`1min` or
+   `1d`). **Gate (plan):** at least one falsifier test bound to a declared
+   falsifier and at least one negative/placebo control.
 3. `falsification_trials` -- the planned trials run through the harness and
    bind every falsifier to a metric from one historical model execution. The
-   model's `fit(context)` runs once, its numeric result is published as a
-   content-addressed fitted-model artifact, and `observe(fit, context)` produces
-   the Layer A observations. Model
-   source receives plain quotes, trades, prices, returns, and resolved
-   indicator values; it has no order, position, sizing, portfolio, or venue
-   capability. The platform adapter publishes arbitrary finite numeric values
-   through `publish_metric`. Thesis writes a workspace evidence record under
-    `models/runs/` containing the model/indicator refs, run ID, state, metrics,
-    and result artifacts. The phase agent receives the MCP result in the same
-    logical turn, authors a Markdown interpretation, and emits a structured
+   model's authored Rust study program runs once as a `study`-shell replay at
+   the interval the model declares in `harnessConfiguration.interval` (emitted
+   as `data.bar_interval` in the study configuration), folds the replayed
+   `BarEvent`s, and publishes its Layer A observables in `on_stop` through
+   `MetricPublisher::publish`; the `fit.<parameter>` metrics are frozen as the
+   content-addressed fitted-model artifact. Model source sees bars only; it
+   has no order, position, sizing, portfolio, or venue capability, and ticks
+   are not part of the study contract. Thesis writes a workspace evidence
+   record under `models/runs/` containing the model ref, run ID, state,
+   metrics, and result artifacts. The phase agent receives the MCP result in
+   the same logical turn, authors a Markdown interpretation, and emits a structured
     visual report. Scorecards use observed metrics and declared thresholds;
     distribution and time-series charts render only when the evidence artifact
     contains real samples, never client-generated placeholder data. Missing

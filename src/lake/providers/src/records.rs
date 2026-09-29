@@ -254,6 +254,44 @@ impl NormalizedCryptoQuote {
     }
 }
 
+/// One session-aligned OHLCV bar.
+///
+/// The lake convention fixes the row timestamp to the bucket start in UTC:
+/// the exchange session open for daily bars and the session-open-aligned
+/// minute window start for 1-minute bars. Every value is an exact decimal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NormalizedBar {
+    /// Bucket start in UTC.
+    pub timestamp: DateTime,
+    /// Canonical requested symbol.
+    pub symbol: String,
+    /// Exact open price.
+    pub open: Decimal18,
+    /// Exact high price.
+    pub high: Decimal18,
+    /// Exact low price.
+    pub low: Decimal18,
+    /// Exact close price.
+    pub close: Decimal18,
+    /// Exact volume.
+    pub volume: Decimal18,
+}
+
+impl NormalizedBar {
+    /// The canonical ingestion row.
+    pub fn to_row(&self) -> Value {
+        json!({
+            "timestamp": self.timestamp.to_nanos(),
+            "symbol": self.symbol,
+            "open": self.open.to_canonical_string(),
+            "high": self.high.to_canonical_string(),
+            "low": self.low.to_canonical_string(),
+            "close": self.close.to_canonical_string(),
+            "volume": self.volume.to_canonical_string(),
+        })
+    }
+}
+
 /// The parseable record timestamp used by the time-sliced planner.
 pub(crate) trait Timestamped {
     /// The record's UTC timestamp.
@@ -279,6 +317,12 @@ impl Timestamped for NormalizedCryptoTrade {
 }
 
 impl Timestamped for NormalizedCryptoQuote {
+    fn timestamp(&self) -> DateTime {
+        self.timestamp
+    }
+}
+
+impl Timestamped for NormalizedBar {
     fn timestamp(&self) -> DateTime {
         self.timestamp
     }

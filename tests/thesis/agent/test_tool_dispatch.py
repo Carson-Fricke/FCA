@@ -222,6 +222,11 @@ def test_role_policy_resolves_harness_skill_bundle_and_tools() -> None:
         in decision.skill_bundle.versions
     )
     assert set(HARNESS_TOOL_NAMES) <= set(decision.allowed_tools)
+    assert {
+        "run_screener",
+        "get_screener_status",
+        "screener_config_template",
+    } <= set(decision.allowed_tools)
 
 
 def test_local_in_process_call_invokes_harness_tool() -> None:
@@ -234,6 +239,31 @@ def test_local_in_process_call_invokes_harness_tool() -> None:
     assert handler.calls[-1] == {
         "name": "run_backtest",
         "arguments": {"config_path": "cfg/bt.yaml"},
+    }
+
+
+def test_local_in_process_call_invokes_screener_tools() -> None:
+    provider, handler = _local_provider()
+
+    launched = provider.call_tool("run_screener", {"config_path": "cfg/screen.yaml"})
+    assert launched.ok, launched.failure
+    assert handler.calls[-1] == {
+        "name": "run_screener",
+        "arguments": {"config_path": "cfg/screen.yaml"},
+    }
+
+    status = provider.call_tool("get_screener_status", {"job_id": "job-1"})
+    assert status.ok, status.failure
+    assert handler.calls[-1] == {
+        "name": "get_screener_status",
+        "arguments": {"job_id": "job-1"},
+    }
+
+    template = provider.call_tool("screener_config_template", {})
+    assert template.ok, template.failure
+    assert handler.calls[-1] == {
+        "name": "screener_config_template",
+        "arguments": {},
     }
 
 

@@ -43,6 +43,7 @@ async fn query_file(context: &ApiContext, request: &FileQueryBody) -> Result<Res
         start_date: request.start_date,
         end_date: request.end_date,
         ensure: request.ensure,
+        interval: request.interval.clone(),
     };
     let result = execute_file_query(
         FileQueryContext {
@@ -124,6 +125,7 @@ async fn query_sql(context: &ApiContext, request: &SqlQueryBody) -> Result<Respo
         sql: request.sql.clone(),
         output: bounded_output(request.output),
         force: request.force,
+        interval: request.interval.clone(),
     };
     let result = execute_sql_query(
         FileQueryContext {
@@ -394,6 +396,7 @@ async fn invoke_option_ensure(
     callback(
         request.asset_class(),
         request.data_type(),
+        None,
         symbol,
         request.start_date(),
         request.end_date(),
@@ -419,7 +422,7 @@ fn option_callback_symbol(request: &impl OptionQuerySelection) -> String {
 }
 
 /// Split option entries into usable complete files and incomplete sessions.
-fn classify_option(
+pub(crate) fn classify_option(
     report: &CoverageReport,
     data_type: DataType,
 ) -> (Vec<SessionCoverage>, Vec<SessionCoverage>) {
@@ -447,6 +450,7 @@ fn option_expected_path(entry: &SessionCoverage, data_type: DataType) -> bool {
         entry.session_date(),
         AssetClass::Option,
         data_type,
+        None,
         &entry.symbol,
     )
     .is_ok_and(|expected| object_path == expected)
@@ -503,6 +507,7 @@ fn build_option_files(
             row_count: record.row_count,
             byte_size: record.byte_size,
             checksum: record.checksum.clone(),
+            interval: None,
         });
     }
     Ok(files)

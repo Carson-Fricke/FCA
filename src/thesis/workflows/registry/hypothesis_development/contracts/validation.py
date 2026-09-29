@@ -28,16 +28,15 @@ from pydantic import ValidationError
 from thesis.research.grammar import (
     IDENTIFIER_PATTERN,
     NAME_PATTERN,
-    PYTHON_IDENTIFIER_PATTERN,
     VERSION_PATTERN,
 )
 from thesis.research.hypothesis import HypothesisFalsifier
+from thesis.research.models import BAR_INTERVALS
 
 #: The identifier grammar shared with the strictly validated front matter.
 _IDENTIFIER = re.compile(IDENTIFIER_PATTERN)
 _NAME = re.compile(NAME_PATTERN)
 _VERSION = re.compile(VERSION_PATTERN)
-_PYTHON_IDENTIFIER = re.compile(PYTHON_IDENTIFIER_PATTERN)
 
 _CONDITIONS = ("lt", "lte", "gt", "gte")
 _SCOPES = ("global", "workspace")
@@ -115,14 +114,6 @@ HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
                 "version": {"type": "string", "pattern": VERSION_PATTERN},
                 "description": {"type": "string", "minLength": 1},
                 "source": {"type": "string", "minLength": 1},
-                "fitEntrypoint": {
-                    "type": "string",
-                    "pattern": PYTHON_IDENTIFIER_PATTERN,
-                },
-                "observeEntrypoint": {
-                    "type": "string",
-                    "pattern": PYTHON_IDENTIFIER_PATTERN,
-                },
                 # The composer accepts an array of identifier strings only:
                 # observables are the model's own statistic names, never
                 # objects carrying a separate type field.
@@ -142,8 +133,15 @@ HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
                     "properties": {
                         "start": {"type": "string", "minLength": 1},
                         "end": {"type": "string", "minLength": 1},
+                        # The bar interval the study replays at; the harness
+                        # validates the same enum in the next wave.
+                        "interval": {
+                            "type": "string",
+                            "minLength": 1,
+                            "enum": list(BAR_INTERVALS),
+                        },
                     },
-                    "required": ["start", "end"],
+                    "required": ["start", "end", "interval"],
                 },
                 "indicators": {
                     "type": "array",
@@ -297,15 +295,6 @@ def _model_errors(model: object) -> list[str]:
         error = _text_error(f"hypothesis.model.{key}", model.get(key))
         if error:
             errors.append(error)
-    for key in ("fitEntrypoint", "observeEntrypoint"):
-        value = model.get(key)
-        if value is None:
-            continue
-        error = _text_error(f"hypothesis.model.{key}", value)
-        if error:
-            errors.append(error)
-        elif _PYTHON_IDENTIFIER.fullmatch(str(value).strip()) is None:
-            errors.append(f"hypothesis.model.{key}: must be a Python identifier")
     outputs = model.get("outputs")
     error = _sequence_error("hypothesis.model.outputs", outputs, "sequence")
     if error:
@@ -336,6 +325,15 @@ def _model_errors(model: object) -> list[str]:
             )
             if error:
                 errors.append(error)
+        interval = declared.get("interval")
+        error = _text_error("hypothesis.model.harnessConfiguration.interval", interval)
+        if error:
+            errors.append(error)
+        elif str(interval).strip() not in BAR_INTERVALS:
+            errors.append(
+                "hypothesis.model.harnessConfiguration.interval: must be one "
+                f"of {', '.join(BAR_INTERVALS)}, got {interval!r}"
+            )
     indicators = model.get("indicators")
     if indicators is not None:
         indicator_error = _sequence_error(

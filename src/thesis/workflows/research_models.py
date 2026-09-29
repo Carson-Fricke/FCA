@@ -188,6 +188,10 @@ def _adapter_bundle(
 ) -> StrategyBundle:
     model = request.model
     configuration = _jsonable_mapping(model.harness_configuration)
+    # The model's bar interval is re-homed into the study's data block: the
+    # harness reads ``data.bar_interval``, and a second top-level spelling
+    # could contradict it.
+    configuration.pop("interval", None)
     shorthand_symbols = (
         configuration.pop("symbols", None)
         or configuration.pop("requiredSymbols", None)
@@ -197,6 +201,7 @@ def _adapter_bundle(
     if not isinstance(data, dict):
         data = {}
         configuration["data"] = data
+    data["bar_interval"] = model.bar_interval
     symbols = data.get("symbols")
     if not isinstance(symbols, list) or not symbols:
         candidate_symbols: object = None
