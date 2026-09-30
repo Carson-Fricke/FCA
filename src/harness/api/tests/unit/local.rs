@@ -512,3 +512,74 @@ fn panic_payloads_render_as_messages() {
     let opaque: Box<dyn std::any::Any + Send> = Box::new(7_u32);
     assert_eq!(panic_message(opaque.as_ref()), "unknown panic");
 }
+
+fn authored_model() -> Value {
+    json!({
+        "modelId": "momentum-model",
+        "version": "1.0.0",
+        "description": "Estimate the continuation regularity.",
+        "source": "use harness_strategy_sdk::StudyProgram;\r\n",
+        "outputs": ["acf1"],
+        "tests": {"acf1": "lag-1 autocorrelation"},
+        "harnessConfiguration": {
+            "start": "2025-01-01T00:00:00Z",
+            "end": "2025-01-08T00:00:00Z",
+            "symbols": ["SPY", "TLT"]
+        }
+    })
+}
+
+#[test]
+fn authored_study_document_derives_every_runtime_field() {
+    let document = authored_study_document(&authored_model()).expect("document");
+
+    assert_eq!(document["shell"], "study");
+    assert_eq!(
+        document["run_id"],
+        document["strategy_instances"][0]["instance_id"]
+    );
+    assert_eq!(document["symbols"], json!(["SPY", "TLT"]));
+    assert_eq!(document["data"]["symbols"], json!(["SPY", "TLT"]));
+    let instance = &document["strategy_instances"][0];
+    assert_eq!(instance["implementation"], "jit");
+    // The bundle hash binds the CRLF-normalized source.
+    assert_eq!(
+        instance["bundle_hash"],
+        backtest::sha256::digest_hex(b"use harness_strategy_sdk::StudyProgram;\n")
+    );
+    assert_eq!(
+        instance["parameters"]["source"],
+        "use harness_strategy_sdk::StudyProgram;\n"
+    );
+}
+
+#[test]
+fn authored_study_document_parses_as_a_typed_study_configuration() {
+    let document = authored_study_document(&authored_model()).expect("document");
+
+    let configuration = backtest::backtest::job::parse_study_document(&document)
+        .expect("typed study configuration");
+
+    assert_eq!(configuration.shell, "study");
+    assert_eq!(
+        configuration.run_id,
+        document["run_id"].as_str().expect("run id")
+    );
+    assert_eq!(configuration.symbols, vec!["SPY", "TLT"]);
+}
+
+#[test]
+fn authored_study_document_requires_the_model_window() {
+    let missing_end = json!({
+        "source": "x",
+        "harnessConfiguration": {"start": "2025-01-01T00:00:00Z"}
+    });
+    let error = authored_study_document(&missing_end).expect_err("missing end");
+    assert!(error.contains("model.harnessConfiguration.end"), "{error}");
+
+    let missing_source = json!({
+        "harnessConfiguration": {"start": "a", "end": "b"}
+    });
+    let error = authored_study_document(&missing_source).expect_err("missing source");
+    assert!(error.contains("model.source"), "{error}");
+}

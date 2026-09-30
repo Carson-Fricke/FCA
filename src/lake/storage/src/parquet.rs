@@ -73,7 +73,9 @@ impl<S: BlobStore + 'static> ParquetWriter<S> {
         interval: Option<&str>,
         symbol: &str,
     ) -> Result<ParquetMetadata, DataError> {
+        let normalize_started = std::time::Instant::now();
         let batch = normalize_records(records, asset_class, data_type, symbol)?;
+        let normalize_seconds = normalize_started.elapsed().as_secs_f64();
         let schema = batch.schema();
         let metadata = schema.metadata();
         let name = metadata
@@ -93,15 +95,24 @@ impl<S: BlobStore + 'static> ParquetWriter<S> {
             ]))
             .build();
         let mut payload = Vec::new();
+        let encode_started = std::time::Instant::now();
         {
             let mut writer = ArrowWriter::try_new(&mut payload, schema, Some(properties))
                 .map_err(DataError::io)?;
             writer.write(&batch).map_err(DataError::io)?;
             writer.close().map_err(DataError::io)?;
         }
+        let encode_seconds = encode_started.elapsed().as_secs_f64();
         let path = partition_path(session_date, asset_class, data_type, interval, symbol)?;
+        let checksum_started = std::time::Instant::now();
         let checksum = hex::encode(Sha256::digest(&payload));
         self.store.replace(&path, &payload)?;
+        eprintln!(
+            "PROFILE parquet rows={} normalize_seconds={normalize_seconds:.3} encode_seconds={encode_seconds:.3} checksum_store_seconds={:.3} bytes={}",
+            batch.num_rows(),
+            checksum_started.elapsed().as_secs_f64(),
+            payload.len()
+        );
         Ok(ParquetMetadata {
             path,
             rows: batch.num_rows() as u64,
@@ -133,12 +144,36 @@ pub fn normalize_records(
         }
         validate_row_symbol(record, &canonical_symbol, row)?;
     }
-    let mut columns: Vec<ArrayRef> = Vec::with_capacity(schema.fields().len());
-    for field in schema.fields() {
-        columns.push(normalized_column(field, records, &canonical_symbol)?);
-    }
+    let columns = normalized_columns(&schema, records, &canonical_symbol)?;
     RecordBatch::try_new(Arc::new(schema), columns)
         .map_err(|error| DataError::value(error.to_string()))
+}
+
+/// Build every Arrow column in parallel; column order and row order are
+/// preserved exactly, only wall time changes. Column construction is the
+/// dominant cost for million-row partitions (one full pass per field), and the
+/// fields are independent, so scoped OS threads parallelize it without
+/// touching the async runtime.
+fn normalized_columns(
+    schema: &arrow_schema::Schema,
+    records: &[Value],
+    canonical_symbol: &str,
+) -> Result<Vec<ArrayRef>, DataError> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = schema
+            .fields()
+            .iter()
+            .map(|field| scope.spawn(move || normalized_column(field, records, canonical_symbol)))
+            .collect();
+        let mut columns = Vec::with_capacity(handles.len());
+        for handle in handles {
+            let column = handle
+                .join()
+                .map_err(|_| DataError::value("column worker panicked"))?;
+            columns.push(column?);
+        }
+        Ok(columns)
+    })
 }
 
 fn normalized_column(

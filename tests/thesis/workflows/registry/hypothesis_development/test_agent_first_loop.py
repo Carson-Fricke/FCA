@@ -261,6 +261,17 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert "request_workflow_input" in seeds[0].body
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, node_id) is True
 
+    # The creation agent's exact agent-facing policy: the drafting tool it is
+    # configured with plus the structural phase control tools. Nothing else is
+    # advertised, so a harness or backtest tool can never be called here.
+    creation = store.get_sub_agent(WORKSPACE, node_id)
+    assert creation is not None
+    assert set(creation.allowed_tools) == {
+        "validate_study",
+        "request_workflow_input",
+        "request_phase_completion",
+    }
+
     # The creation agent proposes and asks the operator through its own
     # wrapped tool: the node enters needs_input and schedules nothing.
     runner = _runner(

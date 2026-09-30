@@ -161,6 +161,7 @@ fn ping_and_tools_list_work() {
         vec![
             TOOL_RUN_BACKTEST,
             "run_study",
+            "validate_study",
             "run_screener",
             TOOL_BACKTEST_CONFIG_TEMPLATE,
             "screener_config_template",

@@ -313,6 +313,28 @@ pub fn load_screen_config(config_path: &Path) -> Result<ScreenConfig, BacktestJo
     ScreenConfig::from_yaml_value_with_base(&value, base_dir).map_err(BacktestJobError::from)
 }
 
+/// Parse one in-memory study configuration document (JSON tree, `study` shell).
+///
+/// The harness builds this document from an authored model before compiling
+/// it, so parsing reuses the exact typed path [`load_study_config`] uses.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] when the document has no `study` shell or the
+/// typed configuration does not parse.
+pub fn parse_study_document(
+    document: &serde_json::Value,
+) -> Result<BacktestConfig, BacktestJobError> {
+    let shell = document
+        .get("shell")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(BacktestJobError::MissingShell)?;
+    if shell != "study" {
+        return Err(BacktestJobError::WrongShell(shell.to_string()));
+    }
+    BacktestConfig::from_yaml_value(&json_to_yaml(document)).map_err(BacktestJobError::from)
+}
+
 fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
     match value {
         serde_json::Value::Null => YamlValue::Null,

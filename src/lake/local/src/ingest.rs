@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -195,6 +196,26 @@ pub struct BackfillResult {
     pub symbols: Vec<String>,
 }
 
+/// One incremental progress snapshot from a backfill walk.
+#[derive(Clone, Debug)]
+pub struct BackfillProgress {
+    /// Sessions the walk planned.
+    pub sessions_total: usize,
+    /// Sessions that reached a terminal outcome so far, in completion order.
+    pub sessions_done: usize,
+    /// Symbol (or pair) of the session that just finished.
+    pub symbol: String,
+    /// Session date that just finished, ISO formatted.
+    pub session_date: String,
+    /// Rows committed for the finished session, by data type.
+    pub data_type_rows: BTreeMap<String, u64>,
+    /// Failure detail when the finished session failed.
+    pub error: Option<String>,
+}
+
+/// A backfill walk's incremental progress observer.
+pub type BackfillProgressSink = Arc<dyn Fn(BackfillProgress) + Send + Sync>;
+
 /// Inputs for one local equity backfill.
 pub struct LocalBackfillOptions {
     /// Local layout the backfill writes into.
@@ -221,6 +242,9 @@ pub struct LocalBackfillOptions {
     /// that already hold the process's store pass it here so in-process
     /// readers see commits without waiting on a file re-read.
     pub catalog: Option<Arc<JsonCatalogStore>>,
+    /// Incremental progress observer; each finished session reports once, as
+    /// it finishes, so a long window's caching progress is visible.
+    pub progress: Option<BackfillProgressSink>,
 }
 
 /// Result of one local crypto backfill, serialized with the Python JSON keys.
@@ -268,6 +292,9 @@ pub struct LocalCryptoBackfillOptions {
     /// that already hold the process's store pass it here so in-process
     /// readers see commits without waiting on a file re-read.
     pub catalog: Option<Arc<JsonCatalogStore>>,
+    /// Incremental progress observer; each finished pair-day reports once, as
+    /// it finishes.
+    pub progress: Option<BackfillProgressSink>,
 }
 
 /// The normalized outcome of one session transaction.
@@ -318,6 +345,7 @@ struct BackfillPlan {
     end_date: Date,
     committer: Arc<LocalBackfillCommitter>,
     retry_settle_seconds: Option<f64>,
+    progress: Option<BackfillProgressSink>,
 }
 
 /// The walk output shared by the equity and crypto results.
@@ -465,6 +493,7 @@ pub async fn run_local_backfill(
             end_date: options.end_date,
             committer,
             retry_settle_seconds: options.retry_settle_seconds,
+            progress: options.progress,
         },
         run,
     )
@@ -548,6 +577,7 @@ pub async fn run_local_crypto_backfill(
             end_date: options.end_date,
             committer,
             retry_settle_seconds: options.retry_settle_seconds,
+            progress: options.progress,
         },
         run,
     )
@@ -800,7 +830,11 @@ async fn execute_backfill(
 
     let mut succeeded = 0usize;
     let mut entries: Vec<SessionIngestEntry> = Vec::with_capacity(planned.len());
-    for ((symbol, session), result) in planned.iter().zip(run_planned(&planned, &run).await) {
+    let progress = plan.progress.clone();
+    for ((symbol, session), result) in planned
+        .iter()
+        .zip(run_planned(&planned, &run, progress).await)
+    {
         entries.push(record_outcome(
             result,
             symbol,
@@ -825,10 +859,11 @@ async fn execute_backfill(
             .iter()
             .map(|index| planned[*index].clone())
             .collect();
-        for (index, ((symbol, session), result)) in retryable
-            .iter()
-            .zip(retry_plan.iter().zip(run_planned(&retry_plan, &run).await))
-        {
+        for (index, ((symbol, session), result)) in retryable.iter().zip(
+            retry_plan
+                .iter()
+                .zip(run_planned(&retry_plan, &run, None).await),
+        ) {
             entries[*index] =
                 record_outcome(result, symbol, session, &mut succeeded, &mut complete);
         }
@@ -859,15 +894,21 @@ async fn execute_backfill(
 /// Run every planned session concurrently within the bounded budget.
 ///
 /// The joined order matches the planned order regardless of completion order,
-/// so the backfill result stays deterministic.
+/// so the backfill result stays deterministic. Each finished session reports
+/// one incremental progress snapshot as it completes.
 async fn run_planned(
     planned: &[(String, CoverageSession)],
     run: &SessionRun,
+    progress: Option<BackfillProgressSink>,
 ) -> Vec<Result<TransactionOutcome, DataError>> {
     let semaphore = Arc::new(Semaphore::new(BACKFILL_CONCURRENCY));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let total = planned.len();
     let futures = planned.iter().map(|(symbol, session)| {
         let run = Arc::clone(run);
         let semaphore = Arc::clone(&semaphore);
+        let progress = progress.clone();
+        let completed = Arc::clone(&completed);
         let symbol = symbol.clone();
         let session = *session;
         async move {
@@ -875,7 +916,30 @@ async fn run_planned(
                 .acquire()
                 .await
                 .expect("the backfill semaphore is never closed");
-            run(symbol, session).await
+            let result = run(symbol.clone(), session).await;
+            if let Some(sink) = progress {
+                let done = completed.fetch_add(1, Ordering::AcqRel) + 1;
+                let (data_type_rows, error) = match &result {
+                    Ok(outcome) => (
+                        outcome
+                            .coverage
+                            .iter()
+                            .map(|record| (record.data_type.value().to_string(), record.row_count))
+                            .collect(),
+                        None,
+                    ),
+                    Err(failure) => (BTreeMap::new(), Some(data_error_message(failure))),
+                };
+                sink(BackfillProgress {
+                    sessions_total: total,
+                    sessions_done: done,
+                    symbol,
+                    session_date: session.session_date.isoformat(),
+                    data_type_rows,
+                    error,
+                });
+            }
+            result
         }
     });
     join_all(futures).await

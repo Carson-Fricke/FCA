@@ -240,6 +240,30 @@ impl Lane {
         }
     }
 
+    /// Record CPU service time (for example one page's parse) in the current
+    /// window without counting a request completion.
+    ///
+    /// Page parsing is real service time on the fetch path, so it must appear
+    /// in the latency baseline: a bandwidth-delay product computed from
+    /// transport-only latency underestimates the in-flight bound and collapses
+    /// throughput toward the controller floor.
+    pub fn observe_service(&self, latency: Duration) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let window = &mut state.window;
+        // Only record service time inside an open window; a cold lane starts
+        // its window at the first completed request.
+        if window.started.is_none() {
+            return;
+        }
+        window.latencies.push(latency.as_secs_f64());
+        if window.latencies.len() > LATENCY_SAMPLES {
+            window.latencies.remove(0);
+        }
+    }
+
     /// Feed one pre-measured window straight to the control law (unit tests).
     #[cfg(test)]
     fn observe_window(&self, completions: u32, elapsed: Duration, latencies: &[Duration]) {

@@ -27,6 +27,11 @@ on-demand data ensure calls, so it is normally left in the default set too.
 .PARAMETER Rotate
 Mint fresh managed tokens instead of reusing the values already in .env.
 
+.PARAMETER LakeDebug
+Build and launch the market-lake debug binary instead of the release binary.
+The lake always runs an optimized build otherwise, because the debug parse
+path is several times slower on real quote volumes.
+
 .PARAMETER NoStop
 Do not stop existing listeners; launch only.
 
@@ -45,6 +50,7 @@ powershell -File scripts/local/start-stack.ps1
 param(
     [string[]]$Servers = @('cosmos', 'lake', 'harness', 'thesis', 'ui'),
     [switch]$Rotate,
+    [switch]$LakeDebug,
     [switch]$NoStop,
     [string]$EnvFile,
     [switch]$Foreground,
@@ -93,6 +99,7 @@ if (-not $Foreground -and -not $Worker) {
         '-DelaySeconds', [string]$DelaySeconds
     )
     if ($Rotate) { $arguments += '-Rotate' }
+    if ($LakeDebug) { $arguments += '-LakeDebug' }
     if ($NoStop) { $arguments += '-NoStop' }
     # Start-Process keeps the worker in OpenCode's descendant process tree,
     # which makes the shell tool wait for long-running server grandchildren.
@@ -231,25 +238,37 @@ Get-Content -LiteralPath $EnvFile | ForEach-Object {
     Set-Item -LiteralPath ("Env:{0}" -f $name) -Value $value
 }
 
-# The native harness facade embeds CPython and loads python312.dll at startup,
-# so the base interpreter directory must be on PATH for the child process.
-$pythonBase = & uv run --no-sync python -c "import sys; print(sys.base_prefix)"
-if ($LASTEXITCODE -eq 0 -and $pythonBase) { $env:PATH = "$pythonBase;$env:PATH" }
-
+# The harness no longer embeds CPython: the harness and lake products are
+# native Rust binaries launched directly from their build outputs. Thesis and
+# the UI still run through uv/npm. The market-lake always launches its release
+# build unless -LakeDebug is passed: the debug parse path is several times
+# slower on real quote volumes.
 $uvExe = (Get-Command uv).Source
 $npmExe = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
 if (-not $npmExe) { $npmExe = (Get-Command npm).Source }
 
+$lakeExe = Join-Path $repo 'src\lake\target\debug\lake.exe'
+if (-not $LakeDebug) {
+    $cargoExe = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+    if (-not $cargoExe) {
+        throw 'cargo is required to build the release market-lake binary'
+    }
+    Write-Host '==> Building the market-lake release binary'
+    & $cargoExe build --release --manifest-path (Join-Path $repo 'src\lake\Cargo.toml') -p lake-cli
+    if ($LASTEXITCODE -ne 0) { throw "cargo build --release -p lake-cli failed (exit $LASTEXITCODE)" }
+    $lakeExe = Join-Path $repo 'src\lake\target\release\lake.exe'
+}
+
 $specs = @{
     lake = [pscustomobject]@{
         Name = 'lake'; Port = 8002; Match = 'lake'
-        FilePath = $uvExe
-        Arguments = @('run', '--no-sync', 'lake', 'local', 'api', '--host', '127.0.0.1', '--port', '8002')
+        FilePath = $lakeExe
+        Arguments = @('local', 'api', '--host', '127.0.0.1', '--port', '8002')
     }
     harness = [pscustomobject]@{
         Name = 'harness'; Port = 8001; Match = 'harness'
-        FilePath = $uvExe
-        Arguments = @('run', '--no-sync', 'harness', 'api', '--config', 'config/harness/api.yaml')
+        FilePath = Join-Path $repo 'src\harness\target\debug\harness.exe'
+        Arguments = @('api', '--config', 'config/harness/api.yaml')
     }
     thesis = [pscustomobject]@{
         Name = 'thesis'; Port = 8000; Match = 'thesis_local_api'

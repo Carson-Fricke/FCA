@@ -87,7 +87,7 @@ class BacktestResearchModelRunner:
             raise TypeError("request must be a ResearchModelRunRequest")
         model_reference = self._models.publish(request.workspace_id, request.model)
         runtime_configuration = {"source": request.model.source}
-        bundle = _adapter_bundle(request, model_reference, runtime_configuration)
+        bundle = _adapter_bundle(request, model_reference)
         backtest = self._backtests.run(
             BacktestRunRequest(
                 run_id=request.run_id,
@@ -181,12 +181,20 @@ def _window_bound(
     return None
 
 
-def _adapter_bundle(
-    request: ResearchModelRunRequest,
-    model_reference: ResearchModelRef,
-    runtime_configuration: Mapping[str, object],
-) -> StrategyBundle:
-    model = request.model
+def study_configuration(
+    model: ResearchModel,
+    *,
+    run_id: str,
+    universe: Sequence[str] = (),
+) -> dict[str, object]:
+    """Materialize the harness study configuration for one research model.
+
+    The model's harness configuration is piped through unchanged except for the
+    fields the run owns: the study shell, run id, resolved symbol set, and the
+    authored program instance.  ``start``/``end`` keep exactly the bounds the
+    model declared; the same function backs both validation and execution, so
+    the validated document is the one that runs.
+    """
     configuration = _jsonable_mapping(model.harness_configuration)
     # The model's bar interval is re-homed into the study's data block: the
     # harness reads ``data.bar_interval``, and a second top-level spelling
@@ -207,8 +215,8 @@ def _adapter_bundle(
         candidate_symbols: object = None
         if isinstance(shorthand_symbols, list | tuple) and shorthand_symbols:
             candidate_symbols = shorthand_symbols
-        elif request.universe:
-            candidate_symbols = request.universe
+        elif universe:
+            candidate_symbols = universe
         if isinstance(candidate_symbols, Sequence) and not isinstance(
             candidate_symbols, str | bytes
         ):
@@ -223,7 +231,7 @@ def _adapter_bundle(
     configuration["start"] = window_start
     configuration["end"] = window_end
     configuration["shell"] = "study"
-    configuration["run_id"] = request.run_id
+    configuration["run_id"] = run_id
     configuration["strategy_instances"] = [
         {
             # The JIT seam rejects a bundle_hash that is not the SHA-256 of
@@ -233,10 +241,21 @@ def _adapter_bundle(
             "capital_fraction": "1.0",
             "implementation": "jit",
             "instance_id": _instance_id(model.model_id),
-            "parameters": dict(runtime_configuration),
+            "parameters": {"source": model.source},
             "symbols": list(data["symbols"]),
         }
     ]
+    return configuration
+
+
+def _adapter_bundle(
+    request: ResearchModelRunRequest,
+    model_reference: ResearchModelRef,
+) -> StrategyBundle:
+    model = request.model
+    configuration = study_configuration(
+        model, run_id=request.run_id, universe=request.universe
+    )
     return StrategyBundle.create(
         strategy_id=_instance_id(f"research-{model.model_id}"),
         version=model.version,
@@ -298,5 +317,6 @@ __all__ = [
     "ResearchModelRunRequest",
     "ResearchModelRunResult",
     "ResearchModelRunner",
+    "study_configuration",
     "study_window",
 ]

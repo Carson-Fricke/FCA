@@ -515,7 +515,7 @@ impl AlpacaClient {
         self.fetch_market_sliced(&symbols, &spec, slices).await
     }
 
-    async fn fetch_market<T: Timestamped + Send>(
+    async fn fetch_market<T: Timestamped + Send + 'static>(
         &self,
         symbols: &[String],
         spec: &FetchSpec<T>,
@@ -525,7 +525,7 @@ impl AlpacaClient {
         Ok(pages.into_iter().flatten().collect())
     }
 
-    async fn fetch_market_sliced<T: Timestamped + Send>(
+    async fn fetch_market_sliced<T: Timestamped + Send + 'static>(
         &self,
         symbols: &[String],
         spec: &FetchSpec<T>,
@@ -581,7 +581,7 @@ impl AlpacaClient {
     /// plus one nanosecond. Adjacent units differ by exactly one nanosecond,
     /// so no timestamp falls between them and no row is fetched twice:
     /// requests equal pages exactly, with no probe and no density estimate.
-    async fn fetch_symbol<T: Timestamped + Send>(
+    async fn fetch_symbol<T: Timestamped + Send + 'static>(
         &self,
         symbol: &str,
         spec: &FetchSpec<T>,
@@ -612,7 +612,7 @@ impl AlpacaClient {
         Ok(records)
     }
 
-    fn fetch_unit<'a, T: Timestamped + Send>(
+    fn fetch_unit<'a, T: Timestamped + Send + 'static>(
         &'a self,
         symbol: &'a str,
         spec: &'a FetchSpec<T>,
@@ -675,7 +675,7 @@ impl AlpacaClient {
     }
 
     /// Follow a cursor to exhaustion when a unit cannot be split further.
-    async fn drain_cursor<T: Timestamped>(
+    async fn drain_cursor<T: Timestamped + Send + 'static>(
         &self,
         symbol: &str,
         spec: &FetchSpec<T>,
@@ -698,7 +698,7 @@ impl AlpacaClient {
         Ok(records)
     }
 
-    async fn fetch_symbol_sequential<T: Timestamped>(
+    async fn fetch_symbol_sequential<T: Timestamped + Send + 'static>(
         &self,
         symbol: &str,
         spec: &FetchSpec<T>,
@@ -727,7 +727,7 @@ impl AlpacaClient {
         }
     }
 
-    async fn fetch_page<T: Timestamped>(
+    async fn fetch_page<T: Timestamped + Send + 'static>(
         &self,
         symbol: &str,
         spec: &FetchSpec<T>,
@@ -749,56 +749,44 @@ impl AlpacaClient {
             params.push(("page_token".to_string(), token.to_string()));
         }
         let response = self.request(&path, &params).await?;
-        let (rows, next_page_token) = parse::page_rows(&response.body, spec.data_type, symbol)?;
-        // The raw timestamp order decides the split boundary: the largest
-        // timestamp strictly below the page's final row is the last value for
-        // which the page proves every existing row has been fetched.
-        let mut last_nanos: Option<i64> = None;
-        let mut safe_split_nanos: Option<i64> = None;
-        for row in &rows {
-            if let Some(nanos) = row
-                .get("t")
-                .and_then(Value::as_str)
-                .and_then(parse_iso_nanos)
-            {
-                if last_nanos.is_some_and(|last| nanos != last) {
-                    safe_split_nanos = last_nanos;
-                }
-                last_nanos = Some(nanos);
-            }
-        }
-        let has_cursor = next_page_token
-            .as_deref()
-            .is_some_and(|token| !token.is_empty());
-        let trim_below = if trim_trailing_ties && has_cursor {
-            safe_split_nanos
-        } else {
-            None
-        };
-        let mut records = Vec::with_capacity(rows.len());
-        for row in rows {
-            if let Some(boundary) = trim_below {
-                let nanos = row
-                    .get("t")
-                    .and_then(Value::as_str)
-                    .and_then(parse_iso_nanos);
-                if nanos.is_some_and(|nanos| nanos > boundary) {
-                    continue;
-                }
-            }
-            let record = (spec.parser)(row, symbol)?;
-            let keep = match spec.window {
-                Some(window) => window.contains(record.timestamp()),
-                None => true,
-            };
-            if keep {
-                records.push(record);
-            }
-        }
+        // The row scan, boundary trim, and per-row conversion are the CPU hot
+        // path (millions of JSON rows per session). Move the body and run the
+        // parse on the blocking pool so page parses from concurrent units
+        // execute in parallel on the runtime's workers instead of serializing
+        // inside one fetch task.
+        let body = response.body;
+        let parser = spec.parser;
+        let window = spec.window;
+        let data_type = spec.data_type;
+        let symbol = symbol.to_string();
+        let parse_started = std::time::Instant::now();
+        let (parsed, next_page_token) = tokio::task::spawn_blocking(
+            move || -> Result<(ParsedPage<T>, Option<String>), ProviderError> {
+                let (rows, next_page_token) = parse::page_rows(&body, data_type, &symbol)?;
+                let has_cursor = next_page_token
+                    .as_deref()
+                    .is_some_and(|token| !token.is_empty());
+                let page = parse_page_rows(
+                    &rows,
+                    parser,
+                    window,
+                    trim_trailing_ties && has_cursor,
+                    &symbol,
+                )?;
+                Ok((page, next_page_token))
+            },
+        )
+        .await
+        .map_err(|error| ProviderError::Transport(format!("page parse task failed: {error}")))??;
+        // Parsing is service time on this page's critical path. Feed it back to
+        // the lane so the in-flight bound reflects the full page cost instead
+        // of transport latency alone (which under-provisions concurrency and
+        // collapses throughput to the controller floor).
+        self.lane.observe_service(parse_started.elapsed());
         Ok(PageResult {
-            records,
+            records: parsed.records,
             next_page_token,
-            safe_split_nanos,
+            safe_split_nanos: parsed.safe_split_nanos,
         })
     }
 
@@ -909,6 +897,72 @@ fn partition_inclusive(start: i64, end: i64, count: usize) -> Vec<(i64, i64)> {
         last.1 = end;
     }
     units
+}
+
+/// The CPU-only half of one fetched page: the converted records and the
+/// boundary a cursor-bearing page may split at.
+struct ParsedPage<T> {
+    records: Vec<T>,
+    safe_split_nanos: Option<i64>,
+}
+
+/// Scan, trim, and convert one page's raw rows.
+///
+/// This is the parsing hot path; callers run it on the blocking pool so
+/// concurrent page fetches parse in parallel instead of serializing inside one
+/// fetch task. The raw timestamp order decides the split boundary: the largest
+/// timestamp strictly below the page's final row is the last value for which
+/// the page proves every existing row has been fetched.
+fn parse_page_rows<T: Timestamped>(
+    rows: &[&Value],
+    parser: Parser<T>,
+    window: Option<SliceWindow>,
+    trim_trailing_ties: bool,
+    symbol: &str,
+) -> Result<ParsedPage<T>, ProviderError> {
+    let mut last_nanos: Option<i64> = None;
+    let mut safe_split_nanos: Option<i64> = None;
+    for row in rows {
+        if let Some(nanos) = row
+            .get("t")
+            .and_then(Value::as_str)
+            .and_then(parse_iso_nanos)
+        {
+            if last_nanos.is_some_and(|last| nanos != last) {
+                safe_split_nanos = last_nanos;
+            }
+            last_nanos = Some(nanos);
+        }
+    }
+    let trim_below = if trim_trailing_ties {
+        safe_split_nanos
+    } else {
+        None
+    };
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        if let Some(boundary) = trim_below {
+            let nanos = row
+                .get("t")
+                .and_then(Value::as_str)
+                .and_then(parse_iso_nanos);
+            if nanos.is_some_and(|nanos| nanos > boundary) {
+                continue;
+            }
+        }
+        let record = parser(row, symbol)?;
+        let keep = match window {
+            Some(window) => window.contains(record.timestamp()),
+            None => true,
+        };
+        if keep {
+            records.push(record);
+        }
+    }
+    Ok(ParsedPage {
+        records,
+        safe_split_nanos,
+    })
 }
 
 /// Split `[start, end]` into `slices` contiguous sub-windows.

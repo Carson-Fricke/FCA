@@ -6,11 +6,122 @@ from typing import cast
 
 from fastapi import FastAPI
 
-from thesis.agent.harness_tools import HarnessToolProvider
+from thesis.agent.harness_tools import (
+    HarnessToolFailure,
+    HarnessToolProvider,
+    HarnessToolResult,
+)
 from thesis.chat.service import ChatService
 from thesis.http import application, serving
 from thesis.integrations.mcp import HarnessMcpClient
 from thesis.providers.openrouter import OpenRouterProvider
+
+_STUDY_SOURCE = """use harness_strategy_sdk::{
+    export_study_program, BarEvent, MetricPublisher, StudyProgram,
+};
+use harness_strategy_sdk::serde_json::Value;
+
+struct PairModel;
+
+impl StudyProgram for PairModel {
+    fn new(_parameters: Value) -> Self {
+        Self
+    }
+
+    fn on_bar(&mut self, _event: &BarEvent) {}
+
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("beta", 1.0);
+        let _ = metrics.publish("fit.beta", 1.0);
+    }
+}
+
+export_study_program!(PairModel);
+"""
+
+
+def _hypothesis_completion() -> dict[str, object]:
+    return {
+        "hypothesis": {
+            "claim": "SPY weekly returns continue.",
+            "disagreement": "A random walk predicts no continuation.",
+            "model": {
+                "modelId": "momentum-model",
+                "version": "1.0.0",
+                "description": "Estimate the weekly continuation regularity.",
+                "source": _STUDY_SOURCE,
+                "outputs": ["beta"],
+                "tests": {"program.rs": "Covered by the workflow tests.\n"},
+                "harnessConfiguration": {
+                    "start": "2025-03-17T00:00:00Z",
+                    "end": "2025-03-24T00:00:00Z",
+                    "symbols": ["SPY"],
+                    "interval": "1d",
+                },
+            },
+            "universe": ["SPY"],
+        }
+    }
+
+
+class _FakeValidator:
+    def __init__(self, *, ok: bool, detail: str = "") -> None:
+        self._ok = ok
+        self._detail = detail
+        self.calls: list[dict[str, object]] = []
+
+    def validate_study(self, *, model: dict[str, object]) -> HarnessToolResult:
+        self.calls.append(model)
+        return HarnessToolResult(
+            tool="validate_study",
+            ok=self._ok,
+            text=self._detail,
+            failure=None
+            if self._ok
+            else HarnessToolFailure(
+                kind="tool", message=self._detail, tool="validate_study"
+            ),
+        )
+
+
+def test_contract_validation_skips_non_creation_phases() -> None:
+    validator = _FakeValidator(ok=False, detail="compile failed")
+    failure = serving.validate_hypothesis_study_contract(
+        cast(HarnessToolProvider, validator), "verdict", _hypothesis_completion()
+    )
+    assert failure is None
+    assert validator.calls == []
+
+
+def test_contract_validation_reports_the_harness_build_failure() -> None:
+    validator = _FakeValidator(ok=False, detail="missing harness_sdk_abi_version")
+    failure = serving.validate_hypothesis_study_contract(
+        cast(HarnessToolProvider, validator),
+        "hypothesis_creation",
+        _hypothesis_completion(),
+    )
+    assert failure is not None
+    assert "missing harness_sdk_abi_version" in failure
+    assert len(validator.calls) == 1
+    assert validator.calls[0]["source"] == _STUDY_SOURCE
+
+
+def test_contract_validation_accepts_a_building_program() -> None:
+    validator = _FakeValidator(ok=True)
+    failure = serving.validate_hypothesis_study_contract(
+        cast(HarnessToolProvider, validator),
+        "hypothesis_creation",
+        _hypothesis_completion(),
+    )
+    assert failure is None
+    assert len(validator.calls) == 1
+
+
+def test_contract_validation_without_a_harness_is_advisory() -> None:
+    failure = serving.validate_hypothesis_study_contract(
+        None, "hypothesis_creation", _hypothesis_completion()
+    )
+    assert failure is None
 
 
 def _stub_harness() -> HarnessToolProvider:

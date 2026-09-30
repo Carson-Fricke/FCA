@@ -98,6 +98,14 @@ harness-hosted MCP endpoint:
   `on_stop(&mut MetricPublisher)`), so a study folds replayed lake bars only,
   has no order path by construction, never submits an order, and is never
   recorded as a backtest;
+- `validate_study` is the capability-gated authoring gate beside `run_study`:
+  it takes the authored model document itself (`model.source` plus its
+  `harnessConfiguration.start`/`.end`), derives the runtime study job
+  internally, and compiles, loads, and constructs the program over the managed
+  JIT workspace without replaying data. Thesis calls it before applying a
+  hypothesis-creation completion, and the creation agent may call it while
+  drafting, so a source that cannot build is repaired in the asking agent's
+  turn instead of failing the trials phase after acceptance;
 - a research model is an authored Rust study program published as a workspace
   artifact whose `on_stop` publishes its fitted parameters as `fit.<parameter>`
   metrics; Thesis freezes them as the content-addressed fitted-model artifact;

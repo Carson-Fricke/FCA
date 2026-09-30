@@ -31,7 +31,10 @@ pub use compile::{compile, CompiledArtifact, ProgramKind};
 pub use config::{build_instances, program_kind, JIT_IMPLEMENTATION, SOURCE_PARAMETER};
 pub use error::JitError;
 pub use load::{LoadedScreening, LoadedStrategy, LoadedStudy};
-pub use run::{run_backtest_configuration, run_study_configuration, ConfigurationRunError};
+pub use run::{
+    run_backtest_configuration, run_study_configuration, validate_configuration,
+    ConfigurationRunError,
+};
 pub use runtime::{
     strategy_instance, study_instance, HostBar, JitStrategyRuntime, JitStudyRuntime,
     STUDY_BARS_ONLY,

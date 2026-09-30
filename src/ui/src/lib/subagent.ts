@@ -303,7 +303,12 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 	let completed = false;
 	let started = false;
 	const visited = new Set<string>();
-	const visits = new Map<string, number>();
+	// Phase entries, not phase-related events: one agent spawn per conversation
+	// phase and one lifecycle transition per deterministic phase. Progress and
+	// phase-result events describe the work inside an entry and must never bump
+	// the attempt counter.
+	const spawns = new Map<string, number>();
+	const entries = new Map<string, number>();
 	for (const event of [...events].sort((a, b) => a.cursor - b.cursor)) {
 		if (event.eventType === 'workflow.launched') {
 			const workflow = recordField(event, 'workflow');
@@ -323,8 +328,12 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 			if (phase && !order.includes(phase)) order.push(phase);
 			if (phase) {
 				visited.add(phase);
-				if (!visits.has(phase)) visits.set(phase, 1);
 				current = phase;
+				// The hidden workflow-node record carries the phase too; it is
+				// the execution's implementation detail, not a phase attempt.
+				if (!isWorkflowNodeRole(stringField(event, 'role'))) {
+					spawns.set(phase, (spawns.get(phase) ?? 0) + 1);
+				}
 			}
 			continue;
 		}
@@ -333,7 +342,9 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 		if (phase && !['requested', 'completed', 'failed', 'paused'].includes(phase)) {
 			if (!order.includes(phase)) order.push(phase);
 			visited.add(phase);
-			visits.set(phase, (visits.get(phase) ?? 0) + 1);
+			if (event.eventType !== 'workflow.progress' && event.eventType !== 'workflow.phase_result') {
+				entries.set(phase, (entries.get(phase) ?? 0) + 1);
+			}
 			current = phase;
 		}
 		if (event.eventType === 'workflow.started') started = true;
@@ -342,7 +353,7 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 	if (completed) current = null;
 	return order.map((name) => ({
 		name,
-		attempts: visits.get(name) ?? 0,
+		attempts: spawns.get(name) ?? entries.get(name) ?? 0,
 		status: name === current
 				? 'active'
 				: visited.has(name)

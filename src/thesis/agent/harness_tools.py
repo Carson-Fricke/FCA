@@ -45,6 +45,7 @@ from thesis.integrations.mcp import (
     TOOL_RUN_SCREENER,
     TOOL_RUN_STUDY,
     TOOL_SCREENER_CONFIG_TEMPLATE,
+    TOOL_VALIDATE_STUDY,
     HarnessMcpAuthError,
     HarnessMcpBoundary,
     HarnessMcpClient,
@@ -63,6 +64,7 @@ from thesis.integrations.mcp import (
 HARNESS_TOOL_NAMES: tuple[str, ...] = (
     TOOL_RUN_BACKTEST,
     TOOL_RUN_STUDY,
+    TOOL_VALIDATE_STUDY,
     TOOL_RUN_SCREENER,
     TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_SCREENER_CONFIG_TEMPLATE,
@@ -80,7 +82,9 @@ HARNESS_MCP_SKILL_VERSION = "1.0.0"
 
 HARNESS_MCP_SKILL_INSTRUCTIONS = (
     "Use the quant-harness MCP tools for deterministic research execution. "
-    "run_backtest and run_study launch backtest and study jobs; run_screener "
+    "run_backtest and run_study launch backtest and study jobs; validate_study "
+    "compiles an authored study program without replaying so an authoring error "
+    "is caught before the submission; run_screener "
     "launches a screening run of an authored Rust program; "
     "backtest_config_template and screener_config_template return starter "
     "configurations to adapt when no config file exists, and run_backtest and "
@@ -424,6 +428,10 @@ class HarnessToolProvider:
     def run_screener(self, args: RunScreenerArgs) -> HarnessToolResult:
         """Call ``run_screener`` with typed arguments."""
         return self.call_tool(TOOL_RUN_SCREENER, args.to_arguments())
+
+    def validate_study(self, *, model: Mapping[str, object]) -> HarnessToolResult:
+        """Call ``validate_study`` to compile one authored model program."""
+        return self.call_tool(TOOL_VALIDATE_STUDY, {"model": dict(model)})
 
     def backtest_config_template(self) -> HarnessToolResult:
         """Call ``backtest_config_template`` for a starter configuration."""

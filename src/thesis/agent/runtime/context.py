@@ -50,7 +50,10 @@ class ToolContext:
     model_invocation_id: str | None = None
     tool_invocation_id: str | None = None
     idempotency_key: str | None = None
-    allowed_tools: tuple[str, ...] = ()
+    #: The exact agent-facing tool policy. ``None`` means the policy was never
+    #: configured (unrestricted); an empty tuple is a configured empty policy
+    #: and permits nothing.
+    allowed_tools: tuple[str, ...] | None = None
     intent_epoch: int = 0
 
     def __post_init__(self) -> None:
@@ -75,15 +78,22 @@ class ToolContext:
             "idempotency_key",
         ):
             object.__setattr__(self, name, _optional_text(getattr(self, name), name))
-        tools = tuple(dict.fromkeys(self.allowed_tools))
-        for tool in tools:
-            _require_text(tool, "allowed_tools entry")
-        object.__setattr__(self, "allowed_tools", tuple(sorted(tools)))
+        if self.allowed_tools is not None:
+            tools = tuple(dict.fromkeys(self.allowed_tools))
+            for tool in tools:
+                _require_text(tool, "allowed_tools entry")
+            object.__setattr__(self, "allowed_tools", tuple(sorted(tools)))
         if self.intent_epoch < 0:
             raise ToolContextError("intent_epoch must not be negative")
 
     def permits(self, tool_name: str) -> bool:
-        """Return whether the effective policy allows ``tool_name``."""
+        """Return whether the effective policy allows ``tool_name``.
+
+        A configured policy permits exactly its entries; only an unconfigured
+        policy (``None``) is unrestricted.
+        """
+        if self.allowed_tools is None:
+            return True
         return tool_name in self.allowed_tools
 
     def with_policy(self, allowed_tools: tuple[str, ...]) -> ToolContext:

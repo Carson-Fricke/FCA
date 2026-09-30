@@ -598,6 +598,23 @@ impl<'de> Deserialize<'de> for CoverageRecord {
     }
 }
 
+/// Incremental progress for one long-running ensure job.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobProgress {
+    /// Sessions the job plans to fill.
+    pub sessions_total: u64,
+    /// Sessions that reached a terminal outcome so far.
+    pub sessions_done: u64,
+    /// Symbol of the session that just finished.
+    pub symbol: String,
+    /// Session date that just finished, ISO formatted.
+    pub session_date: String,
+    /// Rows written for the finished session.
+    pub rows: u64,
+    /// Failure detail when the finished session failed.
+    pub error: Option<String>,
+}
+
 /// State and audit timestamps for one catalog/ensure job.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobRecord {
@@ -611,6 +628,9 @@ pub struct JobRecord {
     pub updated_at: DateTime,
     /// Failure detail when the job failed.
     pub error_message: Option<String>,
+    /// Incremental progress while the job runs; absent before the first
+    /// session finishes.
+    pub progress: Option<JobProgress>,
 }
 
 impl JobRecord {
@@ -632,7 +652,15 @@ impl JobRecord {
             created_at,
             updated_at,
             error_message,
+            progress: None,
         })
+    }
+
+    /// Attach one incremental progress snapshot.
+    #[must_use]
+    pub fn with_progress(mut self, progress: JobProgress) -> Self {
+        self.progress = Some(progress);
+        self
     }
 
     /// The Azure Table row key for this job.
@@ -651,6 +679,8 @@ struct JobJson {
     updated_at: DateTime,
     #[serde(default)]
     error_message: Option<String>,
+    #[serde(default)]
+    progress: Option<JobProgress>,
 }
 
 impl Serialize for JobRecord {
@@ -658,10 +688,11 @@ impl Serialize for JobRecord {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("JobRecord", 5)?;
+        let mut state = serializer.serialize_struct("JobRecord", 6)?;
         state.serialize_field("created_at", &self.created_at.isoformat_micros_utc())?;
         state.serialize_field("error_message", &self.error_message)?;
         state.serialize_field("job_id", &self.job_id)?;
+        state.serialize_field("progress", &self.progress)?;
         state.serialize_field("state", &self.state)?;
         state.serialize_field("updated_at", &self.updated_at.isoformat_micros_utc())?;
         state.end()
@@ -674,14 +705,16 @@ impl<'de> Deserialize<'de> for JobRecord {
         D: Deserializer<'de>,
     {
         let raw = JobJson::deserialize(deserializer)?;
-        JobRecord::new(
+        let mut record = JobRecord::new(
             raw.job_id,
             raw.state,
             raw.created_at,
             raw.updated_at,
             raw.error_message,
         )
-        .map_err(de::Error::custom)
+        .map_err(de::Error::custom)?;
+        record.progress = raw.progress;
+        Ok(record)
     }
 }
 

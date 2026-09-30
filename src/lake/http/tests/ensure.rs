@@ -147,6 +147,7 @@ async fn missing_ensure_persists_a_stable_job_and_polls_to_completion() {
             "created_at": "2024-01-22T12:00:00Z",
             "updated_at": "2024-01-22T12:00:00Z",
             "error_message": null,
+            "progress": null,
         })
     );
 }

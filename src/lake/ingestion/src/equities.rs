@@ -109,6 +109,7 @@ impl EquityIngestTransaction {
     ) -> Result<EquityIngestResult, DataError> {
         let symbol = canonical_symbol(symbol)?;
         let selected = normalize_data_types(data_types, false)?;
+        let session_fetch_started = std::time::Instant::now();
         if let Some(guard) = &self.cap_guard {
             guard.enforce_ingest(0)?;
         }
@@ -129,6 +130,11 @@ impl EquityIngestTransaction {
             })
             .collect();
         let results = join_all(fetches).await;
+        eprintln!(
+            "PROFILE fetch symbol={symbol} session={} seconds={:.3}",
+            session.session_date.isoformat(),
+            session_fetch_started.elapsed().as_secs_f64()
+        );
 
         if let Some(message) = fetch_error_message(&selected, &results) {
             let retryable = failures_all_transient(&results);
@@ -139,7 +145,21 @@ impl EquityIngestTransaction {
             .map(|result| result.expect("a successful gather has no provider error"))
             .collect();
 
-        let staged = match self.stage(&symbol, session, &selected, &records) {
+        let stage_started = std::time::Instant::now();
+        // Staging is CPU-bound (validation, sort, row conversion, Arrow
+        // normalization). Run it on the blocking pool under a multi-thread
+        // runtime so a staging session never occupies a runtime worker that
+        // concurrent sessions need for their fetch I/O. Single-thread test
+        // runtimes cannot block in place, so they stage inline.
+        let offload = tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+        });
+        let staged_result = if offload {
+            tokio::task::block_in_place(|| self.stage(&symbol, session, &selected, &records))
+        } else {
+            self.stage(&symbol, session, &selected, &records)
+        };
+        let staged = match staged_result {
             Ok(staged) => staged,
             Err(error) => {
                 self.writer.reset_staged();
@@ -152,6 +172,11 @@ impl EquityIngestTransaction {
                 );
             }
         };
+        eprintln!(
+            "PROFILE stage symbol={symbol} session={} seconds={:.3}",
+            session.session_date.isoformat(),
+            stage_started.elapsed().as_secs_f64()
+        );
 
         if let Some(guard) = &self.cap_guard {
             let additional_bytes = staged
@@ -194,6 +219,7 @@ impl EquityIngestTransaction {
     ) -> Result<StagedEquityObjects, DataError> {
         let mut metadata = Vec::with_capacity(selected.len());
         for (data_type, records) in selected.iter().zip(records) {
+            let rows_started = std::time::Instant::now();
             let rows = match (data_type, records) {
                 (DataType::Trade, EquityRecords::Trades(trades)) => {
                     trade_rows(trades, symbol, session)?
@@ -203,6 +229,8 @@ impl EquityIngestTransaction {
                 }
                 _ => unreachable!("fetch results align with the selected data types"),
             };
+            let convert_seconds = rows_started.elapsed().as_secs_f64();
+            let write_started = std::time::Instant::now();
             metadata.push(self.writer.write(
                 &rows,
                 session.session_date,
@@ -211,6 +239,13 @@ impl EquityIngestTransaction {
                 None,
                 symbol,
             )?);
+            eprintln!(
+                "PROFILE stage-part symbol={symbol} session={} data_type={} rows={} convert_seconds={convert_seconds:.3} write_seconds={:.3}",
+                session.session_date.isoformat(),
+                data_type.value(),
+                rows.len(),
+                write_started.elapsed().as_secs_f64()
+            );
         }
         Ok(StagedEquityObjects {
             objects: self.writer.drain_staged(),
@@ -331,13 +366,12 @@ fn trade_rows(
     symbol: &str,
     session: &CoverageSession,
 ) -> Result<Vec<Value>, DataError> {
-    let mut validated = Vec::with_capacity(records.len());
-    for record in records {
-        validate_trade(record, symbol, session)?;
-        validated.push(record);
-    }
-    validated.sort_by(|left, right| compare_trades(left, right));
-    Ok(validated.iter().map(|record| record.to_row()).collect())
+    normalized_rows(
+        records,
+        |record| validate_trade(record, symbol, session),
+        compare_trades,
+        NormalizedTrade::to_row,
+    )
 }
 
 /// Validate and canonically order equity quotes.
@@ -346,13 +380,81 @@ fn quote_rows(
     symbol: &str,
     session: &CoverageSession,
 ) -> Result<Vec<Value>, DataError> {
-    let mut validated = Vec::with_capacity(records.len());
-    for record in records {
-        validate_quote(record, symbol, session)?;
-        validated.push(record);
-    }
-    validated.sort_by(|left, right| compare_quotes(left, right));
-    Ok(validated.iter().map(|record| record.to_row()).collect())
+    normalized_rows(
+        records,
+        |record| validate_quote(record, symbol, session),
+        compare_quotes,
+        NormalizedQuote::to_row,
+    )
+}
+
+/// Validate, canonically sort, and convert one session's records.
+///
+/// Validation and JSON row conversion are row-granular and independent, so
+/// each runs across scoped OS threads while the concatenation and the single
+/// sort keep the pinned deterministic order. Million-row partitions spend
+/// most of their staging time here; the parallel passes are byte-for-byte
+/// equivalent to the serial loop.
+fn normalized_rows<T, V, C>(
+    records: &[T],
+    validate: V,
+    compare: C,
+    to_row: fn(&T) -> Value,
+) -> Result<Vec<Value>, DataError>
+where
+    T: Sync,
+    V: Fn(&T) -> Result<(), DataError> + Sync,
+    C: Fn(&T, &T) -> Ordering + Sync,
+{
+    let workers = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let mut validated: Vec<&T> = std::thread::scope(|scope| {
+        let chunk = records.len().div_ceil(workers).max(1);
+        let handles: Vec<_> = records
+            .chunks(chunk)
+            .map(|slice| {
+                let validate = &validate;
+                scope.spawn(move || -> Result<Vec<&T>, DataError> {
+                    let mut chunk_records = Vec::with_capacity(slice.len());
+                    for record in slice {
+                        validate(record)?;
+                        chunk_records.push(record);
+                    }
+                    Ok(chunk_records)
+                })
+            })
+            .collect();
+        let mut merged = Vec::with_capacity(records.len());
+        for handle in handles {
+            let part = handle
+                .join()
+                .map_err(|_| DataError::value("row validation worker panicked"))?;
+            merged.extend(part?);
+        }
+        Ok::<Vec<&T>, DataError>(merged)
+    })?;
+    validated.sort_by(|left, right| compare(left, right));
+    std::thread::scope(|scope| {
+        let chunk = validated.len().div_ceil(workers).max(1);
+        let handles: Vec<_> = validated
+            .chunks(chunk)
+            .map(|slice| {
+                scope.spawn(move || {
+                    slice
+                        .iter()
+                        .map(|record| to_row(record))
+                        .collect::<Vec<Value>>()
+                })
+            })
+            .collect();
+        let mut rows = Vec::with_capacity(validated.len());
+        for handle in handles {
+            let part = handle
+                .join()
+                .map_err(|_| DataError::value("row conversion worker panicked"))?;
+            rows.extend(part);
+        }
+        Ok(rows)
+    })
 }
 
 /// Compare two trades on the pinned `(timestamp, trade_id, exchange, price,

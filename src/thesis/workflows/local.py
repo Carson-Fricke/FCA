@@ -112,7 +112,7 @@ class McpBacktestRunner:
         reusable = self._existing_run(request.run_id)
         if reusable is not None:
             return self._resolve(request.run_id, reusable)
-        path = _materialize_configuration(request.bundle.harness_configuration)
+        path = materialize_configuration(request.bundle.harness_configuration)
         launched = self._harness_tools.call_tool(
             self._launch_tool, {"config_path": path}
         )
@@ -323,7 +323,7 @@ def build_local_workflow_runtime(
     )
 
 
-def _materialize_configuration(configuration: object) -> str:
+def materialize_configuration(configuration: object) -> str:
     """Return a configuration path, writing inline mappings to a temp file."""
     if isinstance(configuration, str) and configuration.strip():
         return configuration
@@ -362,4 +362,5 @@ __all__ = [
     "McpBacktestRunner",
     "McpStudyRunner",
     "build_local_workflow_runtime",
+    "materialize_configuration",
 ]

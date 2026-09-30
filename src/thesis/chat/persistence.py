@@ -302,6 +302,7 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
             ),
             workflow_execution_id=_optional_text(data.get("workflow_execution_id")),
             phase_attempt_id=_optional_text(data.get("phase_attempt_id")),
+            phase=_optional_text(data.get("phase")),
             spec_version=str(data.get("spec_version", "1.0.0")),
             kind=SubAgentKind(str(data.get("kind", SubAgentKind.CONVERSATION))),
             allowed_tools=_ids(data.get("allowed_tools")),

@@ -16,11 +16,12 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
 from thesis.agent.runtime.control import PhaseCompletionRejected
+from thesis.agent.runtime.control_tools import CONTROL_PHASE_TOOL_NAMES
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.datum import Datum, DatumType
 from thesis.agent.runtime.delivery import (
@@ -198,6 +199,32 @@ class WorkflowDoctrine[RequestT: WorkflowRequest, StateT: WorkflowState, Outcome
     transition_error: Callable[[object, object], Exception]
     record_of: Callable[[int, object, object, datetime, int, str], object]
     rebuild: Callable[[StateT, object, tuple[object, ...]], StateT]
+    #: Per-phase MCP tool configuration. A phase absent here falls back to its
+    #: family's ``mcp_tools``; an explicit empty tuple configures no MCP tools.
+    phase_mcp_tools: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+
+def _phase_mcp_tools(
+    doctrine: WorkflowDoctrine[Any, Any, Any], phase_value: str, family: str
+) -> tuple[str, ...]:
+    """Return the MCP tools configured for one phase, else its family's."""
+    declared = doctrine.phase_mcp_tools.get(phase_value)
+    if declared is not None:
+        return tuple(declared)
+    return tuple(doctrine.mcp_tools.get(family, ()))
+
+
+def _phase_allowed_tools(
+    doctrine: WorkflowDoctrine[Any, Any, Any], phase_value: str, family: str
+) -> tuple[str, ...]:
+    """Return a phase agent's exact agent-facing tool policy.
+
+    The catalog is built from exactly this list, so the configuration here is
+    both the dispatch policy and the advertised catalog: the phase's
+    configured MCP tools plus the structural phase control tools.
+    """
+    configured = _phase_mcp_tools(doctrine, phase_value, family)
+    return tuple(dict.fromkeys((*configured, *CONTROL_PHASE_TOOL_NAMES)))
 
 
 class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
@@ -567,7 +594,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         """
         doctrine, _ = self._require_doctrine_chat()
         family, label = doctrine.orchestrators[phase_value]
-        tools = doctrine.mcp_tools.get(family, ())
+        tools = _phase_mcp_tools(doctrine, phase_value, family)
         declared = self._spec.phase_specs.get(phase_value)
         kind = (
             SubAgentKind.CONVERSATION
@@ -578,7 +605,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             role=label,
             kind=kind,
             phase=phase_value,
-            allowed_tools=tuple(tools),
+            allowed_tools=_phase_allowed_tools(doctrine, phase_value, family),
         )
         context = SubAgentContextSpec(
             knowledge_cutoff=None, mcp_enabled=bool(tools), mcp_tools=tools
@@ -1206,7 +1233,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             ):
                 continue
             family, default_role = doctrine.orchestrators[phase_value]
-            tools = doctrine.mcp_tools.get(family, ())
+            tools = _phase_mcp_tools(doctrine, phase_value, family)
             role = str(payload.get("role") or default_role)
             sub_agent_id = str(payload["subAgentId"])
             self._reopen_phase_node(
@@ -1214,14 +1241,17 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 sub_agent_id,
                 phase=phase,
                 role=role,
-                tools=tools,
                 prompt=prompt,
             )
             active = ActiveSubAgent(
                 sub_agent_id=sub_agent_id,
                 phase=phase,
                 role=role,
-                context=SubAgentContextSpec(),
+                context=SubAgentContextSpec(
+                    knowledge_cutoff=None,
+                    mcp_enabled=bool(tools),
+                    mcp_tools=tools,
+                ),
             )
             self._active_orchestrators[request.execution_id] = active
             return active
@@ -1284,7 +1314,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             ):
                 continue
             family, default_role = doctrine.orchestrators[phase_value]
-            tools = doctrine.mcp_tools.get(family, ())
+            tools = _phase_mcp_tools(doctrine, phase_value, family)
             role = str(payload.get("role") or default_role)
             sub_agent_id = str(payload["subAgentId"])
             self._reopen_phase_node(
@@ -1292,7 +1322,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 sub_agent_id,
                 phase=phase,
                 role=role,
-                tools=tools,
             )
             active = ActiveSubAgent(
                 sub_agent_id=sub_agent_id,
@@ -1316,7 +1345,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         *,
         phase: object,
         role: str,
-        tools: tuple[str, ...],
         prompt: str | None = None,
     ) -> None:
         """Reopen a reused phase node and give it its new prompt.
@@ -1348,7 +1376,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             role=role,
             kind=spec.kind,
             phase=spec.phase,
-            allowed_tools=tuple(tools),
+            allowed_tools=spec.allowed_tools,
         )
         self._subagent_lifecycle.spawn(
             request.workspace_id,

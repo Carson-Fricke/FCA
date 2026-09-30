@@ -23,7 +23,9 @@ use mcp::tools::{
 use mcp::transport::serve_stdio;
 use serde_json::{Map, Value};
 
-use crate::local::{NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter};
+use crate::local::{
+    NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter, NativeStudyValidator,
+};
 
 /// Environment variable consulted for the remote API base URL.
 pub const API_BASE_URL_VARIABLE: &str = "HARNESS_API_BASE_URL";
@@ -182,6 +184,7 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
             jobs,
             Arc::new(crate::http::native::NativeScreenRunner::default()),
         )));
+        context.study_validator = Some(Arc::new(NativeStudyValidator));
     }
     let context = context
         .validate()

@@ -50,6 +50,23 @@ impl From<BacktestJobError> for ConfigurationRunError {
     }
 }
 
+/// Validate one configuration's authored programs without replaying history.
+///
+/// Every instance is compiled, loaded, and constructed over the default
+/// managed workspace, exactly as a run would, so a source that fails to build
+/// or omits the SDK handshake exports is reported before any data is fetched.
+/// Returns the number of validated instances.
+///
+/// # Errors
+///
+/// Returns [`JitError`] under the same conditions as
+/// [`build_instances`](crate::config::build_instances).
+pub fn validate_configuration(configuration: &BacktestConfig) -> Result<usize, JitError> {
+    let workspace = ManagedWorkspace::open_default()?;
+    let programs = build_instances(configuration, &workspace)?;
+    Ok(programs.len())
+}
+
 /// Run one already-validated study configuration through JIT-authored study
 /// programs and the native engine, writing the canonical `study.json`
 /// artifact set.

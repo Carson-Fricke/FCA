@@ -227,6 +227,12 @@ type PhaseCompletionApplier = Callable[
     [str, SubAgentRecord, Mapping[str, object]], Mapping[str, object] | None
 ]
 
+#: Validates a phase contract before it is applied; a returned message is the
+#: repair reason the asking agent receives inside the same turn.
+type ContractValidator = Callable[
+    [str, SubAgentRecord, Mapping[str, object]], str | None
+]
+
 
 class ControlToolService:
     """A thin adapter over the conversations service for the control tools.
@@ -243,6 +249,7 @@ class ControlToolService:
         conversations: Conversations,
         execution_epochs: Callable[[str, str], int | None] | None = None,
         phase_completions: PhaseCompletionApplier | None = None,
+        contract_validator: ContractValidator | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         id_factory: Callable[[str], str] | None = None,
     ) -> None:
@@ -251,6 +258,7 @@ class ControlToolService:
         self._store = conversations.store
         self._execution_epochs = execution_epochs
         self._phase_completions = phase_completions
+        self._contract_validator = contract_validator
         self._clock = clock
         self._id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid.uuid4().hex}")
 
@@ -375,15 +383,20 @@ class ControlToolService:
         record = self._lifecycle.get(workspace_id, sub_agent_id)
         if record is None:
             raise RuntimeError("sub-agent does not exist")
-        if (
-            record.workflow_execution_id is not None
-            and self._phase_completions is not None
-        ):
-            applied = self._phase_completions(workspace_id, record, completion)
-            if applied is None:
-                raise PhaseCompletionRejected(
-                    "no workflow is available to apply this completion"
-                )
+        if record.workflow_execution_id is not None:
+            if self._contract_validator is not None:
+                # An authoritative validation (for example a harness compile of
+                # the authored program) runs before any transition commits, so
+                # its failure reaches the agent as a repairable tool result.
+                failure = self._contract_validator(workspace_id, record, completion)
+                if failure:
+                    raise PhaseCompletionRejected(failure)
+            if self._phase_completions is not None:
+                applied = self._phase_completions(workspace_id, record, completion)
+                if applied is None:
+                    raise PhaseCompletionRejected(
+                        "no workflow is available to apply this completion"
+                    )
         return self._complete_child(workspace_id, sub_agent_id, result=completion)
 
     def _complete_child(

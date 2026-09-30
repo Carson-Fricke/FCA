@@ -55,6 +55,7 @@ pub(crate) async fn job_status(
             created_at: record.created_at,
             updated_at: record.updated_at,
             error_message: record.error_message,
+            progress: record.progress,
         })),
         None => Err(ApiError::job_not_found()),
     }

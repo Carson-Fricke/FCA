@@ -10,6 +10,7 @@ from thesis.agent.runtime.control import (
     TOOL_SPAWN_SUB_AGENT,
     AwaitResult,
     ControlToolService,
+    PhaseCompletionRejected,
 )
 from thesis.agent.runtime.control_tools import (
     CONTROL_NODE_TOOL_NAMES,
@@ -236,6 +237,76 @@ def test_operator_input_pause_and_answer_share_the_input_path() -> None:
     assert [message.body for message in answers] == ["approved"]
     assert answers[0].data is not None
     assert answers[0].data["kind"] == "operator_input"
+
+
+def test_contract_validator_rejection_precedes_application() -> None:
+    chat = ChatService(persistence=InMemoryChatPersistence())
+    chat_id = chat.create_chat(
+        _WORKSPACE, title="validation chat", owner_actor_id=_ACTOR
+    ).chat_id
+    execution = chat.launch_workflow(
+        _WORKSPACE,
+        chat_id,
+        workflow=WorkflowDefinition(
+            workflow_id="hypothesis-development",
+            version="1.0.0",
+            title="Hypothesis development",
+            phases=("hypothesis_creation",),
+        ),
+        actor_id=_ACTOR,
+        body="Test the premise.",
+    )
+    store = PersistenceSubAgentStore(chat.persistence)
+    lifecycle = SubAgentLifecycle(chat, store=store)
+    node = lifecycle.spawn(
+        _WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(role="workflow-node", kind=SubAgentKind.ONE_SHOT),
+        actor_id=_ACTOR,
+    )
+    phase = lifecycle.spawn(
+        _WORKSPACE,
+        chat_id,
+        spec=SubAgentSpec(
+            role="hypothesis-creation",
+            kind=SubAgentKind.ONE_SHOT,
+            phase="hypothesis_creation",
+        ),
+        actor_id=_ACTOR,
+        parent_sub_agent_id=node.sub_agent_id,
+        workflow_execution_id=execution.execution_id,
+    )
+    applied: list[object] = []
+    rejection: list[str | None] = [
+        "the authored study program does not compile in the harness"
+    ]
+    service = ControlToolService(
+        conversations=Conversations(chat=chat, store=store, lifecycle=lifecycle),
+        phase_completions=lambda _workspace, _record, completion: (
+            applied.append(completion) or {"applied": True}
+        ),
+        contract_validator=lambda _workspace, _record, _completion: rejection[0],
+    )
+
+    with pytest.raises(PhaseCompletionRejected) as error:
+        service.complete_phase(
+            _WORKSPACE, phase.sub_agent_id, completion={"hypothesis": {}}
+        )
+
+    assert "does not compile" in str(error.value)
+    assert applied == []
+    still_open = lifecycle.get(_WORKSPACE, phase.sub_agent_id)
+    assert still_open is not None
+    assert still_open.status is SubAgentStatus.PENDING
+
+    rejection[0] = None
+    service.complete_phase(
+        _WORKSPACE, phase.sub_agent_id, completion={"hypothesis": {}}
+    )
+    assert applied == [{"hypothesis": {}}]
+    completed = lifecycle.get(_WORKSPACE, phase.sub_agent_id)
+    assert completed is not None
+    assert completed.status is SubAgentStatus.COMPLETED
 
 
 def test_await_sub_agent_waits_for_a_child_to_finish() -> None:

@@ -107,6 +107,9 @@ from thesis.workflows.local import McpBacktestRunner, McpStudyRunner
 from thesis.workflows.registry.hypothesis_development import (
     HypothesisDevelopmentRequest,
 )
+from thesis.workflows.registry.hypothesis_development.composers.hypothesis import (
+    _compose_research_model,
+)
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
 )
@@ -116,7 +119,7 @@ from thesis.workflows.runtime import (
 )
 
 #: Default model when ``THESIS_MODEL`` is unset.
-DEFAULT_SERVING_MODEL = "z-ai/glm-5.3-flash"
+DEFAULT_SERVING_MODEL = "deepseek/deepseek-v4.1-flash"
 
 #: The model profile every serving role resolves to.
 _SERVING_PROFILE_ID = "serving-openrouter"
@@ -293,6 +296,48 @@ def open_serving_harness_tools() -> HarnessToolProvider | None:
     return open_harness_tool_provider(client=composition.client)
 
 
+def validate_hypothesis_study_contract(
+    harness_tools: HarnessToolProvider | None,
+    phase: str | None,
+    completion: Mapping[str, object],
+) -> str | None:
+    """Compile the authored study program before the contract is applied.
+
+    Only the hypothesis-creation contract carries an authored program.  A build
+    failure is returned as the repair reason, so the phase agent fixes its
+    source inside the same turn instead of the trials phase failing the whole
+    execution after acceptance.  Shape errors are left to the contract
+    validator, and a harness outage never blocks the completion — the run
+    surfaces that failure on its own.
+    """
+    if harness_tools is None or phase != "hypothesis_creation":
+        return None
+    payload = completion.get("hypothesis")
+    if not isinstance(payload, Mapping):
+        return None
+    model_payload = payload.get("model")
+    if not isinstance(model_payload, Mapping):
+        return None
+    try:
+        _compose_research_model(model_payload)
+    except Exception:  # noqa: BLE001 - the contract validator reports shape
+        return None
+    try:
+        # The harness builds the runtime study job from the model document and
+        # compiles the authored program; no composition-side envelope is needed.
+        result = harness_tools.validate_study(model=dict(model_payload))
+    except Exception:  # noqa: BLE001 - validation is advisory to the turn
+        return None
+    if result.ok:
+        return None
+    detail = result.text or ("" if result.failure is None else result.failure.message)
+    return (
+        "the authored study program does not compile in the harness; fix "
+        "model.source and call request_phase_completion again: "
+        f"{detail or 'unknown build failure'}"
+    )
+
+
 def build_serving_stack(
     *,
     chat_service: ChatService,
@@ -407,6 +452,16 @@ def build_serving_stack(
         workflow = runtime.build_hypothesis_development(chat=chat_service)
         workflow.fail_execution(request, reason=str(error) or type(error).__name__)
 
+    def validate_phase_contract(
+        workspace_id: str,
+        record: SubAgentRecord,
+        completion: Mapping[str, object],
+    ) -> str | None:
+        del workspace_id
+        return validate_hypothesis_study_contract(
+            harness_tools, record.phase, completion
+        )
+
     def trigger_message_id(history: Sequence[ChatMessage]) -> str | None:
         for message in reversed(history):
             if message.role is MessageRole.USER:
@@ -461,6 +516,7 @@ def build_serving_stack(
         conversations=conversations,
         execution_epochs=execution_epoch,
         phase_completions=apply_phase_completion,
+        contract_validator=validate_phase_contract,
     )
     holder["control_service"] = control_service
 

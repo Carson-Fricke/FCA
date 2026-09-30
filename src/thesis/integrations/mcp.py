@@ -61,8 +61,10 @@ MCP_HTTP_ROUTE = "mcp"
 MCP_HEALTH_ROUTE = "mcp/health"
 #: Default harness-hosted MCP endpoint: the local harness API server.
 DEFAULT_HARNESS_MCP_URL = "http://127.0.0.1:8001"
-#: Default timeout applied to every remote harness MCP HTTP exchange.
-DEFAULT_HTTP_TIMEOUT = 30.0
+#: Default timeout applied to every remote harness MCP HTTP exchange. The
+#: study-authoring validation call compiles an authored Rust program inline, so
+#: the budget covers a cold `cargo build` before the cached artifact exists.
+DEFAULT_HTTP_TIMEOUT = 120.0
 #: Default number of initialize/list_tools probe attempts before giving up.
 DEFAULT_PROBE_ATTEMPTS = 3
 #: Default base delay between probe attempts, in seconds.
@@ -80,6 +82,7 @@ TOOL_RUN_STUDY = "run_study"
 TOOL_RUN_SCREENER = "run_screener"
 TOOL_GET_SCREENER_STATUS = "get_screener_status"
 TOOL_SCREENER_CONFIG_TEMPLATE = "screener_config_template"
+TOOL_VALIDATE_STUDY = "validate_study"
 TOOL_LAUNCH_TRADER = "launch_trader"
 
 
@@ -414,6 +417,10 @@ class HarnessMcpClient:
         if workspace is not None:
             arguments["workspace"] = workspace
         return self.call_tool(TOOL_RUN_BACKTEST, arguments)
+
+    def validate_study(self, *, model: Mapping[str, object]) -> McpToolResult:
+        """Call the ``validate_study`` tool with one authored model document."""
+        return self.call_tool(TOOL_VALIDATE_STUDY, {"model": dict(model)})
 
     def launch_trader(self, *, config_path: str) -> McpToolResult:
         """Call the ``launch_trader`` tool."""
@@ -856,6 +863,7 @@ __all__ = [
     "TOOL_RUN_SCREENER",
     "TOOL_RUN_STUDY",
     "TOOL_SCREENER_CONFIG_TEMPLATE",
+    "TOOL_VALIDATE_STUDY",
     "EnvironmentHarnessTokenSource",
     "HarnessMcpAuthError",
     "HarnessMcpBoundary",

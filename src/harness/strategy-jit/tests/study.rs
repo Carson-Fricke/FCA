@@ -407,6 +407,53 @@ fn runs_a_jit_authored_strategy_through_the_engine() {
 }
 
 #[test]
+fn validate_configuration_accepts_a_real_program_and_rejects_a_stub() {
+    fn authored_configuration(run_id: &str, source: &str) -> BacktestConfig {
+        let mut configuration = BacktestConfig::new(run_id, 0, ONE_DAY_NS, 7).expect("config");
+        configuration.shell = "study".to_string();
+        configuration.symbols = vec!["SPY".to_string()];
+        let mut parameters = BTreeMap::new();
+        parameters.insert(
+            "source".to_string(),
+            backtest::canonical_json::JsonValue::String(source.to_string()),
+        );
+        let normalized = source.replace("\r\n", "\n");
+        configuration.strategy_instances = vec![StrategyInstanceConfig {
+            instance_id: "jit-study".to_string(),
+            implementation: "jit".to_string(),
+            bundle_hash: backtest::sha256::digest_hex(normalized.as_bytes()),
+            parameters,
+            symbols: vec!["SPY".to_string()],
+            capital_fraction: "1.0".to_string(),
+        }];
+        configuration
+    }
+
+    let good = authored_configuration("jit-validate-ok", STUDY_SOURCE);
+    assert_eq!(
+        harness_strategy_jit::validate_configuration(&good).expect("a real program validates"),
+        1
+    );
+
+    // The exact gaming shape a substring gate accepted: both marker strings
+    // present, but no `impl StudyProgram` and no macro invocation, so the
+    // artifact cannot export the SDK handshake.
+    let stub = "extern crate harness_strategy_sdk; \
+                // authored against harness-strategy-sdk; export_study_program!()\n";
+    let stub_configuration = authored_configuration("jit-validate-stub", stub);
+    let error = harness_strategy_jit::validate_configuration(&stub_configuration)
+        .expect_err("a stub without the handshake exports must fail validation");
+    assert!(
+        matches!(
+            error,
+            harness_strategy_jit::JitError::Export { ref symbol, .. }
+                if symbol == "harness_sdk_abi_version"
+        ),
+        "expected the missing-export failure, got {error:?}"
+    );
+}
+
+#[test]
 fn jit_compilation_is_cached_by_source_digest() {
     let directory = temp_dir("cache");
     let workspace = ManagedWorkspace::open(&directory).expect("workspace");

@@ -88,6 +88,7 @@ pub fn create_local_app_with(
     let launcher = Arc::new(
         LocalEnsureLauncher::new(layout.clone(), environ.clone(), settings, universes, now())?
             .with_catalog(Arc::clone(&catalog))
+            .with_jobs(Arc::clone(&jobs))
             .with_providers(providers.equity, providers.crypto)
             .with_bars_provider(providers.bars),
     );

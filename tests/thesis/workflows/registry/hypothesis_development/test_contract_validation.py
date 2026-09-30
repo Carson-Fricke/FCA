@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
+from thesis.agent.runtime.context import ToolContext
+from thesis.agent.runtime.control import TOOL_REQUEST_PHASE_COMPLETION
+from thesis.agent.runtime.control_tools import (
+    ControlToolRuntime,
+    control_registered_tools,
+)
+from thesis.agent.runtime.session import SessionToolRegistry
 from thesis.research.grammar import IDENTIFIER_PATTERN, VERSION_PATTERN
 from thesis.workflows.registry.hypothesis_development.contracts.validation import (
     HYPOTHESIS_COMPLETION_SCHEMA,
@@ -19,6 +28,52 @@ from thesis.workflows.registry.hypothesis_development.phases.trials import (
 )
 
 from ._support import _hypothesis_envelope, _model
+
+
+def test_completion_tool_schema_gate_reports_the_precise_violations() -> None:
+    """The advertised completion schema is enforced at dispatch with paths."""
+    context = ToolContext(
+        workspace_id="workspace-a",
+        chat_id="chat-a",
+        conversation_id="subagent-a",
+        actor_id="operator",
+        sub_agent_id="subagent-a",
+        workflow_execution_id="execution-a",
+    )
+    registry = SessionToolRegistry(
+        control_registered_tools(
+            cast(ControlToolRuntime, object()),
+            context,
+            phase_completion_schema=HYPOTHESIS_COMPLETION_SCHEMA,
+        )
+    )
+
+    execution = registry.dispatch(
+        TOOL_REQUEST_PHASE_COMPLETION,
+        {
+            "completion": {
+                "target": "falsification_trials",
+                "hypothesis": {"claim": "", "model": {"modelId": 7}},
+            }
+        },
+    )
+
+    assert execution.ok is False
+    assert execution.failure is not None
+    assert execution.failure["kind"] == "invalid_arguments"
+    message = str(execution.failure["message"])
+    assert (
+        "completion.hypothesis.claim: expected at least 1 character(s), got 0"
+        in message
+    )
+    assert "completion.hypothesis.disagreement: required property is missing" in message
+    assert "completion.hypothesis.falsifiers: required property is missing" in message
+    assert (
+        "completion.hypothesis.model.modelId: expected string, got integer" in message
+    )
+    assert (
+        "completion.hypothesis.model.version: required property is missing" in message
+    )
 
 
 def test_advertised_target_enum_never_invites_the_failed_phase() -> None:

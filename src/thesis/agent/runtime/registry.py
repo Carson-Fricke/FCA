@@ -109,7 +109,9 @@ def build_session_registry(
     ``phase_completion_schema`` is the phase's declared completion JSON
     Schema; when the context belongs to a workflow phase agent, the catalog
     advertises it on ``request_phase_completion`` so the provider constrains
-    the call at decode time.
+    the call at decode time.  The workflow-launch tool is advertised to
+    contexts outside a workflow execution: a phase agent or an agent spawned
+    under one cannot launch a workflow, while a chat-spawned sub-agent can.
     """
     tools: list[RegisteredTool] = []
     if harness_tools is not None:
@@ -124,9 +126,17 @@ def build_session_registry(
                 phase_completion_schema=phase_completion_schema,
             )
         )
-    if workflow is not None:
+    if workflow is not None and context.workflow_execution_id is None:
+        # Workflow launch is scoped at composition: an agent inside a workflow
+        # execution (any phase agent, or a helper spawned under one) never
+        # advertises it, so the hypothesis-creation agent cannot re-launch its
+        # own workflow after reading the operator's "start the workflow" seed
+        # text. A chat-spawned sub-agent outside a workflow keeps the launcher.
         tools.extend(workflow_registered_tools(workflow, context))
-    policy: Sequence[str] | None = context.allowed_tools or None
+    # The catalog is exactly the configured policy intersected with the
+    # registered tools: an explicit empty policy advertises nothing, and only
+    # an unconfigured policy (``None``) leaves the full catalog in place.
+    policy: Sequence[str] | None = context.allowed_tools
     return SessionToolRegistry(tools, policy=policy)
 
 

@@ -26,6 +26,7 @@ from typing import Protocol
 
 from thesis.agent.runtime.datum import Datum, normalize_datums
 from thesis.agent.runtime.json_recovery import extract_json_object
+from thesis.agent.runtime.schema import render_violations, validate_arguments
 from thesis.agent.runtime.store import SubAgentStore
 from thesis.chat.contracts import (
     AgentInvocation,
@@ -98,6 +99,16 @@ class RegisteredTool:
                 return name
         raise ValueError("registered tool spec is missing a function name")
 
+    @property
+    def input_schema(self) -> Mapping[str, object]:
+        """Return the JSON Schema the tool advertised for its arguments."""
+        function = self.spec.get("function")
+        if isinstance(function, Mapping):
+            parameters = function.get("parameters")
+            if isinstance(parameters, Mapping):
+                return parameters
+        return {}
+
 
 class SessionToolRegistry:
     """A default-deny catalog of tools available to one session.
@@ -154,6 +165,21 @@ class SessionToolRegistry:
                     "kind": "denied",
                     "message": f"tool is not permitted by the effective policy: {name}",
                     "tool": name,
+                },
+            )
+        # One schema abstraction for every dispatched tool call: the arguments
+        # must fit the schema the tool advertised before its handler can run.
+        misses = validate_arguments(tool.input_schema, arguments)
+        if misses:
+            return ToolExecution(
+                ok=False,
+                failure={
+                    "kind": "invalid_arguments",
+                    "message": f"invalid arguments: {render_violations(misses)}",
+                    "tool": name,
+                    "violations": [
+                        {"path": miss.path, "message": miss.message} for miss in misses
+                    ],
                 },
             )
         try:

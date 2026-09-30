@@ -133,6 +133,49 @@ describe('derivePhases', () => {
 			{ name: 'strategy_rca', status: 'done', attempts: 1 }
 		]);
 	});
+
+	it('does not count progress or result events as attempts', () => {
+		const phases = derivePhases([
+			event(
+				'workflow.launched',
+				{ workflow: { phases: ['requested', 'falsification_trials'] } },
+				1
+			),
+			event('workflow.started', {}, 2),
+			event('workflow.phase', { phase: 'falsification_trials' }, 3),
+			event('workflow.progress', { phase: 'falsification_trials' }, 4),
+			event('workflow.phase_result', { phase: 'falsification_trials' }, 5)
+		]);
+		expect(phases).toEqual([
+			{ name: 'falsification_trials', status: 'active', attempts: 1 }
+		]);
+	});
+
+	it('counts one attempt per phase-agent spawn and ignores the hidden workflow node', () => {
+		const phases = derivePhases([
+			event(
+				'workflow.launched',
+				{ workflow: { phases: ['requested', 'hypothesis_creation'] } },
+				1
+			),
+			event('workflow.started', {}, 2),
+			event('sub_agent.spawned', { phase: 'hypothesis_creation', role: 'workflow-node' }, 3),
+			event(
+				'sub_agent.spawned',
+				{ phase: 'hypothesis_creation', role: 'Thesis hypothesis-creation orchestrator' },
+				4
+			),
+			event(
+				'sub_agent.spawned',
+				{ phase: 'hypothesis_creation', role: 'Thesis hypothesis-creation orchestrator' },
+				5
+			),
+			event('workflow.progress', { phase: 'hypothesis_creation' }, 6)
+		]);
+		expect(phases).toEqual([
+			{ name: 'hypothesis_creation', status: 'active', attempts: 2 }
+		]);
+	});
 });
 
 describe('derivePhaseSteps', () => {

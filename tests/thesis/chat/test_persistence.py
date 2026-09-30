@@ -17,7 +17,7 @@ from thesis.chat import (
     TranscriptItemKind,
     WorkflowDefinition,
 )
-from thesis.chat.contracts import ChatMessage, ChatThread
+from thesis.chat.contracts import ChatMessage, ChatThread, SubAgentKind, SubAgentRecord
 from thesis.execution.events import ExecutionEventType
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -310,3 +310,30 @@ def test_tool_result_defaults_survive_round_trip(tmp_path: Path) -> None:
     assert loaded.tool_result is None
     assert loaded.data is None
     assert loaded.kind is TranscriptItemKind.MESSAGE
+
+
+def test_sub_agent_phase_survives_a_persistence_round_trip(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    chat = service.create_chat(
+        "workspace-a", title="Research", owner_actor_id="operator"
+    )
+    store = PersistenceSubAgentStore(service.persistence)
+    lifecycle = SubAgentLifecycle(service, store=store)
+    child = lifecycle.spawn(
+        "workspace-a",
+        chat.chat_id,
+        spec=SubAgentSpec(
+            role="hypothesis-creation",
+            kind=SubAgentKind.CONVERSATION,
+            phase="hypothesis_creation",
+        ),
+        actor_id="operator",
+        workflow_execution_id="execution-1",
+    )
+
+    reloaded = _service(tmp_path).persistence.get(
+        SubAgentRecord, "workspace-a", child.sub_agent_id
+    )
+
+    assert reloaded is not None
+    assert reloaded.phase == "hypothesis_creation"

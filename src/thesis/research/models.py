@@ -110,11 +110,14 @@ class ResearchModel:
             raise ResearchModelError("model source exceeds the 1 MiB limit")
         if "harness_strategy_sdk" not in self.source:
             raise ResearchModelError(
-                "model source must be authored against harness-strategy-sdk"
+                "model source must be authored against the harness_strategy_sdk "
+                "crate (Cargo dependency name harness-strategy-sdk): import it "
+                "with `use harness_strategy_sdk::...`"
             )
         if "export_study_program!" not in self.source:
             raise ResearchModelError(
-                "model source must export its program with export_study_program!"
+                "model source must export its program with a real "
+                "export_study_program!(Type) invocation"
             )
         outputs = tuple(self.outputs)
         if not outputs or any(

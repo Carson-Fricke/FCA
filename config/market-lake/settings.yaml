@@ -9,6 +9,11 @@ provider:
     # Ceiling for the adaptive per-key in-flight bound: the controller ramps
     # toward it while throughput improves and backs off when latency inflates.
     max_concurrency: 512
+    # The account's Alpaca market-data budget (Algo Trader Plus: 10,000
+    # requests/minute). The governor paces requests evenly against this and
+    # sizes the in-flight bound by Little's law; without it the controller has
+    # no budget to target and settles at its floor.
+    requests_per_minute: 10000
     timeout_seconds: 30
     retry:
       max_attempts: 5

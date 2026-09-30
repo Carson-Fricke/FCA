@@ -250,6 +250,9 @@ pub struct JobStatusResponse {
     pub updated_at: DateTime,
     /// Failure detail when the job failed.
     pub error_message: Option<String>,
+    /// Incremental progress while the job runs; absent before the first
+    /// session finishes.
+    pub progress: Option<lake_catalog::JobProgress>,
 }
 
 /// Catalog metadata and a read-only URL for one known lake object.

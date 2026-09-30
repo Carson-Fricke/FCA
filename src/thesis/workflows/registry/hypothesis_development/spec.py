@@ -89,6 +89,15 @@ _CONVERSATIONAL_PHASES: frozenset[HypothesisDevelopmentPhase] = frozenset(
     {HypothesisDevelopmentPhase.HYPOTHESIS_CREATION, HypothesisDevelopmentPhase.VERDICT}
 )
 
+#: MCP tools each agent-backed phase may call, by phase. The creation agent
+#: authors the Rust study program, so it gets the compilation gate to check its
+#: own draft; every other phase authors nothing and declares no MCP tools.
+#: This is the one place the phase tool surface is configured; the agent-facing
+#: catalog is exactly this list plus the structural phase control tools.
+_PHASE_MCP_TOOLS: Mapping[str, tuple[str, ...]] = {
+    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value: ("validate_study",),
+}
+
 #: The deterministic contract function for each deterministic phase.
 _CONTRACTS: Mapping[
     HypothesisDevelopmentPhase,
@@ -422,6 +431,7 @@ def build_hypothesis_development_workflow(
         research_role=research_role,
         experiment_id=experiment_id,
         mcp_tools=tools,
+        phase_mcp_tools=dict(_PHASE_MCP_TOOLS),
     )
     builder = WorkflowBuilder[
         DevelopmentEngine,

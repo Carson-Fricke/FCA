@@ -8,15 +8,16 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use lake_catalog::JsonCatalogStore;
+use lake_catalog::{JobProgress, JobRepository, JobState, JsonCatalogStore};
 use lake_configuration::{LakeSettings, UniverseSettings};
 use lake_contracts::{AssetClass, BarInterval, DataError, DataType, DateTime};
 use lake_coverage::{EnsureJob, EnsureJobLauncher, EnsureSpec};
 use lake_ingestion::{BarsDataProvider, CryptoDataProvider, EquityDataProvider};
 
 use crate::ingest::{
-    run_local_backfill, run_local_bars_backfill, run_local_crypto_backfill, LocalBackfillOptions,
-    LocalBarsBackfillOptions, LocalCryptoBackfillOptions, LocalIngestError,
+    run_local_backfill, run_local_bars_backfill, run_local_crypto_backfill, BackfillProgress,
+    BackfillProgressSink, LocalBackfillOptions, LocalBarsBackfillOptions,
+    LocalCryptoBackfillOptions, LocalIngestError,
 };
 use crate::state::{lookup, LocalLayout};
 
@@ -64,6 +65,7 @@ pub struct LocalEnsureLauncher {
     crypto: Option<Arc<dyn CryptoDataProvider>>,
     bars: Option<Arc<dyn BarsDataProvider>>,
     catalog: Option<Arc<JsonCatalogStore>>,
+    jobs: Option<Arc<dyn JobRepository>>,
     now: DateTime,
 }
 
@@ -85,6 +87,7 @@ impl LocalEnsureLauncher {
             crypto: None,
             bars: None,
             catalog: None,
+            jobs: None,
             now,
         })
     }
@@ -116,6 +119,40 @@ impl LocalEnsureLauncher {
         self
     }
 
+    /// Reuse the process's job store so incremental progress is written onto
+    /// the durable job record as each session finishes.
+    #[must_use]
+    pub fn with_jobs(mut self, jobs: Arc<dyn JobRepository>) -> Self {
+        self.jobs = Some(jobs);
+        self
+    }
+
+    /// Build the per-job progress sink that mirrors walk progress onto the
+    /// durable job record.
+    fn progress_sink(&self, job_id: &str) -> Option<BackfillProgressSink> {
+        let jobs = self.jobs.clone()?;
+        let job_id = job_id.to_string();
+        let updated_at = self.now;
+        Some(Arc::new(move |progress: BackfillProgress| {
+            let Ok(Some(mut record)) = jobs.get(&job_id) else {
+                return;
+            };
+            if record.state != JobState::Running {
+                return;
+            }
+            record.progress = Some(JobProgress {
+                sessions_total: progress.sessions_total as u64,
+                sessions_done: progress.sessions_done as u64,
+                symbol: progress.symbol,
+                session_date: progress.session_date,
+                rows: progress.data_type_rows.values().copied().sum(),
+                error: progress.error,
+            });
+            record.updated_at = updated_at;
+            let _ = jobs.upsert(&record);
+        }))
+    }
+
     /// Build the callable launcher the ensure route invokes.
     pub fn launcher(self: &Arc<Self>) -> EnsureJobLauncher {
         let launcher = Arc::clone(self);
@@ -133,8 +170,9 @@ impl LocalEnsureLauncher {
     /// Run one ensure request as a bounded backfill.
     pub(crate) async fn run(&self, job: EnsureJob) -> Result<(), LocalIngestError> {
         let request = job.request;
+        let progress = self.progress_sink(&job.job_id);
         if request.data_type == DataType::Bars {
-            return self.run_bars(&request).await;
+            return self.run_bars(&request, progress).await;
         }
         match request.asset_class {
             AssetClass::Equity => run_local_backfill(LocalBackfillOptions {
@@ -150,6 +188,7 @@ impl LocalEnsureLauncher {
                 provider: self.equity.clone(),
                 retry_settle_seconds: None,
                 catalog: self.catalog.clone(),
+                progress: progress.clone(),
             })
             .await
             .map(|_| ()),
@@ -165,6 +204,7 @@ impl LocalEnsureLauncher {
                 provider: self.crypto.clone(),
                 retry_settle_seconds: None,
                 catalog: self.catalog.clone(),
+                progress,
             })
             .await
             .map(|_| ()),
@@ -180,7 +220,11 @@ impl LocalEnsureLauncher {
     /// derivation always reads a current partition; the bars backfill then
     /// prefers provider bars and derives only the sessions the provider did
     /// not cover.
-    async fn run_bars(&self, request: &EnsureSpec) -> Result<(), LocalIngestError> {
+    async fn run_bars(
+        &self,
+        request: &EnsureSpec,
+        progress: Option<BackfillProgressSink>,
+    ) -> Result<(), LocalIngestError> {
         let Some(token) = request.interval.as_deref() else {
             return Err(LocalIngestError::new("bars requires an interval"));
         };
@@ -201,6 +245,7 @@ impl LocalEnsureLauncher {
                     provider: self.equity.clone(),
                     retry_settle_seconds: None,
                     catalog: self.catalog.clone(),
+                    progress: progress.clone(),
                 })
                 .await?;
                 run_local_bars_backfill(LocalBarsBackfillOptions {
@@ -233,6 +278,7 @@ impl LocalEnsureLauncher {
                     provider: self.crypto.clone(),
                     retry_settle_seconds: None,
                     catalog: self.catalog.clone(),
+                    progress,
                 })
                 .await?;
                 run_local_bars_backfill(LocalBarsBackfillOptions {

@@ -195,6 +195,106 @@ impl mcp::tools::ScreeningSubmitter for NativeScreeningSubmitter {
     }
 }
 
+/// Local study validator that builds the authored programs without a replay.
+pub struct NativeStudyValidator;
+
+/// The symbols an authored model validates with when it declares none.
+const DEFAULT_STUDY_SYMBOLS: [&str; 1] = ["SPY"];
+
+/// Build the runtime study job document from one authored model document.
+///
+/// The model's fields are exactly what the agent drafts; everything the
+/// runtime job needs beyond them (the study shell, run id, JIT instance,
+/// bundle hash) is derived here, so no impossible field is ever part of the
+/// tool contract.
+fn authored_study_document(model: &Value) -> Result<Value, String> {
+    let object = model
+        .as_object()
+        .ok_or_else(|| "model must be an object".to_string())?;
+    let raw_source = object
+        .get("source")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| "model.source must be a non-empty string".to_string())?;
+    // The JIT seam normalizes CRLF before hashing, so the derived bundle hash
+    // and the compiled source must use the same normalized text.
+    let source = raw_source.replace("\r\n", "\n");
+    let configuration = object
+        .get("harnessConfiguration")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "model.harnessConfiguration must be an object".to_string())?;
+    let start = configuration
+        .get("start")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| {
+            "model.harnessConfiguration.start must be a non-empty RFC 3339 string".to_string()
+        })?;
+    let end = configuration
+        .get("end")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| {
+            "model.harnessConfiguration.end must be a non-empty RFC 3339 string".to_string()
+        })?;
+    let mut symbols: Vec<String> = match configuration.get("symbols") {
+        Some(value) => value
+            .as_array()
+            .ok_or_else(|| "model.harnessConfiguration.symbols must be an array".to_string())?
+            .iter()
+            .map(|item| {
+                item.as_str().map(str::to_string).ok_or_else(|| {
+                    "model.harnessConfiguration.symbols entries must be strings".to_string()
+                })
+            })
+            .collect::<Result<Vec<String>, String>>()?,
+        None => DEFAULT_STUDY_SYMBOLS
+            .iter()
+            .map(|symbol| (*symbol).to_string())
+            .collect(),
+    };
+    if symbols.is_empty() {
+        symbols = DEFAULT_STUDY_SYMBOLS
+            .iter()
+            .map(|symbol| (*symbol).to_string())
+            .collect();
+    }
+    let digest = backtest::sha256::digest_hex(source.as_bytes());
+    let run_id = format!("validate-{}", &digest[..16]);
+    Ok(json!({
+        "shell": "study",
+        "run_id": &run_id,
+        "start": start,
+        "end": end,
+        "symbols": &symbols,
+        "data": {"symbols": &symbols},
+        "strategy_instances": [{
+            "instance_id": &run_id,
+            "implementation": "jit",
+            "bundle_hash": &digest,
+            "capital_fraction": "1.0",
+            "symbols": &symbols,
+            "parameters": {"source": source},
+        }],
+    }))
+}
+
+impl mcp::tools::StudyValidator for NativeStudyValidator {
+    fn validate(&self, model: &Value) -> Result<Value, String> {
+        let document = authored_study_document(model)?;
+        let configuration = backtest::backtest::job::parse_study_document(&document)
+            .map_err(|error| error.to_string())?;
+        let instances = harness_strategy_jit::validate_configuration(&configuration)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({
+            "boundary": "local",
+            "valid": true,
+            "kind": "study",
+            "instances": instances,
+        }))
+    }
+}
+
 /// Run one screening job on a detached worker and persist its result set.
 fn run_background_screen(
     run_store: Arc<dyn RunStore>,

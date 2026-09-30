@@ -3,15 +3,15 @@
 mod support;
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lake_catalog::{CatalogRepository, CoverageQuery, CoverageStatus, JsonCatalogStore};
 use lake_contracts::{AssetClass, DataType};
 use lake_ingestion::{CryptoDataProvider, EquityDataProvider};
 use lake_local::{
-    run_local_backfill, run_local_crypto_backfill, CryptoBackfillResult, LocalBackfillOptions,
-    LocalCryptoBackfillOptions, LocalLayout, SessionIngestEntry,
+    run_local_backfill, run_local_crypto_backfill, BackfillProgress, CryptoBackfillResult,
+    LocalBackfillOptions, LocalCryptoBackfillOptions, LocalLayout, SessionIngestEntry,
 };
 
 use support::{credentials, day, instant, load_settings, FakeAlpaca, FakeCrypto};
@@ -36,6 +36,7 @@ fn equity_options(
         provider: Some(injected),
         retry_settle_seconds: Some(0.0),
         catalog: None,
+        progress: None,
     }
 }
 
@@ -340,6 +341,7 @@ async fn crypto_backfill_survives_a_poisoned_day_and_returns_the_crypto_shape() 
         provider: Some(injected),
         retry_settle_seconds: Some(0.0),
         catalog: None,
+        progress: None,
     })
     .await
     .expect("crypto backfill");
@@ -410,4 +412,39 @@ async fn crypto_backfill_survives_a_poisoned_day_and_returns_the_crypto_shape() 
             "symbols"
         ]
     );
+}
+#[tokio::test]
+async fn backfill_reports_incremental_session_progress() {
+    type Snapshot = (usize, usize, String, String);
+
+    let temporary = tempfile::tempdir().expect("tempdir");
+    let layout = LocalLayout::new(temporary.path().join("local"));
+    let provider = Arc::new(FakeAlpaca::new());
+    let mut options = two_sessions(&layout, Arc::clone(&provider));
+    let seen: Arc<Mutex<Vec<Snapshot>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink_seen = Arc::clone(&seen);
+    options.progress = Some(Arc::new(move |progress: BackfillProgress| {
+        sink_seen.lock().expect("lock").push((
+            progress.sessions_total,
+            progress.sessions_done,
+            progress.symbol.clone(),
+            progress.session_date.clone(),
+        ));
+    }));
+
+    let result = run_local_backfill(options).await.expect("backfill");
+
+    assert_eq!(result.sessions.len(), 2);
+    let snapshots = seen.lock().expect("lock").clone();
+    assert_eq!(snapshots.len(), 2);
+    assert!(snapshots.iter().all(|(total, _, _, _)| *total == 2));
+    let mut done: Vec<usize> = snapshots.iter().map(|(_, done, _, _)| *done).collect();
+    done.sort_unstable();
+    assert_eq!(done, vec![1, 2]);
+    let dates: Vec<&str> = snapshots
+        .iter()
+        .map(|(_, _, _, date)| date.as_str())
+        .collect();
+    assert!(dates.contains(&"2024-01-18"));
+    assert!(dates.contains(&"2024-01-19"));
 }

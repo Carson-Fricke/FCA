@@ -37,10 +37,15 @@ from thesis.agent.runtime.policy import (
     SpawnPolicy,
 )
 from thesis.agent.runtime.registry import THESIS_TOOL_NAMES, build_session_registry
-from thesis.agent.runtime.session import SessionToolRegistry
+from thesis.agent.runtime.session import (
+    RegisteredTool,
+    SessionToolRegistry,
+    ToolExecution,
+)
 from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.agent.runtime.workflow_tools import (
+    WORKFLOW_TOOL_NAMES,
     WorkflowLauncher,
     workflow_registered_tools,
 )
@@ -67,7 +72,10 @@ _ACTOR = "operator-1"
 
 
 def _context(
-    *, allowed: Sequence[str] = (), sub_agent_id: str | None = None
+    *,
+    allowed: Sequence[str] | None = None,
+    sub_agent_id: str | None = None,
+    workflow_execution_id: str | None = None,
 ) -> ToolContext:
     return ToolContext(
         workspace_id=_WORKSPACE,
@@ -75,7 +83,8 @@ def _context(
         conversation_id=_CHAT,
         actor_id=_ACTOR,
         sub_agent_id=sub_agent_id,
-        allowed_tools=tuple(allowed),
+        workflow_execution_id=workflow_execution_id,
+        allowed_tools=allowed,
     )
 
 
@@ -235,7 +244,7 @@ def test_tool_context_rejects_blank_identity_and_sorts_policy() -> None:
     assert not context.permits("c")
 
 
-def test_registry_merges_harness_control_and_workflow_tools() -> None:
+def test_registry_merges_harness_control_and_workflow_tools_for_a_sub_agent() -> None:
     registry = build_session_registry(
         context=_context(sub_agent_id="sa-1"),
         harness_tools=cast(HarnessToolProvider, _HarnessProvider(("run_backtest",))),
@@ -245,7 +254,28 @@ def test_registry_merges_harness_control_and_workflow_tools() -> None:
 
     names = _tool_names(registry)
     assert "run_backtest" in names
+    # A chat-spawned sub-agent outside a workflow keeps the launcher.
     assert set(THESIS_TOOL_NAMES) <= names
+
+
+def test_registry_hides_the_workflow_launcher_from_workflow_agents() -> None:
+    registry = build_session_registry(
+        context=_context(sub_agent_id="sa-1", workflow_execution_id="exec-1"),
+        control=cast(ControlToolRuntime, _ControlStub()),
+        workflow=cast(WorkflowLauncher, _Launcher()),
+    )
+
+    assert set(WORKFLOW_TOOL_NAMES).isdisjoint(_tool_names(registry))
+
+
+def test_registry_advertises_the_workflow_launcher_at_the_top_level() -> None:
+    registry = build_session_registry(
+        context=_context(),
+        control=cast(ControlToolRuntime, _ControlStub()),
+        workflow=cast(WorkflowLauncher, _Launcher()),
+    )
+
+    assert set(WORKFLOW_TOOL_NAMES) <= _tool_names(registry)
 
 
 def test_completion_tools_are_offered_only_to_node_scopes() -> None:
@@ -265,6 +295,102 @@ def test_completion_tools_are_offered_only_to_node_scopes() -> None:
 
     assert set(CONTROL_NODE_TOOL_NAMES).isdisjoint(root)
     assert set(CONTROL_NODE_TOOL_NAMES) <= node
+
+
+def test_registry_advertises_exactly_the_configured_tool_policy() -> None:
+    policy = (
+        "validate_study",
+        "request_workflow_input",
+        "request_phase_completion",
+    )
+    registry = build_session_registry(
+        context=_context(
+            sub_agent_id="sa-1", workflow_execution_id="exec-1", allowed=policy
+        ),
+        harness_tools=cast(
+            HarnessToolProvider,
+            _HarnessProvider(
+                (
+                    "run_backtest",
+                    "run_study",
+                    "validate_study",
+                    "backtest_config_template",
+                )
+            ),
+        ),
+        control=cast(ControlToolRuntime, _ControlStub()),
+        workflow=cast(WorkflowLauncher, _Launcher()),
+    )
+
+    # The catalog is the configured policy, not the registered catalog: only
+    # the declared drafting and phase-control tools are advertised.
+    assert _tool_names(registry) == set(policy)
+
+
+def test_registry_with_an_explicit_empty_policy_advertises_nothing() -> None:
+    registry = build_session_registry(
+        context=_context(sub_agent_id="sa-1", allowed=()),
+        harness_tools=cast(HarnessToolProvider, _HarnessProvider(("run_backtest",))),
+        control=cast(ControlToolRuntime, _ControlStub()),
+    )
+
+    assert _tool_names(registry) == set()
+    denied = registry.dispatch("run_backtest", {})
+    assert denied.ok is False
+    assert denied.failure is not None
+    assert denied.failure["kind"] == "denied"
+
+
+def test_registry_dispatch_validates_arguments_against_the_tool_schema() -> None:
+    calls: list[Mapping[str, object]] = []
+
+    def handler(arguments: Mapping[str, object]) -> ToolExecution:
+        calls.append(arguments)
+        return ToolExecution(ok=True, text="ran")
+
+    registry = SessionToolRegistry(
+        [
+            RegisteredTool(
+                spec={
+                    "type": "function",
+                    "function": {
+                        "name": "validated_tool",
+                        "description": "test",
+                        "parameters": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["model"],
+                            "properties": {
+                                "model": {
+                                    "type": "object",
+                                    "required": ["source"],
+                                    "properties": {
+                                        "source": {"type": "string", "minLength": 1}
+                                    },
+                                }
+                            },
+                        },
+                    },
+                },
+                handler=handler,
+            )
+        ]
+    )
+
+    rejected = registry.dispatch("validated_tool", {"config": {"hypothesis": {}}})
+    assert rejected.ok is False
+    assert rejected.failure is not None
+    assert rejected.failure["kind"] == "invalid_arguments"
+    message = str(rejected.failure["message"])
+    assert "model: required property is missing" in message
+    assert "config: unexpected property" in message
+    assert calls == []
+
+    accepted = registry.dispatch(
+        "validated_tool", {"model": {"source": "use harness_strategy_sdk;"}}
+    )
+    assert accepted.ok is True
+    assert calls == [{"model": {"source": "use harness_strategy_sdk;"}}]
 
 
 def test_registry_policy_denies_tools_outside_the_policy() -> None:
@@ -331,6 +457,21 @@ def test_workflow_tool_anchors_on_the_requesting_message() -> None:
 
     assert execution.ok is True
     assert launcher.calls[0]["trigger_message_id"] == "message-42"
+
+
+def test_workflow_tool_dispatches_from_a_chat_spawned_sub_agent() -> None:
+    launcher = _Launcher()
+    (tool,) = workflow_registered_tools(
+        cast(WorkflowLauncher, launcher), _context(sub_agent_id="sa-1")
+    )
+
+    execution = tool.handler(
+        {"workflow": "hypothesis-development", "idea": "MSTR leads IBIT"}
+    )
+
+    assert execution.ok is True
+    assert launcher.calls[0]["chat_id"] == _CHAT
+    assert launcher.calls[0]["ideas"] == "MSTR leads IBIT"
 
 
 def test_workflow_tool_rejects_an_unknown_workflow() -> None:

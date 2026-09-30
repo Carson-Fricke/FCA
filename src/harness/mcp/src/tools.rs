@@ -1,8 +1,8 @@
 //! Tool catalog and execution boundaries for the harness MCP server.
 //!
 //! The registry publishes `run_backtest`, `get_backtest_status`, `get_run`,
-//! `list_artifacts`, `read_artifact`, `run_study`, `run_screener`,
-//! `get_screener_status`, the configuration templates, and the
+//! `list_artifacts`, `read_artifact`, `run_study`, `validate_study`,
+//! `run_screener`, `get_screener_status`, the configuration templates, and the
 //! capability-gated `launch_trader`. Every boundary is
 //! injected; the server composes no subprocess or HTTP client itself, and
 //! serialized settings never contain a token value.
@@ -34,6 +34,8 @@ pub const TOOL_READ_ARTIFACT: &str = "read_artifact";
 pub const TOOL_LAUNCH_TRADER: &str = "launch_trader";
 /// Tool name for the study runner.
 pub const TOOL_RUN_STUDY: &str = "run_study";
+/// Tool name for study-source validation without a replay.
+pub const TOOL_VALIDATE_STUDY: &str = "validate_study";
 /// Tool name for the screening runner.
 pub const TOOL_RUN_SCREENER: &str = "run_screener";
 /// Tool name for screening job status queries.
@@ -280,6 +282,21 @@ pub trait ScreeningSubmitter: Send + Sync {
     fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
 }
 
+/// Injected local study validation surface for one authored model document.
+///
+/// Validation compiles, loads, and constructs the authored program exactly as
+/// a run would, but never replays market data: the authoring seam fails while
+/// the contract is still repairable.
+pub trait StudyValidator: Send + Sync {
+    /// Validate one authored model document by compiling its program.
+    ///
+    /// # Errors
+    ///
+    /// Returns the build failure verbatim when the program does not compile or
+    /// omits the SDK handshake exports.
+    fn validate(&self, model: &Value) -> Result<Value, String>;
+}
+
 /// Loads and validates one configuration document as a JSON payload.
 pub trait ConfigurationLoader: Send + Sync {
     /// Load one configuration path into the JSON launch body.
@@ -335,6 +352,8 @@ pub struct HarnessToolsContext {
     pub study_submitter: Option<Arc<dyn StudySubmitter>>,
     /// Local screening submitter.
     pub screening_submitter: Option<Arc<dyn ScreeningSubmitter>>,
+    /// Local study validator (compiles authored programs without replaying).
+    pub study_validator: Option<Arc<dyn StudyValidator>>,
     /// Durable local results store, queried in `local` mode.
     pub run_store: Option<Arc<dyn RunStore>>,
     /// Durable local job repository, queried in `local` mode.
@@ -358,6 +377,7 @@ impl HarnessToolsContext {
             backtest_submitter: None,
             study_submitter: None,
             screening_submitter: None,
+            study_validator: None,
             run_store: None,
             job_repository: None,
             configuration_loader: Arc::new(JsonFileConfigurationLoader),
@@ -644,6 +664,35 @@ impl HarnessTools {
         ];
         tail.extend(workspace_arguments(arguments)?);
         self.invoke_process(&tail, "screen-job")
+    }
+
+    /// Validate one authored model document without replaying history.
+    ///
+    /// The model's program is compiled, loaded, and constructed exactly as a
+    /// run would, so a source that cannot build or omits the SDK handshake
+    /// exports fails here while the caller can still repair it. The model
+    /// document is the same object the completion contract carries; the
+    /// platform builds the runtime study job from it internally.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolExecutionError`] when the model document is malformed or
+    /// the authored program fails to build.
+    pub fn validate_study(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
+        let Some(model) = arguments.get("model") else {
+            return Err(ToolExecutionError::new(
+                "validate_study requires the model object under 'model'",
+            ));
+        };
+        let Some(validator) = &self.context.study_validator else {
+            return Err(ToolExecutionError::new(
+                "study validation requires a local study validator in this MCP server",
+            ));
+        };
+        validator.validate(model).map_err(ToolExecutionError::new)
     }
 
     /// Return the embedded starter backtest configuration document.
@@ -1342,6 +1391,56 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             }),
             "study",
             move |arguments| handler.run_study(arguments),
+        ));
+        let handler = tools.clone();
+        candidates.push(Tool::new(
+            TOOL_VALIDATE_STUDY,
+            "Validate the study model you are drafting without replaying \
+             history: compile, load, and construct its authored Rust program \
+             over the managed JIT workspace and return the build failure \
+             verbatim. Pass the model object itself under 'model' — the same \
+             object the completion contract carries. model.source and \
+             model.harnessConfiguration.start/.end are required; call it while \
+             authoring so a compile error is fixed before the contract is \
+             submitted.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["model"],
+                "properties": {
+                    "model": {
+                        "type": "object",
+                        "required": ["source", "harnessConfiguration"],
+                        "properties": {
+                            "modelId": {"type": "string", "minLength": 1, "maxLength": 128},
+                            "version": {"type": "string", "minLength": 1, "maxLength": 64},
+                            "description": {"type": "string", "minLength": 1},
+                            "source": {"type": "string", "minLength": 1},
+                            "outputs": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {"type": "string", "minLength": 1}
+                            },
+                            "tests": {"type": "object"},
+                            "harnessConfiguration": {
+                                "type": "object",
+                                "required": ["start", "end"],
+                                "properties": {
+                                    "start": {"type": "string", "minLength": 1},
+                                    "end": {"type": "string", "minLength": 1},
+                                    "symbols": {
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "items": {"type": "string", "minLength": 1}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }),
+            "study",
+            move |arguments| handler.validate_study(arguments),
         ));
     }
     if capabilities.screener {

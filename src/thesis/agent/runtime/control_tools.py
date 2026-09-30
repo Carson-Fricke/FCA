@@ -54,6 +54,15 @@ CONTROL_NODE_TOOL_NAMES: tuple[str, ...] = (
     TOOL_REQUEST_SUB_AGENT_COMPLETION,
 )
 
+#: The structural control tools every workflow phase agent carries: pausing
+#: for operator input and handing the phase back through its completion
+#: contract. Delegation tools are not structural; a phase agent receives them
+#: only when its own configuration adds them.
+CONTROL_PHASE_TOOL_NAMES: tuple[str, ...] = (
+    TOOL_REQUEST_WORKFLOW_INPUT,
+    TOOL_REQUEST_PHASE_COMPLETION,
+)
+
 _SPECS: dict[str, ControlToolSpec] = {spec.name: spec for spec in CONTROL_TOOL_SPECS}
 
 
@@ -185,7 +194,9 @@ def control_registered_tools(
                 requested_role=spec.role,
                 requested_tools=spec.allowed_tools,
                 requested_budget=spec.delegated_budget,
-                caller_tools=context.allowed_tools,
+                # An unconfigured caller policy means there is no set to narrow
+                # against; an explicit policy passes its exact entries.
+                caller_tools=context.allowed_tools or (),
                 parent_sub_agent_id=context.sub_agent_id,
             )
             if isinstance(decision, SpawnDenial):
@@ -439,6 +450,7 @@ def control_registered_tools(
 __all__ = [
     "CONTROL_CHAT_TOOL_NAMES",
     "CONTROL_NODE_TOOL_NAMES",
+    "CONTROL_PHASE_TOOL_NAMES",
     "ControlToolRuntime",
     "SpawnObserver",
     "control_registered_tools",

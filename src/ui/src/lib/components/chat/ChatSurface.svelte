@@ -265,7 +265,8 @@
 			const existing = byName.get(step.name);
 			byName.set(step.name, {
 				name: step.name,
-				status: step.status === 'pending' ? (existing?.status ?? 'pending') : step.status
+				status: step.status === 'pending' ? (existing?.status ?? 'pending') : step.status,
+				attempts: existing?.attempts
 			});
 		}
 		const merged = [...byName.values()];

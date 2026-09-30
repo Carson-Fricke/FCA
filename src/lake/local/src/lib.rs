@@ -32,9 +32,10 @@ pub use ensure::{
 };
 pub use ingest::{
     run_local_backfill, run_local_bars_backfill, run_local_crypto_backfill, run_local_ingest,
-    BackfillResult, CryptoBackfillResult, IngestCoverageEntry, IngestObjectEntry, IngestResult,
-    LocalBackfillOptions, LocalBarsBackfillOptions, LocalCryptoBackfillOptions, LocalIngestError,
-    LocalIngestOptions, SessionIngestEntry,
+    BackfillProgress, BackfillProgressSink, BackfillResult, CryptoBackfillResult,
+    IngestCoverageEntry, IngestObjectEntry, IngestResult, LocalBackfillOptions,
+    LocalBarsBackfillOptions, LocalCryptoBackfillOptions, LocalIngestError, LocalIngestOptions,
+    SessionIngestEntry,
 };
 pub use state::{
     LocalCatalog, LocalFileIssuer, LocalLayout, LocalStateError, MARKER_CONTENT, MARKER_NAME,

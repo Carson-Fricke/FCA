@@ -28,6 +28,7 @@ fn default_catalog_is_capability_filtered() {
         vec![
             "run_backtest",
             "run_study",
+            "validate_study",
             "run_screener",
             "backtest_config_template",
             "screener_config_template",
@@ -81,6 +82,55 @@ fn run_screener_falls_back_to_the_screen_job_process() {
         payload["stdout"],
         "harness screen-job --config screener.yaml --output-dir out"
     );
+}
+
+#[test]
+fn validate_study_delegates_the_model_to_the_local_validator() {
+    struct EchoValidator;
+
+    impl StudyValidator for EchoValidator {
+        fn validate(&self, model: &Value) -> Result<Value, String> {
+            Ok(json!({
+                "boundary": "local",
+                "valid": true,
+                "model_source": model["source"],
+            }))
+        }
+    }
+
+    let mut context = local_context();
+    context.study_validator = Some(Arc::new(EchoValidator));
+    let catalog = build_catalog(context).expect("catalog");
+    let tool = catalog.resolve(TOOL_VALIDATE_STUDY).expect("tool");
+    let mut arguments = Map::new();
+    arguments.insert(
+        "model".to_string(),
+        json!({
+            "source": "use harness_strategy_sdk::StudyProgram;",
+            "harnessConfiguration": {"start": "2025-01-01T00:00:00Z", "end": "2025-01-08T00:00:00Z"},
+        }),
+    );
+    let payload = tool.call(&arguments).expect("call");
+    assert_eq!(payload["valid"], true);
+    assert_eq!(
+        payload["model_source"],
+        "use harness_strategy_sdk::StudyProgram;"
+    );
+}
+
+#[test]
+fn validate_study_without_a_validator_fails_closed() {
+    let catalog = build_catalog(local_context()).expect("catalog");
+    let tool = catalog.resolve(TOOL_VALIDATE_STUDY).expect("tool");
+    let mut arguments = Map::new();
+    arguments.insert(
+        "model".to_string(),
+        json!({
+            "source": "x",
+            "harnessConfiguration": {"start": "a", "end": "b"},
+        }),
+    );
+    assert!(tool.call(&arguments).is_err());
 }
 
 #[test]

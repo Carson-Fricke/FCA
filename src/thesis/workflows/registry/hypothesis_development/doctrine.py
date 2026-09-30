@@ -83,6 +83,7 @@ def hypothesis_development_doctrine(
         activity={phase.value: text for phase, text in _ACTIVITY.items()},
         default_activity=_DEFAULT_ACTIVITY,
         mcp_tools=services.mcp_tools,
+        phase_mcp_tools=services.phase_mcp_tools,
         request_of=_request_of,
         context_of=_context_of,
         project=_project,
