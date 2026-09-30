@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import ChatComposer from './ChatComposer.svelte';
 	import ChatStarters from './ChatStarters.svelte';
 	import ChatTranscript from './ChatTranscript.svelte';
@@ -9,6 +10,7 @@
 	import SubAgentComposer from './SubAgentComposer.svelte';
 	import WorkflowCard from './WorkflowCard.svelte';
 	import { setSubAgentLiveView } from './sub-agent-live-view';
+	import { ThesisApiError } from '$lib/api';
 	import { WorkflowScopeController } from '$lib/workflow-scope.svelte';
 	import { buildNodeEntries } from '$lib/transcript';
 	import {
@@ -96,6 +98,8 @@
 	);
 	let attachedExecutionId = $state('');
 	let attachedChatId = $state('');
+	let surface = $state<HTMLDivElement>();
+	let nodeSendError = $state<string | null>(null);
 
 	/**
 	 * The execution the surface navigates. A fresh workflow launched in this
@@ -348,6 +352,31 @@
 		});
 	});
 
+	let scrollScope = '';
+	let lastUserMessageId = '';
+	$effect(() => {
+		const scope = `${chatId ?? ''}:${active?.kind ?? 'root'}:${active?.id ?? ''}`;
+		const visibleMessages = isNodeScope
+			? scopeEntries.flatMap((entry) => entry.kind === 'message' ? [entry.message] : [])
+			: messages.filter((message) => message.kind !== 'sub_agent');
+		const userMessageId = visibleMessages.findLast((message) => message.role === 'user')?.message_id ?? '';
+		if (scope !== scrollScope) {
+			scrollScope = scope;
+			lastUserMessageId = userMessageId;
+			return;
+		}
+		if (!userMessageId || userMessageId === lastUserMessageId) return;
+		lastUserMessageId = userMessageId;
+		// Wait for the sent message to render, without following agent/tool updates.
+		void tick().then(() => {
+			if (scrollScope !== scope) return;
+			const transcript = surface?.querySelector<HTMLElement>(
+				'[data-testid="transcript-scroll"], [data-testid="scope-transcript-scroll"]'
+			);
+			if (transcript) transcript.scrollTop = transcript.scrollHeight;
+		});
+	});
+
 	function isToolCallPlaceholder(message: ChatMessage): boolean {
 		const data = message.data ?? {};
 		return (
@@ -382,14 +411,41 @@
 		}
 	}));
 
+	/** Turn a rejected node send into operator-facing text. */
+	function nodeSendFailure(error: unknown): string {
+		if (error instanceof ThesisApiError && error.status === 409) {
+			return 'This sub-agent no longer accepts input: the run moved on, or the backend restarted and stopped it. Refresh and open the active phase, or start a new run.';
+		}
+		return error instanceof Error
+			? `Message could not be sent: ${error.message}`
+			: 'Message could not be sent.';
+	}
+
+	// A scope change clears the previous rejection: the operator is looking at
+	// a different node now.
+	$effect(() => {
+		void active?.id;
+		nodeSendError = null;
+	});
+
 	async function sendNode(_node: SubAgentNode, body: string): Promise<void> {
 		if (!composerNode) return;
-		const message = await controller.submit(composerNode, body);
-		if (message) onNodeMessage?.(message);
+		nodeSendError = null;
+		try {
+			const message = await controller.submit(composerNode, body);
+			onNodeMessage?.(message);
+		} catch (error) {
+			nodeSendError = nodeSendFailure(error);
+			// The tree the surface renders may be stale (for example after a
+			// backend restart terminalized the node): refresh it so the
+			// composer stops offering a closed node.
+			controller.refreshNodes();
+			throw error;
+		}
 	}
 </script>
 
-<div class="flex min-h-0 flex-1 flex-col" data-testid="chat-surface">
+<div bind:this={surface} class="flex min-h-0 flex-1 flex-col" data-testid="chat-surface">
 	{#if scoped}
 		<ScopeStack
 			segments={controller.scope.segments}
@@ -462,6 +518,16 @@
 					/>
 				</div>
 			{/if}
+		</div>
+	{/if}
+
+	{#if nodeSendError}
+		<div
+			class="border-t border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200"
+			data-testid="node-send-error"
+			role="status"
+		>
+			{nodeSendError}
 		</div>
 	{/if}
 

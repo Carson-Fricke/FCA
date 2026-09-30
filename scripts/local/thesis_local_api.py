@@ -209,6 +209,7 @@ app = create_app(
     chat_stream_broker=stack.broker,
     conversations=stack.conversations,
     workflow_runtime=stack.workflow_runtime,
+    workflow_registry=stack.workflow_registry,
     harness_tool_provider=stack.harness_tool_provider,
     operator_policies=stack.operator_policies,
     timeline=timeline,

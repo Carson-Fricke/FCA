@@ -518,8 +518,14 @@ export class WorkflowScopeController {
 		return cached ? mergeEvents(attributed, cached) : attributed;
 	}
 
-	/** Submit operator input to a node that accepts it. */
-	async submit(node: SubAgentNode, body: string): Promise<ChatMessage | null> {
+	/**
+	 * Submit operator input to a node that accepts it.
+	 *
+	 * A node that no longer accepts input, or a backend rejection such as the
+	 * 409 for a closed or stopped node, throws: the surface shows the failure
+	 * instead of silently dropping the message.
+	 */
+	async submit(node: SubAgentNode, body: string): Promise<ChatMessage> {
 		const chatId = this.#chatId;
 		if (
 			isWorkflowNodeRole(node.role) ||
@@ -527,7 +533,7 @@ export class WorkflowScopeController {
 			!body.trim() ||
 			!chatId
 		) {
-			return null;
+			throw new Error('This sub-agent does not accept input');
 		}
 		this.busy = true;
 		try {
@@ -537,9 +543,6 @@ export class WorkflowScopeController {
 				this.nodeRefFor(node.subAgentId),
 				{ body: body.trim() }
 			);
-		} catch (error: unknown) {
-			this.error = error instanceof Error ? error.message : 'Message failed';
-			return null;
 		} finally {
 			this.busy = false;
 		}

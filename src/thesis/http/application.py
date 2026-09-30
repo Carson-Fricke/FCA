@@ -62,6 +62,7 @@ from thesis.http.streaming import (
     create_streaming_router,
 )
 from thesis.http.timeline import create_timeline_router
+from thesis.http.workflows import create_workflow_router
 from thesis.http.workspaces import (
     WorkspaceDataBundle,
     create_workspaces_router,
@@ -81,6 +82,7 @@ if TYPE_CHECKING:
     from thesis.cosmos.timeline import CosmosTimeline
     from thesis.http.workspaces import WorkspaceStore
     from thesis.integrations.mcp import HarnessMcpClient
+    from thesis.workflows.core.registry import WorkflowRegistry
     from thesis.workflows.runtime import WorkflowRuntime
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -319,6 +321,7 @@ def create_app(
     stream_max_poll_cycles: int | None = None,
     workspace_data: WorkspaceDataBundle | None = None,
     workflow_runtime: WorkflowRuntime | None = None,
+    workflow_registry: WorkflowRegistry | None = None,
     harness_data_service: HarnessDataService | None = None,
     model_provider: OpenRouterProvider | None = None,
     harness_tool_provider: HarnessToolProvider | None = None,
@@ -602,6 +605,7 @@ def create_app(
         create_strategy_router(),
         create_screener_router(),
         create_knowledge_router(),
+        create_workflow_router(workflow_registry),
     )
     auth_dependency = [Depends(primary_authenticator)]
     if csrf_guard is not None:
@@ -796,6 +800,7 @@ def serving_app_from_environment() -> FastAPI:
         chat_stream_broker=stack.broker,
         conversations=stack.conversations,
         workflow_runtime=stack.workflow_runtime,
+        workflow_registry=stack.workflow_registry,
         harness_tool_provider=stack.harness_tool_provider,
         operator_policies=stack.operator_policies,
         timeline=timeline,

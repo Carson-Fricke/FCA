@@ -546,7 +546,10 @@ def test_loop_back_reseeds_the_revisited_phase(tmp_path: Path) -> None:
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.phase == HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value
 
-    # The creation node is reused, but the second entry carries its own seed.
+    # The creation node is reused, but the second entry carries its own seed
+    # and the seed carries the refutation: the recorded verdict and the
+    # falsification-trials report frame the revision instead of repeating the
+    # original prompt.
     seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
     assert len(seeds) == 3
     revisited = seeds[2]
@@ -555,6 +558,10 @@ def test_loop_back_reseeds_the_revisited_phase(tmp_path: Path) -> None:
         _message_data(revisited)["deliveryKey"]
         != _message_data(seeds[0])["deliveryKey"]
     )
+    assert "Loop-back revision" in revisited.body
+    assert "do NOT reply that the phase is complete" in revisited.body
+    assert "the planned falsifier fired" in revisited.body
+    assert "falsification_report" in revisited.body
     assert (
         kit.conversations.in_flight(WORKSPACE, request.chat_id, creation_node) is True
     )

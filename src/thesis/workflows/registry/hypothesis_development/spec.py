@@ -159,9 +159,53 @@ def _creation_seed(
     state: HypothesisDevelopmentState,
     context: HandoffContext,
 ) -> str:
-    """Seed the creation agent with its instructions and the operator's words."""
-    del state, context
-    return _creation_prompt(workflow, request)
+    """Seed the creation agent with its instructions and the operator's words.
+
+    A loop-back re-entry is a revision, not a fresh start: the seed appends the
+    recorded verdict and the falsification-trials report so the agent revises
+    the hypothesis instead of repeating the refuted one.
+    """
+    del state
+    prompt = _creation_prompt(workflow, request)
+    if context is None or context.source is None:
+        return prompt
+    from .prompts.creation import _creation_revision_section
+
+    report = _latest_phase_artifact(workflow, request, "falsification_trials")
+    return (
+        prompt
+        + "\n\n"
+        + _creation_revision_section(
+            dict(context.completion) if context.completion else None, report
+        )
+    )
+
+
+def _latest_phase_artifact(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    phase: str,
+) -> Mapping[str, object] | None:
+    """Return the latest recorded artifact for one phase, if any.
+
+    The recorded report outlives the state reset a loop-back applies, so the
+    revision seed reads it from the durable execution events instead of the
+    cleared typed state.
+    """
+    from thesis.execution.events import ExecutionEventType
+
+    for event in reversed(
+        workflow.observe(request.workspace_id, request.execution_id).events
+    ):
+        if event.event_type is not ExecutionEventType.WORKFLOW_PHASE_RESULT:
+            continue
+        payload = event.payload
+        if payload.get("phase") != phase:
+            continue
+        artifact = payload.get("artifact")
+        if isinstance(artifact, Mapping):
+            return dict(artifact)
+    return None
 
 
 def _verdict_seed(

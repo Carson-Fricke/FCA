@@ -13,7 +13,7 @@
 		acceptsInput: boolean;
 		phase?: string;
 		busy?: boolean;
-		onSubmit?: (body: string) => void;
+		onSubmit?: (body: string) => void | Promise<void>;
 	} = $props();
 
 	let body = $state('');
@@ -26,9 +26,15 @@
 				: 'Message this sub-agent...'
 	);
 
-	function send(): void {
+	async function send(): Promise<void> {
 		if (!canSend) return;
-		onSubmit(body.trim());
+		const draft = body.trim();
+		try {
+			await onSubmit(draft);
+		} catch {
+			// Keep the draft so a rejected send can be retried or edited.
+			return;
+		}
 		body = '';
 	}
 </script>

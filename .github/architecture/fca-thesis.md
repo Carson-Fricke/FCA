@@ -408,6 +408,15 @@ structural one. The normative requirements are REQ-018 through REQ-040 in
 
 ### Chat And Execution Boundary
 
+Authenticated `GET /v1/workflows/{workflow_id}` (also under `/api/v1`) exposes
+the registered workflow definition for transition-graph clients. The response
+contains `workflow_id`, `version`, `title`, ordered `phases`, `terminal_phases`,
+and `transitions` mapping each phase to sorted legal target names, including
+empty lists for terminal nodes. It reads the launcher's registry in serving
+compositions; chat-only apps expose the built-in definitions without execution
+services. Unknown ids return HTTP 404 with error code `unknown_workflow`.
+The endpoint never launches a workflow or serializes executable callbacks.
+
 The chat is the sole messaging surface. User messages and agent narration are
 all chat messages on a `ChatThread`; the test for the boundary is whether a
 record would be part of the conversation with a human analyst. An execution is

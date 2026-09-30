@@ -103,6 +103,7 @@ from thesis.strategies.validation import (
     StrategyValidationResult,
 )
 from thesis.workflows.core.execution_store import ExecutionStore
+from thesis.workflows.core.registry import WorkflowRegistry
 from thesis.workflows.local import McpBacktestRunner, McpStudyRunner
 from thesis.workflows.registry.hypothesis_development import (
     HypothesisDevelopmentRequest,
@@ -168,6 +169,7 @@ class ServingStack:
     workflow_runtime: WorkflowRuntime | None
     harness_tool_provider: HarnessToolProvider | None
     operator_policies: OperatorPolicyRegistry
+    workflow_registry: WorkflowRegistry | None = None
 
 
 def _workspace_stores(
@@ -521,6 +523,7 @@ def build_serving_stack(
     holder["control_service"] = control_service
 
     workflow_runtime: WorkflowRuntime | None = None
+    launcher: RuntimeWorkflowLauncher | None = None
     if harness_tools is not None:
         workflow_runtime = build_serving_workflow_runtime(
             model_provider,
@@ -531,11 +534,12 @@ def build_serving_stack(
             detach=detach,
         )
         holder["workflow_runtime"] = workflow_runtime
-        holder["launcher"] = RuntimeWorkflowLauncher(
+        launcher = RuntimeWorkflowLauncher(
             cast("DevelopmentRuntime", workflow_runtime),
             chat_service,
             conversations=conversations,
         )
+        holder["launcher"] = launcher
 
     return ServingStack(
         chat_service=chat_service,
@@ -544,6 +548,7 @@ def build_serving_stack(
         workflow_runtime=workflow_runtime,
         harness_tool_provider=harness_tools,
         operator_policies=resolved_policies,
+        workflow_registry=launcher.workflows if launcher is not None else None,
     )
 
 

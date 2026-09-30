@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Mapping, Sequence
 
 
 def _conversation_lines(conversation: Sequence[tuple[str, str]]) -> list[str]:
@@ -204,4 +205,42 @@ def _creation_turn_prompt(conversation: Sequence[tuple[str, str]]) -> str:
         "",
         _CREATION_PROTOCOL_REMINDER,
     ]
+    return "\n".join(lines)
+
+
+def _creation_revision_section(
+    verdict: Mapping[str, object] | None,
+    report: Mapping[str, object] | None,
+) -> str:
+    """Frame a loop-back re-entry around the refuted attempt.
+
+    The re-entered phase reuses the same conversation, so the previous
+    proposal and completion are still in its transcript.  The section states
+    plainly that the previous completion is superseded and that the agent owes
+    a revised proposal, never a status-only reply, then hands it the verdict
+    and the falsification-trials report the revision must address.
+    """
+    lines = [
+        "## Loop-back revision",
+        "The operator sent this run back from the verdict after the "
+        "falsification trials did not support the previous attempt. The "
+        "previous completion is superseded: do NOT reply that the phase is "
+        "complete or that no further action is required. Revise the hypothesis "
+        "and its statistical model so the recorded failure is addressed (or "
+        "replace it with a better-supported one over the same operator "
+        "window), then post the revised proposal and call request_workflow_input "
+        "in the same response.",
+    ]
+    if verdict:
+        lines += [
+            "",
+            "Recorded verdict:",
+            json.dumps(dict(verdict), ensure_ascii=True, indent=2, default=str),
+        ]
+    if report:
+        lines += [
+            "",
+            "Falsification trials report:",
+            json.dumps(dict(report), ensure_ascii=True, indent=2, default=str),
+        ]
     return "\n".join(lines)

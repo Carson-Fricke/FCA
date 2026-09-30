@@ -7,9 +7,17 @@ Start (or restart) the local Thesis stack with token-stable credentials.
 Runs scripts/local/dev_tokens.py first so LAKE_API__BEARER_TOKEN,
 HARNESS_API_BEARER_TOKEN, THESIS_API__BEARER_TOKEN, and the derived
 PUBLIC_THESIS_API_BEARER_TOKEN exist in the ignored .env file, loads that file
-into the process environment, then launches the selected servers detached with
-logs under .local/logs.  Existing listeners on the target ports are stopped
-first when their command line matches the expected server.
+into the process environment, stops the selected servers' existing listeners,
+builds the selected native servers whose sources changed (market-lake release
+or debug, harness debug), and launches them detached with logs under
+.local\logs.  Builds run after the old listener stops, so a changed binary is
+never blocked by the running executable it replaces.
+
+The restart itself always runs in a WMI-detached worker, never as a descendant
+of the calling shell: `-Foreground` schedules that worker and then waits until
+every selected listener presents a new process and answers its health
+endpoint, so a calling shell or agent tool returns as soon as the restart
+completes instead of waiting on long-running servers.
 
 The Cosmos DB emulator runs from the vNext image with a named data volume
 mounted at /data so conversations survive restarts (the legacy emulator image
@@ -33,15 +41,17 @@ The lake always runs an optimized build otherwise, because the debug parse
 path is several times slower on real quote volumes.
 
 .PARAMETER NoStop
-Do not stop existing listeners; launch only.
+Do not stop existing listeners; launch only.  A rebuild of a running binary
+will then fail on Windows because the executable is locked, so stop the server
+first when its sources changed.
 
 .PARAMETER EnvFile
 Environment file to manage and load. Defaults to <repo>\.env.
 
 .PARAMETER Foreground
-Perform the restart in this process and wait for health checks. By default the
-script schedules a detached worker and returns before stopping Thesis, so a
-live chat request can finish and flush its response.
+Schedule the detached restart worker and wait until every selected server is
+live before returning.  The worker still owns the restart, so the calling
+shell never parents the servers.
 
 .EXAMPLE
 powershell -File scripts/local/start-stack.ps1
@@ -82,6 +92,107 @@ foreach ($server in $Servers) {
     }
 }
 
+$ports = @{ cosmos = 8080; lake = 8002; harness = 8001; thesis = 8000; ui = 5173 }
+$cargoExe = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+
+function Get-PortOwners {
+    param([int]$Port)
+
+    return @(
+        Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    )
+}
+
+function Test-ServerReady {
+    param(
+        [string]$Name,
+        [int]$Port,
+        [int[]]$PreviousOwners
+    )
+
+    $owners = Get-PortOwners -Port $Port
+    $changed = $owners.Count -gt 0 -and (
+        $PreviousOwners.Count -eq 0 -or
+        @($owners | Where-Object { $PreviousOwners -notcontains $_ }).Count -gt 0
+    )
+    if ($Name -eq 'cosmos') {
+        if (-not $changed) { return $false }
+        try {
+            Invoke-RestMethod -Uri "http://127.0.0.1:$Port/ready" -TimeoutSec 5 | Out-Null
+            return $true
+        } catch {
+            return $false
+        }
+    }
+    if ($Name -eq 'ui') { return $changed }
+    if (-not $changed) { return $false }
+    try {
+        Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 5 | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Wait-StackReady {
+    param(
+        [string[]]$Names,
+        [hashtable]$Previous,
+        [int]$WorkerPid,
+        [datetime]$Deadline,
+        [string]$WorkerLog
+    )
+
+    $pending = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in $Names) { [void]$pending.Add($name) }
+    $workerGoneAt = $null
+    while ($pending.Count -gt 0 -and (Get-Date) -lt $Deadline) {
+        foreach ($name in @($pending)) {
+            if (Test-ServerReady -Name $name -Port $ports[$name] -PreviousOwners $Previous[$name]) {
+                Write-Host "==> $name is ready"
+                $pending.Remove($name)
+            }
+        }
+        if ($pending.Count -eq 0) { break }
+        if ($null -eq $workerGoneAt -and -not (Get-Process -Id $WorkerPid -ErrorAction SilentlyContinue)) {
+            $workerGoneAt = Get-Date
+        }
+        if ($null -ne $workerGoneAt -and (Get-Date) -gt $workerGoneAt.AddSeconds(30)) {
+            break
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    foreach ($name in $pending) {
+        Write-Warning "$name did not become ready; inspect $WorkerLog"
+    }
+    return ($pending.Count -eq 0)
+}
+
+function Build-NativeServer {
+    param([string]$Name)
+
+    if ($Name -eq 'harness') {
+        if (-not $cargoExe) { throw 'cargo is required to build the harness binary' }
+        Write-Host '==> Building the harness debug binary'
+        & $cargoExe build --locked --manifest-path (Join-Path $repo 'src\harness\Cargo.toml') -p api --bin harness
+        if ($LASTEXITCODE -ne 0) { throw "cargo build for harness failed (exit $LASTEXITCODE)" }
+        return
+    }
+    if ($Name -eq 'lake') {
+        if (-not $cargoExe) { throw 'cargo is required to build the market-lake binary' }
+        $cargoArguments = @(
+            'build', '--locked', '--manifest-path', (Join-Path $repo 'src\lake\Cargo.toml'),
+            '-p', 'lake-cli'
+        )
+        if (-not $LakeDebug) { $cargoArguments += '--release' }
+        $profile = if ($LakeDebug) { 'debug' } else { 'release' }
+        Write-Host "==> Building the market-lake $profile binary"
+        & $cargoExe @cargoArguments
+        if ($LASTEXITCODE -ne 0) { throw "cargo build for market-lake failed (exit $LASTEXITCODE)" }
+    }
+}
+
 if ($Worker -and $WorkerLog) {
     Start-Transcript -Path $WorkerLog -Append | Out-Null
 }
@@ -101,10 +212,10 @@ if (-not $Foreground -and -not $Worker) {
     if ($Rotate) { $arguments += '-Rotate' }
     if ($LakeDebug) { $arguments += '-LakeDebug' }
     if ($NoStop) { $arguments += '-NoStop' }
-    # Start-Process keeps the worker in OpenCode's descendant process tree,
-    # which makes the shell tool wait for long-running server grandchildren.
-    # WMI creates the worker under the system provider instead, so this command
-    # can terminate immediately while the detached worker owns the restart.
+    # WMI creates the worker under the system provider instead of the calling
+    # shell, so the shell tool can terminate immediately while the detached
+    # worker owns the restart; Start-Process would parent the long-running
+    # servers under the caller and make it wait for them forever.
     $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
         CommandLine = ($arguments -join ' ')
         CurrentDirectory = $repo
@@ -114,6 +225,42 @@ if (-not $Foreground -and -not $Worker) {
     }
     Write-Host "==> Restart scheduled as detached PID $($created.ProcessId)"
     Write-Host "==> Worker log: $workerLog"
+    return
+}
+
+if ($Foreground -and -not $Worker) {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $workerLog = Join-Path $logDir "restart-$stamp.log"
+    $arguments = @(
+        'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
+        '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
+        '-File', ('"{0}"' -f $PSCommandPath),
+        '-Worker', '-ServerList', ('"{0}"' -f ($Servers -join ',')),
+        '-EnvFile', ('"{0}"' -f $EnvFile),
+        '-WorkerLog', ('"{0}"' -f $workerLog),
+        '-DelaySeconds', [string]$DelaySeconds
+    )
+    if ($Rotate) { $arguments += '-Rotate' }
+    if ($LakeDebug) { $arguments += '-LakeDebug' }
+    if ($NoStop) { $arguments += '-NoStop' }
+    $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = ($arguments -join ' ')
+        CurrentDirectory = $repo
+    }
+    if ($created.ReturnValue -ne 0) {
+        throw "Could not schedule restart worker (Win32 error $($created.ReturnValue))"
+    }
+    Write-Host "==> Restart scheduled as detached PID $($created.ProcessId)"
+    Write-Host "==> Worker log: $workerLog"
+    $previous = @{}
+    foreach ($name in $Servers) {
+        $previous[$name] = if ($NoStop) { @() } else { Get-PortOwners -Port $ports[$name] }
+    }
+    $ready = Wait-StackReady -Names $Servers -Previous $previous -WorkerPid $created.ProcessId `
+        -Deadline (Get-Date).AddSeconds(900) -WorkerLog $workerLog
+    if ($ready) {
+        Write-Host '==> All selected servers are live'
+    }
     return
 }
 
@@ -238,31 +385,38 @@ Get-Content -LiteralPath $EnvFile | ForEach-Object {
     Set-Item -LiteralPath ("Env:{0}" -f $name) -Value $value
 }
 
-# The harness no longer embeds CPython: the harness and lake products are
-# native Rust binaries launched directly from their build outputs. Thesis and
-# the UI still run through uv/npm. The market-lake always launches its release
-# build unless -LakeDebug is passed: the debug parse path is several times
-# slower on real quote volumes.
+# Every server must find its own bearer in the process environment: the UI is
+# compiled against PUBLIC_THESIS_API_BEARER_TOKEN, the Thesis API authenticates
+# callers with THESIS_API__BEARER_TOKEN, and the harness and lake validate
+# theirs on every request.  A missing token would otherwise surface as a 401
+# long after the restart reported success.
+$requiredTokens = @()
+if ($Servers -contains 'lake') { $requiredTokens += 'LAKE_API__BEARER_TOKEN' }
+if ($Servers -contains 'harness') { $requiredTokens += 'HARNESS_API_BEARER_TOKEN' }
+if ($Servers -contains 'thesis') { $requiredTokens += 'THESIS_API__BEARER_TOKEN' }
+if ($Servers -contains 'ui') { $requiredTokens += 'PUBLIC_THESIS_API_BEARER_TOKEN' }
+$missingTokens = @($requiredTokens | Where-Object { -not [Environment]::GetEnvironmentVariable($_) })
+if ($missingTokens.Count -gt 0) {
+    throw ('the environment is missing required bearer tokens: ' + ($missingTokens -join ', '))
+}
+
+# The harness and lake products are native Rust binaries launched from their
+# build outputs, so a restart compiles the selected servers before binding
+# them.  Thesis and the UI still run through uv/npm.  The market-lake always
+# launches its release build unless -LakeDebug is passed: the debug parse path
+# is several times slower on real quote volumes.
 $uvExe = (Get-Command uv).Source
 $npmExe = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
 if (-not $npmExe) { $npmExe = (Get-Command npm).Source }
 
-$lakeExe = Join-Path $repo 'src\lake\target\debug\lake.exe'
-if (-not $LakeDebug) {
-    $cargoExe = (Get-Command cargo -ErrorAction SilentlyContinue).Source
-    if (-not $cargoExe) {
-        throw 'cargo is required to build the release market-lake binary'
-    }
-    Write-Host '==> Building the market-lake release binary'
-    & $cargoExe build --release --manifest-path (Join-Path $repo 'src\lake\Cargo.toml') -p lake-cli
-    if ($LASTEXITCODE -ne 0) { throw "cargo build --release -p lake-cli failed (exit $LASTEXITCODE)" }
-    $lakeExe = Join-Path $repo 'src\lake\target\release\lake.exe'
-}
-
 $specs = @{
     lake = [pscustomobject]@{
         Name = 'lake'; Port = 8002; Match = 'lake'
-        FilePath = $lakeExe
+        FilePath = Join-Path $repo $(if ($LakeDebug) {
+            'src\lake\target\debug\lake.exe'
+        } else {
+            'src\lake\target\release\lake.exe'
+        })
         Arguments = @('local', 'api', '--host', '127.0.0.1', '--port', '8002')
     }
     harness = [pscustomobject]@{
@@ -295,6 +449,7 @@ foreach ($name in $Servers) {
         Write-Host "==> Stopping existing $($spec.Name) on port $($spec.Port)"
         Stop-ListeningServer -Port $spec.Port -Match $spec.Match
     }
+    Build-NativeServer -Name $spec.Name
     $out = Join-Path $logDir ("{0}-{1}.out.log" -f $spec.Name, $stamp)
     $err = Join-Path $logDir ("{0}-{1}.err.log" -f $spec.Name, $stamp)
     Write-Host "==> Starting $($spec.Name) on port $($spec.Port)"
