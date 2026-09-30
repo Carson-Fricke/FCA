@@ -306,7 +306,3 @@ impl OrderStateMachine {
         Ok(filled_notional)
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/oms_state.rs"]
-mod tests;

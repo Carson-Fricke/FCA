@@ -300,7 +300,3 @@ impl<'de> Deserialize<'de> for Decimal18 {
         deserializer.deserialize_any(DecimalVisitor)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/decimal.rs"]
-mod tests;

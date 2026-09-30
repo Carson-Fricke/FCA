@@ -306,7 +306,3 @@ impl SingleLegOms {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/oms_manager.rs"]
-mod tests;

@@ -252,7 +252,3 @@ impl ScriptedVenue {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/venues_scripted.rs"]
-mod tests;

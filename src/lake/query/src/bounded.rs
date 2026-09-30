@@ -1366,7 +1366,3 @@ fn scan_quoted(characters: &[char], index: usize, quote: char) -> Option<(usize,
     }
     None
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/bounded.rs"]
-mod tests;

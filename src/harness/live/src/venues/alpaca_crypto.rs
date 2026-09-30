@@ -789,7 +789,3 @@ fn validate_crypto_order(order: &SingleLegOrder) -> LiveResult<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/venues_alpaca_crypto.rs"]
-mod tests;

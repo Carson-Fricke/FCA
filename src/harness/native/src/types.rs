@@ -671,7 +671,3 @@ fn decode_utf8(bytes: &[u8], start: usize) -> Result<u32, TypeError> {
     };
     Ok(value)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/types.rs"]
-mod tests;

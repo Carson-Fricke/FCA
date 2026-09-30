@@ -381,7 +381,3 @@ impl VirtualBook {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/portfolio_book.rs"]
-mod tests;

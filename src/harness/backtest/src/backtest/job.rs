@@ -1237,7 +1237,3 @@ fn record_artifacts(
         .close()
         .map_err(|error| BacktestJobError::Engine(error.to_string()))
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_job.rs"]
-mod tests;

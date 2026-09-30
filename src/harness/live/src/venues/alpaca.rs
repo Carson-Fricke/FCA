@@ -679,7 +679,3 @@ impl<T: AsyncBrokerTransport> AlpacaBroker<T> {
         })
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/venues_alpaca.rs"]
-mod tests;

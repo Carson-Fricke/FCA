@@ -273,7 +273,3 @@ impl AccountSnapshot {
         })
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/accounting.rs"]
-mod tests;

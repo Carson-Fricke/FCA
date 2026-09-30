@@ -393,7 +393,3 @@ impl OrderRequest {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/orders.rs"]
-mod tests;

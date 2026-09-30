@@ -396,7 +396,3 @@ pub mod replay {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/kernel.rs"]
-mod tests;

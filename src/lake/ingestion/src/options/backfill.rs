@@ -410,7 +410,3 @@ fn replace_existing(
 pub(crate) fn format_datetime(value: DateTime) -> String {
     value.isoformat_seconds_z()
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/options_backfill.rs"]
-mod tests;

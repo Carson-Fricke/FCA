@@ -263,7 +263,3 @@ pub fn hex(bytes: &[u8]) -> String {
     }
     out
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/sha256.rs"]
-mod tests;

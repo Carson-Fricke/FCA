@@ -246,7 +246,3 @@ impl IndicatorMachine<RealizedVolKernel> {
         )
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/indicators_volatility.rs"]
-mod tests;

@@ -317,7 +317,3 @@ impl ListingEventDeriver {
         Ok(result)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/listing_events.rs"]
-mod tests;

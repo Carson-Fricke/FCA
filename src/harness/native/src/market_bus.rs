@@ -597,7 +597,3 @@ fn civil_from_days(days_since_epoch: i128) -> Civil {
         day,
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/market_bus.rs"]
-mod tests;

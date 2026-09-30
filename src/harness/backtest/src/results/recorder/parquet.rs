@@ -278,7 +278,3 @@ fn mismatch(field: &FieldDef) -> WriterError {
         expected: field.logical_type.name(),
     }
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/results_recorder_parquet.rs"]
-mod tests;

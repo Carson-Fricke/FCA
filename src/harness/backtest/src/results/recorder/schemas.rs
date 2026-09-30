@@ -393,7 +393,3 @@ const MANIFEST_FIELDS: &[FieldDef] = &[
     field("key", LogicalType::Utf8, false),
     field("value", LogicalType::Utf8, false),
 ];
-
-#[cfg(test)]
-#[path = "../../../tests/unit/results_recorder_schemas.rs"]
-mod tests;

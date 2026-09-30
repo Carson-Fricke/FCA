@@ -256,7 +256,3 @@ pub const fn start_key(start: Nanos) -> OrderingKey {
 pub const fn end_key(end: Nanos) -> OrderingKey {
     (end - 1, u64::MAX, u8::MAX)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/events.rs"]
-mod tests;

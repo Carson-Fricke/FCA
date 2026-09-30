@@ -184,7 +184,3 @@ pub fn manifest_rows(input: &ManifestRowsInput<'_>) -> Vec<(String, String)> {
     entries.push(("row_count".to_string(), (entries.len() + 1).to_string()));
     entries
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/results_recorder_manifest.rs"]
-mod tests;

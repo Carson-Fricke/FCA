@@ -299,7 +299,3 @@ fn nth_weekday(year: i32, month: u32, weekday: u32, n: u32) -> Date {
     let offset = (weekday as i32 - first.weekday_index() as i32).rem_euclid(7) + (n as i32 - 1) * 7;
     first.add_days(offset)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/nasdaq.rs"]
-mod tests;

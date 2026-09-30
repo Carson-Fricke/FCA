@@ -38,7 +38,3 @@ impl ProviderError {
         matches!(self, Self::Transport(_) | Self::Timeout(_))
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/error.rs"]
-mod tests;

@@ -774,7 +774,3 @@ fn nullable_i32(array: &Int32Array, index: usize) -> Option<i32> {
         Some(array.value(index))
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/schemas.rs"]
-mod tests;

@@ -156,7 +156,3 @@ fn touch(order: &SingleLegOrder, market: &MarketEvent) -> Option<(Decimal18, boo
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/fills_simple_touch.rs"]
-mod tests;

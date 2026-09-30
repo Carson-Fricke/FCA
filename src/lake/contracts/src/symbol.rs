@@ -105,7 +105,3 @@ fn is_osi(value: &str) -> bool {
     let right_ok = tail[6] == b'C' || tail[6] == b'P';
     digits_ok && right_ok
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/symbol.rs"]
-mod tests;

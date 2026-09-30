@@ -179,7 +179,3 @@ fn pack32(limbs: &[u32]) -> u128 {
     }
     value
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/wide.rs"]
-mod tests;

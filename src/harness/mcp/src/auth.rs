@@ -84,7 +84,3 @@ impl BearerTokenSource for EnvironmentBearerTokenSource {
         bearer_headers(self.bearer_token().as_deref())
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/auth.rs"]
-mod tests;

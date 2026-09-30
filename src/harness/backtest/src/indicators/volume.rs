@@ -189,7 +189,3 @@ pub type DollarVolume = IndicatorMachine<DollarVolumeKernel>;
 
 /// On-balance volume from the tick rule, cumulative per session.
 pub type OnBalanceVolume = IndicatorMachine<ObvKernel>;
-
-#[cfg(test)]
-#[path = "../../tests/unit/indicators_volume.rs"]
-mod tests;

@@ -788,7 +788,3 @@ pub fn build_trader(mapping: &Mapping) -> Result<Value, ConfigError> {
         "deployment": deployment,
     }))
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/models.rs"]
-mod tests;

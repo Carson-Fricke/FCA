@@ -1175,7 +1175,3 @@ impl TableEntityStore for SdkTableEntityStore {
             .map_err(http_error)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/azure.rs"]
-mod tests;

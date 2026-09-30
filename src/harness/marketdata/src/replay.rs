@@ -731,7 +731,3 @@ fn empty_data_fingerprint(file_fingerprint: &str, sessions: &[ExchangeSession]) 
     let state = FingerprintState::new(file_fingerprint, sessions);
     hex_string(&state.data.clone().finalize())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/replay.rs"]
-mod tests;

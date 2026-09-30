@@ -184,7 +184,3 @@ pub fn scalogram(values: &[f64], scales: &[f64], omega0: f64) -> Result<Scalogra
         .collect();
     Ok((power, cone_mask(values.len(), scales, 2.0)))
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/signal_scalogram.rs"]
-mod tests;

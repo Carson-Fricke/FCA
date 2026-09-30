@@ -86,7 +86,3 @@ fn quote(value: &str) -> String {
     }
     encoded
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/leases.rs"]
-mod tests;

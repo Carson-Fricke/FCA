@@ -233,7 +233,3 @@ pub(crate) fn canonical_symbol(symbol: &str) -> Result<String, DataError> {
     symbol_filename(&canonical)?;
     Ok(canonical)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/common.rs"]
-mod tests;

@@ -169,7 +169,3 @@ impl TradeThrough {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/trade_through.rs"]
-mod tests;

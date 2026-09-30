@@ -199,7 +199,3 @@ impl LatencySize {
         Ok(result)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/latency_size.rs"]
-mod tests;

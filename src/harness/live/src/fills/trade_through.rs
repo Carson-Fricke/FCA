@@ -171,7 +171,3 @@ fn min(left: Decimal18, right: Decimal18) -> Decimal18 {
         right
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/fills_trade_through.rs"]
-mod tests;

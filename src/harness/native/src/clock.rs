@@ -59,7 +59,3 @@ impl SimClock {
         self.advance_to(self.head_ns + delta_ns)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/clock.rs"]
-mod tests;

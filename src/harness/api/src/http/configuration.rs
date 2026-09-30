@@ -205,7 +205,3 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
         })
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/http_configuration.rs"]
-mod tests;

@@ -433,7 +433,3 @@ pub fn derive_run_id(base_run_id: &str, digest: &str) -> String {
 pub fn raw_digest(bytes: &[u8]) -> String {
     digest_hex(bytes)
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/sweeps_spec.rs"]
-mod tests;

@@ -689,7 +689,3 @@ pub fn per_strategy_attribution(
     }
     Ok(result)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/metrics.rs"]
-mod tests;

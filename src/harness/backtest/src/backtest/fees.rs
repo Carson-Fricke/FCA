@@ -404,7 +404,3 @@ fn min_decimal(left: PyDecimal, right: PyDecimal) -> PyDecimal {
         left
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_fees.rs"]
-mod tests;

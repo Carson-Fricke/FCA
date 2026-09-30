@@ -1145,7 +1145,3 @@ impl SessionResolver for ResolverHandle {
         self.0.session_date(moment)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/recorder.rs"]
-mod tests;

@@ -790,7 +790,3 @@ impl<'a> StrategyHistory<'a> {
         self.view.bars(symbol, interval, start, end, None)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/history.rs"]
-mod tests;

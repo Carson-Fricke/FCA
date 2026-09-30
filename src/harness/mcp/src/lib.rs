@@ -24,7 +24,3 @@ pub use store::{
 };
 pub use tools::{build_catalog, HarnessTools, HarnessToolsContext, ToolCapabilities, ToolCatalog};
 pub use transport::{decode_message, encode_message, serve_stdio, InProcessTransport};
-
-#[cfg(test)]
-#[path = "../tests/unit/lib.rs"]
-mod tests;

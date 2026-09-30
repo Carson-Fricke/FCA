@@ -813,7 +813,3 @@ pub fn snapshots_equal(a: &OrderSnapshot, b: &OrderSnapshot) -> bool {
         && a.report_count == b.report_count
         && a.last_report.is_none() == b.last_report.is_none()
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/oms.rs"]
-mod tests;

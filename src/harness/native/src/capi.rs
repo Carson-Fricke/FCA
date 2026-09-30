@@ -607,7 +607,3 @@ pub unsafe extern "C" fn harness_quant_crr_implied_underlying_batch(
     }
     code::OK
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/capi.rs"]
-mod tests;

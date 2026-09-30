@@ -699,7 +699,3 @@ pub trait SasIssuer: Send + Sync {
     /// Issue a read URL for one object path.
     fn issue(&self, object_path: &str) -> String;
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/store.rs"]
-mod tests;

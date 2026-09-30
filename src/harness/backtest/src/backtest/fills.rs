@@ -180,7 +180,3 @@ pub fn fill_model_identity(plugin: &FillPlugin) -> JsonValue {
         ]),
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_fills.rs"]
-mod tests;

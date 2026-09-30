@@ -499,7 +499,3 @@ pub fn wavelet_variance(result: &ModwtResult) -> WaveletVariance {
         shares,
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/signal_wavelets.rs"]
-mod tests;

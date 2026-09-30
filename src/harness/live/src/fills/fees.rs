@@ -582,7 +582,3 @@ fn currency_code(value: &str) -> LiveResult<String> {
     }
     Ok(value.to_string())
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/fills_fees.rs"]
-mod tests;

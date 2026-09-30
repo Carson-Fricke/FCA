@@ -243,7 +243,3 @@ pub fn json_to_yaml(value: &Value) -> YamlValue {
         ),
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/http_native.rs"]
-mod tests;

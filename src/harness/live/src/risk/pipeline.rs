@@ -197,7 +197,3 @@ impl RiskPipeline {
 
 /// Compatibility alias for the pipeline engine.
 pub type RiskEngine = RiskPipeline;
-
-#[cfg(test)]
-#[path = "../../tests/unit/risk_pipeline.rs"]
-mod tests;

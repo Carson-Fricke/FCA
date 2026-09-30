@@ -145,7 +145,3 @@ impl PythonRandom {
         low + i64::from(self.randbelow(span))
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_rng.rs"]
-mod tests;

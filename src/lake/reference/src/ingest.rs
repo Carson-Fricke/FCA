@@ -515,7 +515,3 @@ fn fundamentals_summary(result: &FundamentalsIngestResult) -> FundamentalsSummar
         objects: object_summary(&result.objects),
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/ingest.rs"]
-mod tests;

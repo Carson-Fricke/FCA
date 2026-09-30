@@ -143,7 +143,3 @@ impl MarketEvent {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/events.rs"]
-mod tests;

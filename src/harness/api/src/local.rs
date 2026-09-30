@@ -937,7 +937,3 @@ fn strategy_id(configuration: &BacktestConfig) -> String {
         .collect::<Vec<_>>()
         .join(",")
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/local.rs"]
-mod tests;

@@ -715,7 +715,3 @@ pub fn simple_trade(symbol: &str, price: &str, quantity: &str) -> LiveResult<Mar
         None,
     )?))
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/venues_sim.rs"]
-mod tests;

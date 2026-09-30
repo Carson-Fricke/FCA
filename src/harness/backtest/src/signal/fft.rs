@@ -118,7 +118,3 @@ pub fn idft(re_in: &[f64], im_in: &[f64]) -> (Vec<f64>, Vec<f64>) {
     }
     (re_out, im_out)
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/signal_fft.rs"]
-mod tests;

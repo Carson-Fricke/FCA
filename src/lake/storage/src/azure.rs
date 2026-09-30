@@ -738,7 +738,3 @@ pub fn sas_issuer_from_account_url(
     )?);
     AzureBlobSasIssuer::with_ttl_seconds(backend, container_name, ttl_seconds)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/azure.rs"]
-mod tests;

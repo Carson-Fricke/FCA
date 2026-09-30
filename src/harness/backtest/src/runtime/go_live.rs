@@ -115,7 +115,3 @@ pub fn evaluate(sessions: &[PaperSessionEvidence], criteria: GateCriteria) -> Ga
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/runtime_go_live.rs"]
-mod tests;

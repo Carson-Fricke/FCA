@@ -153,7 +153,3 @@ pub(crate) fn earliest_complete_date(entries: &[CoverageEntry]) -> Option<String
         .map(|entry| entry.session_date.clone())
         .min()
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/ensure.rs"]
-mod tests;

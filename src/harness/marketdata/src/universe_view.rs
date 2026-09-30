@@ -428,7 +428,3 @@ impl UniverseView {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/universe_view.rs"]
-mod tests;

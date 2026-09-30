@@ -253,7 +253,3 @@ fn summarize_parameter(
         best_value,
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/sweeps_sensitivity.rs"]
-mod tests;

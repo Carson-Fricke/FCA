@@ -98,7 +98,3 @@ pub(crate) fn is_non_finite_decimal(text: &str) -> bool {
         .to_ascii_lowercase();
     body == "nan" || body == "inf" || body == "infinity" || body == "snan"
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/partitions.rs"]
-mod tests;

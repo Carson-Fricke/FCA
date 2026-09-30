@@ -528,7 +528,3 @@ pub fn first_would_be_difference(
     }
     None
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/runtime_shadow.rs"]
-mod tests;

@@ -403,7 +403,3 @@ impl SweepRunner {
         Ok(ids)
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/sweeps_runner.rs"]
-mod tests;

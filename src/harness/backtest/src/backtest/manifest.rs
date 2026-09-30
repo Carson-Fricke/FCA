@@ -532,7 +532,3 @@ pub fn configuration_to_json(configuration: &BacktestConfig) -> JsonValue {
         ("symbols", string_array(&configuration.symbols)),
     ])
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_manifest.rs"]
-mod tests;

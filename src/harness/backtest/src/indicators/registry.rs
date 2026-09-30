@@ -507,7 +507,3 @@ pub fn create_indicator(
 pub fn indicator_names() -> Vec<String> {
     default_registry().names()
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/indicators_registry.rs"]
-mod tests;

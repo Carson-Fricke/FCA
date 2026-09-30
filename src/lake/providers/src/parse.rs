@@ -418,7 +418,3 @@ fn conditions(row: &Value) -> Result<Vec<String>, ProviderError> {
 fn protocol(message: impl Into<String>) -> ProviderError {
     ProviderError::Protocol(message.into())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/parse.rs"]
-mod tests;

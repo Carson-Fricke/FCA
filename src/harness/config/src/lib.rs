@@ -127,7 +127,3 @@ pub use loader::{
     environment_variable_name, load_configuration, load_example, resolve_environment_reference,
 };
 pub use yaml::{load_yaml_mapping, parse_yaml_mapping, YamlValue};
-
-#[cfg(test)]
-#[path = "../tests/unit/lib.rs"]
-mod tests;

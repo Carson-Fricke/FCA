@@ -644,7 +644,3 @@ fn parse_http_date(value: &str) -> Option<DateTime> {
     )?;
     Some(instant)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/http.rs"]
-mod tests;

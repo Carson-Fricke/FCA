@@ -210,7 +210,3 @@ impl TraderCore {
         Ok(self.hub.book(&self.book_id)?.cash())
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/trader.rs"]
-mod tests;

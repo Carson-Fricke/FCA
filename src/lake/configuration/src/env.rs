@@ -167,7 +167,3 @@ fn parse_list(text: &str) -> Result<Vec<String>, String> {
             .collect())
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/env.rs"]
-mod tests;

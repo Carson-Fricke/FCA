@@ -58,7 +58,3 @@ fn repository_root() -> PathBuf {
         .expect("crate manifest lives under <root>/src/lake/configuration")
         .to_path_buf()
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/lib.rs"]
-mod tests;

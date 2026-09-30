@@ -353,7 +353,3 @@ fn net(terms: impl Iterator<Item = (OrderLeg, Decimal18)>) -> Decimal18 {
     }
     total
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/venues_options_matching.rs"]
-mod tests;

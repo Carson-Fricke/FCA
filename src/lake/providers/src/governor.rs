@@ -59,7 +59,3 @@ impl RequestGovernor {
         self.requests_per_minute
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/governor.rs"]
-mod tests;

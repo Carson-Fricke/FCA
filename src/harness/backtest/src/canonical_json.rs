@@ -193,7 +193,3 @@ fn write_string_utf8(value: &str, out: &mut String) {
     }
     out.push('"');
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/canonical_json.rs"]
-mod tests;

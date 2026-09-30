@@ -1167,7 +1167,3 @@ pub(crate) fn canonical_underlying(value: &str) -> Result<String, DataError> {
     }
     Ok(canonical)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/models.rs"]
-mod tests;

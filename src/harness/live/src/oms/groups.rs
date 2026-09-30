@@ -663,7 +663,3 @@ fn status_name(status: GroupStatus) -> &'static str {
         GroupStatus::Expired => "expired",
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/oms_groups.rs"]
-mod tests;

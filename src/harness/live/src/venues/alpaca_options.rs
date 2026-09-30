@@ -1307,7 +1307,3 @@ pub fn require_option_symbol(symbol: &Symbol) -> LiveResult<()> {
 pub fn spread_side(legs: &[crate::orders::OrderLeg]) -> Side {
     legs.first().map(|leg| leg.side).unwrap_or(Side::Buy)
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/venues_alpaca_options.rs"]
-mod tests;

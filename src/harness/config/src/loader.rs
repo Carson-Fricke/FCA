@@ -211,7 +211,3 @@ pub fn resolve_environment_reference(
     }
     Ok(value)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/loader.rs"]
-mod tests;

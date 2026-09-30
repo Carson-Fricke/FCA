@@ -451,7 +451,3 @@ pub fn fingerprint_of(events: &[MarketEvent]) -> ReplayFingerprints {
 
 /// A map of counts by key, used by fakes that tally orders.
 pub type Counts = BTreeMap<String, u64>;
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_engine.rs"]
-mod tests;

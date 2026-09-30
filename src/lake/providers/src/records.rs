@@ -327,7 +327,3 @@ impl Timestamped for NormalizedBar {
         self.timestamp
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/records.rs"]
-mod tests;

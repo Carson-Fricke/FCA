@@ -9,7 +9,3 @@ use super::schemas::Artifact;
 pub fn artifact_path(directory: impl AsRef<Path>, artifact: Artifact) -> PathBuf {
     directory.as_ref().join(artifact.file_name())
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/results_recorder_artifacts.rs"]
-mod tests;

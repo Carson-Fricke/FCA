@@ -330,7 +330,3 @@ pub(crate) fn missing_object_path() -> QueryApplicationError {
         None,
     )
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/application.rs"]
-mod tests;

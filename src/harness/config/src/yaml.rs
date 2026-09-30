@@ -427,7 +427,3 @@ pub fn parse_yaml_mapping(text: &str) -> Result<BTreeMap<String, YamlValue>, Con
         )),
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/yaml.rs"]
-mod tests;

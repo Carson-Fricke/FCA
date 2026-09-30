@@ -193,7 +193,3 @@ impl IndicatorMachine<MidSmaKernel> {
         )
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/indicators_overlays.rs"]
-mod tests;

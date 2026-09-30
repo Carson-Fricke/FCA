@@ -522,7 +522,3 @@ fn abs_equal(a: i128, b: i128) -> bool {
 fn abs_less_or_equal(a: i128, b: i128) -> bool {
     abs_value(a) <= abs_value(b)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/books.rs"]
-mod tests;

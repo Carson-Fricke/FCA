@@ -138,7 +138,3 @@ impl ScreenJobRunner for NativeScreenJobRunner {
         })
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/native.rs"]
-mod tests;

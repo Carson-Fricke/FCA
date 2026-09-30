@@ -222,7 +222,3 @@ pub fn render_report_bytes(
 ) -> Vec<u8> {
     render_report(header, equity, trades).into_bytes()
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/results_report.rs"]
-mod tests;

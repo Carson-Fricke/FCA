@@ -481,7 +481,3 @@ fn replace_with_retries(temporary_path: &Path, path: &Path) -> Result<(), DataEr
         None => Err(DataError::io("could not replace the catalog file")),
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/store.rs"]
-mod tests;

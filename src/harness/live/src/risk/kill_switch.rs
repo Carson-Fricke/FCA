@@ -185,7 +185,3 @@ impl RiskRule for KillSwitch {
         Ok(decision)
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/risk_kill_switch.rs"]
-mod tests;

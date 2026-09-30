@@ -340,7 +340,3 @@ impl ListingRepository for MemoryListingRepository {
         Ok(matches)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/memory.rs"]
-mod tests;

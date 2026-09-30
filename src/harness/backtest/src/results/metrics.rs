@@ -569,7 +569,3 @@ pub fn per_strategy_attribution(
 pub fn decimal(value: &str) -> Decimal18 {
     dec(value)
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/results_metrics.rs"]
-mod tests;

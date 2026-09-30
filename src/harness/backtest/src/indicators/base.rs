@@ -498,7 +498,3 @@ impl RollingWindow {
         Some(divide(self.total, Decimal18::from_i64(self.period)))
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/indicators_base.rs"]
-mod tests;

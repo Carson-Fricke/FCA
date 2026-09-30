@@ -1626,7 +1626,3 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
     }
     ToolCatalog::new(candidates)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/tools.rs"]
-mod tests;

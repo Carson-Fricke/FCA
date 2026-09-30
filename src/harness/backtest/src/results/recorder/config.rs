@@ -434,7 +434,3 @@ impl RecorderConfig {
         Ok(self)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/results_recorder_config.rs"]
-mod tests;

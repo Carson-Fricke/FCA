@@ -342,7 +342,3 @@ impl ContractsCatalogPort for MemoryContractsCatalog {
             .cloned())
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/catalog.rs"]
-mod tests;

@@ -333,7 +333,3 @@ pub(crate) fn validate_date_range(
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/validate.rs"]
-mod tests;

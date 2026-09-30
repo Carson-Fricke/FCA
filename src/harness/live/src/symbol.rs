@@ -166,7 +166,3 @@ fn is_market_symbol(value: &str) -> bool {
             || matches!(byte, b'.' | b'/' | b':' | b'_' | b'-')
     })
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/symbol.rs"]
-mod tests;

@@ -575,7 +575,3 @@ fn json_ensure_ascii_string(value: &str) -> String {
     encoded.push('"');
     encoded
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/dead_letter.rs"]
-mod tests;

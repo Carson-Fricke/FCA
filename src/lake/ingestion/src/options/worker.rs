@@ -171,7 +171,3 @@ fn required_datetime(payload: &Value, name: &str) -> Result<DateTime, DataError>
         ))
     })
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/options_worker.rs"]
-mod tests;

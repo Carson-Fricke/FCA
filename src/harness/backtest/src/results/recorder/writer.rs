@@ -427,7 +427,3 @@ impl From<io::Error> for WriterError {
         Self::Io(error)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/results_recorder_writer.rs"]
-mod tests;

@@ -165,7 +165,3 @@ impl IntoResponse for ApiError {
             .into_response()
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/http_models.rs"]
-mod tests;

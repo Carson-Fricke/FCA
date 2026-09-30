@@ -1616,7 +1616,3 @@ pub type AlpacaSipWebSocketFeed = AlpacaWebSocketFeed;
 pub type AlpacaCryptoWebSocketFeed = AlpacaWebSocketFeed;
 /// The OPRA feed shell.
 pub type AlpacaOpraWebSocketFeed = AlpacaWebSocketFeed;
-
-#[cfg(test)]
-#[path = "../tests/unit/ws.rs"]
-mod tests;

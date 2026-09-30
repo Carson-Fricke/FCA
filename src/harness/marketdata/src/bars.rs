@@ -294,7 +294,3 @@ pub fn bars_from_trades<I: IntoIterator<Item = TradeEvent>>(
 ) -> Result<Vec<OhlcvBar>, DataError> {
     build_bars(trades, interval, symbol)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/bars.rs"]
-mod tests;

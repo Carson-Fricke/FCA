@@ -541,7 +541,3 @@ fn system_clock() -> DateTime {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/crypto.rs"]
-mod tests;

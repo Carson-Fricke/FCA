@@ -521,7 +521,3 @@ fn format_decimal(value: Option<Decimal18>) -> String {
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unlimited".into())
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/risk_collateral.rs"]
-mod tests;

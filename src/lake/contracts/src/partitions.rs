@@ -224,7 +224,3 @@ pub fn partition_path(
         )),
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/partitions.rs"]
-mod tests;

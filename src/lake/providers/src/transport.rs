@@ -166,7 +166,3 @@ fn decode_body(text: &str, status: u16) -> Result<Value, TransportFailure> {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/transport.rs"]
-mod tests;

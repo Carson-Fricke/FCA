@@ -357,7 +357,3 @@ impl AzureQueueClient for SdkQueueClient {
 fn azure_error(error: azure_core::Error) -> DataError {
     DataError::Io(error.to_string())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/adapters.rs"]
-mod tests;

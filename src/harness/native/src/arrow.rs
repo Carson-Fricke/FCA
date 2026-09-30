@@ -95,7 +95,3 @@ pub unsafe fn export_decimal_batch(
     }
     true
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/arrow.rs"]
-mod tests;

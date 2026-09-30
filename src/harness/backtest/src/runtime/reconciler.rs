@@ -199,7 +199,3 @@ impl ReconcileSchedule {
         market_event_count > 0 && market_event_count.is_multiple_of(self.every_events)
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/runtime_reconciler.rs"]
-mod tests;

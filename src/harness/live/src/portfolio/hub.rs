@@ -370,7 +370,3 @@ fn aggregate_position(symbol: &Symbol, positions: &[PositionSnapshot]) -> Aggreg
         unrealized_pnl,
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/portfolio_hub.rs"]
-mod tests;

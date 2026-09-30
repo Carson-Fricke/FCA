@@ -237,7 +237,3 @@ pub fn serve_mcp_blocking(args: &crate::McpArgs) -> ExitCode {
 pub fn bearer_variable() -> &'static str {
     BEARER_TOKEN_VARIABLE
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/mcp_cli.rs"]
-mod tests;

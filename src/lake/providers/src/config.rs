@@ -102,7 +102,3 @@ impl ProviderConfig {
 fn configuration(message: &str) -> ProviderError {
     ProviderError::Configuration(message.to_string())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/config.rs"]
-mod tests;

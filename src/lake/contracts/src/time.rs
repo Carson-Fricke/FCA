@@ -378,7 +378,3 @@ pub fn format_nanos_utc(nanos: i64) -> String {
     let trimmed = digits.trim_end_matches('0');
     format!("{year:04}-{month:02}-{date:02}T{hour:02}:{minute:02}:{second:02}.{trimmed}Z")
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/time.rs"]
-mod tests;

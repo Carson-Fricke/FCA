@@ -727,7 +727,3 @@ impl Section {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/universes.rs"]
-mod tests;

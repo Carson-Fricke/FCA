@@ -278,7 +278,3 @@ pub fn build_bars<'a>(
     aggregator.add_many(trades)?;
     aggregator.finalize()
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/bars.rs"]
-mod tests;

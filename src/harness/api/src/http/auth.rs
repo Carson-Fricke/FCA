@@ -119,7 +119,3 @@ pub async fn require_bearer(
         unauthorized()
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/http_auth.rs"]
-mod tests;

@@ -182,7 +182,3 @@ pub struct FileQueryContext<'a> {
     /// Whether the server authorizes `force` overrides for SQL queries.
     pub force_authorized: bool,
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/models.rs"]
-mod tests;

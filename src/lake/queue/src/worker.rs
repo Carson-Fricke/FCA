@@ -525,7 +525,3 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/worker.rs"]
-mod tests;

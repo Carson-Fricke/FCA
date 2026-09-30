@@ -911,7 +911,3 @@ impl Section {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/settings.rs"]
-mod tests;

@@ -272,7 +272,3 @@ impl SecurityMasterView {
         Ok(episodes)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/security_master.rs"]
-mod tests;

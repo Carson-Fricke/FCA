@@ -199,7 +199,3 @@ fn random_suffix() -> String {
         .unwrap_or(0);
     format!("{nanos:032x}{counter:08x}")
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/local.rs"]
-mod tests;

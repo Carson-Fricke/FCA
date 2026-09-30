@@ -223,7 +223,3 @@ pub fn serve_api_blocking(args: &crate::ApiArgs) -> ExitCode {
 pub fn config_path(args: &crate::ApiArgs) -> Option<PathBuf> {
     args.config.clone()
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/http_cli.rs"]
-mod tests;

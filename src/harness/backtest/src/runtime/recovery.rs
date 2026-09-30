@@ -161,7 +161,3 @@ pub fn plan_recovery(policy: BootPolicyKind, facts: RecoveryFacts) -> RecoveryPl
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/runtime_recovery.rs"]
-mod tests;

@@ -481,7 +481,3 @@ fn validate_record(
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/options_transaction.rs"]
-mod tests;

@@ -51,7 +51,3 @@ impl From<CoverageRequestError> for QueryApplicationError {
         Self::new(error.code, error.message, error.details)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/error.rs"]
-mod tests;

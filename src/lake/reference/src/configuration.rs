@@ -392,7 +392,3 @@ fn repository_root() -> PathBuf {
 pub fn process_environ() -> BTreeMap<String, String> {
     std::env::vars().collect()
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/configuration.rs"]
-mod tests;

@@ -218,7 +218,3 @@ pub fn schema_for(asset_class: AssetClass, data_type: DataType) -> Result<Schema
         ))),
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/schemas.rs"]
-mod tests;

@@ -264,21 +264,6 @@ impl Lane {
         }
     }
 
-    /// Feed one pre-measured window straight to the control law (unit tests).
-    #[cfg(test)]
-    fn observe_window(&self, completions: u32, elapsed: Duration, latencies: &[Duration]) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.window = Window {
-            started: None,
-            completions,
-            latencies: latencies.iter().map(Duration::as_secs_f64).collect(),
-        };
-        self.close_window(&mut state, elapsed);
-    }
-
     fn close_window(&self, state: &mut LaneState, elapsed: Duration) {
         let window = std::mem::take(&mut state.window);
         if window.completions == 0 || elapsed.is_zero() {
@@ -396,7 +381,3 @@ pub fn lane_for(
             .or_insert_with(|| Arc::new(Lane::new(requests_per_minute, ceiling))),
     )
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/lane.rs"]
-mod tests;

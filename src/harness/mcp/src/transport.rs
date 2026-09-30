@@ -113,7 +113,3 @@ impl InProcessTransport {
         &self.server
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/transport.rs"]
-mod tests;

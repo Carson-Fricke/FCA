@@ -1,4 +1,4 @@
-﻿//! Data-source resolution and runnability preflight for backtest runs.
+//! Data-source resolution and runnability preflight for backtest runs.
 //!
 //! Port of `harness.runtime.backtest.preflight`. The local Parquet lake reader
 //! lives in the Rust data layer (another epic), so the staged resolver handles
@@ -120,7 +120,3 @@ pub fn resolve_data_source(
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_preflight.rs"]
-mod tests;

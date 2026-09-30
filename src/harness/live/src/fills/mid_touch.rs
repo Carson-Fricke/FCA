@@ -246,7 +246,3 @@ fn is_multiple(value: Decimal18, tick: Decimal18) -> bool {
             .round_to(RoundingMode::Truncate, 0)
             .unwrap_or(quotient)
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/fills_mid_touch.rs"]
-mod tests;

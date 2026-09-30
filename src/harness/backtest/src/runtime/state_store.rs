@@ -1636,7 +1636,3 @@ pub fn payload_sha256(payload: &[u8]) -> String {
     hasher.update(payload);
     hasher.finalize_hex()
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/runtime_state_store.rs"]
-mod tests;

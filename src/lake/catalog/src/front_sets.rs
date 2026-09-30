@@ -279,7 +279,3 @@ impl ContractsCatalog {
         self.front_sets.list(underlying, start, end)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/front_sets.rs"]
-mod tests;

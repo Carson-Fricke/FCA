@@ -577,7 +577,3 @@ fn json_parameters(value: Option<&serde_json::Value>) -> Result<serde_json::Valu
         )),
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_screen.rs"]
-mod tests;

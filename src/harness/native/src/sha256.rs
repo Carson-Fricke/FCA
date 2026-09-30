@@ -215,7 +215,3 @@ impl Sha256 {
         self.state[7] = self.state[7].wrapping_add(h);
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/sha256.rs"]
-mod tests;

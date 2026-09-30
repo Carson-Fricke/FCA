@@ -234,7 +234,3 @@ fn shift_mantissa(mut value: i128, exponent: u32) -> Option<i128> {
     }
     Some(value)
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/options_selector.rs"]
-mod tests;

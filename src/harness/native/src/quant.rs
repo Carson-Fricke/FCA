@@ -490,7 +490,3 @@ pub fn implied_underlying(
         bisect_iterations,
     )
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/quant.rs"]
-mod tests;

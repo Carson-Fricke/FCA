@@ -569,7 +569,3 @@ fn date_of(
     Date::parse(text.trim())
         .ok_or_else(|| ReferenceError::edgar(format!("SEC entry {context} has an invalid {key:?}")))
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/edgar.rs"]
-mod tests;

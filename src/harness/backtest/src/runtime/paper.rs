@@ -456,7 +456,3 @@ impl PaperShellRestore for PaperRuntimeShell {
         self.venue = watermarks;
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/runtime_paper.rs"]
-mod tests;

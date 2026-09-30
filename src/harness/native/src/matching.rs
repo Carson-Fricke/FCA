@@ -845,7 +845,3 @@ fn same_market(a: MarketEvent<'_>, b: MarketEvent<'_>) -> bool {
         && a.sequence() == b.sequence()
         && a.event_id() == b.event_id()
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/matching.rs"]
-mod tests;

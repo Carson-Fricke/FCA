@@ -261,7 +261,3 @@ fn easter(year: i32) -> Date {
     let day = (h + l - 7 * m + 114) % 31 + 1;
     Date::from_ymd(year, month as u32, day as u32).expect("valid easter")
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/sessions.rs"]
-mod tests;

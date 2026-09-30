@@ -922,7 +922,3 @@ pub fn fixture_symbols(fixture: &ReplayFixture) -> Vec<String> {
         .collect();
     set.into_iter().collect()
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_fixture.rs"]
-mod tests;

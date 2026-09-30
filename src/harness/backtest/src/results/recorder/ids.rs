@@ -103,7 +103,3 @@ pub fn format_uuid(bytes: &[u8]) -> String {
         &hex[20..32]
     )
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/results_recorder_ids.rs"]
-mod tests;

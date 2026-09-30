@@ -792,7 +792,3 @@ pub fn parse_configuration_shell(text: &str) -> Option<String> {
     }
     None
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/lib.rs"]
-mod tests;

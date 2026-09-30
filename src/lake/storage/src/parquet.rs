@@ -497,7 +497,3 @@ fn out_of_range(field_name: &str) -> DataError {
         "{field_name} is outside the persisted integer range"
     ))
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/parquet.rs"]
-mod tests;

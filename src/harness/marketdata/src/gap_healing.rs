@@ -283,7 +283,3 @@ fn event_partition(event: &MarketEvent) -> Option<(String, DataType)> {
     };
     Some((event.symbol().to_string(), data_type))
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/gap_healing.rs"]
-mod tests;

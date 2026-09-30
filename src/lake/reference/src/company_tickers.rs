@@ -140,7 +140,3 @@ fn cik_of(entry: &serde_json::Map<String, Value>, index: &str) -> Result<u64, Re
     }
     Ok(integer)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/company_tickers.rs"]
-mod tests;

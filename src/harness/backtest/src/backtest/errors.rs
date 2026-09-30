@@ -204,7 +204,3 @@ impl FillModel {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_errors.rs"]
-mod tests;

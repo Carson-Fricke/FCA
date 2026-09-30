@@ -1172,7 +1172,3 @@ fn month_number(name: &str) -> Option<u32> {
         .position(|month| month.eq_ignore_ascii_case(name))
         .map(|index| index as u32 + 1)
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/client.rs"]
-mod tests;

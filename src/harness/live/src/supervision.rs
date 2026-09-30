@@ -1556,7 +1556,3 @@ pub fn read_supervision_status(config_path: &std::path::Path) -> Option<String> 
     )));
     shared.read_text(&format!("runs/{run_id}/supervision.json"))
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/supervision.rs"]
-mod tests;

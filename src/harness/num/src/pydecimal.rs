@@ -1071,7 +1071,3 @@ impl From<u32> for PyDecimal {
         Self::from_u128(u128::from(value))
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/pydecimal.rs"]
-mod tests;

@@ -704,7 +704,3 @@ fn normalize_crypto(record: &CryptoTradeRecord) -> NormalizedCryptoTrade {
         taker_side: record.taker_side.clone(),
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/bars.rs"]
-mod tests;

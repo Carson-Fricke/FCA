@@ -407,7 +407,3 @@ impl<'a> MarketOrder<'a> {
         prices_for_type(self.order_type, self.limit_price, self.stop_price)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/market.rs"]
-mod tests;

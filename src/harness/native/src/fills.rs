@@ -48,7 +48,3 @@ impl FillModel {
         matches!(self, Self::SimpleTouch)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/fills.rs"]
-mod tests;

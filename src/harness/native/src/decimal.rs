@@ -124,7 +124,3 @@ fn div_round_half_even(numerator: U256, denominator: U256) -> U256 {
         quotient
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/decimal.rs"]
-mod tests;

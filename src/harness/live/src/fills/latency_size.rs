@@ -213,7 +213,3 @@ fn displayed_quantity(side: Side, market: &MarketEvent) -> Decimal18 {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/fills_latency_size.rs"]
-mod tests;

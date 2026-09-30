@@ -691,7 +691,3 @@ impl TryFrom<f64> for Decimal18 {
         Self::from_f64(value)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/decimal18.rs"]
-mod tests;

@@ -115,7 +115,3 @@ impl IndicatorMachine<RsiKernel> {
         )
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/indicators_momentum.rs"]
-mod tests;

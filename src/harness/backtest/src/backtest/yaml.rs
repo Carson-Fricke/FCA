@@ -457,7 +457,3 @@ pub fn load_yaml(text: &str) -> Result<YamlValue, YamlError> {
     }
     Ok(parsed)
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_yaml.rs"]
-mod tests;

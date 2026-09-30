@@ -539,7 +539,3 @@ fn validate_record_timestamp(
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/equities.rs"]
-mod tests;

@@ -440,7 +440,3 @@ fn parse_block(
     }
     Ok((Value::Object(result), cursor))
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/yaml.rs"]
-mod tests;

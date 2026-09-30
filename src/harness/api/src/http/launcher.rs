@@ -223,7 +223,3 @@ impl BacktestLauncher for InProcessLauncher {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/http_launcher.rs"]
-mod tests;

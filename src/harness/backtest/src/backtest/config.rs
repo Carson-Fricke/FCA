@@ -840,7 +840,3 @@ fn datetime_field(mapping: &BTreeMap<String, YamlValue>, key: &str) -> Option<i6
     let text = mapping.get(key).and_then(YamlValue::as_str)?;
     crate::backtest::job::parse_timestamp_ns(text)
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/backtest_config.rs"]
-mod tests;

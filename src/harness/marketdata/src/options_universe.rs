@@ -457,7 +457,3 @@ impl OptionUniverseView {
         Ok(selected)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/options_universe.rs"]
-mod tests;

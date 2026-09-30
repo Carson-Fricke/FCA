@@ -148,7 +148,3 @@ pub fn unwrap(phase: &[f64]) -> Vec<f64> {
     }
     result
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/signal_analytic.rs"]
-mod tests;

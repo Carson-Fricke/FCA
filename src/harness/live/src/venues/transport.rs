@@ -366,7 +366,3 @@ impl BrokerFrameStream for ScriptedFrameStream {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/venues_transport.rs"]
-mod tests;

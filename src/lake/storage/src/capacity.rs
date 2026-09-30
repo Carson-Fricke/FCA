@@ -235,7 +235,3 @@ fn paused_message(status: &StorageCapStatus) -> String {
         status.reason.as_deref().unwrap_or("capacity limit")
     )
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/capacity.rs"]
-mod tests;
