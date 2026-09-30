@@ -17,3 +17,18 @@ members = [
     "strategy-jit",
     "lakeclient",
 ]
+
+# Keep build trees small. On Windows/MSVC every linked binary emits a full PDB
+# when debug info is on, and the test suite links many executables; debug info
+# stays off for all profiles and incremental caches are disabled.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
+[profile.release]
+debug = 0
+incremental = false

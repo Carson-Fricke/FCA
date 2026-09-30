@@ -78,3 +78,19 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", 
 http-body-util = "0.1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
+
+# Keep build trees small. On Windows/MSVC every linked binary emits a full PDB
+# when debug info is on, and this workspace links dozens of test binaries
+# against bundled DuckDB; one target tree grew past 150 GB. Debug info stays
+# off for all profiles and incremental caches are disabled.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
+[profile.release]
+debug = 0
+incremental = false
