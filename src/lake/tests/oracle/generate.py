@@ -16,6 +16,11 @@ Outputs, all committed:
   digests for representative specs.
 * ``storage/tests/oracle/parquet/`` + ``parquet_manifest.json`` — Python
   ``ParquetWriter`` output for every pinned dataset with the logical rows.
+
+Historical note: the Python reference service (``lake.coverage.application``,
+``lake.local.state``, ``lake.storage.parquet``) was deleted in the Rust
+migration, so this generator no longer runs. It is retained as the provenance
+record for the committed fixtures, which the Rust oracle tests still consume.
 """
 
 from __future__ import annotations
@@ -29,9 +34,18 @@ from pathlib import Path
 from typing import Any
 
 from exchange_calendars import get_calendar
-from lake.coverage.application import EnsureSpec, ensure_job_id
-from lake.local.state import LocalCatalogRepository
-from lake.storage.parquet import LocalFilesystemStore, ParquetWriter
+
+# The Python reference these three imports targeted was deleted in the Rust
+# migration, so the imports do not resolve; see the module docstring.
+from lake.coverage.application import (  # ty: ignore[unresolved-import]
+    EnsureSpec,
+    ensure_job_id,
+)
+from lake.local.state import LocalCatalogRepository  # ty: ignore[unresolved-import]
+from lake.storage.parquet import (  # ty: ignore[unresolved-import]
+    LocalFilesystemStore,
+    ParquetWriter,
+)
 
 from lake.catalog.models import CoverageRecord, CoverageStatus
 from lake.contracts import AssetClass, DataType, partition_path

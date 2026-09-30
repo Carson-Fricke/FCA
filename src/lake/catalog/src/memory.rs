@@ -26,10 +26,13 @@ pub(crate) fn guard<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The logical key every coverage record is indexed by.
+type CoverageKey = (AssetClass, DataType, String, Option<String>, Date);
+
 /// Deterministic process-local coverage storage.
 #[derive(Debug, Default)]
 pub struct MemoryCatalogRepository {
-    records: Mutex<BTreeMap<(AssetClass, DataType, String, Option<String>, Date), CoverageRecord>>,
+    records: Mutex<BTreeMap<CoverageKey, CoverageRecord>>,
 }
 
 impl MemoryCatalogRepository {

@@ -356,14 +356,16 @@ class LocalWorkspaceProvider:
     def resolve_path(
         self,
         workspace_id: str,
-        relative_path: str | Path = ".",
+        relative: str | Path = ".",
         *,
         must_exist: bool = False,
     ) -> Path:
-        """Resolve a selected workspace path without accepting a raw root path."""
-        return self.open(workspace_id).resolve_path(
-            relative_path, must_exist=must_exist
-        )
+        """Resolve a selected workspace path without accepting a raw root path.
+
+        The parameter names match ``WorkspacePathProvider`` so the provider
+        satisfies the protocol when passed as a keyword-capable boundary.
+        """
+        return self.open(workspace_id).resolve_path(relative, must_exist=must_exist)
 
     @staticmethod
     def _write_scaffold(root: Path, manifest: WorkspaceManifest) -> None:
