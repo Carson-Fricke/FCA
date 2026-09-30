@@ -362,6 +362,68 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 	}));
 }
 
+/** One deterministic phase attempt: its progress lines and terminal result. */
+export interface PhaseAttemptRun {
+	attempt: number;
+	progress: Array<{ text: string; at: string }>;
+	result: { summary: string; artifact: Record<string, unknown> } | null;
+	error: { message: string } | null;
+}
+
+/**
+ * Group one deterministic phase's `workflow.progress` and
+ * `workflow.phase_result` events by attempt. Every `workflow.phase` entry
+ * event for the phase opens an attempt, so a loopback that re-enters the
+ * phase keeps each earlier attempt's output instead of overwriting it.
+ * Progress or result events seen before any entry event (a truncated replay)
+ * belong to the first attempt.
+ */
+export function derivePhaseAttempts(
+	events: ExecutionEvent[],
+	phase: string
+): PhaseAttemptRun[] {
+	const runs: PhaseAttemptRun[] = [];
+	const open = (): PhaseAttemptRun => {
+		const run: PhaseAttemptRun = {
+			attempt: runs.length + 1,
+			progress: [],
+			result: null,
+			error: null
+		};
+		runs.push(run);
+		return run;
+	};
+	for (const event of [...events].sort((a, b) => a.cursor - b.cursor)) {
+		if (event.payload['phase'] !== phase) continue;
+		if (event.eventType === 'workflow.phase') {
+			open();
+			continue;
+		}
+		if (event.eventType !== 'workflow.progress' && event.eventType !== 'workflow.phase_result') {
+			continue;
+		}
+		const run = runs[runs.length - 1] ?? open();
+		if (event.eventType === 'workflow.progress') {
+			run.progress.push({
+				text: String(event.payload['text'] ?? ''),
+				at: event.occurredAt
+			});
+			continue;
+		}
+		const artifact = (event.payload['artifact'] ?? {}) as Record<string, unknown>;
+		if (artifact['type'] === 'error') {
+			run.result = null;
+			run.error = {
+				message: typeof artifact['message'] === 'string' ? artifact['message'] : ''
+			};
+		} else {
+			run.result = { summary: String(event.payload['summary'] ?? ''), artifact };
+			run.error = null;
+		}
+	}
+	return runs;
+}
+
 /**
  * Derive the phase stepper from the phase orchestrator sub-agents.
  *

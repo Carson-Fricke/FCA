@@ -291,7 +291,12 @@ def _extract_fit(metrics: object | None) -> dict[str, float]:
             raise ValueError(f"fitted parameter {parameter!r} is not finite")
         fit[parameter] = number
     if not fit:
-        raise ValueError("research model run returned no fit parameters")
+        published = sorted(name for name in source if isinstance(name, str))
+        raise ValueError(
+            "research model run published no fit parameters; publish fitted "
+            "parameters as fit.<parameter> metrics (published metrics: "
+            f"{', '.join(published) or 'none'})"
+        )
     return fit
 
 

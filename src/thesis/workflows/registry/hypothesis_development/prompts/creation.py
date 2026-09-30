@@ -159,16 +159,21 @@ _CREATION_FINALIZE_INSTRUCTIONS = (
     "exclusive) and interval (`1min` or `1d`; studies replay bars at exactly "
     "this interval over the declared window), and source: a complete Rust "
     "study program against the harness_strategy_sdk crate (Cargo name "
-    "harness-strategy-sdk) that compiles and exports the SDK handshake. Copy "
-    "this skeleton and fill it in: `use harness_strategy_sdk::{"
+    "harness-strategy-sdk) that compiles and exports the SDK handshake. This "
+    "skeleton is the required shape; replace its compile_error! body before "
+    "completing, because the unfilled skeleton is rejected by the compile "
+    "gate: `use harness_strategy_sdk::{"
     "export_study_program, BarEvent, MetricPublisher, StudyProgram}; use "
     "harness_strategy_sdk::serde_json::Value; struct Model; impl StudyProgram "
     "for Model { fn new(_p: Value) -> Self { Self } fn on_bar(&mut self, "
-    "_e: &BarEvent) {} fn on_stop(&mut self, m: &mut MetricPublisher) { let _ "
-    '= m.publish("data_ok", 1.0); } } export_study_program!(Model);`. Fold '
+    "_e: &BarEvent) {} fn on_stop(&mut self, m: &mut MetricPublisher) { "
+    'compile_error!("replace this skeleton with the fitted model"); } } '
+    "export_study_program!(Model);`. Fold "
     "bars into incremental state, publish every observable by its exact name "
-    "with m.publish(name, value) (names must match outputs), publish fitted "
-    "parameters as fit.<parameter>, and publish failure indicators (e.g. "
+    "with m.publish(name, value) (names must match outputs), and publish at "
+    "least one fitted parameter as a fit.<parameter> metric: the trials phase "
+    "requires fitted parameters, so a run that publishes none fails the "
+    "hypothesis. Also publish failure indicators (e.g. "
     "data_ok=0.0) for missing or inadequate data instead of panicking. No "
     "sizing, no operator-facing prose.",
 )

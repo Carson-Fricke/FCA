@@ -18,7 +18,11 @@
 //! bars are first re-stamped onto these buckets (daily rows collapse to the
 //! session open, minute rows floor to the aligned window start); bars outside
 //! every requested session (for example SIP extended-hours bars) are excluded
-//! by construction. Derived bars aggregate the stored trades in the canonical
+//! by construction. Provider bars are start-stamped, so a provider session is
+//! the half-open `[open, close)` window: the row stamped exactly at the close
+//! starts the following extended-hours period and never belongs to the
+//! session, while event prints keep the closed `[open, close]` window.
+//! Derived bars aggregate the stored trades in the canonical
 //! trade sort order, so the OHLCV is deterministic and independent of trade
 //! arrival order: open is the first trade price, high/low are the running
 //! extremes, close is the last trade price, and volume is the exact decimal
@@ -556,6 +560,11 @@ fn provider_bar_rows(
 }
 
 /// The session-open-aligned bucket start one timestamp belongs to.
+///
+/// Provider rows stamped at or after the close never reach this function
+/// (`session_index` groups provider bars on the half-open session window); the
+/// close-instant clamp serves event prints, so a trade exactly at the close
+/// lands in the final window.
 fn bucket_start(timestamp: DateTime, interval: BarInterval, session: &CoverageSession) -> DateTime {
     match interval {
         BarInterval::OneDay => session.open_time,
@@ -574,11 +583,16 @@ fn minute_window_count(session: &CoverageSession) -> i64 {
     ((total + 59_999_999) / 60_000_000).max(1)
 }
 
-/// The index of the session containing `timestamp`, if any.
+/// The index of the session containing one start-stamped provider bar, if any.
+///
+/// Provider bars are stamped at the start of the interval they cover, so the
+/// session window is half-open `[open, close)`: the row stamped exactly at the
+/// close is the first extended-hours bar of the following period, not part of
+/// this session. Event prints use the closed `[open, close]` window instead.
 fn session_index(sessions: &[CoverageSession], timestamp: DateTime) -> Option<usize> {
     sessions
         .iter()
-        .position(|session| session.open_time <= timestamp && timestamp <= session.close_time)
+        .position(|session| session.open_time <= timestamp && timestamp < session.close_time)
 }
 
 /// The coverage status for one written bars partition.

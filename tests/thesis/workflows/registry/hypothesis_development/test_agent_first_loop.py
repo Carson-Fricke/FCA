@@ -486,6 +486,95 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert kit.provider.prompts == []
 
 
+def test_loop_back_reseeds_the_revisited_phase(tmp_path: Path) -> None:
+    """A verdict loop-back re-enters hypothesis creation with the same durable
+    node.  Every entry must deliver its own phase seed instead of colliding
+    with the previous entry's delivery key, so the revisited agent is woken
+    with the new contract and the second verdict sees the second trials."""
+    kit = _kit(
+        tmp_path,
+        payloads=[],
+        results=[],
+        research_runner=_FakeStudyRunner(),
+    )
+    request = _request(kit)
+    store = PersistenceSubAgentStore(kit.chat.persistence)
+    lifecycle = SubAgentLifecycle(kit.chat, store=store)
+    control = _control(kit, store, request)
+
+    creation_node = kit.workflow.prepare_phase(request)
+    assert creation_node is not None
+    completion = _QueuedCompletionProvider(
+        (
+            "request_phase_completion",
+            {
+                "completion": {
+                    "target": "falsification_trials",
+                    "hypothesis": _hypothesis_envelope(),
+                }
+            },
+        )
+    )
+    _runner(kit, store, control, completion, lifecycle=lifecycle).run_node_turn(
+        WORKSPACE, request.chat_id, creation_node
+    )
+    seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
+    assert len(seeds) == 2
+    verdict_node = str(_message_data(seeds[1])["subAgentId"])
+
+    # The operator loops back: the verdict completes into a revised creation.
+    _runner(
+        kit,
+        store,
+        control,
+        _QueuedCompletionProvider(
+            (
+                "request_phase_completion",
+                {
+                    "completion": {
+                        "target": "hypothesis_creation",
+                        "verdict": {
+                            "outcome": "refuted",
+                            "reason": "the planned falsifier fired",
+                        },
+                    }
+                },
+            )
+        ),
+        lifecycle=lifecycle,
+    ).run_node_turn(WORKSPACE, request.chat_id, verdict_node)
+    execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
+    assert execution.phase == HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value
+
+    # The creation node is reused, but the second entry carries its own seed.
+    seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
+    assert len(seeds) == 3
+    revisited = seeds[2]
+    assert _message_data(revisited)["subAgentId"] == creation_node
+    assert (
+        _message_data(revisited)["deliveryKey"]
+        != _message_data(seeds[0])["deliveryKey"]
+    )
+    assert (
+        kit.conversations.in_flight(WORKSPACE, request.chat_id, creation_node) is True
+    )
+
+    # The second cycle runs: creation completes again, the trials rerun, and
+    # the second verdict entry is seeded with the second trial contract.
+    _runner(kit, store, control, completion, lifecycle=lifecycle).run_node_turn(
+        WORKSPACE, request.chat_id, creation_node
+    )
+    seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
+    assert len(seeds) == 4
+    second_verdict = seeds[3]
+    assert _message_data(second_verdict)["subAgentId"] == verdict_node
+    assert (
+        _message_data(second_verdict)["deliveryKey"]
+        != _message_data(seeds[1])["deliveryKey"]
+    )
+    assert kit.conversations.in_flight(WORKSPACE, request.chat_id, verdict_node) is True
+
+
 def test_rejected_contract_is_repaired_in_turn(tmp_path: Path) -> None:
     kit = _kit(
         tmp_path,

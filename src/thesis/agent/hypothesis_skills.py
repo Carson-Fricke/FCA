@@ -33,7 +33,7 @@ HYPOTHESIS_AUTHORING_SKILL_ID = "hypothesis-authoring"
 FALSIFICATION_PLANNING_SKILL_ID = "falsification-planning"
 FALSIFICATION_RCA_SKILL_ID = "falsification-rca"
 STRATEGY_AUTHORING_SKILL_ID = "strategy-authoring"
-HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.2.0"
+HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.3.0"
 
 _HYPOTHESIS_AUTHORING = (
     "Turn the operator's intuition about a trading opportunity into one "
@@ -52,7 +52,8 @@ _HYPOTHESIS_AUTHORING = (
     "its exact open, high, low, close and volume decimals, into incremental "
     "state and publish every falsifier observable by name in on_stop via "
     "metrics.publish(name, value); the names must match the declared outputs, "
-    "and fitted parameters are published as fit.<parameter> metrics. The study "
+    "and at least one fitted parameter must be published as a fit.<parameter> "
+    "metric because the trials phase requires fitted parameters. The study "
     "replays bars at the interval declared in harnessConfiguration.interval "
     "(1min or 1d) over the declared window. A fired falsifier refutes the claim "
     "on history (Layer A); the same published statistic on a trailing window "

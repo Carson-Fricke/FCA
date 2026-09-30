@@ -12,6 +12,7 @@
 	import { WorkflowScopeController } from '$lib/workflow-scope.svelte';
 	import { buildNodeEntries } from '$lib/transcript';
 	import {
+		derivePhaseAttempts,
 		derivePhaseSteps,
 		derivePhases,
 		executionEvents,
@@ -226,32 +227,33 @@
 	const isPhaseScope = $derived(active?.kind === 'phase');
 
 	/**
-	 * The active phase's run view state (REQ-D2): live `workflow.progress`
-	 * lines for the phase, then its `workflow.phase_result` — the error
-	 * variant when the artifact is one.
+	 * The active phase's run view state (REQ-D2): every attempt's
+	 * `workflow.progress` lines, then its `workflow.phase_result` — the error
+	 * variant when the artifact is one. A loopback that re-enters the phase
+	 * keeps every earlier attempt, so the view selects among them.
 	 */
-	const phaseRun = $derived.by(() => {
-		if (!active || active.kind !== 'phase') return null;
-		let result: { summary: string; artifact: Record<string, unknown> } | null = null;
-		let error: { message: string } | null = null;
-		const progress: Array<{ text: string; at: string }> = [];
-		for (const event of controller.eventsForPhase(active.id)) {
-			if (event.eventType === 'workflow.progress') {
-				progress.push({
-					text: String(event.payload['text'] ?? ''),
-					at: event.occurredAt
-				});
-				continue;
-			}
-			const artifact = (event.payload['artifact'] ?? {}) as Record<string, unknown>;
-			if (artifact['type'] === 'error') {
-				error = { message: String(artifact['message'] ?? '') };
-			} else {
-				result = { summary: String(event.payload['summary'] ?? ''), artifact };
-				error = null;
-			}
-		}
-		return { progress, result, error };
+	const phaseAttempts = $derived.by(() => {
+		if (!active || active.kind !== 'phase') return [];
+		return derivePhaseAttempts(controller.eventsForPhase(active.id), active.id);
+	});
+
+	// The selection is scoped to the phase it was made on, so navigating to
+	// another phase always shows that phase's latest attempt.
+	let selectedAttempt = $state<number | null>(null);
+	let selectedAttemptPhase = $state<string | null>(null);
+
+	function selectAttempt(attempt: number): void {
+		selectedAttempt = attempt;
+		selectedAttemptPhase = active?.kind === 'phase' ? active.id : null;
+	}
+
+	const selectedPhaseRun = $derived.by(() => {
+		if (!phaseAttempts.length) return null;
+		const chosen =
+			selectedAttempt !== null && selectedAttemptPhase === active?.id
+				? phaseAttempts.find((run) => run.attempt === selectedAttempt)
+				: undefined;
+		return chosen ?? phaseAttempts[phaseAttempts.length - 1];
 	});
 
 	const phases = $derived.by(() => {
@@ -395,12 +397,12 @@
 			onBack={() => controller.back()}
 			onNavigate={(index) => controller.navigateTo(index)}
 		>
-			{#if isPhaseScope && phaseRun}
+			{#if isPhaseScope}
 				<div class="min-h-0 flex-1 overflow-y-auto p-3" data-testid="phase-run-scroll">
 					<PhaseRunView
-						progress={phaseRun.progress}
-						result={phaseRun.result}
-						error={phaseRun.error}
+						attempts={phaseAttempts}
+						selectedAttempt={selectedPhaseRun?.attempt ?? null}
+						onSelectAttempt={selectAttempt}
 					/>
 				</div>
 			{:else}

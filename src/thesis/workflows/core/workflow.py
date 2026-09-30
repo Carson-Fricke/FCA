@@ -629,6 +629,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         """
         if self._conversations is None or not prompt:
             return None
+        attempt = self._phase_entry_ordinal(request, phase_value)
         spec, _context, _label = self._phase_spawn_spec(request, phase_value)
         child = self._conversations.spawn(
             Anchor(
@@ -643,14 +644,37 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             SubAgentKind.CONVERSATION,
             actor_id=self._actor,
             sub_agent_id=sub_agent_id,
-            prompt_key=f"phase-seed-{request.execution_id}-{phase_value}",
-            prompt_data={"phase": phase_value},
+            # The seed identifies one entry into the phase: a loop-back
+            # re-entry reuses the durable node, so only an entry-scoped key
+            # delivers its fresh prompt instead of colliding with the previous
+            # entry's delivery.
+            prompt_key=f"phase-seed-{request.execution_id}-{phase_value}-{attempt}",
+            prompt_data={"phase": phase_value, "attempt": attempt},
             attribution={
                 "workflow_execution_id": request.execution_id,
                 "phase_attempt_id": None,
             },
         )
         return child.conversation_id
+
+    def _phase_entry_ordinal(self, request: RequestT, phase_value: str) -> int:
+        """Return the durable ordinal of the current entry into ``phase_value``.
+
+        A phase can be entered more than once: a verdict loop-back revisits
+        hypothesis creation with the same durable node.  Counting the
+        ``workflow.phase`` entry events the engine already emitted makes the
+        ordinal stable across retries of one entry and distinct for every
+        later entry.
+        """
+        _, chat = self._require_doctrine_chat()
+        return sum(
+            1
+            for event in chat.replay_events(
+                request.workspace_id, request.execution_id
+            ).events
+            if event.event_type is ExecutionEventType.WORKFLOW_PHASE
+            and event.payload.get("phase") == phase_value
+        )
 
     def _completion_instruction(self, phase_value: str) -> str:
         """Describe the phase's completion obligation from its spec data.

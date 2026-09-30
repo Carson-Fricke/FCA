@@ -291,7 +291,8 @@ export class WorkflowScopeController {
 	eventsForPhase(phase: string): ExecutionEvent[] {
 		return this.flatEvents.filter(
 			(event) =>
-				(event.eventType === 'workflow.progress' ||
+				(event.eventType === 'workflow.phase' ||
+					event.eventType === 'workflow.progress' ||
 					event.eventType === 'workflow.phase_result') &&
 				event.payload['phase'] === phase
 		);
