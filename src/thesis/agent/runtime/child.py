@@ -129,11 +129,25 @@ class ChildConversation:
 
     def complete(self, result: Mapping[str, object]) -> SubAgentRecord:
         """Mark the child completed and deliver its result to the return anchor."""
-        completed = self._service.lifecycle.complete(
+        self._service.lifecycle.complete(
             self.workspace_id, self.conversation_id, result=result
         )
-        self._service.delivery.deliver_child_result(self._returns_to, completed)
-        return completed
+        return self.deliver_completed_result()
+
+    def deliver_completed_result(self) -> SubAgentRecord:
+        """Deliver an already-completed child's result to the return anchor once.
+
+        The phase-completion route completes the node inside the workflow (the
+        transition owns the result), so this handle owns only the return
+        delivery and must not re-complete the record.
+        """
+        record = self._service.store.get_sub_agent(
+            self.workspace_id, self.conversation_id
+        )
+        if record is None:
+            raise RuntimeError("sub-agent does not exist")
+        self._service.delivery.deliver_child_result(self._returns_to, record)
+        return record
 
     def fail(self, reason: str) -> SubAgentRecord:
         """Mark the child failed and deliver its failure to the return anchor."""

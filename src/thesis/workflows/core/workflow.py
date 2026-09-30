@@ -724,6 +724,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 f"completion does not belong to the current phase {phase!r}"
             )
         handed = self._apply_contract(request, state, phase, completion)
+        # The ordinary transition closes the completed node through
+        # _on_phase_entered while entering the successor; a terminal phase
+        # returns before that hook, so close the still-open node here with the
+        # completion contract attached.  Either way it happens exactly once.
+        self._finish_completed_phase(request, handed, phase, completion)
         target_phase = self._phase_value(handed.phase)
         next_context = HandoffContext(
             source=phase,
@@ -767,6 +772,33 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 self.fail_execution(request, reason=str(error) or type(error).__name__)
 
         self._detach(run)
+
+    def _finish_completed_phase(
+        self,
+        request: RequestT,
+        state: StateT,
+        phase: str,
+        completion: Mapping[str, object],
+    ) -> None:
+        """Close the completed phase node when the transition did not.
+
+        The ordinary transition closes it through ``_on_phase_entered`` while
+        entering the successor.  A terminal phase finishes the execution
+        before that hook, so the completion contract still has to be attached
+        and the node finished here — exactly once, because a successful
+        successor entry replaces the active orchestrator and this becomes a
+        no-op.
+        """
+        active = self._active_orchestrators.get(request.execution_id)
+        if active is None or self._phase_value(active.phase) != phase:
+            return
+        doctrine, _ = self._require_doctrine_chat()
+        self.finish_orchestrator(
+            request,
+            status=STATUS_COMPLETED,
+            summary=doctrine.summarize(state, phase),
+            result=completion,
+        )
 
     def _apply_contract(
         self,
@@ -1065,7 +1097,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             )
         except Exception:  # noqa: BLE001 - phase is best-effort projection state
             pass
-        self._on_phase_entered(request, advanced)
+        self._on_phase_entered(request, advanced, completion=completion)
         return advanced
 
     def _commit_transition(
@@ -1396,6 +1428,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         detail: str | None = None,
         summary: str | None = None,
         artifact: Mapping[str, object] | None = None,
+        result: Mapping[str, object] | None = None,
     ) -> None:
         """Close the execution's open orchestrator with its final projection."""
         active = self._active_orchestrators.pop(request.execution_id, None)
@@ -1446,10 +1479,15 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         )
         if self._subagent_lifecycle is not None:
             if status == STATUS_COMPLETED:
+                completed_result: Mapping[str, object] | None = (
+                    result
+                    if result is not None
+                    else (None if summary is None else {"summary": summary})
+                )
                 self._subagent_lifecycle.complete(
                     request.workspace_id,
                     active.sub_agent_id,
-                    result=(None if summary is None else {"summary": summary}),
+                    result=completed_result,
                 )
             else:
                 self._subagent_lifecycle.fail(
@@ -1458,7 +1496,13 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                     result=None if detail is None else {"failure": detail},
                 )
 
-    def _on_phase_entered(self, request: RequestT, state: StateT) -> None:
+    def _on_phase_entered(
+        self,
+        request: RequestT,
+        state: StateT,
+        *,
+        completion: Mapping[str, object] | None = None,
+    ) -> None:
         doctrine, _ = self._require_doctrine_chat()
         active = self._active_orchestrators.get(request.execution_id)
         report = doctrine.report(self, state, active)
@@ -1470,12 +1514,15 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 status=STATUS_COMPLETED,
                 summary=summary,
                 artifact=report,
+                result=completion,
             )
         else:
             summary = (
                 None if active is None else doctrine.summarize(state, active.phase)
             )
-            self.finish_orchestrator(request, status=STATUS_COMPLETED, summary=summary)
+            self.finish_orchestrator(
+                request, status=STATUS_COMPLETED, summary=summary, result=completion
+            )
         phase_value = self._phase_value(state.phase)
         if phase_value in doctrine.active_phases:
             self._activate_orchestrator(request, state.phase)

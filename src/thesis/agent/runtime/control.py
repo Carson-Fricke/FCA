@@ -28,6 +28,7 @@ from thesis.chat.contracts import (
     AgentInvocationKind,
     AgentInvocationState,
     SubAgentRecord,
+    SubAgentStatus,
     replace_record,
 )
 
@@ -375,29 +376,44 @@ class ControlToolService:
         *,
         completion: Mapping[str, object],
     ) -> SubAgentRecord:
-        """Mark a phase child completed with its constructed completion.
+        """Apply a phase completion through its workflow and return the node.
 
-        The persisted result is a proposal, never a transition: the workflow
-        validates the contract and remains the only thing that advances a phase.
+        The workflow is the only owner of a phase completion: it validates the
+        contract, commits the transition, closes the phase node, and records
+        the completion contract as that node's result.  This adapter only runs
+        the engine-side validation callback, applies the transition, and
+        delivers the finished result to the return anchor exactly once.  A node
+        the workflow does not own is rejected rather than silently completed.
         """
         record = self._lifecycle.get(workspace_id, sub_agent_id)
         if record is None:
             raise RuntimeError("sub-agent does not exist")
-        if record.workflow_execution_id is not None:
-            if self._contract_validator is not None:
-                # An authoritative validation (for example a harness compile of
-                # the authored program) runs before any transition commits, so
-                # its failure reaches the agent as a repairable tool result.
-                failure = self._contract_validator(workspace_id, record, completion)
-                if failure:
-                    raise PhaseCompletionRejected(failure)
-            if self._phase_completions is not None:
-                applied = self._phase_completions(workspace_id, record, completion)
-                if applied is None:
-                    raise PhaseCompletionRejected(
-                        "no workflow is available to apply this completion"
-                    )
-        return self._complete_child(workspace_id, sub_agent_id, result=completion)
+        if record.workflow_execution_id is None:
+            raise PhaseCompletionRejected(
+                "request_phase_completion requires a workflow phase node; "
+                "use request_sub_agent_completion for a sub-agent"
+            )
+        if self._contract_validator is not None:
+            # An authoritative validation (for example a harness compile of
+            # the authored program) runs before any transition commits, so
+            # its failure reaches the agent as a repairable tool result.
+            failure = self._contract_validator(workspace_id, record, completion)
+            if failure:
+                raise PhaseCompletionRejected(failure)
+        if self._phase_completions is None:
+            raise PhaseCompletionRejected(
+                "no workflow is available to apply this completion"
+            )
+        if self._phase_completions(workspace_id, record, completion) is None:
+            raise PhaseCompletionRejected(
+                "no workflow is available to apply this completion"
+            )
+        completed = self._lifecycle.get(workspace_id, sub_agent_id)
+        if completed is None or completed.status is not SubAgentStatus.COMPLETED:
+            raise PhaseCompletionRejected(
+                "the workflow did not complete this phase node; the phase remains open"
+            )
+        return self._child(workspace_id, sub_agent_id).deliver_completed_result()
 
     def _complete_child(
         self,

@@ -325,6 +325,22 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     result = runner.run_node_turn(WORKSPACE, request.chat_id, node_id)
     assert result.status == "completed"
 
+    # The workflow owns the completion: the node closes exactly once, its
+    # durable result is the completion contract, and the phase tool never
+    # re-completes it outside the transition.
+    creation_record = store.get_sub_agent(WORKSPACE, node_id)
+    assert creation_record is not None
+    assert creation_record.status is SubAgentStatus.COMPLETED
+    assert isinstance(creation_record.result, Mapping)
+    assert "hypothesis" in creation_record.result
+    completed_events = [
+        event
+        for event in kit.workflow.observe(WORKSPACE, request.execution_id).events
+        if event.type.value == "sub_agent.completed"
+        and event.payload.get("phase") == "hypothesis_creation"
+    ]
+    assert len(completed_events) == 1
+
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.phase == HypothesisDevelopmentPhase.VERDICT.value
     seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)

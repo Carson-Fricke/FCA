@@ -176,8 +176,12 @@ def control_registered_tools(
     """Return the conversation-scoped control tools bound to ``runtime``.
 
     The chat scope and a node scope differ exactly in the caller's ability to
-    return data to its own caller: only a sub-agent/phase conversation may
-    invoke the completion tools.  ``phase_completion_schema`` is the owning
+    return data to its own caller.  The two node routes are disjoint by
+    construction: a workflow phase node is advertised
+    ``request_phase_completion`` (its result is the phase contract the workflow
+    validates and applies), and every other node is advertised
+    ``request_sub_agent_completion`` (its result is a plain sub-agent result a
+    chat caller can consume).  ``phase_completion_schema`` is the owning
     phase's declared completion JSON Schema; when supplied, the
     ``request_phase_completion`` tool advertises it so the provider
     constrains the contract at decode time — the engine still validates the
@@ -401,10 +405,11 @@ def control_registered_tools(
     # A workflow phase agent is offered the wrapped operator-input tool instead
     # of the plain one: identical behavior, and it flags the workflow card so
     # the phase shows as awaiting operator input. Handled by the same handler.
+    in_workflow = context.workflow_execution_id is not None
     operator_tool = (
-        TOOL_REQUEST_WORKFLOW_INPUT
-        if context.workflow_execution_id is not None
-        else TOOL_REQUEST_OPERATOR_INPUT
+        _SPECS[TOOL_REQUEST_WORKFLOW_INPUT]
+        if in_workflow
+        else _SPECS[TOOL_REQUEST_OPERATOR_INPUT]
     )
     completion_spec = _SPECS[TOOL_REQUEST_PHASE_COMPLETION]
     if phase_completion_schema is not None:
@@ -427,23 +432,27 @@ def control_registered_tools(
             handler=handle_await,
         ),
         RegisteredTool(
-            spec=_function_tool(_SPECS[operator_tool]),
+            spec=_function_tool(operator_tool),
             handler=handle_operator_input,
         ),
     ]
     if context.sub_agent_id is not None:
-        tools.extend(
-            (
+        if in_workflow:
+            # The workflow owns this node's completion: only the phase contract
+            # is advertised, never the plain sub-agent return.
+            tools.append(
                 RegisteredTool(
                     spec=_function_tool(completion_spec),
                     handler=handle_request_phase_completion,
-                ),
+                )
+            )
+        else:
+            tools.append(
                 RegisteredTool(
                     spec=_function_tool(_SPECS[TOOL_REQUEST_SUB_AGENT_COMPLETION]),
                     handler=handle_request_sub_agent_completion,
-                ),
+                )
             )
-        )
     return tuple(tools)
 
 
