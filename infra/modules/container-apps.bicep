@@ -301,10 +301,15 @@ var backtestSecrets = [
     identity: quantIdentityResourceId
   }
 ]
+// External ingress serves TLS on 443 and never exposes the container target
+// port; internal ingress is reached directly on the container port.
+var apiBaseUrl = enableExternalApiIngress
+  ? 'https://${apiApp.properties.configuration.ingress.fqdn}'
+  : 'http://${apiApp.properties.configuration.ingress.fqdn}:${apiContainerPort}'
 var backtestEnvironment = concat(quantBaseEnvironment, [
   {
     name: 'LAKE_API_URL'
-    value: 'http://${apiApp.properties.configuration.ingress.fqdn}:${apiContainerPort}'
+    value: apiBaseUrl
   }
   {
     name: 'LAKE_API__BEARER_TOKEN'
