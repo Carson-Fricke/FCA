@@ -446,16 +446,22 @@ resource thesisApiApp 'Microsoft.App/containerApps@2025-07-01' = {
         allowInsecure: false
         targetPort: thesisContainerPort
         transport: 'http'
-        // A custom hostname binds only to external ingress and references the
-        // managed certificate above; the certificateId reference orders the
-        // certificate before the app. The Static Web App posture keeps
-        // customDomainName empty and ingress internal, so the SWA is the only
-        // public hostname owner.
+        // A custom hostname binds only to external ingress. The certificate id
+        // is a literal resource id rather than the symbolic certificate
+        // reference: Bicep's generated dependency on the conditional
+        // certificate resolves through the existing managed environment, which
+        // ARM rejects with InvalidTemplate whenever the certificate is
+        // skipped. The Static Web App posture keeps customDomainName empty and
+        // ingress internal, so the SWA is the only public hostname owner.
         customDomains: (enableExternalIngress && !empty(customDomainName)) ? [
           {
             name: customDomainName
             bindingType: 'SniEnabled'
-            certificateId: thesisManagedCertificate.id
+            certificateId: resourceId(
+              'Microsoft.App/managedEnvironments/managedCertificates',
+              last(split(containerAppsEnvironmentResourceId, '/')),
+              thesisCustomCertificateName
+            )
           }
         ] : []
         traffic: [
