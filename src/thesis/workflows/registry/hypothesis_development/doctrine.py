@@ -75,7 +75,13 @@ def hypothesis_development_doctrine(
         initial_phase=_HYPOTHESIS_CREATION.value,
         actor=_WORKFLOW_ACTOR,
         active_phases=tuple(phase.value for phase in _ACTIVE_PHASES),
-        conversational_phases=frozenset({_HYPOTHESIS_CREATION.value, _VERDICT.value}),
+        conversational_phases=frozenset(
+            {
+                _HYPOTHESIS_CREATION.value,
+                _VERDICT.value,
+                _STRATEGY_DESIGN.value,
+            }
+        ),
         orchestrators={
             phase.value: entry for phase, entry in _PHASE_ORCHESTRATORS.items()
         },
@@ -84,6 +90,7 @@ def hypothesis_development_doctrine(
         default_activity=_DEFAULT_ACTIVITY,
         mcp_tools=services.mcp_tools,
         phase_mcp_tools=services.phase_mcp_tools,
+        phase_tools=services.phase_tools,
         request_of=_request_of,
         context_of=_context_of,
         project=_project,

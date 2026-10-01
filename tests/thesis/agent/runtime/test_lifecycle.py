@@ -210,6 +210,27 @@ def test_request_input_then_complete_is_terminal() -> None:
         lifecycle.start(_WORKSPACE, node.sub_agent_id)
 
 
+@pytest.mark.parametrize("kind", [SubAgentKind.CONVERSATION, SubAgentKind.ONE_SHOT])
+def test_answer_keeps_conversation_input_open_but_not_one_shot(
+    kind: SubAgentKind,
+) -> None:
+    lifecycle = _lifecycle(_chat())
+    node = lifecycle.spawn(
+        _WORKSPACE,
+        "chat-1",
+        spec=SubAgentSpec(role="research", kind=kind),
+        actor_id=_ACTOR,
+    )
+    lifecycle.start(_WORKSPACE, node.sub_agent_id)
+    lifecycle.request_input(_WORKSPACE, node.sub_agent_id)
+
+    resumed = lifecycle.resume(_WORKSPACE, node.sub_agent_id)
+
+    assert resumed.status is SubAgentStatus.RUNNING
+    assert resumed.accepts_input is (kind is SubAgentKind.CONVERSATION)
+    assert lifecycle.accepts_unsolicited_input(resumed) is resumed.accepts_input
+
+
 def _execution(chat: ChatService, execution_id: str, chat_id: str) -> None:
     chat.persistence.save(
         WorkflowExecution(

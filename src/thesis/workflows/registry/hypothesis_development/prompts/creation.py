@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 
 
@@ -63,6 +62,13 @@ _CREATION_COMPLETION_PROTOCOL = (
     "operator's latest message confirms.",
     "4. Only on confirmation: call request_phase_completion with the "
     'completion contract below and target "falsification_trials".',
+    "Submit the full model and falsifier suite the operator approved. If a "
+    "tool rejects the argument encoding, repair only the encoding: completion "
+    "must be an object, not a JSON string. Never submit a minimal diagnostic "
+    "completion, placeholder hypothesis, constant-output stub, or data-only "
+    "falsifier suite to test the tool; a valid completion advances the real "
+    "workflow. If substantive changes are needed, post the revised proposal "
+    "and call request_workflow_input before completing.",
     'Never name target "failed"; if the work cannot proceed, call '
     "request_workflow_input with the reason instead.",
 )
@@ -164,17 +170,23 @@ _CREATION_FINALIZE_INSTRUCTIONS = (
     "skeleton is the required shape; replace its compile_error! body before "
     "completing, because the unfilled skeleton is rejected by the compile "
     "gate: `use harness_strategy_sdk::{"
-    "export_study_program, BarEvent, MetricPublisher, StudyProgram}; use "
+    "export_study_program, BarFrame, MetricPublisher, StudyProgram}; use "
     "harness_strategy_sdk::serde_json::Value; struct Model; impl StudyProgram "
-    "for Model { fn new(_p: Value) -> Self { Self } fn on_bar(&mut self, "
-    "_e: &BarEvent) {} fn on_stop(&mut self, m: &mut MetricPublisher) { "
+    "for Model { fn new(_p: Value) -> Self { Self } fn on_bar_frame(&mut self, "
+    "_frame: &BarFrame) {} fn on_stop(&mut self, m: &mut MetricPublisher) { "
     'compile_error!("replace this skeleton with the fitted model"); } } '
     "export_study_program!(Model);`. Fold "
-    "bars into incremental state, publish every observable by its exact name "
+    "atomic frames into incremental state: bars_by_symbol contains only bars "
+    "from the same interval_start_ns/interval_end_ns; available_at_ns is the "
+    "interval end, not measured provider latency. Handle missing_symbols "
+    "explicitly, never align by row index or silently carry prior closes. "
+    "Publish every observable by its exact name "
     "with m.publish(name, value) (names must match outputs), and publish at "
     "least one fitted parameter as a fit.<parameter> metric: the trials phase "
     "requires fitted parameters, so a run that publishes none fails the "
-    "hypothesis. Also publish failure indicators (e.g. "
+    "hypothesis. Every falsifier observable must be in this model.outputs, "
+    "and every declared output must be published with an exact literal name "
+    "in this model.source. Also publish failure indicators (e.g. "
     "data_ok=0.0) for missing or inadequate data instead of panicking. No "
     "sizing, no operator-facing prose.",
 )
@@ -212,35 +224,91 @@ def _creation_revision_section(
     verdict: Mapping[str, object] | None,
     report: Mapping[str, object] | None,
 ) -> str:
-    """Frame a loop-back re-entry around the refuted attempt.
+    """Frame a loop-back re-entry around the recorded trial findings.
 
-    The re-entered phase reuses the same conversation, so the previous
-    proposal and completion are still in its transcript.  The section states
-    plainly that the previous completion is superseded and that the agent owes
-    a revised proposal, never a status-only reply, then hands it the verdict
-    and the falsification-trials report the revision must address.
+    The re-entered phase reuses the same conversation, so the original
+    instructions, the previous proposal, and the operator back-and-forth are
+    already in its transcript.  The brief therefore carries only what is new:
+    the verdict agent's outcome and reason, the recorded falsification-trial
+    findings, and the standing obligation to confirm each revision with the
+    operator before completing.
     """
     lines = [
         "## Loop-back revision",
-        "The operator sent this run back from the verdict after the "
-        "falsification trials did not support the previous attempt. The "
-        "previous completion is superseded: do NOT reply that the phase is "
-        "complete or that no further action is required. Revise the hypothesis "
-        "and its statistical model so the recorded failure is addressed (or "
-        "replace it with a better-supported one over the same operator "
-        "window), then post the revised proposal and call request_workflow_input "
-        "in the same response.",
+        "The operator sent this run back from the verdict: the falsification "
+        "trials did not support the previous attempt, and its completion is "
+        "superseded. Your original instructions, the previous proposal, and "
+        "the operator back-and-forth are earlier in this conversation; do NOT "
+        "reply that the phase is complete or that no further action is "
+        "required. Revise the hypothesis and its statistical model so the "
+        "findings below are addressed (or replace it with a better-supported "
+        "one over the same operator window). Keep using request_workflow_input "
+        "to confirm each revision with the operator and iterate on the "
+        "findings until they accept; only then call request_phase_completion.",
+        "For the newly authored model, every revised falsifier observable must "
+        "be in the new model.outputs and be published under that exact literal "
+        "name. Check the new source and outputs together; the previous model's "
+        "outputs do not satisfy this contract.",
+        "Post the revised proposal as your reply text AND call "
+        "request_workflow_input in the same response; revise and ask again "
+        "on operator corrections.",
+        "Argument repair must preserve the full revised model and falsifier "
+        "suite the operator approved. Never replace them with a minimal "
+        "diagnostic object or a data-only suite; that advances a real run.",
     ]
-    if verdict:
-        lines += [
-            "",
-            "Recorded verdict:",
-            json.dumps(dict(verdict), ensure_ascii=True, indent=2, default=str),
-        ]
-    if report:
-        lines += [
-            "",
-            "Falsification trials report:",
-            json.dumps(dict(report), ensure_ascii=True, indent=2, default=str),
-        ]
+    verdict_payload = _verdict_payload(verdict)
+    outcome = verdict_payload.get("outcome")
+    reason = verdict_payload.get("reason")
+    if isinstance(outcome, str) and outcome:
+        verdict_line = f"Verdict: {outcome}"
+        if isinstance(reason, str) and reason:
+            verdict_line += f" — {reason}"
+        lines += ["", verdict_line]
+    elif isinstance(reason, str) and reason:
+        lines += ["", f"Verdict reason: {reason}"]
+    findings = _trial_findings(report)
+    if findings:
+        lines += ["", "Falsification trials findings:", *findings]
     return "\n".join(lines)
+
+
+def _verdict_payload(verdict: Mapping[str, object] | None) -> Mapping[str, object]:
+    """Return the verdict object from a loop-back completion payload."""
+    if not verdict:
+        return {}
+    nested = verdict.get("verdict")
+    return nested if isinstance(nested, Mapping) else verdict
+
+
+def _trial_findings(report: Mapping[str, object] | None) -> list[str]:
+    """Render the recorded trials as compact, one-line findings.
+
+    The trial descriptions are deliberately omitted: the agent authored its
+    own falsifiers, so their full definitions are already in its transcript and
+    only the recorded outcome is new information for the revision.
+    """
+    if not report:
+        return []
+    lines: list[str] = []
+    summary = report.get("content")
+    if isinstance(summary, str) and summary.strip():
+        lines.append(summary.strip())
+    trials = report.get("trials")
+    if isinstance(trials, list):
+        for trial in trials:
+            if not isinstance(trial, Mapping):
+                continue
+            status = "FIRED (refutes)" if trial.get("falsified") else "survived"
+            lines.append(
+                f"- {trial.get('testId')} {trial.get('falsifierId')}: "
+                f"{trial.get('observable')} observed {trial.get('observed')} "
+                f"vs {trial.get('condition')} {trial.get('threshold')} "
+                f"— {status}"
+            )
+    metrics = report.get("metrics")
+    if isinstance(metrics, Mapping) and metrics:
+        published = ", ".join(
+            f"{name}={value}" for name, value in sorted(metrics.items())
+        )
+        lines.append(f"Fitted metrics: {published}")
+    return lines

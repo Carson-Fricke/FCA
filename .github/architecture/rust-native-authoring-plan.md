@@ -23,7 +23,9 @@ content below: porting `mean_reversion`/`short_put_spread` and the workflow
 prompt refinements in `prompts/creation.py` already authored above. N4 is
 delivered, including the Rust screening program kind: screener filters are
 Rust-authored `ScreeningProgram` programs submitted through the harness MCP
-(see `screener-rust-migration.md`).
+(see `screener-rust-migration.md`). The path that turns a surviving hypothesis
+into a workspace Rust strategy — the `author_strategy` tool and the
+`strategies/<slug>/<version>/` artifact — is `strategy-authoring-plan.md`.
 
 ## Why
 
@@ -52,7 +54,7 @@ traits — Python is the replaceable part, not the architecture.
   the engine's event and context types, with an entry-point macro. The SDK
   exposes only the capability surface the author is allowed: studies never see
   the order surface (same contract as `ResearchModelProgram` today) and fold
-  `BarEvent`s only through `on_bar`, and screening programs see only the
+   atomic `BarFrame`s only through `on_bar_frame`, and screening programs see only the
   `ScreenContext` cross-section.
 * **JIT seam** — on submit, the platform writes the authored crate to a
   managed workspace, runs `cargo build --release` against the pinned
@@ -78,7 +80,7 @@ traits — Python is the replaceable part, not the architecture.
 ABI-version gating, source-digest caching). Proven by running an authored bar
 study through the real engine job seam from a JIT-loaded dylib over the
 market-lake bar read route, plus a strategy smoke run, the capability gate (a
-study runtime folds `BarEvent`s only and has no order path by construction),
+study runtime folds `BarFrame`s only and has no order path by construction),
 panic containment, and metric rejection handling.
 
 **Phase N2 — Delete the embedded Python authoring surface now.** Remove the
@@ -101,7 +103,7 @@ surfaces (done).** Thesis is the authoring platform, so the Python exit is not a
 transport change: every implementation Thesis produces becomes authored
 Rust. Research models store and emit authored Rust study programs
 (`implementation: "jit"`, source in `parameters`, bundle hash equal to the
-source digest) that fold `BarEvent`s at the interval the hypothesis declares
+source digest) that fold `BarFrame`s at the interval the hypothesis declares
 in `harnessConfiguration.interval` (`1min` or `1d`, emitted as
 `data.bar_interval` in the study configuration) and publish their Layer A
 observables as metrics — the Python `model_source`/`fit`/`observe` plumbing
@@ -146,7 +148,7 @@ and status query flows through the hosted MCP tools or the REST routes.
 field: the lake owns bars as a first-class data type (fetched provider-first,
 derived from stored trades otherwise), the harness ensures and streams the
 window's bars from the `GET /v1/read` route, and study replay folds
-`BarEvent`s only. Deriving bars in the lake instead of replaying ticks
+atomic `BarFrame`s only. Deriving bars in the lake instead of replaying ticks
 shrinks study replay by orders of magnitude and keeps iteration fast;
 backtests still replay trades and quotes, and tick replay remains for final
 strategy validation.

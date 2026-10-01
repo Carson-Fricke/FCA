@@ -6,7 +6,7 @@ import os
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -70,18 +70,22 @@ class GitCoordinator:
         entry: JournalEntry,
         *,
         expected_head: str | None,
+        artifacts: Mapping[str, bytes] | None = None,
     ) -> GitReceipt:
         """Commit an entry iff repository HEAD still matches ``expected_head``.
 
-        Only the configured manifest is staged. Existing unrelated worktree and
+        Only the configured manifest and accepted artifact bytes are staged. Unrelated
         index changes remain untouched and cannot leak into the publication.
         """
         if expected_head is not None:
             _validate_object_id(expected_head)
         manifest_bytes = entry.manifest_bytes()
+        accepted = self._accepted_artifacts(entry, artifacts)
         with self._publication_lock():
-            recovered = self.find_publication(entry)
+            self._check_destinations(accepted)
+            recovered = self.find_publication(entry, artifacts=artifacts)
             if recovered is not None:
+                self._materialize(manifest_bytes, accepted)
                 return GitReceipt(
                     publication_id=entry.publication_id,
                     commit_hash=recovered,
@@ -96,10 +100,15 @@ class GitCoordinator:
                 )
 
             message = self._commit_message(entry, content_hash(manifest_bytes))
+            if artifacts is not None:
+                message += "\nThesis-Artifacts-SHA256: " + content_hash(
+                    {path: content_hash(payload) for path, payload in accepted.items()}
+                )
             commit_hash = self._create_commit(
                 expected_head=expected_head,
                 manifest_bytes=manifest_bytes,
                 message=message,
+                artifacts=accepted,
             )
             old_value = (
                 self._zero_object_id() if expected_head is None else expected_head
@@ -112,7 +121,7 @@ class GitCoordinator:
                 check=False,
             )
             if advanced.returncode != 0:
-                recovered = self.find_publication(entry)
+                recovered = self.find_publication(entry, artifacts=artifacts)
                 if recovered is not None:
                     return GitReceipt(
                         publication_id=entry.publication_id,
@@ -121,11 +130,8 @@ class GitCoordinator:
                         recovered=True,
                     )
                 raise GitFenceError(_git_error(advanced, "Git HEAD fence was rejected"))
-            destination = self.repository.joinpath(*self.manifest_path.parts)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(manifest_bytes)
-            self._run("add", "--", self.manifest_path.as_posix())
-            if not self.commit_matches(commit_hash, entry):
+            self._materialize(manifest_bytes, accepted)
+            if not self.commit_matches(commit_hash, entry, artifacts=artifacts):
                 raise GitPublicationConflict(
                     f"commit {commit_hash!r} does not match publication manifest"
                 )
@@ -135,7 +141,9 @@ class GitCoordinator:
                 head_before=expected_head,
             )
 
-    def find_publication(self, entry: JournalEntry) -> str | None:
+    def find_publication(
+        self, entry: JournalEntry, *, artifacts: Mapping[str, bytes] | None = None
+    ) -> str | None:
         """Find the unique reachable commit carrying this exact publication."""
         if self.head() is None:
             return None
@@ -153,7 +161,7 @@ class GitCoordinator:
         matches = [
             commit_hash
             for commit_hash in commits
-            if self.commit_matches(commit_hash, entry)
+            if self.commit_matches(commit_hash, entry, artifacts=artifacts)
         ]
         if len(matches) == 1 and len(commits) == 1:
             return matches[0]
@@ -163,7 +171,13 @@ class GitCoordinator:
             )
         return None
 
-    def commit_matches(self, commit_hash: str, entry: JournalEntry) -> bool:
+    def commit_matches(
+        self,
+        commit_hash: str,
+        entry: JournalEntry,
+        *,
+        artifacts: Mapping[str, bytes] | None = None,
+    ) -> bool:
         """Return whether a commit records the exact journal publication."""
         _validate_object_id(commit_hash)
         message = self._run("show", "-s", "--format=%B", commit_hash).stdout
@@ -177,17 +191,234 @@ class GitCoordinator:
             return False
         if trailers.get("Thesis-Manifest-SHA256") != expected_manifest_hash:
             return False
-        return self.manifest_matches(commit_hash, entry)
+        accepted = self._accepted_artifacts(entry, artifacts)
+        artifact_hash = trailers.get("Thesis-Artifacts-SHA256")
+        if artifact_hash is not None and (
+            artifacts is None
+            or artifact_hash
+            != content_hash(
+                {path: content_hash(payload) for path, payload in accepted.items()}
+            )
+        ):
+            return False
+        if artifacts is not None and artifact_hash is None:
+            return False
+        return self.manifest_matches(commit_hash, entry) and all(
+            self.file_matches(commit_hash, path, payload)
+            for path, payload in accepted.items()
+        )
 
     def manifest_matches(self, commit_hash: str, entry: JournalEntry) -> bool:
         """Return whether a commit tree exposes the exact accepted manifest."""
         _validate_object_id(commit_hash)
-        content = self._run(
-            "show", f"{commit_hash}:{self.manifest_path.as_posix()}", check=False
+        return self.file_matches(
+            commit_hash, self.manifest_path.as_posix(), entry.manifest_bytes()
         )
-        return content.returncode == 0 and content.stdout.encode("utf-8") == (
-            entry.manifest_bytes()
+
+    def file_matches(self, commit_hash: str, path: str, payload: bytes) -> bool:
+        """Verify exact regular-file bytes in a commit without text decoding."""
+        _validate_object_id(commit_hash)
+        relative = _relative_path(path, "artifact path").as_posix()
+        blob = self._run("hash-object", "--stdin", input_bytes=payload).stdout.strip()
+        tree = self._run("ls-tree", "-z", commit_hash, "--", relative).stdout
+        return tree == f"100644 blob {blob}\t{relative}\0"
+
+    def tracked_paths(self, prefix: str) -> tuple[str, ...]:
+        """Return regular-file paths in HEAD beneath a confined prefix."""
+        relative = _relative_path(prefix, "tracked prefix").as_posix()
+        if self.head() is None:
+            return ()
+        result = self._run("ls-tree", "-r", "-z", "--name-only", "HEAD", "--", relative)
+        return tuple(path for path in result.stdout.split("\0") if path)
+
+    def commit_order(self) -> tuple[str, ...]:
+        """Return reachable commits oldest-first in topological, not clock order."""
+        if self.head() is None:
+            return ()
+        return tuple(
+            self._run(
+                "rev-list", "--topo-order", "--reverse", "HEAD"
+            ).stdout.splitlines()
         )
+
+    def recover_artifacts(
+        self, commit_hash: str, artifacts: Mapping[str, bytes]
+    ) -> None:
+        """Restore missing accepted files from a reachable commit without a journal.
+
+        Verify every path and byte before writing under the process fence. Existing
+        differing files are never replaced; unrelated index state is untouched.
+        """
+        _validate_object_id(commit_hash)
+        accepted = {
+            _relative_path(path, "artifact path").as_posix(): payload
+            for path, payload in artifacts.items()
+        }
+        folded = sorted(path.casefold() for path in accepted)
+        if len(set(folded)) != len(folded) or any(
+            right.startswith(left + "/")
+            for index, left in enumerate(folded)
+            for right in folded[index + 1 :]
+        ):
+            raise GitPublicationConflict("recovery paths overlap")
+        with self._publication_lock():
+            if not self.is_ancestor(commit_hash) or not all(
+                isinstance(payload, bytes)
+                and self.file_matches(commit_hash, path, payload)
+                for path, payload in accepted.items()
+            ):
+                raise GitPublicationConflict(
+                    "recovery bytes do not match reachable commit"
+                )
+            self._check_destinations(accepted)
+            self._write_missing_artifacts(accepted)
+            if accepted:
+                self._run("add", "--", *accepted)
+
+    def read_file(self, commit_hash: str, path: str) -> bytes:
+        """Read a regular UTF-8 artifact from Git, independent of the checkout."""
+        _validate_object_id(commit_hash)
+        relative = _relative_path(path, "tracked path").as_posix()
+        result = self._run("show", f"{commit_hash}:{relative}")
+        payload = result.stdout.encode("utf-8")
+        if not self.file_matches(commit_hash, relative, payload):
+            raise GitPublicationConflict("tracked artifact is not a regular file")
+        return payload
+
+    def find_artifact_publication(
+        self, publication_id: str, artifacts: Mapping[str, bytes]
+    ) -> str | None:
+        """Locate and verify an authored commit using tracked identifying data only."""
+        if re.fullmatch(r"pub-[0-9a-f]{48}", publication_id) is None:
+            raise ValueError("invalid publication ID")
+        if self.head() is None:
+            return None
+        commits = self._run(
+            "log",
+            "--format=%H",
+            "--fixed-strings",
+            f"--grep=Thesis-Publication-Id: {publication_id}",
+            "HEAD",
+        ).stdout.splitlines()
+        if not commits:
+            return None
+        if len(commits) != 1:
+            raise GitPublicationConflict("publication ID has conflicting Git history")
+        commit = commits[0]
+        trailers = _trailers(self._run("show", "-s", "--format=%B", commit).stdout)
+        expected = content_hash(
+            {path: content_hash(payload) for path, payload in artifacts.items()}
+        )
+        if (
+            trailers.get("Thesis-Publication-Id") != publication_id
+            or trailers.get("Thesis-Artifacts-SHA256") != expected
+            or not all(
+                self.file_matches(commit, path, payload)
+                for path, payload in artifacts.items()
+            )
+        ):
+            raise GitPublicationConflict(
+                "authored artifact commit does not match tracked manifest"
+            )
+        return commit
+
+    def commit_time(self, commit_hash: str) -> str:
+        """Return the immutable commit timestamp for clone-stable projections."""
+        _validate_object_id(commit_hash)
+        return self._run("show", "-s", "--format=%cI", commit_hash).stdout.strip()
+
+    @contextmanager
+    def publication_lock(self) -> Iterator[None]:
+        """Hold the configured process fence for a caller-owned transaction.
+
+        Do not nest publish on this instance; use a distinct lock name for a
+        broader authoring transaction around the Git publication fence.
+        """
+        with self._publication_lock():
+            yield
+
+    def _accepted_artifacts(
+        self, entry: JournalEntry, artifacts: Mapping[str, bytes] | None
+    ) -> dict[str, bytes]:
+        if artifacts is None:
+            return {}
+        accepted = {
+            _relative_path(path, "artifact path").as_posix(): payload
+            for path, payload in artifacts.items()
+        }
+        references = {ref.uri: ref for ref in entry.artifacts}
+        if accepted.keys() != references.keys():
+            raise GitPublicationConflict(
+                "artifact mapping must match journal references"
+            )
+        paths = [self.manifest_path.as_posix(), *accepted]
+        folded = sorted(path.casefold() for path in paths)
+        if len(set(folded)) != len(folded) or any(
+            right.startswith(left + "/")
+            for index, left in enumerate(folded)
+            for right in folded[index + 1 :]
+        ):
+            raise GitPublicationConflict("publication paths overlap")
+        for path, payload in accepted.items():
+            ref = references[path]
+            if (
+                not isinstance(payload, bytes)
+                or len(payload) != ref.size_bytes
+                or content_hash(payload) != ref.sha256
+            ):
+                raise GitPublicationConflict(
+                    "artifact bytes differ from accepted journal"
+                )
+        return accepted
+
+    def _check_destinations(self, artifacts: Mapping[str, bytes]) -> None:
+        for relative in (self.manifest_path.as_posix(), *artifacts):
+            current = self.repository
+            parts = _relative_path(relative, "publication path").parts
+            for position, part in enumerate(parts):
+                if current.is_dir() and any(
+                    child.name.casefold() == part.casefold() and child.name != part
+                    for child in current.iterdir()
+                ):
+                    raise GitPublicationConflict(
+                        "publication path has a case collision"
+                    )
+                current = current / part
+                if current.is_symlink() or (
+                    current.exists()
+                    and (
+                        current.is_dir()
+                        if position == len(parts) - 1
+                        else not current.is_dir()
+                    )
+                ):
+                    raise GitPublicationConflict(
+                        "publication path is not a confined file"
+                    )
+            if relative in artifacts and current.exists():
+                if current.read_bytes() != artifacts[relative]:
+                    raise GitPublicationConflict(
+                        "immutable artifact path already differs"
+                    )
+
+    def _materialize(self, manifest: bytes, artifacts: Mapping[str, bytes]) -> None:
+        self._check_destinations(artifacts)
+        self._write_missing_artifacts(artifacts)
+        destination = self.repository.joinpath(*self.manifest_path.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(manifest)
+        # Refresh only publication paths; unrelated index entries remain untouched.
+        self._run("add", "--", self.manifest_path.as_posix(), *artifacts)
+
+    def _write_missing_artifacts(self, artifacts: Mapping[str, bytes]) -> None:
+        for relative, payload in artifacts.items():
+            destination = self.repository / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not destination.exists():
+                with destination.open("xb") as stream:
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
 
     def is_ancestor(self, commit_hash: str) -> bool:
         """Return whether a commit is reachable from the current Git HEAD."""
@@ -242,32 +473,37 @@ class GitCoordinator:
         expected_head: str | None,
         manifest_bytes: bytes,
         message: str,
+        artifacts: Mapping[str, bytes],
     ) -> str:
         with self._temporary_index() as environment:
             if expected_head is None:
                 self._run("read-tree", "--empty", environment=environment)
             else:
                 self._run("read-tree", expected_head, environment=environment)
-            blob_hash = self._run(
-                "hash-object", "-w", "--stdin", input_bytes=manifest_bytes
-            ).stdout.strip()
-            _validate_object_id(blob_hash)
-            self._run(
-                "update-index",
-                "--add",
-                "--cacheinfo",
-                "100644",
-                blob_hash,
-                self.manifest_path.as_posix(),
-                environment=environment,
-            )
+            for path, payload in {
+                self.manifest_path.as_posix(): manifest_bytes,
+                **artifacts,
+            }.items():
+                blob_hash = self._run(
+                    "hash-object", "-w", "--stdin", input_bytes=payload
+                ).stdout.strip()
+                _validate_object_id(blob_hash)
+                self._run(
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    "100644",
+                    blob_hash,
+                    path,
+                    environment=environment,
+                )
             tree_hash = self._run("write-tree", environment=environment).stdout.strip()
             _validate_object_id(tree_hash)
             arguments = ["commit-tree", tree_hash]
             if expected_head is not None:
                 arguments.extend(("-p", expected_head))
             arguments.extend(("-m", message))
-            commit_hash = self._run(*arguments).stdout.strip()
+            commit_hash = self._run(*arguments, environment=environment).stdout.strip()
             _validate_object_id(commit_hash)
             return commit_hash
 
@@ -279,7 +515,7 @@ class GitCoordinator:
         os.close(descriptor)
         path = Path(name)
         path.unlink()
-        environment = os.environ.copy()
+        environment = _git_environment()
         environment["GIT_INDEX_FILE"] = str(path)
         try:
             yield environment
@@ -322,7 +558,7 @@ class GitCoordinator:
                 cwd=self.repository,
                 capture_output=True,
                 check=False,
-                env=environment,
+                env=_git_environment() if environment is None else environment,
                 input=input_bytes,
                 stdin=subprocess.DEVNULL if input_bytes is None else None,
                 timeout=30,
@@ -340,6 +576,29 @@ class GitCoordinator:
         return result
 
 
+def _git_environment() -> dict[str, str]:
+    """Isolate repository selection, Git configuration, credentials and identity."""
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith(("GIT_", "GCM_"))
+    }
+    environment.update(
+        {
+            "GCM_INTERACTIVE": "Never",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_AUTHOR_NAME": "FCA Thesis",
+            "GIT_AUTHOR_EMAIL": "thesis@localhost",
+            "GIT_COMMITTER_NAME": "FCA Thesis",
+            "GIT_COMMITTER_EMAIL": "thesis@localhost",
+            "GIT_LITERAL_PATHSPECS": "1",
+        }
+    )
+    return environment
+
+
 def _trailers(message: str) -> dict[str, str]:
     trailers: dict[str, str] = {}
     for line in message.splitlines():
@@ -355,7 +614,13 @@ def _relative_path(value: str, name: str) -> PurePosixPath:
         not value
         or "\\" in value
         or path.is_absolute()
-        or any(part in {"", ".", ".."} for part in path.parts)
+        or any(
+            part in {"", ".", ".."}
+            or part.casefold() == ".git"
+            or ":" in part
+            or any(ord(character) < 32 for character in part)
+            for part in value.split("/")
+        )
     ):
         raise ValueError(f"{name} must be a confined relative POSIX path")
     return path

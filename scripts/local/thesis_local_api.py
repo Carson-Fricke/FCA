@@ -173,12 +173,15 @@ _harness, _harness_tools = _harness_composition()
 # message/event shares one per-chat timeline served by the unified stream.
 chat_service, timeline = open_cosmos_chat_stack()
 
+workspace_store = serving_workspace_store()
+repositories = getattr(workspace_store, "provider", None)
 workspace_data = build_local_workspace_data(
     workspace_root=WORKSPACE_ROOT,
     harness_boundary=_harness,
     harness_base_url=HARNESS_BASE_URL,
     chat_service=chat_service,
-    workspace_store=serving_workspace_store(),
+    workspace_store=workspace_store,
+    workspace_repositories=repositories,
 )
 
 # One serving composition owns the conversations service, control tools,
@@ -196,6 +199,8 @@ stack = build_serving_stack(
     harness_tools=_harness_tools,
     execution_store=execution_store,
     workspace_root=WORKSPACE_ROOT,
+    workspace_repositories=repositories,
+    strategy_artifacts=workspace_data.strategy_artifacts,
     detach=daemon_thread,
     control_factory=_LoggingControlToolService,
     on_turn_error=lambda error: print(

@@ -98,9 +98,10 @@ from thesis.research.models import (
     ResearchModelStore,
     WorkspaceResearchModelStore,
 )
-from thesis.strategies.validation import (
-    StrategyValidationRequest,
-    StrategyValidationResult,
+from thesis.strategies import (
+    StrategyArtifactError,
+    StructuralStrategyValidator,
+    WorkspaceStrategyArtifacts,
 )
 from thesis.workflows.core.execution_store import ExecutionStore
 from thesis.workflows.core.registry import WorkflowRegistry
@@ -118,6 +119,7 @@ from thesis.workflows.runtime import (
     WorkflowRuntime,
     build_workflow_runtime,
 )
+from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 #: Default model when ``THESIS_MODEL`` is unset.
 DEFAULT_SERVING_MODEL = "deepseek/deepseek-v4.1-flash"
@@ -150,15 +152,6 @@ class _WorkflowModelProvider:
         return ModelResponse(output=completion.content)
 
 
-class _StructuralStrategyValidator:
-    """Accept a structurally valid bundle for serving composition."""
-
-    def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
-        return StrategyValidationResult(
-            True, (), validation_id=f"serving-{request.bundle_sha256[:16]}"
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class ServingStack:
     """The composed services `create_app` and the HTTP routes consume."""
@@ -174,16 +167,17 @@ class ServingStack:
 
 def _workspace_stores(
     workspace_root: str | Path | None,
+    workspace_repositories: WorkspaceRepositoryProvider | None = None,
 ) -> tuple[ResearchModelStore | None, HypothesisStore | None]:
     """Bind durable research stores to a workspace tree, or keep them in memory.
 
-    A deployed container has no Azure workspace path provider yet, so a
-    composition without ``workspace_root`` keeps model publications and
-    hypothesis artifacts in process memory.  Runs, trials,
-    and conversations stay durable in the execution store and Cosmos; only the
-    workspace-side artifacts are ephemeral until the Azure workspace persists
-    that tree.
+    A remote provider exposes verified checkout paths to the model store.
+    Hypothesis storage retains its existing composition until its global
+    hypothesis-id interface becomes workspace-scoped. Publishing remote Git
+    commits remains an explicit coordinator operation.
     """
+    if workspace_repositories is not None:
+        return WorkspaceResearchModelStore(workspace_repositories), None
     if workspace_root is None:
         return None, None
     from thesis.workspaces.local import LocalWorkspaceProvider
@@ -203,6 +197,7 @@ def build_serving_workflow_runtime(
     execution_store: ExecutionStore | None = None,
     workspace_root: str | Path | None = None,
     detach: Detach | None = daemon_thread,
+    workspace_repositories: WorkspaceRepositoryProvider | None = None,
 ) -> WorkflowRuntime:
     """Compose the falsification-first workflow runtime for the serving roles."""
     skills = SkillRegistry()
@@ -224,7 +219,7 @@ def build_serving_workflow_runtime(
         )
         return with_hypothesis_development_skills(with_harness_mcp(base))
 
-    models, hypothesis_store = _workspace_stores(workspace_root)
+    models, hypothesis_store = _workspace_stores(workspace_root, workspace_repositories)
     runner = McpBacktestRunner(harness_tools)
     # Research models always compile to a ``study`` shell, so the falsification
     # phase executes through ``run_study``; the backtest runner would reject
@@ -244,7 +239,7 @@ def build_serving_workflow_runtime(
         skills=skills,
         runner=runner,
         research_runner=research_runner,
-        strategy_validator=_StructuralStrategyValidator(),
+        strategy_validator=StructuralStrategyValidator(),
         hypothesis_store=hypothesis_store,
         conversations=conversations,
         execution_store=execution_store,
@@ -351,6 +346,8 @@ def build_serving_stack(
     policies: OperatorPolicyRegistry | None = None,
     control_factory: Callable[..., ControlToolService] = ControlToolService,
     on_turn_error: Callable[[tuple[str, str, Exception]], None] | None = None,
+    workspace_repositories: WorkspaceRepositoryProvider | None = None,
+    strategy_artifacts: WorkspaceStrategyArtifacts | None = None,
 ) -> ServingStack:
     """Compose the serving stack over one durable chat service.
 
@@ -432,6 +429,20 @@ def build_serving_stack(
 
     def registry_for(context: ToolContext) -> SessionToolRegistry:
         launcher = holder["launcher"]
+        authoring = None
+        if strategy_artifacts is not None and context.sub_agent_id is not None:
+            record = subagent_store.get_sub_agent(
+                context.workspace_id, context.sub_agent_id
+            )
+            if (
+                record is not None
+                and record.phase == "strategy_design"
+                and record.chat_id == context.chat_id
+                and context.conversation_id == record.sub_agent_id
+                and record.workflow_execution_id == context.workflow_execution_id
+                and record.workflow_execution_id is not None
+            ):
+                authoring = strategy_artifacts
         return build_session_registry(
             context=context,
             harness_tools=harness_tools,
@@ -441,6 +452,7 @@ def build_serving_stack(
             else None,
             spawn_policy=spawn_policy,
             phase_completion_schema=phase_completion_schema(context),
+            strategy_authoring=authoring,
         )
 
     def fail_phase_execution(record: SubAgentRecord, error: Exception) -> None:
@@ -459,7 +471,19 @@ def build_serving_stack(
         record: SubAgentRecord,
         completion: Mapping[str, object],
     ) -> str | None:
-        del workspace_id
+        if record.phase == "strategy_design":
+            receipt = completion.get("strategy")
+            if strategy_artifacts is None or record.workflow_execution_id is None:
+                return "workspace strategy authoring is not configured"
+            if not isinstance(receipt, Mapping):
+                return "strategy completion requires the author_strategy receipt"
+            try:
+                strategy_artifacts.verify_completion(
+                    workspace_id, record.workflow_execution_id, receipt
+                )
+            except (StrategyArtifactError, ValueError, OSError) as error:
+                return str(error)
+            return None
         return validate_hypothesis_study_contract(
             harness_tools, record.phase, completion
         )
@@ -531,6 +555,7 @@ def build_serving_stack(
             conversations=conversations,
             execution_store=execution_store,
             workspace_root=workspace_root,
+            workspace_repositories=workspace_repositories,
             detach=detach,
         )
         holder["workflow_runtime"] = workflow_runtime

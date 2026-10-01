@@ -93,8 +93,8 @@ harness-hosted MCP endpoint:
   a remote `POST /v1/studies/jobs` route, and a `harness study-job` entrypoint
   that writes a `study.json` artifact with the `study` shell;
 - the study execution mode is Rust-JIT: the authored source compiles through
-  `harness-strategy-jit` against `harness-strategy-sdk` ABI v2 and implements
-  `StudyProgram` (`new(parameters)`, `on_bar(&BarEvent)`,
+  `harness-strategy-jit` against `harness-strategy-sdk` ABI v3 and implements
+  `StudyProgram` (`new(parameters)`, `on_bar_frame(&BarFrame)`,
   `on_stop(&mut MetricPublisher)`), so a study folds replayed lake bars only,
   has no order path by construction, never submits an order, and is never
   recorded as a backtest;
@@ -112,6 +112,18 @@ harness-hosted MCP endpoint:
 - Thesis now calls `run_study` through `McpStudyRunner` over the harness-hosted
   MCP endpoint, and its research-model bundle declares the `study` shell, the
   declared bar interval, and the authored Rust study program.
+
+The `strategy_design` phase is conversational and prose-first
+(`prompts/strategy_design.py`): it posts the strategy proposal under
+`### Strategy`, `### Entries & Exits`, and `### Falsifier Re-checks`, asks
+through `request_workflow_input`, and finalizes only after the operator
+confirms. Strategies are pure Rust authored against `harness-strategy-sdk`
+and are published as workspace artifacts under `strategies/<slug>/<version>/`
+-- never a standalone store record. `author_strategy` and the Strategies
+projection are implemented through `thesis.strategies.WorkspaceStrategyArtifacts`.
+Completion verifies a persisted publication receipt, not model-authored hashes
+alone. Validation checks structure without compiling or executing Rust;
+see `strategy-authoring-plan.md` for publication and capability boundaries.
 
 Still to implement: wiring conversation-phase gate failures through durable
 repair turns, which changes the current "gate failure pauses immediately"
@@ -549,6 +561,30 @@ own transition before the next phase begins. Its failure is the execution's
 failure, recorded and delivered durably — never a silently wedged execution and
 never a delayed tool response.
 
+Workflow failure outcomes are delivered to the launching anchor and wake that
+conversation so its agent can surface the failure to the operator. Whether a
+new execution starts is the agent's judgement from the conversation — a
+failure notification alone is not authorization. Root-chat history retains
+tool-result evidence so the outcome is visible: results with their assistant
+call envelopes replay as native tool messages, while unattached results and
+asynchronous notifications replay as structured inbound notes.
+
+Before hypothesis creation completes, the newly submitted falsifier
+observables must be declared in that submission's `model.outputs`, and its
+source must contain exact literal publications for those outputs. A mismatch
+returns a repair response before the phase transition commits. Prior model
+outputs do not satisfy a revised model's contract. The trials phase retains
+its metric-presence check for publications skipped by runtime branches.
+
+Creation argument repair preserves the operator-approved statistical model
+and complete falsifier suite; diagnostic stubs are not research completions.
+The prompt and completion schema explicitly distinguish testing data
+availability from testing the claimed regularity and its negative control.
+In verdict, an explicit operator instruction to loop back authorizes that
+target without asking for the same direction a second time. Running
+conversation nodes retain input access after consuming an answer; one-shot
+nodes do not. Terminal nodes are not run again by a queued worker turn.
+
 ## Harness Study Tool
 
 Quant-harness MUST publish `run_study` as a real MCP tool, served by the
@@ -561,8 +597,8 @@ code.
 
 A study is a statistical replay, not a trading strategy. When it runs a
 research model, that model is an authored Rust program compiled through
-`harness-strategy-jit` against `harness-strategy-sdk` ABI v2 that implements
-`StudyProgram` (`new(parameters)`, `on_bar(&BarEvent)`,
+`harness-strategy-jit` against `harness-strategy-sdk` ABI v3 that implements
+`StudyProgram` (`new(parameters)`, `on_bar_frame(&BarFrame)`,
 `on_stop(&mut MetricPublisher)`) and publishes its fitted parameters and
 observables as `fit.<parameter>` metrics in `on_stop`. The only context
 capability a study program may use is `MetricPublisher`; it sees no order,
@@ -644,7 +680,7 @@ strategy_instances:
       source: |
         use harness_strategy_sdk::serde_json::Value;
         use harness_strategy_sdk::{
-            export_study_program, BarEvent, MetricPublisher, StudyProgram,
+            export_study_program, BarFrame, MetricPublisher, StudyProgram,
         };
 
         struct Model;
@@ -654,7 +690,7 @@ strategy_instances:
                 Self
             }
 
-            fn on_bar(&mut self, _bar: &BarEvent) {}
+            fn on_bar_frame(&mut self, _frame: &BarFrame) {}
 
             fn on_stop(&mut self, metrics: &mut MetricPublisher) {
                 let _ = metrics.publish("fit.baseline", 0.5);
@@ -677,8 +713,9 @@ The tool MUST:
 2. Resolve point-in-time data under the experiment contract: ensure the
    interval's bars through the market lake, then stream them from the lake read
    route; no direct lake-file access exists.
-3. Replay the bars in event order through `on_bar`, then run `on_stop` once
-   after the replay.
+3. Assemble same-interval bars into atomic frames and call `on_bar_frame`
+   once per observed interval at its availability time, then run `on_stop`
+   once after the replay.
 4. Collect the metrics published by `on_stop`: every publication is validated
    host-side (finite value, non-reserved name), a rejected publication fails
    the run even when the program ignores it, and the model's fitted parameters
@@ -686,7 +723,21 @@ The tool MUST:
 5. Freeze immutable fitted parameters and calibration bounds as the
    content-addressed fitted-model artifact.
 6. Publish the canonical `study.json` run artifact and its result set
-   (including `metrics.json`) under the study artifact kind.
+    (including `metrics.json`) under the study artifact kind.
+
+Each `BarFrame` carries `interval_start_ns`, `interval_end_ns`,
+`available_at_ns`, exact-decimal `bars_by_symbol`, and explicit
+`missing_symbols`. The harness uses the observed interval union: it does not
+invent all-missing frames, forward-fill, or join symbols by row position.
+Availability equals interval end under a historical end-of-interval assumption,
+not measured provider latency or revision availability. Frames beyond the run
+horizon are withheld; availability exactly at the horizon is included. Equity
+daily bounds use real XNYS sessions including DST and early closes; crypto
+daily bounds use UTC days. Mixed equity/crypto daily intervals are rejected.
+Duplicate symbol/interval rows, unexpected symbols, and off-grid starts fail
+validation. Raw replay counts/fingerprints remain distinct from frame dispatch
+counts. SDK ABI v3 invalidates older compiled artifacts; single-bar study
+sources must be updated to the frame callback. Tick strategies are unchanged.
 7. Record trusted chat, conversation, sub-agent, workflow, phase, and
    invocation attribution.
 
@@ -716,7 +767,7 @@ follows.
 | `hypothesis_creation` | conversation | Propose the statistical model, falsifiers, controls, and Layer B monitors. Yield so the operator can confirm or revise. After clear confirmation, call `request_phase_completion`. | Construct `HypothesisCreationCompletion`; apply falsifiability, model-output, and plan gates; advance to trials or remain. |
 | `falsification_trials` | one-shot | Call `run_study` and artifact tools directly, inspect results, author the interpretation, then request completion. | Bind every falsifier/control to a recorded run metric and artifact; advance to verdict or remain. |
 | `verdict` | conversation | Present the recorded deterministic verdict and ask whether to continue or loop back. After the operator replies, submit interpreted intent. | Construct `VerdictCompletion`; verify it refers to the latest operator message and verdict; map `continue` or `loop_back` through the transition table. |
-| `strategy_design` | one-shot | Read the surviving model and fit, write the strategy, call validation tools, then request completion. | Validate bundle refs, sandbox result, and falsifier-bound Layer B exits; advance or remain. |
+| `strategy_design` | conversation | Explain the strategy in prose, ask the operator to confirm or revise, and author it through `author_strategy` as Rust source against `harness-strategy-sdk`. Finalize only after the operator confirms and the strategy is published. | Validate the Rust workspace bundle (source, tests, manifest), the sandbox result, and the falsifier-bound Layer B exits; the published bundle is a workspace artifact under `strategies/<slug>/<version>/`, never a store record. Advance or remain. |
 | `strategy_backtesting` | one-shot | Call harness backtest and artifact tools directly, interpret the result, then request completion. | Resolve the recorded run; advance to optimization on success or loop to strategy RCA on failure. |
 | `strategy_rca` | one-shot | Inspect the failed run, spawn critics if useful, author a diagnosis and revision guidance, then request completion. | Validate diagnosis and revision refs; loop to strategy design or remain. |
 | `optimization` | one-shot | Call sweep/backtest tools directly within declared bounds, inspect results, and request completion. | Resolve the recorded optimization run; complete on success or loop to strategy RCA on failure. |
@@ -1207,7 +1258,7 @@ src/thesis/workflows/
       prompts/
         creation.py
         falsification.py
-        strategy.py
+        strategy_design.py
         rca.py
       loops/
         premise.py

@@ -56,11 +56,13 @@ from thesis.integrations.harness_activation import (
 )
 from thesis.integrations.runtime_status import RuntimeStatusClient
 from thesis.screening.service import ScreenerService
+from thesis.strategies import WorkspaceStrategyArtifacts
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobServiceClient
 
     from thesis.screening.runs import ScreeningToolProvider
+    from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 
 def _utc_now() -> datetime:
@@ -502,6 +504,7 @@ class WorkspaceDataBundle:
     strategies: StrategyDataService
     harness: HarnessBoundary | None = None
     screeners: ScreenerService | None = None
+    strategy_artifacts: WorkspaceStrategyArtifacts | None = None
 
 
 def _workspace_template_path(
@@ -526,6 +529,7 @@ def azure_workspace_store(
     container_prefix: str = "thesis-ws-",
     template: str | pathlib.Path | None = None,
     clock: Callable[[], datetime] | None = None,
+    repositories: WorkspaceRepositoryProvider | None = None,
 ) -> WorkspaceStore:
     """Build the blob-container workspace catalog for Azure mode."""
     from thesis.workspaces.azure_catalog import AzureWorkspaceCatalogStore
@@ -533,7 +537,11 @@ def azure_workspace_store(
 
     manifest = load_workspace_manifest(_workspace_template_path(template))
     return AzureWorkspaceCatalogStore(
-        blob_service, manifest, container_prefix=container_prefix, clock=clock
+        blob_service,
+        manifest,
+        container_prefix=container_prefix,
+        clock=clock,
+        repositories=repositories,
     )
 
 
@@ -566,6 +574,7 @@ def build_local_workspace_data(
     artifact_importer: ArtifactImporter | None = None,
     clock: Callable[[], datetime] | None = None,
     id_factory: Callable[[str], str] | None = None,
+    workspace_repositories: WorkspaceRepositoryProvider | None = None,
 ) -> WorkspaceDataBundle:
     """Compose the local-mode services behind the workspace DATA routes.
 
@@ -609,7 +618,17 @@ def build_local_workspace_data(
         if workspace_root is not None
         else InMemoryWorkspaceStateStore()
     )
-    strategies = StrategyDataService(clock=resolved_clock, id_factory=ids)
+    repositories = workspace_repositories
+    if repositories is None and workspace_root is not None:
+        from thesis.workspaces.local import LocalWorkspaceProvider
+
+        repositories = LocalWorkspaceProvider(workspace_root)
+    strategy_artifacts = (
+        WorkspaceStrategyArtifacts(repositories) if repositories is not None else None
+    )
+    strategies = StrategyDataService(
+        clock=resolved_clock, id_factory=ids, artifacts=strategy_artifacts
+    )
     # The screener client is the typed MCP surface for the harness screener
     # tools: an explicit provider wins, else the composed boundary's MCP
     # client is reused. Without one the run route fails closed with 503.
@@ -657,7 +676,9 @@ def build_local_workspace_data(
             ),
             "dashboards": lambda workspace_id: len(widget_store.list(workspace_id)),
             "chats": lambda workspace_id: len(open_chats(workspace_id)),
-            "strategies": lambda workspace_id: len(strategies.store.list(workspace_id)),
+            "strategies": lambda workspace_id: len(
+                strategies.list_strategies(workspace_id)
+            ),
         },
         open_chats_provider=open_chats,
     )
@@ -670,6 +691,7 @@ def build_local_workspace_data(
         strategies=strategies,
         harness=harness,
         screeners=screeners,
+        strategy_artifacts=strategy_artifacts,
     )
 
 

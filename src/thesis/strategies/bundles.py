@@ -55,7 +55,22 @@ def _relative_name(value: str, label: str) -> str:
         not normalized
         or normalized.startswith("/")
         or any(part in {"", ".", ".."} for part in parts)
-        or ":" in parts[0]
+        or any(
+            ":" in part
+            or part.casefold() in {".git", "manifest.json"}
+            or part.endswith((".", " "))
+            or any(ord(character) < 32 or character in '<>"|?*' for character in part)
+            or part.split(".")[0].casefold()
+            in {
+                "con",
+                "prn",
+                "aux",
+                "nul",
+                *(f"com{i}" for i in range(1, 10)),
+                *(f"lpt{i}" for i in range(1, 10)),
+            }
+            for part in parts
+        )
     ):
         raise StrategyBundleError(f"{label} must be a confined relative path")
     return "/".join(parts)
@@ -187,6 +202,15 @@ class StrategyBundle:
         object.__setattr__(
             self, "tests", _files(cast(StrategyFilesInput, self.tests), "tests")
         )
+        paths = sorted(file.path.casefold() for file in (*self.source, *self.tests))
+        if len(set(paths)) != len(paths) or any(
+            right.startswith(left + "/")
+            for index, left in enumerate(paths)
+            for right in paths[index + 1 :]
+        ):
+            raise StrategyBundleError(
+                "source and test paths must not overlap, including case"
+            )
         object.__setattr__(self, "dependencies", _dependency_values(self.dependencies))
         for name in (
             "platform_versions",

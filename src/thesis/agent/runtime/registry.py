@@ -26,6 +26,11 @@ from thesis.agent.runtime.session import (
     SessionToolRegistry,
     ToolExecution,
 )
+from thesis.agent.runtime.strategy_tools import (
+    StrategyAuthor,
+    StrategyAuthoringService,
+    strategy_registered_tools,
+)
 from thesis.agent.runtime.workflow_tools import (
     WORKFLOW_TOOL_NAMES,
     WorkflowLauncher,
@@ -103,6 +108,7 @@ def build_session_registry(
     on_spawn: SpawnObserver | None = None,
     spawn_policy: SpawnPolicy | None = None,
     phase_completion_schema: Mapping[str, object] | None = None,
+    strategy_authoring: StrategyAuthor | StrategyAuthoringService | None = None,
 ) -> SessionToolRegistry:
     """Compose the merged, policy-scoped catalog for one session context.
 
@@ -112,8 +118,14 @@ def build_session_registry(
     the call at decode time.  The workflow-launch tool is advertised to
     contexts outside a workflow execution: a phase agent or an agent spawned
     under one cannot launch a workflow, while a chat-spawned sub-agent can.
+
+    ``strategy_authoring`` is an explicit capability injection. Composition
+    supplies it only for the authorized durable executor, never merely because
+    a helper inherited the tool name in its policy.
     """
     tools: list[RegisteredTool] = []
+    if strategy_authoring is not None:
+        tools.extend(strategy_registered_tools(strategy_authoring, context))
     if harness_tools is not None:
         tools.extend(harness_registered_tools(harness_tools))
     if control is not None:

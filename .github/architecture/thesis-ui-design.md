@@ -98,7 +98,7 @@ implement the UI and does not modify any backend contract.
 | --- | --- | --- |
 | **Overview** | Workspace landing | Recent activity feed, strategy health cards, latest backtests, pinned widgets strip, open chats. |
 | **AI chats** | Full-page workspace chat | Conversation list (workspace-scoped, searchable) + transcript pane. Multiple concurrent threads per workspace. |
-| **Strategies** | Strategy registry | List/grid toggle, status filters (live/paper/paused/draft), per-strategy code view with lineage (version ancestry), New-strategy flow. |
+| **Strategies** | Strategy registry projection | Rebuildable projection over the workspace's Rust strategy artifacts (`strategies/*/*/manifest.json`); the tree is the source of truth, not a store. List/grid toggle, status filters (live/paper/paused/draft), per-strategy code view with lineage (version ancestry), New-strategy flow. |
 | **Backtests** | Run history + results | Summary strip (count, best return, average Sharpe), filterable history table, **detail view with train/test split** (below). |
 | **Deployments** | Paper/live monitoring | Running/paused cards with health, allocated capital, P&L; orders and fills table with mode badges (paper/live); risk panel. |
 | **Dashboards** | Custom widgets | Widget grid, pin/unpin to sidebar, create/remove widgets, widget cards for equity, P&L, allocation, win rate, orders. |

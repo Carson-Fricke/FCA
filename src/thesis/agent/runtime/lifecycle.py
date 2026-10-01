@@ -282,11 +282,14 @@ class SubAgentLifecycle:
 
     def resume(self, workspace_id: str, sub_agent_id: str) -> SubAgentRecord:
         """Consume operator input and return the node to ``running``."""
+        existing = self.get(workspace_id, sub_agent_id)
         return self._update(
             workspace_id,
             sub_agent_id,
             status=SubAgentStatus.RUNNING,
-            accepts_input=False,
+            accepts_input=(
+                existing is not None and existing.kind is SubAgentKind.CONVERSATION
+            ),
         )
 
     def complete(

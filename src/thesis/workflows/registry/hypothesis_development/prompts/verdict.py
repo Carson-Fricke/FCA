@@ -38,7 +38,13 @@ _VERDICT_COMPLETION_PROTOCOL = (
     "2. Never ask for confirmation in prose only: a prose question is "
     "invisible to the workflow — the operator is asked only when you call "
     "request_workflow_input.",
-    "3. If the operator replies with corrections, post the revised proposal "
+    "3. An explicit operator instruction to loop back (for example 'loop "
+    "back - we only had a single falsifier') authorizes target "
+    "hypothesis_creation now. Include their reason in the verdict contract "
+    "and call request_phase_completion in this response; do not ask them to "
+    "confirm the same direction again. Do not claim the loopback occurred "
+    "unless the completion tool accepted it. If the operator instead replies "
+    "with corrections without authorizing a next step, post the revised proposal "
     "AND call request_workflow_input again, in that same response. Repeat "
     "until the operator's latest message confirms the proposal.",
     "4. Only then finalize: call request_phase_completion with the completion "
@@ -59,6 +65,11 @@ _VERDICT_TARGET_RULES = (
     'hypothesis is adjusted and tried again: target "hypothesis_creation".',
     "Base the proposal only on the recorded trials below; never fabricate "
     "observations the trials do not carry.",
+    "A data-availability check surviving is not evidence that the statistical "
+    "regularity survived. If the handed-off suite only checks data or fit "
+    "availability and never probes the claimed regularity or a negative "
+    "control, explain that coverage gap and propose inconclusive with a "
+    "loopback; do not label the claim supported merely because data_ok is 1.",
 )
 
 

@@ -90,7 +90,7 @@ def _model() -> dict[str, object]:
         "description": "Estimate the historical momentum continuation regularity.",
         "source": (
             "use harness_strategy_sdk::{\n"
-            "    export_study_program, BarEvent, MetricPublisher, StudyProgram,\n"
+            "    export_study_program, BarFrame, MetricPublisher, StudyProgram,\n"
             "};\n"
             "use harness_strategy_sdk::serde_json::Value;\n"
             "\n"
@@ -101,7 +101,7 @@ def _model() -> dict[str, object]:
             "        Self\n"
             "    }\n"
             "\n"
-            "    fn on_bar(&mut self, _event: &BarEvent) {}\n"
+            "    fn on_bar_frame(&mut self, _frame: &BarFrame) {}\n"
             "\n"
             "    fn on_stop(&mut self, metrics: &mut MetricPublisher) {\n"
             '        let _ = metrics.publish("sharpe", 1.0);\n'

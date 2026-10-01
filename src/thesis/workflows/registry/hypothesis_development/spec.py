@@ -19,6 +19,11 @@ from typing import Any, cast
 
 from thesis.agent.router import ModelRouter, Role
 from thesis.agent.runtime.conversation import Conversations
+from thesis.agent.runtime.schema import render_violations, validate_arguments
+from thesis.agent.runtime.strategy_tools import (
+    STRATEGY_RECEIPT_SCHEMA,
+    TOOL_AUTHOR_STRATEGY,
+)
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.service import ChatService
 from thesis.experiments.ledger import AttemptLedger
@@ -86,16 +91,23 @@ _TERMINAL_PHASES: frozenset[HypothesisDevelopmentPhase] = frozenset(
 
 #: The phases whose agents accept operator input from birth.
 _CONVERSATIONAL_PHASES: frozenset[HypothesisDevelopmentPhase] = frozenset(
-    {HypothesisDevelopmentPhase.HYPOTHESIS_CREATION, HypothesisDevelopmentPhase.VERDICT}
+    {
+        HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
+        HypothesisDevelopmentPhase.VERDICT,
+        HypothesisDevelopmentPhase.STRATEGY_DESIGN,
+    }
 )
 
 #: MCP tools each agent-backed phase may call, by phase. The creation agent
 #: authors the Rust study program, so it gets the compilation gate to check its
-#: own draft; every other phase authors nothing and declares no MCP tools.
-#: This is the one place the phase tool surface is configured; the agent-facing
-#: catalog is exactly this list plus the structural phase control tools.
+#: own draft; strategy design authors through a Thesis-native tool instead.
+#: The agent-facing policy unions these with local phase grants and controls.
 _PHASE_MCP_TOOLS: Mapping[str, tuple[str, ...]] = {
     HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value: ("validate_study",),
+}
+
+_PHASE_TOOLS: Mapping[str, tuple[str, ...]] = {
+    HypothesisDevelopmentPhase.STRATEGY_DESIGN.value: (TOOL_AUTHOR_STRATEGY,),
 }
 
 #: The deterministic contract function for each deterministic phase.
@@ -161,23 +173,19 @@ def _creation_seed(
 ) -> str:
     """Seed the creation agent with its instructions and the operator's words.
 
-    A loop-back re-entry is a revision, not a fresh start: the seed appends the
-    recorded verdict and the falsification-trials report so the agent revises
-    the hypothesis instead of repeating the refuted one.
+    A loop-back re-entry is a revision, not a fresh start: the conversation
+    already holds the original instructions, the previous proposal, and the
+    operator back-and-forth, so the re-entry seed is only the compact revision
+    brief — the verdict and the recorded falsification-trial findings.
     """
     del state
-    prompt = _creation_prompt(workflow, request)
     if context is None or context.source is None:
-        return prompt
+        return _creation_prompt(workflow, request)
     from .prompts.creation import _creation_revision_section
 
     report = _latest_phase_artifact(workflow, request, "falsification_trials")
-    return (
-        prompt
-        + "\n\n"
-        + _creation_revision_section(
-            dict(context.completion) if context.completion else None, report
-        )
+    return _creation_revision_section(
+        dict(context.completion) if context.completion else None, report
     )
 
 
@@ -206,6 +214,70 @@ def _latest_phase_artifact(
         if isinstance(artifact, Mapping):
             return dict(artifact)
     return None
+
+
+def _strategy_design_seed(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> str:
+    """Seed the design agent with the surviving hypothesis and its ask protocol.
+
+    The agent must explain the strategy it designs in prose and ask the
+    operator to confirm it before the workflow advances to backtesting.
+    """
+    del workflow, request
+    from .prompts.strategy_design import _strategy_design_instructions
+
+    parts = [_strategy_design_instructions()]
+    hypothesis = _surviving_hypothesis(state)
+    if hypothesis is not None:
+        parts += [
+            "",
+            "Surviving hypothesis:",
+            json.dumps(hypothesis, ensure_ascii=True, indent=2, default=str),
+        ]
+    if context is not None and context.completion:
+        parts += [
+            "",
+            f"Accepted completion from the {context.source} phase:",
+            json.dumps(
+                dict(context.completion), ensure_ascii=True, indent=2, default=str
+            ),
+        ]
+    parts += [
+        "",
+        "Authoring input design shape (not the completion receipt): "
+        + _STRATEGY_DESIGN_SCHEMA,
+    ]
+    return "\n".join(parts)
+
+
+def _surviving_hypothesis(
+    state: HypothesisDevelopmentState,
+) -> dict[str, object] | None:
+    """Return the claim and falsifiers the strategy must serve, if recorded."""
+    draft = state.draft
+    if draft is None:
+        return None
+    return {
+        "claim": draft.claim,
+        "disagreement": draft.disagreement,
+        "riskFactor": draft.risk_factor,
+        "horizon": draft.horizon,
+        "universe": list(draft.universe),
+        "falsifiers": [
+            {
+                "falsifierId": falsifier.falsifier_id,
+                "observable": falsifier.observable,
+                "condition": falsifier.condition,
+                "threshold": falsifier.threshold,
+                "test": falsifier.test,
+            }
+            for falsifier in draft.falsifiers
+        ],
+    }
 
 
 def _verdict_seed(
@@ -318,6 +390,23 @@ def _creation_validator(completion: Mapping[str, object]) -> str | None:
     return None
 
 
+def _strategy_receipt_validator(completion: Mapping[str, object]) -> str | None:
+    """Check receipt structure; composition verifies its persisted provenance."""
+    receipt = completion.get("strategy")
+    if not isinstance(receipt, Mapping):
+        return "completion field 'strategy' must be a strategy authoring receipt"
+    misses = validate_arguments(STRATEGY_RECEIPT_SCHEMA, receipt)
+    if misses:
+        return "invalid strategy authoring receipt: " + render_violations(misses)
+    validation = receipt.get("validation")
+    if isinstance(validation, Mapping) and validation.get("accepted") is False:
+        return "strategy authoring receipt records rejected validation"
+    path = str(receipt["artifactPath"])
+    if any(part in {".", ".."} for part in path.split("/")):
+        return "strategy artifactPath must be a confined workspace-relative path"
+    return None
+
+
 def _phase_completion_schema(
     phase: HypothesisDevelopmentPhase,
 ) -> Mapping[str, object] | None:
@@ -330,6 +419,16 @@ def _phase_completion_schema(
     """
     if phase is HypothesisDevelopmentPhase.HYPOTHESIS_CREATION:
         return HYPOTHESIS_COMPLETION_SCHEMA
+    if phase is HypothesisDevelopmentPhase.STRATEGY_DESIGN:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["strategy"],
+            "properties": {
+                "target": {"type": "string", "enum": ["strategy_backtesting"]},
+                "strategy": STRATEGY_RECEIPT_SCHEMA,
+            },
+        }
     required = _REQUIRED.get(phase, ())
     # The advertised target enum names only real successors: the engine still
     # accepts a terminal failure target, but the advertised shape never
@@ -370,7 +469,7 @@ _VALIDATORS: Mapping[
     HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: _creation_validator,
     HypothesisDevelopmentPhase.FALSIFICATION_TRIALS: _list_field("trials"),
     HypothesisDevelopmentPhase.VERDICT: _mapping_field("verdict"),
-    HypothesisDevelopmentPhase.STRATEGY_DESIGN: _mapping_field("strategy"),
+    HypothesisDevelopmentPhase.STRATEGY_DESIGN: _strategy_receipt_validator,
     HypothesisDevelopmentPhase.STRATEGY_BACKTESTING: _mapping_field("backtest"),
     HypothesisDevelopmentPhase.STRATEGY_RCA: _mapping_field("diagnosis"),
     HypothesisDevelopmentPhase.OPTIMIZATION: _mapping_field("optimization"),
@@ -390,6 +489,7 @@ def _seeds() -> Mapping[HypothesisDevelopmentPhase, Callable[..., str]]:
     seeds: dict[HypothesisDevelopmentPhase, Callable[..., str]] = {
         HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: _creation_seed,
         HypothesisDevelopmentPhase.VERDICT: _verdict_seed,
+        HypothesisDevelopmentPhase.STRATEGY_DESIGN: _strategy_design_seed,
     }
     for phase, task in _PHASE_TASKS.items():
         if phase in seeds or phase not in _REQUIRED:
@@ -476,6 +576,7 @@ def build_hypothesis_development_workflow(
         experiment_id=experiment_id,
         mcp_tools=tools,
         phase_mcp_tools=dict(_PHASE_MCP_TOOLS),
+        phase_tools=dict(_PHASE_TOOLS),
     )
     builder = WorkflowBuilder[
         DevelopmentEngine,

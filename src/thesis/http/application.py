@@ -84,6 +84,7 @@ if TYPE_CHECKING:
     from thesis.integrations.mcp import HarnessMcpClient
     from thesis.workflows.core.registry import WorkflowRegistry
     from thesis.workflows.runtime import WorkflowRuntime
+    from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -709,10 +710,9 @@ def durable_chat_service(*, workspace_root: str | Path | None = None) -> ChatSer
 def serving_workspace_store() -> WorkspaceStore | None:
     """Compose the workspace catalog shared by local and workspace runs.
 
-    With ``THESIS_STORAGE_ACCOUNT_NAME`` configured (always true in the
-    deployed Container App) workspaces are blob containers on that account,
-    addressed with the runtime managed identity.  Without it, ``None`` lets the
-    caller fall back to the filesystem catalog under the workspace root.
+    Azure mode combines managed-identity Blob catalog metadata with private
+    Gitea repositories. Without a storage account, the original local
+    filesystem catalog remains selected, regardless of Gitea settings.
     """
     account = _environment_value("THESIS_STORAGE_ACCOUNT_NAME")
     if account is None:
@@ -727,7 +727,42 @@ def serving_workspace_store() -> WorkspaceStore | None:
         account_url=f"https://{account}.blob.core.windows.net",
         credential=DefaultAzureCredential(),
     )
-    return azure_workspace_store(blob_service, container_prefix=prefix)
+    return azure_workspace_store(
+        blob_service,
+        container_prefix=prefix,
+        repositories=serving_workspace_repositories(),
+    )
+
+
+def serving_workspace_repositories() -> WorkspaceRepositoryProvider | None:
+    """Select remote checkouts only for Azure mode; local stays native Git."""
+    if _environment_value("THESIS_STORAGE_ACCOUNT_NAME") is None:
+        return None
+    from tempfile import gettempdir
+
+    from thesis.workspaces.gitea import GiteaWorkspaceProvider
+
+    values = [
+        _environment_value(name)
+        for name in (
+            "THESIS_GITEA_URL",
+            "THESIS_GITEA_ORGANIZATION",
+            "THESIS_GITEA_TOKEN",
+        )
+    ]
+    if not any(values):
+        return None
+    if not all(values):
+        raise ValueError(
+            "Azure workspaces require THESIS_GITEA_URL, THESIS_GITEA_ORGANIZATION "
+            "and THESIS_GITEA_TOKEN"
+        )
+    endpoint, organization, token = values
+    assert endpoint is not None and organization is not None and token is not None
+    root = _environment_value("THESIS_GITEA_CACHE_ROOT") or str(
+        Path(gettempdir()) / "fca-thesis-gitea"
+    )
+    return GiteaWorkspaceProvider(root, endpoint, organization, token)
 
 
 def serving_app_from_environment() -> FastAPI:
@@ -773,9 +808,15 @@ def serving_app_from_environment() -> FastAPI:
     from thesis.http.workspaces import build_local_workspace_data
 
     chat_service, timeline = open_cosmos_chat_stack()
+    workspace_store = serving_workspace_store()
+    repositories = getattr(workspace_store, "provider", None)
+    from thesis.workspaces.local import default_workspace_root
+
     workspace_data = build_local_workspace_data(
         chat_service=chat_service,
-        workspace_store=serving_workspace_store(),
+        workspace_store=workspace_store,
+        workspace_root=default_workspace_root() if workspace_store is None else None,
+        workspace_repositories=repositories,
     )
     # The workflow runtime needs a model provider and a harness tool provider;
     # without them the stack stays chat-only and the durable message surface
@@ -789,6 +830,8 @@ def serving_app_from_environment() -> FastAPI:
         harness_tools=harness_tools,
         execution_store=(open_execution_store() if harness_tools is not None else None),
         detach=daemon_thread,
+        workspace_repositories=repositories,
+        strategy_artifacts=workspace_data.strategy_artifacts,
     )
     return create_app(
         bearer_token=bearer_token,

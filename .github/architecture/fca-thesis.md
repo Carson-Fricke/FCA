@@ -236,10 +236,36 @@ workspaces can read it by default.
 
 In local mode, each workspace is a separate directory and Git repository under
 an operator-configured workspace root outside the FCA source checkout. In Azure
-mode, each workspace is a separate Git-backed entity with isolated execution
-and persistence resources. The exact Azure Git hosting mechanism remains an
-implementation decision, but a shared branch in one repository is not an
-acceptable substitute for a workspace boundary.
+mode, each workspace is a separate Git repository hosted by an open-source
+Gitea instance that Thesis runs inside the customer's own Azure subscription —
+not Gitea Ltd's paid hosting — with isolated execution and persistence
+resources. Thesis provisions each workspace repository through the Gitea API
+and records the repository mapping on the workspace itself. Gitea serves
+repository data from a POSIX filesystem (an Azure Files share or an attached
+managed disk), so repository growth remains subject to the workspace size
+budgets; Git LFS objects and attachments may use the forge's object-storage
+backends. Gitea's MIT license keeps the forge embeddable in a commercial
+product. A shared branch in one repository is not an acceptable substitute for
+a workspace boundary.
+
+The implemented repository adapter is
+`thesis.workspaces.gitea.GiteaWorkspaceProvider`, behind the same structural
+`WorkspaceRepositoryProvider` boundary as native local Git. Remote manifests
+are read from verified checkouts; Blob copies and secret-free repository
+locators are catalog metadata. Creating a workspace seeds and pushes its
+initial scaffold before returning success. Later publication pushes commits
+created by the accepted publication path; it does not commit arbitrary dirty
+files. Checkout conflicts fail explicitly without resetting agent work.
+
+Azure hosting is opt-in through `enableGitea` and an official digest-pinned
+image. The initial host is one internal-ingress Container App and an isolated
+Azure Files share, with SQLite DELETE journaling and one replica. This is a
+single-writer deployment, not an HA architecture: SQLite/SMB locking must be
+validated under production load, rolling updates must not overlap writers,
+and backups must capture the database and repositories together. Admin,
+organization, and token bootstrap remain operator-managed. Existing artifact
+writers are not all connected to remote commit/publication yet; the provider
+does not imply that every workflow artifact is already durable in Gitea.
 
 ### Workspace Repository
 
@@ -262,7 +288,7 @@ A new workspace should start from a versioned scaffold similar to:
 |-- AGENTS.md                      Workspace-local bounded instructions
 |-- chats/                         Thread records and compact summaries
 |-- investigations/               Objectives, decisions, and finding indexes
-|-- strategies/                    Python strategy code and tests
+|-- strategies/                      Rust strategy code and tests
 |-- experiments/                   Contracts, analysis, and evidence claims
 |-- backtests/                     Manifests, metrics, traces, and reports
 |-- uploads/                       Hashed user-provided evidence and metadata
@@ -490,7 +516,7 @@ model router assigns models to roles such as:
 
 - primary chat and workflow orchestration;
 - current or historical web research;
-- Python strategy implementation;
+- Rust strategy implementation;
 - statistical and quantitative critique;
 - code and harness-contract review;
 - adversarial overfitting review; and
@@ -538,7 +564,7 @@ Tools are narrow capabilities rather than arbitrary credentials:
 | CLEO | Read and propose workspace plans; mutations pass through the single-writer coordinator. |
 | Market lake | Ensure and query point-in-time equity, option, and crypto data through published contracts. |
 | Quant harness | Validate strategy code, launch deterministic backtests/sweeps, and query complete result artifacts. |
-| Code sandbox | Run generated Python and tests with bounded CPU, memory, filesystem, and no implicit network or secrets. |
+| Code sandbox | Run generated Rust programs and their tests with bounded CPU, memory, filesystem, and no implicit network or secrets. |
 | Knowledge search | Retrieve global versioned pages and citations under trust-tier rules. |
 | Web research | Search current or archived sources only in workflow contexts whose policy allows it. |
 | Protected testing | Submit immutable experiment and strategy bundles without exposing hidden mappings or windows. |
@@ -702,8 +728,8 @@ resolve from a sibling workspace. A statistical research model is published
 independently under
 `models/<model-id>/<content-sha>/` as an authored Rust program whose source
 implements the SDK `StudyProgram` contract (`new(parameters)`,
-`on_bar(&BarEvent)`, `on_stop(&mut MetricPublisher)`): it folds the replayed
-bars and publishes its Layer A observables as metrics, and `fits/<fit-sha>.json`
+`on_bar_frame(&BarFrame)`, `on_stop(&mut MetricPublisher)`): it folds atomic
+interval frames and publishes its Layer A observables as metrics, and `fits/<fit-sha>.json`
 contains the immutable numeric Layer A parameters and calibration bounds. The
 fitted reference is workspace-local and is the only model state a Layer B
 strategy may consume; the model is never represented as a strategy.
@@ -738,7 +764,7 @@ Every request for operator input or direction is model-authored from a structure
    model's authored Rust study program runs once as a `study`-shell replay at
    the interval the model declares in `harnessConfiguration.interval` (emitted
    as `data.bar_interval` in the study configuration), folds the replayed
-   `BarEvent`s, and publishes its Layer A observables in `on_stop` through
+   `BarFrame`s, and publishes its Layer A observables in `on_stop` through
    `MetricPublisher::publish`; the `fit.<parameter>` metrics are frozen as the
    content-addressed fitted-model artifact. Model source sees bars only; it
    has no order, position, sizing, portfolio, or venue capability, and ticks
@@ -757,14 +783,24 @@ Every request for operator input or direction is model-authored from a structure
     `hypothesis_creation` conversation, reopens that same phase node, and asks
     the agent for a revised proposal before the manual approval gate. This
     premise loop is bounded to five approved hypothesis attempts.
-5. `strategy_design` -- the agent implements the surviving hypothesis from the
-    finalized model specification and its declared falsifiers. The strategy
+5. `strategy_design` -- a conversational phase. The agent implements the
+    surviving hypothesis from the finalized model specification and its declared
+    falsifiers, explains the strategy to the operator in prose, and authors it
+    through the `author_strategy` tool as pure Rust source against
+    `harness-strategy-sdk` (the harness JIT-compiles it). The strategy
    references the surviving workspace model and fitted-model hashes instead of
    copying their definitions, feeds trailing events to the model monitor, and
    publishes each current Layer B observation under the exact falsifier name.
-   A falsifier hit submits flattening orders and prevents new entries.
-    **Gate:** the strategy must pass sandbox validation and declare exit criteria
-    phrased as re-checks of the declared falsifiers (Layer B).
+   A falsifier hit submits flattening orders and prevents new entries. The
+   published strategy is a workspace artifact at
+   `strategies/<slug>/<version>/` (Rust source, tests, and `manifest.json`) and
+   the Strategies page is a projection over it; strategies are never stored in
+   Cosmos or any standalone store.
+    **Completion validation:** the strategy must pass structural validation, declare exit criteria
+    phrased as re-checks of the declared falsifiers (Layer B), and be published
+    as a workspace artifact before the phase advances. Structural validation
+    does not compile Rust, execute tests, or provide a security sandbox;
+    compilation belongs to the harness JIT path.
 6. `strategy_backtesting` -- the validated strategy is run through the harness.
    A successful terminal run advances to optimization. A failed run advances to
    `strategy_rca`; no economic threshold is invented unless a future strategy
@@ -806,7 +842,7 @@ event for every transition so the UI execution timeline renders the pipeline.
 
 ### Strategy Development And Improvement
 
-This workflow starts from a hypothesis, strategy outline, or existing Python
+This workflow starts from a hypothesis, strategy outline, or existing Rust
 strategy. A typical workflow can:
 
 1. Clarify the economic premise, instruments, horizon, execution assumptions,
@@ -1189,9 +1225,10 @@ bounded below platform policy.
 
 ## Quant-Harness Integration And Activation
 
-Generated strategies are Python implementations of the public quant-harness
-strategy contract. A strategy bundle has immutable content identity from the
-first backtest and contains at least:
+Generated strategies are Rust programs authored against the public
+quant-harness strategy SDK (the harness JIT-compiles and loads them at run
+time). A strategy bundle has immutable content identity from the first backtest
+and contains at least:
 
 - strategy source and tests;
 - dependency and platform versions;
@@ -1452,7 +1489,7 @@ create workspace
   -> open chat and upload files
   -> request strategy implementation
   -> see a durable workflow timeline and CLEO plan
-  -> generate and test Python strategy code
+  -> generate and test Rust strategy code
   -> launch quant-harness backtest jobs
   -> inspect results and evidence report
   -> steer work without losing in-flight results
@@ -1627,7 +1664,7 @@ Thesis reaches its intended architecture when:
   workspace plan without merging SQLite databases or losing Git history;
 - an autonomous workflow survives disconnect/restart, accepts immediate
   steering, and retains in-flight tool results;
-- a generated Python strategy runs through the same published quant-harness
+- a generated Rust strategy runs through the same published quant-harness
   contract used by paper and live runtimes;
 - every material claim links to a reproducible experiment, harness manifest,
   observed/declared attempt history, influence/protected-exposure history,

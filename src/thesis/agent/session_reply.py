@@ -25,7 +25,7 @@ from thesis.agent.runtime.store import SubAgentStore
 from thesis.chat.contracts import ChatMessage
 from thesis.chat.responder import ReplyChunk, ToolResultChunk
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
-from thesis.providers.invocations import Role
+from thesis.providers.invocations import Role, ToolCall
 
 #: System prompt for the unified top-level chat agent.
 AGENT_SYSTEM_PROMPT = (
@@ -38,8 +38,11 @@ AGENT_SYSTEM_PROMPT = (
     "your turn and its result is delivered to this conversation when it "
     "finishes. Rely on the "
     "structured tool results as evidence and surface any failure instead of "
-    "assuming success. Workflow phase transitions are owned by the workflow, "
-    "never by you. "
+    "assuming success. A workflow outcome notification (including a failure) "
+    "is delivered to this conversation: report it to the operator and stop. "
+    "Start another execution only when the operator asked for one — a fresh "
+    "request or their standing instruction — never on your own initiative. "
+    "Workflow phase transitions are owned by the workflow, never by you. "
     "Starting a workflow hands the work to it: it routes its own phases and "
     "data, asks the operator for anything it needs from inside the phase that "
     "needs it, and reports back as its own configuration dictates (some "
@@ -65,13 +68,54 @@ def _seed_messages(
     messages: list[ProviderChatMessage] = []
     if system_prompt:
         messages.append(ProviderChatMessage(role="system", content=system_prompt))
+    announced: set[str] = set()
     for message in history:
         role = _role_name(message.role)
         body = message.body.strip()
+        data = message.data or {}
+        if role == "assistant":
+            calls: list[ToolCall] = []
+            raw_calls = data.get("toolCalls")
+            for raw in raw_calls if isinstance(raw_calls, list | tuple) else ():
+                if not isinstance(raw, Mapping):
+                    continue
+                function = raw.get("function")
+                if not isinstance(function, Mapping):
+                    continue
+                call_id, name = raw.get("id"), function.get("name")
+                if isinstance(call_id, str) and isinstance(name, str):
+                    calls.append(
+                        ToolCall(call_id, name, str(function.get("arguments", "")))
+                    )
+            if calls:
+                announced.update(call.id for call in calls)
+                messages.append(
+                    ProviderChatMessage(
+                        role="assistant", content=body, tool_calls=tuple(calls)
+                    )
+                )
+                continue
         if role == "tool":
-            # Root tool results lack their assistant tool-call envelope, so
-            # replaying them would make the provider reject the request.
-            # The assistant's summary already reflects what happened.
+            result = dict(message.tool_result or {})
+            if body:
+                result.setdefault("text", body)
+            content = json.dumps(result, ensure_ascii=True, separators=(",", ":"))
+            call_id = data.get("toolCallId") or result.get("call_id")
+            if isinstance(call_id, str) and call_id in announced:
+                messages.append(
+                    ProviderChatMessage(
+                        role="tool", content=content, tool_call_id=call_id
+                    )
+                )
+            else:
+                # Async deliveries and older root results have no call envelope.
+                # Preserve their evidence as notes instead of sending invalid tools.
+                messages.append(
+                    ProviderChatMessage(
+                        role="user",
+                        content=f"Tool result / runtime notification:\n{content}",
+                    )
+                )
             continue
         if role in _CHAT_ROLES and body:
             messages.append(ProviderChatMessage(role=role, content=body))

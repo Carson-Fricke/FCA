@@ -44,6 +44,7 @@ class HypothesisDevelopmentServices:
     experiment_id: str | None = None
     mcp_tools: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     phase_mcp_tools: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    phase_tools: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def services_of(workflow: Workflow[Any, Any, Any]) -> HypothesisDevelopmentServices:

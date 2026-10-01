@@ -202,6 +202,8 @@ class WorkflowDoctrine[RequestT: WorkflowRequest, StateT: WorkflowState, Outcome
     #: Per-phase MCP tool configuration. A phase absent here falls back to its
     #: family's ``mcp_tools``; an explicit empty tuple configures no MCP tools.
     phase_mcp_tools: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Explicit local capabilities granted to each phase executor, not its family.
+    phase_tools: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def _phase_mcp_tools(
@@ -221,10 +223,18 @@ def _phase_allowed_tools(
 
     The catalog is built from exactly this list, so the configuration here is
     both the dispatch policy and the advertised catalog: the phase's
-    configured MCP tools plus the structural phase control tools.
+    configured MCP tools, explicit local phase grants, and structural controls.
     """
     configured = _phase_mcp_tools(doctrine, phase_value, family)
-    return tuple(dict.fromkeys((*configured, *CONTROL_PHASE_TOOL_NAMES)))
+    return tuple(
+        dict.fromkeys(
+            (
+                *configured,
+                *doctrine.phase_tools.get(phase_value, ()),
+                *CONTROL_PHASE_TOOL_NAMES,
+            )
+        )
+    )
 
 
 class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:

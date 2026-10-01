@@ -14,6 +14,8 @@ from typing import Annotated, Protocol
 from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from thesis.strategies import WorkspaceStrategyArtifacts
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -73,10 +75,12 @@ class StrategyDataService:
         *,
         clock: Callable[[], datetime] | None = None,
         id_factory: Callable[[str], str] | None = None,
+        artifacts: WorkspaceStrategyArtifacts | None = None,
     ) -> None:
         self._store = store if store is not None else InMemoryStrategyStore()
         self._clock = clock if clock is not None else _utc_now
         self._id_factory = id_factory
+        self.artifacts = artifacts
 
     @property
     def store(self) -> StrategyStore:
@@ -89,11 +93,15 @@ class StrategyDataService:
         return self._id_factory("str")
 
     def list_strategies(self, workspace_id: str) -> tuple[dict[str, object], ...]:
+        if self.artifacts is not None:
+            return self.artifacts.list(workspace_id)
         return self._store.list(workspace_id)
 
     def add_strategy(
         self, workspace_id: str, strategy: dict[str, object]
     ) -> dict[str, object]:
+        if self.artifacts is not None:
+            raise ValueError("strategies must be authored as workspace Rust artifacts")
         return self._store.add(workspace_id, strategy)
 
     def create_strategy(
@@ -106,6 +114,8 @@ class StrategyDataService:
         status: str = "draft",
     ) -> dict[str, object]:
         """Create a draft strategy registry entry with an initial version."""
+        if self.artifacts is not None:
+            raise ValueError("use author_strategy to publish a Rust workspace artifact")
         now = _iso_z(self._clock())
         strategy: dict[str, object] = {
             "id": self._next_id(),
@@ -160,13 +170,18 @@ def create_strategy_router() -> APIRouter:
         request: CreateStrategyRequest,
         service: Annotated[StrategyDataService, Depends(get_strategy_service)],
     ) -> dict[str, object]:
-        return service.create_strategy(
-            workspace_id,
-            name=request.name,
-            symbol=request.symbol,
-            description=request.description,
-            status=request.status,
-        )
+        from fastapi import HTTPException
+
+        try:
+            return service.create_strategy(
+                workspace_id,
+                name=request.name,
+                symbol=request.symbol,
+                description=request.description,
+                status=request.status,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     return router
 

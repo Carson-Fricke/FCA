@@ -1136,6 +1136,8 @@ class Conversations:
         record = self._store.get_sub_agent(workspace_id, sub_agent_id)
         if record is None or record.chat_id != chat_id:
             raise NodeTurnError(f"sub-agent was not found: {sub_agent_id}")
+        if record.status in _TERMINAL:
+            return SessionResult(status="completed", content="", turns=())
         if record.status is SubAgentStatus.PENDING:
             record = self._lifecycle.start(workspace_id, sub_agent_id)
         transcript = self.transcript(

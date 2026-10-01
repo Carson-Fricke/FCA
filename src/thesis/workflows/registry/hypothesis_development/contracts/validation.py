@@ -77,6 +77,13 @@ HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
         "falsifiers": {
             "type": "array",
             "minItems": 1,
+            "description": (
+                "The complete operator-approved research falsifier suite: "
+                "cover fit/data failure, departure from the no-structure null, "
+                "wrong-direction or too-weak regularity, and a negative control. "
+                "Data availability alone does not test the hypothesis. Never "
+                "shrink the approved suite while repairing tool arguments."
+            ),
             "items": {
                 "type": "object",
                 "properties": {
@@ -473,6 +480,59 @@ def hypothesis_payload_errors(payload: Mapping[str, object]) -> list[str]:
     errors.extend(_model_errors(payload.get("model")))
     errors.extend(_universe_errors(payload.get("universe")))
     errors.extend(_falsifier_errors(payload.get("falsifiers")))
+    model = payload.get("model")
+    falsifiers = payload.get("falsifiers")
+    if isinstance(model, Mapping):
+        outputs = model.get("outputs")
+        if isinstance(outputs, Sequence) and not isinstance(outputs, str):
+            declared = {name for name in outputs if isinstance(name, str)}
+            if isinstance(falsifiers, Sequence) and not isinstance(falsifiers, str):
+                missing = sorted(
+                    {
+                        item["observable"]
+                        for item in falsifiers
+                        if isinstance(item, Mapping)
+                        and isinstance(item.get("observable"), str)
+                        and item["observable"] not in declared
+                    }
+                )
+                if missing:
+                    errors.append(
+                        "hypothesis.falsifiers: observable(s) absent from the newly "
+                        f"authored model.outputs: {', '.join(missing)}"
+                    )
+            source = model.get("source")
+            if isinstance(source, str):
+                # Tokenize literals before comments so URLs/comment-like text in
+                # string values cannot hide or invent a publish declaration.
+                tokens = [
+                    match.group()
+                    for match in re.finditer(
+                        r'r\#*".*?"\#*|"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*|'
+                        r"[A-Za-z_][A-Za-z_0-9]*|[^\s]",
+                        source,
+                        re.DOTALL,
+                    )
+                    if not match.group().startswith(("//", "/*"))
+                ]
+                published: set[str] = set()
+                for index in range(len(tokens) - 4):
+                    if tokens[index : index + 3] != [".", "publish", "("]:
+                        continue
+                    literal = tokens[index + 3]
+                    if tokens[index + 4] != ",":
+                        continue
+                    if literal.startswith('"') and literal.endswith('"'):
+                        published.add(literal[1:-1])
+                    elif literal.startswith("r") and '"' in literal:
+                        published.add(literal.split('"', 1)[1].rsplit('"', 1)[0])
+                unpublished = sorted(declared - published)
+                if unpublished:
+                    errors.append(
+                        "hypothesis.model.source: newly authored model.outputs "
+                        "must be published under exact literal names; missing: "
+                        f"{', '.join(unpublished)}"
+                    )
     return errors
 
 

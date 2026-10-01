@@ -1,13 +1,15 @@
 """Validation handoff for authored program bundles.
 
-The harness JIT seam is the real validator: an authored Rust program either
-compiles and runs, or the submit surface returns the compiler/engine failure.
-This module keeps the injection seam so a composition can add checks (source
-presence, export macro, size limits) before handing a bundle over.
+The harness JIT seam reports compilation and execution failures. Neither JIT
+compilation nor this module's structural checks establish a security sandbox.
+Structural checks inspect text only and can accept malformed Rust or markers
+inside comments. They do not enforce network, filesystem, process, or memory
+isolation. The injection seam lets a composition supply additional checks.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -67,10 +69,66 @@ class StrategyValidationResult:
 
 
 class StrategySandboxValidator(Protocol):
-    """Published injection boundary for a pre-compile validator."""
+    """Published validator seam; the historical name is not an isolation guarantee."""
 
     def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
         """Validate the authored program source before submission."""
+
+
+class StructuralStrategyValidator:
+    """Check text structure only, not Rust syntax, runnable behavior, or security.
+
+    Marker and regex checks are preflight diagnostics, not a Rust parser. No
+    compiler, test runner, or security sandbox is invoked by this validator.
+    """
+
+    def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
+        """Return deterministic pre-JIT diagnostics without executing Rust."""
+        bundle = request.bundle
+        diagnostics: list[str] = []
+        if tuple(file.path for file in bundle.source) != ("src/lib.rs",):
+            diagnostics.append("current JIT requires a single src/lib.rs source")
+        for file in bundle.source:
+            try:
+                source = file.content.decode("utf-8")
+            except UnicodeError:
+                diagnostics.append("Rust source must be UTF-8")
+                continue
+            if not all(marker in source for marker in REQUIRED_SOURCE_MARKERS):
+                diagnostics.append(
+                    "source must use harness_strategy_sdk and export_strategy_program!"
+                )
+            if (
+                re.search(r"impl\s+(?:[\w:]+::)?StrategyProgram\s+for\s+", source)
+                is None
+            ):
+                diagnostics.append("source must implement StrategyProgram")
+            if re.search(
+                r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]|#\s*\[\s*test\s*\]", source
+            ):
+                diagnostics.append("Rust tests belong under tests/, not src/")
+            if re.search(r"\bmod\s+\w+\s*;|\binclude(?:_str|_bytes)?\s*!", source):
+                diagnostics.append("current JIT source must be self-contained")
+        for file in bundle.tests:
+            try:
+                text = file.content.decode("utf-8")
+            except UnicodeError:
+                diagnostics.append("Rust tests must be UTF-8")
+                continue
+            if not file.path.startswith("tests/") or not file.path.endswith(".rs"):
+                diagnostics.append("Rust tests must live under tests/")
+            if (
+                re.search(r"#\s*\[\s*test\s*\]\s*(?:pub\s+)?fn\s+\w+\s*\(", text)
+                is None
+            ):
+                diagnostics.append(
+                    "each test file must contain a runnable #[test] function"
+                )
+        return StrategyValidationResult(
+            accepted=not diagnostics,
+            diagnostics=tuple(diagnostics),
+            validation_id="structural-rust-v1",
+        )
 
 
 def validation_request(
@@ -116,6 +174,7 @@ __all__ = [
     "SandboxValidationRequest",
     "SandboxValidationResult",
     "StrategySandboxValidator",
+    "StructuralStrategyValidator",
     "StrategyValidationError",
     "StrategyValidationRequest",
     "StrategyValidationResult",

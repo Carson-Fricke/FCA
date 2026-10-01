@@ -191,6 +191,11 @@ src/harness/
   coverage, job status, streaming Arrow IPC reads, and the reference
   universe/facts views over the published lake routes. It replaces the
   retired `LakeEnsureClient`; there is no local lake path or data directory.
+  `ensure_many`/`read_many` issue a symbol set's requests concurrently under a
+  fixed fetch bound, preserving spec order; the study and tick job paths use
+  them so a multi-symbol window fetches every symbol at once instead of one
+  symbol at a time. The lake's shared per-key provider lane remains the rate
+  limit.
 - `config` reproduces the retired Python loader's strict models,
   exact-decimal normalization, datetime formatting, and domain-separated
   hashes; its parity suite asserts the exact hashes of every committed config
@@ -263,9 +268,9 @@ ABI by the native engine or, for screening, by the one-shot screening runner.
 The implemented contract is:
 
 - Authoring. A study program implements `StudyProgram` (`new(parameters)`,
-  `on_bar(&BarEvent)`, `on_stop(&mut MetricPublisher)`) and exports itself
-  with `export_study_program!`; it folds OHLCV bars only — ticks are not part
-  of the study contract — and every `BarEvent` carries the exact `Decimal`
+  `on_bar_frame(&BarFrame)`, `on_stop(&mut MetricPublisher)`) and exports itself
+  with `export_study_program!`; it folds atomic interval frames only — ticks are not part
+  of the study contract — and each frame's per-symbol bars carry exact `Decimal`
   open, high, low, close, and volume. A strategy program implements
   `StrategyProgram` (`new(parameters)`, `on_start`, `on_quote`/`on_trade`
   with an order sink, `on_fill`, `on_stop(&mut MetricPublisher)`) and exports
@@ -288,7 +293,7 @@ The implemented contract is:
   workspace, compiles it with the pinned toolchain (cached by source digest,
   program kind, SDK version, toolchain digest, and SDK ABI version; a
   stale-ABI entry is a cache miss and is rebuilt), loads the cdylib through
-  `libloading`, checks the exported SDK ABI version (2) against the host's
+   `libloading`, checks the exported SDK ABI version (3) against the host's
   and rejects an artifact built against an older version, constructs the
   program state from the configured `parameters`, and drives it through the
   engine's `StrategyRuntime` trait. A panic or failure inside authored code
@@ -390,7 +395,16 @@ with each run's evidence under `models/runs/`; workspace indicator definitions
 remain content-addressed under `indicators/<name>/<content-sha>/`, and the
 Python `harness.indicators` registry was deleted with the native-authoring
 wave. `thesis.strategies` owns
-content-addressed strategy bundles; `thesis.artifacts`
+content-addressed strategy bundles and `WorkspaceStrategyArtifacts`, which
+authors pure Rust workspace files and projects published versions for the
+Strategies HTTP view. `strategies/contracts.py` owns the shared design schema;
+the context-bound `agent/runtime/strategy_tools.py` adapter accepts no
+model-supplied workspace or execution authority. Generic workflow `phase_tools`
+grants remain independent of the concrete strategy capability. Fenced Git
+publication commits exact accepted artifact bytes through a temporary index,
+excluding unrelated staged and dirty files. Completion verifies the persisted
+receipt; structural checks are not compilation or a security sandbox.
+`thesis.artifacts`
 owns reproducibility-critical result imports; `thesis.backtests` imports
 completed harness runs into workspace backtest records (equity, trades, stats)
 linked to the originating chat and workflow execution; `thesis.screening` owns
@@ -400,6 +414,23 @@ never reads market data; and `thesis.providers`
 keeps model credentials behind backend-only protocols.
 Workspace identity remains `.thesis/workspace.yaml`; publication state is
 written separately to `.thesis/publication.json`.
+
+`thesis.workspaces.repository.WorkspaceRepositoryProvider` is the structural
+local/remote boundary: create, open, confined path resolution, locator, and
+publication. `LocalWorkspaceProvider` retains native local Git repositories;
+`GiteaWorkspaceProvider` provisions private, ownership-marked repositories and
+uses rebuildable checkout caches. Azure catalog composition injects this
+provider without changing the workspace HTTP interface. Git is authoritative
+for remote manifests; Blob containers retain catalog mappings and operational
+metadata. Remote publication pushes existing accepted commits, never arbitrary
+dirty files. Research models can use the remote path resolver; automatic
+commit/publication of all artifact writers and workspace-scoping of the legacy
+hypothesis store remain follow-up integration work.
+
+`infra/modules/gitea.bicep` optionally hosts open-source Gitea on internal
+Container Apps ingress with persistent Azure Files storage. It uses one replica
+with SQLite, not a highly available forge cluster. The Thesis image includes
+native Git; only Thesis receives the forge credential through Key Vault.
 
 ## Shared Foundation
 
