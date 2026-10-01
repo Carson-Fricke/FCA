@@ -291,6 +291,26 @@ var cryptoTraderEnvironment = concat(quantBaseEnvironment, [
     secretRef: 'alpaca-api-secret'
   }
 ])
+// The backtest job reads its run window through the frozen market-lake HTTP
+// routes (route-only reads, no local lake path), so it carries the internal
+// API endpoint and the lake bearer token under the quant identity.
+var backtestSecrets = [
+  {
+    name: 'api-bearer-token'
+    keyVaultUrl: '${keyVaultUri}secrets/api-bearer-token'
+    identity: quantIdentityResourceId
+  }
+]
+var backtestEnvironment = concat(quantBaseEnvironment, [
+  {
+    name: 'LAKE_API_URL'
+    value: 'http://${apiApp.properties.configuration.ingress.fqdn}:${apiContainerPort}'
+  }
+  {
+    name: 'LAKE_API__BEARER_TOKEN'
+    secretRef: 'api-bearer-token'
+  }
+])
 
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsWorkspaceName
@@ -794,6 +814,7 @@ resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
+      secrets: backtestSecrets
       replicaRetryLimit: 1
       replicaTimeout: backtestReplicaTimeoutSeconds
       identitySettings: [
@@ -822,7 +843,7 @@ resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
             '--config'
             'config/harness/backtest.yaml'
           ]
-          env: quantBaseEnvironment
+          env: backtestEnvironment
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
