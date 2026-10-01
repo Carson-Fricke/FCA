@@ -1018,7 +1018,21 @@ async fn native_research_metrics_are_queryable_over_http() {
             lake_client(&server),
         )),
     );
-    let study_source = include_str!("fixtures/parity_study.rs");
+    let study_source = r#"
+use harness_strategy_sdk::serde_json::Value;
+use harness_strategy_sdk::{export_study_program, BarFrame, MetricPublisher, StudyProgram};
+struct BarObserver { bars: u64 }
+impl StudyProgram for BarObserver {
+    fn new(_: Value) -> Self { Self { bars: 0 } }
+    fn on_bar_frame(&mut self, frame: &BarFrame) {
+        self.bars += frame.bars_by_symbol.len() as u64;
+    }
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("bar_observations", self.bars as f64);
+    }
+}
+export_study_program!(BarObserver);
+"#;
     let document = json!({
         "schema_version": 1,
         "shell": "study",

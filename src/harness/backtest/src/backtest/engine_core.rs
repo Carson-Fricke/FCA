@@ -7,7 +7,7 @@
 //! Python and are driven through [`StrategyRuntime`].
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use num::PyDecimal;
 
@@ -44,6 +44,133 @@ pub struct EngineBar {
     pub close: PyDecimal,
     /// Interval volume.
     pub volume: PyDecimal,
+}
+
+/// Atomic study observation. Availability assumes interval completion, not provider latency.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EngineBarFrame {
+    /// Inclusive interval start in epoch nanoseconds.
+    pub interval_start_ns: i64,
+    /// Exclusive interval end in epoch nanoseconds.
+    pub interval_end_ns: i64,
+    /// Earliest dispatch time, currently the interval end.
+    pub available_at_ns: i64,
+    /// Observed bars in deterministic symbol order; never carried or filled.
+    pub bars_by_symbol: BTreeMap<String, EngineBar>,
+    /// Configured symbols absent from this observation, in sorted order.
+    pub missing_symbols: Vec<String>,
+}
+
+/// Assemble the observed timestamp union into study-only, complete intervals.
+///
+/// # Errors
+///
+/// Rejects non-study input, invalid intervals, duplicates, unexpected symbols,
+/// off-grid starts, and incompatible equity/crypto daily bounds.
+pub fn assemble_study_frames(
+    configuration: &BacktestConfig,
+    fixture: &ReplayFixture,
+    options: &SyntheticDataOptions,
+) -> Result<Vec<EngineBarFrame>, BacktestError> {
+    let invalid = |message: String| BacktestError::DataPreflight(message);
+    if configuration.shell != "study" {
+        return Err(invalid(
+            "bar frames require a study configuration".to_string(),
+        ));
+    }
+    let daily = match configuration.data_bar_interval.as_str() {
+        "1d" => true,
+        "1min" => false,
+        _ => return Err(invalid("study interval must be 1min or 1d".to_string())),
+    };
+    let symbols: BTreeSet<String> = configuration.symbols.iter().cloned().collect();
+    let has_crypto = symbols
+        .iter()
+        .any(|symbol| marketdata::crypto_pair(symbol).is_some());
+    let has_equity = symbols
+        .iter()
+        .any(|symbol| marketdata::crypto_pair(symbol).is_none());
+    if daily && has_crypto && has_equity {
+        return Err(invalid(
+            "mixed equity/crypto DAILY study has incompatible interval bounds".to_string(),
+        ));
+    }
+    let mut frames: BTreeMap<i64, EngineBarFrame> = BTreeMap::new();
+    let mut seen = BTreeSet::new();
+    for event in &fixture.events {
+        let EngineMarket::Bar(bar) = market_event(event, options) else {
+            return Err(invalid("study fixtures must contain bars only".to_string()));
+        };
+        if !symbols.contains(&bar.symbol) {
+            return Err(invalid(format!("unexpected study symbol {:?}", bar.symbol)));
+        }
+        let start = bar.timestamp_ns;
+        if !seen.insert((start, bar.symbol.clone())) {
+            return Err(invalid(format!(
+                "duplicate study timestamp/symbol: {start}/{}",
+                bar.symbol
+            )));
+        }
+        let date = marketdata::Date::from_days(start.div_euclid(super::errors::ONE_DAY_NS) as i32);
+        let asset = if marketdata::crypto_pair(&bar.symbol).is_some() {
+            marketdata::AssetClass::Crypto
+        } else {
+            marketdata::AssetClass::Equity
+        };
+        let sessions = marketdata::sessions_for(asset, date, date)
+            .map_err(|error| invalid(error.to_string()))?;
+        let session = sessions
+            .first()
+            .ok_or_else(|| invalid(format!("study bar {start} is outside a session")))?;
+        let open = session.open_time.to_nanos();
+        let close = session.close_time.to_nanos();
+        let minute = 60_000_000_000;
+        if start < open
+            || start >= close
+            || (daily && start != open)
+            || (!daily && (start - open) % minute != 0)
+        {
+            return Err(invalid(format!(
+                "misaligned study bar grid at {start} for {}",
+                bar.symbol
+            )));
+        }
+        let end = if daily {
+            close
+        } else {
+            (start + minute).min(close)
+        };
+        let frame = frames.entry(start).or_insert_with(|| EngineBarFrame {
+            interval_start_ns: start,
+            interval_end_ns: end,
+            available_at_ns: end,
+            bars_by_symbol: BTreeMap::new(),
+            missing_symbols: Vec::new(),
+        });
+        if frame.interval_end_ns != end {
+            return Err(invalid(format!(
+                "incompatible study interval bounds at {start}"
+            )));
+        }
+        frame.bars_by_symbol.insert(bar.symbol.clone(), bar);
+    }
+    Ok(frames
+        .into_values()
+        .filter_map(|mut frame| {
+            if frame.interval_start_ns < configuration.start_ns
+                || frame.interval_start_ns >= configuration.end_ns
+                || frame.available_at_ns > configuration.end_ns
+            {
+                return None;
+            }
+            frame.missing_symbols = symbols
+                .iter()
+                .filter(|symbol| !frame.bars_by_symbol.contains_key(*symbol))
+                .cloned()
+                .collect();
+            Some(frame)
+        })
+        .collect())
 }
 
 /// One reconstructed market event carrying Python-scale decimals.
@@ -237,6 +364,8 @@ pub struct EngineReport {
 pub enum EngineEvent {
     /// A market event.
     Market(EngineMarket),
+    /// One atomic study frame, scheduled at availability.
+    BarFrame(EngineBarFrame),
     /// An execution report.
     Report(EngineReport),
     /// A fill.
@@ -249,6 +378,7 @@ impl EngineEvent {
     pub const fn timestamp_ns(&self) -> i64 {
         match self {
             Self::Market(market) => market.timestamp_ns(),
+            Self::BarFrame(frame) => frame.available_at_ns,
             Self::Report(report) => report.timestamp_ns,
             Self::Fill(fill) => fill.timestamp_ns,
         }
@@ -259,6 +389,7 @@ impl EngineEvent {
     pub const fn sequence(&self) -> u64 {
         match self {
             Self::Market(market) => market.sequence(),
+            Self::BarFrame(_) => 0,
             Self::Report(report) => report.sequence,
             Self::Fill(fill) => fill.sequence,
         }
@@ -269,6 +400,7 @@ impl EngineEvent {
     pub fn event_id(&self) -> &str {
         match self {
             Self::Market(market) => market.event_id(),
+            Self::BarFrame(_) => "study-bar-frame",
             Self::Report(report) => &report.event_id,
             Self::Fill(fill) => &fill.event_id,
         }
@@ -284,6 +416,7 @@ impl EngineEvent {
             Self::Market(EngineMarket::Quote { .. }) => 0,
             Self::Market(EngineMarket::Trade { .. }) => 1,
             Self::Market(EngineMarket::Bar(_)) => 9,
+            Self::BarFrame(_) => 9,
             Self::Report(_) => 4,
             Self::Fill(_) => 5,
         }
@@ -296,6 +429,7 @@ impl EngineEvent {
             Self::Market(EngineMarket::Quote { .. }) => "harness.core.types.events.QuoteEvent",
             Self::Market(EngineMarket::Trade { .. }) => "harness.core.types.events.TradeEvent",
             Self::Market(EngineMarket::Bar(_)) => "harness.core.types.events.BarEvent",
+            Self::BarFrame(_) => "harness.backtest.EngineBarFrame",
             Self::Report(_) => "harness.core.types.accounting.ExecutionReport",
             Self::Fill(_) => "harness.core.types.accounting.Fill",
         }
@@ -308,6 +442,7 @@ impl EngineEvent {
             Self::Market(EngineMarket::Quote { .. }) => "quote",
             Self::Market(EngineMarket::Trade { .. }) => "trade",
             Self::Market(EngineMarket::Bar(_)) => "bar",
+            Self::BarFrame(_) => "bar_frame",
             Self::Report(_) => "execution_report",
             Self::Fill(_) => "fill",
         }
@@ -406,6 +541,32 @@ impl EventBus {
         let bytes = identity.as_bytes();
         self.hasher.update(&(bytes.len() as u64).to_be_bytes());
         self.hasher.update(bytes);
+        if let EngineEvent::BarFrame(frame) = event {
+            // Content evidence is independent of source row order and sequences.
+            let payload = JsonValue::object([
+                ("start", JsonValue::Int(frame.interval_start_ns)),
+                ("end", JsonValue::Int(frame.interval_end_ns)),
+                ("available_at", JsonValue::Int(frame.available_at_ns)),
+                ("missing", string_array(&frame.missing_symbols)),
+                (
+                    "bars",
+                    JsonValue::object(frame.bars_by_symbol.iter().map(|(symbol, bar)| {
+                        (
+                            symbol.clone(),
+                            JsonValue::Array(
+                                [bar.open, bar.high, bar.low, bar.close, bar.volume]
+                                    .iter()
+                                    .map(|value| JsonValue::String(value.to_string()))
+                                    .collect(),
+                            ),
+                        )
+                    })),
+                ),
+            ])
+            .to_canonical_string();
+            self.hasher.update(&(payload.len() as u64).to_be_bytes());
+            self.hasher.update(payload.as_bytes());
+        }
         self.dispatched_count += 1;
     }
 }
@@ -855,6 +1016,16 @@ pub const RUNTIME_BARS_UNSUPPORTED: &str =
 
 /// The Python plugin seam the engine drives.
 pub trait StrategyRuntime {
+    /// Observe one atomic study frame. Strategies reject frames by default.
+    ///
+    /// # Errors
+    /// Returns an execution error for non-study runtimes or failed observations.
+    fn on_bar_frame(&mut self, frame: &EngineBarFrame) -> Result<(), BacktestError> {
+        let _ = frame;
+        Err(BacktestError::StrategyExecution(
+            RUNTIME_BARS_UNSUPPORTED.to_string(),
+        ))
+    }
     /// Called once before the first market event.
     ///
     /// # Errors
@@ -939,8 +1110,10 @@ pub struct BacktestOutcome {
     pub dispatch_hash: String,
     /// Bus dispatched count.
     pub dispatched_count: u64,
-    /// Market events consumed.
+    /// Raw replay events consumed, including bars whose intervals end after the window.
     pub market_event_count: u64,
+    /// Atomic study frames dispatched (not the raw bar count).
+    pub bar_frame_count: u64,
     /// Approved orders.
     pub order_count: u64,
     /// Booked fills.
@@ -975,6 +1148,31 @@ impl BacktestOutcome {
     /// Return the canonical, JSON-ready run artifacts.
     #[must_use]
     pub fn artifacts(&self) -> JsonValue {
+        let mut counts = BTreeMap::from([
+            (
+                "dispatched".to_string(),
+                JsonValue::UInt(self.dispatched_count),
+            ),
+            (
+                "market_events".to_string(),
+                JsonValue::UInt(self.market_event_count),
+            ),
+            ("orders".to_string(), JsonValue::UInt(self.order_count)),
+            (
+                "fills".to_string(),
+                JsonValue::UInt(self.fills.len() as u64),
+            ),
+            (
+                "risk_decisions".to_string(),
+                JsonValue::UInt(self.risk_decisions.len() as u64),
+            ),
+        ]);
+        if self.preflight.bar_count > 0 {
+            counts.insert(
+                "bar_frames".to_string(),
+                JsonValue::UInt(self.bar_frame_count),
+            );
+        }
         let mut entries = vec![
             ("manifest", self.manifest.to_json()),
             ("status", JsonValue::string(self.status.value())),
@@ -990,19 +1188,7 @@ impl BacktestOutcome {
                 "dispatch_hash",
                 JsonValue::String(self.dispatch_hash.clone()),
             ),
-            (
-                "counts",
-                JsonValue::object([
-                    ("dispatched", JsonValue::UInt(self.dispatched_count)),
-                    ("market_events", JsonValue::UInt(self.market_event_count)),
-                    ("orders", JsonValue::UInt(self.order_count)),
-                    ("fills", JsonValue::UInt(self.fills.len() as u64)),
-                    (
-                        "risk_decisions",
-                        JsonValue::UInt(self.risk_decisions.len() as u64),
-                    ),
-                ]),
-            ),
+            ("counts", JsonValue::Object(counts)),
             (
                 "strategies",
                 JsonValue::object([
@@ -1375,6 +1561,18 @@ pub fn run_native_engine(
     strategies: Vec<StrategyInstance>,
     synthetic_options: &SyntheticDataOptions,
 ) -> Result<BacktestOutcome, BacktestError> {
+    let study_frames = if configuration.shell == "study" {
+        Some(assemble_study_frames(
+            configuration,
+            fixture,
+            synthetic_options,
+        )?)
+    } else {
+        None
+    };
+    let bar_frame_count = study_frames
+        .as_ref()
+        .map_or(0, |frames| frames.len() as u64);
     let schedule = fee_schedule_from_config(
         &configuration.fees,
         &options.fee_precision,
@@ -1419,10 +1617,23 @@ pub fn run_native_engine(
     let mut risk_decisions: Vec<RiskDecision> = Vec::new();
     let mut market_event_count = 0u64;
 
-    for event in &fixture.events {
-        market_event_count += 1;
-        let market = market_event(event, synthetic_options);
-        bus.schedule(EngineEvent::Market(market));
+    let replay_events: Box<dyn Iterator<Item = EngineEvent> + '_> = match study_frames {
+        Some(frames) => {
+            market_event_count = fixture.events.len() as u64;
+            Box::new(frames.into_iter().map(EngineEvent::BarFrame))
+        }
+        None => Box::new(
+            fixture
+                .events
+                .iter()
+                .map(|event| EngineEvent::Market(market_event(event, synthetic_options))),
+        ),
+    };
+    for event in replay_events {
+        if matches!(event, EngineEvent::Market(_)) {
+            market_event_count += 1;
+        }
+        bus.schedule(event);
         while let Some(dispatched) = bus.dispatch_next() {
             dispatch_event(
                 &dispatched,
@@ -1478,6 +1689,7 @@ pub fn run_native_engine(
         dispatch_hash: bus.dispatch_hash(),
         dispatched_count: bus.dispatched_count(),
         market_event_count,
+        bar_frame_count,
         order_count,
         fills,
         fee_assessments: assessments,
@@ -1511,6 +1723,11 @@ fn dispatch_event(
     strategies: &mut [StrategyInstance],
 ) -> Result<(), BacktestError> {
     match event {
+        EngineEvent::BarFrame(frame) => {
+            for instance in strategies.iter_mut() {
+                instance.runtime.on_bar_frame(frame)?;
+            }
+        }
         EngineEvent::Market(market) => {
             let clock_ns = market.timestamp_ns();
             venue.on_market(market, clock_ns, bus);

@@ -47,7 +47,7 @@ pub fn preflight_data(
         .filter(|symbol| !symbols.contains(symbol))
         .cloned()
         .collect();
-    if !missing.is_empty() {
+    if configuration.shell != "study" && !missing.is_empty() {
         return Err(BacktestError::DataPreflight(format!(
             "fixture is missing configured symbols: {}",
             missing.join(", ")

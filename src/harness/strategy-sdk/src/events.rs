@@ -6,6 +6,7 @@
 //! per-event allocation. Prices are exact [`Decimal`] values.
 
 use num::PyDecimal;
+use std::collections::BTreeMap;
 
 /// A top-of-book quote as the engine dispatched it.
 #[derive(Clone, Copy, Debug)]
@@ -76,7 +77,7 @@ impl<'a> TradeEvent<'a> {
 
 /// One OHLCV bar as the engine dispatched it.
 ///
-/// This is the only market event a study program folds; quotes and trades
+/// Studies read these bars inside an atomic [`BarFrame`]; quotes and trades
 /// remain on [`StrategyProgram`](crate::program::StrategyProgram) and the
 /// indicator surface. Every decimal field is exact, so a study reads bar
 /// values without a float roundtrip.
@@ -100,6 +101,22 @@ pub struct BarEvent<'a> {
     pub close: PyDecimal,
     /// Interval volume.
     pub volume: PyDecimal,
+}
+
+/// One complete atomic interval delivered to a study, including missing symbols.
+/// The map is constructed locally by the SDK and never crosses the C ABI.
+#[derive(Clone, Debug)]
+pub struct BarFrame<'a> {
+    /// Inclusive interval start in epoch nanoseconds.
+    pub interval_start_ns: i64,
+    /// Exclusive interval end in epoch nanoseconds; strictly after start.
+    pub interval_end_ns: i64,
+    /// Availability time, at or after interval end.
+    pub available_at_ns: i64,
+    /// Exact bars by symbol; every timestamp equals interval start.
+    pub bars_by_symbol: BTreeMap<&'a str, BarEvent<'a>>,
+    /// Unique absent symbols, disjoint from the bars.
+    pub missing_symbols: Vec<&'a str>,
 }
 
 /// One booked fill owned by the program.

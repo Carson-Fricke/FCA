@@ -16,10 +16,9 @@ use num::PyDecimal;
 
 /// The ABI version the host and every artifact must agree on.
 ///
-/// Version 2 is the bar cutover: the study vtable folds `CBarEvent` instead
-/// of quote/trade events, so every pre-bar study artifact is rejected by the
-/// loader's version check.
-pub const SDK_ABI_VERSION: u32 = 2;
+/// Version 3 is the atomic bar-frame cutover. All version 2 artifacts,
+/// including strategies and screening programs, must be rebuilt.
+pub const SDK_ABI_VERSION: u32 = 3;
 
 /// Callback result: the author code completed.
 pub const SDK_OK: i32 = 0;
@@ -71,7 +70,10 @@ impl CStr {
     /// the returned slice's lifetime.
     #[must_use]
     pub unsafe fn as_str<'a>(self) -> Option<&'a str> {
-        if self.ptr.is_null() {
+        if self.ptr.is_null()
+            || self.len > isize::MAX as usize
+            || (self.ptr as usize).checked_add(self.len).is_none()
+        {
             return None;
         }
         let bytes = std::slice::from_raw_parts(self.ptr, self.len);
@@ -161,8 +163,7 @@ pub struct CTradeEvent {
 
 /// One OHLCV bar crossing the ABI.
 ///
-/// This is the study market event; quotes and trades cross only for
-/// strategies.
+/// Study frames contain these bars; quotes and trades cross only for strategies.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct CBarEvent {
@@ -184,6 +185,28 @@ pub struct CBarEvent {
     pub close: CDecimal,
     /// Interval volume.
     pub volume: CDecimal,
+}
+
+/// One atomic interval crossing the ABI as borrowed arrays, never Rust maps.
+/// Array storage and string views remain readable for the entire callback.
+/// A null array pointer is permitted only when its count is zero.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CBarFrame {
+    /// Inclusive interval start in epoch nanoseconds.
+    pub interval_start_ns: i64,
+    /// Exclusive interval end in epoch nanoseconds; strictly after start.
+    pub interval_end_ns: i64,
+    /// Availability time, at or after interval end.
+    pub available_at_ns: i64,
+    /// Bars with unique symbols and timestamps equal to interval start.
+    pub bars: *const CBarEvent,
+    /// Number of bars.
+    pub bars_len: usize,
+    /// Unique missing symbols, disjoint from the bars.
+    pub missing_symbols: *const CStr,
+    /// Number of missing symbols.
+    pub missing_symbols_len: usize,
 }
 
 /// One deterministic fill crossing the ABI.
@@ -308,7 +331,7 @@ pub type OrderSubmitFn = unsafe extern "C" fn(ctx: *mut c_void, order: *const CM
 /// The vtable a study artifact exports.
 ///
 /// A study has no order surface by construction: the vtable carries no
-/// order-submit path, its only market callback folds OHLCV bars, and its
+/// order-submit path, its only market callback folds atomic bar frames, and its
 /// market callbacks return no orders.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -319,8 +342,8 @@ pub struct StudyProgramVTable {
     pub reserved: u32,
     /// Construct the program state from a JSON parameters document.
     pub create: StudyCreateFn,
-    /// Fold one OHLCV bar.
-    pub on_bar: StudyBarFn,
+    /// Fold one atomic interval frame.
+    pub on_bar_frame: StudyBarFrameFn,
     /// Publish final metrics through the host sink.
     pub on_stop: StudyStopFn,
     /// Destroy the program state.
@@ -333,8 +356,8 @@ pub struct StudyProgramVTable {
 /// `harness_sdk_last_error`).
 pub type StudyCreateFn = unsafe extern "C" fn(parameters: CStr) -> *mut c_void;
 
-/// Fold one OHLCV bar into a study program state.
-pub type StudyBarFn = unsafe extern "C" fn(state: *mut c_void, event: *const CBarEvent) -> i32;
+/// Fold one atomic interval frame into a study program state.
+pub type StudyBarFrameFn = unsafe extern "C" fn(state: *mut c_void, frame: *const CBarFrame) -> i32;
 
 /// Publish final metrics from a study program state.
 pub type StudyStopFn = unsafe extern "C" fn(state: *mut c_void, metrics: *const CMetricSink) -> i32;

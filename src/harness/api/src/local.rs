@@ -223,6 +223,11 @@ fn authored_study_document(model: &Value) -> Result<Value, String> {
         .get("harnessConfiguration")
         .and_then(Value::as_object)
         .ok_or_else(|| "model.harnessConfiguration must be an object".to_string())?;
+    let interval = configuration
+        .get("interval")
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "1min" | "1d"))
+        .ok_or_else(|| "model.harnessConfiguration.interval must be 1min or 1d".to_string())?;
     let start = configuration
         .get("start")
         .and_then(Value::as_str)
@@ -267,7 +272,7 @@ fn authored_study_document(model: &Value) -> Result<Value, String> {
         "start": start,
         "end": end,
         "symbols": &symbols,
-        "data": {"symbols": &symbols},
+        "data": {"symbols": &symbols, "bar_interval": interval},
         "strategy_instances": [{
             "instance_id": &run_id,
             "implementation": "jit",

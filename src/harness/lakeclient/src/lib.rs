@@ -31,7 +31,7 @@ mod spec;
 pub mod testing;
 
 pub use blocking::BlockingLakeClient;
-pub use client::{LakeClient, LakeClientConfig, DEFAULT_LAKE_BASE_URL};
+pub use client::{LakeClient, LakeClientConfig, DEFAULT_LAKE_BASE_URL, MAX_PARALLEL_FETCHES};
 pub use error::{EnsureFailure, LakeClientError};
 pub use models::{CoverageEntry, CoverageReport, JobStatus};
 pub use spec::{EnsureSpec, ReadSpec};

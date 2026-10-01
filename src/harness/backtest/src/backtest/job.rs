@@ -332,7 +332,11 @@ pub fn parse_study_document(
     if shell != "study" {
         return Err(BacktestJobError::WrongShell(shell.to_string()));
     }
-    BacktestConfig::from_yaml_value(&json_to_yaml(document)).map_err(BacktestJobError::from)
+    let value = json_to_yaml(document);
+    require_study_bar_interval(&value)?;
+    let configuration = BacktestConfig::from_yaml_value(&value).map_err(BacktestJobError::from)?;
+    study_bar_interval(&configuration)?;
+    Ok(configuration)
 }
 
 fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
@@ -537,6 +541,7 @@ fn write_native_results(
     let counts = JobCounts {
         market_events: outcome.market_event_count,
         dispatched: outcome.dispatched_count,
+        bar_frames: (configuration.shell == "study").then_some(outcome.bar_frame_count),
         orders: outcome.order_count,
         fills: outcome.fills.len() as u64,
     };
@@ -682,6 +687,11 @@ fn study_bar_interval(configuration: &BacktestConfig) -> Result<BarInterval, Bac
 }
 
 /// Ensure and read the study window's bars for every configured symbol.
+///
+/// Every symbol's window is ensured and read concurrently (bounded by the lake
+/// client's fetch concurrency), then merged. Completion order cannot change the
+/// replay: [`lake_fixture`] sorts the merged events by timestamp before any
+/// preflight or engine work.
 fn lake_study_bar_events(
     configuration: &BacktestConfig,
     client: &BlockingLakeClient,
@@ -689,35 +699,45 @@ fn lake_study_bar_events(
     end_text: &str,
 ) -> Result<Vec<MarketEvent>, BacktestJobError> {
     let interval = study_bar_interval(configuration)?;
+    let windows: Vec<(String, String, EnsureSpec, ReadSpec)> = configuration
+        .symbols
+        .iter()
+        .map(|symbol| {
+            let (asset_class, lake_symbol) = match marketdata::crypto_pair(symbol) {
+                Some(pair) => ("crypto", pair),
+                None => ("equity", symbol.trim().to_uppercase()),
+            };
+            let ensure = EnsureSpec::new(
+                asset_class,
+                DataType::Bars.value(),
+                &lake_symbol,
+                start_text,
+                end_text,
+            )
+            .with_interval(interval.value());
+            let read = ReadSpec::new(
+                asset_class,
+                DataType::Bars.value(),
+                &lake_symbol,
+                start_text,
+                end_text,
+            )
+            .with_interval(interval.value());
+            (symbol.clone(), lake_symbol, ensure, read)
+        })
+        .collect();
+    let ensures: Vec<EnsureSpec> = windows
+        .iter()
+        .map(|(_, _, ensure, _)| ensure.clone())
+        .collect();
+    for (_, outcome) in windows.iter().zip(client.ensure_many(&ensures)) {
+        outcome.map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    }
+    let reads: Vec<ReadSpec> = windows.iter().map(|(_, _, _, read)| read.clone()).collect();
     let mut events: Vec<MarketEvent> = Vec::new();
-    for symbol in &configuration.symbols {
-        let (asset_class, lake_symbol) = match marketdata::crypto_pair(symbol) {
-            Some(pair) => ("crypto", pair),
-            None => ("equity", symbol.trim().to_uppercase()),
-        };
-        let ensure = EnsureSpec::new(
-            asset_class,
-            DataType::Bars.value(),
-            &lake_symbol,
-            start_text,
-            end_text,
-        )
-        .with_interval(interval.value());
-        client
-            .ensure(&ensure)
-            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        let read = ReadSpec::new(
-            asset_class,
-            DataType::Bars.value(),
-            &lake_symbol,
-            start_text,
-            end_text,
-        )
-        .with_interval(interval.value());
-        let batches = client
-            .read_arrow(&read)
-            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        let decoded = marketdata::events_from_arrow(DataType::Bars, &lake_symbol, &batches)
+    for ((symbol, lake_symbol, _, _), batches) in windows.iter().zip(client.read_many(&reads)) {
+        let batches = batches.map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        let decoded = marketdata::events_from_arrow(DataType::Bars, lake_symbol, &batches)
             .map_err(|error| BacktestJobError::Io(error.to_string()))?;
         events.extend(
             decoded
@@ -730,13 +750,18 @@ fn lake_study_bar_events(
 }
 
 /// Ensure and read the backtest window's trades and quotes per symbol.
+///
+/// Every symbol/data-type window is ensured concurrently — the provider fetch
+/// is the long pole — while reads stay sequential so only one window's Arrow
+/// batches are held at a time. [`lake_fixture`] sorts the merged events, so
+/// completion order cannot change the replay.
 fn lake_tick_events(
     configuration: &BacktestConfig,
     client: &BlockingLakeClient,
     start_text: &str,
     end_text: &str,
 ) -> Result<Vec<MarketEvent>, BacktestJobError> {
-    let mut events: Vec<MarketEvent> = Vec::new();
+    let mut jobs: Vec<(String, String, DataType, EnsureSpec, ReadSpec)> = Vec::new();
     for symbol in &configuration.symbols {
         let (asset_class, lake_symbol) = match marketdata::crypto_pair(symbol) {
             Some(pair) => ("crypto", pair),
@@ -750,9 +775,6 @@ fn lake_tick_events(
                 start_text,
                 end_text,
             );
-            client
-                .ensure(&ensure)
-                .map_err(|error| BacktestJobError::Io(error.to_string()))?;
             let read = ReadSpec::new(
                 asset_class,
                 data_type.value(),
@@ -760,18 +782,29 @@ fn lake_tick_events(
                 start_text,
                 end_text,
             );
-            let batches = client
-                .read_arrow(&read)
-                .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-            let decoded = marketdata::events_from_arrow(data_type, &lake_symbol, &batches)
-                .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-            events.extend(
-                decoded
-                    .iter()
-                    .filter(|event| in_window(event, configuration))
-                    .map(|event| lake_event(event, symbol)),
-            );
+            jobs.push((symbol.clone(), lake_symbol.clone(), data_type, ensure, read));
         }
+    }
+    let ensures: Vec<EnsureSpec> = jobs
+        .iter()
+        .map(|(_, _, _, ensure, _)| ensure.clone())
+        .collect();
+    for (_, outcome) in jobs.iter().zip(client.ensure_many(&ensures)) {
+        outcome.map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    }
+    let mut events: Vec<MarketEvent> = Vec::new();
+    for (symbol, lake_symbol, data_type, _, read) in &jobs {
+        let batches = client
+            .read_arrow(read)
+            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        let decoded = marketdata::events_from_arrow(*data_type, lake_symbol, &batches)
+            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        events.extend(
+            decoded
+                .iter()
+                .filter(|event| in_window(event, configuration))
+                .map(|event| lake_event(event, symbol)),
+        );
     }
     Ok(events)
 }
@@ -858,6 +891,7 @@ struct LedgerRow {
 struct JobCounts {
     market_events: u64,
     dispatched: u64,
+    bar_frames: Option<u64>,
     orders: u64,
     fills: u64,
 }
@@ -1036,18 +1070,22 @@ fn metrics_json(
 ) -> JsonValue {
     let metrics = equity_curve_metrics(&ledger.equity);
     let execution = execution_stats(&ledger.fills, &ledger.orders);
+    let mut count_values = BTreeMap::from([
+        (
+            "market_events".to_string(),
+            JsonValue::UInt(counts.market_events),
+        ),
+        ("dispatched".to_string(), JsonValue::UInt(counts.dispatched)),
+        ("orders".to_string(), JsonValue::UInt(counts.orders)),
+        ("fills".to_string(), JsonValue::UInt(counts.fills)),
+    ]);
+    if let Some(frames) = counts.bar_frames {
+        count_values.insert("bar_frames".to_string(), JsonValue::UInt(frames));
+    }
     JsonValue::object([
         ("run_id", JsonValue::String(run_id.to_string())),
         ("status", JsonValue::string(status)),
-        (
-            "counts",
-            JsonValue::object([
-                ("market_events", JsonValue::UInt(counts.market_events)),
-                ("dispatched", JsonValue::UInt(counts.dispatched)),
-                ("orders", JsonValue::UInt(counts.orders)),
-                ("fills", JsonValue::UInt(counts.fills)),
-            ]),
-        ),
+        ("counts", JsonValue::Object(count_values)),
         (
             "equity",
             JsonValue::object([

@@ -91,6 +91,19 @@ impl BlockingLakeClient {
         self.block_on(self.client.read_arrow(spec))
     }
 
+    /// Ensure every spec concurrently, polling each to completion.
+    ///
+    /// The results keep the spec order; every spec is attempted even when
+    /// another fails.
+    pub fn ensure_many(&self, specs: &[EnsureSpec]) -> Vec<Result<(), LakeClientError>> {
+        self.block_on(self.client.ensure_many(specs))
+    }
+
+    /// Read every spec concurrently, preserving the spec order.
+    pub fn read_many(&self, specs: &[ReadSpec]) -> Vec<Result<Vec<RecordBatch>, LakeClientError>> {
+        self.block_on(self.client.read_many(specs))
+    }
+
     /// Return the as-of universe symbols.
     ///
     /// # Errors

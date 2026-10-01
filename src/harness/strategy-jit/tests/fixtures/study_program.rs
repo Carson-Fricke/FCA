@@ -8,11 +8,13 @@
 
 use harness_strategy_sdk::serde_json::Value;
 use harness_strategy_sdk::{
-    export_study_program, BarEvent, Decimal, MetricPublisher, StudyProgram,
+    export_study_program, BarFrame, Decimal, MetricPublisher, StudyProgram,
 };
 
 #[derive(Debug, Default)]
 struct BarStudy {
+    frames: u64,
+    missing: u64,
     bars: u64,
     mismatches: u64,
     last_open: Option<Decimal>,
@@ -65,25 +67,31 @@ impl StudyProgram for BarStudy {
         }
     }
 
-    fn on_bar(&mut self, event: &BarEvent) {
-        if let Some(expected) = self.expected.get(self.bars as usize) {
-            let mut mismatches = 0;
-            Self::check(event.open, &expected.open, &mut mismatches);
-            Self::check(event.high, &expected.high, &mut mismatches);
-            Self::check(event.low, &expected.low, &mut mismatches);
-            Self::check(event.close, &expected.close, &mut mismatches);
-            Self::check(event.volume, &expected.volume, &mut mismatches);
-            self.mismatches += mismatches;
+    fn on_bar_frame(&mut self, frame: &BarFrame) {
+        self.frames += 1;
+        self.missing += frame.missing_symbols.len() as u64;
+        for event in frame.bars_by_symbol.values() {
+            if let Some(expected) = self.expected.get(self.bars as usize) {
+                let mut mismatches = 0;
+                Self::check(event.open, &expected.open, &mut mismatches);
+                Self::check(event.high, &expected.high, &mut mismatches);
+                Self::check(event.low, &expected.low, &mut mismatches);
+                Self::check(event.close, &expected.close, &mut mismatches);
+                Self::check(event.volume, &expected.volume, &mut mismatches);
+                self.mismatches += mismatches;
+            }
+            self.bars += 1;
+            self.last_open = Some(event.open);
+            self.last_high = Some(event.high);
+            self.last_low = Some(event.low);
+            self.last_close = Some(event.close);
+            self.last_volume = Some(event.volume);
         }
-        self.bars += 1;
-        self.last_open = Some(event.open);
-        self.last_high = Some(event.high);
-        self.last_low = Some(event.low);
-        self.last_close = Some(event.close);
-        self.last_volume = Some(event.volume);
     }
 
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("study_frame_count", self.frames as f64);
+        let _ = metrics.publish("study_missing_count", self.missing as f64);
         let _ = metrics.publish("study_bar_count", self.bars as f64);
         let _ = metrics.publish("study_bar_mismatches", self.mismatches as f64);
         publish_decimal(metrics, "study_last_open", self.last_open);

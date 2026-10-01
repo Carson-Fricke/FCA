@@ -1014,6 +1014,7 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "axum",
+ "futures-util",
  "harness-lakeclient",
  "reqwest",
  "serde",

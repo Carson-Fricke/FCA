@@ -10,7 +10,7 @@
 //!
 //! * [`events`] — the author-facing event and start views (borrowed strings,
 //!   exact [`Decimal`]s) mirroring the engine's `EngineMarket`/`EngineFill`.
-//!   A study program folds [`BarEvent`](events::BarEvent)s only; quote and
+//!   A study program folds [`BarFrame`](events::BarFrame)s only; quote and
 //!   trade events remain on the strategy and indicator surfaces.
 //! * [`program`] — the authoring traits ([`StudyProgram`](program::StudyProgram),
 //!   [`StrategyProgram`](program::StrategyProgram),
@@ -41,14 +41,15 @@ mod indicator;
 mod program;
 
 pub use abi::{
-    CBarEvent, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent, CSlice, CStart,
-    CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn, ScreeningCreateFn, ScreeningDestroyFn,
-    ScreeningProgramVTable, ScreeningResultFn, ScreeningScreenFn, StrategyProgramVTable,
-    StudyBarFn, StudyProgramVTable, ABI_EXPORT, LAST_ERROR_EXPORT, METRIC_INVALID_NAME,
-    METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED, METRIC_RESERVED_NAME, SCREENING_VTABLE_EXPORT,
-    SDK_ABI_VERSION, SDK_ERROR, SDK_OK, STRATEGY_VTABLE_EXPORT, STUDY_VTABLE_EXPORT,
+    CBarEvent, CBarFrame, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent,
+    CSlice, CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn, ScreeningCreateFn,
+    ScreeningDestroyFn, ScreeningProgramVTable, ScreeningResultFn, ScreeningScreenFn,
+    StrategyProgramVTable, StudyBarFrameFn, StudyProgramVTable, ABI_EXPORT, LAST_ERROR_EXPORT,
+    METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED, METRIC_RESERVED_NAME,
+    SCREENING_VTABLE_EXPORT, SDK_ABI_VERSION, SDK_ERROR, SDK_OK, STRATEGY_VTABLE_EXPORT,
+    STUDY_VTABLE_EXPORT,
 };
-pub use events::{BarEvent, Fill, ProgramStart, QuoteEvent, TradeEvent};
+pub use events::{BarEvent, BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
 pub use indicator::{
     indicator_add, indicator_context, indicator_div, indicator_mul, indicator_sub, Indicator,
     INDICATOR_CONTEXT_PRECISION,

@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use harness_strategy_jit::{compile, ManagedWorkspace, ProgramKind};
+use backtest::backtest::engine_core::{EngineBar, EngineBarFrame, EngineMarket, StrategyRuntime};
+use harness_strategy_jit::{compile, JitStudyRuntime, ManagedWorkspace, ProgramKind};
+use harness_strategy_sdk::Decimal;
 
 const STUDY_SOURCE: &str = include_str!("fixtures/study_program.rs");
 
@@ -65,6 +67,99 @@ fn the_workspace_records_provenance_for_every_artifact() {
         .target_dir()
         .join(&entry.artifact_relpath)
         .is_file());
+    let exact = harness_strategy_sdk::serde_json::json!({
+        "open": "1.500", "high": "2.000", "low": "-0", "close": "1E+2", "volume": "1E-9"
+    });
+    let parameters = harness_strategy_sdk::serde_json::json!({"expected": [exact.clone(), exact]});
+    let mut runtime = JitStudyRuntime::from_source(&workspace, STUDY_SOURCE, &parameters)
+        .expect("load cached study");
+    let bar = |symbol: &str| EngineBar {
+        event_id: format!("bar-{symbol}"),
+        timestamp_ns: 10,
+        sequence: 1,
+        symbol: symbol.to_string(),
+        open: "1.500".parse().unwrap(),
+        high: "2.000".parse().unwrap(),
+        low: "-0".parse().unwrap(),
+        close: "1E+2".parse().unwrap(),
+        volume: "0.000000001".parse().unwrap(),
+    };
+    let frame = EngineBarFrame {
+        interval_start_ns: 10,
+        interval_end_ns: 20,
+        available_at_ns: 25,
+        bars_by_symbol: [
+            ("AAA".to_string(), bar("AAA")),
+            ("BBB".to_string(), bar("BBB")),
+        ]
+        .into(),
+        missing_symbols: vec!["CCC".to_string()],
+    };
+    StrategyRuntime::on_bar_frame(&mut runtime, &frame).expect("one atomic callback");
+    let invalid = EngineBarFrame {
+        available_at_ns: 19,
+        ..frame.clone()
+    };
+    assert!(runtime.on_bar_frame(&invalid).is_err());
+    let invalid_key = EngineBarFrame {
+        bars_by_symbol: [("WRONG".to_string(), bar("AAA"))].into(),
+        ..frame.clone()
+    };
+    assert!(runtime.on_bar_frame(&invalid_key).is_err());
+    assert!(StrategyRuntime::on_bar(&mut runtime, &bar("AAA")).is_err());
+    assert!(runtime.on_market(&EngineMarket::Bar(bar("AAA"))).is_err());
+    let quote = EngineMarket::Quote {
+        event_id: "quote".into(),
+        timestamp_ns: 10,
+        sequence: 1,
+        symbol: "AAA".into(),
+        bid: Decimal::ZERO,
+        ask: Decimal::ZERO,
+        bid_quantity: Decimal::ZERO,
+        ask_quantity: Decimal::ZERO,
+        venue: "test".into(),
+    };
+    assert!(runtime.on_market(&quote).is_err());
+    let trade = EngineMarket::Trade {
+        event_id: "trade".into(),
+        timestamp_ns: 10,
+        sequence: 1,
+        symbol: "AAA".into(),
+        price: Decimal::ZERO,
+        quantity: Decimal::ZERO,
+        venue: "test".into(),
+        trade_id: "trade".into(),
+    };
+    assert!(runtime.on_market(&trade).is_err());
+    runtime.on_stop().expect("publish metrics");
+    let metrics = runtime.published_metrics();
+    assert_eq!(metrics["study_frame_count"], "1");
+    assert_eq!(metrics["study_bar_count"], "2");
+    assert_eq!(metrics["study_missing_count"], "1");
+    assert_eq!(metrics["study_bar_mismatches"], "0");
+    drop(runtime);
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn persisted_raw_bar_study_source_fails_to_build() {
+    let directory = temp_dir("old-study-source");
+    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+    let old_source = STUDY_SOURCE.replace(
+        "fn on_bar_frame(&mut self, frame: &BarFrame)",
+        "fn on_bar(&mut self, frame: &BarFrame)",
+    );
+    let error =
+        compile(&workspace, &old_source, ProgramKind::Study).expect_err("old callback rejected");
+    match error {
+        harness_strategy_jit::JitError::Compile { detail, .. } => {
+            assert!(
+                detail.contains("on_bar") && detail.contains("not a member"),
+                "{detail}"
+            );
+        }
+        other => panic!("expected compile failure, got {other:?}"),
+    }
     let _ = std::fs::remove_dir_all(&directory);
 }
 

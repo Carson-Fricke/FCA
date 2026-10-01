@@ -19,7 +19,7 @@ use crate::abi::{
     CDecimal, CMarketOrder, CMetricSink, COrderSink, CStr, METRIC_INVALID_NAME, METRIC_NOT_FINITE,
     METRIC_OK, METRIC_RESERVED_NAME, SDK_OK,
 };
-use crate::events::{BarEvent, Fill, ProgramStart, QuoteEvent, TradeEvent};
+use crate::events::{BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
 
 /// The metric names reserved by the harness; publishing them fails.
 pub const RESERVED_METRIC_NAMES: &[&str] = &[
@@ -35,16 +35,17 @@ pub const RESERVED_METRIC_NAMES: &[&str] = &[
 /// A study program: fit and observe history, publish metrics, no execution.
 ///
 /// Constructed once per run with the configured JSON parameters; the bar
-/// callback folds OHLCV bars in replay order and `on_stop` publishes the
-/// run's custom metrics. Ticks are not part of the study contract.
+/// callback folds atomic interval frames in replay order and `on_stop`
+/// publishes the run's custom metrics. Raw bars and ticks are not part of
+/// the study contract.
 pub trait StudyProgram {
     /// Construct the program from the configured JSON parameters.
     fn new(parameters: serde_json::Value) -> Self
     where
         Self: Sized;
 
-    /// Fold one OHLCV bar.
-    fn on_bar(&mut self, _event: &BarEvent) {}
+    /// Fold one complete atomic interval frame, once per interval.
+    fn on_bar_frame(&mut self, _frame: &BarFrame) {}
 
     /// Publish final metrics once after the replay.
     fn on_stop(&mut self, _metrics: &mut MetricPublisher) {}

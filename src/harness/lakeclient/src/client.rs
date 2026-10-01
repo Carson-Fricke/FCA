@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use arrow_array::RecordBatch;
 use arrow_ipc::reader::StreamReader;
+use futures_util::stream::{self, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde_json::Value;
 
@@ -21,6 +22,12 @@ use crate::spec::{EnsureSpec, ReadSpec};
 pub const DEFAULT_LAKE_BASE_URL: &str = "http://127.0.0.1:8002";
 /// Wall-clock bound for one ensure, job, coverage, or read HTTP call.
 const HTTP_TIMEOUT_SECONDS: u64 = 60;
+/// The most ensure or read requests the batch helpers keep in flight at once.
+///
+/// The lake's shared per-key provider lane is the real rate limit, so this
+/// bound keeps the fetch budget saturated without opening one socket per
+/// configured symbol when a universe grows.
+pub const MAX_PARALLEL_FETCHES: usize = 8;
 
 /// Resolved market-lake connection settings.
 ///
@@ -282,6 +289,40 @@ impl LakeClient {
             return Err(http_error(status.as_u16(), &bytes));
         }
         decode_arrow_stream(&bytes)
+    }
+
+    /// Ensure every spec concurrently, preserving the input order.
+    ///
+    /// Up to [`MAX_PARALLEL_FETCHES`] ensures are in flight at once and every
+    /// spec is attempted even when another fails, so the lake runs its fetches
+    /// concurrently instead of one symbol at a time. Results keep the spec
+    /// order, letting a caller report the first failing symbol deterministically.
+    pub async fn ensure_many(&self, specs: &[EnsureSpec]) -> Vec<Result<(), LakeClientError>> {
+        let requests = specs.iter().cloned().map(|spec| {
+            let client = self.clone();
+            async move { client.ensure(&spec).await }
+        });
+        stream::iter(requests)
+            .buffered(MAX_PARALLEL_FETCHES)
+            .collect()
+            .await
+    }
+
+    /// Read every spec concurrently, preserving the input order.
+    ///
+    /// Same bounded fan-out and ordering contract as [`Self::ensure_many`].
+    pub async fn read_many(
+        &self,
+        specs: &[ReadSpec],
+    ) -> Vec<Result<Vec<RecordBatch>, LakeClientError>> {
+        let requests = specs.iter().cloned().map(|spec| {
+            let client = self.clone();
+            async move { client.read_arrow(&spec).await }
+        });
+        stream::iter(requests)
+            .buffered(MAX_PARALLEL_FETCHES)
+            .collect()
+            .await
     }
 
     /// Return the as-of universe symbols.

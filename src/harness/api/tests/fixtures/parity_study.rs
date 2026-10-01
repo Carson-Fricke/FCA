@@ -1,7 +1,7 @@
 //! A minimal bar study program for the HTTP parity suite: counts observed
 //! OHLCV bars and publishes the bar count and the mean bar close.
 use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{export_study_program, BarEvent, MetricPublisher, StudyProgram};
+use harness_strategy_sdk::{export_study_program, BarFrame, MetricPublisher, StudyProgram};
 
 struct BarObserver {
     bars: u64,
@@ -18,11 +18,13 @@ impl StudyProgram for BarObserver {
         }
     }
 
-    fn on_bar(&mut self, event: &BarEvent) {
-        self.bars += 1;
-        if let Ok(close) = event.close.to_string().parse::<f64>() {
-            self.close_sum += close;
-            self.last_close = close;
+    fn on_bar_frame(&mut self, frame: &BarFrame) {
+        for event in frame.bars_by_symbol.values() {
+            self.bars += 1;
+            if let Ok(close) = event.close.to_string().parse::<f64>() {
+                self.close_sum += close;
+                self.last_close = close;
+            }
         }
     }
 

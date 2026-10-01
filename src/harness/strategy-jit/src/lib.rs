@@ -6,8 +6,8 @@
 //! behind the existing [`StrategyRuntime`](backtest::backtest::engine_core::StrategyRuntime)
 //! engine seam. Identical source, SDK version, and toolchain produce an
 //! identical digest, and the compile step is cached by that digest. Study
-//! programs fold OHLCV bars only: [`JitStudyRuntime::on_bar`] is the explicit
-//! host entry the engine's bar arm will call, and tick events fail loud with
+//! programs fold atomic frames only: [`JitStudyRuntime::on_bar_frame`] is the
+//! host entry, and raw bars and tick events fail loud with
 //! [`STUDY_BARS_ONLY`].
 //!
 //! Screening programs do not run through the engine: they are one-shot
@@ -36,8 +36,7 @@ pub use run::{
     ConfigurationRunError,
 };
 pub use runtime::{
-    strategy_instance, study_instance, HostBar, JitStrategyRuntime, JitStudyRuntime,
-    STUDY_BARS_ONLY,
+    strategy_instance, study_instance, JitStrategyRuntime, JitStudyRuntime, STUDY_BARS_ONLY,
 };
 pub use screen::{rank_rows, run_screening_source};
 pub use screen_run::{

@@ -18,14 +18,15 @@
 
 use std::any::Any;
 use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{c_char, CString};
 use std::panic::AssertUnwindSafe;
 
 use crate::abi::{
-    CBarEvent, CFill, CMetricSink, COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent, SDK_ERROR,
-    SDK_OK,
+    CBarEvent, CBarFrame, CFill, CMetricSink, COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent,
+    SDK_ERROR, SDK_OK,
 };
-use crate::events::{BarEvent, Fill, ProgramStart, QuoteEvent, TradeEvent};
+use crate::events::{BarEvent, BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
 use crate::program::{
     MetricPublisher, OrderSink, ScreenContext, ScreeningProgram, StrategyProgram, StudyProgram,
 };
@@ -136,6 +137,62 @@ pub unsafe fn bar_view<'a>(event: *const CBarEvent) -> Option<BarEvent<'a>> {
     })
 }
 
+unsafe fn checked_slice<'a, T>(ptr: *const T, len: usize) -> Option<&'a [T]> {
+    if len == 0 {
+        return Some(&[]);
+    }
+    let bytes = len.checked_mul(std::mem::size_of::<T>())?;
+    if ptr.is_null()
+        || !(ptr as usize).is_multiple_of(std::mem::align_of::<T>())
+        || bytes > isize::MAX as usize
+        || (ptr as usize).checked_add(bytes).is_none()
+    {
+        return None;
+    }
+    Some(unsafe { std::slice::from_raw_parts(ptr, len) })
+}
+
+/// Validate and reconstruct a frame without exposing Rust containers over FFI.
+///
+/// # Safety
+///
+/// Non-null, aligned pointers with representable lengths must reference live,
+/// initialized storage readable for the returned view's lifetime. Structural
+/// validation cannot establish whether a foreign allocation actually exists.
+pub unsafe fn bar_frame_view<'a>(frame: *const CBarFrame) -> Option<BarFrame<'a>> {
+    let raw = unsafe { checked_slice(frame, 1) }?.first()?;
+    if raw.interval_end_ns <= raw.interval_start_ns || raw.available_at_ns < raw.interval_end_ns {
+        return None;
+    }
+    let bars = unsafe { checked_slice(raw.bars, raw.bars_len) }?;
+    let missing = unsafe { checked_slice(raw.missing_symbols, raw.missing_symbols_len) }?;
+    let mut bars_by_symbol = BTreeMap::new();
+    for raw_bar in bars {
+        let bar = unsafe { bar_view(raw_bar) }?;
+        if bar.timestamp_ns != raw.interval_start_ns
+            || bars_by_symbol.insert(bar.symbol, bar).is_some()
+        {
+            return None;
+        }
+    }
+    let mut missing_symbols = Vec::new();
+    let mut seen = BTreeSet::new();
+    for raw_symbol in missing {
+        let symbol = unsafe { raw_symbol.as_str() }?;
+        if bars_by_symbol.contains_key(symbol) || !seen.insert(symbol) {
+            return None;
+        }
+        missing_symbols.push(symbol);
+    }
+    Some(BarFrame {
+        interval_start_ns: raw.interval_start_ns,
+        interval_end_ns: raw.interval_end_ns,
+        available_at_ns: raw.available_at_ns,
+        bars_by_symbol,
+        missing_symbols,
+    })
+}
+
 /// # Safety
 ///
 /// `fill` must point to a valid `CFill` whose string views remain readable
@@ -198,25 +255,25 @@ pub unsafe extern "C" fn __study_create<T: StudyProgram>(
     }
 }
 
-/// Trampoline: fold one OHLCV bar into a study program.
+/// Trampoline: fold one atomic interval frame into a study program.
 ///
 /// # Safety
 ///
-/// `state` must be the pointer [`__study_create`] returned and `event` must
-/// point to a valid `CBarEvent`.
-pub unsafe extern "C" fn __study_on_bar<T: StudyProgram>(
+/// `state` must be the pointer [`__study_create`] returned and `frame` must
+/// meet the storage requirements of [`bar_frame_view`].
+pub unsafe extern "C" fn __study_on_bar_frame<T: StudyProgram>(
     state: *mut std::os::raw::c_void,
-    event: *const CBarEvent,
+    frame: *const CBarFrame,
 ) -> i32 {
-    let Some(program) = (unsafe { borrow_state::<T>(state, "study program") }) else {
-        return SDK_ERROR;
-    };
-    let Some(bar) = (unsafe { bar_view(event) }) else {
-        record_error("study bar event is malformed".to_string());
-        return SDK_ERROR;
-    };
     run_guarded(|| {
-        program.on_bar(&bar);
+        let Some(program) = (unsafe { borrow_state::<T>(state, "study program") }) else {
+            return SDK_ERROR;
+        };
+        let Some(view) = (unsafe { bar_frame_view(frame) }) else {
+            record_error("study bar frame is malformed".to_string());
+            return SDK_ERROR;
+        };
+        program.on_bar_frame(&view);
         SDK_OK
     })
 }
@@ -612,7 +669,7 @@ macro_rules! export_study_program {
                 abi_version: $crate::SDK_ABI_VERSION,
                 reserved: 0,
                 create: $crate::export::__study_create::<$ty>,
-                on_bar: $crate::export::__study_on_bar::<$ty>,
+                on_bar_frame: $crate::export::__study_on_bar_frame::<$ty>,
                 on_stop: $crate::export::__study_on_stop::<$ty>,
                 destroy: $crate::export::__study_destroy::<$ty>,
             };
