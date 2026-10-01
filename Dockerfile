@@ -91,6 +91,13 @@ RUN test -x /opt/venv/bin/lake \
 
 FROM python:3.12-slim AS runtime
 
+# The JIT seam compiles authored Rust programs at run time, so the runtime
+# image carries the pinned toolchain and needs a C toolchain for crate build
+# scripts (the linker `cc`).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PATH="/opt/rust/bin:/usr/local/cargo/bin:/opt/venv/bin:$PATH" \
     RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
