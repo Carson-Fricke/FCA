@@ -20,7 +20,10 @@ jobs:
   publish:
     name: Build and publish shared image
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The first build after a cargo-chef recipe change recompiles the Rust
+    # dependency layers cold (the lake cook includes DuckDB). One long run
+    # repopulates the BuildKit cache; warm runs finish in minutes.
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
