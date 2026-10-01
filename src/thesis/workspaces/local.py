@@ -164,7 +164,7 @@ written to this repository.
 - `.thesis/journal/`: accepted commands and publication outbox
 - `chats/`: thread records and summaries
 - `investigations/`: objectives, decisions, and finding indexes
-- `strategies/`: strategy source and tests
+- `strategies/`: Rust strategy source and tests
 - `experiments/`: contracts, analysis, and evidence claims
 - `indicators/`: workspace-authored, content-addressed indicator definitions
 - `models/`: workspace-authored statistical research models
@@ -384,6 +384,14 @@ class LocalWorkspaceProvider:
             _workspace_readme(manifest.workspace_id), encoding="utf-8"
         )
         (root / ".gitignore").write_text(_workspace_gitignore(), encoding="utf-8")
+
+    def publish(self, workspace_id: str) -> str:
+        """Return the existing commit; local publication is handled by the journal."""
+        return _git(self.open(workspace_id).root, "rev-parse", "HEAD")
+
+    def repository_uri(self, workspace_id: str) -> str:
+        """Return the verified local repository's file locator."""
+        return self.open(workspace_id).root.as_uri()
 
     @staticmethod
     def _verify_repository(root: Path, manifest: WorkspaceManifest) -> None:

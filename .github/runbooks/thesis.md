@@ -28,6 +28,43 @@ away offline workspace access.
 
 ## Security Boundaries
 
+### Configure Azure workspace repositories
+
+Local stack startup remains unchanged. Gitea settings alone do not switch a
+local run to remote workspaces; Azure selection still requires
+`THESIS_STORAGE_ACCOUNT_NAME`.
+
+For an existing self-hosted forge, set `thesisGiteaUrl`,
+`thesisGiteaOrganization`, and `thesisGiteaTokenSecretName` in the Azure
+deployment. The token secret must already exist in Key Vault. Runtime
+configuration is `THESIS_GITEA_URL`, `THESIS_GITEA_ORGANIZATION`, and
+`THESIS_GITEA_TOKEN`. `THESIS_GITEA_CACHE_ROOT` optionally overrides the
+rebuildable checkout cache. Partial Gitea configuration fails closed; all-empty
+configuration preserves the existing Blob catalog until the forge is
+bootstrapped. No token is embedded in clone URLs or persisted Git configuration.
+
+To host the forge in this subscription, enable `enableGitea` and supply
+`giteaImageReference` as an official Gitea image pinned by SHA-256 digest.
+Provision the forge before enabling Thesis remote workspaces. From a shell
+inside the Container Apps environment, bootstrap the administrator through
+Gitea's admin CLI, create the configured organization, and create a service
+token with repository and organization permissions needed to create private
+repos. Store it in Key Vault; never paste it into a workspace manifest.
+The organization must permit that service account to create repositories.
+The module exposes only internal HTTPS ingress and disables public signup.
+
+The initial host is single-replica SQLite on Azure Files SMB. Test filesystem
+locking and crash recovery before production. Stop the old replica before
+image/configuration updates to avoid overlapping SQLite writers. Back up and
+restore the repositories, database, and Gitea configuration together; LRS
+storage is not a backup. A move to PostgreSQL or another hosting substrate is
+a separate scalability decision, not an implicit scale-out setting.
+
+`WorkspaceRepositoryProvider.publish()` pushes only existing commits. Artifact
+tools must use the accepted publication coordinator before calling it;
+uncommitted cache content is not durable remotely. The harness never receives
+Gitea credentials and never clones a workspace repository.
+
 ### Cross-Workspace Access
 
 No chat, file, memory, plan, strategy, result, credential, or embedding crosses

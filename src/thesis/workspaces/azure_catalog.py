@@ -1,17 +1,9 @@
-"""Azure Blob-backed workspace catalog (one container per workspace).
+"""Azure workspace catalog with injected, remotely backed Git repositories.
 
-In Azure mode a workspace is not a directory: it is a dedicated blob container
-named ``<prefix><workspace-id>`` holding the workspace's manifest at
-``repository/.thesis/workspace.yaml``.  This store implements the same
-:class:`~thesis.http.workspaces.WorkspaceStore` port as the filesystem catalog,
-so the workspace routes, the overview, and the UI all see the same durable
-list.  The manifest in the container is the source of truth; a container that
-has not yet received a manifest is still listed from its name so a
-provisioned-but-unseeded workspace is visible rather than silently missing.
-
-The adapter is transport-thin: it accepts an injected
-:class:`~azure.storage.blob.BlobServiceClient` (composed with the runtime
-managed identity) and never reads an account name or credential itself.
+Blob containers retain catalog metadata and operational scopes. With a
+repository provider, Git owns the manifest and only fully provisioned
+repositories are exposed. Blob-only composition remains available when no
+Gitea configuration is supplied, including existing deployed catalog consumers.
 """
 
 from __future__ import annotations
@@ -24,13 +16,17 @@ from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient, ContainerClient
 
 from thesis.workspaces.catalog import summary_from_manifest
+from thesis.workspaces.local import WorkspaceNotFoundError
 from thesis.workspaces.manifest import (
     WorkspaceManifest,
     dump_workspace_manifest,
     parse_workspace_manifest,
 )
+from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 MANIFEST_PATH = "repository/.thesis/workspace.yaml"
+REPOSITORY_PATH = "catalog/repository.json"
+PROVISION_PATH = "catalog/provision.json"
 ACTIVITY_PATH = "repository/.catalog/activity.json"
 DEFAULT_CONTAINER_PREFIX = "thesis-ws-"
 
@@ -92,6 +88,7 @@ class AzureWorkspaceCatalogStore:
         *,
         container_prefix: str = DEFAULT_CONTAINER_PREFIX,
         clock: Callable[[], datetime] | None = None,
+        repositories: WorkspaceRepositoryProvider | None = None,
     ) -> None:
         if not container_prefix.strip():
             raise ValueError("container_prefix must be a non-empty string")
@@ -100,6 +97,12 @@ class AzureWorkspaceCatalogStore:
         self._prefix = container_prefix
         self._clock = clock if clock is not None else _utc_now
         self._containers: dict[str, ContainerClient] = {}
+        self._repositories = repositories
+
+    @property
+    def provider(self) -> WorkspaceRepositoryProvider | None:
+        """Expose the same confined checkout boundary as the local catalog."""
+        return self._repositories
 
     @property
     def container_prefix(self) -> str:
@@ -147,8 +150,16 @@ class AzureWorkspaceCatalogStore:
             manifest = self._read_manifest(
                 self._blob_service.get_container_client(name)
             )
+            if self._repositories is not None:
+                try:
+                    manifest = self._repositories.open(workspace_id).manifest
+                except WorkspaceNotFoundError:
+                    # An interrupted provision is not a usable workspace.
+                    continue
             summaries.append(
-                summary_from_manifest(manifest)
+                {**summary_from_manifest(manifest), "owner_id": manifest.owner.owner_id}
+                if self._repositories is not None and manifest is not None
+                else summary_from_manifest(manifest)
                 if manifest is not None
                 else self._synthetic_summary(workspace_id)
             )
@@ -156,6 +167,15 @@ class AzureWorkspaceCatalogStore:
         return tuple(summaries)
 
     def get(self, workspace_id: str) -> dict[str, object] | None:
+        if self._repositories is not None:
+            try:
+                manifest = self._repositories.open(workspace_id).manifest
+            except WorkspaceNotFoundError:
+                return None
+            return {
+                **summary_from_manifest(manifest),
+                "owner_id": manifest.owner.owner_id,
+            }
         container = self._container(workspace_id)
         manifest = self._read_manifest(container)
         if manifest is not None:
@@ -173,10 +193,55 @@ class AzureWorkspaceCatalogStore:
         except ResourceExistsError:
             pass
         manifest = azure_manifest_for_summary(self._template, summary)
+        if self._repositories is not None:
+            existing = self._read_manifest(container)
+            if existing is None:
+                try:
+                    content = container.download_blob(PROVISION_PATH).readall()
+                    existing = parse_workspace_manifest(content.decode("utf-8"))
+                except ResourceNotFoundError:
+                    pass
+            if existing is None:
+                try:
+                    existing = self._repositories.open(workspace_id).manifest
+                except WorkspaceNotFoundError:
+                    pass
+            if existing is not None:
+                if (
+                    existing.workspace_id != manifest.workspace_id
+                    or existing.owner != manifest.owner
+                    or existing.charter.title != manifest.charter.title
+                    or existing.charter.objective != manifest.charter.objective
+                ):
+                    raise ValueError(
+                        "workspace provision conflicts with existing identity"
+                    )
+                manifest = existing
+            container.upload_blob(
+                PROVISION_PATH, dump_workspace_manifest(manifest), overwrite=False
+            )
+            manifest = self._repositories.create(manifest).manifest
         container.upload_blob(
             MANIFEST_PATH, dump_workspace_manifest(manifest), overwrite=True
         )
-        return summary_from_manifest(manifest)
+        if self._repositories is not None:
+            # Persist a secret-free mapping only after the scaffold reached Git.
+            container.upload_blob(
+                REPOSITORY_PATH,
+                json.dumps(
+                    {
+                        "workspaceId": manifest.workspace_id,
+                        "ownerId": manifest.owner.owner_id,
+                        "repositoryId": manifest.repository_identity.repository_id,
+                        "gitRepositoryUri": self._repositories.repository_uri(
+                            workspace_id
+                        ),
+                    },
+                    sort_keys=True,
+                ),
+                overwrite=True,
+            )
+        return {**summary_from_manifest(manifest), "owner_id": manifest.owner.owner_id}
 
     def add_activity(self, item: dict[str, object]) -> dict[str, object]:
         workspace_id = str(item["workspace_id"])

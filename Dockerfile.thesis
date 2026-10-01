@@ -24,6 +24,10 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONFAULTHANDLER=1 \
     PYTHONUNBUFFERED=1
 
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 10001 thesis \
     && useradd --uid 10001 --gid thesis --create-home --shell /usr/sbin/nologin thesis
 

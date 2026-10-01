@@ -12,9 +12,10 @@ targetScope = 'resourceGroup'
 // are the strongest native blob boundary short of separate accounts: a
 // workspace can be scoped, audited, deleted, and quota-reported without
 // touching sibling workspaces, and no workspace's blobs share a prefix
-// namespace with another workspace. Inside a container the runtime reserves
-// the repository/, artifacts/, and scratch/ top-level directories for the
-// workspace Git repository, generated artifacts, and execution scratch.
+// namespace with another workspace. Git repositories are hosted separately by
+// Gitea. repository/ manifests and catalog/repository.json are catalog metadata,
+// not authoritative Git object storage; artifacts/ and scratch/ remain isolated
+// operational namespaces.
 //
 // Workspace registry: the 'workspaces' table on this account records one
 // entity per workspace following the AzureWorkspaceEntity contract in

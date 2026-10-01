@@ -113,6 +113,15 @@ param harnessBearerTokenSecretName string = ''
 @description('Name of the operator-provisioned Key Vault secret holding the OpenRouter API key, injected as OPENROUTER_API_KEY. Empty disables model replies and the workflow runtime.')
 param modelApiKeySecretName string = ''
 
+@description('Existing self-hosted Gitea endpoint injected as THESIS_GITEA_URL. Set together with giteaOrganization and giteaTokenSecretName; all empty keeps local workspaces. No forge host is provisioned.')
+param giteaUrl string = ''
+
+@description('Gitea organization injected as THESIS_GITEA_ORGANIZATION. Required together with giteaUrl and giteaTokenSecretName.')
+param giteaOrganization string = ''
+
+@description('Name of the operator-provisioned Key Vault secret injected through a secretRef as THESIS_GITEA_TOKEN. Required together with giteaUrl and giteaOrganization; never pass the token value.')
+param giteaTokenSecretName string = ''
+
 @description('Name of the operator-provisioned Key Vault secret holding the Azure Communication Services email connection string. No secret value is embedded in this module. Empty disables invite-mail delivery wiring so the module stays deployable before the operator creates the secret (see .github/runbooks/thesis-public-auth.md Step 4).')
 param mailerConnectionStringSecretName string = 'thesis-acs-email-connection-string'
 
@@ -191,6 +200,8 @@ var thesisMailerEnabled = !empty(mailerConnectionStringSecretName)
 // composes only what it can authenticate (thesis/http/serving.py).
 var thesisHarnessEnabled = !empty(harnessBearerTokenSecretName)
 var thesisModelKeyEnabled = !empty(modelApiKeySecretName)
+var thesisGiteaConfigured = !empty(giteaUrl) || !empty(giteaOrganization) || !empty(giteaTokenSecretName)
+var thesisGiteaEnabled = !empty(giteaUrl) && !empty(giteaOrganization) && !empty(giteaTokenSecretName)
 var thesisSecrets = concat(
   [
     {
@@ -217,6 +228,13 @@ var thesisSecrets = concat(
     {
       name: modelApiKeySecretName
       keyVaultUrl: '${keyVaultUri}secrets/${modelApiKeySecretName}'
+      identity: thesisIdentityResourceId
+    }
+  ] : [],
+  thesisGiteaEnabled ? [
+    {
+      name: giteaTokenSecretName
+      keyVaultUrl: '${keyVaultUri}secrets/${giteaTokenSecretName}'
       identity: thesisIdentityResourceId
     }
   ] : []
@@ -322,12 +340,27 @@ var thesisWorkflowEnvironment = concat(
     }
   ] : []
 )
+// Leave THESIS_GITEA_CACHE_ROOT unset: the runtime defaults to a temp cache.
+var thesisGiteaEnvironment = thesisGiteaEnabled ? [
+  {
+    name: 'THESIS_GITEA_URL'
+    value: giteaUrl
+  }
+  {
+    name: 'THESIS_GITEA_ORGANIZATION'
+    value: giteaOrganization
+  }
+  {
+    name: 'THESIS_GITEA_TOKEN'
+    secretRef: giteaTokenSecretName
+  }
+] : []
 var thesisApiEnvironment = concat(thesisBaseEnvironment, thesisEntraEnvironment, [
   {
     name: 'THESIS_API__BEARER_TOKEN'
     secretRef: thesisSecretName
   }
-], thesisMailerEnvironment, thesisWorkflowEnvironment)
+], thesisMailerEnvironment, thesisWorkflowEnvironment, thesisGiteaEnvironment)
 
 // The vault is referenced, not created: the composition owns the Key Vault.
 var keyVaultName = split(replace(keyVaultUri, 'https://', ''), '.')[0]
@@ -439,7 +472,12 @@ resource thesisApiApp 'Microsoft.App/containerApps@2025-07-01' = {
           name: thesisContainerName
           image: thesisImageReference
           // Docker ENTRYPOINT remains "thesis"; args replace CMD ["--help"].
-          args: [
+          // Assertions are not enabled; an intentionally invalid CLI option
+          // fails startup on partial Gitea configuration instead of going local.
+          args: thesisGiteaConfigured && !thesisGiteaEnabled ? [
+            'serve'
+            '--gitea-requires-url-organization-and-token-secret-name'
+          ] : [
             'serve'
           ]
           env: thesisApiEnvironment

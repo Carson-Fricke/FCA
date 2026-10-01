@@ -10,6 +10,7 @@ from thesis.workspaces.catalog import (
     manifest_for_summary,
     summary_from_manifest,
 )
+from thesis.workspaces.gitea import GiteaWorkspaceProvider
 from thesis.workspaces.local import (
     LocalWorkspace,
     LocalWorkspaceProvider,
@@ -33,8 +34,11 @@ from thesis.workspaces.manifest import (
     manifest_sha256,
     write_workspace_manifest,
 )
+from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 __all__ = [
+    "GiteaWorkspaceProvider",
+    "WorkspaceRepositoryProvider",
     "AzureWorkspaceEntity",
     "LocalWorkspace",
     "LocalWorkspaceCatalogStore",
