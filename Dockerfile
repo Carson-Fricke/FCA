@@ -111,6 +111,10 @@ COPY --from=builder /opt/venv /opt/venv
 # (with `num` as its sibling path dependency).
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
+# The JIT seam compiles authored programs at run time under the unprivileged
+# runtime user, so that user must be able to write the cargo home copied from
+# the builder (registry downloads and cache locks).
+RUN chown -R lake:lake /usr/local/cargo
 COPY src/harness/strategy-sdk /opt/rust/sdk/strategy-sdk
 COPY src/harness/num /opt/rust/sdk/num
 # The Rust harness process binaries, served directly on PATH (`harness`, `api`,
