@@ -30,15 +30,24 @@ FROM rust-base AS rust-planner
 
 WORKDIR /build/src/harness
 COPY src/harness/ ./
+# `marketdata` path-depends on `../../lake/contracts`, whose manifest inherits
+# the lake workspace root. Both manifests must exist before `cargo metadata`.
+COPY src/lake/Cargo.toml /build/src/lake/Cargo.toml
+COPY src/lake/contracts/ /build/src/lake/contracts/
 RUN cargo chef prepare --recipe-path /build/recipe.json
 
 FROM rust-base AS rust
 
 WORKDIR /build/src/harness
 COPY --from=rust-planner /build/recipe.json /build/recipe.json
+COPY src/lake/Cargo.toml /build/src/lake/Cargo.toml
+COPY src/lake/contracts/ /build/src/lake/contracts/
 RUN cargo chef cook --locked --release --recipe-path /build/recipe.json \
       -p api -p live
 COPY src/harness/ ./
+# Cook replaces the path dependency with a recipe skeleton, so the real lake
+# contracts sources are copied again before the workspace compiles.
+COPY src/lake/contracts/ /build/src/lake/contracts/
 # The `mcp` crate embeds config/harness/backtest.yaml at compile time via
 # `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../config/..."))`.
 # With WORKDIR /build/src/harness that resolves to /build/config/harness/, so

@@ -189,6 +189,7 @@ $providerNamespaces = @(
   'Microsoft.Authorization'
   'Microsoft.Consumption'
   'Microsoft.ContainerRegistry'
+  'Microsoft.DocumentDB'
   'Microsoft.Insights'
   'Microsoft.KeyVault'
   'Microsoft.ManagedIdentity'
@@ -213,7 +214,7 @@ foreach ($namespace in $providerNamespaces) {
 }
 ```
 
-All nine namespaces are currently `Registered` in dev. A `Registering` state
+All ten namespaces are currently `Registered` in dev. A `Registering` state
 is not sufficient for the first full deployment.
 
 ## Configure The Immutable OIDC Subject
