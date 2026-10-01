@@ -135,6 +135,9 @@ param thesisHarnessBearerTokenSecretName string = ''
 @description('Key Vault secret name holding the OpenRouter API key (operator-provisioned). Empty disables model replies and the Thesis workflow runtime.')
 param thesisModelApiKeySecretName string = ''
 
+@description('Key Vault secret name holding the Azure Communication Services email connection string. Empty disables invite-mail delivery so the composition stays deployable before the operator seeds the secret; set it to enable mail.')
+param thesisMailerConnectionStringSecretName string = ''
+
 @description('Whether to self-host open-source Gitea with internal ingress and isolated Azure Files persistence. False creates no forge resources and preserves existing deployment behavior.')
 param enableGitea bool = false
 
@@ -440,6 +443,7 @@ module thesisApi './modules/thesis.bicep' = if (deployThesis) {
     harnessMcpUrl: empty(thesisHarnessMcpUrl) ? 'http://${containerApps.outputs.api.fqdn}:${containerApps.outputs.api.port}' : thesisHarnessMcpUrl
     harnessBearerTokenSecretName: thesisHarnessBearerTokenSecretName
     modelApiKeySecretName: thesisModelApiKeySecretName
+    mailerConnectionStringSecretName: thesisMailerConnectionStringSecretName
     giteaUrl: enableGitea ? gitea!.outputs.endpoint : thesisGiteaUrl
     giteaOrganization: thesisGiteaOrganization
     giteaTokenSecretName: thesisGiteaTokenSecretName
