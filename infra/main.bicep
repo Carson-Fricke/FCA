@@ -277,6 +277,7 @@ module containerRegistry './modules/container-registry.bicep' = {
   params: {
     registryName: containerRegistryName
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
+    thesisPrincipalId: deployThesis ? thesisIdentity.properties.principalId : ''
     location: location
     tags: tags
   }

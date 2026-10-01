@@ -13,6 +13,9 @@ param runtimePrincipalId string
 @description('Optional deployer principal that imports a private source image and verifies its mirrored digest.')
 param imageImportPrincipalId string = ''
 
+@description('Optional Thesis user-assigned identity that pulls the digest-pinned Thesis image. Empty skips the assignment.')
+param thesisPrincipalId string = ''
+
 @description('Azure region for the private runtime registry.')
 param location string = resourceGroup().location
 
@@ -89,6 +92,18 @@ resource imageImportAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01'
   name: guid(registry.id, imageImportPrincipalId, acrPullRole.id)
   properties: {
     principalId: imageImportPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: acrPullRole.id
+  }
+}
+
+// The Thesis API pulls its own digest-pinned image with its user-assigned
+// identity; the lake runtime and deployer assignments do not cover it.
+resource thesisAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(thesisPrincipalId)) {
+  scope: registry
+  name: guid(registry.id, thesisPrincipalId, acrPullRole.id)
+  properties: {
+    principalId: thesisPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: acrPullRole.id
   }
