@@ -22,7 +22,7 @@ from thesis.backtests.run_import import (
 )
 from thesis.http.backtests import BacktestDataService, BacktestRecord
 from thesis.integrations.mcp import (
-    TOOL_GET_BACKTEST_STATUS,
+    TOOL_GET_JOB_STATUS,
     TOOL_GET_RUN,
     TOOL_RUN_BACKTEST,
 )
@@ -142,7 +142,7 @@ class BacktestRunCoordinator:
         return None
 
     def _resolve_run(self, job_id: str) -> tuple[str | None, str | None] | None:
-        result = self._tools.call_tool(TOOL_GET_BACKTEST_STATUS, {"job_id": job_id})
+        result = self._tools.call_tool(TOOL_GET_JOB_STATUS, {"job_id": job_id})
         if not result.ok:
             return None
         return _text(result.structured.get("run_id")), _state_of(result.structured)

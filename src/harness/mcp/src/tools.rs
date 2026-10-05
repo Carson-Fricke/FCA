@@ -1,6 +1,6 @@
 //! Tool catalog and execution boundaries for the harness MCP server.
 //!
-//! The registry publishes `run_backtest`, `get_backtest_status`, `get_run`,
+//! The registry publishes `run_backtest`, `get_job_status`, `get_run`,
 //! `list_artifacts`, `read_artifact`, `run_study`, `validate_study`,
 //! `run_screener`, `get_screener_status`, the configuration templates, and the
 //! capability-gated `launch_trader`. Every boundary is
@@ -23,7 +23,7 @@ pub const TOOL_RUN_BACKTEST: &str = "run_backtest";
 /// Tool name for the embedded backtest configuration template.
 pub const TOOL_BACKTEST_CONFIG_TEMPLATE: &str = "backtest_config_template";
 /// Tool name for job status queries.
-pub const TOOL_BACKTEST_STATUS: &str = "get_backtest_status";
+pub const TOOL_JOB_STATUS: &str = "get_job_status";
 /// Tool name for run queries.
 pub const TOOL_GET_RUN: &str = "get_run";
 /// Tool name for artifact listing.
@@ -36,6 +36,10 @@ pub const TOOL_LAUNCH_TRADER: &str = "launch_trader";
 pub const TOOL_RUN_STUDY: &str = "run_study";
 /// Tool name for study-source validation without a replay.
 pub const TOOL_VALIDATE_STUDY: &str = "validate_study";
+/// Tool name for strategy-source validation without a replay.
+pub const TOOL_VALIDATE_STRATEGY: &str = "validate_strategy";
+/// Read the serving compiler's SDK identity and bounded source guidance.
+pub const TOOL_READ_SDK_REFERENCE: &str = "read_sdk_reference";
 /// Tool name for the screening runner.
 pub const TOOL_RUN_SCREENER: &str = "run_screener";
 /// Tool name for screening job status queries.
@@ -115,6 +119,19 @@ pub struct ToolExecutionError {
 }
 
 impl ToolExecutionError {
+    /// Add observed boundary certainty without dropping structured server details.
+    #[must_use]
+    pub fn with_certainty(mut self, certainty: &str) -> Self {
+        let mut payload = match self.payload.take() {
+            Some(Value::Object(payload)) => payload,
+            Some(value) => Map::from_iter([("serverError".to_string(), value)]),
+            None => Map::new(),
+        };
+        payload.insert("executionCertainty".into(), json!(certainty));
+        self.payload = Some(Value::Object(payload));
+        self
+    }
+
     /// Construct an error with no structured payload.
     #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
@@ -159,8 +176,8 @@ impl std::error::Error for ToolExecutionError {}
 pub struct ToolCapabilities {
     /// Publish `run_backtest`.
     pub backtest: bool,
-    /// Publish `get_backtest_status`.
-    pub backtest_status: bool,
+    /// Publish `get_job_status`.
+    pub job_status: bool,
     /// Publish `get_run` and `list_artifacts`.
     pub artifacts: bool,
     /// Publish `run_study`.
@@ -175,7 +192,7 @@ impl Default for ToolCapabilities {
     fn default() -> Self {
         Self {
             backtest: true,
-            backtest_status: true,
+            job_status: true,
             artifacts: true,
             study: true,
             screener: true,
@@ -190,7 +207,7 @@ impl ToolCapabilities {
     pub fn as_mapping(&self) -> Value {
         json!({
             "backtest": self.backtest,
-            "backtest_status": self.backtest_status,
+            "job_status": self.job_status,
             "artifacts": self.artifacts,
             "study": self.study,
             "screener": self.screener,
@@ -288,11 +305,35 @@ pub trait ScreeningSubmitter: Send + Sync {
 /// a run would, but never replays market data: the authoring seam fails while
 /// the contract is still repairable.
 pub trait StudyValidator: Send + Sync {
+    /// Serving compiler's SDK identity and source guidance, never a client-local SDK.
+    fn sdk_reference(&self, _arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
+        Err(ToolExecutionError::new(
+            "SDK references are unavailable from the composed validator",
+        ))
+    }
+
+    /// Compile, load, and construct a strategy; no structural-only fallback.
+    fn validate_strategy_result(&self, _model: &Value) -> Result<Value, ToolExecutionError> {
+        Err(ToolExecutionError::new(
+            "strategy validation is not implemented by the composed validator",
+        ))
+    }
+
+    /// Opaque provenance supplied by the validator, never a client cache key.
+    fn validation_identity(&self) -> Option<String> {
+        None
+    }
+
+    /// Validate with structured diagnostics and validator-owned reuse metadata.
+    fn validate_result(&self, model: &Value) -> Result<Value, ToolExecutionError> {
+        self.validate(model).map_err(ToolExecutionError::new)
+    }
+
     /// Validate one authored model document by compiling its program.
     ///
     /// # Errors
     ///
-    /// Returns the build failure verbatim when the program does not compile or
+    /// Returns actionable diagnostics when the program does not compile or
     /// omits the SDK handshake exports.
     fn validate(&self, model: &Value) -> Result<Value, String>;
 }
@@ -687,12 +728,146 @@ impl HarnessTools {
                 "validate_study requires the model object under 'model'",
             ));
         };
+        if self.context.mode == Boundary::Remote {
+            return self.remote_validation(TOOL_VALIDATE_STUDY, model);
+        }
         let Some(validator) = &self.context.study_validator else {
             return Err(ToolExecutionError::new(
                 "study validation requires a local study validator in this MCP server",
             ));
         };
-        validator.validate(model).map_err(ToolExecutionError::new)
+        validator.validate_result(model)
+    }
+
+    /// Validate a strategy through the same injected native compiler boundary.
+    pub fn validate_strategy(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
+        let model = arguments.get("model").ok_or_else(|| {
+            ToolExecutionError::new("validate_strategy requires the model object under 'model'")
+        })?;
+        if self.context.mode == Boundary::Remote {
+            return self.remote_validation(TOOL_VALIDATE_STRATEGY, model);
+        }
+        self.context
+            .study_validator
+            .as_ref()
+            .ok_or_else(|| {
+                ToolExecutionError::new(
+                    "strategy validation requires a local program validator in this MCP server",
+                )
+            })?
+            .validate_strategy_result(model)
+    }
+
+    fn remote_validation(&self, name: &str, model: &Value) -> Result<Value, ToolExecutionError> {
+        self.remote_tool(name, &json!({"model": model}))
+    }
+
+    fn remote_tool(&self, name: &str, arguments: &Value) -> Result<Value, ToolExecutionError> {
+        let url = self.remote_url("/mcp")?;
+        let response = self.dispatch_remote_post(
+            &url,
+            &json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": name, "arguments": arguments}
+            }),
+        )?;
+        if matches!(response.status_code, 401 | 403) {
+            return Err(remote_response_failure(
+                &response,
+                "remote credential rejected",
+            ));
+        }
+        if !(200..300).contains(&response.status_code) {
+            return Err(remote_response_failure(
+                &response,
+                &format!("remote {name} failed"),
+            ));
+        }
+        let body = response.body;
+        if body["jsonrpc"] != "2.0" || body["id"] != 1 {
+            return Err(ToolExecutionError::new(
+                "remote validation returned an invalid JSON-RPC envelope",
+            )
+            .with_certainty("unknown_outcome"));
+        }
+        if let Some(error) = body.get("error") {
+            let certainty = error
+                .get("data")
+                .and_then(|data| data.get("executionCertainty"))
+                .and_then(Value::as_str)
+                .filter(|value| {
+                    matches!(
+                        *value,
+                        "not_started" | "observed_failure" | "unknown_outcome"
+                    )
+                })
+                .unwrap_or(
+                    if matches!(
+                        error["code"].as_i64(),
+                        Some(-32700 | -32600 | -32601 | -32602)
+                    ) {
+                        "not_started"
+                    } else {
+                        "unknown_outcome"
+                    },
+                );
+            return Err(ToolExecutionError::with_payload(
+                error["message"]
+                    .as_str()
+                    .unwrap_or("remote validation protocol failure"),
+                json!({"serverError": error}),
+            )
+            .with_certainty(certainty));
+        }
+        let result = &body["result"];
+        let payload = &result["structuredContent"];
+        if result["isError"] == true {
+            let text = result["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Err(ToolExecutionError::with_payload(
+                if text.is_empty() {
+                    "remote validation failed".to_string()
+                } else {
+                    text
+                },
+                payload.clone(),
+            ));
+        }
+        if result["isError"] != false
+            || !payload.is_object()
+            || (name != TOOL_READ_SDK_REFERENCE && payload["valid"] != true)
+        {
+            return Err(ToolExecutionError::new(
+                "remote validation returned no valid structured outcome",
+            )
+            .with_certainty("unknown_outcome"));
+        }
+        Ok(payload.clone())
+    }
+
+    /// Read metadata or a bounded source range from the serving compiler's SDK.
+    pub fn read_sdk_reference(
+        &self,
+        arguments: &Map<String, Value>,
+    ) -> Result<Value, ToolExecutionError> {
+        if self.context.mode == Boundary::Remote {
+            return self.remote_tool(TOOL_READ_SDK_REFERENCE, &Value::Object(arguments.clone()));
+        }
+        self.context
+            .study_validator
+            .as_ref()
+            .ok_or_else(|| {
+                ToolExecutionError::new("SDK references require a native program validator")
+            })?
+            .sdk_reference(arguments)
     }
 
     /// Return the embedded starter backtest configuration document.
@@ -745,7 +920,7 @@ impl HarnessTools {
     /// # Errors
     ///
     /// Returns [`ToolExecutionError`] when the remote call fails.
-    pub fn get_backtest_status(
+    pub fn get_job_status(
         &self,
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
@@ -757,7 +932,7 @@ impl HarnessTools {
             "{JOB_STATUS_ROUTE}/{}",
             utf8_percent_encode(&job_id, PATH_SEGMENT)
         ))?;
-        self.remote_get(&url, &format!("backtest job '{job_id}' does not exist"))
+        self.remote_get(&url, &format!("job '{job_id}' does not exist"))
     }
 
     /// Read one screening job's persisted state.
@@ -794,7 +969,7 @@ impl HarnessTools {
             "{RUN_ROUTE}/{}",
             utf8_percent_encode(&run_id, PATH_SEGMENT)
         ))?;
-        self.remote_get(&url, &format!("backtest run '{run_id}' does not exist"))
+        self.remote_get(&url, &format!("run '{run_id}' does not exist"))
     }
 
     /// List one stored run's artifacts from the remote harness API.
@@ -814,7 +989,7 @@ impl HarnessTools {
             "{RUN_ROUTE}/{}/artifacts",
             utf8_percent_encode(&run_id, PATH_SEGMENT)
         ))?;
-        self.remote_get(&url, &format!("backtest run '{run_id}' does not exist"))
+        self.remote_get(&url, &format!("run '{run_id}' does not exist"))
     }
 
     /// Read one stored run artifact's contents as text or hex-encoded bytes.
@@ -842,14 +1017,14 @@ impl HarnessTools {
     fn local_job_status(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
         let repository = self.context.job_repository.as_ref().ok_or_else(|| {
             ToolExecutionError::new(
-                "local backtest jobs require a durable job repository in this MCP server",
+                "local jobs require a durable job repository in this MCP server",
             )
         })?;
         match repository.get(job_id) {
             Some(record) => serde_json::to_value(&record)
                 .map_err(|error| ToolExecutionError::new(error.to_string())),
             None => Err(ToolExecutionError::new(format!(
-                "backtest job '{job_id}' does not exist"
+                "job '{job_id}' does not exist"
             ))),
         }
     }
@@ -886,9 +1061,9 @@ impl HarnessTools {
         let store = self.context.run_store.as_ref().ok_or_else(|| {
             ToolExecutionError::new("local runs require a durable results store in this MCP server")
         })?;
-        let stored = store.fetch(run_id).ok_or_else(|| {
-            ToolExecutionError::new(format!("backtest run '{run_id}' does not exist"))
-        })?;
+        let stored = store
+            .fetch(run_id)
+            .ok_or_else(|| ToolExecutionError::new(format!("run '{run_id}' does not exist")))?;
         let prefix = run_prefix(&stored.record.run_id)
             .map_err(|error| ToolExecutionError::new(error.to_string()))?;
         let artifacts: Vec<Value> = stored
@@ -912,9 +1087,9 @@ impl HarnessTools {
         let store = self.context.run_store.as_ref().ok_or_else(|| {
             ToolExecutionError::new("local runs require a durable results store in this MCP server")
         })?;
-        let stored = store.fetch(run_id).ok_or_else(|| {
-            ToolExecutionError::new(format!("backtest run '{run_id}' does not exist"))
-        })?;
+        let stored = store
+            .fetch(run_id)
+            .ok_or_else(|| ToolExecutionError::new(format!("run '{run_id}' does not exist")))?;
         let payload = stored.artifacts.get(name).ok_or_else(|| {
             ToolExecutionError::new(format!(
                 "artifact '{name}' does not exist for run '{run_id}'"
@@ -980,20 +1155,26 @@ impl HarnessTools {
                 ))
             })?;
         let url = self.remote_url(LAUNCH_ROUTE)?;
+        validate_configuration(&payload, std::path::Path::new(config_path).parent())?;
         let response = self.dispatch_remote_post(&url, &payload)?;
         let status_code = response.status_code;
         if status_code == 401 || status_code == 403 {
-            return Err(credential_rejected(status_code));
+            return Err(remote_response_failure(
+                &response,
+                "remote credential rejected",
+            ));
         }
         if status_code == 404 || status_code == 501 {
-            return Err(ToolExecutionError::new(format!(
-                "the remote harness API does not implement backtest launch (HTTP {status_code})"
-            )));
+            return Err(remote_response_failure(
+                &response,
+                "the remote harness API does not implement backtest launch",
+            ));
         }
         if !(200..300).contains(&status_code) {
-            return Err(ToolExecutionError::new(format!(
-                "remote backtest launch failed (HTTP {status_code})"
-            )));
+            return Err(remote_response_failure(
+                &response,
+                "remote backtest launch failed",
+            ));
         }
         let job_id = response
             .body
@@ -1002,9 +1183,11 @@ impl HarnessTools {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                ToolExecutionError::new(
+                ToolExecutionError::with_payload(
                     "remote harness launch response requires a non-empty 'job_id' string",
+                    response.body.clone(),
                 )
+                .with_certainty("unknown_outcome")
             })?;
         let state = response
             .body
@@ -1013,9 +1196,11 @@ impl HarnessTools {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                ToolExecutionError::new(
+                ToolExecutionError::with_payload(
                     "remote harness launch response requires a non-empty 'state' string",
+                    response.body.clone(),
                 )
+                .with_certainty("unknown_outcome")
             })?;
         let location = response
             .headers
@@ -1041,20 +1226,26 @@ impl HarnessTools {
                 ))
             })?;
         let url = self.remote_url(STUDY_LAUNCH_ROUTE)?;
+        validate_configuration(&payload, std::path::Path::new(config_path).parent())?;
         let response = self.dispatch_remote_post(&url, &payload)?;
         let status_code = response.status_code;
         if status_code == 401 || status_code == 403 {
-            return Err(credential_rejected(status_code));
+            return Err(remote_response_failure(
+                &response,
+                "remote credential rejected",
+            ));
         }
         if status_code == 404 || status_code == 501 {
-            return Err(ToolExecutionError::new(format!(
-                "the remote harness API does not implement study launch (HTTP {status_code})"
-            )));
+            return Err(remote_response_failure(
+                &response,
+                "the remote harness API does not implement study launch",
+            ));
         }
         if !(200..300).contains(&status_code) {
-            return Err(ToolExecutionError::new(format!(
-                "remote study launch failed (HTTP {status_code})"
-            )));
+            return Err(remote_response_failure(
+                &response,
+                "remote study launch failed",
+            ));
         }
         let job_id = response
             .body
@@ -1063,9 +1254,11 @@ impl HarnessTools {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                ToolExecutionError::new(
+                ToolExecutionError::with_payload(
                     "remote harness study response requires a non-empty 'job_id' string",
+                    response.body.clone(),
                 )
+                .with_certainty("unknown_outcome")
             })?;
         let state = response
             .body
@@ -1074,9 +1267,11 @@ impl HarnessTools {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                ToolExecutionError::new(
+                ToolExecutionError::with_payload(
                     "remote harness study response requires a non-empty 'state' string",
+                    response.body.clone(),
                 )
+                .with_certainty("unknown_outcome")
             })?;
         let location = response
             .headers
@@ -1086,6 +1281,7 @@ impl HarnessTools {
         Ok(json!({
             "boundary": "remote",
             "job_id": job_id,
+            "run_id": job_id,
             "state": state,
             "location": location,
         }))
@@ -1102,20 +1298,26 @@ impl HarnessTools {
                 ))
             })?;
         let url = self.remote_url(SCREENER_LAUNCH_ROUTE)?;
+        validate_configuration(&payload, std::path::Path::new(config_path).parent())?;
         let response = self.dispatch_remote_post(&url, &payload)?;
         let status_code = response.status_code;
         if status_code == 401 || status_code == 403 {
-            return Err(credential_rejected(status_code));
+            return Err(remote_response_failure(
+                &response,
+                "remote credential rejected",
+            ));
         }
         if status_code == 404 || status_code == 501 {
-            return Err(ToolExecutionError::new(format!(
-                "the remote harness API does not implement screening launch (HTTP {status_code})"
-            )));
+            return Err(remote_response_failure(
+                &response,
+                "the remote harness API does not implement screening launch",
+            ));
         }
         if !(200..300).contains(&status_code) {
-            return Err(ToolExecutionError::new(format!(
-                "remote screening launch failed (HTTP {status_code})"
-            )));
+            return Err(remote_response_failure(
+                &response,
+                "remote screening launch failed",
+            ));
         }
         let job_id = response
             .body
@@ -1124,9 +1326,11 @@ impl HarnessTools {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                ToolExecutionError::new(
+                ToolExecutionError::with_payload(
                     "remote harness screener response requires a non-empty 'job_id' string",
+                    response.body.clone(),
                 )
+                .with_certainty("unknown_outcome")
             })?;
         let state = response
             .body
@@ -1135,9 +1339,11 @@ impl HarnessTools {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                ToolExecutionError::new(
+                ToolExecutionError::with_payload(
                     "remote harness screener response requires a non-empty 'state' string",
+                    response.body.clone(),
                 )
+                .with_certainty("unknown_outcome")
             })?;
         let location = response
             .headers
@@ -1188,9 +1394,12 @@ impl HarnessTools {
             .remote_transport
             .as_ref()
             .ok_or_else(remote_unconfigured)?;
-        transport
-            .post(url, &headers, payload)
-            .map_err(|_| ToolExecutionError::new("the remote harness API could not be reached"))
+        transport.post(url, &headers, payload).map_err(|_| {
+            ToolExecutionError::new(
+                "the remote harness API could not be reached; request outcome is unknown",
+            )
+            .with_certainty("unknown_outcome")
+        })
     }
 
     fn remote_headers(&self) -> Result<BTreeMap<String, String>, ToolExecutionError> {
@@ -1198,6 +1407,7 @@ impl HarnessTools {
             ToolExecutionError::new(format!(
                 "remote harness API calls need a bearer credential: {error}"
             ))
+            .with_certainty("not_started")
         })
     }
 
@@ -1213,12 +1423,50 @@ impl HarnessTools {
 
 fn remote_unconfigured() -> ToolExecutionError {
     ToolExecutionError::new("the remote harness API boundary is not configured for this MCP server")
+        .with_certainty("not_started")
 }
 
 fn credential_rejected(status_code: u16) -> ToolExecutionError {
     ToolExecutionError::new(format!(
         "the remote harness API rejected the bearer credential (HTTP {status_code})"
     ))
+    .with_certainty("not_started")
+}
+
+fn remote_response_failure(response: &RemoteResponse, message: &str) -> ToolExecutionError {
+    let certainty = response
+        .body
+        .get("executionCertainty")
+        .or_else(|| {
+            response
+                .body
+                .get("error")
+                .and_then(|error| error.get("executionCertainty"))
+        })
+        .and_then(Value::as_str)
+        .filter(|value| {
+            matches!(
+                *value,
+                "not_started" | "observed_failure" | "unknown_outcome"
+            )
+        })
+        .unwrap_or(
+            if (400..500).contains(&response.status_code) || response.status_code == 501 {
+                "not_started"
+            } else {
+                "unknown_outcome"
+            },
+        );
+    let detail = response
+        .body
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .or_else(|| response.body.get("message"))
+        .and_then(Value::as_str);
+    ToolExecutionError::with_payload(
+        format!("{message} (HTTP {}){}", response.status_code, detail.map(|detail| format!(": {detail}")).unwrap_or_default()),
+        json!({"boundary": "remote", "statusCode": response.status_code, "serverError": response.body}),
+    ).with_certainty(certainty)
 }
 
 fn text_argument(arguments: &Map<String, Value>, key: &str) -> Result<String, ToolExecutionError> {
@@ -1256,12 +1504,28 @@ fn resolve_config(arguments: &Map<String, Value>) -> Result<String, ToolExecutio
             let Some(document) = value.as_object() else {
                 return Err(ToolExecutionError::new("config must be a JSON object"));
             };
+            validate_configuration(value, None)?;
             let text = serde_json::to_string(document)
                 .map_err(|error| ToolExecutionError::new(error.to_string()))?;
             return materialize_config(&text);
         }
     }
     text_argument(arguments, "config_path")
+}
+
+/// Validate with the same replay and screening schemas used by API and engine.
+pub fn validate_configuration(
+    document: &Value,
+    base: Option<&std::path::Path>,
+) -> Result<(), ToolExecutionError> {
+    if document.get("shell").and_then(Value::as_str) == Some("screen") {
+        backtest::backtest::screen::ScreenConfig::from_json_value_with_base(document, base)
+            .map_err(|e| ToolExecutionError::new(e.to_string()))?;
+    } else {
+        backtest::backtest::config::BacktestConfig::from_yaml(&document.to_string())
+            .map_err(|e| ToolExecutionError::new(e.to_string()))?;
+    }
+    Ok(())
 }
 
 fn materialize_config(text: &str) -> Result<String, ToolExecutionError> {
@@ -1309,6 +1573,73 @@ fn workspace_option(arguments: &Map<String, Value>) -> Result<Option<String>, To
     }
 }
 
+fn study_subscription_schema() -> Value {
+    let symbols = json!({"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$"}});
+    json!({
+        "type": "array", "minItems": 1,
+        "description": "Exact requested inputs, matching the program and its indicators. Bars support one shared interval, 1min or 1d (not both); quote/trade must omit interval. Symbol aliases must equal the subscription symbol union; duplicate aliases must agree. Symbols must be nonempty and unpadded.",
+        "items": {"oneOf": [
+            {"type": "object", "additionalProperties": false,
+             "required": ["data_type", "symbols", "interval"],
+             "properties": {"data_type": {"const": "bars"}, "symbols": symbols,
+                            "interval": {"type": "string", "enum": ["1min", "1d"]}}},
+            {"type": "object", "additionalProperties": false,
+             "required": ["data_type", "symbols"],
+             "properties": {"data_type": {"type": "string", "enum": ["quote", "trade"]}, "symbols": symbols}}
+        ]}
+    })
+}
+
+fn study_configuration_schema() -> Value {
+    let symbols =
+        json!({"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}});
+    let data = json!({
+        "type": "object", "additionalProperties": false,
+        "properties": {
+            "snapshot_id": {"type": "string", "minLength": 1},
+            "fingerprint": {"type": "string"},
+            "bar_interval": {"type": "string", "enum": ["1min", "1d"]},
+            "subscriptions": study_subscription_schema(),
+            "symbols": symbols
+        }
+    });
+    json!({
+        "type": "object",
+        "required": ["start", "end"],
+        "anyOf": [
+            {"required": ["interval"]},
+            {"required": ["subscriptions"]},
+            {"required": ["data"], "properties": {"data": {"anyOf": [{"required": ["bar_interval"]}, {"required": ["subscriptions"]}]}}}
+        ],
+        "description": "Supported replay configuration. Aliases must agree; interval must match bars and must be omitted for tick-only subscriptions. Symbols default to the validator universe only when no symbol declaration/subscriptions exist.",
+        "properties": {
+            "start": {"type": "string", "format": "date-time", "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$", "description": "RFC 3339 timestamp with Z or explicit UTC offset; must precede end."},
+            "end": {"type": "string", "format": "date-time", "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$", "description": "RFC 3339 timestamp with Z or explicit UTC offset; must follow start."},
+            "interval": {"type": "string", "enum": ["1min", "1d"]},
+            "subscriptions": study_subscription_schema(),
+            "requiredSymbols": symbols,
+            "required_symbols": symbols,
+            "symbols": symbols,
+            "data": data
+        }
+    })
+}
+
+fn authored_model_schema() -> Value {
+    json!({
+        "type": "object", "required": ["source", "harnessConfiguration"],
+        "properties": {
+            "modelId": {"type": "string", "minLength": 1, "maxLength": 128},
+            "version": {"type": "string", "minLength": 1, "maxLength": 64},
+            "description": {"type": "string", "minLength": 1},
+            "source": {"type": "string", "minLength": 1},
+            "outputs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "tests": {"type": "object"},
+            "harnessConfiguration": study_configuration_schema()
+        }
+    })
+}
+
 /// Build the capability-filtered tool catalog for one composition.
 ///
 /// # Errors
@@ -1318,6 +1649,21 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
     let capabilities = context.capabilities;
     let tools = Arc::new(HarnessTools::new(context));
     let mut candidates: Vec<Tool> = Vec::new();
+    if capabilities.study || capabilities.backtest {
+        let handler = tools.clone();
+        candidates.push(Tool::new(
+            TOOL_READ_SDK_REFERENCE,
+            "Read the serving harness compiler's SDK identity/version/ABI and source hashes. \
+             Omit topic for metadata only; topic reads bounded current SDK source, not a local \
+             package or stale template. Compare sdkIdentity before using local SDK guidance. \
+             Refresh initialize/serverInfo to compare current validationIdentity before running.",
+            json!({"type": "object", "additionalProperties": false, "properties": {
+                "topic": {"type": "string", "enum": ["consumer", "program", "indicator_api", "events", "exports", "decimal"]},
+                "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1},
+                "max_chars": {"type": "integer", "minimum": 1, "maximum": 16000}
+            }}), "sdk", move |arguments| handler.read_sdk_reference(arguments),
+        ));
+    }
 
     if capabilities.backtest {
         let handler = tools.clone();
@@ -1397,46 +1743,38 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             TOOL_VALIDATE_STUDY,
             "Validate the study model you are drafting without replaying \
              history: compile, load, and construct its authored Rust program \
-             over the managed JIT workspace and return the build failure \
-             verbatim. Pass the model object itself under 'model' — the same \
+             over the managed JIT workspace and return compact structured \
+             diagnostics. Pass the model object itself under 'model' - the same \
              object the completion contract carries. model.source and \
-             model.harnessConfiguration.start/.end are required; call it while \
-             authoring so a compile error is fixed before the contract is \
-             submitted.",
+             model.harnessConfiguration.start/.end are required RFC 3339 timestamps \
+             with Z or an explicit offset (for example 2025-01-01T00:00:00-05:00), \
+             with start before end. Supply interval (1min or 1d) or subscriptions, \
+             directly or under data (data.bar_interval/data.subscriptions). \
+             Use harness_strategy_sdk imports and its serde_json::Value re-export. \
+             Implement MarketConsumer with type Context = ObservationContext and \
+             fn subscriptions(&self) -> Vec<Subscription>; use Subscription::Bars \
+             { symbols, interval }, Subscription::Quote { symbols }, or \
+             Subscription::Trade { symbols }. Put market callbacks on MarketConsumer: \
+             fn on_bar(&mut self, frame: &BarFrame, ctx: &mut ObservationContext), \
+             on_quote(&mut self, event: &QuoteEvent, ctx: &mut ObservationContext), \
+             on_trade(&mut self, event: &TradeEvent, ctx: &mut ObservationContext). \
+             BarFrame has bars_by_symbol and missing_symbols, not a single bar. \
+             Decimal fields are exact; use checked arithmetic, not primitive casts. \
+             Implement StudyProgram::new(parameters: Value) -> Self and optionally \
+             on_stop(&mut self, metrics: &mut MetricPublisher); metrics.publish(name, \
+             value: f64) returns Result<(), PublishError>. Export at module scope \
+             with harness_strategy_sdk::export_study_program!(MyStudy). A study has \
+             no order sink. Keep subscriptions and indicator topology stable; \
+             indicators update before their consumer. Validation does not replay \
+             data or prove output behavior. Fix reported source/configuration \
+             errors and call validate_study again before submitting the contract; \
+             report infrastructure failures rather than treating them as source errors.",
             json!({
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["model"],
                 "properties": {
-                    "model": {
-                        "type": "object",
-                        "required": ["source", "harnessConfiguration"],
-                        "properties": {
-                            "modelId": {"type": "string", "minLength": 1, "maxLength": 128},
-                            "version": {"type": "string", "minLength": 1, "maxLength": 64},
-                            "description": {"type": "string", "minLength": 1},
-                            "source": {"type": "string", "minLength": 1},
-                            "outputs": {
-                                "type": "array",
-                                "minItems": 1,
-                                "items": {"type": "string", "minLength": 1}
-                            },
-                            "tests": {"type": "object"},
-                            "harnessConfiguration": {
-                                "type": "object",
-                                "required": ["start", "end"],
-                                "properties": {
-                                    "start": {"type": "string", "minLength": 1},
-                                    "end": {"type": "string", "minLength": 1},
-                                    "symbols": {
-                                        "type": "array",
-                                        "minItems": 1,
-                                        "items": {"type": "string", "minLength": 1}
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    "model": authored_model_schema()
                 }
             }),
             "study",
@@ -1519,11 +1857,37 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             move |_arguments| handler.screener_config_template(),
         ));
     }
-    if capabilities.backtest_status {
+    if capabilities.backtest {
+        let handler = tools.clone();
+        let input_schema = json!({
+            "type": "object", "additionalProperties": false, "required": ["model"],
+            "properties": {"model": authored_model_schema()}
+        });
+        candidates.push(Tool::new(
+            TOOL_VALIDATE_STRATEGY,
+            "Validate an authored Rust strategy without replaying data: compile, load, construct, \
+             and check effective subscriptions (including indicators) against harnessConfiguration. \
+             Pass {model: {source, harnessConfiguration}} as for validate_study; timestamps require \
+             RFC 3339 with Z or an explicit offset; interval is 1min or 1d, or declare tagged \
+             subscriptions directly or under data. Implement MarketConsumer with type Context = \
+             OrderSink, fn subscriptions(&self) -> Vec<Subscription>, and market callbacks on \
+             MarketConsumer; implement StrategyProgram::new(parameters: \
+             harness_strategy_sdk::serde_json::Value) -> Self. Export at module scope with \
+             harness_strategy_sdk::export_strategy_program!(MyStrategy). Bar callbacks receive \
+             &BarFrame with bars_by_symbol and missing_symbols. Subscriptions and indicator topology \
+             must remain stable. This is not a backtest and does not prove trading performance. \
+             Fix compact structured compiler/configuration errors and call validate_strategy again; \
+             report infrastructure failures separately. A strategy run uses shell backtest and backtest.json.",
+            input_schema,
+            "backtest",
+            move |arguments| handler.validate_strategy(arguments),
+        ));
+    }
+    if capabilities.job_status {
         let handler = tools.clone();
         candidates.push(Tool::new(
-            TOOL_BACKTEST_STATUS,
-            "Read one backtest job's persisted state \
+            TOOL_JOB_STATUS,
+            "Read one job's persisted state \
              {job_id, state, created_at, updated_at, error_message} from the remote harness API.",
             json!({
                 "type": "object",
@@ -1531,8 +1895,8 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
                 "required": ["job_id"],
                 "properties": {"job_id": text_property()}
             }),
-            "backtest_status",
-            move |arguments| handler.get_backtest_status(arguments),
+            "job_status",
+            move |arguments| handler.get_job_status(arguments),
         ));
     }
     if capabilities.screener {

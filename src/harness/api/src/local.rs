@@ -20,7 +20,7 @@ use backtest::backtest::engine_core::EngineOptions;
 use backtest::backtest::screen::ScreenConfig;
 
 use crate::http::screener::ScreeningRunner;
-use harness_lakeclient::{BlockingLakeClient, EnsureSpec};
+use harness_lakeclient::BlockingLakeClient;
 use mcp::store::{JobRepository, JobState, RunCatalogRecord, RunStatus, RunStore};
 
 /// Local backtest submitter that runs the native engine and records the run.
@@ -123,7 +123,9 @@ impl mcp::tools::StudySubmitter for NativeStudySubmitter {
         });
         Ok(json!({
             "boundary": "local",
-            "study_id": run_id,
+            "study_id": run_id.clone(),
+            "job_id": run_id.clone(),
+            "run_id": run_id,
             "state": "running",
             "kind": "study",
         }))
@@ -195,8 +197,12 @@ impl mcp::tools::ScreeningSubmitter for NativeScreeningSubmitter {
     }
 }
 
-/// Local study validator that builds the authored programs without a replay.
+/// Local program validator that compiles, loads, and constructs without a replay.
 pub struct NativeStudyValidator;
+
+#[cfg(test)]
+#[path = "../tests/unit/local_validation.rs"]
+mod validation_tests;
 
 /// The symbols an authored model validates with when it declares none.
 const DEFAULT_STUDY_SYMBOLS: [&str; 1] = ["SPY"];
@@ -207,7 +213,19 @@ const DEFAULT_STUDY_SYMBOLS: [&str; 1] = ["SPY"];
 /// runtime job needs beyond them (the study shell, run id, JIT instance,
 /// bundle hash) is derived here, so no impossible field is ever part of the
 /// tool contract.
-fn authored_study_document(model: &Value) -> Result<Value, String> {
+///
+/// # Errors
+/// Returns a reason when the authored source or harness contract is malformed.
+pub fn authored_study_document(model: &Value) -> Result<Value, String> {
+    authored_program_document(model, "study")
+}
+
+/// Derive a strategy job using the same authored model/configuration shape as studies.
+pub fn authored_strategy_document(model: &Value) -> Result<Value, String> {
+    authored_program_document(model, "backtest")
+}
+
+fn authored_program_document(model: &Value, shell: &str) -> Result<Value, String> {
     let object = model
         .as_object()
         .ok_or_else(|| "model must be an object".to_string())?;
@@ -223,11 +241,126 @@ fn authored_study_document(model: &Value) -> Result<Value, String> {
         .get("harnessConfiguration")
         .and_then(Value::as_object)
         .ok_or_else(|| "model.harnessConfiguration must be an object".to_string())?;
-    let interval = configuration
-        .get("interval")
-        .and_then(Value::as_str)
-        .filter(|value| matches!(*value, "1min" | "1d"))
-        .ok_or_else(|| "model.harnessConfiguration.interval must be 1min or 1d".to_string())?;
+    let mut data = match configuration.get("data") {
+        Some(value) => value
+            .as_object()
+            .ok_or_else(|| "model.harnessConfiguration.data must be an object".to_string())?
+            .clone(),
+        None => serde_json::Map::new(),
+    };
+    let mut subscriptions = None;
+    let mut subscription_echo = None;
+    for value in [
+        configuration.get("subscriptions"),
+        data.get("subscriptions"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let inputs = crate::http::configuration::parse_subscriptions(value)
+            .map_err(|error| error.to_string())?;
+        if subscriptions
+            .as_ref()
+            .is_some_and(|declared| declared != &inputs)
+        {
+            return Err(
+                "model.harnessConfiguration.data.subscriptions conflicts with subscriptions"
+                    .to_string(),
+            );
+        }
+        if subscription_echo.is_none() {
+            subscription_echo = Some(value.clone());
+        }
+        subscriptions = Some(inputs);
+    }
+    let mut interval: Option<String> = None;
+    for value in [configuration.get("interval"), data.get("bar_interval")]
+        .into_iter()
+        .flatten()
+    {
+        let declared = value
+            .as_str()
+            .filter(|value| matches!(*value, "1min" | "1d"))
+            .ok_or_else(|| {
+                "model.harnessConfiguration.interval and data.bar_interval must be 1min or 1d"
+                    .to_string()
+            })?;
+        if interval
+            .as_deref()
+            .is_some_and(|interval| interval != declared)
+        {
+            return Err(
+                "model.harnessConfiguration.interval conflicts with data.bar_interval".to_string(),
+            );
+        }
+        interval = Some(declared.to_string());
+    }
+    if interval.is_none() && subscriptions.is_none() {
+        return Err("model.harnessConfiguration.interval or data.bar_interval must be 1min or 1d when subscriptions are absent".to_string());
+    }
+    if let (Some(inputs), Some(interval)) = (&subscriptions, interval.as_deref()) {
+        let bar_interval = inputs
+            .iter()
+            .find(|input| input.data_type == "bars")
+            .and_then(|input| input.interval.as_deref());
+        match bar_interval {
+            Some(declared) if declared == interval => {}
+            Some(_) => {
+                return Err(
+                    "model.harnessConfiguration.interval must match the bars subscription interval"
+                        .to_string(),
+                );
+            }
+            None => {
+                return Err("model.harnessConfiguration.interval is not allowed for tick-only subscriptions".to_string());
+            }
+        }
+    }
+    let mut explicit_symbols = None;
+    for value in [
+        configuration.get("symbols"),
+        configuration.get("requiredSymbols"),
+        configuration.get("required_symbols"),
+        data.get("symbols"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let items = value
+            .as_array()
+            .ok_or_else(|| "model.harnessConfiguration.symbols must be an array".to_string())?;
+        let mut symbols = items
+            .iter()
+            .map(|item| {
+                let symbol = item.as_str().ok_or_else(|| {
+                    "model.harnessConfiguration.symbols entries must be strings".to_string()
+                })?;
+                if symbol.is_empty() || symbol.trim() != symbol {
+                    return Err(
+                        "model.harnessConfiguration.symbols entries must be nonempty and unpadded"
+                            .to_string(),
+                    );
+                }
+                Ok(symbol.to_string())
+            })
+            .collect::<Result<Vec<String>, String>>()?;
+        symbols.sort();
+        symbols.dedup();
+        if symbols.is_empty() {
+            return Err(
+                "model.harnessConfiguration explicit symbols must not be empty".to_string(),
+            );
+        }
+        if explicit_symbols
+            .as_ref()
+            .is_some_and(|declared| declared != &symbols)
+        {
+            return Err(
+                "model.harnessConfiguration symbol aliases and data.symbols must match".to_string(),
+            );
+        }
+        explicit_symbols = Some(symbols);
+    }
     let start = configuration
         .get("start")
         .and_then(Value::as_str)
@@ -242,62 +375,167 @@ fn authored_study_document(model: &Value) -> Result<Value, String> {
         .ok_or_else(|| {
             "model.harnessConfiguration.end must be a non-empty RFC 3339 string".to_string()
         })?;
-    let mut symbols: Vec<String> = match configuration.get("symbols") {
-        Some(value) => value
-            .as_array()
-            .ok_or_else(|| "model.harnessConfiguration.symbols must be an array".to_string())?
+    let symbols: Vec<String> = if let Some(inputs) = &subscriptions {
+        let mut symbols: Vec<String> = inputs
             .iter()
-            .map(|item| {
-                item.as_str().map(str::to_string).ok_or_else(|| {
-                    "model.harnessConfiguration.symbols entries must be strings".to_string()
-                })
-            })
-            .collect::<Result<Vec<String>, String>>()?,
-        None => DEFAULT_STUDY_SYMBOLS
-            .iter()
-            .map(|symbol| (*symbol).to_string())
-            .collect(),
-    };
-    if symbols.is_empty() {
-        symbols = DEFAULT_STUDY_SYMBOLS
-            .iter()
-            .map(|symbol| (*symbol).to_string())
+            .flat_map(|input| input.symbols.clone())
             .collect();
-    }
+        symbols.sort();
+        symbols.dedup();
+        if symbols.is_empty() {
+            return Err(
+                "model.harnessConfiguration.subscriptions must request symbols".to_string(),
+            );
+        }
+        if explicit_symbols
+            .as_ref()
+            .is_some_and(|declared| declared != &symbols)
+        {
+            return Err(
+                "model.harnessConfiguration.symbols must match the subscription symbol union"
+                    .to_string(),
+            );
+        }
+        symbols
+    } else {
+        match explicit_symbols {
+            Some(symbols) => symbols,
+            None => DEFAULT_STUDY_SYMBOLS
+                .iter()
+                .map(|symbol| (*symbol).to_string())
+                .collect(),
+        }
+    };
     let digest = backtest::sha256::digest_hex(source.as_bytes());
-    let run_id = format!("validate-{}", &digest[..16]);
-    Ok(json!({
-        "shell": "study",
-        "run_id": &run_id,
-        "start": start,
-        "end": end,
-        "symbols": &symbols,
-        "data": {"symbols": &symbols, "bar_interval": interval},
-        "strategy_instances": [{
+    let run_id = format!("validate-{shell}-{}", &digest[..16]);
+    data.insert("symbols".to_string(), json!(&symbols));
+    if let Some(interval) = interval {
+        data.insert("bar_interval".to_string(), json!(interval));
+    }
+    if let Some(echo) = subscription_echo {
+        // Preserve the authored echo's exact tagged shape; normalization is validation only.
+        data.insert("subscriptions".to_string(), echo);
+    } else if shell == "backtest" {
+        // An authored interval requests bars, not the legacy strategy tick defaults.
+        data.insert(
+            "subscriptions".to_string(),
+            json!([{
+                "data_type": "bars", "symbols": &symbols, "interval": data["bar_interval"]
+            }]),
+        );
+    }
+    let mut document = configuration.clone();
+    for key in [
+        "interval",
+        "subscriptions",
+        "symbols",
+        "requiredSymbols",
+        "required_symbols",
+    ] {
+        document.remove(key);
+    }
+    document.insert("shell".to_string(), json!(shell));
+    document.insert("run_id".to_string(), json!(&run_id));
+    document.insert("start".to_string(), json!(start));
+    document.insert("end".to_string(), json!(end));
+    document.insert("symbols".to_string(), json!(&symbols));
+    document.insert("data".to_string(), Value::Object(data));
+    document.insert(
+        "strategy_instances".to_string(),
+        json!([{
             "instance_id": &run_id,
             "implementation": "jit",
             "bundle_hash": &digest,
             "capital_fraction": "1.0",
             "symbols": &symbols,
             "parameters": {"source": source},
-        }],
-    }))
+        }]),
+    );
+    Ok(Value::Object(document))
 }
 
 impl mcp::tools::StudyValidator for NativeStudyValidator {
-    fn validate(&self, model: &Value) -> Result<Value, String> {
-        let document = authored_study_document(model)?;
-        let configuration = backtest::backtest::job::parse_study_document(&document)
-            .map_err(|error| error.to_string())?;
-        let instances = harness_strategy_jit::validate_configuration(&configuration)
-            .map_err(|error| error.to_string())?;
-        Ok(json!({
-            "boundary": "local",
-            "valid": true,
-            "kind": "study",
-            "instances": instances,
-        }))
+    fn sdk_reference(
+        &self,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<Value, mcp::tools::ToolExecutionError> {
+        harness_strategy_jit::validation_service()
+            .sdk_reference(arguments)
+            .map_err(|error| mcp::tools::ToolExecutionError::new(error.to_string()))
     }
+
+    fn validate_strategy_result(
+        &self,
+        model: &Value,
+    ) -> Result<Value, mcp::tools::ToolExecutionError> {
+        validate_authored_program(model, "backtest")
+    }
+
+    fn validation_identity(&self) -> Option<String> {
+        harness_strategy_jit::validation_service()
+            .validation_identity()
+            .ok()
+    }
+
+    fn validate(&self, model: &Value) -> Result<Value, String> {
+        self.validate_result(model)
+            .map_err(|error| error.to_string())
+    }
+
+    fn validate_result(&self, model: &Value) -> Result<Value, mcp::tools::ToolExecutionError> {
+        validate_authored_program(model, "study")
+    }
+}
+
+fn validate_authored_program(
+    model: &Value,
+    shell: &str,
+) -> Result<Value, mcp::tools::ToolExecutionError> {
+    use harness_strategy_jit::ValidationFailure;
+    let kind = if shell == "study" {
+        "study"
+    } else {
+        "strategy"
+    };
+    let cache_input = json!({"kind": kind, "model": model});
+    harness_strategy_jit::validation_service()
+        .validate(&cache_input, || {
+            let document = authored_program_document(model, shell)
+                .map_err(ValidationFailure::configuration)?;
+            let configuration = if shell == "study" {
+                backtest::backtest::job::parse_study_document(&document)
+                    .map_err(|error| ValidationFailure::configuration(error.to_string()))?
+            } else {
+                BacktestConfig::from_yaml(&document.to_string())
+                    .map_err(|error| ValidationFailure::configuration(error.to_string()))?
+            };
+            let mut result = harness_strategy_jit::inspect_configuration(&configuration)?;
+            let sdk = harness_strategy_jit::validation_service()
+                .sdk_reference(&serde_json::Map::new())
+                .map_err(ValidationFailure::from)?;
+            result["sdkIdentity"] = sdk["sdkIdentity"].clone();
+            result["sdkVersion"] = sdk["sdkVersion"].clone();
+            result["sdkAbiVersion"] = sdk["sdkAbiVersion"].clone();
+            result["boundary"] = json!("local");
+            Ok(result)
+        })
+        .map_err(|error| {
+            mcp::tools::ToolExecutionError::with_payload(
+                &error.message,
+                json!({
+                    "boundary": "local",
+                    "valid": false,
+                    "kind": kind,
+                    "shell": shell,
+                    "error": error.message,
+                    "diagnostics": error.diagnostics,
+                    "deterministicCompilerDiagnostic": error.deterministic_compiler_diagnostic,
+                    "cacheable": error.cacheable,
+                    "reused": error.reused,
+                    "validationIdentity": error.validation_identity,
+                }),
+            )
+        })
 }
 
 /// Run one screening job on a detached worker and persist its result set.
@@ -725,87 +963,23 @@ fn record_failed_run(
     fail_job(jobs, run_id, started, message);
 }
 
-/// Clamp a study's data-window start to the lake's complete bar coverage.
+/// Retain the operator's study window without acquiring implicit bar inputs.
 ///
-/// Returns the actual `(start, end)` session dates the study will replay. The
-/// start moves to the earliest session with complete bars when the lake's bar
-/// coverage begins after the requested start, so a model contract reaching
-/// back before the provider's history no longer launches a study that can only
-/// replay empty data. The requested window is kept when the lake reports no
-/// complete session inside it.
+/// Existing launchers call this seam before compilation. Acquisition belongs
+/// to the engine after it resolves and validates the source subscription union.
 ///
 /// # Errors
 ///
-/// Returns a reason string when the configured bar interval is not a canonical
-/// token or the lake coverage query fails.
+/// Returns a reason string when a window date is outside the representable range.
 pub(crate) fn clamp_study_window(
-    client: &BlockingLakeClient,
+    _client: &BlockingLakeClient,
     configuration: &mut BacktestConfig,
 ) -> Result<(NaiveDate, NaiveDate), String> {
-    let interval = marketdata::lake::BarInterval::parse(&configuration.data_bar_interval)
-        .map_err(|error| error.to_string())?;
-    let earliest = earliest_complete_session_ns(
-        client,
-        &configuration.symbols,
-        interval.value(),
-        configuration.start_ns,
-        configuration.end_ns,
-    )?;
-    if let Some(start_ns) = clamped_start_ns(configuration.start_ns, configuration.end_ns, earliest)
-    {
-        configuration.start_ns = start_ns;
-    }
-    let start_date = date_of(configuration.start_ns).ok_or_else(|| {
-        "the clamped data window start is outside the representable range".to_string()
-    })?;
-    let end_date = date_of(configuration.end_ns.saturating_sub(1)).ok_or_else(|| {
-        "the clamped data window end is outside the representable range".to_string()
-    })?;
+    let start_date = date_of(configuration.start_ns)
+        .ok_or_else(|| "the data window start is outside the representable range".to_string())?;
+    let end_date = date_of(configuration.end_ns.saturating_sub(1))
+        .ok_or_else(|| "the data window end is outside the representable range".to_string())?;
     Ok((start_date, end_date))
-}
-
-/// The earliest fully covered bars session across a symbol set, in epoch nanos.
-///
-/// Each symbol resolves to the earliest session where its `interval` bars are
-/// complete, and the result is the latest of those per-symbol dates: the
-/// study's data window starts only where every configured symbol carries bar
-/// data.
-fn earliest_complete_session_ns(
-    client: &BlockingLakeClient,
-    symbols: &[String],
-    interval: &str,
-    start_ns: i64,
-    end_ns: i64,
-) -> Result<Option<i64>, String> {
-    let start = date_string(start_ns);
-    let end = date_string(end_ns.saturating_sub(1));
-    let mut window_start: Option<i64> = None;
-    for symbol in symbols {
-        let (asset_class, lake_symbol) = lake_asset_class(symbol);
-        let spec = EnsureSpec::new(asset_class, "bars", &lake_symbol, &start, &end)
-            .with_interval(interval);
-        let session = client
-            .earliest_complete_session(&spec)
-            .map_err(|error| error.to_string())?;
-        let Some(session_ns) = session.as_deref().and_then(date_ns) else {
-            continue;
-        };
-        window_start = Some(match window_start {
-            Some(current) => current.max(session_ns),
-            None => session_ns,
-        });
-    }
-    Ok(window_start)
-}
-
-/// Move a window start to an earliest complete session without emptying it.
-fn clamped_start_ns(requested_start_ns: i64, end_ns: i64, earliest: Option<i64>) -> Option<i64> {
-    let start_ns = earliest?;
-    if start_ns > requested_start_ns && start_ns < end_ns {
-        Some(start_ns)
-    } else {
-        None
-    }
 }
 
 /// Mark one background job failed when its worker exits without a terminal
@@ -852,27 +1026,6 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         return message.clone();
     }
     "unknown panic".to_string()
-}
-
-fn lake_asset_class(symbol: &str) -> (&'static str, String) {
-    match marketdata::crypto_pair(symbol) {
-        Some(pair) => ("crypto", pair),
-        None => ("equity", symbol.trim().to_uppercase()),
-    }
-}
-
-fn date_string(nanos: i64) -> String {
-    let seconds = nanos.div_euclid(1_000_000_000);
-    chrono::DateTime::from_timestamp(seconds, 0)
-        .map(|value| value.format("%Y-%m-%d").to_string())
-        .unwrap_or_default()
-}
-
-/// Parse a `YYYY-MM-DD` session date into epoch nanoseconds at UTC midnight.
-fn date_ns(value: &str) -> Option<i64> {
-    let date = NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok()?;
-    let seconds = date.and_hms_opt(0, 0, 0)?.and_utc().timestamp();
-    seconds.checked_mul(1_000_000_000)
 }
 
 /// The UTC calendar date of an epoch-nanosecond timestamp.

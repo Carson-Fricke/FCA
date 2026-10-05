@@ -21,7 +21,6 @@ from thesis.http.chat import (
     create_chat_router,
     get_chat_service,
 )
-from thesis.http.streaming import create_streaming_router
 
 __all__ = [
     "ActorRequest",
@@ -40,6 +39,5 @@ __all__ = [
     "UploadAttachmentRequest",
     "create_app",
     "create_chat_router",
-    "create_streaming_router",
     "get_chat_service",
 ]

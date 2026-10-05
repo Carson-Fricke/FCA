@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from thesis.chat.service import ChatService
+from thesis.cosmos.chunks import ChunkedPayloadStore
 from thesis.cosmos.client import (
     CATALOG_CONTAINER,
     EXECUTIONS_CONTAINER,
-    TIMELINE_CONTAINER,
     CosmosSettings,
     ensure_database,
     open_cosmos_client,
@@ -22,18 +22,20 @@ def open_cosmos_chat_stack(
 ) -> tuple[ChatService, CosmosTimeline]:
     """Open the durable chat service and its unified per-chat timeline.
 
-    The returned ``ChatService`` persists every record in Cosmos and writes
-    execution events to the shared timeline; the returned ``CosmosTimeline`` is
-    served by the unified timeline stream.
+    One authoritative catalog container holds records, messages, events, and
+    the per-chat sequence counters. The returned ``CosmosTimeline`` is the
+    query facade over that container, served by the unified timeline stream.
     """
     client = open_cosmos_client(settings)
     database = ensure_database(client, settings)
-    timeline = CosmosTimeline(database.get_container_client(TIMELINE_CONTAINER))
-    catalog = CosmosChatPersistence(
-        database.get_container_client(CATALOG_CONTAINER), timeline=timeline
-    )
+    catalog_container = database.get_container_client(CATALOG_CONTAINER)
+    chunks = ChunkedPayloadStore(catalog_container)
+    timeline = CosmosTimeline(catalog_container, chunks=chunks)
+    catalog = CosmosChatPersistence(catalog_container, timeline=timeline)
     events = CosmosExecutionEventStore(
-        timeline, chat_for_execution=catalog.chat_id_for_execution
+        timeline,
+        scope_for_execution=catalog.scope_for_execution,
+        require_active_conversation=catalog.require_active_conversation,
     )
     return ChatService(persistence=catalog, events=events), timeline
 
@@ -44,7 +46,7 @@ def open_execution_store(
     """Open the Cosmos-backed execution store over the executions container.
 
     One durable document per workflow execution (REQ-B5); the container is
-    provisioned by :func:`ensure_database` alongside the chat stack.
+    provisioned by the existing local/deployed stack bootstrap.
     """
     client = open_cosmos_client(settings)
     database = ensure_database(client, settings)

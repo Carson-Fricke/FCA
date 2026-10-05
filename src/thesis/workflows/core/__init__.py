@@ -17,6 +17,7 @@ from thesis.workflows.core.phase import (
     DeterministicPhase,
     OneShotPhase,
     PhaseSpec,
+    TerminalPhase,
 )
 from thesis.workflows.core.registry import (
     UnknownWorkflowError,
@@ -49,6 +50,7 @@ __all__ = [
     "PhaseSpec",
     "PipingFunction",
     "TERMINAL_EXECUTION_STATES",
+    "TerminalPhase",
     "TransitionMachine",
     "TransitionRequest",
     "TransitionTable",

@@ -1,7 +1,7 @@
 //! Errors raised by the JIT compile and load seam.
 
 /// One JIT seam failure.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum JitError {
     /// A filesystem operation failed.
     Io(String),
@@ -11,6 +11,8 @@ pub enum JitError {
         digest: String,
         /// The tail of the captured build output.
         detail: String,
+        /// Rustc JSON errors attributed to the authored library target.
+        diagnostics: Vec<serde_json::Value>,
     },
     /// The compiled artifact could not be located.
     ArtifactMissing {
@@ -52,7 +54,7 @@ impl std::fmt::Display for JitError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(detail) => write!(formatter, "jit workspace io failure: {detail}"),
-            Self::Compile { digest, detail } => {
+            Self::Compile { digest, detail, .. } => {
                 write!(
                     formatter,
                     "authored program {digest} failed to compile: {detail}"

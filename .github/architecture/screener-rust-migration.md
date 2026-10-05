@@ -144,7 +144,7 @@ Contracts are code: types, schemas, models, and their focused tests. Behavior
 ### P6 — Docs and closeout
 
 - Update `repository.md`, `rust-native-authoring-plan.md`,
-  `fca-thesis.md`, `thesis-ui-design.md`, and record the decision in BRAIN.
+  `fca-thesis.md` and `thesis-ui-design.md`, and record the decision in Git.
 
 ## Frozen contract notes
 

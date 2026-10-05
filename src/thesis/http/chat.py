@@ -1,31 +1,39 @@
 """Thin HTTP adapter for the workspace chat service.
 
 The router only translates validated HTTP payloads into service calls.  It has
-no knowledge of CLEO, queues, storage engines, or execution implementation
+no knowledge of queues, storage engines, or execution implementation
 details; applications inject a :class:`ChatService` through app state.
 """
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Annotated
 
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
     Path,
     Query,
     Request,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
+from thesis.agent.runtime.conversation import Conversations
 from thesis.chat import (
     ChatService,
     CrossWorkspaceLinkError,
-    InvalidLifecycleTransition,
     MessageRole,
     MessageState,
-    RecordNotFound,
+)
+from thesis.http.errors import require_service
+from thesis.http.errors import service_error as _service_error
+from thesis.http.wire import (
+    ChatMessageListWire,
+    ChatThreadListWire,
+    ChatThreadWire,
+    CreateMessageResponseWire,
+    SteeringPercolationWire,
 )
 
 
@@ -115,23 +123,7 @@ class SubmitToolJobRequest(ChatHTTPModel):
 
 def get_chat_service(request: Request) -> ChatService:
     """Resolve the service from app state so applications control persistence."""
-    service = getattr(request.app.state, "chat_service", None)
-    if service is None:
-        service = ChatService()
-        request.app.state.chat_service = service
-    if not isinstance(service, ChatService):
-        raise RuntimeError("app.state.chat_service must be a ChatService")
-    return service
-
-
-def _service_error(error: Exception) -> HTTPException:
-    if isinstance(error, RecordNotFound):
-        return HTTPException(status_code=404, detail=str(error))
-    if isinstance(error, (CrossWorkspaceLinkError, InvalidLifecycleTransition)):
-        return HTTPException(status_code=409, detail=str(error))
-    if isinstance(error, ValueError):
-        return HTTPException(status_code=422, detail=str(error))
-    return HTTPException(status_code=500, detail="chat service request failed")
+    return require_service(request, "chat_service", ChatService)
 
 
 def create_chat_router() -> APIRouter:
@@ -142,7 +134,7 @@ def create_chat_router() -> APIRouter:
     """
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["chat"])
 
-    @router.post("/chats")
+    @router.post("/chats", response_model=ChatThreadWire)
     async def create_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateChatRequest,
@@ -161,8 +153,8 @@ def create_chat_router() -> APIRouter:
             raise _service_error(error) from error
         return chat.as_dict()
 
-    @router.get("/chats")
-    async def list_chats(
+    @router.get("/chats", response_model=ChatThreadListWire)
+    def list_chats(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
@@ -170,8 +162,8 @@ def create_chat_router() -> APIRouter:
             "items": [chat.as_dict() for chat in chat_service.list_chats(workspace_id)]
         }
 
-    @router.get("/chats/{chat_id}")
-    async def get_chat(
+    @router.get("/chats/{chat_id}", response_model=ChatThreadWire)
+    def get_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -182,7 +174,7 @@ def create_chat_router() -> APIRouter:
             raise _service_error(error) from error
 
     @router.get("/chats/{chat_id}/execution")
-    async def get_chat_execution(
+    def get_chat_execution(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -194,19 +186,14 @@ def create_chat_router() -> APIRouter:
         is not logged as an error.
         """
         try:
-            chat_service.get_chat(workspace_id, chat_id)
-            matches = [
-                execution
-                for execution in chat_service.list_executions(workspace_id)
-                if execution.chat_id == chat_id
-            ]
+            matches = chat_service.list_chat_executions(workspace_id, chat_id)
         except Exception as error:
             raise _service_error(error) from error
         if not matches:
             return None
         return max(matches, key=lambda execution: execution.created_at).as_dict()
 
-    @router.post("/chats/{chat_id}/archive")
+    @router.post("/chats/{chat_id}/archive", response_model=ChatThreadWire)
     async def archive_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -219,7 +206,7 @@ def create_chat_router() -> APIRouter:
         return chat.as_dict()
 
     @router.delete("/chats/{chat_id}", status_code=204)
-    async def delete_chat(
+    def delete_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -229,7 +216,11 @@ def create_chat_router() -> APIRouter:
         except Exception as error:
             raise _service_error(error) from error
 
-    @router.post("/chats/{chat_id}/messages")
+    @router.post(
+        "/chats/{chat_id}/messages",
+        response_model=CreateMessageResponseWire,
+        response_model_exclude_unset=True,
+    )
     async def create_message(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -247,11 +238,24 @@ def create_chat_router() -> APIRouter:
         conversation persists it and wakes its own reply turn, so the reply
         never runs inside the request.
         """
+        from thesis.http.chat_sub_agents import (
+            authenticated_actor_id,
+            authenticated_principal,
+        )
+
         steering = (
             request.targets_execution_id is not None
             or request.steering_intent is not None
         )
         try:
+            conversations = require_service(
+                http_request, "conversations", Conversations
+            )
+            principal = authenticated_principal(http_request)
+            if principal is None:
+                raise ValueError("authenticated actor identity is required")
+            actor_id = authenticated_actor_id(principal)
+            root = conversations.root(workspace_id, chat_id)
             if steering:
                 if (
                     request.execution_id is not None
@@ -261,58 +265,49 @@ def create_chat_router() -> APIRouter:
                 percolation = chat_service.post_steering_message(
                     workspace_id,
                     chat_id,
-                    actor_id=request.actor_id,
+                    actor_id=actor_id,
                     body=request.body,
                     role=request.role,
                     attachment_ids=request.attachment_ids,
                     investigation_ids=request.investigation_ids or None,
                     targets_execution_id=request.targets_execution_id,
                     steering_intent=request.steering_intent,
+                    message_factory=partial(root.send, schedule=False),
+                    after_delivery=conversations.schedule_input,
                 )
             else:
-                conversations = getattr(http_request.app.state, "conversations", None)
-                if conversations is not None and request.role is MessageRole.USER:
-                    message = conversations.root(workspace_id, chat_id).send(
-                        body=request.body,
-                        actor_id=request.actor_id,
-                        role=request.role,
-                        attachment_ids=request.attachment_ids,
-                        investigation_ids=request.investigation_ids,
-                        execution_id=request.execution_id,
-                        intent_epoch=request.intent_epoch,
-                    )
-                else:
-                    message = chat_service.create_message(
-                        workspace_id,
-                        chat_id,
-                        actor_id=request.actor_id,
-                        body=request.body,
-                        role=request.role,
-                        attachment_ids=request.attachment_ids,
-                        investigation_ids=request.investigation_ids,
-                        execution_id=request.execution_id,
-                        intent_epoch=request.intent_epoch,
-                    )
+                chat_service.get_chat(workspace_id, chat_id)
+                message = root.send(
+                    body=request.body,
+                    actor_id=actor_id,
+                    role=request.role,
+                    attachment_ids=request.attachment_ids,
+                    investigation_ids=request.investigation_ids,
+                    execution_id=request.execution_id,
+                    intent_epoch=request.intent_epoch,
+                )
         except Exception as error:
             raise _service_error(error) from error
         if not steering:
             return message.as_dict()
         result = percolation.message.as_dict()
-        result["steering"] = {
-            "intent": request.steering_intent,
-            "targetsExecutionId": request.targets_execution_id,
-            "percolatedTo": [
-                {
-                    "executionId": execution.execution_id,
-                    "intentEpoch": execution.intent_epoch,
-                }
-                for execution in percolation.executions
-            ],
-        }
+        result["steering"] = SteeringPercolationWire.model_validate(
+            {
+                "intent": request.steering_intent,
+                "targetsExecutionId": request.targets_execution_id,
+                "percolatedTo": [
+                    {
+                        "executionId": execution.execution_id,
+                        "intentEpoch": execution.intent_epoch,
+                    }
+                    for execution in percolation.executions
+                ],
+            }
+        ).model_dump(mode="json", by_alias=True)
         return result
 
-    @router.get("/chats/{chat_id}/messages")
-    async def list_messages(
+    @router.get("/chats/{chat_id}/messages", response_model=ChatMessageListWire)
+    def list_messages(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -468,6 +463,7 @@ def create_chat_router() -> APIRouter:
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: SteerWorkflowRequest,
+        http_request: Request,
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         """Deprecated chat-scoped alias.
@@ -477,13 +473,30 @@ def create_chat_router() -> APIRouter:
         the execution's originating chat, which durably acknowledges the
         intent and bumps the execution's intent epoch.
         """
+        from thesis.http.chat_sub_agents import (
+            authenticated_actor_id,
+            authenticated_principal,
+        )
+
         try:
+            conversations = require_service(
+                http_request, "conversations", Conversations
+            )
+            principal = authenticated_principal(http_request)
+            if principal is None:
+                raise ValueError("authenticated actor identity is required")
+            target = chat_service.get_execution(workspace_id, execution_id)
             execution = chat_service.steer_workflow(
                 workspace_id,
                 execution_id,
-                actor_id=request.actor_id,
+                actor_id=authenticated_actor_id(principal),
                 body=request.body,
                 message_id=request.message_id,
+                message_factory=partial(
+                    conversations.root(workspace_id, target.chat_id).send,
+                    schedule=False,
+                ),
+                after_delivery=conversations.schedule_input,
             )
         except Exception as error:
             raise _service_error(error) from error

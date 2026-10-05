@@ -12,13 +12,13 @@
 
 use std::os::raw::c_void;
 
-use num::PyDecimal;
+use num::Decimal;
 
 /// The ABI version the host and every artifact must agree on.
 ///
-/// Version 3 is the atomic bar-frame cutover. All version 2 artifacts,
-/// including strategies and screening programs, must be rebuilt.
-pub const SDK_ABI_VERSION: u32 = 3;
+/// Version 4 unifies market consumers, adds interval identity and state-based
+/// subscriptions, and adds study ticks and strategy frames. Rebuild artifacts.
+pub const SDK_ABI_VERSION: u32 = 4;
 
 /// Callback result: the author code completed.
 pub const SDK_OK: i32 = 0;
@@ -100,7 +100,7 @@ pub struct CDecimal {
 impl CDecimal {
     /// Lossless conversion from the engine decimal.
     #[must_use]
-    pub const fn from_decimal(value: PyDecimal) -> Self {
+    pub const fn from_decimal(value: Decimal) -> Self {
         Self {
             negative: value.is_signed(),
             coefficient: value.coefficient(),
@@ -110,8 +110,8 @@ impl CDecimal {
 
     /// Lossless reconstruction of the engine decimal.
     #[must_use]
-    pub const fn to_decimal(self) -> PyDecimal {
-        PyDecimal::from_parts(self.negative, self.coefficient, self.scale)
+    pub const fn to_decimal(self) -> Decimal {
+        Decimal::from_parts(self.negative, self.coefficient, self.scale)
     }
 }
 
@@ -163,7 +163,7 @@ pub struct CTradeEvent {
 
 /// One OHLCV bar crossing the ABI.
 ///
-/// Study frames contain these bars; quotes and trades cross only for strategies.
+/// Atomic frames contain these bars for every market consumer.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct CBarEvent {
@@ -207,6 +207,8 @@ pub struct CBarFrame {
     pub missing_symbols: *const CStr,
     /// Number of missing symbols.
     pub missing_symbols_len: usize,
+    /// Canonical interval identity: `1min` or `1d`.
+    pub interval: CStr,
 }
 
 /// One deterministic fill crossing the ABI.
@@ -331,8 +333,7 @@ pub type OrderSubmitFn = unsafe extern "C" fn(ctx: *mut c_void, order: *const CM
 /// The vtable a study artifact exports.
 ///
 /// A study has no order surface by construction: the vtable carries no
-/// order-submit path, its only market callback folds atomic bar frames, and its
-/// market callbacks return no orders.
+/// order-submit path, and its quote, trade, and frame callbacks return no orders.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct StudyProgramVTable {
@@ -348,6 +349,12 @@ pub struct StudyProgramVTable {
     pub on_stop: StudyStopFn,
     /// Destroy the program state.
     pub destroy: StudyDestroyFn,
+    /// Observe a quote without execution capability.
+    pub on_quote: StudyQuoteFn,
+    /// Observe a trade without execution capability.
+    pub on_trade: StudyTradeFn,
+    /// Borrow effective subscription JSON after construction.
+    pub subscriptions: SubscriptionsFn,
 }
 
 /// Construct a study program state from a JSON parameters document.
@@ -358,6 +365,10 @@ pub type StudyCreateFn = unsafe extern "C" fn(parameters: CStr) -> *mut c_void;
 
 /// Fold one atomic interval frame into a study program state.
 pub type StudyBarFrameFn = unsafe extern "C" fn(state: *mut c_void, frame: *const CBarFrame) -> i32;
+pub type StudyQuoteFn = unsafe extern "C" fn(state: *mut c_void, event: *const CQuoteEvent) -> i32;
+pub type StudyTradeFn = unsafe extern "C" fn(state: *mut c_void, event: *const CTradeEvent) -> i32;
+/// State-owned JSON array valid until the next subscriptions call or destroy.
+pub type SubscriptionsFn = unsafe extern "C" fn(state: *mut c_void) -> CStr;
 
 /// Publish final metrics from a study program state.
 pub type StudyStopFn = unsafe extern "C" fn(state: *mut c_void, metrics: *const CMetricSink) -> i32;
@@ -391,10 +402,19 @@ pub struct StrategyProgramVTable {
     pub on_stop: StrategyStopFn,
     /// Destroy the program state.
     pub destroy: StrategyDestroyFn,
+    /// Fold an atomic bar frame and submit orders.
+    pub on_bar_frame: StrategyBarFrameFn,
+    /// Borrow effective subscription JSON after construction.
+    pub subscriptions: SubscriptionsFn,
 }
 
 /// Construct a strategy program state from a JSON parameters document.
 pub type StrategyCreateFn = unsafe extern "C" fn(parameters: CStr) -> *mut c_void;
+pub type StrategyBarFrameFn = unsafe extern "C" fn(
+    state: *mut c_void,
+    frame: *const CBarFrame,
+    orders: *const COrderSink,
+) -> i32;
 
 /// Run one strategy program start.
 pub type StrategyStartFn = unsafe extern "C" fn(state: *mut c_void, start: *const CStart) -> i32;

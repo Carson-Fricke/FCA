@@ -31,7 +31,7 @@ VERDICT_INCONCLUSIVE = "inconclusive"
 _WORKFLOW_ID = "hypothesis-development"
 
 
-_WORKFLOW_VERSION = "1.0.0"
+_WORKFLOW_VERSION = "2.0.0"
 
 
 _WORKFLOW_TITLE = "Hypothesis development"
@@ -69,12 +69,9 @@ _HYPOTHESIS_SCHEMA = (
     '"horizon": string, "universe": [string], "falsifiers": [{"falsifierId": '
     'string, "observable": string, "condition": "lt"|"lte"|"gt"|"gte", '
     '"threshold": number, "test": string}], "sizing": string, "body": string, '
-    '"model": {"modelId": string, "version": string, "description": string, '
-    '"source": string, "outputs": [string], "tests": '
-    '{path: string}, "harnessConfiguration": {"symbols": [string], '
-    '"start": string, "end": string, "interval": "1min"|"1d"}, "indicators": [{"alias": '
-    'string, "scope": "global"|"workspace", "name": string, "symbol": string, '
-    '"parameters": {}, "contentSha256": string|null, "definition": object|null}]}}'
+    '"model": {"workspaceId": string, "kind": "study", "programId": string, '
+    '"gitCommit": string, "version": string, "description": string, '
+    '"outputs": [string], "tests": {path: string}}}'
 )
 
 
@@ -93,12 +90,8 @@ _RCA_SCHEMA = (
 
 
 _STRATEGY_DESIGN_SCHEMA = (
-    '{"strategyId": string, "version": string, "entrypoint": string, '
-    '"files": {path: string}, '
-    '"tests": {path: string}, "harnessConfiguration": {}, "exitCriteria": '
-    '[{"falsifierId": string, "observable": string, "condition": '
-    '"lt"|"lte"|"gt"|"gte", "threshold": number, "description": string}], '
-    '"limitations": [string]}'
+    '{"workspaceId": string, "kind": "strategy", "programId": string, '
+    '"gitCommit": string, "version": string}'
 )
 
 

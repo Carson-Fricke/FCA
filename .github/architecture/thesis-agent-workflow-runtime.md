@@ -1,4 +1,4 @@
-﻿# Thesis Durable Agent and Workflow Runtime v1.0.0
+﻿# Thesis Durable Agent and Workflow Runtime
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHOULD",
 "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to
@@ -6,11 +6,229 @@ be interpreted as described in RFC 2119.
 
 ## Status
 
-This document is the accepted design baseline for the next Thesis agent and
-workflow runtime. Where the current implementation differs, this document
-defines the target architecture.
+Current study authoring uses SDK ABI v4 and shared `MarketConsumer` callbacks.
+The model declares exact `harnessConfiguration.subscriptions` for bars, quotes
+and/or trades, including requirements of its owned indicators. Source declares
+the same union through `subscriptions()` and `indicators()`. Compilation
+validation returns effective subscriptions and rejects mismatches before
+fetching. Model configuration, workspace publication and the study compiler
+preserve types/symbols/intervals and the operator's sample window. Tick-only
+studies do not need a bars interval. Observation-only contexts prohibit order
+submission; strategy callbacks use `OrderSink`. The native built-in indicator
+registry has not migrated; this shared interface applies to SDK-authored
+consumers and their program-owned indicator dependencies.
+
+This document records the current implemented runtime and the accepted design
+baseline. The registered hypothesis-development topology is version `2.0.0`;
+remaining normative recovery and repair-budget requirements below are not a
+claim that all of them are implemented.
+
+Workspace program authoring and reference-based workflow completion are
+implemented through `workspaces/programs.py` and `agent/runtime/program_tools.py`.
+Model invocations now store reference-only neutral message audits alongside the
+actual projected provider request; Cosmos saves that opaque request in immutable
+chunks before publishing its invocation manifest. These changes do not establish
+complete crash recovery or remote deployment verification.
+
+### Option 1 Session Delivery Contract
+
+Option 1 is the REQUIRED delivery architecture for roots, helpers, and phases.
+The neutral delivery modules now exist: `agent/messages.py` defines
+`SessionMessage` and `MessageContent`, `agent/runtime/inbox.py` owns
+`SessionInbox`, `agent/runtime/incoming.py` owns the storage writer, and
+`providers/session_adapter.py` owns pure provider preparation. Presence of these
+modules is not a claim that every recovery requirement is verified.
+
+`SessionMessage.direction` is only `incoming`, `outgoing`, or `instruction`;
+native provider roles are NOT session types. `MessageContent` contains `source`,
+`text`, optional structured `result`, explicit
+`ToolCorrelation(request_message_id, request_id, tool_name)`, and outgoing
+`requests`. Source/provenance/content are data, not authority. Instruction
+direction and any `bootstrapInstruction` marker are trusted-runtime-only;
+only the runtime-configured initial bootstrap instruction MAY project as native
+`system`. A durable record without canonical session data is not decoded at
+all; no persisted role, prose, or marker selects privileged instructions.
+
+Every incoming producer MUST converge on `Conversations.deliver_session_message`
+through service or handle delegation, and ultimately
+`runtime/incoming.py::write_incoming`. `DeliveryService` wrappers use that writer;
+standalone delivery also reaches `write_incoming`, not another storage path.
+Dispatched tool results use `SessionInbox.deliver` with its injected persistence
+port, never native-history appends. A tool outcome containing multiple datums is
+ONE incoming receipt with an ordered array; the UI expands that array purely.
+Incoming observation does not write another copy.
+
+The inbox MUST preserve durable arrival order, identity, idempotency, and
+per-conversation positions. Persistence precedes visibility and wake. At each
+eligible model boundary, the live inbox MUST reconcile against scoped
+authoritative, durably ordered messages, not callback arrival order. Arrivals
+after provider pull but before output persistence MUST NOT rearrange the live
+request snapshot; they reconcile at the next eligible boundary. ACK covers only
+pending inputs actually included in a successful provider request, after outgoing
+persistence succeeds, not scheduling, provider/output-write failures, late
+mid-model arrivals, projection-deferred input, or results after a terminal
+request. Empty or unusable provider completion is an interruption: no input ACK
+and no invented empty outgoing reply. Mid-turn input remains durable for the next
+eligible model boundary.
+
+Live/replay share `project_native_messages` through pure
+`NativeSessionAdapter.request_snapshot`. Explicit correlations join only within
+the supplied conversation scope; prose, tool names alone, or foreign history
+MUST NOT associate results. Complete protocol groups may defer interleaved
+evidence in projection, never rewrite the log. Partial/ambiguous groups preserve
+evidence without fabricated calls/results. The adapter owns no persistence,
+scheduling, ACK, dispatch, runtime callbacks, or service introspection; only its
+completion wrapper calls injected `provider.complete`.
+
+Provider snapshot audit is REQUIRED, not optional. Before provider execution,
+the session as caller MUST persist a `STARTED` `AgentInvocation`
+with reference-only `request_messages`, input hash, and detached opaque
+`provider_request`. Ordered references contain only `message_id`, `direction`,
+and `position` from the exact working snapshot; canonical bodies, tool arguments,
+and results remain in the neutral transcript, not a second full canonical audit.
+Historical full-message invocation audits remain readable. The opaque audit
+records actual projected messages, advertised tool catalog,
+options, protocol-mapping/projection version (`native-session-v1`), and
+tool-catalog version prepared purely at the provider boundary. Caller persistence
+owns this opaque runtime effect; the adapter remains pure. Terminal updates
+preserve those fields. Cosmos forces `provider_request` into workspace-scoped,
+create-only content-addressed chunks, even for small requests, before saving the
+invocation manifest in the existing catalog container. `cosmos/chunks.py` uses
+bounded leaves and reference pages; hydration verifies their identities, byte
+count, and digest and restores the complete JSON request. Oversized record and
+timeline payloads use the same chunk mechanism. A failed chunk/audit write prevents
+provider execution; unreferenced chunks are retained without per-record deletion
+or automatic garbage collection. Native audit fields are allowed for storage/inspection,
+NOT runtime role mapping or session message types. Thus "persist actual projected
+inputs before execution" means
+persist this opaque audit, not create an independent native message path; the
+consumed-input record remains the canonical neutral input snapshot. Outgoing call
+envelopes and correlated tool invocations are durable before dispatch; results
+return through incoming delivery before reuse.
+
+Root, helper, phase, and model-only turns still execute `AgentSession` through
+`Conversations.run_node_turn`; model-only means an empty registry, not another
+executor/dispatcher/scheduler. Scheduling remains single-process
+(`WEB_CONCURRENCY=1`). Steering uses the canonical message factory with
+`schedule=False` and the ready callback
+`after_delivery=conversations.schedule_input` only after intent-epoch effects
+are installed. Node/source completion, execution-store revision CAS, effects
+outside the acceptance guard, and deterministic-executor failure policy remain
+unchanged.
+
+Ordinary tool failures/provider interruptions remain durable outcomes rather
+than automatic workflow failures. Unknown-outcome mutations MUST NOT auto-replay.
+Terminal/cancelled receivers retain late asynchronous outcomes without
+resurrection, unauthorized dispatch, or lost partial activity. Child transcripts
+remain private. Restart/resume MUST reuse the same neutral log, inbox, adapter,
+correlations, and consumption positions. Legacy native-role and old delivery
+schema decoding stay confined to `messages.py` and the centralized
+activity/persistence decoder, not another live path.
+
+The complete contract and module table are in
+`../instructions/agent-session-delivery.instructions.md`. Root `AGENTS.md`
+references it with `@`; only supporting loaders expand that reference or apply
+its exact `applyTo` globs. Unsupported loaders MUST read the references directly.
+Instructions cannot ensure absolute compliance or LLM honesty. The coordinator
+MUST retain and run the mandatory AST source guard and behavior suites in
+`REQ-DEL`; missing required modules MUST fail with no hidden optional bypass.
+Neither prompts nor static guards alone prove complete behavior.
 
 ### Implemented so far
+
+Live tool activity is implemented for root and scoped conversations. Assistant
+text and call envelopes are durable before dispatch; each tool result is durable
+before the next model request. Explicit program validations and completion-time
+`verify_program_reference` checks render, including failures and reused results.
+Runtime
+checks have their own start/result correlation without fabricated model calls.
+Cards expose arguments, timestamps, duration, structured output, and failures.
+
+Ordinary tool faults return nonterminal results to their caller. Expected model
+transport/rejection and catalog failures interrupt only the affected turn;
+completed activity survives, the node accepts input, and the workflow stays
+running. The runtime records a local notification, not an agent-authored ask.
+Unexpected programming and persistence faults outside tool execution remain
+terminal. Cancellation is cooperative before requests and dispatch; synchronous
+calls may finish, but cancelled nodes cannot be overwritten by late completion.
+Skipped calls retain paired results without dispatching another operation.
+
+Root and scoped composers remain writable mid-turn. Only a message POST in
+flight prevents duplicate submission; failures retain drafts and show errors.
+Provider replay groups matching calls/results ahead of interleaved inbound
+notes, preserving durable arrival order. Scoped timeline history loads backward
+with the same thread filter until exhaustion instead of truncating to one page.
+
+Live UI delivery uses one chat timeline SSE route,
+`GET /v1/workspaces/{ws}/chats/{chat}/timeline/stream`, for durable messages,
+events, and execution snapshots. REST timeline history establishes the initial
+`after` watermark; `TimelineStream` tails greater sequences and resumes with
+`Last-Event-ID`. Legacy execution, chat-message, and sub-agent SSE routes are
+removed; execution and sub-agent REST `/events` replay endpoints remain.
+Frontend `timeline.svelte.ts` indexes events and snapshots by execution ID, and
+the pure `workflow-live.ts` projection derives a map of live workflow states.
+The singleton `effectiveExecution` is removed. Cards select their own execution
+ID from that map; concurrent workflows and scoped navigation do not open
+additional streams. Timeline execution snapshots are first-save state, not
+current-state watermarks: all available lifecycle events replay against them,
+even when their sequence precedes a late snapshot. Phase projection uses
+declared workflow phases and explicit phase executors, not helpers; phase
+navigation and event selection are scoped by execution ID and canonical phase.
+
+Frontend topology reads share a 64-entry cache keyed by backend, API base URL,
+workspace, workflow ID, and version, including tracked in-flight requests.
+Matching explicit-version definitions have a five-minute lifetime; failed,
+mismatched, and unversioned reads are removed on completion. This cache owns no
+mutable execution state. Workflow-card canvas animation pauses outside the
+viewport or while the document is hidden and resumes when visible.
+
+The shared Python harness provider caches successful catalogs, not validation
+results. The local `StudyValidator` delegates full-input validation reuse to the
+JIT `ValidationService`, bounded to 64 entries and 4 MiB of serialized payloads.
+Its opaque compiler identity
+covers compiled JIT behavior, current SDK/num sources, Cargo/toolchain
+configuration, relevant environment, and compiler executables. Successful probes
+are cached with fresh configuration and executable checks. Changed source or
+configuration invalidates both validation reuse and the actual compiled artifact
+through the compiler fingerprint; identity is rechecked before caching a result.
+Missing identity disables reuse. Infrastructure failures are not cached.
+Cargo JSON diagnostics establish `deterministicCompilerDiagnostic`; configuration
+rejections can be `cacheable` without being compiler diagnostics. MCP forwards
+validator-owned `reused`, `cacheable`, diagnostics, and optional
+`serverInfo.validationIdentity`, without filesystem access or compiler probes.
+Python transports neither maintain a validation LRU nor infer compiler identity
+or diagnostics from regexes over human-readable errors.
+
+Concrete model-provider boundaries normalize `httpx` transport and `OSError`
+failures (including SSL errors) into provider errors. `AgentSession` consumes
+those errors; it does not guess infrastructure failures from exception names.
+
+Discovery posts an early plan, authors committed studies, validates changed input,
+runs the latest validated ID, and inspects artifacts. Discovery, model creation,
+and strategy design share `prompts/sdk.py`: read matching SDK signatures/templates
+before authoring or repairing, apply targeted patches, and ask through
+`request_workflow_input` after three unsuccessful repairs. That compiler-repair
+limit is prompt guidance, not a runtime-enforced repair cap or workflow gate.
+
+The changed hypothesis-development topology is version `2.0.0`. Definition
+requests can name a version; unsupported historical versions return an explicit
+diagnostic rather than substituting today's legal edges. Persisted retired phase
+values remain readable independently of topology availability.
+
+The merged session registry includes `search_knowledge` and `read_knowledge`.
+Shared content ships under `src/thesis/knowledge/library/`; workspace content
+is confined to that workspace's repository `knowledge/` directory. Both are
+searched by default. Model scope narrows `WorkflowSpec.knowledge_scope`
+(`shared`, `workspace`, or `both`), resolved from trusted workflow attribution
+for phase agents and helper children. Serving reads `THESIS_KNOWLEDGE_SCOPE`
+when composing its workflow runtime. Results carry actual byte snapshot IDs,
+page versions and source-qualified references and are always data-only.
+
+`knowledge/embeddings.py` pins the semantic model to a commit and verifies
+model/tokenizer checksums. Loading is single-flight and successful vector caches
+include backend identity. Index construction and query embedding bind one
+backend per search operation; primary inference failure retries the entire
+operation once on the lexical fallback, never mixing vector spaces.
 
 The durable sub-agent runtime is implemented in `thesis.agent.runtime`:
 
@@ -21,70 +239,214 @@ The durable sub-agent runtime is implemented in `thesis.agent.runtime`:
   completion contract, and delegated budget;
 - `SubAgentLifecycle` enforces chat/workspace scope, maximum depth, maximum
   active children, delegated-budget inheritance, and the one-shot input rule;
-- `PhaseCompletionProtocol` implements the nested budgets exactly: three
-  construction attempts per agent turn, two repair turns, then operator
-  escalation, with durable repair epochs;
+- `SubAgentBudget` declares construction and repair budgets, but the live
+  completion path returns validation feedback without enforcing the nested
+  repair-turn budgets specified below;
 - `ControlToolService` is a thin adapter over the `Conversations` service: it
   records the spawn as a first-class tool invocation and delegates spawn,
   await, completion, and operator input to the conversation handles;
-- `DeliveryService` is the single delivery path for a child's result, a
-  workflow outcome, or an operator answer: it persists the typed datum at the
-  anchor and then routes that anchor's wake, durable before routed and
-  idempotent under retry, with `SubAgentNotifier` folded into it;
+- `DeliveryService` adapts child results, workflow outcomes, and operator answers
+  to the canonical incoming writer, then routes the anchor's wake, durable before
+  routed and idempotent under retry, with `SubAgentNotifier` folded into it;
 - `AgentSession` is the single durable model/tool turn loop that the chat path
-  and workflow path converge on: it sends the merged catalog, persists each
+  and workflow path use through `Conversations.run_node_turn`: it sends the merged catalog, persists each
   model and tool invocation as a first-class record, threads tool results back
-  as `tool` messages, stops on a terminal control tool, and enforces a safety
+  as neutral incoming messages, stops on a terminal control tool, and enforces a safety
   iteration cap;
-- chat transcript seeding is parameterized by anchor: the root prompt is seeded
-  only from root messages and a node only from its own, so one anchor's turns
-  never leak into another conversation;
+- `messages.decode_transcript` is the shared neutral durable-history decoder,
+  scoped by anchor: the root uses only root messages and a child only its own.
+  `Conversations._persist_turn` writes outgoing envelopes only; incoming
+  observations never repersist results. Runtime tool starts are activity and
+  their results use the canonical incoming writer;
 - starting a workflow returns its execution handle immediately and runs the
   execution detached; the outcome is delivered later at the caller's anchor
   through `DeliveryService`, so a workflow never executes inside the launching
   tool call;
 - the legacy `agent/reply.py` tool-calling provider and the
-  `HarnessToolDispatcher`/`WorkflowRuntime.tool_dispatcher` path are removed;
-  tool dispatch is the unified session registry and the plain provider remains
-  only as `create_app`'s non-tool fallback.
+  `HarnessToolDispatcher`/`WorkflowRuntime.tool_dispatcher` path are removed,
+  as is `agent/session_reply.py` (`SessionReplyProvider` and its queue/adapter).
+  `reply_for` and the legacy executor path are removed as well. Tool-enabled and
+  model-only composition both execute `AgentSession`; model-only sessions use
+  an empty tool registry, not a separate reply implementation.
 
 The conversation abstraction (`thesis-conversation-abstraction-v1`,
 REQ-034..REQ-040) is implemented in `thesis.agent.runtime.conversation` and
 `thesis.agent.runtime.child`:
 
 - one `Conversation` owns a transcript and turns for chats and sub-agents
-  alike: a chat is a conversation at the root anchor (the folded
-  `ChatReplyService` turn is its turn implementation, streaming through the
-  chat's delta sink), and a sub-agent is a nested conversation running the
-  durable session turn over its own anchored transcript;
+  alike: root and child anchors execute `AgentSession` through
+  `Conversations.run_node_turn`, with root activity published to the chat sink;
 - the `Conversations` service is the only upstream surface — `root`, `get`,
   `children`, `deliver`, and `spawn(returns_to, spec, prompt, kind)` — and owns
   the per-conversation workers (serialize, coalesce, mid-turn drain), the
   routing rule (root to itself, record anchors durable-only, every other
   conversation on its worker), and spawning;
+- per-conversation intake uses generations and monotonic durable message
+  positions. The model-boundary snapshot acknowledges only observed input;
+  consumed wakes do not schedule a duplicate turn and later input coalesces into
+  one follow-up. `ChatThread.input_consumed_positions` persists the high-water
+  mark by anchor (empty string for root). Recent-ID memory is bounded to 256,
+  and paired read/ACK callbacks permit idle state retirement only after durable
+  acknowledgement. Delayed positioned wakes remain fenced after retirement.
+  Position zero supports historical messages without promising durable deduplication
+  for them. Persistence I/O does not hold the global worker-map or intake guard;
+- child `send` routes through anchored answer admission, checking scope,
+  lifecycle, and operator policy before persistence and wake. It cannot bypass
+  admission by writing directly to the shared chat;
 - `ChildConversation` composes the return layer over an inner conversation:
   the `returns_to` anchor, `complete`/`fail`/`result`/`await_result`/
-  `children`/`cancel`, and one turn-end policy — `OneShotPolicy` completes a
-  one-shot child on its final answer and delivers it to the return anchor,
-  `ConversationalPolicy` keeps the conversation open, and phase children
-  never auto-complete because their completion is the engine-bound
-  `request_phase_completion` tool;
+  `children`/`cancel`, and one turn-end policy. Durable `CompletionMode` selects
+  `OneShotPolicy` (`complete_on_text`) or `ConversationalPolicy`
+  (`explicit_completion`), independently of the input `kind`.
+  `returns_to_sub_agent_id` stores the return anchor independently of parentage,
+  and `phase_executor` is explicit completion authority. Phase executors always
+  use explicit completion, even with one-shot input. Historical inference of
+  these fields is confined to `chat/persistence.py`, not live handle reconstruction;
 - the workflow engine sees only the service (`ports.conversations`) and the
   handles: phase children are spawned through `service.spawn` with the
   workflow node as their return anchor, phase results route through the
   service's delivery, and the engine builds no spawner, delivery, or scheduler
   of its own;
-- phase specs are the sealed union of frozen dataclasses —
-  `ConversationPhase`, `OneShotPhase`, `DeterministicPhase` — dispatched by
-  exhaustive match, so invalid combinations are unrepresentable and a
-  `DeterministicPhase` builds no conversation at all.
+- phase specs are the sealed union of frozen dataclasses:
+  `ConversationPhase`, `OneShotPhase`, `DeterministicPhase`, and `TerminalPhase`.
+  Exhaustive dispatch keeps invalid combinations unrepresentable. Deterministic
+  phases create no conversation; terminal phases have no executor or contract.
 
-The `hypothesis_development` workflow is now a nested package
-(`thesis/workflows/registry/hypothesis_development/`) with concern modules (`errors`,
-`primitives`, `phases`, `contracts`, `gates`, `prompts`, `composers`, `state`,
-`workflow`) behind a stable public facade. The retired sibling workflows
+`agent/runtime/activity.py` owns the immutable discriminated `ExternalInput`,
+`ModelOutput`, `RuntimeTool`, and `Delivery` contracts, their generated schemas,
+and the canonical activity decoder. Transcript seeding, anchor ownership,
+input recognition, and persistence consume that contract instead of independent
+metadata heuristics. Every activity carries `activityKind`; a record without
+canonical session data is not decoded.
+
+The coordinator and stream brokers are process-local, not distributed ownership
+leases. Serving entrypoints require `WEB_CONCURRENCY=1` and reject other values,
+including values greater than one. Programmatic launchers must retain one worker.
+
+The `hypothesis_development` workflow is a nested package
+(`thesis/workflows/registry/hypothesis_development/`) with `spec`, `doctrine`,
+`services`, `session_services`, `rebuild`, `piping`, `artifacts`, `state`, and
+the `phases`, `contracts`, `gates`, `prompts`, and `composers` concerns behind
+its public `__init__.py` facade. The retired sibling workflows
 (strategy development, autonomous discovery, and the standalone RCA loop) and
 their tests were removed.
+
+`workflows/runtime.py` defines the typed `WorkflowSessionServices`,
+`WorkflowSessionBindings`, and `RuntimeToolActivity` ports. The concrete
+`hypothesis_development/session_services.py` owns role policy, completion
+schemas, knowledge restrictions, strategy-authoring authority, and completion
+validation/application. HTTP serving composes these ports, not workflow policy.
+Spec-only session services remain bound when the harness/runtime is absent, so
+attributed helpers retain retrieval restrictions and phase schemas. Without an
+execution runtime, phase completion is denied, not silently accepted.
+Runtime-owned `verify_program_reference` checks use the conversation's internal
+activity writer; completion does not compile, execute, or repair program source.
+
+### Committed Workspace Programs
+
+`workspaces/programs.py::WorkspacePrograms` owns studies, strategies, and
+indicators under `studies/<program_id>/`, `strategies/<program_id>/`, and
+`indicators/<program_id>/`. Each contains `program.rs`, `manifest.json`, and,
+after validation, `validation.json`. The manifest records kind/ID, dated execution
+configuration with exact subscriptions, indicator IDs, and the indicator type.
+IDs select confined paths; models cannot supply workspace paths or source
+overrides in execution configuration. Author/update commits exact artifact bytes
+through a temporary Git index under the publication lock, refusing staged or dirty
+changes in those artifact files and excluding unrelated changes. Remote publication
+failure retains a pinned local-commit receipt for explicit publication reconciliation,
+not re-authoring or automatic execution replay.
+
+Agent-facing read, validate, and run select the latest committed contents, never
+working-tree source. Updates require the current content `expected_version`; source
+patches require one exact `expected` match and paired `replacement`. Content version
+hashes source and manifest file digests, including transitive indicator dependencies,
+not HEAD or the validation receipt. Every dependency is read from the same selected
+commit and assembled as a Rust module; changed dependencies invalidate validation.
+Indicators validate through an observation-only study wrapper and cannot run alone.
+
+Validation calls the injected harness `validate_study` or `validate_strategy`;
+compilation is authoritative, with no structural-only acceptance fallback. The
+committed receipt records the exact content identity, file hashes, source commit,
+SDK identity, acceptance, and bounded diagnostics. The service rechecks content
+and SDK identity before committing it. Runs require accepted validation matching
+the latest content version and current SDK identity, then call `run_study` or
+`run_backtest` with configuration assembled from committed content. Receipt commit
+updates do not themselves change content identity. Unknown execution outcomes
+require inspection before an explicit retry, never automatic replay.
+
+`agent/runtime/program_tools.py` binds these operations to trusted `ToolContext`
+workspace scope and the existing registry/dispatcher/inbox. Author/update alone
+accept source or patches; validation/run accept only `program_id`; list tools
+enumerate committed IDs with an optional prefix and bound. Program bindings
+replace conflicting raw harness and legacy author registrations. Roots receive
+the composed service; workflow bindings grant it only to the owning discovery,
+model-creation, strategy-design, or strategy-backtesting executor, not helpers
+merely inheriting tool names. The effective tool policy still filters the catalog.
+
+`read_sdk_reference` supplies bounded line ranges from matching local SDK sources,
+the `decimal` kernel topic, and study/strategy/indicator templates. `template=basic` renders declared
+subscriptions into the matching template. Version and ABI metadata come from
+the SDK's `Cargo.toml` and `src/abi.rs` and must match the canonical packaged SDK.
+SDK identity hashes Cargo manifests and Rust source files across `strategy-sdk`,
+`contracts`, and `num`; dependency changes invalidate stored validation. The wheel
+and source distribution carry these canonical crates with portable relative Cargo
+dependencies, not a separate Python-side SDK copy. Remote harness access does not
+supply local references. Missing or mismatched sources fail explicitly. The
+study/strategy/indicator templates in `programs.py` are shared by reference reads
+and basic authoring; they are minimal SDK contracts, not completed research models.
+
+Model creation and strategy design complete with artifact references
+(`workspaceId`, `kind`, `programId`, `gitCommit`, content-hash `version`), not inline
+Rust. Model references also carry research description, outputs, and tests.
+`session_services.py` verifies the pinned reachable commit against the latest
+content and accepted stored validation, including file hashes and SDK identity;
+the reference commit must match the latest validation's source commit. Completion
+does not compile, run, or rewrite source. Workflow composition uses the
+`workflows/research_models.py::ProgramSnapshots` read port to resolve accepted
+commits and their dependency snapshots; later edits cannot silently change the
+accepted model. Prompts own SDK lookup, targeted repair, and conversational review;
+there is no runtime compiler-repair cap. The general session iteration ceiling
+and cancellation remain separate safety boundaries.
+
+### Workflow Composition
+
+`spec.phase_declarations()` is the one authoritative declaration of live phases,
+edges/pipes, schemas, executor/tool/knowledge policies, and payload folds.
+Secondary lookup maps and the registered definition derive from it. Live
+acceptance and durable replay both apply the pure, I/O-free
+`rebuild.fold_transition` through the core's `reduce_transition` port: validate
+source/sequence/edge, fold completion payload, then apply the declared pipe once.
+Rebuild reads transitions, not the workspace hypothesis side-store.
+
+Acceptance verifies current intent epoch and the owning `phase_executor`,
+execution/chat/parent/phase, and attempt identity. Under the shared
+`ChatService.execution_guard` used by steering, cancellation, and job attachment,
+it rechecks those facts, commits the transition with execution-store revision CAS,
+projects the phase, and closes the accepted executor before releasing the guard.
+Events, child-result delivery, and successor entry occur outside that guard.
+This is a single-process fence plus store CAS, not a cross-store transaction.
+
+The HTTP factory registers root and `/api` routes on the same app; both resolve
+the same app-state services and authentication. Defaults are fresh per factory,
+composed once, and never created lazily by requests. Production explicitly uses
+`in_memory=False`; absent services return typed 503 errors. `http/schema.py`
+exports the app's OpenAPI 3.1 plus runtime activity/message/datum/tool schemas;
+`http/wire.py` derives durable record fields from their dataclasses and response
+envelopes from typed models, including complete input receipts and tree records.
+Schema generation and wire validation are implemented. This does not establish
+complete side-effect recovery or output-publication receipts for every operation.
+
+Cosmos commits a message or event by writing the per-chat sequence counter CAS
+and the item create in one transactional batch in the workspace partition.
+Messages, events, and immutable first-save execution snapshots are the same
+documents the timeline reads, so there is no catalog-to-timeline projection,
+deferred repair, or second container. A failed batch consumes no sequence;
+concurrent writers retry conflicts. Timeline readers snapshot the in-process
+commit version before reading durable items and wait for a version change;
+the database sequence remains the only cursor, and a recovery interval bounds a
+lost wake. `open_cosmos_chat_stack` and `open_execution_store` call
+`ensure_database`, which creates the database and catalog/executions containers
+if absent. Opening these stacks is not side-effect-free.
 
 The harness `run_study` tool is implemented across the Rust workspace and the
 harness-hosted MCP endpoint:
@@ -93,41 +455,45 @@ harness-hosted MCP endpoint:
   a remote `POST /v1/studies/jobs` route, and a `harness study-job` entrypoint
   that writes a `study.json` artifact with the `study` shell;
 - the study execution mode is Rust-JIT: the authored source compiles through
-  `harness-strategy-jit` against `harness-strategy-sdk` ABI v3 and implements
-  `StudyProgram` (`new(parameters)`, `on_bar_frame(&BarFrame)`,
-  `on_stop(&mut MetricPublisher)`), so a study folds replayed lake bars only,
-  has no order path by construction, never submits an order, and is never
+  `harness-strategy-jit` against `harness-strategy-sdk` ABI v4 and implements
+  `MarketConsumer<Context = ObservationContext>` plus `StudyProgram`
+  (`new(parameters)`, `on_stop(&mut MetricPublisher)`). It observes subscribed
+  quotes, trades, and atomic frames through the common callbacks, has no order
+  path by construction, never submits an order, and is never
   recorded as a backtest;
 - `validate_study` is the capability-gated authoring gate beside `run_study`:
   it takes the authored model document itself (`model.source` plus its
   `harnessConfiguration.start`/`.end`), derives the runtime study job
   internally, and compiles, loads, and constructs the program over the managed
-  JIT workspace without replaying data. Thesis calls it before applying a
-  hypothesis-creation completion, and the creation agent may call it while
-  drafting, so a source that cannot build is repaired in the asking agent's
-  turn instead of failing the trials phase after acceptance;
+  JIT workspace without replaying data. The agent-facing workspace wrapper takes
+  only `program_id` and loads committed source/configuration before calling that
+  harness boundary. The model-creation agent calls it before submitting completion;
+  completion verifies the stored receipt without recompiling. A source that
+  cannot build is repaired in the asking agent's turn instead of failing the
+  trials phase after acceptance;
 - a research model is an authored Rust study program published as a workspace
   artifact whose `on_stop` publishes its fitted parameters as `fit.<parameter>`
   metrics; Thesis freezes them as the content-addressed fitted-model artifact;
 - Thesis now calls `run_study` through `McpStudyRunner` over the harness-hosted
   MCP endpoint, and its research-model bundle declares the `study` shell, the
-  declared bar interval, and the authored Rust study program.
+  exact declared subscriptions, and the authored Rust study program.
 
 The `strategy_design` phase is conversational and prose-first
 (`prompts/strategy_design.py`): it posts the strategy proposal under
 `### Strategy`, `### Entries & Exits`, and `### Falsifier Re-checks`, asks
 through `request_workflow_input`, and finalizes only after the operator
 confirms. Strategies are pure Rust authored against `harness-strategy-sdk`
-and are published as workspace artifacts under `strategies/<slug>/<version>/`
--- never a standalone store record. `author_strategy` and the Strategies
-projection are implemented through `thesis.strategies.WorkspaceStrategyArtifacts`.
-Completion verifies a persisted publication receipt, not model-authored hashes
-alone. Validation checks structure without compiling or executing Rust;
-see `strategy-authoring-plan.md` for publication and capability boundaries.
+and are committed workspace programs under `strategies/<program_id>/`, never a
+standalone store record. The program-bound `author_strategy`/`update_strategy`
+tools commit source; `validate_strategy` compiles through the harness before
+reference-based completion. The older `WorkspaceStrategyArtifacts` service and
+Strategies HTTP projection remain separate domain surfaces, not the program-bound
+workflow's authoring or completion path.
 
-Still to implement: wiring conversation-phase gate failures through durable
-repair turns, which changes the current "gate failure pauses immediately"
-behavior and therefore lands together with the matching phase-test updates.
+The implemented boundaries above do not establish completion of every normative
+repair-budget or restart requirement below. Operator workflow gates remain
+removed; domain contract/evidence validation is distinct from conversational
+operator review.
 
 ### Accepted v1.0.1 decisions
 
@@ -166,7 +532,7 @@ without inventing or dropping intermediate activity.
 - Let every agent-backed phase call its permitted MCP tools directly.
 - Make sub-agents independently durable and usable from either chat or a
   workflow phase.
-- Preserve the current hypothesis-creation and verdict user experience.
+- Preserve the current model-creation and verdict user experience.
 - Validate phase completion contracts and evidence deterministically.
 - Split the runtime and workflows into maintainable, nested packages.
 
@@ -202,11 +568,39 @@ attribution requirements.
 | Completion contract | The phase-specific JSON value supplied to `request_phase_completion`. |
 | Construction | Parsing, validating, and normalizing a completion contract into a typed domain object. |
 | Acceptance gate | Deterministic code that validates a constructed contract against durable workflow state and evidence. |
-| Repair turn | A durable system turn that explains why no completion request was accepted and asks the same sub-agent to try again. |
-| Study | A durable bar replay execution with no order execution. It runs one authored Rust `StudyProgram` over lake bars; a research-model program publishes its fitted parameters as `fit.<parameter>` metrics in `on_stop`. It is never represented as a backtest or a strategy. |
+| Repair turn | Durable incoming runtime feedback that explains why no completion request was accepted and asks the same sub-agent to try again. |
+| Study | A durable market replay execution with no order execution. It runs one authored Rust `StudyProgram` over exactly its subscribed lake inputs (bars, quotes, and/or trades, including owned indicator requirements); a research-model program publishes fitted parameters as `fit.<parameter>` metrics in `on_stop`. It is never represented as a backtest or a strategy. |
 | Tool context | Trusted attribution attached by the runtime to a tool invocation. Models cannot provide or override it. |
 
 ## Requirements
+
+**REQ-DEL: Neutral delivery and executable enforcement.** Roots, helpers, phases,
+and model-only sessions MUST follow the Option 1 contract above, with one neutral
+inbox, one incoming storage writer, one pure live/replay provider projection,
+opaque request audits, success-bound ACKs, and no alternate execution path.
+The coordinator owns test edits and integration verification after edits freeze;
+this documentation-only update does not certify implementation or test results.
+
+Required assertions and verification paths:
+
+| Assertion | Verification path |
+| --- | --- |
+| Required modules fail when absent; AST imports/calls and aliases reject native session construction, hidden incoming writers, parallel result queues, and adapter effects; reference-only audits, unconditional pre-provider persistence, terminal preservation, exact root reference/globs, and mutation controls remain mandatory with no optional bypass | `tests/thesis/agent/runtime/test_delivery_architecture.py` |
+| Every source (operator, initial prompt, tool result, helper result, workflow outcome, runtime notification/check, repair, asynchronous completion) converges on the writer; receipt identity, arrival order, assigned input position, retries, visibility-before-wake prevention, and one receipt for multi-datum outcomes | `tests/thesis/agent/runtime/test_canonical_delivery.py`, `test_initial_intake.py`, `test_session_delivery.py`, `test_session_live_activity.py` in the same directory |
+| Canonical decode and live/replay equivalence, exact scoped correlation, only runtime-configured initial bootstrap projects as native system, a record without canonical session data is not decoded, foreign/reused IDs, partial groups, and interleaved inputs without fabrication or privilege | `tests/thesis/providers/test_session_adapter.py`, `tests/thesis/agent/runtime/test_session_delivery.py` |
+| Mandatory opaque audit retains actual protocol mapping, advertised tool catalog and their versions/options, ordered canonical message references and request IDs without full canonical duplication; detached, hashed caller persistence and Cosmos request chunks precede execution and survive success/failure terminal updates; adapter stays pure and audit/output persistence faults prevent execution/ACK/dispatch as applicable | `tests/thesis/agent/runtime/test_session_input_snapshot.py`, `tests/thesis/providers/test_session_adapter.py`, `tests/thesis/cosmos/test_chunks.py` |
+| Live inbox reconciles scoped authoritative durable order at each eligible model boundary; arrivals after provider pull and before output persistence never rearrange the live snapshot | `tests/thesis/agent/runtime/test_arrival_reconciliation.py`, `tests/thesis/agent/runtime/test_session_input_snapshot.py` |
+| Only pending inputs actually included in a successful provider request are ACKed after output persistence; empty/unusable completion interrupts without ACK or invented empty reply; initial pending input, mid-model and post-provider arrivals, interrupted/provider/output/ACK faults, partial activity, and results after terminal requests stay truthful and unconsumed until eligible | `tests/thesis/agent/runtime/test_session_delivery.py`, `test_canonical_delivery.py`, `test_session_input_snapshot.py` in the same directory; `tests/thesis/agent/runtime/test_arrival_reconciliation.py` |
+| Synchronous and asynchronous completion, skipped/not-started calls, unknown mutation outcomes, terminal/cancelled late delivery, and private child transcripts do not resurrect nodes or replay effects | `tests/thesis/agent/runtime/test_canonical_delivery.py`, `test_session_live_activity.py`, `test_durable_architecture.py` in the same directory; `tests/thesis/workflows/registry/hypothesis_development/test_live_tool_recovery.py` |
+| Restart/reload/resume preserve all incoming sources and per-anchor input/consumed positions, pending partial groups, correlations, idempotency, delayed-wake fences, and the same projection, without synthetic results or side-effect replay | `tests/thesis/agent/runtime/test_durable_architecture.py`, `test_turn_retirement.py`, `test_unified_conversation.py` in the same directory |
+| Steering epoch is installed before canonical wake for synchronous and asynchronous workers; root/model-only routing, source completion, node lifecycle, store CAS, and effects outside the acceptance guard remain unchanged; deterministic executor faults still fail workflows | `tests/thesis/workflows/test_steering_delivery.py`, `test_unified_session.py` in the same directory; `tests/thesis/http/test_input_acknowledgement_wiring.py`, `test_serving_midturn.py` in the same directory; `tests/thesis/workflows/registry/hypothesis_development/test_acceptance_fence.py`; `tests/thesis/agent/runtime/test_lifecycle_acceptance_guard.py` |
+
+These suites are required verification locations, not a claim that every row is
+already completely asserted. The coordinator MUST close/report coverage gaps,
+including all-source restart/input-position and pending-partial cases, and run
+the canonical focused `uv run --extra dev pytest -p no:cacheprovider <paths>`
+checks. Repository-wide verification remains the coordinator's one post-freeze
+integration pass under the root execution policy.
 
 **REQ-001: Deterministic phase machine.** A workflow MUST define an explicit,
 versioned set of phases and legal transitions. Only deterministic workflow code
@@ -217,8 +611,9 @@ MAY persist a `PhaseTransition`.
 - Verification: Attempting an undeclared transition fails without changing the
   execution phase.
 
-**REQ-002: Three phase kinds.** Every phase MUST be declared as exactly one of
-`conversation`, `one_shot`, or `deterministic`.
+**REQ-002: Explicit phase kinds.** Every phase MUST be declared as exactly one of
+`conversation`, `one_shot`, `deterministic`, or `terminal`. Terminal outcomes have
+neither an executor nor a completion contract.
 
 - Verification: Workflow registration rejects a missing or unsupported phase
   kind.
@@ -226,7 +621,8 @@ MAY persist a `PhaseTransition`.
 **REQ-003: Sub-agent foundation.** Every conversation or one-shot phase MUST
 run through a durable sub-agent attached directly to the execution's chat. The
 phase attempt MUST reference the sub-agent id. A deterministic phase MUST NOT
-create a sub-agent solely to represent its execution.
+create a sub-agent solely to represent its execution. Terminal phases MUST NOT
+create an executor or sub-agent.
 
 - Rationale: Sub-agents are a general chat capability. Workflow phases are one
   consumer of that capability, not its owner.
@@ -250,18 +646,18 @@ contract and evidence references; the gate determines `advance`, `loopback`,
 `remain`, or `fail` and selects any target through the declared transition
 table.
 
-**REQ-007: No model-selected target.** `request_phase_completion` MUST NOT
-accept a target phase. A completion contract MAY contain domain intent such as
-`continue` or `loop_back`; deterministic gate code maps that intent to a legal
-transition.
+**REQ-007: Declared targets only.** A completion contract MAY name a target
+from the phase's declared successors; the engine MUST validate it against the
+registered transition table. A phase with `on_complete` MAY omit the target and
+use that declared successor. Model output MUST NOT introduce an arbitrary edge.
 
 **REQ-008: Complete durability.** All sub-agent state, conversation turns,
 model invocations, tool invocations, results, completion requests, validation
 results, and workflow transitions MUST be persisted before their effects are
 treated as visible or complete.
 
-**REQ-009: Caller receives tool result.** Every tool invocation MUST append a
-durable `tool` turn to the conversation of the agent that invoked it. Tool
+**REQ-009: Caller receives tool result.** Every tool invocation MUST deliver one
+durable neutral incoming receipt to the conversation of the agent that invoked it. Tool
 results MUST NOT be delivered only through an execution event, UI stream, or
 child conversation.
 
@@ -287,7 +683,10 @@ SubAgentRecord
   workflow_execution_id?       # attribution only
   phase_attempt_id?             # attribution only
   spec_version
-  kind                         # conversation | one_shot
+  kind                         # conversation | one_shot (input policy)
+  completion_mode              # complete_on_text | explicit_completion
+  returns_to_sub_agent_id?      # null for the root return anchor
+  phase_executor               # explicit workflow-completion authority
   role
   allowed_tools
   status                       # pending | running | needs_input | completed | failed | cancelled
@@ -302,10 +701,12 @@ SubAgentRecord
 `workflow_execution_id` and `phase_attempt_id` are optional attribution links.
 They do not make the workflow the owner of the sub-agent.
 
-Each sub-agent owns a durable ordered conversation. Supported turn roles are
-`system`, `user`, `assistant`, and `tool`. Assistant tool-call requests and
-their tool results MUST appear in the order seen by the model. A turn MAY link
-to one or more first-class invocation records.
+Each sub-agent owns a durable ordered conversation. Chat records retain
+`system`, `user`, `assistant`, and `tool` presentation fields, while canonical
+content is persisted under `data['sessionMessage']`. Decoding is canonical-only;
+neither presentation nor native audit roles are session message types. Provider projection MUST preserve explicit call/result correlation
+without rewriting durable arrival order. A turn MAY link to first-class
+invocation records.
 
 ### First-Class Invocations
 
@@ -337,15 +738,16 @@ sub-agents, and workflow phase sub-agents. It MUST:
 3. Persist a model invocation request before contacting the provider.
 4. Persist the assistant response or tool-call turn before dispatching tools.
 5. Dispatch each tool with trusted tool context.
-6. Persist each tool invocation and result before returning the result to the
-   model as a `tool` turn.
+6. Persist each tool invocation before dispatch and deliver its result through
+   the injected inbox persistence port before subsequent provider projection.
 7. Repeat until the model yields, a control tool is accepted, a process fault
    occurs, or a safety budget stops the turn.
 8. Save a checkpoint after each durable boundary so recovery never repeats a
    completed side effect.
 
-The current separate single-shot workflow model path and chat-only tool loop
-MUST converge on this abstraction.
+Root chat and phase/helper children use this abstraction through the conversation
+service, including model-only composition with an empty registry. There is no
+separate plain reply fallback or legacy executor.
 
 ## Operator Input Semantics
 
@@ -474,7 +876,7 @@ The tool handler MUST process a completion request in this order:
 5. Evaluate the deterministic acceptance gate against durable state and
    evidence.
 6. Persist the gate result.
-7. Return the gate result to the calling agent as a durable tool turn.
+7. Return the acceptance result to the calling agent as a durable incoming receipt.
 8. If the result is `advance`, `loopback`, or `fail`, apply the corresponding
    deterministic state-machine action after the tool result is durable.
 
@@ -498,6 +900,12 @@ the phase active so the agent can call more tools, revise its evidence, request
 operator input, or submit again.
 
 ### Nested Repair Budgets
+
+The following is the accepted design baseline, not current enforcement. The live
+completion path returns in-turn validation feedback but has no runtime repair-turn
+counter or compiler-repair cap. `SubAgentBudget` fields alone do not enforce these
+limits; `prompts/sdk.py` asks for operator input after three unsuccessful compiler
+repairs. The session retains its independent tool-iteration safety ceiling.
 
 Each agent turn permits three failed completion-contract construction attempts.
 The result of each attempt is returned to the model in the same agent turn. An
@@ -561,6 +969,19 @@ own transition before the next phase begins. Its failure is the execution's
 failure, recorded and delivered durably — never a silently wedged execution and
 never a delayed tool response.
 
+A deterministic executor or its invalid completion contract MUST fail the
+workflow. It MUST NOT be converted into an agent-recoverable tool failure or
+spawn an agent to repair deterministic execution. This is distinct from an
+agent's tool error or an interrupted model turn.
+
+`McpBacktestRunner` and `McpStudyRunner` send configuration mappings inline;
+explicit path strings refer to the harness host. They join only confirmed
+in-flight jobs. The exact domain not-found response permits a launch; an
+unavailable transport, authentication/protocol error, or unknown state is not
+evidence of absence and fails the deterministic call. Terminal jobs may be
+relaunched for revised artifacts. Polling has a monotonic deadline, bounded
+backoff, and cancellation checks before launch and around status queries.
+
 Workflow failure outcomes are delivered to the launching anchor and wake that
 conversation so its agent can surface the failure to the operator. Whether a
 new execution starts is the agent's judgement from the conversation — a
@@ -569,14 +990,14 @@ tool-result evidence so the outcome is visible: results with their assistant
 call envelopes replay as native tool messages, while unattached results and
 asynchronous notifications replay as structured inbound notes.
 
-Before hypothesis creation completes, the newly submitted falsifier
+Before model creation completes, the newly submitted falsifier
 observables must be declared in that submission's `model.outputs`, and its
 source must contain exact literal publications for those outputs. A mismatch
 returns a repair response before the phase transition commits. Prior model
 outputs do not satisfy a revised model's contract. The trials phase retains
 its metric-presence check for publications skipped by runtime branches.
 
-Creation argument repair preserves the operator-approved statistical model
+Model-creation argument repair preserves the operator-approved statistical model
 and complete falsifier suite; diagnostic stubs are not research completions.
 The prompt and completion schema explicitly distinguish testing data
 availability from testing the claimed regularity and its negative control.
@@ -588,7 +1009,7 @@ nodes do not. Terminal nodes are not run again by a queued worker turn.
 ## Harness Study Tool
 
 Quant-harness MUST publish `run_study` as a real MCP tool, served by the
-harness-hosted MCP endpoint. A **study** is a durable bar replay execution with
+harness-hosted MCP endpoint. A **study** is a durable market replay execution with
 no order execution. The tool replaces the synthetic `harness.research_model`
 label and Thesis-side direct invocation of `ResearchModelRunner` from workflow
 code.
@@ -597,15 +1018,27 @@ code.
 
 A study is a statistical replay, not a trading strategy. When it runs a
 research model, that model is an authored Rust program compiled through
-`harness-strategy-jit` against `harness-strategy-sdk` ABI v3 that implements
-`StudyProgram` (`new(parameters)`, `on_bar_frame(&BarFrame)`,
-`on_stop(&mut MetricPublisher)`) and publishes its fitted parameters and
-observables as `fit.<parameter>` metrics in `on_stop`. The only context
-capability a study program may use is `MetricPublisher`; it sees no order,
-position, sizing, portfolio, or venue surface, and ticks are not part of the
-study contract. Strategies remain tick-based: a `StrategyProgram` receives
-quotes and trades with an order sink and produces fills with portfolio
-accounting, costs, and risk.
+`harness-strategy-jit` against `harness-strategy-sdk` ABI v4. It implements
+`MarketConsumer<Context = ObservationContext>` for market callbacks and
+`StudyProgram` for construction (`new(parameters)`) and final publication
+(`on_stop(&mut MetricPublisher)`). Fitted parameters use `fit.<parameter>`;
+observables use their exact declared output names. `ObservationContext` has no
+order capability, and a study sees no position, sizing, portfolio, or venue
+surface. Strategies implement `MarketConsumer<Context = OrderSink>` for the
+same quote/trade/frame callbacks; `StrategyProgram` retains `new`, `on_start`,
+`on_fill`, and `on_stop`, with execution, costs, and risk owned by the harness.
+
+`subscriptions(&self) -> Vec<Subscription>` declares each consumer's own inputs:
+`Bars { symbols, interval }` (`1min` or `1d`), `Quote { symbols }`, or
+`Trade { symbols }`. `indicators(&mut self) -> Vec<&mut dyn Indicator>` exposes
+references to owned dependencies, including nested indicators. SDK indicators
+implement `MarketConsumer<Context = ObservationContext>` plus `Indicator::value`.
+Declarations and topology MUST remain stable after construction; cycles and
+zero-sized indicator dependencies are rejected. Dependencies update before
+their parent, and routing filters every consumer's own types, symbols, and
+interval. Authored bar callbacks use `on_bar(&BarFrame, &mut Self::Context)`;
+there is no raw single-bar study callback. The ABI's internal `on_bar_frame`
+vtable slot is not an authored trait method.
 
 Running a study through the backtest boundary is prohibited because it conflates
 two different contracts and produces a "backtest run" record, manifest, artifact
@@ -636,18 +1069,24 @@ The tool spans the harness Rust workspace and the harness-hosted MCP endpoint:
    entrypoint runs one configuration and writes the canonical `study.json`.
 2. The study execution mode is Rust-JIT: the authored source compiles against
    the pinned SDK ABI (the loader rejects an artifact built against a different
-   version) and is driven over replayed bars only, never binding order,
+   version) and is driven over exact subscribed inputs, never binding order,
    position, sizing, portfolio, or venue capability.
-3. The study configuration declares `shell: study` and `data.bar_interval`
-   (`1min` or `1d`). The harness ensures the window's bars through the market
-   lake and streams them from the lake read route through
+3. The study configuration declares `shell: study` and `data.subscriptions`.
+   After construction, ABI v4 exposes the canonical source-and-dependency union
+   as JSON. The echo MUST canonically equal that union before acquisition.
+   The harness ensures and reads exactly those types, symbols, and bar intervals
+   through the market lake via
    `harness-lakeclient`; the harness never reads lake files or links lake
    storage, and the lake can never be bypassed with a local path.
-4. Thesis's research-model adapter takes the model's declared
-   `harnessConfiguration.interval` (`1min` or `1d`) and its declared window and
-   re-homes them into the emitted study configuration as `data.bar_interval`
-   and the run window; a missing or invalid interval fails the run loudly
-   before any replay.
+4. Thesis's research-model adapter preserves
+   `harnessConfiguration.subscriptions` as `data.subscriptions` and materializes
+   the declared window without widening it. `validate_study` compiles, loads,
+   constructs, returns effective `subscriptions`, and rejects an unequal echo
+   without fetching data. Only one distinct bars interval is supported across
+   a run, including dependencies and instances; conflicts fail before any lake
+   ensure/read. Tick-only studies need no global interval. Legacy interval-only
+   documents remain readable, but old authored source MUST migrate to the
+   current SDK API and compiled artifacts MUST rebuild for ABI v4.
 5. Thesis calls `run_study` through `McpStudyRunner` over the hosted MCP
    endpoint and binds phase completion to the returned study's metric
    references; the `fit.<parameter>` metrics freeze as the content-addressed
@@ -657,8 +1096,8 @@ The tool spans the harness Rust workspace and the harness-hosted MCP endpoint:
 
 An existing study configuration document is passed by path (`config_path`) or
 inline (`config`), exactly like `run_backtest`. The configuration declares the
-`study` shell, the `data` block with the symbol universe, the sample window,
-and `data.bar_interval`, and one JIT-authored program instance whose
+`study` shell, the sample window, and the `data` block with exact subscriptions,
+and one JIT-authored program instance whose
 `parameters.source` is the Rust study program and whose `bundle_hash` equals
 the SHA-256 of that source:
 
@@ -669,7 +1108,10 @@ start: "2020-01-01T00:00:00Z"
 end: "2025-12-31T00:00:00Z"
 data:
   symbols: [SPY]
-  bar_interval: 1d
+  subscriptions:
+    - data_type: bars
+      symbols: [SPY]
+      interval: 1d
 strategy_instances:
   - instance_id: research-model-...
     implementation: jit
@@ -680,17 +1122,29 @@ strategy_instances:
       source: |
         use harness_strategy_sdk::serde_json::Value;
         use harness_strategy_sdk::{
-            export_study_program, BarFrame, MetricPublisher, StudyProgram,
+            export_study_program, BarFrame, MarketConsumer, MetricPublisher,
+            ObservationContext, StudyProgram, Subscription,
         };
 
         struct Model;
+
+        impl MarketConsumer for Model {
+            type Context = ObservationContext;
+
+            fn subscriptions(&self) -> Vec<Subscription> {
+                vec![Subscription::Bars {
+                    symbols: vec!["SPY".into()],
+                    interval: "1d".into(),
+                }]
+            }
+
+            fn on_bar(&mut self, _frame: &BarFrame, _ctx: &mut ObservationContext) {}
+        }
 
         impl StudyProgram for Model {
             fn new(_parameters: Value) -> Self {
                 Self
             }
-
-            fn on_bar_frame(&mut self, _frame: &BarFrame) {}
 
             fn on_stop(&mut self, metrics: &mut MetricPublisher) {
                 let _ = metrics.publish("fit.baseline", 0.5);
@@ -710,12 +1164,20 @@ The tool MUST:
 1. Compile the configuration's authored Rust program through the JIT seam and
    load it behind the SDK ABI (cached by source digest, program kind, SDK
    version, toolchain digest, and SDK ABI version).
-2. Resolve point-in-time data under the experiment contract: ensure the
-   interval's bars through the market lake, then stream them from the lake read
-   route; no direct lake-file access exists.
-3. Assemble same-interval bars into atomic frames and call `on_bar_frame`
-   once per observed interval at its availability time, then run `on_stop`
-   once after the replay.
+2. Resolve and validate the compiled source-and-dependency union and optional
+   config echo before acquisition. Ensure/read exactly the study's effective
+   subscriptions through lake routes; no direct lake-file access exists. Bars
+   ensures fetch provider bars or derive from already stored trades, never
+   trigger undeclared trade fetching. Backtests separately add quote/trade
+   execution feeds. The manifest distinguishes `effective_subscriptions`,
+   `execution_subscriptions`, and their deduplicated `acquired_subscriptions`
+   union; execution inputs do not belong in the consumer echo.
+3. Assemble subscribed same-interval bars into atomic frames and call common
+   `MarketConsumer` callbacks with dependency-first, consumer-local routing.
+   Mixed replay uses one availability-ordered causal queue: at equal time,
+   ticks precede completed frames, then generated execution events. Call
+   `on_bar` at frame availability, never bar start, and `on_stop` once after
+   replay.
 4. Collect the metrics published by `on_stop`: every publication is validated
    host-side (finite value, non-reserved name), a rejected publication fails
    the run even when the program ignores it, and the model's fitted parameters
@@ -725,7 +1187,7 @@ The tool MUST:
 6. Publish the canonical `study.json` run artifact and its result set
     (including `metrics.json`) under the study artifact kind.
 
-Each `BarFrame` carries `interval_start_ns`, `interval_end_ns`,
+Each `BarFrame` carries `interval`, `interval_start_ns`, `interval_end_ns`,
 `available_at_ns`, exact-decimal `bars_by_symbol`, and explicit
 `missing_symbols`. The harness uses the observed interval union: it does not
 invent all-missing frames, forward-fill, or join symbols by row position.
@@ -736,8 +1198,10 @@ daily bounds use real XNYS sessions including DST and early closes; crypto
 daily bounds use UTC days. Mixed equity/crypto daily intervals are rejected.
 Duplicate symbol/interval rows, unexpected symbols, and off-grid starts fail
 validation. Raw replay counts/fingerprints remain distinct from frame dispatch
-counts. SDK ABI v3 invalidates older compiled artifacts; single-bar study
-sources must be updated to the frame callback. Tick strategies are unchanged.
+counts. SDK ABI v4 invalidates older compiled artifacts; authored studies and
+strategies MUST move market methods into `MarketConsumer` and declare exact
+subscriptions. `new` and `on_stop` remain in the specialized program impl;
+strategies also retain `on_start` and `on_fill` there.
 7. Record trusted chat, conversation, sub-agent, workflow, phase, and
    invocation attribution.
 
@@ -758,35 +1222,73 @@ to a backtest run.
 
 ## Hypothesis Development Workflow
 
-The current operator experience remains unchanged, but phase wiring changes as
-follows.
+The workflow runs discovery -> model creation -> falsification trials ->
+verdict -> the strategy chain. Phase wiring is as follows.
 
 | Phase | Kind | Agent behavior | Completion contract and deterministic action |
 | --- | --- | --- | --- |
-| `requested` | deterministic | None | Validate intake; advance to creation or fail. |
-| `hypothesis_creation` | conversation | Propose the statistical model, falsifiers, controls, and Layer B monitors. Yield so the operator can confirm or revise. After clear confirmation, call `request_phase_completion`. | Construct `HypothesisCreationCompletion`; apply falsifiability, model-output, and plan gates; advance to trials or remain. |
-| `falsification_trials` | one-shot | Call `run_study` and artifact tools directly, inspect results, author the interpretation, then request completion. | Bind every falsifier/control to a recorded run metric and artifact; advance to verdict or remain. |
-| `verdict` | conversation | Present the recorded deterministic verdict and ask whether to continue or loop back. After the operator replies, submit interpreted intent. | Construct `VerdictCompletion`; verify it refers to the latest operator message and verdict; map `continue` or `loop_back` through the transition table. |
-| `strategy_design` | conversation | Explain the strategy in prose, ask the operator to confirm or revise, and author it through `author_strategy` as Rust source against `harness-strategy-sdk`. Finalize only after the operator confirms and the strategy is published. | Validate the Rust workspace bundle (source, tests, manifest), the sandbox result, and the falsifier-bound Layer B exits; the published bundle is a workspace artifact under `strategies/<slug>/<version>/`, never a store record. Advance or remain. |
-| `strategy_backtesting` | one-shot | Call harness backtest and artifact tools directly, interpret the result, then request completion. | Resolve the recorded run; advance to optimization on success or loop to strategy RCA on failure. |
+| `discovery` | conversation | Run small targeted studies (`validate_study`, `run_study`, `get_run`, `list_artifacts`, `read_artifact`) on the starting premise, record every attempt including negative results, and identify ONE candidate opportunity with its signal, information timing, direction, holding period, profit source, expected effect, and main competing explanation. Stop when nothing is worth pursuing. | Construct the discovery completion (`candidate`, `attempts`, `untouchedData`, `limitations`); advance to model creation. A verdict restart re-enters the same durable conversation with only the superseding verdict brief. |
+| `model_creation` | conversation | Turn the accepted discovery candidate into ONE statistical model, pre-register the falsifier tests and controls from the knowledge cards, author the research model, and call `validate_study` to compile-check it. Yield so the operator can confirm or revise. After clear confirmation, call `request_phase_completion`. | Construct the model-creation completion; apply falsifiability, model-output, and plan gates; advance to trials or remain. |
+| `falsification_trials` | deterministic | `run_falsification_trials` executes the accepted model through the study runner, binds recorded evidence, and returns the trials contract; no phase agent or model turn. | Validate the trials contract and advance to verdict; executor faults or invalid contracts fail the workflow durably. |
+| `verdict` | conversation | Present the recorded deterministic verdict and ask whether to continue or loop back. After the operator replies, submit interpreted intent. | Construct `VerdictCompletion`; verify it refers to the latest operator message and verdict; map `continue` to strategy design and `loop_back` to model creation (same premise, revise the model) or discovery (premise not worth pursuing) through the transition table. |
+| `strategy_design` | conversation | Explain the strategy in prose, ask the operator to confirm or revise, author or patch a committed program, and call `validate_strategy` on its latest ID. | Submit the successful validation's compact program reference; verify committed content and current stored validation, then advance to strategy backtesting. No completion-time compilation or repair. |
+| `strategy_backtesting` | one-shot | The owning agent reads the handed-off strategy ID and calls `run_backtest {program_id: ...}` against latest committed content with current accepted validation, then requests phase completion. | Return the actual recorded backtest receipt; advance to optimization on success or loop to strategy RCA on failure. Stale/rejected validation is reported, not bypassed with inline source. |
 | `strategy_rca` | one-shot | Inspect the failed run, spawn critics if useful, author a diagnosis and revision guidance, then request completion. | Validate diagnosis and revision refs; loop to strategy design or remain. |
-| `optimization` | one-shot | Call sweep/backtest tools directly within declared bounds, inspect results, and request completion. | Resolve the recorded optimization run; complete on success or loop to strategy RCA on failure. |
-| `completed` | deterministic | None | Persist terminal artifacts and completion state. |
+| `optimization` | one-shot | Prepare the bounded optimization backtest and request completion through its declared contract. No retired `run_sweep` MCP surface is implied. | Resolve the recorded optimization result; complete on success or loop to strategy RCA on failure. |
+| `completed` | terminal | None | Terminal outcome with no executor or completion contract. |
+| `failed` | terminal | None | Terminal failure with recorded reason and partial evidence. |
 
-### Hypothesis Creation Completion
+Phase agents receive only their phase's permitted tool policy: discovery holds
+study execution and inspection tools. Discovery, model creation, and strategy
+design share author/update/read/validate/list tools for studies, strategies, and
+indicators, plus `read_sdk_reference`; only discovery adds `run_study`.
+Strategy backtesting is a `OneShotPhase` agent with `read_strategy`, `run_backtest`,
+knowledge retrieval, and its phase control tools; it owns its completion request.
+Conversational phases hold
+`search_knowledge`/`read_knowledge`. Knowledge retrieval is collection-scoped per phase:
+discovery may retrieve `discovery`, `data-quality`, `trading-costs`, and
+`model-cards` method/model cards;
+model creation only `model-cards`, `inference`, `validation`, and
+`trading-costs`; every other phase is unrestricted. The collection allowlist is
+trusted runtime policy (a workflow phase absent from the table is unrestricted),
+filtered before each source's index is built so lexical, semantic, and
+hyperlink-graph expansion cannot reach excluded pages, and re-checked on every
+read.
+
+### Discovery Completion
+
+The contract hands model creation exactly one candidate and the honest record
+of how it was found. It MUST include:
+
+- one candidate with opportunity, signal, information time, direction, holding
+  period, profit source, effect, competing explanation, and evidence;
+- at least one attempt with purpose, study id, data types, window, and result,
+  including attempts that changed nothing; and
+- the data deliberately left untouched and the phase's limitations.
+
+The advertised target enum names only `model_creation`: discovery never ends
+the whole run itself.
+
+### Model Creation Completion
 
 The contract MUST preserve the current structured hypothesis, research model,
 and falsification-plan fields. It MUST include:
 
 - claim, disagreement, risk factor, horizon, and universe;
 - falsifiers with id, observable, condition, threshold, and exact test;
-- the content-addressable research model source, outputs, tests, and harness
-  configuration; the adapter requires the model's declared window
-  (`harnessConfiguration.start`/`end`) and bar interval
-  (`harnessConfiguration.interval`, `1min` or `1d`), re-homes the interval into
-  the emitted study configuration as `data.bar_interval`, and materializes the
-  window (symbols, start, end) into the study run instead of silently defaulting
-  it; the strategy bundle materializes the universe symbols and the same
+- the committed study reference plus description, outputs, and tests, never
+  inline Rust or caller paths; the adapter resolves source, dependencies, and
+  configuration from the accepted commit. It requires the model's declared window
+  (`harnessConfiguration.start`/`end`) and exact
+  `harnessConfiguration.subscriptions`, preserved as `data.subscriptions`.
+  Entries are strict tagged objects with `data_type` and `symbols`, plus
+  `interval` only for bars (`1min` or `1d`), and MUST canonically equal the
+  compiled source-and-dependency union. All subscription symbols MUST belong
+  to the hypothesis universe. Optional global symbols MUST equal the
+  subscription symbol union, and any legacy interval MUST match the single
+  bars interval (never for tick-only inputs). The adapter materializes that
+  symbol union and the unchanged start/end bounds into the study run; the
+  strategy bundle materializes the universe symbols and the same
   window so a strategy backtest never relies on the design agent to declare
   them;
 - negative or placebo controls;
@@ -800,6 +1302,12 @@ contract.
 
 ### Falsification Trials Completion
 
+In the current `2.0.0` topology this contract is returned by the deterministic
+`run_falsification_trials` executor, not a phase-agent tool call. It runs the
+accepted model through the study runner and resolves evidence in deterministic
+code. The broader evidence requirements below remain the design baseline; they
+do not imply a trials conversation or additional implemented output receipts.
+
 The contract MUST include:
 
 - hypothesis and research-model refs;
@@ -811,9 +1319,10 @@ The contract MUST include:
 - interpretation artifact ref; and
 - limitations or typed failures.
 
-The gate MUST verify every binding against a successful or explicitly failed
-tool result in the same phase attempt. A failed harness call is an execution
-problem, not automatic hypothesis refutation.
+The executor MUST verify every binding against the recorded study result for
+the attempt. A failed harness call is an execution problem, not automatic
+hypothesis refutation; executor faults and invalid returned contracts fail the
+workflow instead of creating an agent repair turn.
 
 ### Verdict Completion
 
@@ -1035,8 +1544,8 @@ single worker per node. A wake that arrives while a turn is running MUST
 coalesce into exactly one follow-up turn — never a concurrent turn on the same
 node, never a dropped wake — and the running turn MUST drain new inbound
 messages between model iterations so the model sees the latest data without
-restarting the turn. A text-only turn for a one-shot child MUST complete the
-node with its answer and deliver it to the caller; a conversation agent MUST
+restarting the turn. A text-only turn for a `complete_on_text` child MUST complete
+the node with its answer and deliver it to the caller; a conversation agent MUST
 accept input while it runs; a phase agent MUST complete only through the
 completion tool.
 
@@ -1091,15 +1600,18 @@ special-casing either.
 - Verification: one wrapper serves both; record-anchor delivery schedules
   nothing.
 
-**REQ-037: Kind is a creation parameter.** One-shot versus conversational MUST
-select a turn-end policy and input acceptance, never a different
-implementation of internals. One-shot children auto-complete on their final
-answer and deliver it to the return anchor; conversational children accept
-input from birth and stay open; phase children do not auto-complete.
+**REQ-037: Independent durable lifecycle policy.** One-shot versus conversational
+kind MUST govern unsolicited input acceptance, never a different implementation
+of internals. Durable completion mode MUST independently select the turn-end
+policy; `complete_on_text` children complete on their final answer and deliver to
+their durable return anchor, while `explicit_completion` children stay open.
+Phase executors MUST use explicit completion and explicit phase authority.
+Legacy inference MUST remain confined to persistence decoding.
 
-- Rationale: matches the durable `kind` enum without leaking it into
-  behavior classes.
-- Verification: the policy object is the only kind-dependent code.
+- Rationale: input acceptance, completion policy, return placement, and workflow
+  authority are distinct durable facts, not inferred from parentage or phase text.
+- Verification: reconstructing a handle selects policy from completion mode and
+  preserves return anchor and authority independently of input kind.
 
 **REQ-038: No phase knowledge in child semantics.** Phase binding is spec
 data on the record, the completion tool the engine binds into the child's
@@ -1119,10 +1631,12 @@ Upstream MUST NOT call a scheduler, runner, or coordinator.
   runner.
 
 **REQ-040: Phase specs are a sealed union of objects.** A workflow's phases
-MUST be a sealed union of frozen dataclasses — conversation, one-shot,
-deterministic — dispatched by exhaustive match; invalid combinations MUST be
+MUST be a sealed union of frozen dataclasses: conversation, one-shot,
+deterministic, and terminal. They are dispatched by exhaustive match; invalid
+combinations MUST be
 unrepresentable rather than builder-rejected. An agent phase's spec produces a
-child conversation through the service; a deterministic phase produces none.
+child conversation through the service; deterministic and terminal phases
+produce none.
 
 - Rationale: the flat spec's optional fields are validated combinations; types
   make them unrepresentable.
@@ -1137,7 +1651,7 @@ conversation abstraction recorded in
 `thesis-conversation-abstraction-v1`; they are implemented by
 `thesis.agent.runtime.conversation` and `thesis.agent.runtime.child` (one
 conversation hierarchy, composed child semantics, anchor-based returns, the
-kind-as-creation-parameter turn-end policy, the service-owned routing rule,
+independent durable completion/input policies, the service-owned routing rule,
 and the sealed phase-spec union).
 
 **REQ-041: Contract handoffs are validated before they commit and advertised
@@ -1174,124 +1688,53 @@ call fails, and an unrecoverable call MUST fail with an actionable message.
   carries the declared schema; fenced and embedded tool arguments dispatch
   normally.
 
-## Target Package Layout
+## Implemented Package Layout
 
-The implementation MUST replace monolithic workflow modules with nested
-packages. Public compatibility facades MAY temporarily re-export existing
-names during migration.
+The active boundaries are below. `__init__.py` files expose intentional public
+facades. This is not a claim that every earlier migration requirement or
+repair-budget mechanism is complete.
 
-```text
-src/thesis/agent/
-  session/
-    __init__.py
-    session.py          # durable model/tool turn loop
-    turn.py             # durable turn contracts
-    history.py          # replay and resume assembly
-    budgets.py          # construction, repair, tool, token, and time budgets
-    errors.py
-  tools/
-    __init__.py
-    protocol.py         # common tool spec/result contracts
-    registry.py         # merged catalog
-    control.py          # phase/sub-agent completion and operator input
-    spawn.py            # spawn_sub_agent, await_sub_agent
-    harness.py          # harness MCP adapter
-    dispatch.py         # policy-scoped dispatch
-  invocation/
-    __init__.py
-    provider.py         # tool-capable provider boundary
-    completion.py       # model completion and tool calls
-    provenance.py       # first-class invocation records
-  subagents/
-    __init__.py
-    records.py          # durable sub-agent contracts/store protocol
-    lifecycle.py        # spawn, input, complete, fail, cancel
-    tree.py             # chat/sub-agent hierarchy projection
-  router.py
-  skills.py
-  context.py
+| Path | Implemented responsibility |
+| --- | --- |
+| `agent/runtime/__init__.py` | Public conversation, child, session, lifecycle, control, delivery, and store facade. |
+| `agent/runtime/conversation.py` | Root/child `run_node_turn`, shared history decoding and `_persist_turn`, runtime-internal activity, and anchored intake. |
+| `agent/runtime/session.py` | Durable model/tool loop and session turn/result contracts. |
+| `agent/runtime/turns.py` | Per-conversation generations/positions, bounded recent-ID memory, durable high-water ACKs, and safe idle retirement. |
+| `agent/runtime/activity.py` | Discriminated immutable activity, source-generated activity/message schemas, and the canonical activity decoder. |
+| `agent/runtime/child.py`, `lifecycle.py`, `delivery.py` | Child return policy, durable lifecycle, and one anchored datum delivery path. |
+| `agent/runtime/control.py`, `control_tools.py`, `registry.py` | Control commands, schemas/handlers, and merged tool catalog. |
+| `agent/runtime/knowledge_tools.py`, `program_tools.py`, `strategy_tools.py`, `workflow_tools.py` | Context-bound retrieval, committed program tools, legacy strategy-domain authoring, and workflow launch adapters. Program binding replaces conflicting legacy/raw harness tools. |
+| `agent/runtime/context.py`, `datum.py`, `specs.py`, `policy.py`, `store.py`, `tree.py`, `spawn.py`, `schema.py`, `json_recovery.py` | Trusted attribution, typed datums/specs, admission, persistence, hierarchy/spawn, and argument construction. |
+| `agent/harness_tools.py` | MCP catalog/result adapter, not a validation cache. |
+| `workflows/core/` | Generic spec, phase, builder, registry, machine, workflow, state, execution store, delivery, and events; `workflow.py` accepts the reducer port. |
+| `workflows/registry/hypothesis_development/__init__.py` | Concrete workflow public facade, including `fold_transition` and `rebuild_state`. |
+| `hypothesis_development/spec.py`, `doctrine.py`, `piping.py` | One phase declaration for topology/policy/payload folds, domain ports/reducer binding, and accepted handoffs applied once. |
+| `hypothesis_development/session_services.py` | Session role policy, schema/knowledge/authoring bindings, validation/application, and failure callback. |
+| `hypothesis_development/services.py`, `rebuild.py`, `state.py`, `artifacts.py`, `ledger.py`, `jobs.py`, `errors.py`, `primitives.py` | Domain validation/evidence, shared live/replay fold, state, artifacts, ledger, jobs, and domain values. |
+| `hypothesis_development/phases/`, `contracts/`, `gates/`, `prompts/`, `composers/` | Phase declarations, typed completion/validation, domain acceptance, agent instructions, and construction. Discovery has its own contract/prompt; `prompts/model_creation.py` replaces the retired creation prompt. Domain acceptance modules are not operator workflow gates. |
+| `workflows/runtime.py` | Composition and exported typed workflow session ports. |
+| `workflows/local.py` | MCP runners, bounded polling, and local composition. |
+| `http/application.py`, `errors.py` | Same-app root/API composition, fresh factory defaults, fail-closed service resolution, and typed error translation. |
+| `http/schema.py`, `wire.py` | Authoritative OpenAPI/runtime export and source-derived response/record models. |
+| `http/timeline.py`, `streaming.py` | Unified chat timeline REST history and the sole conversation SSE route, with shared resume-cursor transport primitives. |
+| `research/hypothesis.py` | Workspace repository-backed immutable canonical hypothesis versions, journaled fenced publication, and committed-content verification. |
+| `workspaces/programs.py` | Committed study/strategy/indicator source and manifests, content/dependency versions, exact-input validation receipts, ID-based execution, SDK references/templates, and pinned snapshot loading. |
+| `workflows/research_models.py` | `ProgramSnapshots` read port and accepted study-reference resolution for deterministic research execution. |
+| `hypothesis_development/prompts/sdk.py` | Shared SDK lookup, targeted patch, validation, and prompt-only repair guidance. |
+| `cosmos/chunks.py`, `records.py`, `timeline.py` | Immutable bounded payload trees, forced opaque provider-request chunk storage before invocation persistence, the single authoritative conversation store with atomic sequence commits, and verified hydration. |
 
-src/thesis/workflows/
-  core/                    # the general workflow implementation
-    __init__.py
-    spec.py                # WorkflowSpec, PhaseSpec, TransitionRequest, WorkflowContext
-    workflow.py            # the general Workflow object: prepare, completion, pipes
-    phase.py               # AgentSpec, PhaseKind, PhaseSpec, seeds and validators
-    builder.py             # WorkflowBuilder: phases, seeds, validators, transitions, piping
-    registry.py            # WorkflowRegistry: workflow id -> WorkflowSpec
-    machine.py             # transitions and PhaseTransition
-    state.py               # common workflow state/replay
-    gate.py                # deterministic acceptance protocol/outcomes
-    delivery.py            # node turn delivery and operator-question plumbing
-    events.py              # workflow event projections
-  registry/                # concrete workflows, one package per workflow id
-    __init__.py            # registers every concrete workflow with the registry
-    hypothesis_development/
-      __init__.py          # spec assembly and public facade
-      spec.py              # phases, allowed transitions, seeds, piping, handoff
-      request.py
-      state.py
-      artifacts.py
-      ledger.py
-      phases/
-        creation.py
-        trials.py
-        verdict.py
-        design.py
-        backtesting.py
-        strategy_rca.py
-        optimization.py
-      contracts/
-        creation.py
-        hypothesis.py
-        plan.py
-        trials.py
-        verdict.py
-        strategy.py
-        rca.py
-      gates/
-        falsifiability.py
-        model.py
-        plan.py
-        evidence.py
-        strategy.py
-      prompts/
-        creation.py
-        falsification.py
-        strategy_design.py
-        rca.py
-      loops/
-        premise.py
-        strategy.py
-    strategy_development/
-      phases/
-      contracts/
-      gates/
-      prompts/
-    discovery/
-      phases/
-      contracts/
-      gates/
-      prompts/
-    rca/
-      phases/
-      contracts/
-      gates/
-      prompts/
-  runtime.py            # slim composition root
-```
-
-The tree above is the target. Concrete workflows MUST live under
+`agent/session_reply.py` and the standalone strategy-development, discovery,
+and RCA workflow packages are removed. Concrete workflows MUST live under
 `workflows/registry/<workflow-id>/` and MUST be resolved by id through
 `core/registry.py`; no workflow-specific behavior or contract may live in
 `core/`. The tool surface resolves a requested workflow id to its spec and calls
 the generic `execute`.
 
-`src/thesis/execution/sub_agents.py` SHOULD become a temporary compatibility
-facade over `thesis.agent.subagents`. `src/thesis/execution/checkpoints.py` is no
-longer part of the workflow runtime. The execution event log remains the streaming
-and projection mechanism, while first-class invocation and sub-agent stores are
-their own durable sources of truth.
+`src/thesis/execution/checkpoints.py` is not the workflow state reducer. The
+execution event log remains durable event evidence and supports REST replay;
+its events project into the unified chat timeline for live streaming.
+First-class invocation and sub-agent stores remain their own durable sources
+of truth. There is no separate execution SSE delivery path.
 
 Tests MUST mirror the package tree. The monolithic hypothesis-development test
 module MUST be split into core protocol, phase, gate, tool, recovery, and

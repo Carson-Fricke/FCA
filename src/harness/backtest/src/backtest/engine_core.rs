@@ -9,7 +9,8 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
-use num::PyDecimal;
+use num::Decimal;
+use serde::{Deserialize, Serialize};
 
 use crate::backtest::config::BacktestConfig;
 use crate::backtest::errors::{BacktestError, BacktestStatus};
@@ -23,6 +24,145 @@ use crate::backtest::portfolio::{portfolio_json, PortfolioHub, PortfolioSnapshot
 use crate::canonical_json::JsonValue;
 use crate::sha256::Sha256;
 
+/// Exact consumer inputs, including the union of program-owned dependencies.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MarketSubscription {
+    /// `quote`, `trade`, or `bars`.
+    pub data_type: String,
+    /// Explicit instrument symbols.
+    pub symbols: Vec<String>,
+    /// Required for bars, absent for ticks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
+}
+
+/// Validate and deduplicate an exact requirement union.
+///
+/// # Errors
+/// Rejects invalid declarations and multiple bar intervals, whose identity the
+/// current replay fixture cannot preserve.
+pub fn normalize_subscriptions(
+    inputs: &[MarketSubscription],
+) -> Result<Vec<MarketSubscription>, BacktestError> {
+    let mut declarations = Vec::new();
+    for input in inputs {
+        let declaration = match (
+            harness_contracts::DataType::parse(&input.data_type)
+                .map_err(BacktestError::Configuration)?,
+            &input.interval,
+        ) {
+            (harness_contracts::DataType::Bars, Some(interval)) => {
+                harness_contracts::Subscription::Bars {
+                    symbols: input.symbols.clone(),
+                    interval: interval.clone(),
+                }
+            }
+            (harness_contracts::DataType::Quote, None) => harness_contracts::Subscription::Quote {
+                symbols: input.symbols.clone(),
+            },
+            (harness_contracts::DataType::Trade, None) => harness_contracts::Subscription::Trade {
+                symbols: input.symbols.clone(),
+            },
+            _ => {
+                return Err(BacktestError::Configuration(
+                    "invalid subscription type/interval".into(),
+                ))
+            }
+        };
+        declarations.push(declaration);
+    }
+    let declarations = harness_contracts::canonical_subscriptions(declarations)
+        .map_err(BacktestError::Configuration)?;
+    let mut intervals = BTreeSet::new();
+    let mut output = Vec::new();
+    for input in declarations {
+        let (data_type, symbols, interval) = match input {
+            harness_contracts::Subscription::Bars { symbols, interval } => {
+                if !matches!(interval.as_str(), "1min" | "1d") {
+                    return Err(BacktestError::Configuration(
+                        "replay bar interval must be 1min or 1d".into(),
+                    ));
+                }
+                intervals.insert(interval.clone());
+                ("bars", symbols, Some(interval))
+            }
+            harness_contracts::Subscription::Quote { symbols } => ("quote", symbols, None),
+            harness_contracts::Subscription::Trade { symbols } => ("trade", symbols, None),
+        };
+        output.push(MarketSubscription {
+            data_type: data_type.into(),
+            symbols,
+            interval,
+        });
+    }
+    if intervals.len() > 1 {
+        return Err(BacktestError::Configuration(
+            "multiple bar intervals are incompatible with replay fixture interval identity".into(),
+        ));
+    }
+    Ok(output)
+}
+
+/// Legacy native runtimes use shell defaults; authored runtimes declare inputs.
+pub fn default_subscriptions(configuration: &BacktestConfig) -> Vec<MarketSubscription> {
+    if configuration.shell == "study" {
+        vec![MarketSubscription {
+            data_type: "bars".into(),
+            symbols: configuration.symbols.clone(),
+            interval: Some(configuration.data_bar_interval.clone()),
+        }]
+    } else {
+        ["quote", "trade"]
+            .into_iter()
+            .map(|kind| MarketSubscription {
+                data_type: kind.into(),
+                symbols: configuration.symbols.clone(),
+                interval: None,
+            })
+            .collect()
+    }
+}
+
+/// Resolve consumer requirements before acquisition, validating the optional echo.
+///
+/// # Errors
+/// Rejects invalid inputs or an echo that differs from consumer requirements.
+pub fn runtime_subscriptions(
+    configuration: &BacktestConfig,
+    strategies: &[StrategyInstance],
+) -> Result<Vec<MarketSubscription>, BacktestError> {
+    let inputs: Vec<_> = strategies
+        .iter()
+        .flat_map(|instance| {
+            instance
+                .runtime
+                .subscriptions()
+                .unwrap_or_else(|| default_subscriptions(configuration))
+        })
+        .collect();
+    let union = normalize_subscriptions(&inputs)?;
+    if configuration.has_subscription_echo()
+        && normalize_subscriptions(&configuration.data_subscriptions)? != union
+    {
+        return Err(BacktestError::Configuration(
+            "data.subscriptions does not match runtime subscription union".into(),
+        ));
+    }
+    if configuration.shell == "study"
+        && !configuration.has_subscription_echo()
+        && strategies
+            .iter()
+            .any(|instance| instance.runtime.subscriptions().is_some())
+        && union != normalize_subscriptions(&default_subscriptions(configuration))?
+    {
+        return Err(BacktestError::Configuration(
+            "legacy study runtime subscriptions must match data.symbols/data.bar_interval; declare data.subscriptions for exact mixed inputs".into(),
+        ));
+    }
+    Ok(union)
+}
+
 /// One reconstructed OHLCV bar carrying Python-scale decimals.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineBar {
@@ -35,20 +175,22 @@ pub struct EngineBar {
     /// Instrument symbol.
     pub symbol: String,
     /// Interval open.
-    pub open: PyDecimal,
+    pub open: Decimal,
     /// Interval high.
-    pub high: PyDecimal,
+    pub high: Decimal,
     /// Interval low.
-    pub low: PyDecimal,
+    pub low: Decimal,
     /// Interval close.
-    pub close: PyDecimal,
+    pub close: Decimal,
     /// Interval volume.
-    pub volume: PyDecimal,
+    pub volume: Decimal,
 }
 
-/// Atomic study observation. Availability assumes interval completion, not provider latency.
+/// Atomic bar observation. Availability assumes interval completion, not provider latency.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineBarFrame {
+    /// Canonical interval identity (`1min` or `1d`).
+    pub interval: String,
     /// Inclusive interval start in epoch nanoseconds.
     pub interval_start_ns: i64,
     /// Exclusive interval end in epoch nanoseconds.
@@ -61,11 +203,11 @@ pub struct EngineBarFrame {
     pub missing_symbols: Vec<String>,
 }
 
-/// Assemble the observed timestamp union into study-only, complete intervals.
+/// Assemble bars in a mixed replay into atomic, complete intervals.
 ///
 /// # Errors
 ///
-/// Rejects non-study input, invalid intervals, duplicates, unexpected symbols,
+/// Rejects invalid intervals, duplicates, unexpected bar symbols,
 /// off-grid starts, and incompatible equity/crypto daily bounds.
 pub fn assemble_study_frames(
     configuration: &BacktestConfig,
@@ -73,11 +215,6 @@ pub fn assemble_study_frames(
     options: &SyntheticDataOptions,
 ) -> Result<Vec<EngineBarFrame>, BacktestError> {
     let invalid = |message: String| BacktestError::DataPreflight(message);
-    if configuration.shell != "study" {
-        return Err(invalid(
-            "bar frames require a study configuration".to_string(),
-        ));
-    }
     let daily = match configuration.data_bar_interval.as_str() {
         "1d" => true,
         "1min" => false,
@@ -99,7 +236,7 @@ pub fn assemble_study_frames(
     let mut seen = BTreeSet::new();
     for event in &fixture.events {
         let EngineMarket::Bar(bar) = market_event(event, options) else {
-            return Err(invalid("study fixtures must contain bars only".to_string()));
+            continue;
         };
         if !symbols.contains(&bar.symbol) {
             return Err(invalid(format!("unexpected study symbol {:?}", bar.symbol)));
@@ -141,6 +278,7 @@ pub fn assemble_study_frames(
             (start + minute).min(close)
         };
         let frame = frames.entry(start).or_insert_with(|| EngineBarFrame {
+            interval: configuration.data_bar_interval.clone(),
             interval_start_ns: start,
             interval_end_ns: end,
             available_at_ns: end,
@@ -187,13 +325,13 @@ pub enum EngineMarket {
         /// Instrument symbol.
         symbol: String,
         /// Best bid.
-        bid: PyDecimal,
+        bid: Decimal,
         /// Best ask.
-        ask: PyDecimal,
+        ask: Decimal,
         /// Bid size.
-        bid_quantity: PyDecimal,
+        bid_quantity: Decimal,
         /// Ask size.
-        ask_quantity: PyDecimal,
+        ask_quantity: Decimal,
         /// Reporting venue.
         venue: String,
     },
@@ -208,9 +346,9 @@ pub enum EngineMarket {
         /// Instrument symbol.
         symbol: String,
         /// Print price.
-        price: PyDecimal,
+        price: Decimal,
         /// Print quantity.
-        quantity: PyDecimal,
+        quantity: Decimal,
         /// Reporting venue.
         venue: String,
         /// Trade identifier.
@@ -266,11 +404,11 @@ impl EngineMarket {
 
     /// The exact price the engine records for this market event.
     #[must_use]
-    pub fn mark_price(&self) -> PyDecimal {
+    pub fn mark_price(&self) -> Decimal {
         match self {
             Self::Quote { bid, ask, .. } => bid
                 .checked_add(*ask)
-                .and_then(|sum| sum.checked_div(PyDecimal::from_i128(2)))
+                .and_then(|sum| sum.checked_div(Decimal::from_i128(2)))
                 .unwrap_or(*bid),
             Self::Trade { price, .. } => *price,
             Self::Bar(EngineBar { close, .. }) => *close,
@@ -288,15 +426,15 @@ pub struct EngineOrder {
     /// `buy` or `sell`.
     pub side: String,
     /// Order quantity.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// Order type (`market`, `limit`, `stop`, `stop_limit`).
     pub order_type: String,
     /// Time in force (`day`, `gtc`, `ioc`).
     pub time_in_force: String,
     /// Limit price, if any.
-    pub limit_price: Option<PyDecimal>,
+    pub limit_price: Option<Decimal>,
     /// Stop price, if any.
-    pub stop_price: Option<PyDecimal>,
+    pub stop_price: Option<Decimal>,
     /// Order timestamp in epoch nanoseconds.
     pub timestamp_ns: i64,
     /// Order sequence.
@@ -308,7 +446,7 @@ pub struct EngineOrder {
 impl EngineOrder {
     /// The signed quantity against the current position.
     #[must_use]
-    pub fn signed_quantity(&self) -> PyDecimal {
+    pub fn signed_quantity(&self) -> Decimal {
         if self.side == "buy" {
             self.quantity
         } else {
@@ -335,11 +473,11 @@ pub struct EngineFill {
     /// `buy` or `sell`.
     pub side: String,
     /// Fill quantity.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// Fill price.
-    pub price: PyDecimal,
+    pub price: Decimal,
     /// Fill fee.
-    pub fee: PyDecimal,
+    pub fee: Decimal,
     /// Liquidity role.
     pub liquidity: String,
 }
@@ -408,8 +546,7 @@ impl EngineEvent {
 
     /// Class priority used by the queue, mirroring `EVENT_CLASS_PRIORITY`.
     ///
-    /// Bars carry the explicit tail priority of the bar event class; a study
-    /// replay carries bars and nothing else, so the slot never reorders ticks.
+    /// Frames carry the bar class priority at their availability time.
     #[must_use]
     pub const fn class_priority(&self) -> u8 {
         match self {
@@ -454,6 +591,7 @@ impl EngineEvent {
 struct QueuedEvent {
     event: EngineEvent,
     feed_ordinal: u64,
+    phase: u8,
 }
 
 impl PartialEq for QueuedEvent {
@@ -475,9 +613,10 @@ impl Ord for QueuedEvent {
 }
 
 impl QueuedEvent {
-    fn key(&self) -> (i64, u64, u8, u64) {
+    fn key(&self) -> (i64, u8, u64, u8, u64) {
         (
             self.event.timestamp_ns(),
+            self.phase,
             self.event.sequence(),
             self.event.class_priority(),
             self.feed_ordinal,
@@ -492,6 +631,7 @@ pub struct EventBus {
     feed_ordinal: u64,
     hasher: Sha256,
     dispatched_count: u64,
+    frame_replay: bool,
 }
 
 impl EventBus {
@@ -503,9 +643,21 @@ impl EventBus {
 
     /// Enqueue one event.
     pub fn schedule(&mut self, event: EngineEvent) {
+        // Frame-enabled replay observes every same-time tick before frames,
+        // then dispatches generated execution responses. Legacy ticks keep their key.
+        let phase = if self.frame_replay {
+            match &event {
+                EngineEvent::Market(_) => 0,
+                EngineEvent::BarFrame(_) => 1,
+                EngineEvent::Report(_) | EngineEvent::Fill(_) => 2,
+            }
+        } else {
+            0
+        };
         self.heap.push(QueuedEvent {
             event,
             feed_ordinal: self.feed_ordinal,
+            phase,
         });
         self.feed_ordinal += 1;
     }
@@ -547,6 +699,7 @@ impl EventBus {
                 ("start", JsonValue::Int(frame.interval_start_ns)),
                 ("end", JsonValue::Int(frame.interval_end_ns)),
                 ("available_at", JsonValue::Int(frame.available_at_ns)),
+                ("interval", JsonValue::String(frame.interval.clone())),
                 ("missing", string_array(&frame.missing_symbols)),
                 (
                     "bars",
@@ -576,16 +729,16 @@ impl EventBus {
 struct WorkingOrder {
     order: EngineOrder,
     status: String,
-    filled_quantity: PyDecimal,
+    filled_quantity: Decimal,
     response_pending: bool,
 }
 
 impl WorkingOrder {
-    fn remaining(&self) -> PyDecimal {
+    fn remaining(&self) -> Decimal {
         self.order
             .quantity
             .checked_sub(self.filled_quantity)
-            .unwrap_or(PyDecimal::ZERO)
+            .unwrap_or(Decimal::ZERO)
     }
 
     fn is_active(&self) -> bool {
@@ -705,7 +858,7 @@ impl SimulatedVenue {
         let working = WorkingOrder {
             order: order.clone(),
             status: "accepted".to_string(),
-            filled_quantity: PyDecimal::ZERO,
+            filled_quantity: Decimal::ZERO,
             response_pending: false,
         };
         self.orders.push(working);
@@ -726,18 +879,18 @@ impl SimulatedVenue {
         &mut self,
         index: usize,
         market: &EngineMarket,
-        available: PyDecimal,
+        available: Decimal,
         clock_ns: i64,
         bus: &mut EventBus,
-    ) -> Option<PyDecimal> {
+    ) -> Option<Decimal> {
         let (order, remaining) = {
             let working = &self.orders[index];
             (working.order.clone(), working.remaining())
         };
-        if remaining.cmp_value(PyDecimal::ZERO) != Ordering::Greater {
+        if remaining.cmp_value(Decimal::ZERO) != Ordering::Greater {
             return None;
         }
-        if available <= PyDecimal::ZERO {
+        if available <= Decimal::ZERO {
             return None;
         }
         let decision = simple_touch_price(&order, market)?;
@@ -746,7 +899,7 @@ impl SimulatedVenue {
         } else {
             available
         };
-        if quantity.cmp_value(PyDecimal::ZERO) != Ordering::Greater {
+        if quantity.cmp_value(Decimal::ZERO) != Ordering::Greater {
             return None;
         }
         self.schedule_fill(index, quantity, decision, clock_ns, bus);
@@ -756,8 +909,8 @@ impl SimulatedVenue {
     fn schedule_fill(
         &mut self,
         index: usize,
-        quantity: PyDecimal,
-        price: PyDecimal,
+        quantity: Decimal,
+        price: Decimal,
         clock_ns: i64,
         bus: &mut EventBus,
     ) {
@@ -789,7 +942,7 @@ impl SimulatedVenue {
             side: order.side.clone(),
             quantity,
             price,
-            fee: PyDecimal::ZERO,
+            fee: Decimal::ZERO,
             liquidity: "taker".to_string(),
         }));
     }
@@ -815,7 +968,7 @@ impl SimulatedVenue {
     }
 }
 
-fn market_quantity(side: &str, market: &EngineMarket) -> PyDecimal {
+fn market_quantity(side: &str, market: &EngineMarket) -> Decimal {
     match market {
         EngineMarket::Trade { quantity, .. } => *quantity,
         EngineMarket::Quote {
@@ -831,11 +984,11 @@ fn market_quantity(side: &str, market: &EngineMarket) -> PyDecimal {
         }
         // Bars are not tradable book or print events: the venue explicitly
         // exposes no quantity for them, so no resting order can ever match.
-        EngineMarket::Bar(_) => PyDecimal::ZERO,
+        EngineMarket::Bar(_) => Decimal::ZERO,
     }
 }
 
-fn simple_touch_price(order: &EngineOrder, market: &EngineMarket) -> Option<PyDecimal> {
+fn simple_touch_price(order: &EngineOrder, market: &EngineMarket) -> Option<Decimal> {
     match market {
         EngineMarket::Trade { price, .. } => {
             if order.order_type == "market" || order.order_type == "stop" {
@@ -917,7 +1070,7 @@ pub struct ResolvedRiskRule {
     /// Rule kind.
     pub kind: RiskRuleKind,
     /// Numeric limit.
-    pub limit: PyDecimal,
+    pub limit: Decimal,
 }
 
 /// Supported built-in risk rule kinds.
@@ -973,14 +1126,14 @@ pub fn resolve_risk_rules(
     Ok(rules)
 }
 
-fn parameter_decimal(value: &JsonValue) -> Option<PyDecimal> {
+fn parameter_decimal(value: &JsonValue) -> Option<Decimal> {
     match value {
         JsonValue::String(text) => text.parse().ok(),
         JsonValue::Object(entries) => entries.get("$decimal").and_then(|inner| match inner {
             JsonValue::String(text) => text.parse().ok(),
             _ => None,
         }),
-        JsonValue::Int(value) => Some(PyDecimal::from_i128(i128::from(*value))),
+        JsonValue::Int(value) => Some(Decimal::from_i128(i128::from(*value))),
         _ => None,
     }
 }
@@ -1005,7 +1158,7 @@ pub struct StrategyStart {
     /// Run seed.
     pub seed: u64,
     /// Initial book cash.
-    pub initial_cash: PyDecimal,
+    pub initial_cash: Decimal,
     /// Run start in epoch nanoseconds.
     pub start_ns: i64,
 }
@@ -1016,6 +1169,22 @@ pub const RUNTIME_BARS_UNSUPPORTED: &str =
 
 /// The Python plugin seam the engine drives.
 pub trait StrategyRuntime {
+    /// Exact own and indicator requirements. `None` is for legacy native mocks.
+    fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+        None
+    }
+
+    /// Observe an atomic frame and return strategy intents.
+    ///
+    /// # Errors
+    /// Propagates callback failures. Studies must never return orders.
+    fn on_frame_orders(
+        &mut self,
+        frame: &EngineBarFrame,
+    ) -> Result<Vec<EngineOrder>, BacktestError> {
+        self.on_bar_frame(frame)?;
+        Ok(Vec::new())
+    }
     /// Observe one atomic study frame. Strategies reject frames by default.
     ///
     /// # Errors
@@ -1480,18 +1649,18 @@ pub fn market_event(event: &MarketEvent, options: &SyntheticDataOptions) -> Engi
     }
 }
 
-fn py_from(value: num::Decimal18, scale: u32) -> PyDecimal {
+fn py_from(value: num::Decimal18, scale: u32) -> Decimal {
     crate::backtest::fixture::python_decimal(value, scale)
         .parse()
-        .unwrap_or(PyDecimal::ZERO)
+        .unwrap_or(Decimal::ZERO)
 }
 
 /// Evaluate one configured rule against a candidate order.
 fn evaluate_rule(
     rule: &ResolvedRiskRule,
     order: &EngineOrder,
-    prices: &BTreeMap<String, PyDecimal>,
-    current_quantity: PyDecimal,
+    prices: &BTreeMap<String, Decimal>,
+    current_quantity: Decimal,
 ) -> (String, Option<String>) {
     match rule.kind {
         RiskRuleKind::MaxOrderNotional => {
@@ -1501,7 +1670,7 @@ fn evaluate_rule(
                     Some("max_order_notional missing price".to_string()),
                 );
             };
-            let notional = order.quantity.checked_mul(price).unwrap_or(PyDecimal::ZERO);
+            let notional = order.quantity.checked_mul(price).unwrap_or(Decimal::ZERO);
             if notional.cmp_value(rule.limit) != Ordering::Greater {
                 ("allow".to_string(), None)
             } else {
@@ -1522,7 +1691,7 @@ fn evaluate_rule(
                 .checked_add(order.signed_quantity())
                 .map(|value| value.abs())
                 .and_then(|value| value.checked_mul(price))
-                .unwrap_or(PyDecimal::ZERO);
+                .unwrap_or(Decimal::ZERO);
             if projected.cmp_value(rule.limit) != Ordering::Greater {
                 ("allow".to_string(), None)
             } else {
@@ -1535,7 +1704,7 @@ fn evaluate_rule(
     }
 }
 
-fn order_price(order: &EngineOrder, prices: &BTreeMap<String, PyDecimal>) -> Option<PyDecimal> {
+fn order_price(order: &EngineOrder, prices: &BTreeMap<String, Decimal>) -> Option<Decimal> {
     if let Some(limit) = order.limit_price {
         return Some(limit);
     }
@@ -1556,23 +1725,48 @@ pub fn run_native_engine(
     configuration: &BacktestConfig,
     fixture: &ReplayFixture,
     preflight: &DataPreflight,
-    manifest: BacktestManifest,
+    mut manifest: BacktestManifest,
     options: &EngineOptions,
     strategies: Vec<StrategyInstance>,
     synthetic_options: &SyntheticDataOptions,
 ) -> Result<BacktestOutcome, BacktestError> {
-    let study_frames = if configuration.shell == "study" {
-        Some(assemble_study_frames(
-            configuration,
-            fixture,
-            synthetic_options,
-        )?)
+    let requirements = runtime_subscriptions(configuration, &strategies)?;
+    let explicit: Vec<_> = strategies
+        .iter()
+        .filter_map(|s| s.runtime.subscriptions())
+        .flatten()
+        .collect();
+    super::preflight::validate_subscription_coverage(
+        fixture,
+        &normalize_subscriptions(&explicit)?,
+    )?;
+    if strategies
+        .iter()
+        .any(|s| s.runtime.subscriptions().is_some())
+        || configuration.has_subscription_echo()
+    {
+        manifest.effective_subscriptions = Some(requirements.clone());
+        let execution = if configuration.shell == "study" {
+            Vec::new()
+        } else {
+            normalize_subscriptions(&default_subscriptions(configuration))?
+        };
+        let mut acquired = requirements.clone();
+        acquired.extend(execution.iter().cloned());
+        manifest.acquired_subscriptions = Some(normalize_subscriptions(&acquired)?);
+        manifest.execution_subscriptions = Some(execution);
+    }
+    let mut frame_config = configuration.clone();
+    let bars = requirements.iter().find(|s| s.data_type == "bars");
+    let frames = if let Some(bars) = bars {
+        frame_config.symbols = bars.symbols.clone();
+        frame_config.data_bar_interval = bars.interval.clone().unwrap();
+        assemble_study_frames(&frame_config, fixture, synthetic_options)?
     } else {
-        None
+        Vec::new()
     };
-    let bar_frame_count = study_frames
-        .as_ref()
-        .map_or(0, |frames| frames.len() as u64);
+    super::preflight::validate_completed_bar_coverage(&explicit, &frames)?;
+    let bar_frame_count = frames.len() as u64;
     let schedule = fee_schedule_from_config(
         &configuration.fees,
         &options.fee_precision,
@@ -1608,32 +1802,43 @@ pub fn run_native_engine(
     }
 
     let mut bus = EventBus::new();
+    bus.frame_replay = bars.is_some();
     let mut venue = SimulatedVenue::new();
-    let mut prices: BTreeMap<String, PyDecimal> = BTreeMap::new();
+    let mut prices: BTreeMap<String, Decimal> = BTreeMap::new();
     let mut order_owners: BTreeMap<String, String> = BTreeMap::new();
     let mut order_counts: BTreeMap<String, u64> = BTreeMap::new();
     let mut fills: Vec<EngineFill> = Vec::new();
     let mut assessments: Vec<FeeAssessment> = Vec::new();
     let mut risk_decisions: Vec<RiskDecision> = Vec::new();
-    let mut market_event_count = 0u64;
-
-    let replay_events: Box<dyn Iterator<Item = EngineEvent> + '_> = match study_frames {
-        Some(frames) => {
-            market_event_count = fixture.events.len() as u64;
-            Box::new(frames.into_iter().map(EngineEvent::BarFrame))
+    let market_event_count = fixture.events.len() as u64;
+    let mut replay_events: Vec<_> = fixture
+        .events
+        .iter()
+        .filter(|event| !matches!(event, MarketEvent::Bar { .. }))
+        .map(|event| EngineEvent::Market(market_event(event, synthetic_options)))
+        .chain(frames.into_iter().map(EngineEvent::BarFrame))
+        .collect();
+    // Sort by actual availability before draining; raw bar starts are not dispatch times.
+    replay_events.sort_by_key(|event| {
+        (
+            event.timestamp_ns(),
+            event.sequence(),
+            event.class_priority(),
+        )
+    });
+    if bus.frame_replay {
+        for event in replay_events.drain(..) {
+            bus.schedule(event);
         }
-        None => Box::new(
-            fixture
-                .events
-                .iter()
-                .map(|event| EngineEvent::Market(market_event(event, synthetic_options))),
-        ),
-    };
-    for event in replay_events {
-        if matches!(event, EngineEvent::Market(_)) {
-            market_event_count += 1;
+    }
+    for event in replay_events
+        .into_iter()
+        .map(Some)
+        .chain(std::iter::once(None))
+    {
+        if let Some(event) = event {
+            bus.schedule(event);
         }
-        bus.schedule(event);
         while let Some(dispatched) = bus.dispatch_next() {
             dispatch_event(
                 &dispatched,
@@ -1677,6 +1882,9 @@ pub fn run_native_engine(
         }
         stopped.push(instance.instance_id.clone());
     }
+    if !teardown_errors.is_empty() {
+        return Err(BacktestError::StrategyExecution(teardown_errors.join("; ")));
+    }
 
     let order_count: u64 = order_counts.values().sum();
     verify_replay(fixture, preflight, market_event_count)?;
@@ -1714,7 +1922,7 @@ fn dispatch_event(
     bus: &mut EventBus,
     venue: &mut SimulatedVenue,
     hub: &mut PortfolioHub,
-    prices: &mut BTreeMap<String, PyDecimal>,
+    prices: &mut BTreeMap<String, Decimal>,
     order_owners: &mut BTreeMap<String, String>,
     order_counts: &mut BTreeMap<String, u64>,
     fills: &mut Vec<EngineFill>,
@@ -1724,24 +1932,92 @@ fn dispatch_event(
 ) -> Result<(), BacktestError> {
     match event {
         EngineEvent::BarFrame(frame) => {
+            for bar in frame.bars_by_symbol.values() {
+                prices.insert(bar.symbol.clone(), bar.close);
+                hub.mark(&bar.symbol, bar.close);
+            }
             for instance in strategies.iter_mut() {
-                instance.runtime.on_bar_frame(frame)?;
+                let inputs = instance
+                    .runtime
+                    .subscriptions()
+                    .unwrap_or_else(|| default_subscriptions(configuration));
+                let inputs = normalize_subscriptions(&inputs)?;
+                let Some(input) = inputs.iter().find(|s| {
+                    s.data_type == "bars" && s.interval.as_deref() == Some(frame.interval.as_str())
+                }) else {
+                    continue;
+                };
+                let mut routed = frame.clone();
+                routed
+                    .bars_by_symbol
+                    .retain(|symbol, _| input.symbols.contains(symbol));
+                routed.missing_symbols = input
+                    .symbols
+                    .iter()
+                    .filter(|s| !routed.bars_by_symbol.contains_key(*s))
+                    .cloned()
+                    .collect();
+                let orders = instance.runtime.on_frame_orders(&routed)?;
+                if configuration.shell == "study" && !orders.is_empty() {
+                    return Err(BacktestError::StrategyExecution(
+                        "studies cannot submit orders".into(),
+                    ));
+                }
+                for order in orders {
+                    process_order(
+                        &order,
+                        &instance.instance_id,
+                        configuration,
+                        options,
+                        schedule,
+                        rules,
+                        frame.available_at_ns,
+                        bus,
+                        venue,
+                        hub,
+                        prices,
+                        order_owners,
+                        order_counts,
+                        risk_decisions,
+                    );
+                }
             }
         }
         EngineEvent::Market(market) => {
             let clock_ns = market.timestamp_ns();
-            venue.on_market(market, clock_ns, bus);
+            if configuration.shell != "study" {
+                venue.on_market(market, clock_ns, bus);
+            }
             let mark = market.mark_price();
             prices.insert(market.symbol().to_string(), mark);
             hub.mark(market.symbol(), mark);
             for instance in strategies.iter_mut() {
-                // Bars go through the explicit bar entry; every tick goes
-                // through the tick entry, so a study never sees a tick and a
-                // strategy never sees a bar.
+                let inputs = instance
+                    .runtime
+                    .subscriptions()
+                    .unwrap_or_else(|| default_subscriptions(configuration));
+                let kind = match market {
+                    EngineMarket::Quote { .. } => "quote",
+                    EngineMarket::Trade { .. } => "trade",
+                    EngineMarket::Bar(_) => "bars",
+                };
+                if !inputs
+                    .iter()
+                    .any(|s| s.data_type == kind && s.symbols.iter().any(|s| s == market.symbol()))
+                {
+                    continue;
+                }
+                // Individual bars are assembled before dispatch; tick callbacks
+                // receive only the exact declared symbol/type union.
                 let orders = match market {
                     EngineMarket::Bar(bar) => instance.runtime.on_bar(bar)?,
                     _ => instance.runtime.on_market(market)?,
                 };
+                if configuration.shell == "study" && !orders.is_empty() {
+                    return Err(BacktestError::StrategyExecution(
+                        "studies cannot submit orders".into(),
+                    ));
+                }
                 for order in orders {
                     process_order(
                         &order,
@@ -1826,7 +2102,7 @@ fn process_order(
     bus: &mut EventBus,
     venue: &mut SimulatedVenue,
     hub: &PortfolioHub,
-    prices: &BTreeMap<String, PyDecimal>,
+    prices: &BTreeMap<String, Decimal>,
     order_owners: &mut BTreeMap<String, String>,
     order_counts: &mut BTreeMap<String, u64>,
     risk_decisions: &mut Vec<RiskDecision>,
@@ -1836,7 +2112,7 @@ fn process_order(
         .positions
         .iter()
         .find(|position| position.symbol == order.symbol)
-        .map_or(PyDecimal::ZERO, |position| position.quantity);
+        .map_or(Decimal::ZERO, |position| position.quantity);
     let mut audits = Vec::new();
     let mut reason = None;
     let mut action = "allow".to_string();
@@ -1872,13 +2148,13 @@ fn process_order(
     venue.submit(order.clone(), clock_ns, bus);
 }
 
-fn capital_fraction(configuration: &BacktestConfig, instance_id: &str) -> PyDecimal {
+fn capital_fraction(configuration: &BacktestConfig, instance_id: &str) -> Decimal {
     configuration
         .strategy_instances
         .iter()
         .find(|instance| instance.instance_id == instance_id)
-        .and_then(|instance| instance.capital_fraction.parse::<PyDecimal>().ok())
-        .unwrap_or(PyDecimal::ONE)
+        .and_then(|instance| instance.capital_fraction.parse::<Decimal>().ok())
+        .unwrap_or(Decimal::ONE)
 }
 
 fn verify_replay(

@@ -10,6 +10,8 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+config = { path = "../config" }
+harness-contracts = { path = "../contracts" }
 num = { path = "../num" }
 marketdata = { path = "../marketdata" }
 harness-lakeclient = { path = "../lakeclient" }
@@ -17,6 +19,7 @@ arrow-array = "59"
 arrow-schema = "59"
 parquet = { version = "59", features = ["arrow"] }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 harness-lakeclient = { path = "../lakeclient", features = ["test-support"] }

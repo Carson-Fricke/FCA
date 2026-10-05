@@ -1,12 +1,12 @@
 //! Exact, configuration-driven fee calculation and aggregation.
 //!
 //! Port of `harness.fills.fees` and `harness.runtime.backtest.fees`. Every
-//! money value is a [`PyDecimal`] so the scale and rounding of the Python
-//! `decimal.Decimal` reference are preserved byte for byte.
+//! money value is a [`Decimal`] so the exact scale and rounding contract is
+//! preserved byte for byte.
 
 use std::collections::BTreeMap;
 
-use num::{Context, PyDecimal, RoundingMode};
+use num::{Context, Decimal, RoundingMode};
 
 use crate::backtest::config::{BacktestConfig, FeeBasis, FeeConfig};
 use crate::backtest::errors::BacktestError;
@@ -15,15 +15,15 @@ use crate::backtest::errors::BacktestError;
 pub const DEFAULT_FEE_PRECISION: &str = "0.0001";
 
 /// Basis-point denominator.
-fn basis_points() -> PyDecimal {
-    PyDecimal::from_i128(10_000)
+fn basis_points() -> Decimal {
+    Decimal::from_i128(10_000)
 }
 
 /// Rounding policy shared by every derived fee model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FeeRounding {
     /// Decimal place to round to.
-    pub precision: PyDecimal,
+    pub precision: Decimal,
     /// Rounding mode.
     pub mode: RoundingMode,
 }
@@ -31,7 +31,7 @@ pub struct FeeRounding {
 impl FeeRounding {
     /// Round one exact amount without introducing binary floating point.
     #[must_use]
-    pub fn apply(self, amount: PyDecimal) -> PyDecimal {
+    pub fn apply(self, amount: Decimal) -> Decimal {
         let context = Context::new(28, self.mode);
         amount
             .quantize_with(self.precision, &context)
@@ -45,7 +45,7 @@ pub struct FeeComponent {
     /// Component identifier.
     pub fee_id: String,
     /// Rounded amount.
-    pub amount: PyDecimal,
+    pub amount: Decimal,
 }
 
 /// Itemized fees and attribution for one fill.
@@ -70,8 +70,8 @@ pub struct FeeAssessment {
 impl FeeAssessment {
     /// The exact sum of already-rounded components.
     #[must_use]
-    pub fn total(&self) -> PyDecimal {
-        let mut total = PyDecimal::ZERO;
+    pub fn total(&self) -> Decimal {
+        let mut total = Decimal::ZERO;
         for component in &self.components {
             total = total.checked_add(component.amount).unwrap_or(total);
         }
@@ -85,15 +85,15 @@ pub struct EquityRegulatoryFeeModel {
     /// Rounding policy.
     pub rounding: FeeRounding,
     /// Per-share commission.
-    pub commission_per_share: PyDecimal,
+    pub commission_per_share: Decimal,
     /// Minimum commission.
-    pub commission_minimum: PyDecimal,
+    pub commission_minimum: Decimal,
     /// SEC notional-bps rate.
-    pub sec_rate_bps: PyDecimal,
+    pub sec_rate_bps: Decimal,
     /// TAF per share.
-    pub taf_per_share: PyDecimal,
+    pub taf_per_share: Decimal,
     /// TAF maximum.
-    pub taf_maximum: PyDecimal,
+    pub taf_maximum: Decimal,
 }
 
 /// Options per-contract fee model.
@@ -102,9 +102,9 @@ pub struct OptionsPerContractFeeModel {
     /// Rounding policy.
     pub rounding: FeeRounding,
     /// Per-contract commission.
-    pub commission_per_contract: PyDecimal,
+    pub commission_per_contract: Decimal,
     /// Flat per-contract fee.
-    pub fee_per_contract: PyDecimal,
+    pub fee_per_contract: Decimal,
 }
 
 /// Crypto maker/taker fee model.
@@ -113,9 +113,9 @@ pub struct CryptoMakerTakerFeeModel {
     /// Rounding policy.
     pub rounding: FeeRounding,
     /// Maker notional-bps rate.
-    pub maker_rate_bps: PyDecimal,
+    pub maker_rate_bps: Decimal,
     /// Taker notional-bps rate.
-    pub taker_rate_bps: PyDecimal,
+    pub taker_rate_bps: Decimal,
 }
 
 /// The complete derived fee schedule for one run.
@@ -141,9 +141,9 @@ pub struct FeeFill<'a> {
     /// `buy` or `sell`.
     pub side: &'a str,
     /// String-exact quantity.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// String-exact price.
-    pub price: PyDecimal,
+    pub price: Decimal,
     /// Optional liquidity role.
     pub liquidity: Option<&'a str>,
 }
@@ -193,7 +193,7 @@ impl FeeSchedule {
                     .checked_mul(fill.price)
                     .and_then(|value| value.checked_div(basis_points()))
                     .and_then(|value| value.checked_mul(rate))
-                    .unwrap_or(PyDecimal::ZERO);
+                    .unwrap_or(Decimal::ZERO);
                 let role = if fill.liquidity == Some("maker") {
                     "maker"
                 } else {
@@ -209,7 +209,7 @@ impl FeeSchedule {
                 let commission = fill
                     .quantity
                     .checked_mul(equity.commission_per_share)
-                    .unwrap_or(PyDecimal::ZERO);
+                    .unwrap_or(Decimal::ZERO);
                 let commission = max_decimal(commission, equity.commission_minimum);
                 let mut components = vec![FeeComponent {
                     fee_id: "commission".to_string(),
@@ -221,11 +221,11 @@ impl FeeSchedule {
                         .checked_mul(fill.price)
                         .and_then(|value| value.checked_mul(equity.sec_rate_bps))
                         .and_then(|value| value.checked_div(basis_points()))
-                        .unwrap_or(PyDecimal::ZERO);
+                        .unwrap_or(Decimal::ZERO);
                     let taf = min_decimal(
                         fill.quantity
                             .checked_mul(equity.taf_per_share)
-                            .unwrap_or(PyDecimal::ZERO),
+                            .unwrap_or(Decimal::ZERO),
                         equity.taf_maximum,
                     );
                     components.push(FeeComponent {
@@ -260,7 +260,7 @@ pub struct FeeAggregate {
     /// Currency code.
     pub currency: String,
     /// Total amount.
-    pub amount: PyDecimal,
+    pub amount: Decimal,
 }
 
 /// Deterministic fee totals across all required attribution dimensions.
@@ -277,9 +277,9 @@ pub struct FeeAggregation {
 /// Aggregate assessments by run, strategy, and asset class and currency.
 #[must_use]
 pub fn aggregate_fees(assessments: &[FeeAssessment]) -> FeeAggregation {
-    let mut by_run: BTreeMap<(String, String), PyDecimal> = BTreeMap::new();
-    let mut by_strategy: BTreeMap<(String, String), PyDecimal> = BTreeMap::new();
-    let mut by_asset_class: BTreeMap<(String, String), PyDecimal> = BTreeMap::new();
+    let mut by_run: BTreeMap<(String, String), Decimal> = BTreeMap::new();
+    let mut by_strategy: BTreeMap<(String, String), Decimal> = BTreeMap::new();
+    let mut by_asset_class: BTreeMap<(String, String), Decimal> = BTreeMap::new();
     for assessment in assessments {
         let total = assessment.total();
         add_total(&mut by_run, &assessment.run_id, &assessment.currency, total);
@@ -304,18 +304,18 @@ pub fn aggregate_fees(assessments: &[FeeAssessment]) -> FeeAggregation {
 }
 
 fn add_total(
-    totals: &mut BTreeMap<(String, String), PyDecimal>,
+    totals: &mut BTreeMap<(String, String), Decimal>,
     key: &str,
     currency: &str,
-    amount: PyDecimal,
+    amount: Decimal,
 ) {
     let entry = totals
         .entry((key.to_string(), currency.to_string()))
-        .or_insert(PyDecimal::ZERO);
+        .or_insert(Decimal::ZERO);
     *entry = entry.checked_add(amount).unwrap_or(*entry);
 }
 
-fn aggregates(totals: BTreeMap<(String, String), PyDecimal>) -> Vec<FeeAggregate> {
+fn aggregates(totals: BTreeMap<(String, String), Decimal>) -> Vec<FeeAggregate> {
     totals
         .into_iter()
         .map(|((key, currency), amount)| FeeAggregate {
@@ -337,7 +337,7 @@ pub fn fee_schedule_from_config(
     precision: &str,
     schedule_id: &str,
 ) -> Result<FeeSchedule, BacktestError> {
-    let precision: PyDecimal = precision.parse().map_err(|_| {
+    let precision: Decimal = precision.parse().map_err(|_| {
         BacktestError::Configuration(format!("precision must be an exact decimal: {precision}"))
     })?;
     let mode = RoundingMode::from_name(&fees.rounding).ok_or_else(|| {
@@ -355,8 +355,8 @@ pub fn fee_schedule_from_config(
             commission_per_share: per_unit,
             commission_minimum: flat,
             sec_rate_bps: notional_bps,
-            taf_per_share: PyDecimal::ZERO,
-            taf_maximum: PyDecimal::ZERO,
+            taf_per_share: Decimal::ZERO,
+            taf_maximum: Decimal::ZERO,
         },
         option: OptionsPerContractFeeModel {
             rounding,
@@ -381,15 +381,15 @@ pub fn fee_schedule_for_run(config: &BacktestConfig) -> Result<FeeSchedule, Back
     fee_schedule_from_config(&config.fees, DEFAULT_FEE_PRECISION, "harness-config")
 }
 
-fn sum_rates(fees: &FeeConfig, basis: FeeBasis) -> PyDecimal {
-    let mut total = PyDecimal::ZERO;
+fn sum_rates(fees: &FeeConfig, basis: FeeBasis) -> Decimal {
+    let mut total = Decimal::ZERO;
     for rule in fees.rules.iter().filter(|rule| rule.basis == basis) {
         total = total.checked_add(rule.rate).unwrap_or(total);
     }
     total
 }
 
-fn max_decimal(left: PyDecimal, right: PyDecimal) -> PyDecimal {
+fn max_decimal(left: Decimal, right: Decimal) -> Decimal {
     if left.cmp_value(right) == std::cmp::Ordering::Less {
         right
     } else {
@@ -397,7 +397,7 @@ fn max_decimal(left: PyDecimal, right: PyDecimal) -> PyDecimal {
     }
 }
 
-fn min_decimal(left: PyDecimal, right: PyDecimal) -> PyDecimal {
+fn min_decimal(left: Decimal, right: Decimal) -> Decimal {
     if left.cmp_value(right) == std::cmp::Ordering::Greater {
         right
     } else {

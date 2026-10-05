@@ -34,11 +34,19 @@ from thesis.workspaces.manifest import (
     manifest_sha256,
     write_workspace_manifest,
 )
+from thesis.workspaces.programs import (
+    ProgramArtifactError,
+    ProgramPublicationError,
+    WorkspacePrograms,
+)
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 __all__ = [
     "GiteaWorkspaceProvider",
     "WorkspaceRepositoryProvider",
+    "ProgramArtifactError",
+    "ProgramPublicationError",
+    "WorkspacePrograms",
     "AzureWorkspaceEntity",
     "LocalWorkspace",
     "LocalWorkspaceCatalogStore",

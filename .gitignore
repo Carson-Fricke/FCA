@@ -98,11 +98,7 @@ credentials.json
 Thumbs.db
 Desktop.ini
 
-# CLEO runtime data is governed by .cleo/.gitignore. Keep the portable
-# .cleo-export.json and allow-listed .cleo project artifacts tracked.
-
 # Compiled ARM templates are regenerable from Bicep via az bicep build;
 # keep only the Bicep sources tracked (stale compiled output misleads deploys).
 /infra/*.json
 /infra/modules/*.json
-

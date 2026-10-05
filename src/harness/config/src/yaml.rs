@@ -27,6 +27,7 @@ pub enum YamlValue {
     Map(BTreeMap<String, YamlValue>),
 }
 
+#[derive(Clone)]
 struct YamlLine {
     number: usize,
     indent: usize,
@@ -316,8 +317,33 @@ fn parse_block(
             }
             let item = line_text[1..].trim().to_string();
             if !item.is_empty() {
-                result.push(scalar(&item)?);
-                index += 1;
+                if split_mapping_entry(&item).is_ok() && !item.starts_with(['\'', '"', '[']) {
+                    // Expand '- key: value' to a regular mapping block, preserving
+                    // the following indented fields and the shared duplicate-key checks.
+                    let mut next = index + 1;
+                    while next < lines.len() && lines[next].indent > indent {
+                        next += 1;
+                    }
+                    let child_indent = indent + 2;
+                    let mut expanded = vec![YamlLine {
+                        number: lines[index].number,
+                        indent: child_indent,
+                        text: item,
+                    }];
+                    expanded.extend_from_slice(&lines[index + 1..next]);
+                    let (parsed, consumed) = parse_block(&expanded, 0, child_indent)?;
+                    if consumed != expanded.len() {
+                        return Err(ConfigError(format!(
+                            "invalid YAML near line {}",
+                            expanded[consumed].number
+                        )));
+                    }
+                    result.push(parsed);
+                    index = next;
+                } else {
+                    result.push(scalar(&item)?);
+                    index += 1;
+                }
             } else if index + 1 < lines.len() && lines[index + 1].indent > indent {
                 let child_indent = lines[index + 1].indent;
                 let (parsed, next) = parse_block(lines, index + 1, child_indent)?;

@@ -26,10 +26,187 @@ use crate::abi::{
     CBarEvent, CBarFrame, CFill, CMetricSink, COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent,
     SDK_ERROR, SDK_OK,
 };
+use crate::consumer::{
+    route_bar_with_signature, route_quote_with_signature, route_trade_with_signature,
+    routing_signature, validate_routing, RoutingSignature,
+};
 use crate::events::{BarEvent, BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
 use crate::program::{
     MetricPublisher, OrderSink, ScreenContext, ScreeningProgram, StrategyProgram, StudyProgram,
 };
+use crate::{effective_subscriptions, MarketConsumer, ObservationContext};
+
+struct ConsumerState<T> {
+    program: T,
+    subscriptions: String,
+    signature: Option<RoutingSignature>,
+    failed: bool,
+}
+
+unsafe fn borrow_program<'a, T: MarketConsumer>(
+    state: *mut std::os::raw::c_void,
+    what: &str,
+) -> Option<(&'a mut T, &'a RoutingSignature)> {
+    let state = borrow_state::<ConsumerState<T>>(state, what)?;
+    if state.failed {
+        record_error("market consumer previously failed routing validation".into());
+        return None;
+    }
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        validate_routing(
+            &mut state.program,
+            state.signature.as_ref().expect("constructed signature"),
+        )
+    }));
+    let result = match result {
+        Ok(result) => result,
+        Err(payload) => {
+            record_panic(&*payload);
+            state.failed = true;
+            return None;
+        }
+    };
+    if let Err(message) = result {
+        state.failed = true;
+        record_error(message);
+        return None;
+    }
+    Some((&mut state.program, state.signature.as_ref()?))
+}
+
+fn create_consumer<T: MarketConsumer>(program: T) -> *mut std::os::raw::c_void {
+    // Capture addresses only after the final allocation, not before moving the root.
+    let mut state = Box::new(ConsumerState {
+        program,
+        subscriptions: String::new(),
+        signature: None,
+        failed: false,
+    });
+    match routing_signature(&mut state.program)
+        .and_then(|signature| {
+            state.signature = Some(signature);
+            effective_subscriptions(&mut state.program)
+        })
+        .and_then(|inputs| serde_json::to_string(&inputs).map_err(|e| e.to_string()))
+        .and_then(|subscriptions| {
+            validate_routing(
+                &mut state.program,
+                state.signature.as_ref().expect("captured signature"),
+            )?;
+            Ok(subscriptions)
+        }) {
+        Ok(subscriptions) => {
+            state.subscriptions = subscriptions;
+            Box::into_raw(state).cast()
+        }
+        Err(message) => {
+            record_error(format!("invalid subscriptions: {message}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+unsafe fn finish_callback<T: MarketConsumer>(
+    state: *mut std::os::raw::c_void,
+    result: Result<(), String>,
+) -> i32 {
+    let Some(state) = borrow_state::<ConsumerState<T>>(state, "consumer") else {
+        return SDK_ERROR;
+    };
+    let result = result.and_then(|()| {
+        validate_routing(
+            &mut state.program,
+            state.signature.as_ref().expect("constructed signature"),
+        )
+    });
+    match result {
+        Ok(()) => SDK_OK,
+        Err(message) => {
+            state.failed = true;
+            record_error(message);
+            SDK_ERROR
+        }
+    }
+}
+
+/// Borrow the state-owned effective subscription JSON.
+///
+/// # Safety
+/// State must come from the matching consumer create trampoline.
+pub unsafe extern "C" fn __subscriptions<T: MarketConsumer>(
+    state: *mut std::os::raw::c_void,
+) -> CStr {
+    match borrow_state::<ConsumerState<T>>(state, "consumer") {
+        Some(state) => CStr::from_slice(&state.subscriptions),
+        None => CStr::from_slice(""),
+    }
+}
+
+/// Observe a study quote with dependency routing.
+///
+/// # Safety
+/// State and event must be valid for the callback.
+pub unsafe extern "C" fn __study_on_quote<T: StudyProgram>(
+    state: *mut std::os::raw::c_void,
+    event: *const CQuoteEvent,
+) -> i32 {
+    run_guarded(|| {
+        let (Some((program, signature)), Some(event)) =
+            (borrow_program::<T>(state, "study"), quote_view(event))
+        else {
+            record_error("study quote event or state is malformed".into());
+            return SDK_ERROR;
+        };
+        let result =
+            route_quote_with_signature(program, &event, &mut ObservationContext, signature);
+        finish_callback::<T>(state, result)
+    })
+}
+
+/// Observe a study trade with dependency routing.
+///
+/// # Safety
+/// State and event must be valid for the callback.
+pub unsafe extern "C" fn __study_on_trade<T: StudyProgram>(
+    state: *mut std::os::raw::c_void,
+    event: *const CTradeEvent,
+) -> i32 {
+    run_guarded(|| {
+        let (Some((program, signature)), Some(event)) =
+            (borrow_program::<T>(state, "study"), trade_view(event))
+        else {
+            record_error("study trade event or state is malformed".into());
+            return SDK_ERROR;
+        };
+        let result =
+            route_trade_with_signature(program, &event, &mut ObservationContext, signature);
+        finish_callback::<T>(state, result)
+    })
+}
+
+/// Observe a strategy frame and preserve submitted orders.
+///
+/// # Safety
+/// State, frame storage, and order sink must be valid for the callback.
+pub unsafe extern "C" fn __strategy_on_bar_frame<T: StrategyProgram>(
+    state: *mut std::os::raw::c_void,
+    frame: *const CBarFrame,
+    orders: *const COrderSink,
+) -> i32 {
+    run_guarded(|| {
+        let (Some((program, signature)), Some(frame), Some(sink)) = (
+            borrow_program::<T>(state, "strategy"),
+            bar_frame_view(frame),
+            orders.as_ref(),
+        ) else {
+            record_error("strategy frame, state or order sink is malformed".into());
+            return SDK_ERROR;
+        };
+        let result =
+            route_bar_with_signature(program, &frame, &mut OrderSink::from_sink(*sink), signature);
+        finish_callback::<T>(state, result)
+    })
+}
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
@@ -185,6 +362,10 @@ pub unsafe fn bar_frame_view<'a>(frame: *const CBarFrame) -> Option<BarFrame<'a>
         missing_symbols.push(symbol);
     }
     Some(BarFrame {
+        interval: match unsafe { raw.interval.as_str() }? {
+            interval @ ("1min" | "1d") => interval,
+            _ => return None,
+        },
         interval_start_ns: raw.interval_start_ns,
         interval_end_ns: raw.interval_end_ns,
         available_at_ns: raw.available_at_ns,
@@ -239,7 +420,7 @@ pub unsafe extern "C" fn __study_create<T: StudyProgram>(
     let outcome =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             match parse_parameters(parameters) {
-                Ok(value) => Box::into_raw(Box::new(T::new(value))).cast::<std::os::raw::c_void>(),
+                Ok(value) => create_consumer(T::new(value)),
                 Err(message) => {
                     record_error(format!("study program creation failed: {message}"));
                     std::ptr::null_mut()
@@ -266,15 +447,16 @@ pub unsafe extern "C" fn __study_on_bar_frame<T: StudyProgram>(
     frame: *const CBarFrame,
 ) -> i32 {
     run_guarded(|| {
-        let Some(program) = (unsafe { borrow_state::<T>(state, "study program") }) else {
+        let Some((program, signature)) = (unsafe { borrow_program::<T>(state, "study program") })
+        else {
             return SDK_ERROR;
         };
         let Some(view) = (unsafe { bar_frame_view(frame) }) else {
             record_error("study bar frame is malformed".to_string());
             return SDK_ERROR;
         };
-        program.on_bar_frame(&view);
-        SDK_OK
+        let result = route_bar_with_signature(program, &view, &mut ObservationContext, signature);
+        unsafe { finish_callback::<T>(state, result) }
     })
 }
 
@@ -288,7 +470,7 @@ pub unsafe extern "C" fn __study_on_stop<T: StudyProgram>(
     state: *mut std::os::raw::c_void,
     metrics: *const CMetricSink,
 ) -> i32 {
-    let Some(program) = (unsafe { borrow_state::<T>(state, "study program") }) else {
+    let Some((program, _)) = (unsafe { borrow_program::<T>(state, "study program") }) else {
         return SDK_ERROR;
     };
     let Some(sink) = (unsafe { metrics.as_ref() }) else {
@@ -298,7 +480,7 @@ pub unsafe extern "C" fn __study_on_stop<T: StudyProgram>(
     let mut publisher = MetricPublisher::from_sink(*sink);
     run_guarded(|| {
         program.on_stop(&mut publisher);
-        SDK_OK
+        unsafe { finish_callback::<T>(state, Ok(())) }
     })
 }
 
@@ -313,7 +495,7 @@ pub unsafe extern "C" fn __study_destroy<T: StudyProgram>(state: *mut std::os::r
         return;
     }
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drop(Box::from_raw(state.cast::<T>()));
+        drop(Box::from_raw(state.cast::<ConsumerState<T>>()));
     }));
 }
 
@@ -328,7 +510,7 @@ pub unsafe extern "C" fn __strategy_create<T: StrategyProgram>(
     let outcome =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             match parse_parameters(parameters) {
-                Ok(value) => Box::into_raw(Box::new(T::new(value))).cast::<std::os::raw::c_void>(),
+                Ok(value) => create_consumer(T::new(value)),
                 Err(message) => {
                     record_error(format!("strategy program creation failed: {message}"));
                     std::ptr::null_mut()
@@ -354,7 +536,7 @@ pub unsafe extern "C" fn __strategy_on_start<T: StrategyProgram>(
     state: *mut std::os::raw::c_void,
     start: *const CStart,
 ) -> i32 {
-    let Some(program) = (unsafe { borrow_state::<T>(state, "strategy program") }) else {
+    let Some((program, _)) = (unsafe { borrow_program::<T>(state, "strategy program") }) else {
         return SDK_ERROR;
     };
     let Some(raw) = (unsafe { start.as_ref() }) else {
@@ -383,7 +565,7 @@ pub unsafe extern "C" fn __strategy_on_start<T: StrategyProgram>(
     };
     run_guarded(|| {
         program.on_start(&start_view);
-        SDK_OK
+        unsafe { finish_callback::<T>(state, Ok(())) }
     })
 }
 
@@ -399,7 +581,8 @@ pub unsafe extern "C" fn __strategy_on_quote<T: StrategyProgram>(
     event: *const CQuoteEvent,
     orders: *const COrderSink,
 ) -> i32 {
-    let Some(program) = (unsafe { borrow_state::<T>(state, "strategy program") }) else {
+    let Some((program, signature)) = (unsafe { borrow_program::<T>(state, "strategy program") })
+    else {
         return SDK_ERROR;
     };
     let Some(quote) = (unsafe { quote_view(event) }) else {
@@ -412,8 +595,8 @@ pub unsafe extern "C" fn __strategy_on_quote<T: StrategyProgram>(
     };
     let mut orders = OrderSink::from_sink(*sink);
     run_guarded(|| {
-        program.on_quote(&quote, &mut orders);
-        SDK_OK
+        let result = route_quote_with_signature(program, &quote, &mut orders, signature);
+        unsafe { finish_callback::<T>(state, result) }
     })
 }
 
@@ -429,7 +612,8 @@ pub unsafe extern "C" fn __strategy_on_trade<T: StrategyProgram>(
     event: *const CTradeEvent,
     orders: *const COrderSink,
 ) -> i32 {
-    let Some(program) = (unsafe { borrow_state::<T>(state, "strategy program") }) else {
+    let Some((program, signature)) = (unsafe { borrow_program::<T>(state, "strategy program") })
+    else {
         return SDK_ERROR;
     };
     let Some(trade) = (unsafe { trade_view(event) }) else {
@@ -442,8 +626,8 @@ pub unsafe extern "C" fn __strategy_on_trade<T: StrategyProgram>(
     };
     let mut orders = OrderSink::from_sink(*sink);
     run_guarded(|| {
-        program.on_trade(&trade, &mut orders);
-        SDK_OK
+        let result = route_trade_with_signature(program, &trade, &mut orders, signature);
+        unsafe { finish_callback::<T>(state, result) }
     })
 }
 
@@ -457,7 +641,7 @@ pub unsafe extern "C" fn __strategy_on_fill<T: StrategyProgram>(
     state: *mut std::os::raw::c_void,
     fill: *const CFill,
 ) -> i32 {
-    let Some(program) = (unsafe { borrow_state::<T>(state, "strategy program") }) else {
+    let Some((program, _)) = (unsafe { borrow_program::<T>(state, "strategy program") }) else {
         return SDK_ERROR;
     };
     let Some(view) = (unsafe { fill_view(fill) }) else {
@@ -466,7 +650,7 @@ pub unsafe extern "C" fn __strategy_on_fill<T: StrategyProgram>(
     };
     run_guarded(|| {
         program.on_fill(&view);
-        SDK_OK
+        unsafe { finish_callback::<T>(state, Ok(())) }
     })
 }
 
@@ -480,7 +664,7 @@ pub unsafe extern "C" fn __strategy_on_stop<T: StrategyProgram>(
     state: *mut std::os::raw::c_void,
     metrics: *const CMetricSink,
 ) -> i32 {
-    let Some(program) = (unsafe { borrow_state::<T>(state, "strategy program") }) else {
+    let Some((program, _)) = (unsafe { borrow_program::<T>(state, "strategy program") }) else {
         return SDK_ERROR;
     };
     let Some(sink) = (unsafe { metrics.as_ref() }) else {
@@ -490,7 +674,7 @@ pub unsafe extern "C" fn __strategy_on_stop<T: StrategyProgram>(
     let mut publisher = MetricPublisher::from_sink(*sink);
     run_guarded(|| {
         program.on_stop(&mut publisher);
-        SDK_OK
+        unsafe { finish_callback::<T>(state, Ok(())) }
     })
 }
 
@@ -505,7 +689,7 @@ pub unsafe extern "C" fn __strategy_destroy<T: StrategyProgram>(state: *mut std:
         return;
     }
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drop(Box::from_raw(state.cast::<T>()));
+        drop(Box::from_raw(state.cast::<ConsumerState<T>>()));
     }));
 }
 
@@ -672,6 +856,9 @@ macro_rules! export_study_program {
                 on_bar_frame: $crate::export::__study_on_bar_frame::<$ty>,
                 on_stop: $crate::export::__study_on_stop::<$ty>,
                 destroy: $crate::export::__study_destroy::<$ty>,
+                on_quote: $crate::export::__study_on_quote::<$ty>,
+                on_trade: $crate::export::__study_on_trade::<$ty>,
+                subscriptions: $crate::export::__subscriptions::<$ty>,
             };
             &VTABLE
         }
@@ -706,6 +893,8 @@ macro_rules! export_strategy_program {
                 on_fill: $crate::export::__strategy_on_fill::<$ty>,
                 on_stop: $crate::export::__strategy_on_stop::<$ty>,
                 destroy: $crate::export::__strategy_destroy::<$ty>,
+                on_bar_frame: $crate::export::__strategy_on_bar_frame::<$ty>,
+                subscriptions: $crate::export::__subscriptions::<$ty>,
             };
             &VTABLE
         }

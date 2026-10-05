@@ -1,14 +1,34 @@
-<!-- CAAMP:START -->
-@~/.agents/AGENTS.md
-@.cleo/project-context.json
-<!-- CAAMP:END -->
-
-@.github/instructions/cleo.instructions.md
 @.github/instructions/copilot-instructions.md
 @.github/instructions/repository-organization.instructions.md
 @.github/instructions/source-documentation.instructions.md
 @.github/instructions/market-lake-local.instructions.md
 @.github/instructions/thesis-workflow-development.instructions.md
+@.github/instructions/agent-session-delivery.instructions.md
+
+## Agent Session Delivery Contract
+
+Every coding agent changing Thesis agent, provider, chat, workflow, UI, or
+Thesis test code MUST read and follow
+`.github/instructions/agent-session-delivery.instructions.md`. Option 1 requires
+one neutral session inbox, one canonical incoming writer, and one pure provider
+projection shared by live execution and replay. Provider-native roles MUST NOT
+become session message types or independent delivery paths.
+`Conversations.deliver_session_message` and handle delegation converge on
+`runtime/incoming.py::write_incoming`; tool results use the injected inbox
+persistence port, not a native-history append.
+
+The root reference loads this contract for agents reading `AGENTS.md`; the
+instruction file's `applyTo` globs select it in supporting coding tools.
+The `@` reference depends on loader support; unsupported loaders MUST read the
+referenced file directly. Instructions cannot guarantee obedience or honesty by
+every LLM or instruction loader.
+The integration owner MUST retain and run executable architecture and behavior tests,
+including `tests/thesis/agent/runtime/test_delivery_architecture.py`, and MUST
+NOT treat prompts or documentation as proof of implementation compliance.
+The source guard is mandatory and MUST fail for missing required modules, with
+no hidden optional bypass. `REQ-DEL` in the runtime architecture names the
+delivery assertions and verification paths; the coordinator owns test edits and
+integration verification.
 
 ## FCA Execution Policy
 
@@ -34,31 +54,12 @@
   facades, entrypoints, dependency direction, or deployment shape.
 - Treat architecture-documentation updates as integration-owned unless a task
   explicitly assigns that file.
-- Explore cheaply. Check BRAIN first with `cleo memory find "<topic>"` for
-  prior knowledge, then read files directly.
-- CLEO is a task tracker and BRAIN is a lookup tool. Do not use CLEO
-  orchestration, spawn prompts, or worktree machinery to drive implementation;
-  implement with ordinary agents and keep CLEO task state updated.
-- Create tasks atomically. Decompose epics with `cleo workgraph validate
-  --dry-run` followed by `cleo workgraph apply`; for plain multi-task creation
-  use `cleo add-batch` with `--dry-run` first, in chunks of at most 20 tasks
-  per transaction. Never loop single `cleo add` calls to create more than two
-  tasks.
-- Assemble every evidence atom before the first `cleo verify` call, then make
-  one `cleo verify <id> --all` invocation. Iterative per-gate verify attempts
-  are an anti-pattern; each failed gate forces evidence recapture and
-  staleness re-verification.
+- Explore the repository directly with focused file and content searches.
 - NEVER co-locate Rust tests inside a `src/**/*.rs` file. Every `#[cfg(test)]`
   test module lives under the package's own `tests/` directory — a peer of
   `src/` and `Cargo.toml` inside that crate. Do not add `#[cfg(test)] mod tests`
   to a source file. See `.github/instructions/rust.instructions.md` for the
   integration-vs-unit placement rule.
-- NEVER complete multiple tasks with individual `cleo complete` invocations.
-  When more than one task must be closed, bulk-complete the set in one
-  transaction with `scripts/cleo-bulk-complete.ps1 -ManifestPath <manifest.json>`
-  (one `sqlite3` process, one commit). Reserve single `cleo complete` for a lone
-  task. Per-task completion costs O(N x process startup) and is a known
-  anti-pattern.
 - NEVER use workflow gates, gate tools, or gate events (`workflow.gate.*`). All
   workflow gates, gate resolution schemas, and gate cards are permanently
   removed and prohibited. Operator interaction is conversational and
@@ -69,4 +70,3 @@
   authors, relays, or pauses for operator input, and nothing percolates to the
   parent conversation. The operator always responds via standard chat input.
   See `.github/instructions/thesis-workflow-development.instructions.md`.
-

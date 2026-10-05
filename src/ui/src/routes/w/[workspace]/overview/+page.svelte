@@ -3,13 +3,24 @@
 	import MetricCard from '$lib/components/common/MetricCard.svelte';
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import { relativeTime } from '$lib/format';
-	import type { PageData } from './$types';
+	import { useWorkspaceContext } from '$lib/workspace-context.svelte';
 
-	let { data }: { data: PageData } = $props();
-
-	const activity = $derived(data.snapshot.overview.activity);
-	const openChats = $derived(data.snapshot.overview.openChats);
-	const counts = $derived(data.snapshot.counts);
+	const workspace = useWorkspaceContext();
+	const detail = $derived(workspace.detail);
+	const activity = $derived(detail?.overview.activity ?? []);
+	const openChats = $derived(detail?.overview.openChats ?? []);
+	const counts = $derived(
+		detail?.counts ?? {
+			strategies: 0,
+			chats: 0,
+			backtests: 0,
+			deployments: 0,
+			dashboards: 0,
+			screeners: 0
+		}
+	);
+	const health = $derived(detail?.overview.health ?? null);
+	const workspaceName = $derived(workspace.summary.name);
 	const workspaceId = $derived(page.params.workspace ?? '');
 </script>
 
@@ -19,7 +30,7 @@
 	<header>
 		<h1 class="text-xl font-semibold text-slate-800">Overview</h1>
 		<p class="text-sm text-slate-500">
-			Workspace landing for <span class="text-accent">{data.snapshot.overview.workspace.name}</span>.
+			Workspace landing for <span class="text-accent">{workspaceName}</span>.
 		</p>
 	</header>
 
@@ -92,15 +103,19 @@
 				<h2 class="mb-2 text-sm font-semibold text-slate-800">Workspace health</h2>
 				<p class="flex items-center gap-2 text-sm">
 					<span
-						class="h-2 w-2 rounded-full {data.snapshot.overview.health === 'operational'
+						class="h-2 w-2 rounded-full {health === 'operational'
 							? 'bg-profit'
-							: 'bg-warn'}"
+							: health === 'degraded'
+								? 'bg-warn'
+								: 'bg-surface-600'}"
 						aria-hidden="true"
 					></span>
 					<span class="text-slate-700">
-						{data.snapshot.overview.health === 'operational'
-							? 'All systems operational'
-							: 'Degraded surfaces — see deployments'}
+						{health === null
+							? 'Checking workspace health…'
+							: health === 'operational'
+								? 'All systems operational'
+								: 'Degraded surfaces — see deployments'}
 					</span>
 				</p>
 				<p class="mt-2 font-mono text-[10px] text-slate-500">{counts.dashboards} dashboards · {counts.screeners} saved screeners</p>

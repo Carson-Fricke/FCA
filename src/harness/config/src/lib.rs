@@ -1,22 +1,20 @@
-//! Behavior-identical harness configuration: YAML-subset loading, strict typed
-//! models, and canonical domain-separated hashing.
+//! Authoritative harness document syntax, replay schema, and typed normalization.
 //!
-//! This crate ports `harness.configuration` (hashing, models, loader) so the
-//! Rust engine loads and hashes committed documents exactly as Python does.
-//! `load_configuration` returns the canonical `model_dump(mode="python")` tree,
-//! which both the hash and downstream consumers use.
+//! Compact shipped replay defaults are applied only to absent fields; invalid
+//! supplied fields fail validation. Hash encoding lives in `harness-contracts`.
 
 pub mod loader;
 pub mod models;
+pub mod replay;
 pub mod yaml;
 
 use std::fmt;
 
+use harness_contracts::HashEncoding;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 /// The domain separator for configuration hashes.
-pub const CONFIGURATION_HASH_DOMAIN: &[u8] = b"fca:harness-configuration:v1\0";
+pub use harness_contracts::CONFIGURATION_HASH_DOMAIN;
 
 /// A configuration loading or validation failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,48 +34,13 @@ impl std::error::Error for ConfigError {}
 /// separators=(",", ":"), sort_keys=True)`.
 #[must_use]
 pub fn canonical_json(value: &Value) -> String {
-    let mut output = String::new();
-    write_canonical(value, &mut output);
-    output
-}
-
-fn write_canonical(value: &Value, output: &mut String) {
-    match value {
-        Value::Object(map) => {
-            let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-            entries.sort_by(|left, right| left.0.cmp(right.0));
-            output.push('{');
-            for (index, (key, item)) in entries.iter().enumerate() {
-                if index > 0 {
-                    output.push(',');
-                }
-                output.push_str(&serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string()));
-                output.push(':');
-                write_canonical(item, output);
-            }
-            output.push('}');
-        }
-        Value::Array(items) => {
-            output.push('[');
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    output.push(',');
-                }
-                write_canonical(item, output);
-            }
-            output.push(']');
-        }
-        other => output.push_str(&other.to_string()),
-    }
+    harness_contracts::canonical_json(value, HashEncoding::Utf8)
 }
 
 /// Return a domain-separated SHA-256 hash of canonical configuration.
 #[must_use]
 pub fn configuration_hash(value: &Value) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(CONFIGURATION_HASH_DOMAIN);
-    hasher.update(canonical_json(value).as_bytes());
-    hex::encode(hasher.finalize())
+    harness_contracts::configuration_hash(value, HashEncoding::Utf8)
 }
 
 /// One validated configuration document as its canonical tree.
@@ -85,7 +48,7 @@ pub fn configuration_hash(value: &Value) -> String {
 pub enum HarnessConfig {
     /// An API shell document.
     Api(Value),
-    /// A backtest shell document.
+    /// A replay shell document (backtest or study).
     Backtest(Value),
     /// A trader shell document.
     Trader(Value),
@@ -97,7 +60,13 @@ impl HarnessConfig {
     pub fn shell(&self) -> &'static str {
         match self {
             Self::Api(_) => "api",
-            Self::Backtest(_) => "backtest",
+            Self::Backtest(value) => {
+                if value["shell"] == "study" {
+                    "study"
+                } else {
+                    "backtest"
+                }
+            }
             Self::Trader(_) => "trader",
         }
     }

@@ -214,93 +214,45 @@ impl LocalEnsureLauncher {
         }
     }
 
-    /// Run one bars ensure: ensure trades for the window, then produce bars.
+    /// Run one bars ensure: fetch the window's bars only.
     ///
-    /// Trades are ensured through the same launchers as any trade request so
-    /// derivation always reads a current partition; the bars backfill then
-    /// prefers provider bars and derives only the sessions the provider did
-    /// not cover.
+    /// A bars ensure fetches exactly the requested data type and never
+    /// backfills trades.  The bars backfill prefers provider bars and derives
+    /// only the sessions the provider did not cover from the stored trade
+    /// partitions when they exist; sessions without stored trades publish
+    /// error coverage instead of triggering a trade fetch the caller did not
+    /// request.
     async fn run_bars(
         &self,
         request: &EnsureSpec,
         progress: Option<BackfillProgressSink>,
     ) -> Result<(), LocalIngestError> {
+        if !matches!(request.asset_class, AssetClass::Equity | AssetClass::Crypto) {
+            return Err(LocalIngestError::new(
+                "options ingest is not supported by the local launcher",
+            ));
+        }
         let Some(token) = request.interval.as_deref() else {
             return Err(LocalIngestError::new("bars requires an interval"));
         };
         let interval =
             BarInterval::parse(token).map_err(|error| LocalIngestError::new(error.to_string()))?;
-        let symbol = request.symbol.trim().to_uppercase();
-        match request.asset_class {
-            AssetClass::Equity => {
-                run_local_backfill(LocalBackfillOptions {
-                    layout: self.layout.clone(),
-                    symbols: vec![symbol.clone()],
-                    start_date: request.start_date,
-                    end_date: request.end_date,
-                    data_types: Some(vec![DataType::Trade]),
-                    environ: self.environ.clone(),
-                    now: self.now,
-                    settings: self.settings.clone(),
-                    provider: self.equity.clone(),
-                    retry_settle_seconds: None,
-                    catalog: self.catalog.clone(),
-                    progress: progress.clone(),
-                })
-                .await?;
-                run_local_bars_backfill(LocalBarsBackfillOptions {
-                    layout: self.layout.clone(),
-                    asset_class: AssetClass::Equity,
-                    symbols: vec![symbol],
-                    interval,
-                    start_date: request.start_date,
-                    end_date: request.end_date,
-                    environ: self.environ.clone(),
-                    now: self.now,
-                    settings: self.settings.clone(),
-                    provider: self.bars.clone(),
-                    retry_settle_seconds: None,
-                    catalog: self.catalog.clone(),
-                })
-                .await
-                .map(|_| ())
-            }
-            AssetClass::Crypto => {
-                run_local_crypto_backfill(LocalCryptoBackfillOptions {
-                    layout: self.layout.clone(),
-                    pairs: vec![symbol.clone()],
-                    start_date: request.start_date,
-                    end_date: request.end_date,
-                    data_types: Some(vec![DataType::Trade]),
-                    environ: self.environ.clone(),
-                    now: self.now,
-                    settings: self.settings.clone(),
-                    provider: self.crypto.clone(),
-                    retry_settle_seconds: None,
-                    catalog: self.catalog.clone(),
-                    progress,
-                })
-                .await?;
-                run_local_bars_backfill(LocalBarsBackfillOptions {
-                    layout: self.layout.clone(),
-                    asset_class: AssetClass::Crypto,
-                    symbols: vec![symbol],
-                    interval,
-                    start_date: request.start_date,
-                    end_date: request.end_date,
-                    environ: self.environ.clone(),
-                    now: self.now,
-                    settings: self.settings.clone(),
-                    provider: self.bars.clone(),
-                    retry_settle_seconds: None,
-                    catalog: self.catalog.clone(),
-                })
-                .await
-                .map(|_| ())
-            }
-            _ => Err(LocalIngestError::new(
-                "options ingest is not supported by the local launcher",
-            )),
-        }
+        run_local_bars_backfill(LocalBarsBackfillOptions {
+            layout: self.layout.clone(),
+            asset_class: request.asset_class,
+            symbols: vec![request.symbol.trim().to_uppercase()],
+            interval,
+            start_date: request.start_date,
+            end_date: request.end_date,
+            environ: self.environ.clone(),
+            now: self.now,
+            settings: self.settings.clone(),
+            provider: self.bars.clone(),
+            retry_settle_seconds: None,
+            catalog: self.catalog.clone(),
+            progress,
+        })
+        .await
+        .map(|_| ())
     }
 }

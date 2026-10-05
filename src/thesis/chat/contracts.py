@@ -1,7 +1,7 @@
 """Workspace-scoped contracts for Thesis chat and autonomous work.
 
 The records in this module are transport and persistence contracts.  They do
-not import CLEO, FastAPI, a model provider, or a storage implementation.
+not import FastAPI, a model provider, or a storage implementation.
 Mutable lifecycle operations create a new record snapshot rather than mutating
 an existing record in place.
 """
@@ -22,6 +22,7 @@ _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
 _WORKSPACE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
+_MAX_REASONING = 32_768
 
 
 class ChatContractError(ValueError):
@@ -43,6 +44,7 @@ class CrossWorkspaceLinkError(ChatContractError):
 class ChatState(StrEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"
+    DELETED = "deleted"
 
 
 class MessageRole(StrEnum):
@@ -111,6 +113,11 @@ class SubAgentKind(StrEnum):
 
     CONVERSATION = "conversation"
     ONE_SHOT = "one_shot"
+
+
+class CompletionMode(StrEnum):
+    COMPLETE_ON_TEXT = "complete_on_text"
+    EXPLICIT_COMPLETION = "explicit_completion"
 
 
 #: Durable role of the workflow-node record that owns one execution's phase
@@ -190,20 +197,29 @@ def _validate_body(value: str, name: str, *, max_length: int) -> str:
     return value.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _normalise_reasoning(value: str | None) -> str | None:
+def normalise_reasoning(value: str | None) -> str | None:
     """Normalize an optional reasoning channel, treating blanks as absent.
 
-    Reasoning is a free-text, multi-line side channel that is never part of
-    the message ``body``.  Empty or whitespace-only values collapse to ``None``
-    so older records and non-reasoning messages stay byte-identical.
+    Reasoning is a free-text, multi-line model side channel that is never part
+    of the message ``body``.  Provider output is normalized rather than
+    rejected: stray control characters are dropped, line endings collapse to
+    ``\\n``, and an over-long trace is bounded to the record maximum, so a
+    display detail can never fail message persistence.  Empty or
+    whitespace-only values collapse to ``None`` so older records and
+    non-reasoning messages stay byte-identical.
     """
     if value is None:
         return None
     if not isinstance(value, str):
         raise ChatContractError("reasoning must be text")
-    if not value.strip():
+    cleaned = "".join(
+        character
+        for character in value.replace("\r\n", "\n").replace("\r", "\n")
+        if ord(character) >= 32 or character in "\n\t"
+    )
+    if not cleaned.strip():
         return None
-    return _validate_body(value, "reasoning", max_length=32_768)
+    return cleaned[:_MAX_REASONING]
 
 
 def _validate_timestamp(value: datetime, name: str) -> None:
@@ -276,6 +292,73 @@ class WorkspaceRecord:
         return _as_dict(self)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ConversationRecord(WorkspaceRecord):
+    """Immutable ownership; ``chat_id`` remains the shipped root identity.
+
+    Missing ownership is derived here for persisted pre-ownership snapshots.
+    A root has no parent; a child defaults to the root unless its durable
+    sub-agent record supplies a direct parent.
+    """
+
+    chat_id: str
+    conversation_id: str | None = None
+    root_conversation_id: str | None = None
+    parent_conversation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        root = self.chat_id
+        conversation = root
+        parent = None
+        if isinstance(self, SubAgentRecord):
+            conversation = self.sub_agent_id
+            parent = self.parent_sub_agent_id or root
+        elif isinstance(self, ChatMessage) and self.data is not None:
+            anchor = self.data.get("subAgentId")
+            conversation = anchor if isinstance(anchor, str) and anchor else root
+        conversation = (
+            conversation if self.conversation_id is None else self.conversation_id
+        )
+        if conversation != root and parent is None:
+            parent = root
+        if self.root_conversation_id is not None and self.root_conversation_id != root:
+            raise ChatContractError("root_conversation_id must equal chat_id")
+        if not isinstance(conversation, str):
+            raise ChatContractError(
+                "conversation_id must be a non-empty safe identifier"
+            )
+        _validate_id(conversation, "conversation_id")
+        if isinstance(self, ChatThread) and conversation != root:
+            raise ChatContractError("a chat thread must own the root conversation")
+        if isinstance(self, SubAgentRecord) and conversation != self.sub_agent_id:
+            raise ChatContractError("a sub-agent must own its own conversation")
+        if isinstance(self, ChatMessage) and self.data is not None:
+            anchor = self.data.get("subAgentId")
+            if isinstance(anchor, str) and anchor and anchor != conversation:
+                raise ChatContractError("message ownership must match data.subAgentId")
+        if self.parent_conversation_id is not None:
+            parent = self.parent_conversation_id
+        if conversation == root:
+            if parent is not None:
+                raise ChatContractError("a root conversation must not have a parent")
+        else:
+            if not isinstance(parent, str):
+                raise ChatContractError(
+                    "parent_conversation_id must be a safe identifier"
+                )
+            _validate_id(parent, "parent_conversation_id")
+            if parent == conversation:
+                raise ChatContractError("a conversation must not parent itself")
+        if isinstance(self, SubAgentRecord) and parent != (
+            self.parent_sub_agent_id or root
+        ):
+            raise ChatContractError("sub-agent ownership must match its direct parent")
+        object.__setattr__(self, "conversation_id", conversation)
+        object.__setattr__(self, "root_conversation_id", root)
+        object.__setattr__(self, "parent_conversation_id", parent)
+        WorkspaceRecord.__post_init__(self)
+
+
 @dataclass(frozen=True, slots=True)
 class RecordLinks:
     """Explicit links shared by chat, investigation, and execution records."""
@@ -321,7 +404,7 @@ class RecordLinks:
 
 
 @dataclass(frozen=True, slots=True)
-class ChatThread(WorkspaceRecord):
+class ChatThread(ConversationRecord):
     """A persistent conversational thread within exactly one workspace."""
 
     chat_id: str
@@ -330,14 +413,34 @@ class ChatThread(WorkspaceRecord):
     state: ChatState = ChatState.ACTIVE
     links: RecordLinks = field(default_factory=RecordLinks)
     updated_at: datetime | None = None
+    input_consumed_positions: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _validate_id(self.chat_id, "chat_id")
         _validate_text(self.title, "title", max_length=256)
         _validate_id(self.owner_actor_id, "owner_actor_id")
+        try:
+            object.__setattr__(self, "state", ChatState(self.state))
+        except ValueError as error:
+            raise ChatContractError("state must be a chat state") from error
+        positions = dict(self.input_consumed_positions)
+        for anchor, position in positions.items():
+            if anchor:
+                _validate_id(anchor, "input_consumed_positions anchor")
+            if (
+                isinstance(position, bool)
+                or not isinstance(position, int)
+                or position < 0
+            ):
+                raise ChatContractError(
+                    "input consumption positions must be non-negative integers"
+                )
+        object.__setattr__(
+            self, "input_consumed_positions", MappingProxyType(positions)
+        )
         if self.updated_at is not None:
             _validate_timestamp(self.updated_at, "updated_at")
-        WorkspaceRecord.__post_init__(self)
+        ConversationRecord.__post_init__(self)
 
     @property
     def investigation_ids(self) -> tuple[str, ...]:
@@ -361,7 +464,7 @@ class ChatThread(WorkspaceRecord):
 
 
 @dataclass(frozen=True, slots=True)
-class ChatMessage(WorkspaceRecord):
+class ChatMessage(ConversationRecord):
     """One durable user, assistant, system, or tool message."""
 
     message_id: str
@@ -378,6 +481,7 @@ class ChatMessage(WorkspaceRecord):
     investigation_ids: tuple[str, ...] = ()
     execution_id: str | None = None
     intent_epoch: int = 0
+    input_position: int = 0
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -387,7 +491,7 @@ class ChatMessage(WorkspaceRecord):
         object.__setattr__(
             self, "body", _validate_body(self.body, "body", max_length=32_768)
         )
-        object.__setattr__(self, "reasoning", _normalise_reasoning(self.reasoning))
+        object.__setattr__(self, "reasoning", normalise_reasoning(self.reasoning))
         if not isinstance(self.kind, TranscriptItemKind):
             try:
                 object.__setattr__(self, "kind", TranscriptItemKind(self.kind))
@@ -407,6 +511,8 @@ class ChatMessage(WorkspaceRecord):
             )
         if self.intent_epoch < 0:
             raise ChatContractError("intent_epoch must not be negative")
+        if self.input_position < 0:
+            raise ChatContractError("input_position must not be negative")
         object.__setattr__(
             self, "attachment_ids", _normalise_ids(self.attachment_ids, "attachment_id")
         )
@@ -419,11 +525,11 @@ class ChatMessage(WorkspaceRecord):
             _validate_id(self.execution_id, "execution_id")
         if self.updated_at is not None:
             _validate_timestamp(self.updated_at, "updated_at")
-        WorkspaceRecord.__post_init__(self)
+        ConversationRecord.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
-class Attachment(WorkspaceRecord):
+class Attachment(ConversationRecord):
     """Metadata for an untrusted upload; bytes remain behind an injected port."""
 
     attachment_id: str
@@ -454,7 +560,7 @@ class Attachment(WorkspaceRecord):
             _validate_text(self.error_message, "error_message", max_length=2048)
         if self.updated_at is not None:
             _validate_timestamp(self.updated_at, "updated_at")
-        WorkspaceRecord.__post_init__(self)
+        ConversationRecord.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -520,7 +626,7 @@ class WorkflowDefinition:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkflowExecution(WorkspaceRecord):
+class WorkflowExecution(ConversationRecord):
     """Durable workflow state independent of any browser connection."""
 
     execution_id: str
@@ -576,11 +682,11 @@ class WorkflowExecution(WorkspaceRecord):
             value = getattr(self, name)
             if value is not None:
                 _validate_timestamp(value, name)
-        WorkspaceRecord.__post_init__(self)
+        ConversationRecord.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True)
-class ToolJob(WorkspaceRecord):
+class ToolJob(ConversationRecord):
     """An externally submitted tool operation whose result is never discarded."""
 
     tool_job_id: str
@@ -627,11 +733,11 @@ class ToolJob(WorkspaceRecord):
             _validate_text(self.error_message, "error_message", max_length=2048)
         if self.updated_at is not None:
             _validate_timestamp(self.updated_at, "updated_at")
-        WorkspaceRecord.__post_init__(self)
+        ConversationRecord.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class SubAgentRecord(WorkspaceRecord):
+class SubAgentRecord(ConversationRecord):
     """An independently durable agent attached directly to one chat.
 
     A sub-agent owns its own conversation, specification snapshot, tool policy,
@@ -650,6 +756,9 @@ class SubAgentRecord(WorkspaceRecord):
     phase: str | None = None
     spec_version: str = "1.0.0"
     kind: SubAgentKind = SubAgentKind.CONVERSATION
+    completion_mode: CompletionMode = CompletionMode.EXPLICIT_COMPLETION
+    returns_to_sub_agent_id: str | None = None
+    phase_executor: bool = False
     allowed_tools: tuple[str, ...] = ()
     status: SubAgentStatus = SubAgentStatus.PENDING
     accepts_input: bool = False
@@ -666,6 +775,7 @@ class SubAgentRecord(WorkspaceRecord):
         _validate_text(self.role, "role", max_length=256)
         for name in (
             "parent_sub_agent_id",
+            "returns_to_sub_agent_id",
             "spawned_by_invocation_id",
             "workflow_execution_id",
             "phase_attempt_id",
@@ -678,6 +788,15 @@ class SubAgentRecord(WorkspaceRecord):
             if value is not None:
                 _validate_id(value, name)
         _validate_text(self.spec_version, "spec_version", max_length=64)
+        object.__setattr__(
+            self, "completion_mode", CompletionMode(self.completion_mode)
+        )
+        if self.phase_executor and not (
+            self.phase and self.workflow_execution_id and self.phase_attempt_id
+        ):
+            raise ChatContractError(
+                "phase_executor requires phase execution attribution"
+            )
         if not isinstance(self.kind, SubAgentKind):
             try:
                 object.__setattr__(self, "kind", SubAgentKind(self.kind))
@@ -709,16 +828,21 @@ class SubAgentRecord(WorkspaceRecord):
             object.__setattr__(self, "result", MappingProxyType(dict(self.result)))
         if self.updated_at is not None:
             _validate_timestamp(self.updated_at, "updated_at")
-        WorkspaceRecord.__post_init__(self)
+        ConversationRecord.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class AgentInvocation(WorkspaceRecord):
+class AgentInvocation(ConversationRecord):
     """One first-class durable model or tool invocation.
 
     Invocations are never inferred from UI events: each completion and each tool
     call is persisted with its trusted attribution, hashes, and terminal state so
     recovery can deduplicate side effects by ``idempotency_key``.
+
+    New model invocations retain ordered ``request_messages`` references with
+    message_id, direction and position, not another transcript. Historical full
+    message mappings remain readable as persisted evidence. ``provider_request``
+    is the detached actual provider audit; references never reconstruct it.
     """
 
     invocation_id: str
@@ -735,12 +859,19 @@ class AgentInvocation(WorkspaceRecord):
     tool_name: str | None = None
     policy_hash: str | None = None
     input_hash: str | None = None
+    request_messages: tuple[Mapping[str, object], ...] = ()
+    provider_request: Mapping[str, object] | None = None
+    request_message_id: str | None = None
+    tool_request_id: str | None = None
     output_hash: str | None = None
     idempotency_key: str | None = None
+    intent_epoch: int = 0
     failure: Mapping[str, object] | None = None
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        if self.intent_epoch < 0:
+            raise ChatContractError("intent_epoch must not be negative")
         for name in (
             "invocation_id",
             "chat_id",
@@ -749,6 +880,7 @@ class AgentInvocation(WorkspaceRecord):
             "parent_invocation_id",
             "workflow_execution_id",
             "phase_attempt_id",
+            "request_message_id",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -771,6 +903,43 @@ class AgentInvocation(WorkspaceRecord):
             value = getattr(self, name)
             if value is not None:
                 _validate_text(value, name, max_length=256)
+        if self.tool_request_id is not None:
+            _validate_text(self.tool_request_id, "tool_request_id", max_length=4096)
+        if not isinstance(self.request_messages, tuple | list) or any(
+            not isinstance(message, Mapping) for message in self.request_messages
+        ):
+            raise ChatContractError("request_messages must contain mappings")
+
+        def freeze(value: object) -> object:
+            if isinstance(value, Mapping):
+                return MappingProxyType(
+                    {key: freeze(item) for key, item in value.items()}
+                )
+            if isinstance(value, list):
+                return tuple(freeze(item) for item in value)
+            return value
+
+        try:
+            snapshot = json.loads(
+                json.dumps(_json_value(self.request_messages), allow_nan=False)
+            )
+        except (TypeError, ValueError) as error:
+            raise ChatContractError(
+                "request_messages must contain finite JSON values"
+            ) from error
+        object.__setattr__(self, "request_messages", freeze(snapshot))
+        if self.provider_request is not None:
+            if not isinstance(self.provider_request, Mapping):
+                raise ChatContractError("provider_request must be a mapping")
+            try:
+                audit = json.loads(
+                    json.dumps(_json_value(self.provider_request), allow_nan=False)
+                )
+            except (TypeError, ValueError) as error:
+                raise ChatContractError(
+                    "provider_request must contain finite JSON values"
+                ) from error
+            object.__setattr__(self, "provider_request", freeze(audit))
         for name in ("policy_hash", "input_hash", "output_hash"):
             value = getattr(self, name)
             if value is not None and _HASH_PATTERN.fullmatch(value) is None:
@@ -783,7 +952,7 @@ class AgentInvocation(WorkspaceRecord):
             object.__setattr__(self, "failure", MappingProxyType(dict(self.failure)))
         if self.updated_at is not None:
             _validate_timestamp(self.updated_at, "updated_at")
-        WorkspaceRecord.__post_init__(self)
+        ConversationRecord.__post_init__(self)
 
 
 def _as_dict(record: object) -> dict[str, object]:
@@ -826,6 +995,15 @@ def _as_json(value: object) -> object:
 def replace_record[T: WorkspaceRecord](record: T, **changes: Any) -> T:
     """Replace a lifecycle snapshot and recompute its content hash."""
     changes.pop("content_hash", None)
+    if isinstance(record, ConversationRecord):
+        for name in (
+            "chat_id",
+            "conversation_id",
+            "root_conversation_id",
+            "parent_conversation_id",
+        ):
+            if name in changes and changes[name] != getattr(record, name):
+                raise ChatContractError("conversation ownership is immutable")
     return replace(record, **changes)
 
 
@@ -839,12 +1017,15 @@ __all__ = [
     "ChatMessage",
     "ChatState",
     "ChatThread",
+    "CompletionMode",
+    "ConversationRecord",
     "CrossWorkspaceLinkError",
     "InvalidLifecycleTransition",
     "Investigation",
     "InvestigationState",
     "MessageRole",
     "MessageState",
+    "normalise_reasoning",
     "RecordLinks",
     "RecordNotFound",
     "SubAgentKind",

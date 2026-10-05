@@ -10,6 +10,8 @@ from thesis.research.hypothesis import HypothesisDocument
 from thesis.workflows.core.phase import HandoffContext
 from thesis.workflows.research_models import (
     ResearchModelRunResult,
+    StudyProgramReference,
+    resolve_study_reference,
 )
 
 from ..artifacts import (
@@ -22,6 +24,7 @@ from ..composers.hypothesis import (
     _compose_research_model,
     _compose_universe,
     _optional_compose_text,
+    decode_persisted_model,
 )
 from ..contracts.creation import HypothesisDevelopmentRequest
 from ..contracts.hypothesis import HypothesisDraft
@@ -99,9 +102,19 @@ def _run_falsification_trials(
         raise WorkflowError(
             "falsification trials require the accepted hypothesis contract"
         )
-    draft = _draft_from_contract(payload)
+    # The pure fold owns historical decoding. A newly supplied handoff never
+    # enables the retired inline schema just because it reaches an executor.
+    draft = state.draft or _draft_from_contract(payload)
+    if isinstance(draft.model, StudyProgramReference):
+        programs = services_of(workflow).programs
+        if programs is None:
+            raise WorkflowError("workspace programs are not configured")
+        draft = replace(
+            draft,
+            model=resolve_study_reference(programs, request.workspace_id, draft.model),
+        )
     document = build_hypothesis(workflow, request, draft)
-    services_of(workflow).store.save(document)
+    services_of(workflow).store.save(document, workspace_id=request.workspace_id)
     plan = _plan_from_document(document)
     staged = replace(state, draft=draft, hypothesis=document, plan=plan)
     final = run_trials(workflow, request, staged)
@@ -112,10 +125,14 @@ def _run_falsification_trials(
     return contract, final
 
 
-def _draft_from_contract(payload: Mapping[str, object]) -> HypothesisDraft:
+def _draft_from_contract(
+    payload: Mapping[str, object], *, persisted: bool = False
+) -> HypothesisDraft:
     """Compose the typed hypothesis draft from the accepted contract payload."""
     try:
-        model = _compose_research_model(payload.get("model"))
+        model = (decode_persisted_model if persisted else _compose_research_model)(
+            payload.get("model")
+        )
         return HypothesisDraft(
             claim=_required_text(payload, "claim"),
             disagreement=_required_text(payload, "disagreement"),
@@ -193,8 +210,13 @@ def run_trials(
     model_run: ResearchModelRunResult | None = None
     # Scope the run id to the hypothesis revision so a revised model never
     # adopts or overwrites the previous revision's run.
+    from thesis.research.models import ResearchModel
+
+    if not isinstance(state.draft.model, ResearchModel):
+        raise WorkflowError("trials require a resolved committed study")
     model_run_id = (
-        f"falsify-{request.execution_id}-{document.content_sha256[:12]}-model"
+        f"falsify-{request.execution_id}-{document.content_sha256[:12]}-"
+        f"{state.draft.model.content_sha256[:12]}-model"
     )
     pending = [test for test in plan.tests if test.test_id not in retained]
     if pending:

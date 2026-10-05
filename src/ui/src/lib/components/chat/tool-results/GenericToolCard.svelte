@@ -19,7 +19,7 @@
 			class="rounded border border-loss/30 bg-loss/10 px-2 py-1 text-xs text-loss"
 			data-testid="tool-failure"
 		>
-			{result.failure.kind}: {result.failure.message}
+			{String(result.failure.kind ?? 'Tool failure')}: {String(result.failure.message ?? result.summary ?? 'No failure description supplied')}
 		</p>
 	{/if}
 

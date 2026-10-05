@@ -18,6 +18,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, Protocol, cast
 
 from thesis.agent.runtime.control import PhaseCompletionRejected
@@ -32,6 +33,8 @@ from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.specs import SubAgentSpec
 from thesis.chat.contracts import (
     WORKFLOW_NODE_ROLE,
+    CompletionMode,
+    InvalidLifecycleTransition,
     MessageRole,
     RecordNotFound,
     SubAgentKind,
@@ -57,12 +60,12 @@ from thesis.execution.workflow_events import (
 from thesis.workflows.core.delivery import WorkflowNodeManager
 from thesis.workflows.core.events import emit_phase, finish_execution
 from thesis.workflows.core.execution_store import (
+    ExecutionDocument,
     ExecutionIdentity,
     ExecutionStore,
     ExecutionStoreConflict,
     StoreTransition,
 )
-from thesis.workflows.core.machine import TransitionMachine, TransitionTable
 from thesis.workflows.core.phase import (
     ConversationPhase,
     DeterministicPhase,
@@ -70,11 +73,10 @@ from thesis.workflows.core.phase import (
 )
 from thesis.workflows.core.spec import (
     HandoffContext,
-    TransitionRequest,
     WorkflowContext,
     WorkflowSpec,
 )
-from thesis.workflows.core.state import WorkflowState
+from thesis.workflows.core.state import TERMINAL_EXECUTION_STATES, WorkflowState
 
 __all__ = [
     "ActiveSubAgent",
@@ -196,9 +198,10 @@ class WorkflowDoctrine[RequestT: WorkflowRequest, StateT: WorkflowState, Outcome
         Mapping[str, object] | None,
     ]
     validate_launch: Callable[[str, str | None, str | None], None]
-    transition_error: Callable[[object, object], Exception]
-    record_of: Callable[[int, object, object, datetime, int, str], object]
-    rebuild: Callable[[StateT, object, tuple[object, ...]], StateT]
+    reduce_transition: Callable[
+        [StateT, StoreTransition, Mapping[tuple[str, str], Callable[[StateT], StateT]]],
+        StateT,
+    ]
     #: Per-phase MCP tool configuration. A phase absent here falls back to its
     #: family's ``mcp_tools``; an explicit empty tuple configures no MCP tools.
     phase_mcp_tools: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
@@ -275,7 +278,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             None if self._conversations is None else self._conversations.delivery
         )
         self._nodes: WorkflowNodeManager | None = None
-        self._transitions: TransitionMachine[object, object, StateT] | None = None
         if ports is not None:
             if doctrine is None:
                 raise ValueError("a runnable workflow requires its doctrine")
@@ -292,11 +294,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 actor_id=doctrine.actor,
                 initial_phase=doctrine.initial_phase,
                 clock=ports.clock,
-            )
-            self._transitions = TransitionMachine(
-                TransitionTable(spec.transitions, error=doctrine.transition_error),
-                record_of=doctrine.record_of,
-                rebuild=doctrine.rebuild,
             )
 
     # -- spec surface ------------------------------------------------------
@@ -508,6 +505,27 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
     ) -> WorkflowExecution:
         """Record immediate, non-destructive steering on the execution."""
         _, chat = self._require_doctrine_chat()
+        if message_id is None:
+            conversations = self._conversations
+            if conversations is None:
+                raise WorkflowEngineError("workflow has no conversation service bound")
+            execution = chat.get_execution(workspace_id, execution_id)
+            root = conversations.root(workspace_id, execution.chat_id)
+            percolation = chat.post_steering_message(
+                workspace_id,
+                execution.chat_id,
+                actor_id=actor_id,
+                body=body,
+                targets_execution_id=execution_id,
+                message_factory=partial(root.send, schedule=False),
+            )
+            # The worker must observe the committed steering epoch and event.
+            conversations.schedule_input(percolation.message)
+            return next(
+                item
+                for item in percolation.executions
+                if item.execution_id == execution_id
+            )
         return chat.steer_workflow(
             workspace_id,
             execution_id,
@@ -558,7 +576,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         prompt = self._phase_prompt(
             request, state.phase, state, context, override=override
         )
-        return self._enter_phase(request, state.phase, state, prompt, context)
+        try:
+            return self._enter_phase(request, state.phase, state, prompt, context)
+        except Exception as error:  # noqa: BLE001 - phase entry faults are terminal
+            self.fail_execution(request, reason=str(error) or type(error).__name__)
+            raise
 
     def _phase_prompt(
         self,
@@ -579,7 +601,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         if self._doctrine is None:
             return None
         phase_value = self._phase_value(phase)
-        spec = self._spec.phase_specs.get(phase_value)
+        spec = self._spec.phase_specs[phase_value]
         seed = spec.seed if isinstance(spec, ConversationPhase | OneShotPhase) else None
         task = override or (
             seed(self, request, state, context)
@@ -605,7 +627,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         doctrine, _ = self._require_doctrine_chat()
         family, label = doctrine.orchestrators[phase_value]
         tools = _phase_mcp_tools(doctrine, phase_value, family)
-        declared = self._spec.phase_specs.get(phase_value)
+        declared = self._spec.phase_specs[phase_value]
         kind = (
             SubAgentKind.CONVERSATION
             if isinstance(declared, ConversationPhase)
@@ -653,6 +675,8 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             # tool this engine binds into its registry.
             SubAgentKind.CONVERSATION,
             actor_id=self._actor,
+            completion_mode=CompletionMode.EXPLICIT_COMPLETION,
+            phase_executor=True,
             sub_agent_id=sub_agent_id,
             # The seed identifies one entry into the phase: a loop-back
             # re-entry reuses the durable node, so only an entry-scoped key
@@ -662,7 +686,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             prompt_data={"phase": phase_value, "attempt": attempt},
             attribution={
                 "workflow_execution_id": request.execution_id,
-                "phase_attempt_id": None,
+                "phase_attempt_id": self._phase_attempt_id(request, phase_value),
             },
         )
         return child.conversation_id
@@ -685,6 +709,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             if event.event_type is ExecutionEventType.WORKFLOW_PHASE
             and event.payload.get("phase") == phase_value
         )
+
+    def _phase_attempt_id(self, request: RequestT, phase_value: str) -> str:
+        return f"{request.execution_id}:{phase_value}:{self._phase_entry_ordinal(request, phase_value)}"
 
     def _completion_instruction(self, phase_value: str) -> str:
         """Describe the phase's completion obligation from its spec data.
@@ -741,9 +768,10 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         """
         if self._doctrine is None or self._chat is None:
             raise WorkflowEngineError("workflow has no doctrine or chat service bound")
+        self._check_acceptance(request, completion=completion)
         state = self._reconstruct_state(request)
         phase = self._phase_value(state.phase)
-        declared = self._spec.phase_specs.get(phase)
+        declared = self._spec.phase_specs[phase]
         if isinstance(declared, DeterministicPhase):
             # A deterministic phase has no node and no orchestrator (REQ-C1):
             # its contract is applied inside the engine's own cascade, so a
@@ -752,17 +780,17 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 f"phase {phase!r} is deterministic and accepts no completion; "
                 "the workflow advances on its own"
             )
-        active = self.ensure_orchestrator(request, state.phase)
+        active = self._active_orchestrators.get(request.execution_id)
+        self._check_phase_owner(request, node_id, phase)
+        if active is None:
+            active = self.ensure_orchestrator(request, state.phase)
         if active.sub_agent_id != node_id:
             raise PhaseCompletionRejected(
                 f"completion does not belong to the current phase {phase!r}"
             )
-        handed = self._apply_contract(request, state, phase, completion)
-        # The ordinary transition closes the completed node through
-        # _on_phase_entered while entering the successor; a terminal phase
-        # returns before that hook, so close the still-open node here with the
-        # completion contract attached.  Either way it happens exactly once.
-        self._finish_completed_phase(request, handed, phase, completion)
+        handed = self._apply_contract(
+            request, state, phase, completion, node_id=node_id
+        )
         target_phase = self._phase_value(handed.phase)
         next_context = HandoffContext(
             source=phase,
@@ -796,7 +824,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         tests and embedders deterministic.
         """
         if self._detach is None:
-            self._enter_phase(request, state.phase, state, prompt, context)
+            try:
+                self._enter_phase(request, state.phase, state, prompt, context)
+            except Exception as error:  # noqa: BLE001 - phase faults are terminal
+                self.fail_execution(request, reason=str(error) or type(error).__name__)
+                raise
             return
 
         def run() -> None:
@@ -807,39 +839,14 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
 
         self._detach(run)
 
-    def _finish_completed_phase(
-        self,
-        request: RequestT,
-        state: StateT,
-        phase: str,
-        completion: Mapping[str, object],
-    ) -> None:
-        """Close the completed phase node when the transition did not.
-
-        The ordinary transition closes it through ``_on_phase_entered`` while
-        entering the successor.  A terminal phase finishes the execution
-        before that hook, so the completion contract still has to be attached
-        and the node finished here — exactly once, because a successful
-        successor entry replaces the active orchestrator and this becomes a
-        no-op.
-        """
-        active = self._active_orchestrators.get(request.execution_id)
-        if active is None or self._phase_value(active.phase) != phase:
-            return
-        doctrine, _ = self._require_doctrine_chat()
-        self.finish_orchestrator(
-            request,
-            status=STATUS_COMPLETED,
-            summary=doctrine.summarize(state, phase),
-            result=completion,
-        )
-
     def _apply_contract(
         self,
         request: RequestT,
         state: StateT,
         phase: str,
         completion: Mapping[str, object],
+        *,
+        node_id: str | None = None,
     ) -> StateT:
         """Validate one contract and apply its declared transition and pipe.
 
@@ -848,6 +855,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         the transition's pipe, and returns the handed-off state.  A terminal
         phase closes the execution instead.
         """
+        self._check_acceptance(request, completion=completion)
         failure = self._validate_contract(phase, completion)
         if failure:
             raise PhaseCompletionRejected(failure)
@@ -866,9 +874,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             target,
             f"phase completion accepted for {phase!r}",
             completion=completion,
+            node_id=node_id,
         )
-        pipe = self._spec.piping.get((phase, target))
-        handed = advanced if pipe is None else pipe(advanced)
+        handed = advanced
         if self._phase_value(handed.phase) in self.terminal_phases:
             final_value = self._phase_value(handed.phase)
             if final_value == "failed":
@@ -963,16 +971,22 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         current = state
         entry = phase
         for _ in range(len(self._spec.phases) + 1):
+            if self._execution_cancelled_or_deleted(request):
+                return None
             phase_value = self._phase_value(entry)
             if phase_value in self.terminal_phases:
                 return None
-            spec = self._spec.phase_specs.get(phase_value)
+            spec = self._spec.phase_specs[phase_value]
             if not isinstance(spec, DeterministicPhase):
                 active = self.ensure_orchestrator(request, entry, prompt=prompt)
                 return active.sub_agent_id
             contract = spec.contract(self, request, current, context)
-            if contract is None:
+            if self._execution_cancelled_or_deleted(request):
                 return None
+            if contract is None:
+                raise WorkflowEngineError(
+                    f"deterministic phase {phase_value!r} returned no contract"
+                )
             if not isinstance(contract, Mapping):
                 raise WorkflowEngineError(
                     f"deterministic phase {phase_value!r} must return a contract"
@@ -1004,6 +1018,14 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         """
         if self._doctrine is None or self._chat is None:
             return
+        try:
+            execution = self._chat.get_execution(
+                request.workspace_id, request.execution_id
+            )
+        except RecordNotFound:
+            return
+        if execution.state in TERMINAL_EXECUTION_STATES:
+            return
         node_id = self._workflow_node_id(request)
         parent_sub_agent_id: str | None = None
         if node_id is not None and self._subagent_lifecycle is not None:
@@ -1032,7 +1054,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             pass
         else:
             execution_phase = execution.phase or "failed"
-        text = f"Hypothesis development {request.execution_id} failed: {reason}."
+        text = f"{self.title} {request.execution_id} failed: {reason}."
         self._conversations.deliver(
             Anchor(
                 request.workspace_id,
@@ -1108,6 +1130,50 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         doctrine, _ = self._require_doctrine_chat()
         return doctrine.reconstruct(self, request)
 
+    def _check_acceptance(
+        self, request: RequestT, *, completion: Mapping[str, object] | None = None
+    ) -> None:
+        execution = self._require_execution(request)
+        if execution.state in TERMINAL_EXECUTION_STATES:
+            raise PhaseCompletionRejected(
+                "execution is no longer accepting completions"
+            )
+        if execution.intent_epoch != request.intent_epoch:
+            raise PhaseCompletionRejected("completion intent epoch is stale")
+        if completion is not None and "intentEpoch" in completion:
+            epoch = completion["intentEpoch"]
+            if (
+                isinstance(epoch, bool)
+                or not isinstance(epoch, int)
+                or epoch != request.intent_epoch
+            ):
+                raise PhaseCompletionRejected("completion intent epoch is stale")
+
+    def _check_phase_owner(self, request: RequestT, node_id: str, phase: str) -> None:
+        record = (
+            None
+            if self._subagent_lifecycle is None
+            else self._subagent_lifecycle.get(request.workspace_id, node_id)
+        )
+        if (
+            record is None
+            or not record.phase_executor
+            or record.workflow_execution_id != request.execution_id
+            or record.chat_id != request.chat_id
+            or record.parent_sub_agent_id != self._workflow_node_id(request)
+            or record.phase != phase
+            or record.phase_attempt_id != self._phase_attempt_id(request, phase)
+            or record.status
+            in {
+                SubAgentStatus.COMPLETED,
+                SubAgentStatus.FAILED,
+                SubAgentStatus.CANCELLED,
+            }
+        ):
+            raise PhaseCompletionRejected(
+                "completion does not belong to the current phase executor"
+            )
+
     def _transition(
         self,
         request: RequestT,
@@ -1116,58 +1182,85 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         reason: str,
         *,
         completion: Mapping[str, object] | None = None,
+        node_id: str | None = None,
     ) -> StateT:
         at = self._clock()
-        advanced = self._advance(state, target, reason, at=at)
+        self._check_acceptance(request, completion=completion)
+        if node_id is not None:
+            self._check_phase_owner(request, node_id, self._phase_value(state.phase))
+        assert self._execution_store is not None
+        observed = self._execution_store.get(request.execution_id)
+        if len(observed.transitions) != len(state.transitions):
+            raise PhaseCompletionRejected("phase state changed before acceptance")
+        transition = StoreTransition(
+            sequence=len(state.transitions) + 1,
+            from_phase=self._phase_value(state.phase),
+            to_phase=self._phase_value(target),
+            occurred_at=at,
+            intent_epoch=request.intent_epoch,
+            reason=reason,
+            completion=dict(completion or {}),
+        )
+        doctrine, _ = self._require_doctrine_chat()
+        advanced = doctrine.reduce_transition(state, transition, self._spec.piping)
         # Store-first ordering (REQ-B2): the transition — with its completion
         # contract — is committed to the execution store before any
         # projection, so a crash in between leaves the state correct.
-        self._commit_transition(request, state, target, at, reason, completion)
+        self._check_acceptance(request, completion=completion)
+        self._commit_transition(
+            request, transition, expected_revision=observed.revision, node_id=node_id
+        )
         self._emit_phase(request, target, {"reason": reason})
-        _, chat = self._require_doctrine_chat()
-        try:
-            chat.set_execution_phase(
-                request.workspace_id, request.execution_id, self._phase_value(target)
-            )
-        except Exception:  # noqa: BLE001 - phase is best-effort projection state
-            pass
         self._on_phase_entered(request, advanced, completion=completion)
         return advanced
 
     def _commit_transition(
         self,
         request: RequestT,
-        state: StateT,
-        target: object,
-        at: datetime,
-        reason: str,
-        completion: Mapping[str, object] | None,
+        transition: StoreTransition,
+        *,
+        expected_revision: int,
+        node_id: str | None = None,
     ) -> None:
-        """Append the applied transition, with its completion, to the store."""
+        """Commit, project the phase, and close its executor under one fence."""
         store = self._execution_store
-        if store is None:
-            return
-        store.append_transition(
-            request.execution_id,
-            StoreTransition(
-                sequence=len(state.transitions) + 1,
-                from_phase=self._phase_value(state.phase),
-                to_phase=self._phase_value(target),
-                occurred_at=at,
-                intent_epoch=state.intent_epoch,
-                reason=reason,
-                completion=dict(completion or {}),
-            ),
-        )
+        assert store is not None
+        _, chat = self._require_doctrine_chat()
 
-    def _advance(
-        self, state: StateT, target: object, reason: str, *, at: datetime
-    ) -> StateT:
-        assert self._transitions is not None
-        request = TransitionRequest(
-            target_phase=target, intent_epoch=state.intent_epoch
-        )
-        return self._transitions.apply(state, request, reason=reason, at=at)
+        def commit() -> ExecutionDocument:
+            return store.append_transition(
+                request.execution_id, transition, expected_revision=expected_revision
+            )
+
+        with chat.execution_guard(request.workspace_id, request.execution_id):
+            try:
+                chat.accept_transition(
+                    request.workspace_id,
+                    request.execution_id,
+                    expected_intent_epoch=request.intent_epoch,
+                    expected_phase=transition.from_phase,
+                    expected_node_id=node_id,
+                    expected_attempt_id=(
+                        None
+                        if node_id is None
+                        else self._phase_attempt_id(request, transition.from_phase)
+                    ),
+                    target_phase=transition.to_phase,
+                    commit=commit,
+                )
+            except InvalidLifecycleTransition as error:
+                raise PhaseCompletionRejected(str(error)) from error
+            except ExecutionStoreConflict as error:
+                raise PhaseCompletionRejected(
+                    "phase state changed before commit"
+                ) from error
+            # Cancellation uses this same guard. Close the accepted executor
+            # before releasing it; events and successor entry stay outside.
+            if node_id is not None:
+                assert self._subagent_lifecycle is not None
+                self._subagent_lifecycle.complete(
+                    request.workspace_id, node_id, result=transition.completion
+                )
 
     def _emit_phase(
         self,
@@ -1340,8 +1433,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                     request.chat_id,
                     spec=spec,
                     actor_id=self._actor,
+                    completion_mode=CompletionMode.EXPLICIT_COMPLETION,
+                    phase_executor=True,
                     parent_sub_agent_id=self._workflow_node_id(request),
                     workflow_execution_id=request.execution_id,
+                    phase_attempt_id=self._phase_attempt_id(request, phase_value),
                 )
                 sub_agent_id = record.sub_agent_id
         self.append_sub_agent(
@@ -1438,20 +1534,18 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             )
             return
         spec, _context, _label = self._phase_spawn_spec(request, phase_value)
-        spec = SubAgentSpec(
-            role=role,
-            kind=spec.kind,
-            phase=spec.phase,
-            allowed_tools=spec.allowed_tools,
-        )
+        spec = replace(spec, role=role)
         self._subagent_lifecycle.spawn(
             request.workspace_id,
             request.chat_id,
             spec=spec,
             actor_id=self._actor,
+            completion_mode=CompletionMode.EXPLICIT_COMPLETION,
+            phase_executor=True,
             parent_sub_agent_id=self._workflow_node_id(request),
             workflow_execution_id=request.execution_id,
             sub_agent_id=sub_agent_id,
+            phase_attempt_id=self._phase_attempt_id(request, phase_value),
         )
 
     def finish_orchestrator(
@@ -1513,6 +1607,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         )
         if self._subagent_lifecycle is not None:
             if status == STATUS_COMPLETED:
+                record = self._subagent_lifecycle.get(
+                    request.workspace_id, active.sub_agent_id
+                )
+                if record is not None and record.status is SubAgentStatus.COMPLETED:
+                    return
                 completed_result: Mapping[str, object] | None = (
                     result
                     if result is not None
@@ -1642,6 +1741,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         """
         _, chat = self._require_doctrine_chat()
         phase_value = self._phase_value(phase)
+        store = self._execution_store
+        if store is not None:
+            store.put_phase_result(request.execution_id, phase_value, artifact)
         append_workflow_phase_result(
             chat.event_store,
             execution_id=request.execution_id,
@@ -1653,9 +1755,6 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             actor_id=self._actor,
             intent_epoch=request.intent_epoch,
         )
-        store = self._execution_store
-        if store is not None:
-            store.put_phase_result(request.execution_id, phase_value, artifact)
 
     def _emit_orchestrator_progress(self, request: RequestT) -> None:
         """Record the active phase's safe activity label."""

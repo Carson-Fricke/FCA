@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import replace
+from typing import cast
 
 import pytest
 
@@ -119,7 +120,11 @@ def test_authoring_binds_attribution_and_returns_canonical_result(
             **_arguments(),
         }
     ]
-    assert "author_strategy" not in THESIS_TOOL_NAMES
+    assert "author_strategy" in THESIS_TOOL_NAMES
+    assert [
+        cast(Mapping[str, object], tool["function"])["name"]
+        for tool in registry.catalog()
+    ] == ["author_strategy"]
 
 
 def test_inherited_grant_without_injection_offers_no_authority() -> None:

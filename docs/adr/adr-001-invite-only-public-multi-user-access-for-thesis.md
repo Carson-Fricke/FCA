@@ -1,7 +1,6 @@
 # ADR-001: Invite-Only Public Multi-User Access for Thesis
 
 - **Status:** Accepted (2026-09-12)
-- **CLEO slug:** `adr-001-invite-only-public-multi-user-access-for-thesis`
 - **Supersedes:** the single-operator first-release assumption in `.github/architecture/fca-thesis.md` for named, invited users only.
 
 ## Context

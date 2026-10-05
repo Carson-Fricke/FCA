@@ -1,7 +1,6 @@
 //! Toolchain resolution for managed builds.
 
 use std::path::Path;
-use std::process::Command;
 
 use backtest::sha256::digest_hex;
 
@@ -29,19 +28,9 @@ pub struct Toolchain {
 ///
 /// Returns [`JitError`] when `rustc` cannot be executed or reports nothing.
 pub fn resolve_toolchain(cwd: &Path) -> Result<Toolchain, JitError> {
-    let output = Command::new("rustc")
-        .arg("--version")
-        .arg("--verbose")
-        .current_dir(cwd)
-        .output()
-        .map_err(|error| JitError::Io(format!("running rustc --version: {error}")))?;
-    if !output.status.success() {
-        return Err(JitError::Io(format!(
-            "rustc --version failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let output =
+        crate::provenance::compiler_probe("rustc".as_ref(), &["--version", "--verbose"], cwd)?;
+    let text = String::from_utf8_lossy(&output).into_owned();
     let mut release = String::new();
     let mut commit_hash = String::new();
     let mut host = String::new();

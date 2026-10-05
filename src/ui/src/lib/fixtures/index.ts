@@ -25,8 +25,6 @@ import consentProposal from './consent-proposal.json';
 import type {
 	BacktestDetail,
 	BacktestSummaryRow,
-	ChatMessage,
-	ChatThread,
 	ConsentProposal,
 	DeploymentCard,
 	EquityPoint,
@@ -41,19 +39,20 @@ import type {
 	Strategy,
 	TradeRecord,
 	WidgetDefinition,
-	WorkflowExecutionRecord,
 	WorkspaceOverview,
 	WorkspaceSnapshot,
 	WorkspaceStateData,
 	WorkspaceSummary
 } from '../types';
+import { decodeWire } from '../wire';
+import type { ChatMessageWire, ChatThreadListWire, WorkflowExecutionWire } from '../generated';
 
 export interface Fixtures {
 	workspaces: { items: WorkspaceSummary[] };
 	workspaceSnapshot: Record<string, { overview: WorkspaceOverview; counts: WorkspaceSnapshot['counts'] }>;
-	chats: Record<string, { items: ChatThread[] }>;
-	chatMessages: Record<string, { items: ChatMessage[] }>;
-	executions: Record<string, WorkflowExecutionRecord>;
+	chats: Record<string, ChatThreadListWire>;
+	chatMessages: Record<string, { items: ChatMessageWire[] }>;
+	executions: Record<string, WorkflowExecutionWire>;
 	executionEvents: Record<string, { items: ExecutionEvent[] }>;
 	strategies: Record<string, { items: Strategy[] }>;
 	backtests: Record<string, { items: BacktestSummaryRow[] }>;
@@ -74,9 +73,12 @@ export interface Fixtures {
 export const fixtures: Fixtures = {
 	workspaces,
 	workspaceSnapshot,
-	chats,
-	chatMessages,
-	executions,
+	chats: Object.fromEntries(Object.entries(chats).map(([id, doc]) => [id,
+		decodeWire('ChatThreadListWire', doc, `fixture/chats/${id}`)])),
+	chatMessages: Object.fromEntries(Object.entries(chatMessages).map(([id, doc]) => [id,
+		decodeWire('ChatMessageListWire', doc, `fixture/messages/${id}`)])),
+	executions: Object.fromEntries(Object.entries(executions).map(([id, doc]) => [id,
+		decodeWire('WorkflowExecutionWire', doc, `fixture/execution/${id}`)])),
 	executionEvents,
 	strategies,
 	backtests,

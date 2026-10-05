@@ -110,12 +110,36 @@ class PersistenceSubAgentStore:
     def get_sub_agent(
         self, workspace_id: str, sub_agent_id: str
     ) -> SubAgentRecord | None:
-        return self._persistence.get(SubAgentRecord, workspace_id, sub_agent_id)
+        from thesis.chat.contracts import ChatState, ChatThread
+
+        record = self._persistence.get(SubAgentRecord, workspace_id, sub_agent_id)
+        if record is not None:
+            root = self._persistence.get(ChatThread, workspace_id, record.chat_id)
+            if root is not None and root.state is ChatState.DELETED:
+                return None
+        return record
 
     def list_sub_agents(self, workspace_id: str) -> tuple[SubAgentRecord, ...]:
         return self._persistence.list(SubAgentRecord, workspace_id)
 
     def save_invocation(self, invocation: AgentInvocation) -> AgentInvocation:
+        if invocation.sub_agent_id:
+            node = self.get_sub_agent(invocation.workspace_id, invocation.sub_agent_id)
+            previous = self.get_invocation(
+                invocation.workspace_id, invocation.invocation_id
+            )
+            if previous is not None:
+                from dataclasses import replace
+
+                invocation = replace(
+                    invocation, parent_conversation_id=previous.parent_conversation_id
+                )
+            elif node is not None:
+                from dataclasses import replace
+
+                invocation = replace(
+                    invocation, parent_conversation_id=node.parent_conversation_id
+                )
         return self._persistence.save(invocation)
 
     def get_invocation(

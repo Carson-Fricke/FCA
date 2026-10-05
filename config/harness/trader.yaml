@@ -8,7 +8,7 @@ strategy_instances:
   -
     instance_id: spy-momentum-paper
     implementation: jit
-    bundle_hash: f1a5eed2b41b89034ec5051d54338396aad384928b9264d938cdb4057f64a39a
+    bundle_hash: 0e4de7edd0f1e275a9ba47b7ed95b45d54522777bf2c75777a54edffc9894eeb
     capital_fraction: 1.0
     symbols: [SPY]
     parameters:

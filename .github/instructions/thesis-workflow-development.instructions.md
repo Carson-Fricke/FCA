@@ -1,9 +1,10 @@
 # Thesis Workflow Development Instructions
 
 Scope: any change under `src/thesis/workflows/**`, workflow tools, or phase
-agents. Read the authoring guide first:
-`cleo docs fetch thesis-workflow-authoring-guide`. Deep contracts:
-`.github/architecture/thesis-agent-workflow-runtime.md` (REQ-018..REQ-040).
+agents. Read the repository source directly:
+`.github/architecture/thesis-agent-workflow-runtime.md` (REQ-018..REQ-040 and
+"Option 1 Session Delivery Contract") and
+`.github/instructions/agent-session-delivery.instructions.md`.
 
 ## Non-negotiables
 
@@ -25,8 +26,11 @@ agents. Read the authoring guide first:
 5. **Workflow-specific content stays in the workflow package**
    (`workflows/registry/<id>/`). `workflows/core/` stays generic; if your
    change adds workflow knowledge to `core/`, it is wrong.
-6. **One writer, one path.** One tool-result payload shape, one delivery path,
-   one spawn path. Collapse duplicates instead of syncing them.
+6. **One writer, one path.** Every incoming producer, including dispatched tool
+   results, MUST use `Conversation.deliver_session_message` and the singular
+   neutral `SessionInbox`. Native provider roles MUST NOT be session message
+   types. Live/replay MUST share the pure provider adapter. Intake APIs and
+   visuals MAY differ; they MUST NOT introduce a second writer or inbox.
 7. **Operator gates are prompted, not enforced.** Instruct the phase agent to
    ask via `request_workflow_input` and complete only on acceptance. Never add
    a deterministic gate to a workflow unless the operator specifically asked
@@ -41,25 +45,29 @@ agents. Read the authoring guide first:
    same change.
 9. **Retired persisted values stay readable.** Durable records decode through
    closed tables; keep retired enum members and map them on read.
-10. **Verify after every step:** `uv run --no-sync --extra dev ruff check
-    src tests scripts`, `ruff format`, `ty check src/thesis`,
-    `pytest -p no:cacheprovider tests/thesis tests/harness -q`. Never leave a
-    red tree. Rewrite old-contract tests; do not keep two truths.
+10. **Verify the owned scope.** Use the canonical `uv run --extra dev` commands
+    in `.github/instructions/copilot-instructions.md` for focused Ruff lint,
+    format checks, ty, and pytest. The integration owner runs repository-wide
+    verification once after edits freeze and MUST include
+    `tests/thesis/agent/runtime/test_delivery_architecture.py` once the delivery
+    modules are final. Rewrite old-contract tests; do not keep two truths.
 
 ## Required reading before edits
 
-- `cleo docs fetch thesis-workflow-authoring-guide` (working rules, phase
-  contract, testing requirements, anti-patterns).
-- `cleo docs fetch thesis-conversation-abstraction-v1` (the conversation
-  abstraction now implemented: one `Conversation`/`Conversations` service for
-  chats and sub-agents, child return semantics composed on top,
-  REQ-034..040).
-- `cleo docs fetch thesis-chat-surface-and-subagent-anchoring-v1` (the
-  inversion design record).
-- `.github/architecture/thesis-agent-workflow-runtime.md` REQ-018..REQ-040.
-- `cleo memory find "workflow"` for recorded pitfalls.
+- `.github/instructions/agent-session-delivery.instructions.md` (neutral inbox,
+  canonical incoming writer, provider projection and enforcement).
+- `.github/architecture/thesis-agent-workflow-runtime.md` (REQ-018..REQ-040,
+  conversation abstraction, anchoring, and Option 1 delivery contract).
+- `.github/architecture/repository.md` (package and dependency boundaries).
+- `.github/architecture/thesis-ui-design.md` (shared timeline, scoped intake,
+  and presentation versus execution authority).
 
 ## Current shape (do not regress)
+
+The conversation service is implemented. Option 1's neutral message, inbox,
+and provider-adapter modules are REQUIRED migration targets, not a claim of
+completed implementation. Existing role-based session/projection code MUST NOT
+be extended as an alternative design.
 
 - One conversation abstraction: `thesis.agent.runtime.conversation` owns the
   `Conversation` handle and the `Conversations` service; HTTP, tools, and the

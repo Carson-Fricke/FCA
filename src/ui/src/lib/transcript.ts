@@ -1,15 +1,6 @@
 /**
- * Unified, chronologically ordered transcript for a nested workflow scope.
- *
- * The chat pane shows a normal transcript for the root agent, but drilling into
- * a phase or sub-agent must show *that* agent's conversation. A sub-agent's
- * history lives in two durable sources: user messages it received (persisted as
- * `kind=sub_agent` chat messages carrying its `subAgentId`) and its own
- * execution events (thinking, tool calls, outputs). This module merges
- * both into a single, time-ordered entry list so a message can never drift out
- * of order relative to the tool renderings around it.
- *
- * The merge is pure and network-free so the ordering contract is unit-testable.
+ * Shared root/scoped activity projection. Unified seq is retained throughout;
+ * array position/cursor supports historical callers without unified envelopes.
  */
 
 import { isWorkflowNodeRole, parseToolResult, type SubAgentTreeNode } from './subagent';
@@ -82,7 +73,7 @@ export type ScopeEntry =
 export interface SpawnDetails {
 	role: string;
 	phase: string;
-	isolated: boolean;
+	isolated: boolean | null;
 	knowledgeCutoff: string | null;
 	mcpTools: string[];
 }
@@ -100,7 +91,7 @@ function spawnDetails(event: ExecutionEvent): SpawnDetails {
 	return {
 		role: stringField(event, 'role') ?? 'sub-agent',
 		phase: stringField(event, 'phase') ?? '',
-		isolated: record['isolated'] === true,
+		isolated: typeof record['isolated'] === 'boolean' ? record['isolated'] : null,
 		knowledgeCutoff: typeof cutoff === 'string' && cutoff.length > 0 ? cutoff : null,
 		mcpTools: tools
 	};
@@ -134,14 +125,13 @@ export function outputText(event: ExecutionEvent): string {
 function spawnAnchor(node: SubAgentTreeNode): { at: string; order: number } {
 	for (const event of node.events) {
 		if (event.eventType === 'sub_agent.spawned') {
-			return { at: event.occurredAt, order: event.cursor };
+			return { at: event.occurredAt, order: event.seq ?? event.cursor };
 		}
 	}
 	return { at: '', order: Number.MAX_SAFE_INTEGER };
 }
 
 function compareEntries(a: ScopeEntry, b: ScopeEntry): number {
-	if (a.at !== b.at) return a.at < b.at ? -1 : 1;
 	return a.order - b.order;
 }
 
@@ -152,6 +142,110 @@ export interface BuildNodeEntriesOptions {
 	events: ExecutionEvent[];
 	/** Direct child sub-agents, rendered as drill-in items at their spawn time. */
 	children?: SubAgentTreeNode[];
+	terminal?: boolean;
+}
+
+/** Project durable envelopes and runtime starts into activity, retaining assistant bodies. */
+export function projectToolMessages(messages: ChatMessage[], terminal = false): ChatMessage[] {
+	const unique = [...new Map(messages.map((message) => [message.message_id, message])).values()]
+		.sort((a, b) => (a.seq ?? messages.indexOf(a)) - (b.seq ?? messages.indexOf(b)));
+	const order = new Map(unique.map((message, index) => [message.message_id, message.seq ?? index]));
+	const calls = new Map<string, { message: ChatMessage; tool: string; arguments: unknown }>();
+	for (const message of unique) {
+		if (message.role === 'tool' && message.data?.toolActivity === 'started' &&
+			typeof message.data.toolCallId === 'string' && typeof message.data.tool === 'string') {
+			calls.set(message.data.toolCallId, { message, tool: message.data.tool, arguments: message.data.arguments });
+			continue;
+		}
+		if (message.role !== 'assistant' || !Array.isArray(message.data?.toolCalls)) continue;
+		for (const raw of message.data.toolCalls) {
+			if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' ||
+				!raw.function || typeof raw.function.name !== 'string') continue;
+			calls.set(raw.id, { message, tool: raw.function.name, arguments: raw.function.arguments });
+		}
+	}
+	const completed = new Set<string>();
+	const projected: ChatMessage[] = [];
+	for (const [index, message] of unique.entries()) {
+		if (message.role === 'tool' && message.data?.toolActivity === 'started') continue;
+		const correlation = message.data?.sessionMessage?.content.correlation;
+		const callId = typeof message.data?.toolCallId === 'string' ? message.data.toolCallId
+			: message.tool_result?.callId ?? correlation?.request_id ?? null;
+		const datums = message.data?.datums;
+		if (Array.isArray(datums)) {
+			if (callId) completed.add(callId);
+			const call = callId ? calls.get(callId) : undefined;
+			// These identities belong only to rendering; the aggregate remains one durable arrival.
+			for (const [datumIndex, datum] of datums.entries()) {
+				projected.push({ ...message, seq: order.get(message.message_id),
+					message_id: `${message.message_id}:datum:${datumIndex}`, role: 'tool',
+					tool_result: { ...datum, callId, tool: message.tool_result?.tool ?? correlation?.tool_name ?? call?.tool ?? null,
+						arguments: message.data?.arguments ?? call?.arguments,
+						startedAt: typeof message.data?.startedAt === 'string' ? message.data.startedAt :
+							typeof call?.message.data?.startedAt === 'string' ? call.message.data.startedAt : undefined,
+						durationMs: typeof message.data?.durationMs === 'number' ? message.data.durationMs : undefined,
+						reused: typeof message.data?.reused === 'boolean' ? message.data.reused : undefined,
+						requestState: datum.datumType === 'operator_question'
+							? unique.slice(index + 1).some((later) => later.role === 'user') ? 'answered' : terminal ? 'resolved' : 'waiting'
+							: undefined } });
+			}
+			continue;
+		}
+		if (message.tool_result && callId) completed.add(callId);
+		if (message.role !== 'tool') {
+			const failure = message.data?.failure;
+			if (message.role === 'system' && failure && typeof failure === 'object' && !Array.isArray(failure)) {
+				const detail = failure as Record<string, unknown>;
+				projected.push({ ...message, tool_result: message.tool_result ?? {
+					tool: 'runtime', callId: null, ok: false, summary: message.body,
+					structured: detail, text: '', failure: {
+						kind: typeof detail.kind === 'string' ? detail.kind : 'runtime',
+						message: typeof detail.message === 'string' ? detail.message : message.body
+					}
+				} });
+			} else {
+				projected.push(message);
+			}
+			continue;
+		}
+		if (callId) completed.add(callId);
+		let result = message.tool_result;
+		if (result) {
+			const startedAt = callId ? calls.get(callId)?.message.data?.startedAt : undefined;
+			result = {
+				...result,
+				callId: callId ?? null,
+				arguments: message.data?.arguments ?? result.arguments ?? (callId ? calls.get(callId)?.arguments : undefined),
+				durationMs: typeof message.data?.durationMs === 'number' ? message.data.durationMs : result.durationMs,
+				reused: typeof message.data?.reused === 'boolean' ? message.data.reused : result.reused,
+				startedAt: typeof message.data?.startedAt === 'string' ? message.data.startedAt :
+					result.startedAt ?? (typeof startedAt === 'string' ? startedAt : undefined)
+			};
+			if (result.datumType === 'operator_question') {
+				const answered = unique.slice(index + 1).some((later) => later.role === 'user');
+				result.requestState = result.requestState ?? (answered ? 'answered' : terminal ? 'resolved' : 'waiting');
+			}
+		}
+		projected.push({ ...message, tool_result: result });
+	}
+	for (const [callId, call] of calls) {
+		if (completed.has(callId)) continue;
+		const callIndex = unique.indexOf(call.message);
+		const notice = unique.slice(callIndex + 1).find((message) => message.role === 'system' &&
+			['interrupted', 'cancelled', 'failed', 'completed'].includes(String(message.data?.status)));
+		const outcome = notice?.data?.status === 'interrupted' ? 'interrupted' : terminal || notice ? 'unknown_outcome' : undefined;
+		projected.push({
+			...call.message, seq: order.get(call.message.message_id), message_id: call.message.role === 'tool' ? call.message.message_id : `pending:${callId}`, role: 'tool', body: '',
+			data: { ...call.message.data, toolCallId: callId },
+			tool_result: { tool: call.tool, callId, pending: !outcome, outcome, arguments: call.arguments,
+				startedAt: typeof call.message.data?.startedAt === 'string' ? call.message.data.startedAt : undefined,
+				ok: false, summary: '', structured: {}, text: '', failure: outcome ? {
+					kind: outcome,
+					message: 'No final tool result was recorded. The execution outcome is unknown.'
+				} : null }
+		});
+	}
+	return projected.sort((a, b) => (a.seq ?? order.get(a.message_id) ?? 0) - (b.seq ?? order.get(b.message_id) ?? 0));
 }
 
 /**
@@ -163,43 +257,71 @@ export interface BuildNodeEntriesOptions {
 export function buildNodeEntries({
 	messages,
 	events,
-	children = []
+	children = [],
+	terminal = false
 }: BuildNodeEntriesOptions): ScopeEntry[] {
 	const entries: ScopeEntry[] = [];
+	const resultIds = new Set(messages.flatMap((message) => {
+		const id = message.data?.toolCallId ?? message.tool_result?.callId ?? message.data?.sessionMessage?.content.correlation?.request_id;
+		return (message.tool_result || Array.isArray(message.data?.datums) || message.role === 'tool') &&
+			message.data?.toolActivity !== 'started' && typeof id === 'string' ? [id] : [];
+	}));
+	const uniqueEvents = [...new Map(events.map((event) => [event.eventId, event])).values()];
+	const projectedMessages = projectToolMessages(messages, terminal);
+	const eventResults = uniqueEvents.flatMap((event) => {
+		const result = parseToolResult(event);
+		const messageId = field(event, 'messageId') ?? field(event, 'message_id');
+		if (!result || messages.some((message) => message.message_id === messageId) || projectedMessages.some((message) =>
+			(message.tool_result && result.callId && message.tool_result.callId === result.callId &&
+				message.tool_result.ok === result.ok && JSON.stringify(message.tool_result.failure) === JSON.stringify(result.failure) &&
+				message.tool_result.datumType === result.datumType && message.tool_result.summary === result.summary &&
+				JSON.stringify(message.tool_result.structured) === JSON.stringify(result.structured) && message.tool_result.text === result.text))) return [];
+		return [{ event, result }];
+	});
+	const eventCallIds = new Set(eventResults.flatMap(({ result }) => result.callId ? [result.callId] : []));
+	for (const id of eventCallIds) resultIds.add(id);
+	const pendingArguments = new Map(projectedMessages.flatMap((message) => (message.tool_result?.pending || message.tool_result?.outcome) && message.tool_result
+		? [[message.tool_result.callId, message.tool_result.arguments] as const] : []));
 
-	messages.forEach((message, index) => {
+	projectedMessages.forEach((message, index) => {
+		if ((message.tool_result?.pending || message.tool_result?.outcome) && eventCallIds.has(message.tool_result.callId!)) return;
 		entries.push({
 			kind: 'message',
 			id: message.message_id,
 			at: message.created_at,
-			order: index,
+		order: message.seq ?? index,
 			message
 		});
 	});
 
-	for (const event of events) {
-		const base = { id: event.eventId, at: event.occurredAt, order: event.cursor } as const;
+	for (const event of uniqueEvents) {
+		const messageId = field(event, 'messageId') ?? field(event, 'message_id');
+		if (typeof messageId === 'string' && messages.some((message) => message.message_id === messageId)) continue;
+		const base = { id: event.eventId, at: event.occurredAt, order: event.seq ?? event.cursor } as const;
 		if (event.eventType === 'sub_agent.spawned') {
+			if (children.some((child) => child.node.subAgentId === field(event, 'subAgentId'))) continue;
 			entries.push({ kind: 'spawn', ...base, spawn: spawnDetails(event) });
-			continue;
-		}
-		// Engine activity labels and the needs-input pause signal are
-		// lifecycle wiring (node status, liveness), not conversation content:
-		// they never render. Tool progress still falls through to the plain
-		// event line.
-		if (
-			event.eventType === 'sub_agent.needs_input' ||
-			(event.eventType === 'sub_agent.progress' &&
-				stringField(event, 'kind') !== 'tool')
-		) {
 			continue;
 		}
 		const result = parseToolResult(event);
 		if (result) {
-			entries.push({ kind: 'tool', ...base, result });
+			if (eventResults.some((item) => item.event === event)) {
+				const answered = messages.some((message) => message.role === 'user' && (message.seq ?? -1) > (event.seq ?? event.cursor));
+				entries.push({ kind: 'tool', ...base, result: {
+					...result,
+					arguments: result.arguments ?? pendingArguments.get(result.callId),
+					requestState: result.requestState ?? (result.datumType === 'operator_question'
+						? answered ? 'answered' : terminal ? 'resolved' : 'waiting' : undefined)
+				} });
+			}
 			continue;
 		}
-		if (event.eventType === 'sub_agent.output') {
+		// The request card owns the pause signal; retain all other activity.
+		if (event.eventType === 'sub_agent.needs_input' && !outputText(event)) continue;
+		if (event.eventType === 'tool.started' && typeof field(event, 'toolCallId') === 'string' &&
+			(resultIds.has(field(event, 'toolCallId') as string) ||
+				pendingArguments.has(field(event, 'toolCallId') as string))) continue;
+		if (event.eventType === 'sub_agent.output' || event.eventType === 'sub_agent.needs_input') {
 			const artifact = field(event, 'artifact') as Record<string, unknown> | null;
 			if (
 				artifact &&
@@ -242,4 +364,21 @@ export function buildNodeEntries({
 	}
 
 	return entries.sort(compareEntries);
+}
+
+/** Pending and delivery feedback use the same historical/live activity as rendering. */
+export function threadActivity(messages: ChatMessage[], events: ExecutionEvent[], terminal = false, acceptedId?: string) {
+	const entries = buildNodeEntries({ messages, events, terminal });
+	const latest = entries.findLast((entry) => entry.kind === 'assistant' ||
+		(entry.kind === 'message' && (entry.message.role === 'user' ||
+			(entry.message.role === 'assistant' && !!entry.message.body && !entry.message.data?.toolCalls))));
+	const accepted = entries.find((entry) => entry.id === acceptedId);
+	const replied = accepted && entries.some((entry) => entry.order > accepted.order &&
+		(entry.kind === 'assistant' || (entry.kind === 'message' && entry.message.role === 'assistant' &&
+			!!entry.message.body && !entry.message.data?.toolCalls)));
+	return {
+		pending: !terminal && ((latest?.kind === 'message' && latest.message.role === 'user') ||
+			entries.some((entry) => entry.kind === 'message' && entry.message.tool_result?.pending)),
+		queued: !terminal && !!acceptedId && !replied
+	};
 }

@@ -4,8 +4,8 @@ use std::cmp::Ordering;
 
 use harness_strategy_sdk::serde_json::Value;
 use harness_strategy_sdk::{
-    export_strategy_program, Decimal, Fill, MetricPublisher, OrderSink, OrderType, QuoteEvent,
-    Side, StrategyProgram, SubmittedOrder, TimeInForce,
+    export_strategy_program, Decimal, Fill, MarketConsumer, MetricPublisher, OrderSink,
+    OrderType, QuoteEvent, Side, StrategyProgram, SubmittedOrder, Subscription, TimeInForce,
 };
 
 struct Momentum {
@@ -25,6 +25,24 @@ impl StrategyProgram for Momentum {
             filled: false,
             liquidated: false,
         }
+    }
+
+    fn on_fill(&mut self, _fill: &Fill) {
+        self.filled = true;
+    }
+
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("parity_fills", f64::from(self.liquidated));
+    }
+}
+
+impl MarketConsumer for Momentum {
+    type Context = OrderSink;
+
+    fn subscriptions(&self) -> Vec<Subscription> {
+        vec![Subscription::Quote {
+            symbols: vec!["SPY".into()],
+        }]
     }
 
     fn on_quote(&mut self, event: &QuoteEvent, orders: &mut OrderSink) {
@@ -66,14 +84,6 @@ impl StrategyProgram for Momentum {
                 event_id: format!("parity-sell-event-{}", event.sequence),
             });
         }
-    }
-
-    fn on_fill(&mut self, _fill: &Fill) {
-        self.filled = true;
-    }
-
-    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("parity_fills", f64::from(self.liquidated));
     }
 }
 

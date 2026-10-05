@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use backtest::backtest::config::BacktestConfig;
-use backtest::backtest::engine_core::{BacktestOutcome, EngineOptions};
+use backtest::backtest::engine_core::{BacktestOutcome, EngineOptions, MarketSubscription};
 use backtest::backtest::job::BacktestJobError;
 use backtest::backtest::job::{
     run_native_job_with_lake_client, run_native_study_job_with_lake_client,
@@ -65,6 +65,94 @@ pub fn validate_configuration(configuration: &BacktestConfig) -> Result<usize, J
     let workspace = ManagedWorkspace::open_default()?;
     let programs = build_instances(configuration, &workspace)?;
     Ok(programs.len())
+}
+
+/// Construct programs and return canonical effective inputs before fetching data.
+///
+/// # Errors
+/// Returns a configuration error for invalid source, parameters, or declarations.
+pub fn configuration_subscriptions(
+    configuration: &BacktestConfig,
+) -> Result<Vec<MarketSubscription>, ConfigurationRunError> {
+    let workspace = ManagedWorkspace::open_default()?;
+    let programs = build_instances(configuration, &workspace)?;
+    let inputs: Vec<MarketSubscription> = programs
+        .iter()
+        .flat_map(|program| program.runtime.subscriptions().unwrap_or_default())
+        .collect();
+    let inputs = inputs
+        .into_iter()
+        .map(|input| match input.data_type.as_str() {
+            "bars" => Ok(harness_strategy_sdk::Subscription::Bars {
+                symbols: input.symbols,
+                interval: input
+                    .interval
+                    .ok_or_else(|| JitError::Invalid("bars require an interval".into()))?,
+            }),
+            "quote" => Ok(harness_strategy_sdk::Subscription::Quote {
+                symbols: input.symbols,
+            }),
+            "trade" => Ok(harness_strategy_sdk::Subscription::Trade {
+                symbols: input.symbols,
+            }),
+            _ => Err(JitError::Invalid(
+                "unsupported subscription data type".into(),
+            )),
+        })
+        .collect::<Result<Vec<_>, JitError>>()?;
+    let canonical =
+        harness_strategy_sdk::canonical_subscriptions(inputs).map_err(JitError::Invalid)?;
+    Ok(canonical
+        .into_iter()
+        .map(crate::runtime::engine_subscription)
+        .collect())
+}
+
+/// Inspect compiled, loaded, and constructed program inputs without fetching market data.
+///
+/// # Errors
+/// Returns structured authored diagnostics or a non-cacheable configuration/runtime failure.
+pub fn inspect_configuration(
+    configuration: &BacktestConfig,
+) -> Result<serde_json::Value, crate::compile::ValidationFailure> {
+    use crate::compile::ValidationFailure;
+    use backtest::backtest::engine_core::{default_subscriptions, normalize_subscriptions};
+
+    let subscriptions =
+        configuration_subscriptions(configuration).map_err(|error| match error {
+            ConfigurationRunError::Jit(error) => ValidationFailure::for_program(
+                error,
+                crate::config::program_kind(&configuration.shell),
+            ),
+            ConfigurationRunError::Job(error) => ValidationFailure::new(error.to_string()),
+        })?;
+    let subscriptions = normalize_subscriptions(&subscriptions)
+        .map_err(|error| ValidationFailure::configuration(error.to_string()))?;
+    let expected = if configuration.has_subscription_echo() {
+        configuration.data_subscriptions.clone()
+    } else {
+        default_subscriptions(configuration)
+    };
+    let expected = normalize_subscriptions(&expected)
+        .map_err(|error| ValidationFailure::configuration(error.to_string()))?;
+    if expected != subscriptions {
+        return Err(ValidationFailure::configuration(
+            if configuration.has_subscription_echo() {
+                "data.subscriptions does not match runtime subscription union"
+            } else if configuration.shell == "study" {
+                "legacy study symbols and interval do not match runtime subscription union"
+            } else {
+                "configured symbols and interval do not match runtime subscription union"
+            },
+        ));
+    }
+    Ok(serde_json::json!({
+        "valid": true,
+        "kind": if configuration.shell == "study" { "study" } else { "strategy" },
+        "shell": configuration.shell,
+        "instances": configuration.strategy_instances.len(),
+        "subscriptions": subscriptions,
+    }))
 }
 
 /// Run one already-validated study configuration through JIT-authored study

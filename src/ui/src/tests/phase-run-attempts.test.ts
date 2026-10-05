@@ -1,24 +1,17 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { ExecutionEvent, ExecutionEventType, WorkflowExecutionRecord } from '$lib/types';
+import type { ExecutionEvent, ExecutionEventType } from '$lib/types';
+import { timelineFixture } from './timeline-fixture';
+import { phaseScopeId, serializeScope } from '$lib/scope.svelte';
 
 vi.mock('$lib/api', () => ({
 	apiBaseUrl: 'http://api.test',
 	fixtureMode: false,
 	listChatSubAgents: vi.fn(async () => []),
-	listExecutionEvents: vi.fn(async () => []),
-	listNodeEvents: vi.fn(async () => []),
-	postNodeMessage: vi.fn()
+	postNodeMessage: vi.fn(),
+	getWorkflowDefinition: vi.fn(async () => { throw new Error('Unavailable'); })
 }));
 
-vi.mock('$lib/sse', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('$lib/sse')>();
-	class FakeExecutionEventStream {
-		async start(): Promise<void> {}
-		stop(): void {}
-	}
-	return { ...actual, ExecutionEventStream: FakeExecutionEventStream };
-});
 
 import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 
@@ -45,19 +38,8 @@ function event(
 	};
 }
 
-const execution: WorkflowExecutionRecord = {
-	execution_id: 'exec-1',
-	chat_id: 'chat-1',
-	trigger_message_id: 'msg-1',
-	workflow_id: 'hypothesis-development',
-	workflow_version: 'v1',
-	requested_by: 'user-alex',
-	state: 'running',
-	phase: PHASE,
-	intent_epoch: 0,
-	steering_message_ids: [],
-	created_at: '2026-01-01T00:00:00Z'
-};
+const initialScope = serializeScope([{ kind: 'conversation', id: 'chat-1', label: 'Conversation' },
+	{ kind: 'phase', id: phaseScopeId('exec-1', PHASE), label: PHASE }]);
 
 const events: ExecutionEvent[] = [
 	event(1, 'workflow.phase', { phase: PHASE, reason: 'entered' }),
@@ -83,11 +65,9 @@ describe('phase attempt selection', () => {
 			props: {
 				workspaceId: 'ws-1',
 				chatId: 'chat-1',
-				messages: [],
-				events,
-				execution,
+				timeline: timelineFixture([], events),
 				onSend: vi.fn(),
-				initialScope: `conversation:chat-1/phase:${PHASE}`
+				initialScope
 			}
 		});
 
@@ -109,11 +89,9 @@ describe('phase attempt selection', () => {
 			props: {
 				workspaceId: 'ws-1',
 				chatId: 'chat-1',
-				messages: [],
-				events: events.slice(0, 3),
-				execution,
+				timeline: timelineFixture([], events.slice(0, 3)),
 				onSend: vi.fn(),
-				initialScope: `conversation:chat-1/phase:${PHASE}`
+				initialScope
 			}
 		});
 

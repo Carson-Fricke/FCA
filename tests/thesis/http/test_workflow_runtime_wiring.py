@@ -15,7 +15,7 @@ from typing import cast
 from fastapi.testclient import TestClient
 
 from thesis.agent.runtime.conversation import Conversations
-from thesis.chat import ChatService, InMemoryChatStreamBroker
+from thesis.chat import ChatService
 from thesis.http.application import create_app
 from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
 from thesis.workflows.runtime import WorkflowRuntime
@@ -65,16 +65,10 @@ def test_create_app_attaches_runtime_to_the_app_state() -> None:
 def test_create_app_exposes_an_injected_conversations_service() -> None:
     runtime = _FakeRuntime()
     chat = ChatService()
-    broker = InMemoryChatStreamBroker()
-    conversations = Conversations(
-        chat=chat,
-        broker=broker,
-        reply_for=lambda workspace_id, chat_id, history: iter(()),
-    )
+    conversations = Conversations(chat=chat)
     app = create_app(
         bearer_token=TOKEN,
         chat_service=chat,
-        chat_stream_broker=broker,
         conversations=conversations,
         workflow_runtime=cast(WorkflowRuntime, runtime),
     )

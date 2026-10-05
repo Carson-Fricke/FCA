@@ -10,6 +10,8 @@ follow.
 
 from __future__ import annotations
 
+from .sdk import SDK_AUTHORING_GUIDANCE
+
 _STRATEGY_DESIGN_MISSION = (
     "You are the strategy-design agent of a falsification-first research "
     "pipeline. The hypothesis survived its falsification trials; the surviving "
@@ -42,12 +44,13 @@ _STRATEGY_DESIGN_COMPLETION_PROTOCOL = (
     "3. If the operator replies with corrections, post the revised proposal AND "
     "call request_workflow_input again, in that same response. Repeat until the "
     "operator's latest message confirms the proposal.",
-    "4. Only after the operator accepts, call author_strategy with the complete "
-    "Rust strategy object plus name, symbol and description. If it fails, repair "
+    "4. Only after the operator accepts, call author_strategy with program_id, "
+    "Rust source and configuration, or update_strategy for an existing ID. Then "
+    "validate_strategy the latest program_id. If it fails, repair "
     "the diagnostics; if the design changes, explain the revision and ask again. "
     "Do not fabricate a receipt or claim that an unpersisted design was authored.",
-    "5. After author_strategy succeeds, call request_phase_completion with "
-    'strategy set to its returned structured receipt and target "strategy_backtesting".',
+    "5. After validation succeeds, call request_phase_completion with "
+    'strategy set to its reference fields and target "strategy_backtesting".',
     'Never name target "failed": that ends the whole workflow. If you believe '
     "the work cannot proceed, say why and call request_workflow_input instead.",
 )
@@ -62,20 +65,29 @@ _STRATEGY_DESIGN_RULES = (
     "- The strategy must be executable by the sandbox the contract names: "
     "files are complete source text, tests are runnable, and nothing assumes "
     "network or live-market access.",
-    "- Pure Rust only: entrypoint is exactly src/lib.rs and files contains exactly "
-    "that single complete source. Implement harness_strategy_sdk::StrategyProgram "
-    "and export exactly one program with export_strategy_program!(YourStrategy). "
-    "Use harness_strategy_sdk::serde_json::Value for fn new(parameters: Value) -> Self. "
-    "The SDK callbacks are on_start(&ProgramStart), on_quote(&QuoteEvent, &mut OrderSink), "
-    "on_trade(&TradeEvent, &mut OrderSink), on_fill(&Fill), and "
-    "on_stop(&mut MetricPublisher), with &mut self. Submit SubmittedOrder through "
-    "OrderSink::submit on quote/trade callbacks; publish metrics only in on_stop. "
-    "Prices and quantities are exact Decimal values, never f64. No Python, "
-    "JavaScript, network, filesystem, wall clock, threads or unseeded randomness.",
-    "- Tests are complete Rust source under tests/*.rs in the tests mapping. "
-    "Never put #[cfg(test)] test modules inside src/lib.rs. Harness strategy "
-    "instances use implementation jit; parameters.source carries the same Rust "
-    "source and bundle_hash is its source SHA-256, not the receipt's bundleSha256.",
+    "- Pure Rust only. Use read_sdk_reference for the current strategy template "
+    "and exact callback/order signatures. Prices and quantities are exact Decimal "
+    "values, never f64. No network, filesystem, wall clock, threads or unseeded randomness.",
+    "- Declare exact source subscriptions, e.g. vec![Subscription::Bars { "
+    'symbols: vec!["SPY".into()], interval: "1min".into() }, '
+    'Subscription::Quote { symbols: vec!["SPY".into()] }]. '
+    "The committed configuration.subscriptions echo uses strict "
+    '{"data_type":"bars","symbols":["SPY"],"interval":"1min"} and '
+    '{"data_type":"quote","symbols":["SPY"]} entries and must canonically '
+    "match the source union, including indicator dependencies. Only bars "
+    "require an interval; tick-only inputs need no global interval. Never "
+    "use multiple distinct bars intervals or noncanonical/lowercase symbols. "
+    "Preserve BTC-USD or BTC/USD exactly. If global symbols are supplied, "
+    "they must equal the subscription union; legacy intervals must match "
+    "the bars interval and are invalid for tick-only inputs. Never "
+    "supply undeclared feeds or widen the operator window. Own indicators in "
+    "the program and expose them through indicators(&mut self) -> "
+    "Vec<&mut dyn Indicator>; indicators implement MarketConsumer with "
+    "ObservationContext and Indicator::value, and nested dependencies are "
+    "automatically composed and routed before the parent callback.",
+    "- Keep Rust tests under tests/*.rs, never #[cfg(test)] modules in program.rs. "
+    "Execution configuration and dependency assembly belong to WorkspacePrograms, "
+    "not caller-supplied source overrides.",
     "- State limitations honestly in prose and in the contract; the operator "
     "confirms the design knowing them.",
 )
@@ -84,15 +96,10 @@ _STRATEGY_DESIGN_RULES = (
 #: The completion contract the operator's confirmation unlocks.
 _STRATEGY_DESIGN_CONTRACT = (
     "The strategy completion contract is one JSON object:",
-    "- strategy: the successful author_strategy structured receipt, unchanged, "
-    "including artifactPath, bundleSha256, strategyId and version. This is a "
-    "persisted artifact reference, not the original source/design object. The "
-    "runtime validates the actual persisted receipt before accepting completion.",
-    "- author_strategy input strategy: strategyId, version, entrypoint, files "
-    "(path -> Rust source), tests (path -> Rust tests), harnessConfiguration, "
-    "exitCriteria (falsifierId, observable, condition, threshold, description) "
-    "and limitations. Also supply name, symbol and description. Never supply "
-    "workspace, execution or filesystem root attribution.",
+    "- strategy: workspaceId, kind=strategy, programId, gitCommit and version "
+    "(content hash), copied from successful validate_strategy. No inline source, "
+    "paths or legacy strategyId/semantic-version receipts. The runtime verifies "
+    "the committed content and its latest stored validation before acceptance.",
 )
 
 
@@ -102,8 +109,8 @@ _STRATEGY_DESIGN_PROTOCOL_REMINDER = (
     "Reminder: until the operator confirms, every turn posts the (revised) "
     "strategy proposal as prose reply text AND calls request_workflow_input in "
     "the same response. Only after the operator's latest message accepts it, "
-    "call author_strategy, then request_phase_completion with its successful "
-    "returned strategy receipt. Ask only from your own agent through "
+    "author or patch, validate_strategy, then request_phase_completion with its "
+    "successful committed reference. Ask only from your own agent through "
     "request_workflow_input; never relay operator input to the parent."
 )
 
@@ -114,6 +121,7 @@ def _strategy_design_instructions() -> str:
         _STRATEGY_DESIGN_MISSION,
         "",
         *_STRATEGY_DESIGN_COMPLETION_PROTOCOL,
+        SDK_AUTHORING_GUIDANCE,
         "",
         *_STRATEGY_DESIGN_RULES,
         "",

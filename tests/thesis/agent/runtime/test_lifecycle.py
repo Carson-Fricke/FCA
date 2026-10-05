@@ -25,7 +25,9 @@ _ACTOR = "operator-1"
 
 
 def _chat() -> ChatService:
-    service = ChatService(persistence=InMemoryChatPersistence())
+    service = ChatService(
+        persistence=InMemoryChatPersistence(), id_factory=lambda prefix: f"{prefix}-1"
+    )
     service.create_chat(_WORKSPACE, title="Test chat", owner_actor_id=_ACTOR)
     return service
 

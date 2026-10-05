@@ -28,6 +28,24 @@ pub enum JsonValue {
 }
 
 impl JsonValue {
+    /// Convert without re-encoding numbers or losing exact decimal wrappers.
+    pub fn to_serde_value(&self) -> serde_json::Value {
+        match self {
+            Self::Null => serde_json::Value::Null,
+            Self::Bool(v) => (*v).into(),
+            Self::Int(v) => (*v).into(),
+            Self::UInt(v) => (*v).into(),
+            Self::String(v) => v.clone().into(),
+            Self::Array(v) => {
+                serde_json::Value::Array(v.iter().map(Self::to_serde_value).collect())
+            }
+            Self::Object(v) => serde_json::Value::Object(
+                v.iter()
+                    .map(|(k, v)| (k.clone(), v.to_serde_value()))
+                    .collect(),
+            ),
+        }
+    }
     /// Build a JSON string value.
     #[must_use]
     pub fn string(value: impl Into<String>) -> Self {

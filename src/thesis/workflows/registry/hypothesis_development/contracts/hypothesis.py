@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from thesis.research.hypothesis import HypothesisFalsifier
 from thesis.research.models import ResearchModel
+from thesis.workflows.research_models import StudyProgramReference
 
 from ..errors import (
     FalsificationComposeError,
@@ -27,7 +28,7 @@ class HypothesisDraft:
     horizon: str
     universe: tuple[str, ...]
     falsifiers: tuple[HypothesisFalsifier, ...]
-    model: ResearchModel
+    model: ResearchModel | StudyProgramReference
     sizing: str | None = None
     body: str = ""
     hypothesis_id: str | None = None
@@ -47,7 +48,7 @@ class HypothesisDraft:
             raise FalsificationComposeError(
                 "hypothesis draft requires HypothesisFalsifier values"
             )
-        if not isinstance(self.model, ResearchModel):
+        if not isinstance(self.model, ResearchModel | StudyProgramReference):
             raise FalsificationComposeError(
                 "hypothesis draft requires a research model"
             )

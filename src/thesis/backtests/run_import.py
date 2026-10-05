@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.backtests.artifacts import ArtifactReader, HarnessArtifactReader
 from thesis.http.backtests import BacktestRecord
-from thesis.integrations.mcp import TOOL_GET_BACKTEST_STATUS, TOOL_GET_RUN
+from thesis.integrations.mcp import TOOL_GET_JOB_STATUS, TOOL_GET_RUN
 
 _PENDING_STATES = frozenset({"queued", "running", "pending", "submitted", "created"})
 _FAILED_STATES = frozenset({"failed", "cancelled", "canceled", "error", "errored"})
@@ -189,9 +189,9 @@ def _require_terminal(tools: HarnessToolProvider, run_id: str) -> None:
 
     The async submitter writes the run catalog row only when the worker
     finishes, so a still-running run is distinguishable from a missing one only
-    through ``get_backtest_status``.
+    through ``get_job_status``.
     """
-    result = tools.call_tool(TOOL_GET_BACKTEST_STATUS, {"job_id": run_id})
+    result = tools.call_tool(TOOL_GET_JOB_STATUS, {"job_id": run_id})
     if not result.ok:
         return
     state = _status_of(result.structured)

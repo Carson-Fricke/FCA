@@ -317,7 +317,8 @@ fn backtest_document(run_id: &str) -> Value {
         "start": "2024-01-02T14:30:00Z",
         "end": "2024-01-19T21:00:00Z",
         "strategy_instances": [
-            {"instance_id": "spy-momentum", "implementation": "x:Y", "parameters": {"threshold": "0.05"}}
+            {"instance_id": "spy-momentum", "implementation": "x:Y", "bundle_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+             "capital_fraction": "1", "symbols": ["SPY"], "parameters": {"threshold": "0.05"}}
         ]
     })
 }
@@ -1018,21 +1019,7 @@ async fn native_research_metrics_are_queryable_over_http() {
             lake_client(&server),
         )),
     );
-    let study_source = r#"
-use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{export_study_program, BarFrame, MetricPublisher, StudyProgram};
-struct BarObserver { bars: u64 }
-impl StudyProgram for BarObserver {
-    fn new(_: Value) -> Self { Self { bars: 0 } }
-    fn on_bar_frame(&mut self, frame: &BarFrame) {
-        self.bars += frame.bars_by_symbol.len() as u64;
-    }
-    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("bar_observations", self.bars as f64);
-    }
-}
-export_study_program!(BarObserver);
-"#;
+    let study_source = include_str!("fixtures/parity_study.rs");
     let document = json!({
         "schema_version": 1,
         "shell": "study",
@@ -1087,4 +1074,446 @@ export_study_program!(BarObserver);
         Some(observed)
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+const SUBSCRIPTION_STUDY: &str = r#"
+use harness_strategy_sdk::serde_json::Value;
+use harness_strategy_sdk::{export_study_program, BarFrame, MarketConsumer, MetricPublisher,
+    ObservationContext, QuoteEvent, StudyProgram, Subscription};
+struct Observer { quotes: u64, bars: u64 }
+impl StudyProgram for Observer {
+    fn new(_: Value) -> Self { Self { quotes: 0, bars: 0 } }
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("quote_observations", self.quotes as f64);
+        let _ = metrics.publish("bar_observations", self.bars as f64);
+    }
+}
+impl MarketConsumer for Observer {
+    type Context = ObservationContext;
+    fn subscriptions(&self) -> Vec<Subscription> {
+        vec![Subscription::Quote { symbols: vec!["SPY".into()] } /* BARS */]
+    }
+    fn on_quote(&mut self, _: &QuoteEvent, _: &mut ObservationContext) { self.quotes += 1; }
+    fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {
+        self.bars += frame.bars_by_symbol.len() as u64;
+    }
+}
+export_study_program!(Observer);
+"#;
+
+#[test]
+fn authored_subscription_studies_validate_then_launch_exact_lake_inputs() {
+    use mcp::tools::StudyValidator;
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    for mixed in [false, true] {
+        let server = spy_lake();
+        let root = temp_root(if mixed { "mixed-study" } else { "ticks-study" });
+        let source = if mixed {
+            SUBSCRIPTION_STUDY.replace(
+                "/* BARS */",
+                ", Subscription::Bars { symbols: vec![\"SPY\".into()], interval: \"1min\".into() }",
+            )
+        } else {
+            SUBSCRIPTION_STUDY.to_string()
+        };
+        let expected = if mixed {
+            json!([
+                {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"},
+                {"data_type": "quote", "symbols": ["SPY"]}
+            ])
+        } else {
+            json!([{"data_type": "quote", "symbols": ["SPY"]}])
+        };
+        let model = json!({"source": source, "harnessConfiguration": {
+            "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
+            "data": {"subscriptions": expected}
+        }});
+        let validation = api::local::NativeStudyValidator
+            .validate(&model)
+            .expect("validate source union");
+        assert_eq!(validation["instances"], 1);
+        assert_eq!(validation["subscriptions"], expected);
+        assert!(
+            server.requests().is_empty(),
+            "validation must not fetch data"
+        );
+        let document = api::local::authored_study_document(&model).expect("authored document");
+        assert_eq!(document["data"]["subscriptions"], expected);
+        assert!(document["data"].get("bar_interval").is_none());
+        let run_id = document["run_id"].as_str().unwrap().to_string();
+        let router = durable_router(
+            &root,
+            Arc::new(api::http::native::NativeBacktestRunner::with_lake_client(
+                root.join("out"),
+                lake_client(&server),
+            )),
+        );
+        runtime.block_on(async {
+            let mut mismatch = document.clone();
+            mismatch["run_id"] = json!(format!("{run_id}-mismatch"));
+            mismatch["data"]["subscriptions"] = json!([{"data_type": "trade", "symbols": ["SPY"]}]);
+            let (status, _, body) = send(
+                &router,
+                post_json("/v1/studies/jobs", Some(BEARER), mismatch),
+            )
+            .await;
+            assert_eq!(status, StatusCode::ACCEPTED);
+            assert_eq!(json_body(&body)["state"], "failed");
+            assert!(
+                server.requests().is_empty(),
+                "echo mismatch must fail before any lake traffic"
+            );
+            let (status, _, body) = send(
+                &router,
+                post_json("/v1/studies/jobs", Some(BEARER), document),
+            )
+            .await;
+            assert_eq!(
+                status,
+                StatusCode::ACCEPTED,
+                "{}",
+                String::from_utf8_lossy(&body)
+            );
+            let (_, _, job) = send(
+                &router,
+                get_auth(&format!("/v1/backtests/jobs/{run_id}"), BEARER),
+            )
+            .await;
+            assert_eq!(
+                json_body(&job)["state"],
+                "succeeded",
+                "{}",
+                String::from_utf8_lossy(&job)
+            );
+            let (_, _, artifact) = send(
+                &router,
+                get_auth(
+                    &format!("/v1/backtests/runs/{run_id}/artifacts/study.json"),
+                    BEARER,
+                ),
+            )
+            .await;
+            let artifact = json_body(&artifact);
+            assert_eq!(artifact["manifest"]["effective_subscriptions"], expected);
+            let (_, _, run) = send(
+                &router,
+                get_auth(&format!("/v1/backtests/runs/{run_id}"), BEARER),
+            )
+            .await;
+            let metrics = json_body(&run)["metrics"].clone();
+            assert!(
+                metrics["quote_observations"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap()
+                    > 0.0
+            );
+            assert_eq!(
+                metrics["bar_observations"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap(),
+                if mixed { 3.0 } else { 0.0 }
+            );
+        });
+        let mut ensured = Vec::new();
+        let mut read = Vec::new();
+        for request in server.requests() {
+            if request.path == "/v1/catalog/ensure" {
+                let body = json_body(request.body.as_ref().unwrap());
+                ensured.push(body["data_type"].as_str().unwrap().to_string());
+                assert_eq!(body["start_date"], "2024-01-02");
+                assert_eq!(body["end_date"], "2024-01-04");
+            }
+            if request.path == "/v1/read" {
+                read.push(request.query["data_type"].clone());
+            }
+        }
+        ensured.sort();
+        read.sort();
+        let types: Vec<String> = if mixed {
+            vec!["bars".into(), "quote".into()]
+        } else {
+            vec!["quote".into()]
+        };
+        assert_eq!(ensured, types);
+        assert_eq!(read, types);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[test]
+fn authored_tick_echo_uses_only_explicit_symbols_and_rejects_mismatch() {
+    use mcp::tools::StudyValidator;
+    let model = json!({
+        "source": SUBSCRIPTION_STUDY.replace("SPY", "QQQ"),
+        "harnessConfiguration": {
+            "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
+            "subscriptions": [{"data_type": "quote", "symbols": ["QQQ"]}]
+        }
+    });
+    let document = api::local::authored_study_document(&model).unwrap();
+    assert_eq!(document["data"]["symbols"], json!(["QQQ"]));
+    assert_eq!(document["strategy_instances"][0]["symbols"], json!(["QQQ"]));
+    let response = api::local::NativeStudyValidator.validate(&model).unwrap();
+    assert_eq!(
+        response["subscriptions"],
+        model["harnessConfiguration"]["subscriptions"]
+    );
+    let mut mismatch = model;
+    mismatch["harnessConfiguration"]["subscriptions"][0]["data_type"] = json!("trade");
+    assert!(api::local::NativeStudyValidator
+        .validate(&mismatch)
+        .unwrap_err()
+        .contains("does not match"));
+}
+
+#[test]
+fn validator_returns_recursive_indicator_requirements_without_extras() {
+    use mcp::tools::StudyValidator;
+    let source = r#"
+use harness_strategy_sdk::serde_json::Value;
+use harness_strategy_sdk::{export_study_program, Decimal, Indicator, MarketConsumer,
+    ObservationContext, StudyProgram, Subscription};
+struct Leaf { last: Option<Decimal> }
+impl Indicator for Leaf { fn value(&self) -> Option<Decimal> { self.last } }
+impl MarketConsumer for Leaf {
+    type Context = ObservationContext;
+    fn subscriptions(&self) -> Vec<Subscription> {
+        vec![Subscription::Trade { symbols: vec!["QQQ".into()] }]
+    }
+}
+struct Parent { leaf: Leaf }
+impl Indicator for Parent { fn value(&self) -> Option<Decimal> { self.leaf.value() } }
+impl MarketConsumer for Parent {
+    type Context = ObservationContext;
+    fn subscriptions(&self) -> Vec<Subscription> { vec![] }
+    fn indicators(&mut self) -> Vec<&mut dyn Indicator> { vec![&mut self.leaf] }
+}
+struct Study { parent: Parent }
+impl StudyProgram for Study {
+    fn new(_: Value) -> Self { Self { parent: Parent { leaf: Leaf { last: None } } } }
+}
+impl MarketConsumer for Study {
+    type Context = ObservationContext;
+    fn subscriptions(&self) -> Vec<Subscription> { vec![] }
+    fn indicators(&mut self) -> Vec<&mut dyn Indicator> { vec![&mut self.parent] }
+}
+export_study_program!(Study);
+"#;
+    let expected = json!([{"data_type": "trade", "symbols": ["QQQ"]}]);
+    let model = json!({"source": source, "harnessConfiguration": {
+        "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
+        "subscriptions": expected
+    }});
+    let response = api::local::NativeStudyValidator.validate(&model).unwrap();
+    assert_eq!(response["subscriptions"], expected);
+}
+
+#[test]
+fn strict_http_subscription_contract_rejects_invalid_shapes() {
+    use api::http::configuration::ConfigurationParser;
+    for subscriptions in [
+        json!({"data_type": "quote", "symbols": ["SPY"]}),
+        json!([{"data_type": "bars", "symbols": ["SPY"]}]),
+        json!([{"data_type": "bars", "symbols": ["SPY"], "interval": "5min"}]),
+        json!([{"data_type": "quote", "symbols": ["SPY"], "interval": null}]),
+        json!([{"data_type": "trade", "symbols": []}]),
+        json!([{"data_type": "quote", "symbols": ["SPY"], "extra": true}]),
+    ] {
+        let mut document = backtest_document("invalid-subscription");
+        document["data"] = json!({"subscriptions": subscriptions});
+        assert!(StrictJsonConfigurationParser
+            .parse(&serde_json::to_vec(&document).unwrap())
+            .is_err());
+    }
+}
+
+#[test]
+fn authored_contract_rejects_symbol_and_interval_conflicts_before_lake() {
+    use mcp::tools::StudyValidator;
+
+    let server = spy_lake();
+    let base = json!({"source": SUBSCRIPTION_STUDY, "harnessConfiguration": {
+        "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
+        "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}]
+    }});
+    for symbols in [json!(["QQQ"]), json!([]), json!("SPY"), json!([1])] {
+        let mut model = base.clone();
+        model["harnessConfiguration"]["symbols"] = symbols;
+        assert!(api::local::authored_study_document(&model)
+            .unwrap_err()
+            .contains("symbols"));
+        assert!(api::local::NativeStudyValidator.validate(&model).is_err());
+    }
+    let mut ticks = base.clone();
+    ticks["harnessConfiguration"]["interval"] = json!("1min");
+    assert!(api::local::NativeStudyValidator
+        .validate(&ticks)
+        .unwrap_err()
+        .contains("tick-only"));
+
+    let mut bars = base;
+    bars["source"] = json!(include_str!("fixtures/parity_study.rs"));
+    bars["harnessConfiguration"]["subscriptions"] = json!([
+        {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}
+    ]);
+    bars["harnessConfiguration"]["interval"] = json!("1d");
+    assert!(api::local::NativeStudyValidator
+        .validate(&bars)
+        .unwrap_err()
+        .contains("must match"));
+    bars["harnessConfiguration"]["interval"] = json!("1min");
+    bars["harnessConfiguration"]["symbols"] = json!(["SPY", "SPY"]);
+    assert!(api::local::NativeStudyValidator.validate(&bars).is_ok());
+    assert!(server.requests().is_empty());
+}
+
+#[test]
+fn legacy_authored_contract_must_match_compiled_bar_requirements() {
+    use mcp::tools::StudyValidator;
+
+    let server = spy_lake();
+    let model = json!({"source": include_str!("fixtures/parity_study.rs"), "harnessConfiguration": {
+        "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
+        "symbols": ["SPY"], "interval": "1min"
+    }});
+    let response = api::local::NativeStudyValidator.validate(&model).unwrap();
+    assert_eq!(
+        response["subscriptions"],
+        json!([
+            {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}
+        ])
+    );
+    let mut wrong_symbols = model.clone();
+    wrong_symbols["harnessConfiguration"]["symbols"] = json!(["QQQ"]);
+    let mut wrong_interval = model.clone();
+    wrong_interval["harnessConfiguration"]["interval"] = json!("1d");
+    let mut wrong_type = model;
+    wrong_type["source"] = json!(SUBSCRIPTION_STUDY);
+    for mismatch in [wrong_symbols, wrong_interval, wrong_type] {
+        assert!(api::local::NativeStudyValidator
+            .validate(&mismatch)
+            .unwrap_err()
+            .contains("legacy study symbols and interval"));
+    }
+    assert!(server.requests().is_empty());
+}
+
+#[test]
+fn nested_authored_configuration_preserves_runtime_fields_and_normalized_source() {
+    use mcp::tools::StudyValidator;
+
+    let source = include_str!("fixtures/parity_study.rs")
+        .replace("\r\n", "\n")
+        .replace("SPY", "QQQ");
+    let model = json!({"source": source.replace('\n', "\r\n"), "harnessConfiguration": {
+        "start": "2024-01-02T09:30:00-05:00", "end": "2024-01-04T16:00:00-05:00",
+        "seed": 31, "base_currency": "EUR", "initial_cash": "12345.50",
+        "data": {"symbols": ["QQQ"], "bar_interval": "1min",
+            "snapshot_id": "authored-snapshot", "fingerprint": "b".repeat(64)},
+        "strategy_instances": [{"parameters": {"source": "stale"}}],
+        "shell": "backtest", "run_id": "stale"
+    }});
+    let document = api::local::authored_study_document(&model).unwrap();
+    for key in [
+        "start",
+        "end",
+        "seed",
+        "base_currency",
+        "initial_cash",
+        "data",
+    ] {
+        assert_eq!(document[key], model["harnessConfiguration"][key], "{key}");
+    }
+    assert_eq!(document["symbols"], json!(["QQQ"]));
+    assert_eq!(document["shell"], "study");
+    assert_ne!(document["run_id"], "stale");
+    assert_eq!(
+        document["strategy_instances"][0]["parameters"],
+        json!({"source": source})
+    );
+    assert_eq!(
+        document["strategy_instances"][0]["bundle_hash"],
+        backtest::sha256::digest_hex(source.as_bytes())
+    );
+    let response = api::local::NativeStudyValidator.validate(&model).unwrap();
+    assert_eq!(
+        response["subscriptions"],
+        json!([
+            {"data_type": "bars", "symbols": ["QQQ"], "interval": "1min"}
+        ])
+    );
+    let mut lf_model = model.clone();
+    lf_model["source"] = json!(source);
+    assert_eq!(
+        api::local::authored_study_document(&lf_model).unwrap(),
+        document
+    );
+    for alias in ["symbols", "requiredSymbols", "required_symbols"] {
+        let mut aliased = model.clone();
+        aliased["harnessConfiguration"][alias] = json!(["QQQ", "QQQ"]);
+        assert_eq!(
+            api::local::authored_study_document(&aliased).unwrap(),
+            document
+        );
+        aliased["harnessConfiguration"][alias] = json!(["SPY"]);
+        assert!(api::local::NativeStudyValidator
+            .validate(&aliased)
+            .unwrap_err()
+            .contains("must match"));
+    }
+}
+
+#[test]
+fn nested_and_shorthand_contracts_reject_contradictions_before_lake() {
+    use mcp::tools::StudyValidator;
+
+    let server = spy_lake();
+    let echo = json!([
+        {"data_type": "quote", "symbols": ["SPY"]},
+        {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}
+    ]);
+    let source = SUBSCRIPTION_STUDY.replace(
+        "/* BARS */",
+        ", Subscription::Bars { symbols: vec![\"SPY\".into()], interval: \"1min\".into() }",
+    );
+    let model = json!({"source": source, "harnessConfiguration": {
+        "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
+        "data": {"subscriptions": echo, "symbols": ["SPY"], "bar_interval": "1min"}
+    }});
+    let document = api::local::authored_study_document(&model).unwrap();
+    assert_eq!(document["data"], model["harnessConfiguration"]["data"]);
+    assert!(api::local::NativeStudyValidator.validate(&model).is_ok());
+    let mut equivalent = model.clone();
+    equivalent["harnessConfiguration"]["subscriptions"] = json!([
+        {"data_type": "bars", "symbols": ["SPY", "SPY"], "interval": "1min"},
+        {"data_type": "quote", "symbols": ["SPY"]}
+    ]);
+    equivalent["harnessConfiguration"]["interval"] = json!("1min");
+    let document = api::local::authored_study_document(&equivalent).unwrap();
+    assert!(document.get("subscriptions").is_none());
+    assert!(document.get("interval").is_none());
+    assert_eq!(
+        document["data"]["subscriptions"],
+        equivalent["harnessConfiguration"]["subscriptions"]
+    );
+    let mut wrong_echo = model.clone();
+    wrong_echo["harnessConfiguration"]["subscriptions"] =
+        json!([{"data_type": "trade", "symbols": ["SPY"]}]);
+    let mut wrong_interval = model.clone();
+    wrong_interval["harnessConfiguration"]["interval"] = json!("1d");
+    let mut wrong_symbols = model.clone();
+    wrong_symbols["harnessConfiguration"]["requiredSymbols"] = json!(["QQQ"]);
+    let mut wrong_union = model;
+    wrong_union["harnessConfiguration"]["data"]["symbols"] = json!(["QQQ"]);
+    for mismatch in [wrong_echo, wrong_interval, wrong_symbols, wrong_union] {
+        assert!(api::local::NativeStudyValidator
+            .validate(&mismatch)
+            .is_err());
+    }
+    assert!(server.requests().is_empty());
 }

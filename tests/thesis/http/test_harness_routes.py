@@ -52,7 +52,7 @@ class FakeMcpHandler:
                     {"name": name, "description": f"{name} tool", "inputSchema": {}}
                     for name in (
                         "run_backtest",
-                        "get_backtest_status",
+                        "get_job_status",
                         "get_run",
                         "list_artifacts",
                     )
@@ -71,7 +71,7 @@ class FakeMcpHandler:
     def _call(self, name: str) -> dict[str, object]:
         if self._missing and name != "run_backtest":
             identifier = "run-1" if name in {"get_run", "list_artifacts"} else "job-1"
-            noun = "job" if name == "get_backtest_status" else "run"
+            noun = "job" if name == "get_job_status" else "run"
             return {
                 "isError": True,
                 "content": [
@@ -85,7 +85,7 @@ class FakeMcpHandler:
                 "state": "queued",
                 "location": "/v1/backtests/jobs/job-1",
             },
-            "get_backtest_status": {
+            "get_job_status": {
                 "job_id": "job-1",
                 "state": "completed",
                 "created_at": "2026-09-09T12:00:00Z",
@@ -200,7 +200,7 @@ def test_status_reports_local_topology_catalog() -> None:
     assert body["health"] is None
     assert [tool["name"] for tool in body["tools"]] == [
         "run_backtest",
-        "get_backtest_status",
+        "get_job_status",
         "get_run",
         "list_artifacts",
     ]
@@ -293,13 +293,13 @@ def test_run_and_artifact_manifest_exposes_canonical_shape() -> None:
     ]
 
 
-def test_missing_run_maps_to_not_found() -> None:
+def test_tool_failure_without_typed_not_found_remains_bad_gateway() -> None:
     client = _client(_local_service(FakeMcpHandler(missing=True)))
 
     response = client.get("/v1/backtests/runs/run-1", headers=HEADERS)
 
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "harness_resource_not_found"
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "harness_tool_error"
 
 
 def test_harness_routes_require_authentication() -> None:

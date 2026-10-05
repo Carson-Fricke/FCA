@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 from urllib.parse import urlsplit
 
+import httpx
+
 from thesis.providers.invocations import (
     ChatMessage,
     ModelCompletion,
@@ -420,7 +422,7 @@ class FoundryDeploymentInvoker:
     ) -> tuple[int, str]:
         try:
             return self._transport.post(url, headers, payload)
-        except Exception as error:
+        except (httpx.TransportError, OSError) as error:
             raise ProviderUnreachableError(
                 "foundry transport is unreachable"
             ) from error

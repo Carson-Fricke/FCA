@@ -25,10 +25,12 @@ representation.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import count
 from typing import Literal, Protocol, cast
@@ -71,10 +73,12 @@ DEFAULT_PROBE_ATTEMPTS = 3
 DEFAULT_PROBE_BACKOFF_SECONDS = 0.25
 
 McpLocation = Literal["local", "remote"]
+ExecutionCertainty = Literal["not_started", "observed_failure", "unknown_outcome"]
+_LOGGER = logging.getLogger(__name__)
 
 TOOL_RUN_BACKTEST = "run_backtest"
 TOOL_BACKTEST_CONFIG_TEMPLATE = "backtest_config_template"
-TOOL_GET_BACKTEST_STATUS = "get_backtest_status"
+TOOL_GET_JOB_STATUS = "get_job_status"
 TOOL_GET_RUN = "get_run"
 TOOL_LIST_ARTIFACTS = "list_artifacts"
 TOOL_READ_ARTIFACT = "read_artifact"
@@ -83,15 +87,27 @@ TOOL_RUN_SCREENER = "run_screener"
 TOOL_GET_SCREENER_STATUS = "get_screener_status"
 TOOL_SCREENER_CONFIG_TEMPLATE = "screener_config_template"
 TOOL_VALIDATE_STUDY = "validate_study"
+TOOL_VALIDATE_STRATEGY = "validate_strategy"
+TOOL_READ_SDK_REFERENCE = "read_sdk_reference"
 TOOL_LAUNCH_TRADER = "launch_trader"
 
 
 class HarnessMcpError(RuntimeError):
     """Base error for a failed or misused harness MCP client call."""
 
+    execution_certainty: ExecutionCertainty = "unknown_outcome"
+
 
 class HarnessMcpProtocolError(HarnessMcpError):
     """The MCP server returned a malformed or error response."""
+
+    def __init__(
+        self, message: str, *, payload: Mapping[str, object] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.payload = dict(payload or {})
+        if payload is not None:
+            self.execution_certainty = outcome_certainty(payload)
 
 
 class HarnessMcpTransportError(HarnessMcpError):
@@ -102,9 +118,16 @@ class HarnessMcpTransportError(HarnessMcpError):
     when one was observed, and never carries a credential.
     """
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        execution_certainty: ExecutionCertainty = "unknown_outcome",
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.execution_certainty = execution_certainty
 
 
 class HarnessMcpAuthError(HarnessMcpTransportError):
@@ -123,6 +146,7 @@ class HarnessMcpToolError(HarnessMcpError):
         super().__init__(f"harness MCP tool {tool!r} failed: {message}")
         self.tool = tool
         self.payload = None if payload is None else dict(payload)
+        self.execution_certainty = outcome_certainty(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +166,16 @@ class McpToolResult:
     is_error: bool
     structured: Mapping[str, object] = field(default_factory=dict)
     text: str = ""
+
+
+def outcome_certainty(payload: Mapping[str, object] | None) -> ExecutionCertainty:
+    """Use explicit server certainty; a legacy tool rejection is observed failure."""
+    value = None if payload is None else payload.get("executionCertainty")
+    if value in ("not_started", "observed_failure", "unknown_outcome"):
+        return cast(ExecutionCertainty, value)
+    if value is not None:
+        return "unknown_outcome"
+    return "observed_failure"
 
 
 class McpTransport(Protocol):
@@ -246,11 +280,14 @@ class RemoteHttpMcpTransport:
 
     def health(self) -> Mapping[str, object]:
         """Probe ``GET /mcp/health`` and return the decoded liveness body."""
+        headers = self._headers()
         try:
-            response = self._http.get(self._health_route, headers=self._headers())
-        except httpx.HTTPError as error:
-            raise HarnessMcpTransportError(
-                "the harness MCP endpoint is unreachable"
+            response = self._http.get(self._health_route, headers=headers)
+        except HarnessMcpError:
+            raise
+        except Exception as error:
+            raise self._exchange_failure(
+                error, token=headers["Authorization"][7:]
             ) from error
         self._raise_for_status(response)
         return _response_object(response)
@@ -262,14 +299,25 @@ class RemoteHttpMcpTransport:
         self, request: Mapping[str, object], *, expect_response: bool
     ) -> Mapping[str, object] | None:
         try:
+            headers = self._headers()
+        except HarnessMcpError:
+            raise
+        except Exception as error:
+            raise HarnessMcpTransportError(
+                f"harness MCP credential resolution failed ({type(error).__name__})",
+                execution_certainty="not_started",
+            ) from error
+        try:
             response = self._http.post(
                 self._route,
                 json=dict(request),
-                headers=self._headers(),
+                headers=headers,
             )
-        except httpx.HTTPError as error:
-            raise HarnessMcpTransportError(
-                "the harness MCP endpoint is unreachable"
+        except HarnessMcpError:
+            raise
+        except Exception as error:
+            raise self._exchange_failure(
+                error, token=headers["Authorization"][7:]
             ) from error
         self._raise_for_status(response)
         if not expect_response:
@@ -281,9 +329,30 @@ class RemoteHttpMcpTransport:
         if token is None:
             raise HarnessMcpAuthError(
                 "the harness MCP endpoint requires a bearer credential "
-                f"({HARNESS_API_BEARER_TOKEN_VARIABLE} is unset)"
+                f"({HARNESS_API_BEARER_TOKEN_VARIABLE} is unset)",
+                execution_certainty="not_started",
             )
         return {"Authorization": f"Bearer {token}"}
+
+    def _exchange_failure(
+        self, error: Exception, *, token: str | None = None
+    ) -> HarnessMcpTransportError:
+        # Preserve TLS details, but never expose a bearer in exception text.
+        detail = str(error)
+        token = token or self._bearer_token
+        if token:
+            detail = detail.replace(token, "[redacted]")
+        certainty: ExecutionCertainty = (
+            "not_started"
+            if isinstance(
+                error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+            )
+            else "unknown_outcome"
+        )
+        return HarnessMcpTransportError(
+            f"the harness MCP exchange failed ({type(error).__name__}): {detail}",
+            execution_certainty=certainty,
+        )
 
     def _resolve_token(self) -> str | None:
         if self._bearer_token is not None:
@@ -298,6 +367,7 @@ class RemoteHttpMcpTransport:
             raise HarnessMcpAuthError(
                 "the harness MCP endpoint rejected the bearer credential",
                 status_code=response.status_code,
+                execution_certainty="not_started",
             )
         if response.is_error:
             raise HarnessMcpTransportError(
@@ -329,7 +399,21 @@ class HarnessMcpClient:
     @property
     def server_info(self) -> Mapping[str, object]:
         """Return the ``initialize`` server info, or empty before initialize."""
-        return self._server
+        with self._lock:
+            return deepcopy(dict(self._server))
+
+    def current_server_info(self) -> Mapping[str, object]:
+        """Fetch fresh initialize metadata, bypassing the cached handshake."""
+        return self.initialize(refresh=True)
+
+    def validation_identity(self) -> str | None:
+        """Read the serving compiler's current identity, never a cached value."""
+        info = self.current_server_info().get("serverInfo")
+        return (
+            _optional_str(info.get("validationIdentity"))
+            if isinstance(info, Mapping)
+            else None
+        )
 
     @property
     def initialized(self) -> bool:
@@ -341,7 +425,7 @@ class HarnessMcpClient:
         """Return the transport selected for this client's topology."""
         return self._transport
 
-    def initialize(self) -> Mapping[str, object]:
+    def initialize(self, *, refresh: bool = False) -> Mapping[str, object]:
         """Negotiate the protocol once and acknowledge the initialization.
 
         The handshake is idempotent: after one successful exchange this returns
@@ -349,10 +433,15 @@ class HarnessMcpClient:
         can back both the boundary and the tool provider without a duplicate
         initialize.  Sends are serialized on the transport lock, so a shared
         client is safe for the boundary runner and the chat tool loop alike.
+        ``refresh=True`` discards the old handshake identity and negotiates again
+        to obtain current server metadata, including validation identity.
         """
         with self._lock:
-            if self._initialized:
+            if self._initialized and not refresh:
                 return dict(self._server)
+            if refresh:
+                self._initialized = False
+                self._server = {}
             result = self._request(
                 "initialize",
                 {
@@ -362,9 +451,17 @@ class HarnessMcpClient:
                 },
             )
             self._server = dict(result)
-            self._transport.notify(
-                {"jsonrpc": "2.0", "method": "notifications/initialized"}
-            )
+            try:
+                self._transport.notify(
+                    {"jsonrpc": "2.0", "method": "notifications/initialized"}
+                )
+            except HarnessMcpError:
+                raise
+            except Exception as error:
+                raise HarnessMcpTransportError(
+                    "harness MCP notifications/initialized failed "
+                    f"({type(error).__name__})"
+                ) from error
             self._initialized = True
             return result
 
@@ -373,21 +470,31 @@ class HarnessMcpClient:
         result = self._request("tools/list", {})
         raw = result.get("tools")
         tools: list[McpTool] = []
+        if not isinstance(raw, (list, tuple)):
+            raise HarnessMcpProtocolError(
+                "harness MCP tools/list returned no tools array"
+            )
         if isinstance(raw, (list, tuple)):
             for entry in raw:
                 if not isinstance(entry, Mapping):
-                    continue
+                    raise HarnessMcpProtocolError(
+                        "harness MCP tools/list returned an invalid tool"
+                    )
                 name = entry.get("name")
                 schema = entry.get("inputSchema")
                 if not isinstance(name, str) or not name:
-                    continue
+                    raise HarnessMcpProtocolError(
+                        "harness MCP tools/list returned an invalid tool name"
+                    )
+                if not isinstance(schema, Mapping):
+                    raise HarnessMcpProtocolError(
+                        "harness MCP tools/list returned an invalid input schema"
+                    )
                 tools.append(
                     McpTool(
                         name=name,
                         description=str(entry.get("description", "")),
-                        input_schema=dict(schema)
-                        if isinstance(schema, Mapping)
-                        else {},
+                        input_schema=dict(schema),
                     )
                 )
         return tuple(tools)
@@ -400,6 +507,13 @@ class HarnessMcpClient:
             "tools/call",
             {"name": name, "arguments": dict(arguments or {})},
         )
+        if not isinstance(result.get("isError", False), bool) or not (
+            isinstance(result.get("content"), (list, tuple))
+            or isinstance(result.get("structuredContent"), Mapping)
+        ):
+            raise HarnessMcpProtocolError(
+                "harness MCP tools/call returned an invalid tool result"
+            )
         structured = result.get("structuredContent")
         payload = dict(structured) if isinstance(structured, Mapping) else {}
         return McpToolResult(
@@ -422,13 +536,21 @@ class HarnessMcpClient:
         """Call the ``validate_study`` tool with one authored model document."""
         return self.call_tool(TOOL_VALIDATE_STUDY, {"model": dict(model)})
 
+    def validate_strategy(self, *, model: Mapping[str, object]) -> McpToolResult:
+        """Compile, load, and construct an authored strategy without replay."""
+        return self.call_tool(TOOL_VALIDATE_STRATEGY, {"model": dict(model)})
+
+    def read_sdk_reference(self, **arguments: object) -> McpToolResult:
+        """Read serving SDK metadata or bounded source guidance through MCP."""
+        return self.call_tool(TOOL_READ_SDK_REFERENCE, arguments)
+
     def launch_trader(self, *, config_path: str) -> McpToolResult:
         """Call the ``launch_trader`` tool."""
         return self.call_tool(TOOL_LAUNCH_TRADER, {"config_path": config_path})
 
-    def get_backtest_status(self, *, job_id: str) -> McpToolResult:
-        """Call the ``get_backtest_status`` tool."""
-        return self.call_tool(TOOL_GET_BACKTEST_STATUS, {"job_id": job_id})
+    def get_job_status(self, *, job_id: str) -> McpToolResult:
+        """Call the ``get_job_status`` tool."""
+        return self.call_tool(TOOL_GET_JOB_STATUS, {"job_id": job_id})
 
     def get_run(self, *, run_id: str) -> McpToolResult:
         """Call the ``get_run`` tool."""
@@ -471,18 +593,49 @@ class HarnessMcpClient:
         self, method: str, params: Mapping[str, object]
     ) -> Mapping[str, object]:
         with self._lock:
-            response = self._transport.exchange(
-                {
-                    "jsonrpc": "2.0",
-                    "id": self._next_id(),
-                    "method": method,
-                    "params": dict(params),
-                }
+            tool = params.get("name") if method == "tools/call" else None
+            _LOGGER.info("harness MCP request method=%s tool=%s", method, tool)
+            try:
+                request_id = self._next_id()
+                response = self._transport.exchange(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "method": method,
+                        "params": dict(params),
+                    }
+                )
+            except HarnessMcpError:
+                _LOGGER.warning(
+                    "harness MCP request failed method=%s tool=%s", method, tool
+                )
+                raise
+            except Exception as error:
+                _LOGGER.warning(
+                    "harness MCP request failed method=%s tool=%s", method, tool
+                )
+                raise HarnessMcpTransportError(
+                    f"harness MCP {method} exchange failed ({type(error).__name__})"
+                ) from error
+        if response.get("jsonrpc") != "2.0" or response.get("id") != request_id:
+            raise HarnessMcpProtocolError(
+                f"harness MCP {method} returned an invalid response envelope"
             )
         error = response.get("error")
         if isinstance(error, Mapping):
             raise HarnessMcpProtocolError(
-                f"harness MCP {method} failed: {error.get('message', 'unknown error')}"
+                f"harness MCP {method} failed: {error.get('message', 'unknown error')}",
+                payload={
+                    "serverError": dict(error),
+                    "executionCertainty": (
+                        outcome_certainty(error["data"])
+                        if isinstance(error.get("data"), Mapping)
+                        and "executionCertainty" in error["data"]
+                        else "not_started"
+                        if error.get("code") in {-32700, -32600, -32601, -32602}
+                        else "unknown_outcome"
+                    ),
+                },
             )
         result = response.get("result")
         if not isinstance(result, Mapping):
@@ -853,7 +1006,7 @@ __all__ = [
     "PROTOCOL_VERSION",
     "THESIS_LOCATION_VARIABLE",
     "TOOL_BACKTEST_CONFIG_TEMPLATE",
-    "TOOL_GET_BACKTEST_STATUS",
+    "TOOL_GET_JOB_STATUS",
     "TOOL_GET_RUN",
     "TOOL_GET_SCREENER_STATUS",
     "TOOL_LAUNCH_TRADER",
@@ -864,6 +1017,9 @@ __all__ = [
     "TOOL_RUN_STUDY",
     "TOOL_SCREENER_CONFIG_TEMPLATE",
     "TOOL_VALIDATE_STUDY",
+    "TOOL_VALIDATE_STRATEGY",
+    "TOOL_READ_SDK_REFERENCE",
+    "outcome_certainty",
     "EnvironmentHarnessTokenSource",
     "HarnessMcpAuthError",
     "HarnessMcpBoundary",

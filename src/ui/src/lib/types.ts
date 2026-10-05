@@ -1,5 +1,6 @@
 /**
- * Typed mirrors of the Thesis API contracts the UI consumes.
+ * UI view models derived from generated chat/runtime contracts, plus scoped
+ * mirrors for product endpoints not yet included in the backend export.
  *
  * Chat/execution records mirror the snake_case serialization of
  * `src/thesis/chat/contracts.py`; execution SSE events mirror the camelCase
@@ -7,6 +8,18 @@
  * harness status surfaces mirror `src/thesis/integrations/runtime_status.py`;
  * consent shapes mirror `src/thesis/activation/consent.py` canonical JSON.
  */
+import type {
+	ChatMessageWire,
+	ChatThreadWire,
+	SteeringExecutionWire,
+	SteeringPercolationWire,
+	ExecutionEventWire,
+	SubAgentNodeWire,
+	TimelineItemWire,
+	WorkflowDefinitionWire,
+	WorkflowExecutionWire,
+	ToolResultWire
+} from './generated';
 
 // ---------- Status surfaces (runtime_status.py) ----------
 
@@ -119,125 +132,66 @@ export interface ConsentAuditEntry {
 
 // ---------- Chat + execution (chat/contracts.py serialization) ----------
 
-export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
+export type MessageRole = ChatMessageWire['role'];
 
-export interface ChatMessage {
-	message_id: string;
-	chat_id: string;
-	workspace_id: string;
-	actor_id: string;
-	role: MessageRole;
-	body: string;
-	state: string;
-	attachment_ids: string[];
-	created_at: string;
-	updated_at: string | null;
-	execution_id: string | null;
-	intent_epoch: number;
-	/** Model reasoning trace persisted alongside the assistant reply, if any. */
-	reasoning?: string;
-	/** Structured harness-tool outcome carried by a tool-role message. */
+/** Transcript position and pending tool state are UI projections, not wire fields. */
+export type ChatMessage = Pick<ChatMessageWire,
+	'message_id' | 'chat_id' | 'workspace_id' | 'actor_id' | 'role' | 'body' | 'state' |
+	'attachment_ids' | 'created_at' | 'updated_at' | 'execution_id' | 'intent_epoch'
+> & Partial<Omit<ChatMessageWire,
+	'message_id' | 'chat_id' | 'workspace_id' | 'actor_id' | 'role' | 'body' | 'state' |
+	'attachment_ids' | 'created_at' | 'updated_at' | 'execution_id' | 'intent_epoch' | 'tool_result'
+>> & {
+	seq?: number;
+	threadId?: string | null;
 	tool_result?: ToolResult | null;
-	/** Transcript item discriminator; `workflow` anchors render the workflow card. */
-	kind?: TranscriptItemKind;
-	/** Structured payload for the item kind (e.g. workflow anchor metadata). */
-	data?: Record<string, unknown> | null;
-}
+};
 
-export interface ChatThread {
-	chat_id: string;
-	workspace_id: string;
-	title: string;
-	state: string;
+/** Thread kind and flattened links are presentation projections of the durable record. */
+export type ChatThread = ChatThreadWire & {
 	kind: 'chat' | 'investigation';
-	owner_actor_id: string;
-	created_at: string;
-	updated_at: string | null;
-	investigation_ids: string[];
-	strategy_ids: string[];
-}
+	investigation_ids: NonNullable<ChatThreadWire['links']['investigation_ids']>;
+	strategy_ids: NonNullable<ChatThreadWire['links']['strategy_ids']>;
+};
 
 /** The percolation result returned by POST .../chats/{chat}/messages. */
-export interface SteeringPercolationTarget {
-	execution_id: string;
-	intent_epoch: number;
-	steering_intent: string | null;
-}
+export type SteeringPercolationTarget = {
+	execution_id: SteeringExecutionWire['executionId'];
+	intent_epoch: SteeringExecutionWire['intentEpoch'];
+	steering_intent: SteeringPercolationWire['intent'];
+};
 
 export interface PostMessageResult {
 	message: ChatMessage;
 	percolated: SteeringPercolationTarget[];
 }
 
-export type ExecutionEventType =
-	| 'workflow.launched'
-	| 'workflow.started'
-	| 'workflow.phase'
-	| 'workflow.progress'
-	| 'workflow.phase_result'
-	| 'workflow.steered'
-	| 'workflow.stopped'
-	| 'workflow.cancelled'
-	| 'workflow.completed'
-	| 'workflow.failed'
-	| 'message.accepted'
-	| 'tool.submitted'
-	| 'tool.started'
-	| 'tool.result'
-	| 'tool.failed'
-	| 'sub_agent.spawned'
-	| 'sub_agent.progress'
-	| 'sub_agent.output'
-	| 'sub_agent.needs_input'
-	| 'sub_agent.completed'
-	| 'sub_agent.failed';
+export type ExecutionEventType = ExecutionEventWire['eventType'];
 
 /** Durable execution event; `as_dict()` camelCase serialization. */
-export interface ExecutionEvent {
-	actorId: string;
-	actorScope: 'user' | 'assistant' | 'system' | 'tool' | 'workflow';
-	correlationId: string;
-	cursor: number;
-	eventId: string;
-	eventType: ExecutionEventType;
-	executionId: string;
-	intentEpoch: number;
-	lateResult: boolean;
-	occurredAt: string;
-	payload: Record<string, unknown>;
-	workspaceId: string;
-}
+export type ExecutionEvent = ExecutionEventWire & {
+	seq?: number;
+	threadId?: string | null;
+};
 
 /**
  * One item on the unified per-chat Cosmos timeline. Messages, execution
  * events, and execution state changes all share one ordered log; `threadId`
  * routes an item to the root agent or one sub-agent.
  */
-export interface TimelineItem {
-	id: string;
-	chatId: string;
-	workspaceId: string;
-	kind: 'message' | 'event' | 'execution' | 'chat' | 'counter' | string;
-	seq: number;
-	ts: string;
-	executionId?: string;
-	threadId?: string;
-	payload: Record<string, unknown>;
-}
+export type TimelineItem = TimelineItemWire;
 
-export interface WorkflowExecutionRecord {
-	execution_id: string;
-	chat_id: string;
-	trigger_message_id: string;
-	workflow_id: string;
-	workflow_version: string;
-	requested_by: string;
-	state: string;
-	phase: string | null;
-	intent_epoch: number;
-	steering_message_ids: string[];
-	created_at: string;
-}
+/** Cards can project handles before the complete execution record is loaded. */
+export type WorkflowExecutionRecord = Pick<WorkflowExecutionWire,
+	'execution_id' | 'chat_id' | 'trigger_message_id' | 'workflow_id' | 'workflow_version' |
+	'requested_by' | 'state' | 'phase' | 'intent_epoch' | 'steering_message_ids' | 'created_at'
+> & Partial<Omit<WorkflowExecutionWire,
+	'execution_id' | 'chat_id' | 'trigger_message_id' | 'workflow_id' | 'workflow_version' |
+	'requested_by' | 'state' | 'phase' | 'intent_epoch' | 'steering_message_ids' | 'created_at'
+>>;
+
+/** Read-only topology returned by GET /v1/workflows/{workflow_id}. */
+export type WorkflowDefinition = WorkflowDefinitionWire;
 
 // ---------- Nested sub-agents and transcript items ----------
 
@@ -246,7 +200,7 @@ export interface WorkflowExecutionRecord {
  * `kind` plus a `data` payload so the transcript can route to the right card
  * without inspecting message bodies.
  */
-export type TranscriptItemKind = 'message' | 'tool' | 'workflow' | 'sub_agent' | 'gate' | 'artifact';
+export type TranscriptItemKind = ChatMessageWire['kind'];
 
 export interface TranscriptItem {
 	id: string;
@@ -254,13 +208,7 @@ export interface TranscriptItem {
 	data: Record<string, unknown>;
 }
 
-export type SubAgentStatus =
-	| 'spawned'
-	| 'running'
-	| 'progress'
-	| 'needs_input'
-	| 'completed'
-	| 'failed';
+export type SubAgentStatus = SubAgentNodeWire['status'] | 'spawned' | 'progress';
 
 /** Sandbox context attached to one sub-agent spawn. */
 export interface SubAgentMcpContext {
@@ -277,22 +225,16 @@ export interface SubAgentContext {
 }
 
 /** One node in the nested sub-agent execution tree. */
-export interface SubAgentNode {
-	subAgentId: string;
-	parentSubAgentId: string | null;
-	phase: string;
-	role: string;
+export type SubAgentNode = Pick<SubAgentNodeWire,
+	'subAgentId' | 'parentSubAgentId' | 'phase' | 'role' | 'acceptsInput' | 'workflowExecutionId'
+> & Partial<Omit<SubAgentNodeWire,
+	'children' | 'status' | 'subAgentId' | 'parentSubAgentId' | 'phase' | 'role' | 'acceptsInput' | 'workflowExecutionId'
+>> & {
+	/** Event-only display statuses aren't durable lifecycle values. */
 	status: SubAgentStatus;
-	context: SubAgentContext;
-	/** Whether this node accepts operator input (`POST {node}/messages`). */
-	acceptsInput: boolean;
-	/**
-	 * The workflow execution owning this node's activity, or `null` for a node
-	 * spawned directly from chat. A node without an execution has no activity
-	 * log, so the UI never requests events for it.
-	 */
-	workflowExecutionId: string | null;
-}
+	/** Available only from an explicit event snapshot; not stored on durable tree nodes. */
+	context: SubAgentContext | null;
+};
 
 /** A phase in the compact workflow stepper. */
 export interface WorkflowPhase {
@@ -309,28 +251,17 @@ export interface ExecutionNodeRef {
 
 // ---------- Ephemeral tool results (tool.result SSE event) ----------
 
-export interface ToolResultFailure {
-	kind: string;
-	message: string;
-	tool?: string | null;
-	statusCode?: number | null;
-	payload?: Record<string, unknown>;
-}
+export type ToolResultFailure = NonNullable<ToolResultWire['failure']>;
 
-export interface ToolResult {
-	tool: string;
-	/**
-	 * Persisted datum type selecting the canonical renderer; omitted when
-	 * unset. Harness tools may instead fall back to their own tool name.
-	 */
-	datumType?: string | null;
-	callId: string | null;
-	ok: boolean;
-	summary: string;
-	structured: Record<string, unknown>;
-	text: string;
-	failure: ToolResultFailure | null;
-}
+export type ToolResult = ToolResultWire & {
+	pending?: boolean;
+	outcome?: 'unknown_outcome' | 'interrupted';
+	requestState?: 'waiting' | 'answered' | 'resolved';
+	arguments?: unknown;
+	durationMs?: number;
+	startedAt?: string;
+	reused?: boolean;
+};
 
 /** Response from the Thesis backtest-run materialization endpoint. */
 export interface BacktestRunCard {
@@ -714,31 +645,7 @@ export interface ScreenerRunInput {
 	as_of: string;
 }
 
-// ---------- CLEO projection + workspace state ----------
-
-export interface CleoPlanStep {
-	id: string;
-	title: string;
-	state: 'done' | 'active' | 'pending' | 'blocked';
-	gate: string | null;
-}
-
-export interface CleoPlan {
-	plan_id: string;
-	title: string;
-	current_stage: string;
-	stages: { name: string; state: 'done' | 'active' | 'pending' }[];
-	steps: CleoPlanStep[];
-	updated_at: string;
-}
-
-export interface CleoTaskEvent {
-	id: string;
-	at: string;
-	task_id: string;
-	kind: 'task.created' | 'task.started' | 'task.completed' | 'gate.passed' | 'gate.blocked';
-	detail: string;
-}
+// ---------- Workspace state ----------
 
 export interface LineageNode {
 	id: string;
@@ -780,8 +687,6 @@ export interface KnowledgeHit {
 }
 
 export interface WorkspaceStateData {
-	cleo: CleoPlan;
-	taskTimeline: CleoTaskEvent[];
 	lineages: StrategyLineage[];
 	evidence: EvidenceItem[];
 	consentAudit: ConsentAuditEntry[];
@@ -791,12 +696,3 @@ export interface WorkspaceStateData {
 
 /** Selectable data backend: bundled fixtures, same-origin local, or remote. */
 export type BackendKind = 'fixtures' | 'local' | 'azure';
-
-export interface Capabilities {
-	backend: BackendKind;
-	chatMessages: boolean;
-	executionStream: boolean;
-	portfolio: StatusSurface<true>;
-	riskDecisions: StatusSurface<true>;
-	artifacts: StatusSurface<true>;
-}

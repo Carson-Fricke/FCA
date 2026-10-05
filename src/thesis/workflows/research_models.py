@@ -16,8 +16,9 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Protocol
+from typing import Protocol, cast
 
+from thesis.agent.runtime.schema import render_violations, violations
 from thesis.research.models import (
     FittedModelRef,
     InMemoryResearchModelStore,
@@ -25,6 +26,7 @@ from thesis.research.models import (
     ResearchModelError,
     ResearchModelRef,
     ResearchModelStore,
+    validate_market_configuration,
 )
 from thesis.strategies import StrategyBundle
 from thesis.workflows.backtests import (
@@ -32,6 +34,109 @@ from thesis.workflows.backtests import (
     BacktestRunRequest,
     BacktestRunResult,
 )
+from thesis.workspaces.programs import PROGRAM_ID_PATTERN, ProgramKind
+
+PROGRAM_REFERENCE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["workspaceId", "kind", "programId", "gitCommit", "version"],
+    "properties": {
+        "workspaceId": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "enum": ["study", "strategy", "indicator"]},
+        "programId": {"type": "string", "pattern": PROGRAM_ID_PATTERN},
+        "gitCommit": {"type": "string", "pattern": r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$"},
+        "version": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+    },
+}
+
+
+class ProgramSnapshots(Protocol):
+    """Public committed snapshot port, implemented by WorkspacePrograms."""
+
+    def load(
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        commit: str | None = None,
+    ) -> Mapping[str, object]:
+        """Return receipt identity, assembled source and committed configuration.
+
+        Latest loads also include ``validation`` (the stored validation.json
+        receipt, or None), current ``sdkIdentity``, and fresh serving compiler
+        ``validationIdentity`` for completion acceptance.
+        Pinned loads assemble every dependency at the selected commit.
+        """
+
+
+@dataclass(frozen=True, slots=True)
+class StudyProgramReference:
+    """Accepted study identity and research metadata, never inline Rust source."""
+
+    workspace_id: str
+    program_id: str
+    git_commit: str
+    version: str
+    description: str
+    outputs: tuple[str, ...]
+    tests: Mapping[str, str]
+
+    @classmethod
+    def from_document(cls, value: Mapping[str, object]) -> StudyProgramReference:
+        reference = {
+            key: value.get(key)
+            for key in ("workspaceId", "kind", "programId", "gitCommit", "version")
+        }
+        misses = violations(PROGRAM_REFERENCE_SCHEMA, reference, "model")
+        if misses:
+            raise ResearchModelError(render_violations(misses))
+        if value["kind"] != "study":
+            raise ResearchModelError("research model reference must name a study")
+        return cls(
+            cast(str, value["workspaceId"]),
+            cast(str, value["programId"]),
+            cast(str, value["gitCommit"]),
+            cast(str, value["version"]),
+            cast(str, value["description"]),
+            tuple(cast(Sequence[str], value["outputs"])),
+            dict(cast(Mapping[str, str], value["tests"])),
+        )
+
+
+def resolve_study_reference(
+    programs: ProgramSnapshots,
+    workspace_id: str,
+    reference: StudyProgramReference,
+) -> ResearchModel:
+    """Resolve the accepted immutable commit, never today's program version."""
+    if reference.workspace_id != workspace_id:
+        raise ResearchModelError("study reference belongs to another workspace")
+    snapshot = programs.load(
+        workspace_id, "study", reference.program_id, reference.git_commit
+    )
+    for key, expected in (
+        ("workspaceId", workspace_id),
+        ("kind", "study"),
+        ("programId", reference.program_id),
+        ("gitCommit", reference.git_commit),
+        ("version", reference.version),
+    ):
+        if snapshot.get(key) != expected:
+            raise ResearchModelError(
+                f"committed study {key} does not match accepted reference"
+            )
+    configuration = cast(Mapping[str, object], snapshot["configuration"])
+    study_window(configuration)
+    return ResearchModel(
+        model_id=reference.program_id,
+        version=reference.version,
+        description=reference.description,
+        source=cast(str, snapshot["source"]),
+        outputs=reference.outputs,
+        tests=reference.tests,
+        harness_configuration=configuration,
+    )
+
 
 _SAFE_STRATEGY_ID = re.compile(r"[^A-Za-z0-9._:@-]+")
 
@@ -86,7 +191,9 @@ class BacktestResearchModelRunner:
         if not isinstance(request, ResearchModelRunRequest):
             raise TypeError("request must be a ResearchModelRunRequest")
         model_reference = self._models.publish(request.workspace_id, request.model)
-        runtime_configuration = {"source": request.model.source}
+        runtime_configuration = {
+            "sourceSha256": hashlib.sha256(request.model.source.encode()).hexdigest()
+        }
         bundle = _adapter_bundle(request, model_reference)
         backtest = self._backtests.run(
             BacktestRunRequest(
@@ -196,10 +303,9 @@ def study_configuration(
     the validated document is the one that runs.
     """
     configuration = _jsonable_mapping(model.harness_configuration)
-    # The model's bar interval is re-homed into the study's data block: the
-    # harness reads ``data.bar_interval``, and a second top-level spelling
-    # could contradict it.
+    validate_market_configuration(configuration)
     configuration.pop("interval", None)
+    subscriptions = configuration.pop("subscriptions", None)
     shorthand_symbols = (
         configuration.pop("symbols", None)
         or configuration.pop("requiredSymbols", None)
@@ -209,9 +315,30 @@ def study_configuration(
     if not isinstance(data, dict):
         data = {}
         configuration["data"] = data
-    data["bar_interval"] = model.bar_interval
-    symbols = data.get("symbols")
-    if not isinstance(symbols, list) or not symbols:
+    if subscriptions is None:
+        subscriptions = cast(object, data.get("subscriptions"))
+    if subscriptions is not None:
+        assert isinstance(subscriptions, list)
+        symbols = list(
+            dict.fromkeys(
+                symbol for item in subscriptions for symbol in item["symbols"]
+            )
+        )
+        if universe and set(symbols) - set(universe):
+            raise ResearchModelError(
+                "subscription symbols must be present in the declared universe"
+            )
+        if "subscriptions" in data and data["subscriptions"] != subscriptions:
+            raise ResearchModelError(
+                "data.subscriptions conflicts with model subscriptions"
+            )
+        data["subscriptions"] = subscriptions
+        data.pop("bar_interval", None)
+        data["symbols"] = symbols
+    else:
+        data["bar_interval"] = model.bar_interval
+        symbols = data.get("symbols")
+    if subscriptions is None and (not isinstance(symbols, list) or not symbols):
         candidate_symbols: object = None
         if isinstance(shorthand_symbols, list | tuple) and shorthand_symbols:
             candidate_symbols = shorthand_symbols
@@ -223,26 +350,28 @@ def study_configuration(
             symbols = [str(item) for item in candidate_symbols if str(item).strip()]
         if symbols:
             data["symbols"] = list(dict.fromkeys(symbols))
-    if not isinstance(symbols, list) or not symbols:
+    if subscriptions is None and (not isinstance(symbols, list) or not symbols):
         symbols = ["SPY"]
         data["symbols"] = symbols
-    configuration["symbols"] = list(data["symbols"])
+    resolved_symbols = data["symbols"]
+    assert isinstance(resolved_symbols, list)
+    configuration["symbols"] = list(resolved_symbols)
     window_start, window_end = study_window(configuration)
     configuration["start"] = window_start
     configuration["end"] = window_end
     configuration["shell"] = "study"
     configuration["run_id"] = run_id
+    source = model.source.replace("\r\n", "\n")
     configuration["strategy_instances"] = [
         {
             # The JIT seam rejects a bundle_hash that is not the SHA-256 of
-            # the authored source, so the provenance digest binds exactly
-            # what the engine compiles.
-            "bundle_hash": hashlib.sha256(model.source.encode("utf-8")).hexdigest(),
+            # the LF-normalized source, matching the API and JIT compiler.
+            "bundle_hash": hashlib.sha256(source.encode("utf-8")).hexdigest(),
             "capital_fraction": "1.0",
             "implementation": "jit",
             "instance_id": _instance_id(model.model_id),
-            "parameters": {"source": model.source},
-            "symbols": list(data["symbols"]),
+            "parameters": {"source": source},
+            "symbols": list(resolved_symbols),
         }
     ]
     return configuration
@@ -258,7 +387,10 @@ def _adapter_bundle(
     )
     return StrategyBundle.create(
         strategy_id=_instance_id(f"research-{model.model_id}"),
-        version=model.version,
+        # StrategyBundle is only the historical harness adapter, not program identity.
+        version="1.0.0"
+        if re.fullmatch(r"[0-9a-f]{64}", model.version)
+        else model.version,
         source={"program.rs": model.source},
         tests=dict(model.tests),
         dependencies=[model_reference.key],
@@ -318,6 +450,10 @@ def _jsonable(value: object) -> object:
 
 
 __all__ = [
+    "PROGRAM_REFERENCE_SCHEMA",
+    "ProgramSnapshots",
+    "StudyProgramReference",
+    "resolve_study_reference",
     "BacktestResearchModelRunner",
     "ResearchModelRunRequest",
     "ResearchModelRunResult",

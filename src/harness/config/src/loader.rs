@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::models::{build_api, build_backtest, build_trader};
-use crate::yaml::{load_yaml_mapping, YamlValue};
+use crate::yaml::YamlValue;
 use crate::{ConfigError, HarnessConfig};
 
 fn is_environment_reference(value: &str) -> bool {
@@ -88,7 +88,8 @@ fn reject_committed_secrets(value: &YamlValue, path: &str) -> Result<(), ConfigE
 ///
 /// Returns [`ConfigError`] for unreadable, malformed, or invalid documents.
 pub fn load_configuration(path: &std::path::Path) -> Result<HarnessConfig, ConfigError> {
-    let mapping = load_yaml_mapping(path)?;
+    let text = std::fs::read_to_string(path).map_err(|e| ConfigError(e.to_string()))?;
+    let mapping = crate::replay::parse_document(&text)?;
     reject_committed_secrets(&YamlValue::Map(mapping.clone()), "")?;
     let shell = match mapping.get("shell") {
         Some(YamlValue::Str(shell)) => shell.clone(),
@@ -110,7 +111,7 @@ pub fn load_configuration(path: &std::path::Path) -> Result<HarnessConfig, Confi
     };
     match shell.as_str() {
         "api" => build_api(&mapping).map(HarnessConfig::Api),
-        "backtest" => build_backtest(&mapping).map(HarnessConfig::Backtest),
+        "backtest" | "study" => build_backtest(&mapping).map(HarnessConfig::Backtest),
         "trader" => build_trader(&mapping).map(HarnessConfig::Trader),
         other => Err(ConfigError(format!(
             "configuration shell must be one of 'api', 'backtest', 'trader', not '{other}'"

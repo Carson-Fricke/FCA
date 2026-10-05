@@ -1,6 +1,7 @@
-"""Global Knowledge Library: corpus, trust, and projection layers.
+"""Global Knowledge Library: corpus and trust layers.
 
-The canonical corpus is Git-versioned Markdown under ``knowledge/``.  This
+The shared corpus is Markdown under ``thesis/knowledge/library/``; each
+workspace owns a separate ``knowledge/`` corpus. This
 package holds the corpus-facing structures:
 
 - :mod:`thesis.knowledge.metadata` — strict front-matter parsing and
@@ -13,33 +14,25 @@ package holds the corpus-facing structures:
   (:class:`KnowledgeCorpus`, :class:`CorpusSnapshot`);
 - :mod:`thesis.knowledge.trust` — workspace-local trust overlays
   (:class:`WorkspaceTrustOverlay`) that promote pages by interpretation
-  only, never mutating global corpus content; and
-- :mod:`thesis.knowledge.cleo_projection` — the optional, rebuildable CLEO
-  initialization projection (:func:`build_projection`,
-  :class:`ProjectionManifest`): a compact citation manifest, never a second
-  canonical copy and never a CLEO Nexus/Brain load.
+  only, never mutating global corpus content.
 
 The sibling index and search modules are the rebuildable, derived index
 layer and are deliberately independent of these structures.
 """
 
-from thesis.knowledge.cleo_projection import (
-    EXCERPT_CHARS,
-    NON_CANONICAL_GUARD,
-    PROJECTION_IS_NOT_CANONICAL,
-    ProjectionCorpus,
-    ProjectionError,
-    ProjectionManifest,
-    ProjectionPage,
-    ProjectionRecord,
-    build_projection,
-    rebuild,
-)
 from thesis.knowledge.corpus import (
     CorpusError,
     CorpusPage,
     CorpusSnapshot,
     KnowledgeCorpus,
+)
+from thesis.knowledge.embeddings import (
+    MODEL_DIMENSIONS,
+    MODEL_ID,
+    EmbeddingModelError,
+    FallbackEmbedder,
+    MiniLmEmbedder,
+    default_embedder,
 )
 from thesis.knowledge.links import (
     LinkError,
@@ -58,6 +51,7 @@ from thesis.knowledge.metadata import (
     parse_front_matter,
     render_front_matter,
 )
+from thesis.knowledge.service import KnowledgeScope, KnowledgeService
 from thesis.knowledge.trust import (
     DEFAULT_READ_ACCESS,
     PROMOTABLE_TIERS,
@@ -76,24 +70,23 @@ __all__ = [
     "CorpusPage",
     "CorpusSnapshot",
     "DEFAULT_READ_ACCESS",
-    "EXCERPT_CHARS",
     "EffectiveTier",
+    "EmbeddingModelError",
+    "FallbackEmbedder",
     "KnowledgeCorpus",
+    "KnowledgeScope",
+    "KnowledgeService",
+    "MiniLmEmbedder",
+    "MODEL_DIMENSIONS",
+    "MODEL_ID",
     "LinkError",
     "LinkGraph",
     "MetadataError",
-    "NON_CANONICAL_GUARD",
     "PageMetadata",
     "PageNode",
     "PageRelationship",
-    "PROJECTION_IS_NOT_CANONICAL",
     "PROMOTABLE_TIERS",
     "PROMOTION_IS_INTERPRETATION_ONLY",
-    "ProjectionCorpus",
-    "ProjectionError",
-    "ProjectionManifest",
-    "ProjectionPage",
-    "ProjectionRecord",
     "PromotionDecision",
     "RelationshipType",
     "TIER_PRECEDENCE",
@@ -101,11 +94,10 @@ __all__ = [
     "TrustState",
     "TrustTier",
     "WorkspaceTrustOverlay",
-    "build_projection",
+    "default_embedder",
     "default_read_access",
     "normalize_corpus_path",
     "parse_front_matter",
-    "rebuild",
     "relationship_type",
     "render_front_matter",
     "resolve_effective_tier",

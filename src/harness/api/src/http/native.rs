@@ -21,9 +21,7 @@ use std::sync::Arc;
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::EngineOptions;
 use backtest::backtest::screen::ScreenConfig;
-use backtest::backtest::yaml::YamlValue;
 use harness_lakeclient::BlockingLakeClient;
-use num::PyDecimal;
 use serde_json::Value;
 
 use super::configuration::ValidatedConfiguration;
@@ -42,7 +40,6 @@ pub struct NativeBacktestRunner {
     /// Optional explicit lake client; environment resolution applies when absent.
     pub lake_client: Option<Arc<BlockingLakeClient>>,
 }
-
 impl NativeBacktestRunner {
     /// Compose a runner writing engine artifacts beneath `output_root`.
     #[must_use]
@@ -74,9 +71,8 @@ impl NativeBacktestRunner {
 
 impl BacktestRunner for NativeBacktestRunner {
     fn run(&self, configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
-        let yaml = json_to_yaml(&configuration.document);
-        let mut native =
-            BacktestConfig::from_yaml_value(&yaml).map_err(|error| error.to_string())?;
+        let mut native = BacktestConfig::from_yaml(&configuration.document.to_string())
+            .map_err(|error| error.to_string())?;
         let client = self.resolved_lake_client()?;
         let directory = match &self.output_root {
             Some(root) => root.join(&native.run_id),
@@ -203,43 +199,5 @@ fn collect_artifacts(base: &Path, directory: &Path, output: &mut BTreeMap<String
                 output.insert(relative.to_string_lossy().replace('\\', "/"), payload);
             }
         }
-    }
-}
-
-fn decimal_value(text: &str) -> YamlValue {
-    match text.parse::<PyDecimal>() {
-        Ok(value) => YamlValue::Decimal(value),
-        Err(_) => YamlValue::String(text.to_string()),
-    }
-}
-
-/// Convert one submitted JSON value into the engine's YAML value model.
-///
-/// Objects and arrays recurse; JSON integers stay integers, JSON floats become
-/// exact decimals, and strings stay strings (so strategy parameters such as
-/// `"0.05"` remain quoted strings rather than tagged decimals).
-#[must_use]
-pub fn json_to_yaml(value: &Value) -> YamlValue {
-    match value {
-        Value::Null => YamlValue::Null,
-        Value::Bool(inner) => YamlValue::Bool(*inner),
-        Value::Number(number) => {
-            if let Some(integer) = number.as_i64() {
-                YamlValue::Int(integer)
-            } else if let Some(unsigned) = number.as_u64() {
-                i64::try_from(unsigned)
-                    .map_or_else(|_| decimal_value(&unsigned.to_string()), YamlValue::Int)
-            } else {
-                decimal_value(&number.to_string())
-            }
-        }
-        Value::String(text) => YamlValue::String(text.clone()),
-        Value::Array(items) => YamlValue::Sequence(items.iter().map(json_to_yaml).collect()),
-        Value::Object(entries) => YamlValue::Mapping(
-            entries
-                .iter()
-                .map(|(key, item)| (key.clone(), json_to_yaml(item)))
-                .collect(),
-        ),
     }
 }

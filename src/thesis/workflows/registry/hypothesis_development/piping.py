@@ -21,14 +21,46 @@ def identity_pipe(state: HypothesisDevelopmentState) -> HypothesisDevelopmentSta
 def reset_premise(
     state: HypothesisDevelopmentState,
 ) -> HypothesisDevelopmentState:
-    """Clear the refuted premise's derived artifacts for a fresh proposal.
+    """Clear the refuted premise's model artifacts for a fresh proposal.
 
-    Applied when the verdict circles back to hypothesis creation: the
-    refuted hypothesis, its model references, plan, trials, and the abandoned
-    strategy artifacts all belong to the previous attempt.
+    Applied when the workflow circles back from the verdict to model creation
+    or rediscovery to model creation: the refuted hypothesis, its model
+    references, plan, trials, and the abandoned strategy artifacts all belong
+    to the previous attempt.  The discovery draft is deliberately kept — the
+    selected candidate is the premise the new model re-uses — and only a full
+    rediscovery clears it through :func:`reset_discovery`.
     """
     return replace(
         state,
+        hypothesis=None,
+        draft=None,
+        research_model_reference=None,
+        research_model_artifact=None,
+        fitted_model_reference=None,
+        fitted_parameters=None,
+        research_model_runtime_configuration=None,
+        plan=None,
+        trials=(),
+        strategy_bundle=None,
+        exit_criteria=(),
+        strategy_backtest=None,
+        optimization_backtest=None,
+    )
+
+
+def reset_discovery(
+    state: HypothesisDevelopmentState,
+) -> HypothesisDevelopmentState:
+    """Clear the whole attempt for a full restart from discovery.
+
+    Applied when the verdict sends the run all the way back to discovery: the
+    selected candidate, the drafted and finalized hypothesis, the model and
+    its fit, the plan, the trials, and every strategy artifact and backtest
+    are superseded.
+    """
+    return replace(
+        state,
+        discovery=None,
         hypothesis=None,
         draft=None,
         research_model_reference=None,
@@ -60,5 +92,6 @@ __all__ = [
     "HypothesisDevelopmentState",
     "identity_pipe",
     "reset_backtests",
+    "reset_discovery",
     "reset_premise",
 ]

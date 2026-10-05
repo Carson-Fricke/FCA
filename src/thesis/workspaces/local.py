@@ -36,7 +36,6 @@ class WorkspacePathError(WorkspaceRepositoryError):
 
 
 WORKSPACE_DIRECTORIES = (
-    ".cleo",
     ".thesis/events",
     ".thesis/journal",
     "chats",
@@ -45,6 +44,7 @@ WORKSPACE_DIRECTORIES = (
     "experiments",
     "indicators",
     "models",
+    "knowledge",
     "backtests",
     "uploads",
     "activations",
@@ -159,7 +159,6 @@ written to this repository.
 
 ## Repository Map
 
-- `.cleo/`: workspace-scoped planning state
 - `.thesis/events/`: durable user-visible execution events
 - `.thesis/journal/`: accepted commands and publication outbox
 - `chats/`: thread records and summaries
@@ -168,6 +167,7 @@ written to this repository.
 - `experiments/`: contracts, analysis, and evidence claims
 - `indicators/`: workspace-authored, content-addressed indicator definitions
 - `models/`: workspace-authored statistical research models
+- `knowledge/`: workspace-local reference pages queried alongside shared Thesis knowledge
 - `backtests/`: manifests, metrics, traces, and reports
 - `uploads/`: hashed user evidence and provenance metadata
 - `activations/`: bundles, consent references, and outcomes

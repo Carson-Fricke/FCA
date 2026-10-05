@@ -22,6 +22,7 @@ protocol, and tool failures become agent-visible
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -35,17 +36,20 @@ from thesis.integrations.mcp import (
     DEFAULT_PROBE_ATTEMPTS,
     DEFAULT_PROBE_BACKOFF_SECONDS,
     TOOL_BACKTEST_CONFIG_TEMPLATE,
-    TOOL_GET_BACKTEST_STATUS,
+    TOOL_GET_JOB_STATUS,
     TOOL_GET_RUN,
     TOOL_GET_SCREENER_STATUS,
     TOOL_LAUNCH_TRADER,
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
+    TOOL_READ_SDK_REFERENCE,
     TOOL_RUN_BACKTEST,
     TOOL_RUN_SCREENER,
     TOOL_RUN_STUDY,
     TOOL_SCREENER_CONFIG_TEMPLATE,
+    TOOL_VALIDATE_STRATEGY,
     TOOL_VALIDATE_STUDY,
+    ExecutionCertainty,
     HarnessMcpAuthError,
     HarnessMcpBoundary,
     HarnessMcpClient,
@@ -58,6 +62,7 @@ from thesis.integrations.mcp import (
     harness_mcp_topology_from_env,
     open_harness_mcp_boundary,
     open_harness_mcp_client,
+    outcome_certainty,
 )
 
 #: The harness MCP tools the Thesis agent may discover and call.
@@ -66,14 +71,16 @@ HARNESS_TOOL_NAMES: tuple[str, ...] = (
     TOOL_RUN_STUDY,
     TOOL_VALIDATE_STUDY,
     TOOL_RUN_SCREENER,
+    TOOL_VALIDATE_STRATEGY,
     TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_SCREENER_CONFIG_TEMPLATE,
-    TOOL_GET_BACKTEST_STATUS,
+    TOOL_GET_JOB_STATUS,
     TOOL_GET_SCREENER_STATUS,
     TOOL_GET_RUN,
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
     TOOL_LAUNCH_TRADER,
+    TOOL_READ_SDK_REFERENCE,
 )
 
 #: Skill identity and version declaring the harness tools to role policies.
@@ -83,13 +90,13 @@ HARNESS_MCP_SKILL_VERSION = "1.0.0"
 HARNESS_MCP_SKILL_INSTRUCTIONS = (
     "Use the quant-harness MCP tools for deterministic research execution. "
     "run_backtest and run_study launch backtest and study jobs; validate_study "
-    "compiles an authored study program without replaying so an authoring error "
+    "and validate_strategy compile, load, and construct authored programs without replaying so an authoring error "
     "is caught before the submission; run_screener "
     "launches a screening run of an authored Rust program; "
     "backtest_config_template and screener_config_template return starter "
     "configurations to adapt when no config file exists, and run_backtest and "
     "run_screener accept those configurations inline as the `config` argument; "
-    "get_backtest_status, get_screener_status, and get_run report job and run "
+    "get_job_status, get_screener_status, and get_run report job and run "
     "state; list_artifacts enumerates a run's immutable outputs and read_artifact "
     "reads one artifact's text or hex-encoded bytes; and launch_trader "
     "starts a supervised trader session. Pass typed arguments, rely on the "
@@ -119,6 +126,22 @@ class HarnessToolFailure:
     tool: str | None = None
     status_code: int | None = None
     payload: Mapping[str, object] = field(default_factory=dict)
+    execution_certainty: ExecutionCertainty = "not_started"
+    deterministic_compiler_diagnostic: bool = False
+
+    @property
+    def retry_guidance(self) -> str:
+        """Describe recovery without authorizing an automatic mutation replay."""
+        if self.deterministic_compiler_diagnostic:
+            return "Fix the authored source using these compiler diagnostics before validating again."
+        if self.execution_certainty == "not_started":
+            return (
+                "Resolve the failure before an explicit retry; execution did not start."
+            )
+        return (
+            "Inspect run/job state before explicitly retrying a mutation; "
+            "never automatically replay run_study, run_backtest, run_screener, or launch_trader."
+        )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
@@ -131,6 +154,9 @@ class HarnessToolFailure:
             "payload": dict(self.payload),
             "statusCode": self.status_code,
             "tool": self.tool,
+            "executionCertainty": self.execution_certainty,
+            "retryGuidance": self.retry_guidance,
+            "deterministicCompilerDiagnostic": self.deterministic_compiler_diagnostic,
         }
 
 
@@ -263,8 +289,8 @@ class RunScreenerArgs:
 
 
 @dataclass(frozen=True, slots=True)
-class GetBacktestStatusArgs:
-    """Typed arguments for ``get_backtest_status``."""
+class GetJobStatusArgs:
+    """Typed arguments for ``get_job_status``."""
 
     job_id: str
 
@@ -363,6 +389,19 @@ class HarnessToolProvider:
 
     def __init__(self, client: HarnessMcpClient) -> None:
         self._client = client
+        self._catalog_lock = threading.RLock()
+        self._catalog: HarnessToolCatalog | None = None
+
+    def invalidate(self) -> None:
+        """Drop the catalog; validation identity and reuse belong to the compiler."""
+        with self._catalog_lock:
+            self._catalog = None
+
+    def refresh(self) -> HarnessToolCatalog:
+        """Invalidate and rediscover the published tool catalog."""
+        with self._catalog_lock:
+            self.invalidate()
+            return self.discover()
 
     @property
     def client(self) -> HarnessMcpClient:
@@ -371,20 +410,24 @@ class HarnessToolProvider:
 
     def discover(self) -> HarnessToolCatalog:
         """Return the published harness tool catalog or a typed failure."""
-        try:
-            tools = self._client.list_tools()
-        except HarnessMcpError as error:
-            return HarnessToolCatalog(failure=_failure_from_error(error))
-        return HarnessToolCatalog(
-            tools=tuple(
-                HarnessToolSpec(
-                    name=tool.name,
-                    description=tool.description,
-                    input_schema=tool.input_schema,
+        with self._catalog_lock:
+            if self._catalog is not None:
+                return self._catalog
+            try:
+                tools = self._client.list_tools()
+            except HarnessMcpError as error:
+                return HarnessToolCatalog(failure=_failure_from_error(error))
+            self._catalog = HarnessToolCatalog(
+                tools=tuple(
+                    HarnessToolSpec(
+                        name=tool.name,
+                        description=tool.description,
+                        input_schema=tool.input_schema,
+                    )
+                    for tool in tools
                 )
-                for tool in tools
             )
-        )
+            return self._catalog
 
     def list_tools(self) -> tuple[HarnessToolSpec, ...]:
         """Return the discovered catalog, raising :class:`HarnessToolError`."""
@@ -408,14 +451,13 @@ class HarnessToolProvider:
                 ),
             )
         try:
-            result = self._client.call_tool(name, arguments)
+            return _result_from_mcp(name, self._client.call_tool(name, arguments))
         except HarnessMcpError as error:
             return HarnessToolResult(
                 tool=name,
                 ok=False,
                 failure=_failure_from_error(error, tool=name),
             )
-        return _result_from_mcp(name, result)
 
     def run_backtest(self, args: RunBacktestArgs) -> HarnessToolResult:
         """Call ``run_backtest`` with typed arguments."""
@@ -433,6 +475,22 @@ class HarnessToolProvider:
         """Call ``validate_study`` to compile one authored model program."""
         return self.call_tool(TOOL_VALIDATE_STUDY, {"model": dict(model)})
 
+    def validate_strategy(self, *, model: Mapping[str, object]) -> HarnessToolResult:
+        """Validate a strategy and preserve structured diagnostics in a typed result."""
+        return self.call_tool(TOOL_VALIDATE_STRATEGY, {"model": dict(model)})
+
+    def current_server_info(self) -> Mapping[str, object]:
+        """Fetch fresh serving SDK/compiler metadata, not the catalog cache."""
+        return self._client.current_server_info()
+
+    def validation_identity(self) -> str | None:
+        """Fetch the current compiler identity for persisted-validation checks."""
+        return self._client.validation_identity()
+
+    def read_sdk_reference(self, **arguments: object) -> HarnessToolResult:
+        """Read serving SDK metadata or bounded source with typed failure handling."""
+        return self.call_tool(TOOL_READ_SDK_REFERENCE, arguments)
+
     def backtest_config_template(self) -> HarnessToolResult:
         """Call ``backtest_config_template`` for a starter configuration."""
         return self.call_tool(TOOL_BACKTEST_CONFIG_TEMPLATE, {})
@@ -441,9 +499,9 @@ class HarnessToolProvider:
         """Call ``screener_config_template`` for a starter screen configuration."""
         return self.call_tool(TOOL_SCREENER_CONFIG_TEMPLATE, {})
 
-    def get_backtest_status(self, args: GetBacktestStatusArgs) -> HarnessToolResult:
-        """Call ``get_backtest_status`` with typed arguments."""
-        return self.call_tool(TOOL_GET_BACKTEST_STATUS, args.to_arguments())
+    def get_job_status(self, args: GetJobStatusArgs) -> HarnessToolResult:
+        """Call ``get_job_status`` with typed arguments."""
+        return self.call_tool(TOOL_GET_JOB_STATUS, args.to_arguments())
 
     def get_screener_status(self, args: GetScreenerStatusArgs) -> HarnessToolResult:
         """Call ``get_screener_status`` with typed arguments."""
@@ -467,6 +525,7 @@ class HarnessToolProvider:
 
     def close(self) -> None:
         """Close the underlying harness MCP transport."""
+        self.invalidate()
         self._client.close()
 
 
@@ -603,6 +662,10 @@ def _failure_from_error(
             message=str(error),
             tool=error.tool,
             payload=error.payload or {},
+            execution_certainty=error.execution_certainty,
+            deterministic_compiler_diagnostic=(
+                (error.payload or {}).get("deterministicCompilerDiagnostic") is True
+            ),
         )
     if isinstance(error, HarnessMcpAuthError):
         return HarnessToolFailure(
@@ -610,6 +673,7 @@ def _failure_from_error(
             message=str(error),
             tool=tool,
             status_code=error.status_code,
+            execution_certainty=error.execution_certainty,
         )
     if isinstance(error, HarnessMcpTransportError):
         return HarnessToolFailure(
@@ -617,10 +681,22 @@ def _failure_from_error(
             message=str(error),
             tool=tool,
             status_code=error.status_code,
+            execution_certainty=error.execution_certainty,
         )
     if isinstance(error, HarnessMcpProtocolError):
-        return HarnessToolFailure(kind="protocol", message=str(error), tool=tool)
-    return HarnessToolFailure(kind="harness", message=str(error), tool=tool)
+        return HarnessToolFailure(
+            kind="protocol",
+            message=str(error),
+            tool=tool,
+            payload=error.payload,
+            execution_certainty=error.execution_certainty,
+        )
+    return HarnessToolFailure(
+        kind="harness",
+        message=str(error),
+        tool=tool,
+        execution_certainty=error.execution_certainty,
+    )
 
 
 def _result_from_mcp(tool: str, result: McpToolResult) -> HarnessToolResult:
@@ -635,6 +711,10 @@ def _result_from_mcp(tool: str, result: McpToolResult) -> HarnessToolResult:
                 message=result.text or f"harness MCP tool {tool!r} returned an error",
                 tool=tool,
                 payload=result.structured,
+                execution_certainty=outcome_certainty(result.structured),
+                deterministic_compiler_diagnostic=(
+                    result.structured.get("deterministicCompilerDiagnostic") is True
+                ),
             ),
         )
     return HarnessToolResult(
@@ -657,7 +737,7 @@ __all__ = [
     "HARNESS_MCP_SKILL_VERSION",
     "HARNESS_TOOL_NAMES",
     "FailureKind",
-    "GetBacktestStatusArgs",
+    "GetJobStatusArgs",
     "GetRunArgs",
     "GetScreenerStatusArgs",
     "HarnessToolCatalog",

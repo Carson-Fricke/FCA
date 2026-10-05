@@ -11,7 +11,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 _WIDGET_TYPES = ("equity", "pnl", "allocation", "winrate", "orders")
@@ -127,13 +127,9 @@ class DashboardDataService:
 
 def get_dashboard_service(request: Request) -> DashboardDataService:
     """Resolve the service from app state so applications control persistence."""
-    service = getattr(request.app.state, "dashboard_service", None)
-    if service is None:
-        service = DashboardDataService()
-        request.app.state.dashboard_service = service
-    if not isinstance(service, DashboardDataService):
-        raise RuntimeError("app.state.dashboard_service must be a DashboardDataService")
-    return service
+    from thesis.http.errors import require_service
+
+    return require_service(request, "dashboard_service", DashboardDataService)
 
 
 def create_dashboard_router() -> APIRouter:
@@ -170,13 +166,9 @@ def create_dashboard_router() -> APIRouter:
         try:
             service.delete_widget(workspace_id, widget_id)
         except KeyError as error:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "widget_not_found",
-                    "message": f"widget {widget_id!r} does not exist",
-                },
-            ) from error
+            from thesis.http.errors import service_error
+
+            raise service_error(error, resource="widget") from error
 
     return router
 

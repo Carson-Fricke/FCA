@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import ChatComposer from './ChatComposer.svelte';
 	import ChatStarters from './ChatStarters.svelte';
 	import ChatTranscript from './ChatTranscript.svelte';
@@ -10,24 +10,19 @@
 	import SubAgentComposer from './SubAgentComposer.svelte';
 	import WorkflowCard from './WorkflowCard.svelte';
 	import { setSubAgentLiveView } from './sub-agent-live-view';
+	import { setWorkflowLiveView } from './workflow-live-view';
 	import { ThesisApiError } from '$lib/api';
 	import { WorkflowScopeController } from '$lib/workflow-scope.svelte';
-	import { buildNodeEntries } from '$lib/transcript';
-	import {
-		derivePhaseAttempts,
-		derivePhaseSteps,
-		derivePhases,
-		executionEvents,
-		projectExecution
-	} from '$lib/subagent';
+	import type { TimelineController } from '$lib/timeline.svelte';
+	import { buildNodeEntries, threadActivity } from '$lib/transcript';
+	import { derivePhaseAttempts } from '$lib/subagent';
+	import { hasActiveWorkflow, isTerminalWorkflow, withWorkflowNodes } from '$lib/workflow-live';
 	import type {
 		ChatMessage,
 		ConsentConfirmation,
 		ConsentProposal,
-		ExecutionEvent,
 		SteeringPercolationTarget,
-		SubAgentNode,
-		WorkflowExecutionRecord
+		SubAgentNode
 	} from '$lib/types';
 
 	/**
@@ -44,9 +39,9 @@
 	let {
 		workspaceId,
 		chatId = null,
-		messages,
-		events = null,
-		execution = null,
+		drafting = chatId === null,
+		terminal = false,
+		timeline,
 		percolations = {},
 		proposal = null,
 		onConfirmConsent,
@@ -64,10 +59,9 @@
 	}: {
 		workspaceId: string;
 		chatId?: string | null;
-		messages: ChatMessage[];
-		/** Execution events from the shared timeline stream (external feed). */
-		events?: ExecutionEvent[] | null;
-		execution?: WorkflowExecutionRecord | null;
+		drafting?: boolean;
+		terminal?: boolean;
+		timeline: TimelineController;
 		percolations?: Record<string, SteeringPercolationTarget[]>;
 		proposal?: ConsentProposal | null;
 		onConfirmConsent?: (confirmation: ConsentConfirmation) => void;
@@ -79,7 +73,7 @@
 			body: string;
 			attachmentIds: string[];
 			steeringIntent: string | null;
-		}) => void;
+		}) => void | Promise<void>;
 		onNodeMessage?: (message: ChatMessage) => void;
 		onScopeChange?: (scope: string) => void;
 		hostId?: string;
@@ -94,112 +88,51 @@
 		// svelte-ignore state_referenced_locally
 		workspaceId,
 		// svelte-ignore state_referenced_locally
-		hostId
+		hostId,
+		// svelte-ignore state_referenced_locally
+		timeline
 	);
-	let attachedExecutionId = $state('');
+	const messages = $derived(timeline.messages);
 	let attachedChatId = $state('');
 	let surface = $state<HTMLDivElement>();
 	let nodeSendError = $state<string | null>(null);
+	let nodeDrafts = $state<Record<string, string>>({});
+	let queuedFeedback = $state<Record<string, string>>({});
 
-	/**
-	 * The execution the surface navigates. A fresh workflow launched in this
-	 * chat arrives first as a streamed `kind=workflow` anchor, so the surface
-	 * falls back to the anchor's execution id instead of waiting for a reload
-	 * before the phase drill-in works.
-	 */
-	function executionFromAnchor(message: ChatMessage): WorkflowExecutionRecord | null {
-		const data = message.data ?? {};
-		const executionId = String(data.executionId ?? message.execution_id ?? '');
-		if (!executionId) return null;
-		return {
-			execution_id: executionId,
-			chat_id: message.chat_id,
-			trigger_message_id: message.message_id,
-			workflow_id: String(data.workflowId ?? 'workflow'),
-			workflow_version: String(data.version ?? ''),
-			requested_by: message.actor_id,
-			state: String(data.status ?? 'running'),
-			phase: data.currentPhase == null ? null : String(data.currentPhase),
-			intent_epoch: message.intent_epoch,
-			steering_message_ids: [],
-			created_at: message.created_at
-		};
-	}
+	const workflows = $derived(withWorkflowNodes(timeline.workflows, controller.tree));
+	const anyActiveWorkflow = $derived(hasActiveWorkflow(workflows));
+	$effect(() => controller.resolvePendingPhase());
 
-	const effectiveExecution = $derived.by(() => {
-		// Conversation switches can leave the previous fetch result in the host
-		// briefly. Never bind this surface to another chat's execution.
-		let latest = execution && (!chatId || execution.chat_id === chatId) ? execution : null;
-		for (let index = messages.length - 1; index >= 0; index -= 1) {
-			const candidate = executionFromAnchor(messages[index]);
-			if (!candidate) continue;
-			if (!latest || candidate.created_at > latest.created_at) latest = candidate;
-			break;
-		}
-		if (!latest) return null;
-		return projectExecution(latest, executionEvents(events ?? [], latest.execution_id));
-	});
-
-	const effectiveEvents = $derived(
-		effectiveExecution
-			? executionEvents(events ?? [], effectiveExecution.execution_id)
-			: []
-	);
-
-	// Attach to the active chat's execution; a different execution (or none)
-	// resets the scope to the conversation root. Without an execution the
-	// controller still attaches to the chat itself, so sub-agent cards can
-	// drill into chat-spawned agents that have no activity log at all.
+	// Scope belongs to the chat, never to whichever workflow launched most recently.
 	$effect(() => {
-		const current = effectiveExecution;
-		if (!current) {
-			if (chatId && chatId !== attachedChatId) {
-				attachedChatId = chatId;
-				controller.attachChat(chatId, {
-					rootLabel,
-					scope: initialScope,
-					hash: initialHash
-				});
-			} else if (!chatId && attachedChatId) {
-				attachedChatId = '';
-				controller.detach();
-			}
-			attachedExecutionId = '';
-			return;
+		if (chatId && chatId !== attachedChatId) {
+			attachedChatId = chatId;
+			untrack(() => controller.attachChat(chatId!, { rootLabel, scope: initialScope, hash: initialHash }));
+		} else if (!chatId && attachedChatId) {
+			attachedChatId = '';
+			controller.detach();
 		}
-		if (current.execution_id === attachedExecutionId) return;
-		attachedExecutionId = current.execution_id;
-		attachedChatId = '';
-		controller.attach(current.execution_id, current, {
-			chatId: chatId ?? current.chat_id,
-			rootLabel,
-			scope: initialScope,
-			hash: initialHash,
-			externalEvents: events !== null
-		});
 	});
 
-	// Feed the scope controller from the single shared timeline stream.
-	$effect(() => {
-		if (effectiveEvents.length) controller.ingestEvents(effectiveEvents);
-	});
-
-	// Chat-spawned agents have no activity log, so their durable status only
-	// advances on the record itself: refresh the tree whenever the chat
-	// timeline moves while no execution is attached. The first run after an
-	// attach seeds without refreshing; the attach itself just loaded the
-	// tree.
+	// Capabilities are durable node metadata, refreshed as the shared timeline advances.
 	let nodeRefreshSeeded = false;
+	let nodeRefreshItem = '';
+	let nodeRefreshChat = '';
 	$effect(() => {
-		const timelineMoved = messages[messages.length - 1]?.message_id ?? '';
-		if (effectiveExecution || !attachedChatId) {
+		const timelineMoved = timeline.nodeRevision;
+		if (nodeRefreshChat !== (chatId ?? '')) {
+			nodeRefreshChat = chatId ?? '';
 			nodeRefreshSeeded = false;
-			return;
+			nodeRefreshItem = '';
 		}
+		if (!chatId) return;
 		if (!nodeRefreshSeeded || !timelineMoved) {
 			nodeRefreshSeeded = true;
+			nodeRefreshItem = timelineMoved;
 			return;
 		}
+		if (timelineMoved === nodeRefreshItem) return;
+		nodeRefreshItem = timelineMoved;
 		controller.refreshNodes();
 	});
 
@@ -229,6 +162,7 @@
 	);
 	const isNodeScope = $derived(active?.kind === 'sub_agent');
 	const isPhaseScope = $derived(active?.kind === 'phase');
+	const historyThread = $derived(isNodeScope && active ? active.id : 'root');
 
 	/**
 	 * The active phase's run view state (REQ-D2): every attempt's
@@ -238,7 +172,8 @@
 	 */
 	const phaseAttempts = $derived.by(() => {
 		if (!active || active.kind !== 'phase') return [];
-		return derivePhaseAttempts(controller.eventsForPhase(active.id), active.id);
+		if (!active.executionId || !active.phase) return [];
+		return derivePhaseAttempts(controller.eventsForPhase(active.executionId, active.phase), active.phase);
 	});
 
 	// The selection is scoped to the phase it was made on, so navigating to
@@ -260,95 +195,41 @@
 		return chosen ?? phaseAttempts[phaseAttempts.length - 1];
 	});
 
-	const phases = $derived.by(() => {
-		// The launch contract declares the complete phase sequence; lifecycle
-		// events mark earlier phases done without hiding work that has not
-		// started. Durable phase nodes are authoritative for their own status,
-		// so the stepper still reflects a restart with no events loaded.
-		const derived = derivePhases(controller.rootEvents);
-		const byName = new Map(derived.map((phase) => [phase.name, phase]));
-		for (const step of derivePhaseSteps(controller.tree, effectiveExecution?.execution_id)) {
-			const existing = byName.get(step.name);
-			byName.set(step.name, {
-				name: step.name,
-				status: step.status === 'pending' ? (existing?.status ?? 'pending') : step.status,
-				attempts: existing?.attempts
-			});
-		}
-		const merged = [...byName.values()];
-		if (merged.length || !effectiveExecution?.phase) return merged;
-		return [{ name: effectiveExecution.phase, status: 'active' as const }];
-	});
-
-	// The launch renders as the workflow card in the transcript, either as the
-	// legacy `kind=workflow` anchor or as the `start_workflow` tool result whose
-	// datum type is `workflow_execution`; the fallback live card renders only
-	// when neither representation is present.
-	const hasWorkflowAnchor = $derived(
-		messages.some(
-			(message) =>
-				message.kind === 'workflow' ||
-				(message.role === 'tool' &&
-					message.tool_result?.datumType === 'workflow_execution')
-		)
-	);
-
-	/** Phases whose agent is blocked on operator input, surfaced on the card. */
-	const attentionPhases = $derived.by(() => {
-		const phases = new Set<string>();
-		const collect = (nodes: typeof controller.tree): void => {
-			for (const node of nodes) {
-				if (node.node.status === 'needs_input' && node.node.phase) {
-					phases.add(node.node.phase);
-				}
-				collect(node.children);
-			}
-		};
-		collect(controller.tree);
-		return [...phases];
-	});
-
 	const composerNode = $derived(isNodeScope ? controller.subAgentById(active!.id) : null);
 
 	/** Whether one sub-agent owes a reply right now (its last scoped message is a prompt). */
 	function subAgentPending(subAgentId: string): boolean {
-		const scoped = messages.filter(
-			(message) =>
-				message.kind === 'sub_agent' &&
-				String(message.data?.subAgentId ?? '') === subAgentId
-		);
+		const scoped = timeline.messagesFor(subAgentId);
 		if (!scoped.length) {
 			return controller.subAgentById(subAgentId)?.status === 'spawned';
 		}
-		return scoped[scoped.length - 1].role === 'user';
+		const node = controller.subAgentById(subAgentId);
+		return threadActivity(scoped, timeline.eventsFor(subAgentId),
+			!!node && ['completed', 'failed', 'cancelled'].includes(node.status)).pending;
 	}
 
 	// The node scope shows the typing indicator only while a reply is actually
 	// owed: a running agent that has already answered is idle, not busy.
-	const nodePending = $derived(composerNode ? subAgentPending(composerNode.subAgentId) : false);
+	const nodeTerminal = $derived(composerNode?.status === 'completed' || composerNode?.status === 'failed' || composerNode?.status === 'cancelled' ||
+		isTerminalWorkflow(composerNode?.workflowExecutionId ? workflows.get(composerNode.workflowExecutionId)?.execution : null));
+	const nodePending = $derived(!nodeTerminal && composerNode ? subAgentPending(composerNode.subAgentId) : false);
 	const showNodeComposer = $derived(
-		isNodeScope && composerNode?.acceptsInput === true && active?.readOnly !== true
+		isNodeScope && composerNode?.acceptsInput === true && active?.readOnly !== true && !nodeTerminal
 	);
+	const showQueuedFeedback = $derived.by(() => {
+		if (!composerNode || !showNodeComposer) return false;
+		const feedback = queuedFeedback[composerNode.subAgentId];
+		return threadActivity(timeline.messagesFor(composerNode.subAgentId), timeline.eventsFor(composerNode.subAgentId), nodeTerminal, feedback).queued;
+	});
 
 	const scopeEntries = $derived.by(() => {
 		const segment = active;
 		if (!segment || segment.kind !== 'sub_agent') return [];
-		const events = controller.eventsForSubAgent(segment.id);
 		return buildNodeEntries({
-			messages: messages.filter(
-				(message) =>
-					message.kind === 'sub_agent' &&
-					String(message.data?.subAgentId ?? '') === segment.id &&
-					(message.role === 'user' ||
-						message.role === 'system' ||
-						message.role === 'tool' ||
-						// Agent-authored replies are durable assistant messages on
-						// the node's own transcript; only the tool-call envelope
-						// placeholder is hidden (its tool result already renders).
-						(message.role === 'assistant' && !isToolCallPlaceholder(message)))
-			),
-			events,
-			children: controller.childrenOf(segment.id)
+			messages: timeline.messagesFor(segment.id),
+			events: timeline.eventsFor(segment.id),
+			children: controller.childrenOf(segment.id),
+			terminal: nodeTerminal
 		});
 	});
 
@@ -358,7 +239,7 @@
 		const scope = `${chatId ?? ''}:${active?.kind ?? 'root'}:${active?.id ?? ''}`;
 		const visibleMessages = isNodeScope
 			? scopeEntries.flatMap((entry) => entry.kind === 'message' ? [entry.message] : [])
-			: messages.filter((message) => message.kind !== 'sub_agent');
+			: timeline.messagesFor('root');
 		const userMessageId = visibleMessages.findLast((message) => message.role === 'user')?.message_id ?? '';
 		if (scope !== scrollScope) {
 			scrollScope = scope;
@@ -377,17 +258,13 @@
 		});
 	});
 
-	function isToolCallPlaceholder(message: ChatMessage): boolean {
-		const data = message.data ?? {};
-		return (
-			Array.isArray(data.toolCalls) &&
-			message.body.startsWith('Requested tool call(s):')
-		);
+	function enterPhase(executionId: string, phase: string, options: { readOnly: boolean }): void {
+		void controller.enterPhase(executionId, phase, options.readOnly || isTerminalWorkflow(workflows.get(executionId)?.execution));
 	}
-
-	function enterPhase(phase: string, options: { readOnly: boolean }): void {
-		void controller.enterPhase(phase, options.readOnly);
-	}
+	setWorkflowLiveView((id) => {
+		const live = workflows.get(id);
+		return live ? { ...live, onEnterPhase: (phase, options) => enterPhase(id, phase, options) } : null;
+	});
 
 	function enterSubAgent(node: SubAgentNode): void {
 		controller.enterSubAgent(node);
@@ -395,7 +272,7 @@
 
 	/** Drill into a spawned sub-agent by id, awaiting the durable tree first. */
 	async function enterSpawnedSubAgent(subAgentId: string): Promise<void> {
-		await controller.ensureLoaded();
+		if (!controller.subAgentById(subAgentId)) await controller.ensureLoaded();
 		const node = controller.subAgentById(subAgentId);
 		if (node) controller.enterSubAgent(node);
 	}
@@ -428,11 +305,12 @@
 		nodeSendError = null;
 	});
 
-	async function sendNode(_node: SubAgentNode, body: string): Promise<void> {
-		if (!composerNode) return;
+	async function sendNode(node: SubAgentNode, body: string): Promise<void> {
 		nodeSendError = null;
+		const running = nodePending || node.status === 'running' || node.status === 'progress';
 		try {
-			const message = await controller.submit(composerNode, body);
+			const message = await controller.submit(node, body);
+			if (running) queuedFeedback[node.subAgentId] = message.message_id;
 			onNodeMessage?.(message);
 		} catch (error) {
 			nodeSendError = nodeSendFailure(error);
@@ -474,28 +352,29 @@
 		</ScopeStack>
 	{:else}
 		<div class="min-h-0 flex-1 overflow-y-auto p-3" data-testid="transcript-scroll">
-			{#if !messages.length && !streaming.active}
+			{#if drafting && !chatId && !messages.length && !streaming.active}
 				<div class="mb-3">
 					<p class="mb-2 text-xs text-slate-500">Start with a suggestion, or ask anything.</p>
 					<ChatStarters
-						onSelect={(prompt) =>
-							onSend({ body: prompt, attachmentIds: [], steeringIntent: null })}
+						onSelect={(prompt) => {
+							void Promise.resolve(onSend({ body: prompt, attachmentIds: [], steeringIntent: null }))
+								.catch((error) => { nodeSendError = error instanceof Error ? error.message : 'Message could not be sent.'; });
+						}}
 						disabled={busy}
 					/>
 				</div>
 			{/if}
 			<ChatTranscript
-				{messages}
-				events={events ?? []}
+				messages={timeline.messagesFor('root')}
+				{terminal}
+				events={timeline.eventsFor('root')}
 				{workspaceId}
 				{percolations}
 				{proposal}
 				{onConfirmConsent}
 				{onRejectConsent}
 				{consentBusy}
-				execution={effectiveExecution}
-				{phases}
-				{attentionPhases}
+				{workflows}
 				onEnterPhase={enterPhase}
 			/>
 			<StreamingReply
@@ -504,23 +383,30 @@
 				reasoning={streaming.reasoning}
 				testId="streaming-reply"
 			/>
-			{#if effectiveExecution && !hasWorkflowAnchor}
+			{#each [...workflows.values()].filter((live) => !live.anchored && !timeline.initialLoading) as live (live.execution.execution_id)}
 				<div class="mt-3">
 					<WorkflowCard
-						execution={effectiveExecution}
-						{phases}
-						status={effectiveExecution.state}
-						summary={effectiveExecution.phase
-							? `Current phase ${effectiveExecution.phase}`
+						execution={live.execution}
+						phases={live.phases}
+						status={live.execution.state}
+						summary={live.execution.phase
+							? `Current phase ${live.execution.phase}`
 							: 'Awaiting phase transitions'}
-						{attentionPhases}
-						onEnterPhase={enterPhase}
+						attentionPhases={live.attentionPhases}
+						onEnterPhase={(phase, options) => enterPhase(live.execution.execution_id, phase, options)}
 					/>
 				</div>
-			{/if}
+			{/each}
 		</div>
 	{/if}
 
+	{#if timeline.streamError}
+		<p class="px-3 py-2 text-xs text-warn" role="status" data-testid="timeline-stream-error">{timeline.streamError}</p>
+	{/if}
+	{#if controller.error}
+		<p class="px-3 py-2 text-xs text-warn" role="status" data-testid="node-metadata-error">{controller.error}</p>
+		<button class="px-3 py-2 text-xs text-accent" onclick={() => controller.refreshNodes()}>Retry Agent Metadata</button>
+	{/if}
 	{#if nodeSendError}
 		<div
 			class="border-t border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200"
@@ -530,14 +416,30 @@
 			{nodeSendError}
 		</div>
 	{/if}
+	{#if timeline.history[historyThread]?.error}
+		<p class="px-3 py-2 text-xs text-warn" role="status">{timeline.history[historyThread].error}</p>
+			<button class="px-3 py-2 text-xs text-accent" data-testid="history-retry"
+				disabled={timeline.history[historyThread]?.loading} onclick={() => timeline.loadHistory(historyThread)}>Retry History</button>
+	{/if}
+	{#if timeline.history[historyThread]?.loading}
+		<p class="px-3 py-2 text-xs text-slate-500" role="status" data-testid="history-loading">Loading conversation history...</p>
+	{/if}
+	{#if showQueuedFeedback}
+		<p class="border-t border-surface-700 px-3 py-2 text-xs text-accent" role="status" data-testid="node-feedback-queued">
+			Feedback accepted while this agent is running, queued for delivery.
+		</p>
+	{/if}
 
 	{#if showNodeComposer && composerNode}
-		<SubAgentComposer
-			acceptsInput={true}
-			phase={composerNode.phase}
-			busy={controller.busy || nodePending}
-			onSubmit={(body) => sendNode(composerNode, body)}
-		/>
+		{#each [composerNode] as node (node.subAgentId)}
+			<SubAgentComposer
+				acceptsInput={true}
+				bind:draft={() => nodeDrafts[node.subAgentId] ?? '', (value) => { nodeDrafts[node.subAgentId] = value; }}
+				phase={node.phase}
+				busy={controller.busy}
+				onSubmit={(body) => sendNode(node, body)}
+			/>
+		{/each}
 	{:else if isNodeScope}
 		<div
 			class="border-t border-surface-700 bg-surface-900 px-3 py-2 text-center text-[11px] text-slate-500"
@@ -555,7 +457,7 @@
 	{:else}
 		<ChatComposer
 			onSubmit={onSend}
-			activeExecutionId={effectiveExecution?.execution_id ?? null}
+			{anyActiveWorkflow}
 			{busy}
 		/>
 	{/if}

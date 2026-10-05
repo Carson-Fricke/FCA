@@ -41,8 +41,8 @@ pub enum DecimalError {
     NonFinite,
     /// The requested rounding precision is outside `0..=SCALE`.
     InvalidScale,
-    /// A context operation (for example `PyDecimal::quantize`) would produce a
-    /// result the context cannot represent. Mirrors Python's
+    /// A context operation (for example `Decimal::quantize`) would produce a
+    /// result the context cannot represent. Mirrors the reference engine's
     /// `decimal.InvalidOperation`.
     InvalidOperation,
 }

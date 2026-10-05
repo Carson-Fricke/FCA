@@ -21,7 +21,8 @@ use marketdata::{BarInterval, DataType, Date};
 
 use crate::backtest::config::BacktestConfig;
 use crate::backtest::engine_core::{
-    build_default_manifest, run_native_engine, BacktestOutcome, EngineOptions, StrategyInstance,
+    build_default_manifest, default_subscriptions, normalize_subscriptions, run_native_engine,
+    runtime_subscriptions, BacktestOutcome, EngineOptions, MarketSubscription, StrategyInstance,
 };
 use crate::backtest::errors::{BacktestError, ONE_DAY_NS};
 use crate::backtest::fixture::{
@@ -29,7 +30,6 @@ use crate::backtest::fixture::{
 };
 use crate::backtest::preflight::preflight_data;
 use crate::backtest::screen::ScreenConfig;
-use crate::backtest::yaml::YamlValue;
 use crate::canonical_json::JsonValue;
 use crate::results::metrics::{
     equity_curve_metrics, execution_stats, trade_stats, EquityPoint, FillRow, OrderRow,
@@ -90,122 +90,98 @@ impl From<BacktestError> for BacktestJobError {
 /// Read the top-level `shell` scalar from a configuration document.
 #[must_use]
 pub fn parse_shell(text: &str) -> Option<String> {
-    let compact = text.trim();
-    if compact.starts_with('{') {
-        let marker = "\"shell\"";
-        let start = compact.find(marker)? + marker.len();
-        let value = compact[start..]
-            .trim_start()
-            .strip_prefix(':')?
-            .trim_start();
-        let value = value.strip_prefix('"')?;
-        let end = value.find('"')?;
-        let shell = &value[..end];
-        if !shell.is_empty() {
-            return Some(shell.to_string());
-        }
+    let mapping = config::replay::parse_document(text).ok()?;
+    match mapping.get("shell") {
+        Some(config::YamlValue::Str(shell)) if !shell.is_empty() => Some(shell.clone()),
+        _ => None,
     }
-    for line in text.lines() {
-        let trimmed = line.trim_end();
-        if trimmed.trim_start().len() != trimmed.len() {
-            continue;
-        }
-        let rest = trimmed
-            .strip_prefix("shell:")
-            .or_else(|| trimmed.strip_prefix("\"shell\":"));
-        if let Some(rest) = rest {
-            let value = rest
-                .trim()
-                .trim_matches(|character| character == '"' || character == '\'');
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
 }
 
 /// Read a top-level scalar (string or integer) from a configuration document.
 #[must_use]
 pub fn parse_scalar(text: &str, key: &str) -> Option<String> {
-    for line in text.lines() {
-        let trimmed = line.trim_end();
-        if trimmed.trim_start().len() != trimmed.len() {
-            continue;
-        }
-        let rest = trimmed
-            .strip_prefix(&format!("{key}:"))
-            .or_else(|| trimmed.strip_prefix(&format!("\"{key}\":")));
-        if let Some(rest) = rest {
-            let value = rest
-                .trim()
-                .trim_matches(|character| character == '"' || character == '\'');
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
+    let mapping = config::replay::parse_document(text).ok()?;
+    match mapping.get(key)? {
+        config::YamlValue::Str(v) if !v.is_empty() => Some(v.clone()),
+        config::YamlValue::Int(v) => Some(v.to_string()),
+        _ => None,
     }
-    None
 }
 
 /// Read a scalar one indent level below a top-level `section:` block.
 #[must_use]
 pub fn parse_nested_scalar(text: &str, section: &str, key: &str) -> Option<String> {
-    let mut in_section = false;
-    for line in text.lines() {
-        let trimmed = line.trim_end();
-        if trimmed.trim().is_empty() || trimmed.trim_start().starts_with('#') {
-            continue;
-        }
-        let indented = trimmed.len() != trimmed.trim_start().len();
-        if !indented {
-            in_section = trimmed.trim_end() == format!("{section}:");
-            continue;
-        }
-        if !in_section {
-            continue;
-        }
-        let content = trimmed.trim();
-        let rest = content
-            .strip_prefix(&format!("{key}:"))
-            .or_else(|| content.strip_prefix(&format!("\"{key}\":")));
-        if let Some(rest) = rest {
-            let value = rest
-                .trim()
-                .trim_matches(|character| character == '"' || character == '\'');
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
+    let mapping = config::replay::parse_document(text).ok()?;
+    let config::YamlValue::Map(section) = mapping.get(section)? else {
+        return None;
+    };
+    match section.get(key)? {
+        config::YamlValue::Str(v) if !v.is_empty() => Some(v.clone()),
+        config::YamlValue::Int(v) => Some(v.to_string()),
+        _ => None,
     }
-    None
 }
 
-/// Parse an ISO-8601 UTC timestamp into epoch nanoseconds.
-///
-/// Accepts the `YYYY-MM-DDThh:mm:ss[.ffffff]Z` / `+00:00` form the Python
-/// `harness.configuration` loader resolves into a UTC `datetime`.
+/// Parse an RFC3339 timestamp with explicit offset at exact nanosecond precision.
+/// Returns `None` for malformed or out-of-range bounds rather than rounding.
 #[must_use]
 pub fn parse_timestamp_ns(value: &str) -> Option<i64> {
     let text = value.trim();
-    let (date, time) = text.split_once('T')?;
-    let mut date_parts = date.split('-');
-    let year: i64 = date_parts.next()?.parse().ok()?;
-    let month: i64 = date_parts.next()?.parse().ok()?;
-    let day: i64 = date_parts.next()?.parse().ok()?;
-    let time = time.trim_end_matches('Z');
-    let time = time.split_once('+').map_or(time, |(left, _)| left);
-    let mut time_parts = time.split(':');
-    let hour: i64 = time_parts.next()?.parse().ok()?;
-    let minute: i64 = time_parts.next()?.parse().ok()?;
-    let second: i64 = time_parts
-        .next()
-        .and_then(|part| part.split('.').next())
-        .and_then(|part| part.parse().ok())
-        .unwrap_or(0);
-    let days = crate::backtest::fixture::days_from_civil(year, month, day);
-    let seconds = ((days * 24 + hour) * 60 + minute) * 60 + second;
-    Some(seconds * 1_000_000_000)
+    if !text.is_ascii() || text.len() < 20 {
+        return None;
+    }
+    let digits = |part: &str| -> Option<i64> {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        part.parse().ok()
+    };
+    if !matches!(text.as_bytes()[10], b'T' | b't') || &text[4..5] != "-" || &text[7..8] != "-" {
+        return None;
+    }
+    digits(&text[..4])?;
+    digits(&text[5..7])?;
+    digits(&text[8..10])?;
+    let date = Date::parse(&text[..10])?;
+    let time = &text[11..];
+    let (clock, offset) = if time.ends_with(['Z', 'z']) {
+        (&time[..time.len() - 1], 0)
+    } else {
+        let index = time.rfind(['+', '-'])?;
+        let zone = &time[index..];
+        if zone.len() != 6 || &zone[3..4] != ":" {
+            return None;
+        }
+        let hours = digits(&zone[1..3])?;
+        let minutes = digits(&zone[4..6])?;
+        if hours > 23 || minutes > 59 {
+            return None;
+        }
+        let sign = if zone.starts_with('+') { 1 } else { -1 };
+        (&time[..index], sign * (hours * 3600 + minutes * 60))
+    };
+    let (clock, fraction) = match clock.split_once('.') {
+        Some((clock, fraction)) => {
+            if fraction.len() > 9 {
+                return None;
+            }
+            let nanos = digits(fraction)? * 10_i64.pow(9 - fraction.len() as u32);
+            (clock, nanos)
+        }
+        None => (clock, 0),
+    };
+    if clock.len() != 8 || &clock[2..3] != ":" || &clock[5..6] != ":" {
+        return None;
+    }
+    let hour = digits(&clock[..2])?;
+    let minute = digits(&clock[3..5])?;
+    let second = digits(&clock[6..8])?;
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let seconds =
+        i128::from(date.days()) * 86_400 + i128::from(hour * 3600 + minute * 60 + second - offset);
+    i64::try_from(seconds * 1_000_000_000 + i128::from(fraction)).ok()
 }
 
 /// The default synthetic run window: 2024-01-01 to 2024-01-03 UTC.
@@ -229,15 +205,6 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
     if shell != "backtest" {
         return Err(BacktestJobError::WrongShell(shell));
     }
-    if text.trim_start().starts_with('{') {
-        let document: serde_json::Value =
-            serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        return resolve_authored_sources(
-            BacktestConfig::from_yaml_value(&json_to_yaml(&document))
-                .map_err(BacktestJobError::from)?,
-            config_path,
-        );
-    }
     resolve_authored_sources(
         BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
         config_path,
@@ -249,9 +216,8 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
 /// A study reuses the replay configuration shape but declares the `study`
 /// shell, so it is never confused with a backtest. The strategy-instance list
 /// names platform study programs rather than user strategies, and the raw
-/// document must declare `data.bar_interval` explicitly — a study never falls
-/// back to the backtest default token. The declared interval must be a string
-/// holding a canonical bar token (`1min`, `1d`).
+/// document declares exact `data.subscriptions`, or a legacy explicit
+/// `data.bar_interval` (`1min`, `1d`). Tick-only subscriptions need no interval.
 ///
 /// # Errors
 ///
@@ -265,20 +231,13 @@ pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJ
     if shell != "study" {
         return Err(BacktestJobError::WrongShell(shell));
     }
-    let value = if text.trim_start().starts_with('{') {
-        let document: serde_json::Value =
-            serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        json_to_yaml(&document)
-    } else {
-        crate::backtest::yaml::load_yaml(&text)
-            .map_err(|error| BacktestJobError::from(BacktestError::Configuration(error.0)))?
-    };
-    require_study_bar_interval(&value)?;
     let configuration = resolve_authored_sources(
-        BacktestConfig::from_yaml_value(&value).map_err(BacktestJobError::from)?,
+        BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
         config_path,
     )?;
-    study_bar_interval(&configuration)?;
+    if !configuration.data_subscriptions_declared {
+        study_bar_interval(&configuration)?;
+    }
     Ok(configuration)
 }
 
@@ -332,31 +291,12 @@ pub fn parse_study_document(
     if shell != "study" {
         return Err(BacktestJobError::WrongShell(shell.to_string()));
     }
-    let value = json_to_yaml(document);
-    require_study_bar_interval(&value)?;
-    let configuration = BacktestConfig::from_yaml_value(&value).map_err(BacktestJobError::from)?;
-    study_bar_interval(&configuration)?;
-    Ok(configuration)
-}
-
-fn json_to_yaml(value: &serde_json::Value) -> YamlValue {
-    match value {
-        serde_json::Value::Null => YamlValue::Null,
-        serde_json::Value::Bool(inner) => YamlValue::Bool(*inner),
-        serde_json::Value::Number(number) => number
-            .as_i64()
-            .map_or_else(|| YamlValue::String(number.to_string()), YamlValue::Int),
-        serde_json::Value::String(text) => YamlValue::String(text.clone()),
-        serde_json::Value::Array(items) => {
-            YamlValue::Sequence(items.iter().map(json_to_yaml).collect())
-        }
-        serde_json::Value::Object(entries) => YamlValue::Mapping(
-            entries
-                .iter()
-                .map(|(key, item)| (key.clone(), json_to_yaml(item)))
-                .collect(),
-        ),
+    let configuration =
+        BacktestConfig::from_yaml(&document.to_string()).map_err(BacktestJobError::from)?;
+    if !configuration.data_subscriptions_declared {
+        study_bar_interval(&configuration)?;
     }
+    Ok(configuration)
 }
 
 /// Inline `parameters.source_path` authored sources after parsing.
@@ -423,7 +363,8 @@ pub fn run_native_job_with_lake_client(
     strategies: Vec<StrategyInstance>,
     client: &BlockingLakeClient,
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    let fixture = lake_fixture(configuration, client)?;
+    let subscriptions = runtime_subscriptions(configuration, &strategies)?;
+    let fixture = lake_fixture_with_subscriptions(configuration, client, &subscriptions)?;
     let outcome = run_native_engine_outcome(
         configuration,
         engine_options,
@@ -456,7 +397,8 @@ pub fn run_native_study_job_with_lake_client(
     programs: Vec<StrategyInstance>,
     client: &BlockingLakeClient,
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
-    let fixture = lake_fixture(configuration, client)?;
+    let subscriptions = runtime_subscriptions(configuration, &programs)?;
+    let fixture = lake_fixture_with_subscriptions(configuration, client, &subscriptions)?;
     let outcome = run_native_engine_outcome(
         configuration,
         engine_options,
@@ -587,10 +529,9 @@ fn lake_scale_options() -> SyntheticDataOptions {
 
 /// Build a replay fixture from the market-lake read route.
 ///
-/// The configuration shell selects the replay data type. A `study` run
-/// ensures and reads `data.bar_interval` bars for every configured symbol and
-/// replays bars only; a backtest ensures and reads the run window's trades and
-/// quotes exactly as before. Equity symbols use the `equity` asset class;
+/// Uses the configuration echo when present, otherwise legacy shell defaults.
+/// Backtests also acquire separate quote/trade execution feeds. Equity symbols
+/// use the `equity` asset class;
 /// symbols shaped like a crypto pair (`BTC-USD`) use the `crypto` asset class
 /// with their canonical `BASE/QUOTE` symbol. Fetched crypto events are re-keyed
 /// to the configured dashed symbol so the fixture, preflight, and research
@@ -605,15 +546,47 @@ pub fn lake_fixture(
     configuration: &BacktestConfig,
     client: &BlockingLakeClient,
 ) -> Result<ReplayFixture, BacktestJobError> {
+    let subscriptions = if configuration.has_subscription_echo() {
+        configuration.data_subscriptions.clone()
+    } else {
+        default_subscriptions(configuration)
+    };
+    lake_fixture_with_subscriptions(configuration, client, &subscriptions)
+}
+
+/// Acquire exact consumer inputs plus separate backtest execution feeds.
+///
+/// # Errors
+/// Rejects incompatible intervals and empty requested symbol/type coverage.
+pub fn lake_fixture_with_subscriptions(
+    configuration: &BacktestConfig,
+    client: &BlockingLakeClient,
+    subscriptions: &[MarketSubscription],
+) -> Result<ReplayFixture, BacktestJobError> {
+    let requirements = normalize_subscriptions(subscriptions)?;
+    if configuration.has_subscription_echo()
+        && normalize_subscriptions(&configuration.data_subscriptions)? != requirements
+    {
+        return Err(BacktestJobError::Engine(
+            "data.subscriptions does not match runtime subscription union".into(),
+        ));
+    }
+    let mut acquisition = requirements.clone();
+    if configuration.shell != "study" {
+        acquisition.extend(default_subscriptions(configuration));
+    }
+    let acquisition = normalize_subscriptions(&acquisition)?;
     let start_date = Date::from_days(configuration.start_ns.div_euclid(ONE_DAY_NS) as i32);
-    let end_date = Date::from_days(configuration.end_ns.div_euclid(ONE_DAY_NS) as i32);
+    let end_date = Date::from_days(
+        configuration
+            .end_ns
+            .saturating_sub(1)
+            .div_euclid(ONE_DAY_NS) as i32,
+    );
     let start_text = start_date.isoformat();
     let end_text = end_date.isoformat();
-    let mut events = if configuration.shell == "study" {
-        lake_study_bar_events(configuration, client, &start_text, &end_text)?
-    } else {
-        lake_tick_events(configuration, client, &start_text, &end_text)?
-    };
+    let mut events =
+        lake_subscription_events(configuration, client, &start_text, &end_text, &acquisition)?;
     if events.is_empty() {
         let expected = if configuration.shell == "study" {
             "bar"
@@ -634,40 +607,27 @@ pub fn lake_fixture(
     });
     let sessions = sessions_from_events(&events);
     let fingerprints = ReplayFingerprints::of_events(&events);
-    Ok(ReplayFixture {
+    let fixture = ReplayFixture {
         sessions,
         events,
         source_id: format!("lake:{}", client.base_url()),
         symbols: configuration.symbols.clone(),
         fingerprints,
         expected_data_fingerprint: None,
-    })
-}
-
-/// Require an explicitly declared `data.bar_interval` in a raw study document.
-///
-/// A study must name its data source: unlike a backtest it has no default bar
-/// token, so an absent or non-string interval fails loudly before any typed
-/// parsing or lake traffic. The canonical token vocabulary is enforced
-/// afterwards by [`study_bar_interval`].
-///
-/// # Errors
-///
-/// Returns [`BacktestJobError::Engine`] when `data.bar_interval` is absent or
-/// is not a string.
-fn require_study_bar_interval(value: &YamlValue) -> Result<(), BacktestJobError> {
-    let interval = value
-        .as_mapping()
-        .and_then(|root| root.get("data"))
-        .and_then(YamlValue::as_mapping)
-        .and_then(|data| data.get("bar_interval"))
-        .and_then(YamlValue::as_str);
-    if interval.is_some() {
-        return Ok(());
+    };
+    super::preflight::validate_subscription_coverage(&fixture, &requirements)?;
+    if let Some(bars) = requirements.iter().find(|input| input.data_type == "bars") {
+        let mut frame_config = configuration.clone();
+        frame_config.symbols = bars.symbols.clone();
+        frame_config.data_bar_interval = bars.interval.clone().unwrap();
+        let frames = super::engine_core::assemble_study_frames(
+            &frame_config,
+            &fixture,
+            &lake_scale_options(),
+        )?;
+        super::preflight::validate_completed_bar_coverage(&requirements, &frames)?;
     }
-    Err(BacktestJobError::Engine(
-        "study configuration requires data.bar_interval (1min or 1d)".to_string(),
-    ))
+    Ok(fixture)
 }
 
 /// The canonical bar interval a study configuration must carry.
@@ -686,132 +646,102 @@ fn study_bar_interval(configuration: &BacktestConfig) -> Result<BarInterval, Bac
     })
 }
 
-/// Ensure and read the study window's bars for every configured symbol.
+/// Ensure and read every normalized symbol/type requirement.
 ///
-/// Every symbol's window is ensured and read concurrently (bounded by the lake
+/// Every input window is ensured and read concurrently (bounded by the lake
 /// client's fetch concurrency), then merged. Completion order cannot change the
 /// replay: [`lake_fixture`] sorts the merged events by timestamp before any
 /// preflight or engine work.
-fn lake_study_bar_events(
+fn lake_subscription_events(
     configuration: &BacktestConfig,
     client: &BlockingLakeClient,
     start_text: &str,
     end_text: &str,
+    subscriptions: &[MarketSubscription],
 ) -> Result<Vec<MarketEvent>, BacktestJobError> {
-    let interval = study_bar_interval(configuration)?;
-    let windows: Vec<(String, String, EnsureSpec, ReadSpec)> = configuration
-        .symbols
-        .iter()
-        .map(|symbol| {
+    let mut windows = Vec::new();
+    for input in subscriptions {
+        let data_type = match input.data_type.as_str() {
+            "bars" => DataType::Bars,
+            "quote" => DataType::Quote,
+            "trade" => DataType::Trade,
+            other => {
+                return Err(BacktestJobError::from(BacktestError::Configuration(
+                    format!("unknown data type {other:?}"),
+                )))
+            }
+        };
+        for symbol in &input.symbols {
             let (asset_class, lake_symbol) = match marketdata::crypto_pair(symbol) {
                 Some(pair) => ("crypto", pair),
                 None => ("equity", symbol.trim().to_uppercase()),
             };
-            let ensure = EnsureSpec::new(
+            let mut ensure = EnsureSpec::new(
                 asset_class,
-                DataType::Bars.value(),
+                data_type.value(),
                 &lake_symbol,
                 start_text,
                 end_text,
-            )
-            .with_interval(interval.value());
-            let read = ReadSpec::new(
+            );
+            let mut read = ReadSpec::new(
                 asset_class,
-                DataType::Bars.value(),
+                data_type.value(),
                 &lake_symbol,
                 start_text,
                 end_text,
-            )
-            .with_interval(interval.value());
-            (symbol.clone(), lake_symbol, ensure, read)
-        })
-        .collect();
+            );
+            if let Some(interval) = &input.interval {
+                ensure = ensure.with_interval(interval);
+                read = read.with_interval(interval);
+            }
+            windows.push((symbol.clone(), lake_symbol, data_type, ensure, read));
+        }
+    }
     let ensures: Vec<EnsureSpec> = windows
         .iter()
-        .map(|(_, _, ensure, _)| ensure.clone())
+        .map(|(_, _, _, ensure, _)| ensure.clone())
         .collect();
     for (_, outcome) in windows.iter().zip(client.ensure_many(&ensures)) {
         outcome.map_err(|error| BacktestJobError::Io(error.to_string()))?;
     }
-    let reads: Vec<ReadSpec> = windows.iter().map(|(_, _, _, read)| read.clone()).collect();
-    let mut events: Vec<MarketEvent> = Vec::new();
-    for ((symbol, lake_symbol, _, _), batches) in windows.iter().zip(client.read_many(&reads)) {
-        let batches = batches.map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        let decoded = marketdata::events_from_arrow(DataType::Bars, lake_symbol, &batches)
-            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        events.extend(
-            decoded
-                .iter()
-                .filter(|event| in_window(event, configuration))
-                .map(|event| lake_event(event, symbol)),
-        );
-    }
-    Ok(events)
-}
-
-/// Ensure and read the backtest window's trades and quotes per symbol.
-///
-/// Every symbol/data-type window is ensured concurrently — the provider fetch
-/// is the long pole — while reads stay sequential so only one window's Arrow
-/// batches are held at a time. [`lake_fixture`] sorts the merged events, so
-/// completion order cannot change the replay.
-fn lake_tick_events(
-    configuration: &BacktestConfig,
-    client: &BlockingLakeClient,
-    start_text: &str,
-    end_text: &str,
-) -> Result<Vec<MarketEvent>, BacktestJobError> {
-    let mut jobs: Vec<(String, String, DataType, EnsureSpec, ReadSpec)> = Vec::new();
-    for symbol in &configuration.symbols {
-        let (asset_class, lake_symbol) = match marketdata::crypto_pair(symbol) {
-            Some(pair) => ("crypto", pair),
-            None => ("equity", symbol.trim().to_uppercase()),
-        };
-        for data_type in [DataType::Quote, DataType::Trade] {
-            let ensure = EnsureSpec::new(
-                asset_class,
-                data_type.value(),
-                &lake_symbol,
-                start_text,
-                end_text,
-            );
-            let read = ReadSpec::new(
-                asset_class,
-                data_type.value(),
-                &lake_symbol,
-                start_text,
-                end_text,
-            );
-            jobs.push((symbol.clone(), lake_symbol.clone(), data_type, ensure, read));
-        }
-    }
-    let ensures: Vec<EnsureSpec> = jobs
+    let reads: Vec<ReadSpec> = windows
         .iter()
-        .map(|(_, _, _, ensure, _)| ensure.clone())
+        .map(|(_, _, _, _, read)| read.clone())
         .collect();
-    for (_, outcome) in jobs.iter().zip(client.ensure_many(&ensures)) {
-        outcome.map_err(|error| BacktestJobError::Io(error.to_string()))?;
-    }
     let mut events: Vec<MarketEvent> = Vec::new();
-    for (symbol, lake_symbol, data_type, _, read) in &jobs {
-        let batches = client
-            .read_arrow(read)
-            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    for ((symbol, lake_symbol, data_type, _, _), batches) in
+        windows.iter().zip(client.read_many(&reads))
+    {
+        let batches = batches.map_err(|error| BacktestJobError::Io(error.to_string()))?;
         let decoded = marketdata::events_from_arrow(*data_type, lake_symbol, &batches)
             .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        events.extend(
-            decoded
-                .iter()
-                .filter(|event| in_window(event, configuration))
-                .map(|event| lake_event(event, symbol)),
-        );
+        // Marketdata DateTime is microsecond-based. Restore Arrow row precision
+        // before enforcing the nanosecond run bounds; decoding preserves row order.
+        let timestamps = batches.iter().flat_map(|batch| {
+            let nanos = batch.column_by_name("timestamp").and_then(|column| {
+                column
+                    .as_any()
+                    .downcast_ref::<arrow_array::TimestampNanosecondArray>()
+            });
+            (0..batch.num_rows()).map(move |row| nanos.map(|array| array.value(row)))
+        });
+        for (event, timestamp) in decoded.iter().zip(timestamps) {
+            let mut event = lake_event(event, symbol);
+            if let Some(timestamp) = timestamp {
+                match &mut event {
+                    MarketEvent::Quote { timestamp_ns, .. }
+                    | MarketEvent::Trade { timestamp_ns, .. }
+                    | MarketEvent::Bar { timestamp_ns, .. } => *timestamp_ns = timestamp,
+                }
+            }
+            if event.timestamp_ns() >= configuration.start_ns
+                && event.timestamp_ns() < configuration.end_ns
+            {
+                events.push(event);
+            }
+        }
     }
     Ok(events)
-}
-
-fn in_window(event: &marketdata::MarketEvent, configuration: &BacktestConfig) -> bool {
-    let timestamp = event.timestamp().to_nanos();
-    timestamp >= configuration.start_ns && timestamp < configuration.end_ns
 }
 
 /// Convert one normalized lake event into the engine's fixture event.

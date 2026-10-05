@@ -10,9 +10,7 @@ general object plus this data.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
-from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 from thesis.research.hypothesis import (
     HypothesisArtifactError,
@@ -21,43 +19,30 @@ from thesis.research.hypothesis import (
 from thesis.workflows.core.spec import WorkflowContext
 from thesis.workflows.core.workflow import Workflow, WorkflowDoctrine
 
+from .artifacts import discovery_report_artifact
 from .contracts.creation import HypothesisDevelopmentRequest
 from .errors import (
     HypothesisDevelopmentIntakeError,
-    InvalidPhaseTransition,
     WorkflowError,
 )
 from .phases import (
-    _ACTIVE_PHASES,
-    _HYPOTHESIS_CREATION,
+    _DISCOVERY,
+    _MODEL_CREATION,
     _OPTIMIZATION,
-    _PHASE_ORCHESTRATORS,
-    _PHASE_TASKS,
     _STRATEGY_BACKTESTING,
     _STRATEGY_DESIGN,
     _STRATEGY_RCA,
     _VERDICT,
-    HYPOTHESIS_DEVELOPMENT_WORKFLOW,
-    HypothesisDevelopmentPhase,
-    PhaseTransition,
+    phase_from_value,
+    workflow_definition,
 )
 from .primitives import (
     _WORKFLOW_ACTOR,
     _text,
 )
-from .rebuild import rebuild_state
+from .rebuild import fold_transition, rebuild_state
 from .services import HypothesisDevelopmentServices, services_of
 from .state import HypothesisDevelopmentOutcome, HypothesisDevelopmentState
-
-#: The phases whose entries open a visible orchestrator conversation.
-_ACTIVITY: Mapping[HypothesisDevelopmentPhase, str] = {
-    _HYPOTHESIS_CREATION: "Finalizing the structured hypothesis model.",
-    _VERDICT: "Recording the falsification verdict.",
-    _STRATEGY_DESIGN: "Preparing the strategy design from the surviving model.",
-    _STRATEGY_BACKTESTING: "Testing the designed strategy through the harness.",
-    _STRATEGY_RCA: "Diagnosing the failed strategy backtest.",
-    _OPTIMIZATION: "Preparing the bounded strategy optimization run.",
-}
 
 _DEFAULT_ACTIVITY = "Preparing the next workflow step."
 
@@ -70,23 +55,33 @@ def hypothesis_development_doctrine(
     HypothesisDevelopmentOutcome,
 ]:
     """Assemble the doctrine the general workflow object reads."""
+    from thesis.workflows.core.phase import ConversationPhase
+
+    from .spec import phase_declarations
+
+    declarations = phase_declarations()
+    agents = tuple(item for item in declarations if item.orchestrator is not None)
     return WorkflowDoctrine(
-        definition=HYPOTHESIS_DEVELOPMENT_WORKFLOW,
-        initial_phase=_HYPOTHESIS_CREATION.value,
+        definition=workflow_definition(),
+        initial_phase=_DISCOVERY.value,
         actor=_WORKFLOW_ACTOR,
-        active_phases=tuple(phase.value for phase in _ACTIVE_PHASES),
+        active_phases=tuple(item.spec.phase for item in agents),
         conversational_phases=frozenset(
-            {
-                _HYPOTHESIS_CREATION.value,
-                _VERDICT.value,
-                _STRATEGY_DESIGN.value,
-            }
+            item.spec.phase
+            for item in agents
+            if isinstance(item.spec, ConversationPhase)
         ),
         orchestrators={
-            phase.value: entry for phase, entry in _PHASE_ORCHESTRATORS.items()
+            item.spec.phase: item.orchestrator
+            for item in agents
+            if item.orchestrator is not None
         },
-        tasks={phase.value: task for phase, task in _PHASE_TASKS.items()},
-        activity={phase.value: text for phase, text in _ACTIVITY.items()},
+        tasks={item.spec.phase: item.task for item in agents if item.task is not None},
+        activity={
+            item.spec.phase: item.activity
+            for item in agents
+            if item.activity is not None
+        },
         default_activity=_DEFAULT_ACTIVITY,
         mcp_tools=services.mcp_tools,
         phase_mcp_tools=services.phase_mcp_tools,
@@ -98,9 +93,7 @@ def hypothesis_development_doctrine(
         summarize=_phase_summary,
         report=_phase_report,
         validate_launch=_validate_launch,
-        transition_error=_transition_error,
-        record_of=_record_of,
-        rebuild=_rebuild,
+        reduce_transition=fold_transition,
     )
 
 
@@ -186,7 +179,8 @@ def _reconstruct_state(
         request.workspace_id,
         request.execution_id,
         document.transitions,
-        initial_phase=_HYPOTHESIS_CREATION,
+        initial_phase=_DISCOVERY,
+        pipes=workflow.spec.piping,
     )
 
 
@@ -196,7 +190,9 @@ def _load_hypothesis(
 ) -> HypothesisDocument | None:
     """Load the execution's hypothesis artifact when it was finalized."""
     try:
-        return services_of(workflow).store.load(f"h-{request.execution_id}")
+        return services_of(workflow).store.load(
+            f"h-{request.execution_id}", workspace_id=request.workspace_id
+        )
     except HypothesisArtifactError:
         return None
 
@@ -213,8 +209,12 @@ def _phase_value(phase: object) -> str:
 
 def _phase_summary(state: HypothesisDevelopmentState, phase: object) -> str:
     """Summarize what one phase produced, for its transcript."""
-    resolved = HypothesisDevelopmentPhase(_phase_value(phase))
-    if resolved is _HYPOTHESIS_CREATION:
+    resolved = phase_from_value(_phase_value(phase))
+    if resolved is _DISCOVERY:
+        if state.discovery is not None:
+            return f"Discovery candidate: {state.discovery.candidate.opportunity}"
+        return "Discovery completed without a recorded candidate."
+    if resolved is _MODEL_CREATION:
         if state.hypothesis is not None:
             return f"Hypothesis: {state.hypothesis.front_matter.claim}"
         if state.draft is not None:
@@ -244,9 +244,23 @@ def _phase_report(
     state: HypothesisDevelopmentState,
     active: object,
 ) -> Mapping[str, object] | None:
-    """Return the rich structured report one phase exit projects, if any."""
-    del workflow, state, active
-    return None
+    """Return the rich structured report one phase exit projects, if any.
+
+    Discovery projects its selected candidate as the discovery artifact; every
+    other phase's report stays empty (model creation's hypothesis result is the
+    durable hypothesis document, not a phase report).
+    """
+    if active is None:
+        return None
+    phase = getattr(active, "phase", None)
+    if phase is None:
+        return None
+    resolved = phase_from_value(_phase_value(phase))
+    if resolved is not _DISCOVERY:
+        return None
+    if state.discovery is None:
+        return None
+    return discovery_report_artifact(state)
 
 
 def _project(
@@ -259,6 +273,7 @@ def _project(
         phase=state.phase,
         fenced=state.fenced,
         transitions=state.transitions,
+        discovery=state.discovery,
         hypothesis=state.hypothesis,
         research_model_reference=state.research_model_reference,
         research_model_artifact=state.research_model_artifact,
@@ -277,46 +292,6 @@ def _project(
         optimization_backtest=state.optimization_backtest,
         journal_id=state.journal_id,
         detail=state.detail,
-    )
-
-
-# -- transition machine adapters ---------------------------------------------
-
-
-def _transition_error(current: object, target: object) -> Exception:
-    return InvalidPhaseTransition(
-        f"workflow phase cannot move from {_phase_value(current)} "
-        f"to {_phase_value(target)}"
-    )
-
-
-def _record_of(
-    sequence: int,
-    source: object,
-    target: object,
-    at: datetime,
-    intent_epoch: int,
-    reason: str,
-) -> PhaseTransition:
-    return PhaseTransition(
-        sequence=sequence,
-        from_phase=HypothesisDevelopmentPhase(_phase_value(source)),
-        to_phase=HypothesisDevelopmentPhase(_phase_value(target)),
-        at=at,
-        intent_epoch=intent_epoch,
-        reason=reason,
-    )
-
-
-def _rebuild(
-    state: HypothesisDevelopmentState,
-    target: object,
-    records: tuple[object, ...],
-) -> HypothesisDevelopmentState:
-    return replace(
-        state,
-        phase=HypothesisDevelopmentPhase(_phase_value(target)),
-        transitions=cast("tuple[PhaseTransition, ...]", records),
     )
 
 

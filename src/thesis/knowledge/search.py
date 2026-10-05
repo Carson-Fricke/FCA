@@ -33,6 +33,8 @@ from thesis.knowledge.index import (
     SearchIndex,
     TrustState,
     TrustTier,
+    embedding_identity,
+    embedding_operation,
     tokenize,
 )
 
@@ -87,6 +89,14 @@ class HashingEmbedder:
     def dim(self) -> int:
         """The fixed dimensionality of produced vectors."""
         return self._dim
+
+    @property
+    def model_id(self) -> str:
+        return "hashed-bag-of-words"
+
+    @property
+    def cache_identity(self) -> str:
+        return f"{self.model_id}:v1:{self._dim}"
 
     def embed(self, text: str) -> list[float]:
         """Return the L2-normalized hashed bag-of-words vector of ``text``."""
@@ -239,10 +249,19 @@ class KnowledgeSearch:
         any text match are returned with a zero score marked ``metadata``
         when an explicit metadata filter was supplied.
         """
+        return embedding_operation(
+            self._embedder, lambda backend: self._search(query, backend)
+        )
+
+    def _search(self, query: SearchQuery, embedder: EmbeddingPort) -> list[SearchHit]:
         if not isinstance(query, SearchQuery):
             raise KnowledgeSearchError("query must be a SearchQuery")
+        if self._index.embedding_model and self._index.embedding_model != (
+            embedding_identity(embedder)
+        ):
+            raise KnowledgeSearchError("query embedding model does not match the index")
         query_tokens = frozenset(tokenize(query.text))
-        query_vector = self._embedder.embed(query.text) if query.text.strip() else None
+        query_vector = embedder.embed(query.text) if query.text.strip() else None
         filter_tags = frozenset(query.tags)
         filter_ids = frozenset(query.page_ids)
         has_metadata_filter = (

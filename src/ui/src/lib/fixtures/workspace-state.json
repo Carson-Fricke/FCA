@@ -1,31 +1,5 @@
 {
 	"alpha-lab": {
-		"cleo": {
-			"plan_id": "plan-momentum-34",
-			"title": "Tune Momentum Breakout and take v3.2 to paper",
-			"current_stage": "validate",
-			"stages": [
-				{ "name": "spec", "state": "done" },
-				{ "name": "implement", "state": "done" },
-				{ "name": "validate", "state": "active" },
-				{ "name": "deploy", "state": "pending" }
-			],
-			"steps": [
-				{ "id": "step-1", "title": "Adapt v3.1 with 0.9σ entry threshold", "state": "done", "gate": null },
-				{ "id": "step-2", "title": "Run declared-split backtest (bt-204)", "state": "done", "gate": "stats within policy bounds" },
-				{ "id": "step-3", "title": "Adversarial overfitting review", "state": "active", "gate": "reviewer sign-off" },
-				{ "id": "step-4", "title": "Package bundle and propose paper consent", "state": "pending", "gate": "structured consent" },
-				{ "id": "step-5", "title": "Paper deployment soak for 5 sessions", "state": "pending", "gate": null }
-			],
-			"updated_at": "2026-09-08T18:10:00Z"
-		},
-		"taskTimeline": [
-			{ "id": "tl-1", "at": "2026-09-08T17:14:05Z", "task_id": "step-1", "kind": "task.completed", "detail": "v3.2 adaptation published as version 3.2.0" },
-			{ "id": "tl-2", "at": "2026-09-08T17:16:00Z", "task_id": "step-2", "kind": "task.started", "detail": "Backtest bt-204 submitted with declared split 2025-01-31" },
-			{ "id": "tl-3", "at": "2026-09-08T18:04:00Z", "task_id": "step-2", "kind": "task.completed", "detail": "bt-204 completed: +18.4% total, OOS +7.0%" },
-			{ "id": "tl-4", "at": "2026-09-08T18:05:30Z", "task_id": "step-3", "kind": "task.started", "detail": "Adversarial review queued with pre-result assignment" },
-			{ "id": "tl-5", "at": "2026-09-08T18:06:00Z", "task_id": "step-3", "kind": "gate.blocked", "detail": "Awaiting reviewer sign-off before packaging" }
-		],
 		"lineages": [
 			{
 				"strategy_id": "str-1",
@@ -123,25 +97,6 @@
 		]
 	},
 	"beta-quant": {
-		"cleo": {
-			"plan_id": "plan-carry-7",
-			"title": "Draft term-structure carry strategy",
-			"current_stage": "spec",
-			"stages": [
-				{ "name": "spec", "state": "active" },
-				{ "name": "implement", "state": "pending" },
-				{ "name": "validate", "state": "pending" },
-				{ "name": "deploy", "state": "pending" }
-			],
-			"steps": [
-				{ "id": "bstep-1", "title": "Collect roll calendars and carry definitions", "state": "active", "gate": "data coverage confirmed" },
-				{ "id": "bstep-2", "title": "First-pass sizing sketch", "state": "pending", "gate": null }
-			],
-			"updated_at": "2026-09-07T08:41:00Z"
-		},
-		"taskTimeline": [
-			{ "id": "btl-1", "at": "2026-09-07T08:41:00Z", "task_id": "bstep-1", "kind": "task.created", "detail": "Workflow wf-strategy-draft 1.1.0 completed; plan created" }
-		],
 		"lineages": [
 			{
 				"strategy_id": "str-b1",

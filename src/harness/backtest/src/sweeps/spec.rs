@@ -407,14 +407,10 @@ pub fn configuration_digest(
     instance_id: &str,
     parameters: &BTreeMap<String, JsonValue>,
 ) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"fca:harness-configuration:v1\0");
-    hasher.update(
-        configuration_json(base, instance_id, Some(parameters))
-            .to_canonical_string_utf8()
-            .as_bytes(),
-    );
-    hasher.finalize_hex()
+    harness_contracts::configuration_hash(
+        &configuration_json(base, instance_id, Some(parameters)).to_serde_value(),
+        harness_contracts::HashEncoding::Utf8,
+    )
 }
 
 /// Derive one run identity from the base run ID and configuration digest.

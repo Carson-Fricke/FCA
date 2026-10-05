@@ -27,16 +27,15 @@ def test_falsifier_missing_from_new_outputs_is_rejected() -> None:
     )
 
 
-def test_declared_output_not_published_by_new_source_is_rejected() -> None:
+def test_inline_source_is_not_a_live_completion_field() -> None:
     payload = _hypothesis_envelope()
     model = payload["model"]
     assert isinstance(model, dict)
-    model["source"] = model["source"].replace('publish("sharpe",', 'publish("ar1_gap",')
-    model["source"] += '\n// metrics.publish("sharpe", 1.0);\n'
+    model["source"] = 'metrics.publish("sharpe", 1.0);'
 
     errors = hypothesis_payload_errors(payload)
 
-    assert any("exact literal names; missing: sharpe" in error for error in errors)
+    assert any("hypothesis.model.source" in error for error in errors)
 
 
 def test_valid_new_model_can_replace_old_output_names() -> None:
@@ -54,6 +53,5 @@ def test_valid_new_model_can_replace_old_output_names() -> None:
     model = payload["model"]
     assert isinstance(model, dict)
     model["outputs"] = ["ar1_gap"]
-    model["source"] = model["source"].replace('publish("sharpe",', 'publish("ar1_gap",')
 
     assert hypothesis_payload_errors(payload) == []

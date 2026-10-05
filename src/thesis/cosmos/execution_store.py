@@ -27,6 +27,7 @@ from azure.cosmos.exceptions import (
     CosmosResourceNotFoundError,
 )
 
+from thesis.cosmos.chunks import ChunkedPayloadStore, ensure_bounded_item
 from thesis.workflows.core.execution_store import (
     ExecutionDocument,
     ExecutionIdentity,
@@ -62,6 +63,7 @@ class CosmosExecutionStore:
 
     def __init__(self, container: ContainerProxy) -> None:
         self._container = container
+        self._chunks = ChunkedPayloadStore(container, partition_field="executionId")
 
     def create(
         self,
@@ -130,7 +132,7 @@ class CosmosExecutionStore:
 
     def _read(self, execution_id: str) -> dict[str, Any]:
         try:
-            return dict(
+            envelope = dict(
                 self._container.read_item(
                     item=_item_id(execution_id), partition_key=execution_id
                 )
@@ -139,6 +141,8 @@ class CosmosExecutionStore:
             raise ExecutionStoreNotFound(
                 f"execution {execution_id!r} was not found"
             ) from error
+        envelope["payload"] = self._chunks.load(envelope["payload"], execution_id)
+        return envelope
 
     def _checked(
         self, execution_id: str, expected_revision: int | None
@@ -157,7 +161,8 @@ class CosmosExecutionStore:
         self, envelope: dict[str, Any], document: ExecutionDocument
     ) -> ExecutionDocument:
         stored = dict(envelope)
-        stored["payload"] = document.as_dict()
+        stored["payload"] = self._chunks.dump(document.as_dict(), document.execution_id)
+        ensure_bounded_item(stored)
         etag = envelope.get("_etag")
         try:
             if etag is not None:
@@ -179,17 +184,18 @@ class CosmosExecutionStore:
             ) from error
         return document
 
-    @staticmethod
-    def _envelope(document: ExecutionDocument) -> dict[str, object]:
-        return {
+    def _envelope(self, document: ExecutionDocument) -> dict[str, object]:
+        envelope = {
             "id": _item_id(document.execution_id),
             "executionId": document.execution_id,
             "workspaceId": document.identity.workspace_id,
             "chatId": document.identity.chat_id,
             "recordType": RECORD_TYPE,
             "createdAt": _now(),
-            "payload": document.as_dict(),
+            "payload": self._chunks.dump(document.as_dict(), document.execution_id),
         }
+        ensure_bounded_item(envelope)
+        return envelope
 
 
 __all__ = [

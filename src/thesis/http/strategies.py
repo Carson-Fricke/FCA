@@ -144,13 +144,9 @@ class StrategyDataService:
 
 def get_strategy_service(request: Request) -> StrategyDataService:
     """Resolve the service from app state so applications control persistence."""
-    service = getattr(request.app.state, "strategy_service", None)
-    if service is None:
-        service = StrategyDataService()
-        request.app.state.strategy_service = service
-    if not isinstance(service, StrategyDataService):
-        raise RuntimeError("app.state.strategy_service must be a StrategyDataService")
-    return service
+    from thesis.http.errors import require_service
+
+    return require_service(request, "strategy_service", StrategyDataService)
 
 
 def create_strategy_router() -> APIRouter:
@@ -170,7 +166,7 @@ def create_strategy_router() -> APIRouter:
         request: CreateStrategyRequest,
         service: Annotated[StrategyDataService, Depends(get_strategy_service)],
     ) -> dict[str, object]:
-        from fastapi import HTTPException
+        from thesis.http.errors import service_error
 
         try:
             return service.create_strategy(
@@ -181,7 +177,7 @@ def create_strategy_router() -> APIRouter:
                 status=request.status,
             )
         except ValueError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+            raise service_error(error) from error
 
     return router
 

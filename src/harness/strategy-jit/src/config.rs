@@ -42,7 +42,10 @@ pub fn build_instances(
     for configured in &configuration.strategy_instances {
         let source = authored_source(configured)?;
         verify_bundle_hash(configured, &source)?;
-        let parameters = parameters_value(configured);
+        let mut parameters = parameters_value(configured);
+        if parameters.get("symbols").is_none() {
+            parameters["symbols"] = serde_json::json!(configured.symbols);
+        }
         let runtime = match kind {
             ProgramKind::Study => {
                 study_instance(workspace, &source, &parameters, &configured.instance_id)?

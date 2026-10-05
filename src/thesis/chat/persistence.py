@@ -26,7 +26,8 @@ import tempfile
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import TypeVar, cast
+from threading import Lock, RLock
+from typing import Any, TypeVar, cast
 
 from thesis.chat.contracts import (
     AgentInvocation,
@@ -34,9 +35,12 @@ from thesis.chat.contracts import (
     AgentInvocationState,
     Attachment,
     AttachmentState,
+    ChatContractError,
     ChatMessage,
     ChatState,
     ChatThread,
+    CompletionMode,
+    ConversationRecord,
     Investigation,
     InvestigationState,
     MessageRole,
@@ -50,6 +54,7 @@ from thesis.chat.contracts import (
     TranscriptItemKind,
     WorkflowExecution,
     WorkflowExecutionState,
+    replace_record,
 )
 
 Record = (
@@ -63,17 +68,7 @@ Record = (
     | AgentInvocation
 )
 RecordType = type[Record]
-RecordT = TypeVar(
-    "RecordT",
-    ChatThread,
-    ChatMessage,
-    Attachment,
-    Investigation,
-    WorkflowExecution,
-    ToolJob,
-    SubAgentRecord,
-    AgentInvocation,
-)
+RecordT = TypeVar("RecordT", bound=Record)
 
 _ID_FIELDS: Mapping[RecordType, str] = {
     ChatThread: "chat_id",
@@ -98,6 +93,29 @@ _RECORD_TYPES: tuple[RecordType, ...] = (
 )
 
 _SKIPPED_FIELDS = frozenset({"schema_version", "content_hash"})
+_CONVERSATION_LOCKS: dict[tuple[str, str, str], RLock] = {}
+_LOCK_REGISTRY_GUARD = Lock()
+
+
+def conversation_lock(store: str, workspace_id: str, root: str) -> RLock:
+    """Share a single-process write/delete guard across adapter instances."""
+    with _LOCK_REGISTRY_GUARD:
+        return _CONVERSATION_LOCKS.setdefault((store, workspace_id, root), RLock())
+
+
+def ensure_ownership_unchanged(previous: Record | None, record: Record) -> None:
+    """Reject moving a persisted identity to a different conversation."""
+    if isinstance(previous, ConversationRecord) and isinstance(
+        record, ConversationRecord
+    ):
+        for name in (
+            "chat_id",
+            "conversation_id",
+            "root_conversation_id",
+            "parent_conversation_id",
+        ):
+            if getattr(previous, name) != getattr(record, name):
+                raise ChatContractError("conversation ownership is immutable")
 
 
 def _record_id(record: Record) -> str:
@@ -191,8 +209,18 @@ def _links(value: object) -> RecordLinks:
 def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record:
     """Reconstruct one record from its durable JSON payload."""
     _ensure_supported(record_type)
+    ownership: dict[str, Any] = {
+        name: data[name]
+        for name in (
+            "conversation_id",
+            "root_conversation_id",
+            "parent_conversation_id",
+        )
+        if name in data
+    }
     if record_type is ChatThread:
         return ChatThread(
+            **ownership,
             workspace_id=str(data["workspace_id"]),
             created_at=_datetime(data["created_at"]),
             created_by=str(data["created_by"]),
@@ -202,9 +230,13 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
             state=ChatState(str(data["state"])),
             links=_links(data.get("links")),
             updated_at=_optional_datetime(data.get("updated_at")),
+            input_consumed_positions=cast(
+                Mapping[str, int], _mapping(data.get("input_consumed_positions")) or {}
+            ),
         )
     if record_type is ChatMessage:
         return ChatMessage(
+            **ownership,
             workspace_id=str(data["workspace_id"]),
             created_at=_datetime(data["created_at"]),
             created_by=str(data["created_by"]),
@@ -224,10 +256,12 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
             if data.get("execution_id") is None
             else str(data["execution_id"]),
             intent_epoch=_int(data.get("intent_epoch")),
+            input_position=_int(data.get("input_position")),
             updated_at=_optional_datetime(data.get("updated_at")),
         )
     if record_type is Attachment:
         return Attachment(
+            **ownership,
             workspace_id=str(data["workspace_id"]),
             created_at=_datetime(data["created_at"]),
             created_by=str(data["created_by"]),
@@ -264,6 +298,7 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
         )
     if record_type is WorkflowExecution:
         return WorkflowExecution(
+            **ownership,
             workspace_id=str(data["workspace_id"]),
             created_at=_datetime(data["created_at"]),
             created_by=str(data["created_by"]),
@@ -290,6 +325,7 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
         )
     if record_type is SubAgentRecord:
         return SubAgentRecord(
+            **ownership,
             workspace_id=str(data["workspace_id"]),
             created_at=_datetime(data["created_at"]),
             created_by=str(data["created_by"]),
@@ -305,6 +341,31 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
             phase=_optional_text(data.get("phase")),
             spec_version=str(data.get("spec_version", "1.0.0")),
             kind=SubAgentKind(str(data.get("kind", SubAgentKind.CONVERSATION))),
+            completion_mode=CompletionMode(
+                str(
+                    data.get(
+                        "completion_mode",
+                        (
+                            CompletionMode.COMPLETE_ON_TEXT
+                            if data.get("kind") == SubAgentKind.ONE_SHOT
+                            and not data.get("phase")
+                            else CompletionMode.EXPLICIT_COMPLETION
+                        ),
+                    )
+                )
+            ),
+            returns_to_sub_agent_id=_optional_text(
+                data.get("returns_to_sub_agent_id", data.get("parent_sub_agent_id"))
+            ),
+            phase_executor=_bool(
+                data.get("phase_executor"),
+                default=bool(
+                    data.get("phase")
+                    and data.get("workflow_execution_id")
+                    and data.get("phase_attempt_id")
+                    and data.get("parent_sub_agent_id")
+                ),
+            ),
             allowed_tools=_ids(data.get("allowed_tools")),
             status=SubAgentStatus(str(data.get("status", SubAgentStatus.PENDING))),
             accepts_input=_bool(data.get("accepts_input")),
@@ -317,13 +378,20 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
         )
     if record_type is AgentInvocation:
         kind = AgentInvocationKind(str(data.get("kind", AgentInvocationKind.MODEL)))
+        request_messages = data.get("request_messages", ())
+        # References and shipped full-message audits are both opaque evidence.
+        # Do not synthesize message contents or reconstruct the provider request.
+        if not isinstance(request_messages, list | tuple) or any(
+            not isinstance(message, Mapping) for message in request_messages
+        ):
+            raise TypeError("request_messages must be a sequence of mappings")
         return AgentInvocation(
+            **ownership,
             workspace_id=str(data["workspace_id"]),
             created_at=_datetime(data["created_at"]),
             created_by=str(data["created_by"]),
             invocation_id=str(data["invocation_id"]),
             chat_id=str(data["chat_id"]),
-            conversation_id=str(data["conversation_id"]),
             kind=kind,
             state=AgentInvocationState(
                 str(data.get("state", AgentInvocationState.REQUESTED))
@@ -337,12 +405,20 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
             tool_name=_optional_text(data.get("tool_name")),
             policy_hash=_optional_text(data.get("policy_hash")),
             input_hash=_optional_text(data.get("input_hash")),
+            request_messages=cast(
+                tuple[Mapping[str, object], ...], tuple(request_messages)
+            ),
+            provider_request=_mapping(data.get("provider_request")),
+            request_message_id=_optional_text(data.get("request_message_id")),
+            tool_request_id=_optional_text(data.get("tool_request_id")),
             output_hash=_optional_text(data.get("output_hash")),
             idempotency_key=_optional_text(data.get("idempotency_key")),
+            intent_epoch=_int(data.get("intent_epoch")),
             failure=_mapping(data.get("failure")),
             updated_at=_optional_datetime(data.get("updated_at")),
         )
     return ToolJob(
+        **ownership,
         workspace_id=str(data["workspace_id"]),
         created_at=_datetime(data["created_at"]),
         created_by=str(data["created_by"]),
@@ -416,6 +492,21 @@ class FileChatPersistence:
         return self._type_dir(record_type) / f"{digest}.json"
 
     def save(self, record: RecordT) -> RecordT:
+        if isinstance(record, ConversationRecord):
+            with conversation_lock(
+                str(self._root.resolve()), record.workspace_id, record.chat_id
+            ):
+                root = self.get(ChatThread, record.workspace_id, record.chat_id)
+                if root is not None and root.state is ChatState.DELETED:
+                    raise ChatContractError("conversation has been deleted")
+                ensure_ownership_unchanged(
+                    self.get(type(record), record.workspace_id, _record_id(record)),
+                    record,
+                )
+                return self._save(record)
+        return self._save(record)
+
+    def _save(self, record: RecordT) -> RecordT:
         record_type = cast(RecordType, type(record))
         _ensure_supported(record_type)
         record_id = _record_id(record)
@@ -451,11 +542,100 @@ class FileChatPersistence:
         if not directory.is_dir():
             return ()
         records = [self._read(path) for path in sorted(directory.glob("*.json"))]
-        selected = [record for record in records if record.workspace_id == workspace_id]
+        selected = [
+            record
+            for record in records
+            if record.workspace_id == workspace_id
+            and not (
+                isinstance(record, ChatThread) and record.state is ChatState.DELETED
+            )
+        ]
         selected.sort(key=lambda record: (record.created_at, _record_id(record)))
         return cast(tuple[RecordT, ...], tuple(selected))
 
+    def list_conversation(
+        self,
+        record_type: type[RecordT],
+        workspace_id: str,
+        root_conversation_id: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> tuple[RecordT, ...]:
+        if not issubclass(record_type, ConversationRecord):
+            raise TypeError("record type is not conversation-owned")
+        return tuple(
+            record
+            for record in self.list(record_type, workspace_id)
+            if isinstance(record, ConversationRecord)
+            and record.root_conversation_id == root_conversation_id
+            and (conversation_id is None or record.conversation_id == conversation_id)
+        )
+
+    def mark_conversation_deleted(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        deleted_at: datetime,
+    ) -> None:
+        with conversation_lock(str(self._root.resolve()), workspace_id, chat_id):
+            root = self.get(ChatThread, workspace_id, chat_id)
+            if root is not None and root.state is not ChatState.DELETED:
+                self._save(
+                    replace_record(root, state=ChatState.DELETED, updated_at=deleted_at)
+                )
+
+    def list_deleted_conversations(self, workspace_id: str) -> tuple[ChatThread, ...]:
+        directory = self._type_dir(ChatThread)
+        if not directory.is_dir():
+            return ()
+        return tuple(
+            record
+            for path in directory.glob("*.json")
+            if isinstance((record := self._read(path)), ChatThread)
+            and record.workspace_id == workspace_id
+            and record.state is ChatState.DELETED
+        )
+
+    def purge_conversation(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        limit: int = 100,
+    ) -> bool:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        with conversation_lock(str(self._root.resolve()), workspace_id, chat_id):
+            root = self.get(ChatThread, workspace_id, chat_id)
+            if root is None or root.state is not ChatState.DELETED:
+                raise ChatContractError("purge requires a deleted root conversation")
+            remaining = limit
+            for record_type in _RECORD_TYPES:
+                if record_type is ChatThread or not issubclass(
+                    record_type, ConversationRecord
+                ):
+                    continue
+                for record in self.list_conversation(
+                    record_type, workspace_id, chat_id
+                ):
+                    if remaining == 0:
+                        return False
+                    self.delete(record_type, workspace_id, _record_id(record))
+                    remaining -= 1
+            return True
+
     def delete(
+        self, record_type: RecordType, workspace_id: str, record_id: str
+    ) -> None:
+        if record_type is ChatThread:
+            with conversation_lock(str(self._root.resolve()), workspace_id, record_id):
+                root = self.get(ChatThread, workspace_id, record_id)
+                if root is not None and root.state is ChatState.DELETED:
+                    raise ChatContractError("a conversation tombstone must be retained")
+                self._delete(record_type, workspace_id, record_id)
+            return
+        self._delete(record_type, workspace_id, record_id)
+
+    def _delete(
         self, record_type: RecordType, workspace_id: str, record_id: str
     ) -> None:
         path = self._path(record_type, workspace_id, record_id)

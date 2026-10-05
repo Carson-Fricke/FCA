@@ -119,6 +119,15 @@ class DeterministicPhase[WorkflowT, RequestT, StateT](
     contract: DeterministicExecutor[WorkflowT, RequestT, StateT]
 
 
+@dataclass(frozen=True, slots=True)
+class TerminalPhase[WorkflowT, RequestT, StateT](
+    _PhaseSpec[WorkflowT, RequestT, StateT]
+):
+    """A terminal outcome with no executor or completion contract."""
+
+    terminal: bool = field(default=True, init=False)
+
+
 #: The sealed union of phase types.  The engine dispatches on this union by
 #: exhaustive match; adding a phase type is a compile error at every
 #: unmatched site.
@@ -126,4 +135,5 @@ type PhaseSpec[WorkflowT, RequestT, StateT] = (
     ConversationPhase[WorkflowT, RequestT, StateT]
     | OneShotPhase[WorkflowT, RequestT, StateT]
     | DeterministicPhase[WorkflowT, RequestT, StateT]
+    | TerminalPhase[WorkflowT, RequestT, StateT]
 )

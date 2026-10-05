@@ -6,10 +6,19 @@ The package re-exports the prompt surface so callers can keep importing from
 
 from __future__ import annotations
 
-from .creation import _creation_turn_prompt
+from .discovery import _discovery_restart_section, _discovery_turn_prompt
+from .model_creation import (
+    _model_creation_instructions,
+    _model_creation_revision_section,
+    _model_creation_turn_prompt,
+)
 from .verdict import _verdict_instructions
 
 __all__ = [
-    "_creation_turn_prompt",
+    "_discovery_restart_section",
+    "_discovery_turn_prompt",
+    "_model_creation_instructions",
+    "_model_creation_revision_section",
+    "_model_creation_turn_prompt",
     "_verdict_instructions",
 ]

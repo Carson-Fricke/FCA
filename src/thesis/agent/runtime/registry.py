@@ -20,7 +20,15 @@ from thesis.agent.runtime.control_tools import (
     SpawnObserver,
     control_registered_tools,
 )
+from thesis.agent.runtime.knowledge_tools import (
+    KNOWLEDGE_TOOL_NAMES,
+    knowledge_registered_tools,
+)
 from thesis.agent.runtime.policy import SpawnPolicy
+from thesis.agent.runtime.program_tools import (
+    PROGRAM_TOOL_NAMES,
+    program_registered_tools,
+)
 from thesis.agent.runtime.session import (
     RegisteredTool,
     SessionToolRegistry,
@@ -36,6 +44,8 @@ from thesis.agent.runtime.workflow_tools import (
     WorkflowLauncher,
     workflow_registered_tools,
 )
+from thesis.knowledge.service import KnowledgeScope, KnowledgeService
+from thesis.workspaces.programs import WorkspacePrograms
 
 #: The static Thesis-owned tool names: control tools plus workflow launch.
 #: The completion tools are policy-visible so a node can inherit them, while
@@ -46,6 +56,8 @@ THESIS_TOOL_NAMES: tuple[str, ...] = tuple(
             *CONTROL_CHAT_TOOL_NAMES,
             *CONTROL_NODE_TOOL_NAMES,
             *WORKFLOW_TOOL_NAMES,
+            *KNOWLEDGE_TOOL_NAMES,
+            *PROGRAM_TOOL_NAMES,
         }
     )
 )
@@ -109,6 +121,10 @@ def build_session_registry(
     spawn_policy: SpawnPolicy | None = None,
     phase_completion_schema: Mapping[str, object] | None = None,
     strategy_authoring: StrategyAuthor | StrategyAuthoringService | None = None,
+    knowledge: KnowledgeService | None = None,
+    knowledge_scope: KnowledgeScope = "both",
+    knowledge_collections: tuple[str, ...] | None = None,
+    programs: WorkspacePrograms | None = None,
 ) -> SessionToolRegistry:
     """Compose the merged, policy-scoped catalog for one session context.
 
@@ -124,10 +140,25 @@ def build_session_registry(
     a helper inherited the tool name in its policy.
     """
     tools: list[RegisteredTool] = []
-    if strategy_authoring is not None:
+    if knowledge is not None:
+        tools.extend(
+            knowledge_registered_tools(
+                knowledge,
+                context,
+                knowledge_scope,
+                allowed_collections=knowledge_collections,
+            )
+        )
+    if programs is not None:
+        tools.extend(program_registered_tools(programs, context))
+    if strategy_authoring is not None and programs is None:
         tools.extend(strategy_registered_tools(strategy_authoring, context))
     if harness_tools is not None:
-        tools.extend(harness_registered_tools(harness_tools))
+        tools.extend(
+            tool
+            for tool in harness_registered_tools(harness_tools)
+            if programs is None or tool.name not in PROGRAM_TOOL_NAMES
+        )
     if control is not None:
         tools.extend(
             control_registered_tools(

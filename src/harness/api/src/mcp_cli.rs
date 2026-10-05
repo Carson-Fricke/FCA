@@ -193,14 +193,7 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
 }
 
 fn default_loader() -> Arc<dyn ConfigurationLoader> {
-    struct JsonLoader;
-    impl ConfigurationLoader for JsonLoader {
-        fn load_json(&self, path: &str) -> Result<Value, String> {
-            let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-            serde_json::from_str(&text).map_err(|error| error.to_string())
-        }
-    }
-    Arc::new(JsonLoader)
+    Arc::new(mcp::tools::JsonFileConfigurationLoader)
 }
 
 /// Serve the MCP server over stdio until EOF.

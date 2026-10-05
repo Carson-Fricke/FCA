@@ -1,4 +1,8 @@
-"""The hypothesis-creation phase's durable trigger text."""
+"""The workflow-start durable trigger text.
+
+The workflow still starts by handing the operator's launching message to the
+first phase (now discovery), so the trigger reader lives here unchanged.
+"""
 
 from __future__ import annotations
 

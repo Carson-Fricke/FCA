@@ -1,0 +1,3001 @@
+{
+  "$defs": {
+    "ActorRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor_id"
+      ],
+      "type": "object"
+    },
+    "ActorScope": {
+      "enum": [
+        "user",
+        "assistant",
+        "system",
+        "tool",
+        "workflow"
+      ],
+      "type": "string"
+    },
+    "ChatMessageListWire": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ChatMessageWire"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChatMessageWire": {
+      "additionalProperties": false,
+      "description": "Complete serialized chat record, including persisted hash and timestamps.",
+      "properties": {
+        "actor_id": {
+          "type": "string"
+        },
+        "attachment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": "string"
+        },
+        "chat_id": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "data": {
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "discriminator": {
+                    "mapping": {
+                      "delivery": "#/$defs/Delivery",
+                      "external_input": "#/$defs/ExternalInput",
+                      "model_output": "#/$defs/ModelOutput",
+                      "runtime_tool": "#/$defs/RuntimeTool"
+                    },
+                    "propertyName": "activityKind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/ExternalInput"
+                    },
+                    {
+                      "$ref": "#/$defs/ModelOutput"
+                    },
+                    {
+                      "$ref": "#/$defs/RuntimeTool"
+                    },
+                    {
+                      "$ref": "#/$defs/Delivery"
+                    }
+                  ]
+                },
+                {
+                  "additionalProperties": true,
+                  "not": {
+                    "required": [
+                      "activityKind"
+                    ]
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            {
+              "properties": {
+                "datums": {
+                  "items": {
+                    "$ref": "#/$defs/DatumWire"
+                  },
+                  "type": "array"
+                },
+                "sessionMessage": {
+                  "$ref": "#/$defs/SessionMessageWire"
+                }
+              }
+            }
+          ]
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_position": {
+          "type": "integer"
+        },
+        "intent_epoch": {
+          "type": "integer"
+        },
+        "investigation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptItemKind"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "parent_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/MessageRole"
+        },
+        "root_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/MessageState"
+        },
+        "tool_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolResultWire"
+            },
+            {
+              "$ref": "#/$defs/DeliveredDatumWire"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "created_at",
+        "created_by",
+        "schema_version",
+        "content_hash",
+        "chat_id",
+        "conversation_id",
+        "root_conversation_id",
+        "parent_conversation_id",
+        "message_id",
+        "actor_id",
+        "role",
+        "body",
+        "reasoning",
+        "tool_result",
+        "kind",
+        "data",
+        "state",
+        "attachment_ids",
+        "investigation_ids",
+        "execution_id",
+        "intent_epoch",
+        "input_position",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "ChatState": {
+      "enum": [
+        "active",
+        "archived",
+        "deleted"
+      ],
+      "type": "string"
+    },
+    "ChatSubAgentMessageRequest": {
+      "additionalProperties": false,
+      "description": "One operator input message addressed to a chat-scoped sub-agent.\n\nThe answering actor is never accepted here: it is derived from the\nauthenticated session by the route.",
+      "properties": {
+        "body": {
+          "maxLength": 32768,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "type": "object"
+    },
+    "ChatSubAgentTreeWire": {
+      "additionalProperties": false,
+      "description": "Canonical tree response used by the projection and HTTP schema export.",
+      "properties": {
+        "chatId": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SubAgentNodeWire"
+          },
+          "type": "array"
+        },
+        "roots": {
+          "items": {
+            "$ref": "#/$defs/SubAgentNodeWire"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "chatId",
+        "roots",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChatThreadListWire": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ChatThreadWire"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChatThreadWire": {
+      "additionalProperties": false,
+      "description": "Complete serialized thread with source-derived links and provenance.",
+      "properties": {
+        "chat_id": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "input_consumed_positions": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "links": {
+          "$ref": "#/$defs/RecordLinks"
+        },
+        "owner_actor_id": {
+          "type": "string"
+        },
+        "parent_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/ChatState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "created_at",
+        "created_by",
+        "schema_version",
+        "content_hash",
+        "chat_id",
+        "conversation_id",
+        "root_conversation_id",
+        "parent_conversation_id",
+        "title",
+        "owner_actor_id",
+        "state",
+        "links",
+        "updated_at",
+        "input_consumed_positions"
+      ],
+      "type": "object"
+    },
+    "CompletionMode": {
+      "enum": [
+        "complete_on_text",
+        "explicit_completion"
+      ],
+      "type": "string"
+    },
+    "CreateAttachmentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "filename": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        "media_type": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message_id",
+        "actor_id",
+        "filename",
+        "media_type",
+        "size_bytes"
+      ],
+      "type": "object"
+    },
+    "CreateChatRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "experiment_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "investigation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "owner_actor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "strategy_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "owner_actor_id"
+      ],
+      "type": "object"
+    },
+    "CreateInvestigationRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "chat_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "experiment_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "objective": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        "owner_actor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "strategy_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "objective",
+        "owner_actor_id"
+      ],
+      "type": "object"
+    },
+    "CreateMessageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "attachment_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "maxLength": 32768,
+          "minLength": 1,
+          "type": "string"
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intent_epoch": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "investigation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "role": {
+          "$ref": "#/$defs/MessageRole",
+          "default": "user"
+        },
+        "steering_intent": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targets_execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "actor_id",
+        "body"
+      ],
+      "type": "object"
+    },
+    "CreateMessageResponseWire": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "type": "string"
+        },
+        "attachment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": "string"
+        },
+        "chat_id": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "data": {
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "discriminator": {
+                    "mapping": {
+                      "delivery": "#/$defs/Delivery",
+                      "external_input": "#/$defs/ExternalInput",
+                      "model_output": "#/$defs/ModelOutput",
+                      "runtime_tool": "#/$defs/RuntimeTool"
+                    },
+                    "propertyName": "activityKind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/ExternalInput"
+                    },
+                    {
+                      "$ref": "#/$defs/ModelOutput"
+                    },
+                    {
+                      "$ref": "#/$defs/RuntimeTool"
+                    },
+                    {
+                      "$ref": "#/$defs/Delivery"
+                    }
+                  ]
+                },
+                {
+                  "additionalProperties": true,
+                  "not": {
+                    "required": [
+                      "activityKind"
+                    ]
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            {
+              "properties": {
+                "datums": {
+                  "items": {
+                    "$ref": "#/$defs/DatumWire"
+                  },
+                  "type": "array"
+                },
+                "sessionMessage": {
+                  "$ref": "#/$defs/SessionMessageWire"
+                }
+              }
+            }
+          ]
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_position": {
+          "type": "integer"
+        },
+        "intent_epoch": {
+          "type": "integer"
+        },
+        "investigation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptItemKind"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "parent_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/MessageRole"
+        },
+        "root_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/MessageState"
+        },
+        "steering": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SteeringPercolationWire"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolResultWire"
+            },
+            {
+              "$ref": "#/$defs/DeliveredDatumWire"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "created_at",
+        "created_by",
+        "schema_version",
+        "content_hash",
+        "chat_id",
+        "conversation_id",
+        "root_conversation_id",
+        "parent_conversation_id",
+        "message_id",
+        "actor_id",
+        "role",
+        "body",
+        "reasoning",
+        "tool_result",
+        "kind",
+        "data",
+        "state",
+        "attachment_ids",
+        "investigation_ids",
+        "execution_id",
+        "intent_epoch",
+        "input_position",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "CreateStrategyRequest": {
+      "additionalProperties": false,
+      "description": "Request boundary for a new strategy registry entry.",
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "status": {
+          "default": "draft",
+          "pattern": "^(live|paper|paused|draft)$",
+          "type": "string"
+        },
+        "symbol": {
+          "maxLength": 32,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "CreateWidgetRequest": {
+      "additionalProperties": false,
+      "description": "Request boundary for widget creation; shapes follow WidgetDefinition.",
+      "properties": {
+        "data": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "pinned": {
+          "default": false,
+          "type": "boolean"
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "pattern": "^(equity|pnl|allocation|winrate|orders)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "type"
+      ],
+      "type": "object"
+    },
+    "CreateWorkspaceRequest": {
+      "additionalProperties": false,
+      "description": "Request boundary for workspace creation.",
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "initials": {
+          "anyOf": [
+            {
+              "maxLength": 4,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "DatumWire": {
+      "additionalProperties": false,
+      "properties": {
+        "datumType": {
+          "type": "string"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "structured": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "failure",
+        "ok",
+        "structured",
+        "summary",
+        "text",
+        "datumType"
+      ],
+      "type": "object"
+    },
+    "DeliveredDatumWire": {
+      "additionalProperties": true,
+      "description": "Persisted deliveries carried datum fields plus routing metadata.\n\nThese are not model-requested calls, so they have no call ID or tool name.\nKeep this shape readable without weakening direct tool-result validation.",
+      "properties": {
+        "datumType": {
+          "type": "string"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "structured": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "failure",
+        "ok",
+        "structured",
+        "summary",
+        "text",
+        "datumType"
+      ],
+      "type": "object"
+    },
+    "Delivery": {
+      "additionalProperties": true,
+      "properties": {
+        "activityKind": {
+          "const": "delivery",
+          "default": "delivery",
+          "type": "string"
+        },
+        "deliveryKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "activityKind"
+      ],
+      "type": "object"
+    },
+    "ErrorDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "ErrorResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ErrorDetail"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
+    "ExecutionEventType": {
+      "enum": [
+        "workflow.launched",
+        "workflow.started",
+        "workflow.phase",
+        "workflow.progress",
+        "workflow.phase_result",
+        "workflow.steered",
+        "workflow.stopped",
+        "workflow.cancelled",
+        "workflow.completed",
+        "workflow.failed",
+        "message.accepted",
+        "tool.submitted",
+        "tool.started",
+        "tool.result",
+        "tool.failed",
+        "sub_agent.spawned",
+        "sub_agent.progress",
+        "sub_agent.output",
+        "sub_agent.needs_input",
+        "sub_agent.completed",
+        "sub_agent.failed"
+      ],
+      "type": "string"
+    },
+    "ExecutionEventWire": {
+      "additionalProperties": false,
+      "description": "Execution event fields with the aliases used by ExecutionEvent.as_dict.",
+      "properties": {
+        "actorId": {
+          "type": "string"
+        },
+        "actorScope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActorScope"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "correlationId": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": "integer"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "eventType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionEventType"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "executionId": {
+          "type": "string"
+        },
+        "intentEpoch": {
+          "type": "integer"
+        },
+        "lateResult": {
+          "type": "boolean"
+        },
+        "occurredAt": {
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "executionId",
+        "workspaceId",
+        "eventType",
+        "correlationId",
+        "actorId",
+        "actorScope",
+        "occurredAt",
+        "payload",
+        "intentEpoch",
+        "lateResult",
+        "eventId",
+        "cursor"
+      ],
+      "type": "object"
+    },
+    "ExternalInput": {
+      "additionalProperties": true,
+      "properties": {
+        "activityKind": {
+          "const": "external_input",
+          "default": "external_input",
+          "type": "string"
+        },
+        "subAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "activityKind"
+      ],
+      "type": "object"
+    },
+    "LaunchBacktestRequest": {
+      "additionalProperties": false,
+      "description": "Request boundary mirroring the harness activation request contract.",
+      "properties": {
+        "bundle_ref": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "config_path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        },
+        "environment": {
+          "default": "paper",
+          "enum": [
+            "paper",
+            "shadow",
+            "live"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strategy_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "bundle_ref",
+        "config_path"
+      ],
+      "type": "object"
+    },
+    "LaunchHarnessBacktestRequest": {
+      "additionalProperties": false,
+      "description": "The canonical launch body accepted by ``POST /v1/backtests/jobs``.",
+      "properties": {
+        "config_path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "config_path"
+      ],
+      "type": "object"
+    },
+    "MessageContent": {
+      "additionalProperties": false,
+      "description": "Uniform content for operator input, deliveries, prompts, and results.",
+      "properties": {
+        "correlation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCorrelation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requests": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ToolRequest"
+          },
+          "type": "array"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "source"
+      ],
+      "type": "object"
+    },
+    "MessageRole": {
+      "enum": [
+        "user",
+        "assistant",
+        "system",
+        "tool"
+      ],
+      "type": "string"
+    },
+    "MessageState": {
+      "enum": [
+        "draft",
+        "accepted",
+        "streaming",
+        "completed",
+        "failed",
+        "deleted"
+      ],
+      "type": "string"
+    },
+    "MessageStateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/MessageState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "ModelOutput": {
+      "additionalProperties": true,
+      "properties": {
+        "activityKind": {
+          "const": "model_output",
+          "default": "model_output",
+          "type": "string"
+        },
+        "invocationId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "toolCallId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "toolCalls": {
+          "default": [],
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "activityKind"
+      ],
+      "type": "object"
+    },
+    "NodeInputReceiptWire": {
+      "additionalProperties": false,
+      "description": "Node-answer HTTP receipt: durable message plus admission provenance.",
+      "properties": {
+        "actor_id": {
+          "type": "string"
+        },
+        "attachment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": "string"
+        },
+        "chat_id": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "data": {
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "discriminator": {
+                    "mapping": {
+                      "delivery": "#/$defs/Delivery",
+                      "external_input": "#/$defs/ExternalInput",
+                      "model_output": "#/$defs/ModelOutput",
+                      "runtime_tool": "#/$defs/RuntimeTool"
+                    },
+                    "propertyName": "activityKind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/ExternalInput"
+                    },
+                    {
+                      "$ref": "#/$defs/ModelOutput"
+                    },
+                    {
+                      "$ref": "#/$defs/RuntimeTool"
+                    },
+                    {
+                      "$ref": "#/$defs/Delivery"
+                    }
+                  ]
+                },
+                {
+                  "additionalProperties": true,
+                  "not": {
+                    "required": [
+                      "activityKind"
+                    ]
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            {
+              "properties": {
+                "datums": {
+                  "items": {
+                    "$ref": "#/$defs/DatumWire"
+                  },
+                  "type": "array"
+                },
+                "sessionMessage": {
+                  "$ref": "#/$defs/SessionMessageWire"
+                }
+              }
+            }
+          ]
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_position": {
+          "type": "integer"
+        },
+        "intent_epoch": {
+          "type": "integer"
+        },
+        "investigation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptItemKind"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "operatorPolicy": {
+          "$ref": "#/$defs/OperatorPolicyDecisionWire"
+        },
+        "parent_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/MessageRole"
+        },
+        "root_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/MessageState"
+        },
+        "subAgentId": {
+          "type": "string"
+        },
+        "tool_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolResultWire"
+            },
+            {
+              "$ref": "#/$defs/DeliveredDatumWire"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "created_at",
+        "created_by",
+        "schema_version",
+        "content_hash",
+        "chat_id",
+        "conversation_id",
+        "root_conversation_id",
+        "parent_conversation_id",
+        "message_id",
+        "actor_id",
+        "role",
+        "body",
+        "reasoning",
+        "tool_result",
+        "kind",
+        "data",
+        "state",
+        "attachment_ids",
+        "investigation_ids",
+        "execution_id",
+        "intent_epoch",
+        "input_position",
+        "updated_at",
+        "subAgentId",
+        "operatorPolicy"
+      ],
+      "type": "object"
+    },
+    "OperatorActorKind": {
+      "description": "Who may answer a node's question, as trusted actor kinds.",
+      "enum": [
+        "human_operator",
+        "parent_agent",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "OperatorPolicyDecisionWire": {
+      "additionalProperties": false,
+      "description": "Flattened provenance returned by OperatorPolicyDecision.as_dict().",
+      "properties": {
+        "actorId": {
+          "type": "string"
+        },
+        "actorKind": {
+          "$ref": "#/$defs/OperatorActorKind"
+        },
+        "allowed": {
+          "type": "boolean"
+        },
+        "allowedActorKinds": {
+          "items": {
+            "$ref": "#/$defs/OperatorActorKind"
+          },
+          "type": "array"
+        },
+        "nodeId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy": {
+          "enum": [
+            "human_only",
+            "custom"
+          ],
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed",
+        "actorId",
+        "actorKind",
+        "allowedActorKinds",
+        "policy",
+        "role",
+        "nodeId"
+      ],
+      "type": "object"
+    },
+    "RecordLinks": {
+      "description": "Explicit links shared by chat, investigation, and execution records.",
+      "properties": {
+        "chat_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "experiment_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "investigation_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "strategy_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tool_job_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "workflow_execution_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RunScreenerRequest": {
+      "additionalProperties": false,
+      "description": "Request boundary for one screening run of a saved definition.",
+      "properties": {
+        "as_of": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "definition_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "definition_id",
+        "as_of"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityWire": {
+      "discriminator": {
+        "mapping": {
+          "delivery": "#/$defs/Delivery",
+          "external_input": "#/$defs/ExternalInput",
+          "model_output": "#/$defs/ModelOutput",
+          "runtime_tool": "#/$defs/RuntimeTool"
+        },
+        "propertyName": "activityKind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ExternalInput"
+        },
+        {
+          "$ref": "#/$defs/ModelOutput"
+        },
+        {
+          "$ref": "#/$defs/RuntimeTool"
+        },
+        {
+          "$ref": "#/$defs/Delivery"
+        }
+      ]
+    },
+    "RuntimeTool": {
+      "additionalProperties": true,
+      "properties": {
+        "activityKind": {
+          "const": "runtime_tool",
+          "default": "runtime_tool",
+          "type": "string"
+        },
+        "subAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "toolActivity": {
+          "default": "started",
+          "enum": [
+            "started",
+            "finished"
+          ],
+          "type": "string"
+        },
+        "toolCallId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "activityKind"
+      ],
+      "type": "object"
+    },
+    "SaveScreenerRequest": {
+      "additionalProperties": false,
+      "description": "Request boundary for one authored screener definition.",
+      "properties": {
+        "bar_interval": {
+          "default": "1d",
+          "pattern": "^(1min|1d)$",
+          "type": "string"
+        },
+        "lookback_days": {
+          "maximum": 3650,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "parameters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rank_metric": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "universe_revision": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "lookback_days",
+        "rank_metric",
+        "source"
+      ],
+      "type": "object"
+    },
+    "ScanAttachmentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "available"
+      ],
+      "type": "object"
+    },
+    "SessionMessageWire": {
+      "additionalProperties": false,
+      "description": "An immutable message in the caller-supplied session scope and order.",
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/MessageContent"
+        },
+        "direction": {
+          "enum": [
+            "incoming",
+            "outgoing",
+            "instruction"
+          ],
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "position": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message_id",
+        "direction",
+        "content"
+      ],
+      "type": "object"
+    },
+    "SteerWorkflowRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "body": {
+          "maxLength": 32768,
+          "minLength": 1,
+          "type": "string"
+        },
+        "message_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "actor_id",
+        "body"
+      ],
+      "type": "object"
+    },
+    "SteeringExecutionWire": {
+      "additionalProperties": false,
+      "properties": {
+        "executionId": {
+          "type": "string"
+        },
+        "intentEpoch": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "executionId",
+        "intentEpoch"
+      ],
+      "type": "object"
+    },
+    "SteeringPercolationWire": {
+      "additionalProperties": false,
+      "description": "The steering acknowledgement attached to an accepted chat message.",
+      "properties": {
+        "intent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "percolatedTo": {
+          "items": {
+            "$ref": "#/$defs/SteeringExecutionWire"
+          },
+          "type": "array"
+        },
+        "targetsExecutionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "intent",
+        "targetsExecutionId",
+        "percolatedTo"
+      ],
+      "type": "object"
+    },
+    "SubAgentKind": {
+      "description": "The two agent-backed phase kinds; deterministic work is never a sub-agent.",
+      "enum": [
+        "conversation",
+        "one_shot"
+      ],
+      "type": "string"
+    },
+    "SubAgentNodeListWire": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SubAgentNodeWire"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "SubAgentNodeWire": {
+      "additionalProperties": false,
+      "description": "One chat-scoped sub-agent node and its direct children.",
+      "properties": {
+        "acceptsInput": {
+          "type": "boolean"
+        },
+        "allowedTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "chatId": {
+          "type": "string"
+        },
+        "children": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SubAgentNodeWire"
+          },
+          "type": "array"
+        },
+        "completionContractRef": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completionMode": {
+          "$ref": "#/$defs/CompletionMode"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delegatedBudget": {
+          "type": "integer"
+        },
+        "inputContractRef": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SubAgentKind"
+        },
+        "parentSubAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phaseAttemptId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phaseExecutor": {
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resultRef": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "returnsToSubAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "type": "string"
+        },
+        "specVersion": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SubAgentStatus"
+        },
+        "subAgentId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflowExecutionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "subAgentId",
+        "chatId",
+        "role",
+        "kind",
+        "status",
+        "parentSubAgentId",
+        "workflowExecutionId",
+        "phaseAttemptId",
+        "specVersion",
+        "completionMode",
+        "phaseExecutor",
+        "returnsToSubAgentId",
+        "phase",
+        "acceptsInput",
+        "allowedTools",
+        "delegatedBudget",
+        "inputContractRef",
+        "completionContractRef",
+        "resultRef",
+        "result",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "SubAgentStatus": {
+      "description": "Lifecycle status projected for one durable sub-agent.",
+      "enum": [
+        "pending",
+        "running",
+        "needs_input",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "SubmitToolJobRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "correlation_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "experiment_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "investigation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strategy_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tool_name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "actor_id"
+      ],
+      "type": "object"
+    },
+    "TimelineEventWire": {
+      "additionalProperties": false,
+      "properties": {
+        "chatId": {
+          "type": "string"
+        },
+        "executionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "event",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ExecutionEventWire"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "threadId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "chatId",
+        "workspaceId",
+        "seq",
+        "ts",
+        "kind",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "TimelineExecutionWire": {
+      "additionalProperties": false,
+      "properties": {
+        "chatId": {
+          "type": "string"
+        },
+        "executionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "execution",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/WorkflowExecutionWire"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "threadId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "chatId",
+        "workspaceId",
+        "seq",
+        "ts",
+        "kind",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "TimelineItemWire": {
+      "discriminator": {
+        "mapping": {
+          "event": "#/$defs/TimelineEventWire",
+          "execution": "#/$defs/TimelineExecutionWire",
+          "message": "#/$defs/TimelineMessageWire"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TimelineMessageWire"
+        },
+        {
+          "$ref": "#/$defs/TimelineEventWire"
+        },
+        {
+          "$ref": "#/$defs/TimelineExecutionWire"
+        }
+      ]
+    },
+    "TimelineMessageWire": {
+      "additionalProperties": false,
+      "properties": {
+        "chatId": {
+          "type": "string"
+        },
+        "executionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "message",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ChatMessageWire"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "threadId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "chatId",
+        "workspaceId",
+        "seq",
+        "ts",
+        "kind",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "TimelinePageWire": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/TimelineItemWire"
+          },
+          "type": "array"
+        },
+        "nextBefore": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextBefore",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ToolCorrelation": {
+      "additionalProperties": false,
+      "description": "The immutable, exact join to a request in a particular message.",
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "request_message_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_message_id",
+        "request_id",
+        "tool_name"
+      ],
+      "type": "object"
+    },
+    "ToolRequest": {
+      "additionalProperties": false,
+      "description": "One model-requested operation, without a provider wire representation.",
+      "properties": {
+        "arguments": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ToolResultRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intent_epoch": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "success": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ToolResultWire": {
+      "additionalProperties": false,
+      "properties": {
+        "callId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "datumType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "structured": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "failure",
+        "ok",
+        "structured",
+        "summary",
+        "text",
+        "callId",
+        "tool"
+      ],
+      "type": "object"
+    },
+    "TranscriptItemKind": {
+      "description": "The discriminator carried by one conversation item.",
+      "enum": [
+        "message",
+        "tool",
+        "workflow",
+        "sub_agent",
+        "gate",
+        "artifact"
+      ],
+      "type": "string"
+    },
+    "UploadAttachmentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "content_uri": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content_uri",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "WorkflowDefinitionWire": {
+      "additionalProperties": false,
+      "properties": {
+        "phases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "terminal_phases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "transitions": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "version": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "version",
+        "title",
+        "phases",
+        "terminal_phases",
+        "transitions"
+      ],
+      "type": "object"
+    },
+    "WorkflowExecutionState": {
+      "enum": [
+        "queued",
+        "running",
+        "stopped",
+        "cancelled",
+        "completed",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "WorkflowExecutionWire": {
+      "additionalProperties": false,
+      "description": "Complete serialized workflow execution record.",
+      "properties": {
+        "chat_id": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "experiment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intent_epoch": {
+          "type": "integer"
+        },
+        "investigation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requested_by": {
+          "type": "string"
+        },
+        "root_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/WorkflowExecutionState"
+        },
+        "steering_message_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "strategy_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tool_job_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "trigger_message_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "workflow_version": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "created_at",
+        "created_by",
+        "schema_version",
+        "content_hash",
+        "chat_id",
+        "conversation_id",
+        "root_conversation_id",
+        "parent_conversation_id",
+        "execution_id",
+        "trigger_message_id",
+        "workflow_id",
+        "workflow_version",
+        "requested_by",
+        "investigation_id",
+        "strategy_ids",
+        "experiment_ids",
+        "tool_job_ids",
+        "state",
+        "phase",
+        "intent_epoch",
+        "steering_message_ids",
+        "updated_at",
+        "finished_at"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

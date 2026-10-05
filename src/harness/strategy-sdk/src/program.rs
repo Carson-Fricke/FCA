@@ -1,7 +1,7 @@
 //! Authoring traits and the capability surfaces they may touch.
 //!
 //! The capability split mirrors the Python contract exactly: a
-//! [`StudyProgram`] never sees the order surface and folds OHLCV bars only —
+//! [`StudyProgram`] never sees the order surface and observes market inputs;
 //! its only context interaction is publishing metrics through
 //! [`MetricPublisher`] — while a [`StrategyProgram`] submits orders through
 //! [`OrderSink`], whose host stamps the event time on every intent exactly as
@@ -12,14 +12,15 @@
 
 use std::collections::BTreeMap;
 
-use num::PyDecimal;
+use num::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::abi::{
     CDecimal, CMarketOrder, CMetricSink, COrderSink, CStr, METRIC_INVALID_NAME, METRIC_NOT_FINITE,
     METRIC_OK, METRIC_RESERVED_NAME, SDK_OK,
 };
-use crate::events::{BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
+use crate::events::{Fill, ProgramStart};
+use crate::{MarketConsumer, ObservationContext};
 
 /// The metric names reserved by the harness; publishing them fails.
 pub const RESERVED_METRIC_NAMES: &[&str] = &[
@@ -34,25 +35,20 @@ pub const RESERVED_METRIC_NAMES: &[&str] = &[
 
 /// A study program: fit and observe history, publish metrics, no execution.
 ///
-/// Constructed once per run with the configured JSON parameters; the bar
-/// callback folds atomic interval frames in replay order and `on_stop`
-/// publishes the run's custom metrics. Raw bars and ticks are not part of
-/// the study contract.
-pub trait StudyProgram {
+/// Constructed once per run with configured JSON parameters. Market callbacks
+/// live on [`MarketConsumer`]; `on_stop` publishes the run's custom metrics.
+pub trait StudyProgram: MarketConsumer<Context = ObservationContext> {
     /// Construct the program from the configured JSON parameters.
     fn new(parameters: serde_json::Value) -> Self
     where
         Self: Sized;
-
-    /// Fold one complete atomic interval frame, once per interval.
-    fn on_bar_frame(&mut self, _frame: &BarFrame) {}
 
     /// Publish final metrics once after the replay.
     fn on_stop(&mut self, _metrics: &mut MetricPublisher) {}
 }
 
 /// A strategy program: the full runtime surface including order submission.
-pub trait StrategyProgram {
+pub trait StrategyProgram: MarketConsumer<Context = OrderSink> {
     /// Construct the program from the configured JSON parameters.
     fn new(parameters: serde_json::Value) -> Self
     where
@@ -60,12 +56,6 @@ pub trait StrategyProgram {
 
     /// Run once before the first market event.
     fn on_start(&mut self, _start: &ProgramStart) {}
-
-    /// Fold one top-of-book quote and submit orders through the sink.
-    fn on_quote(&mut self, _event: &QuoteEvent, _orders: &mut OrderSink) {}
-
-    /// Fold one trade print and submit orders through the sink.
-    fn on_trade(&mut self, _event: &TradeEvent, _orders: &mut OrderSink) {}
 
     /// Fold one booked fill owned by this program.
     fn on_fill(&mut self, _fill: &Fill) {}
@@ -265,15 +255,15 @@ pub struct SubmittedOrder {
     /// Order side.
     pub side: Side,
     /// Order quantity.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// Order type.
     pub order_type: OrderType,
     /// Time in force.
     pub time_in_force: TimeInForce,
     /// Limit price, required for limit and stop-limit orders.
-    pub limit_price: Option<PyDecimal>,
+    pub limit_price: Option<Decimal>,
     /// Stop price, required for stop and stop-limit orders.
-    pub stop_price: Option<PyDecimal>,
+    pub stop_price: Option<Decimal>,
     /// Order sequence.
     pub sequence: u64,
     /// Order event identifier.
@@ -415,9 +405,9 @@ impl TimeInForce {
     }
 }
 
-fn optional_decimal(value: Option<PyDecimal>) -> (bool, CDecimal) {
+fn optional_decimal(value: Option<Decimal>) -> (bool, CDecimal) {
     match value {
         Some(value) => (true, CDecimal::from_decimal(value)),
-        None => (false, CDecimal::from_decimal(PyDecimal::from_i128(0))),
+        None => (false, CDecimal::from_decimal(Decimal::from_i128(0))),
     }
 }

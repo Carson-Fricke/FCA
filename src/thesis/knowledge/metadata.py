@@ -36,6 +36,7 @@ from urllib.parse import urlparse
 _DELIMITER = "---"
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_COLLECTION_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):(.*)$")
@@ -84,7 +85,7 @@ _REQUIRED_FIELDS: Final = (
     "relationships",
     "trust",
 )
-_OPTIONAL_FIELDS: Final = ("effective_start", "effective_end")
+_OPTIONAL_FIELDS: Final = ("effective_start", "effective_end", "collections")
 _KNOWN_FIELDS: Final = frozenset((*_REQUIRED_FIELDS, *_OPTIONAL_FIELDS))
 _SOURCE_FIELDS: Final = frozenset(("url", "publisher", "content_hash"))
 _REQUIRED_SOURCE_FIELDS: Final = frozenset(("url", "content_hash"))
@@ -113,10 +114,12 @@ class PageMetadata:
 
     ``tags``, ``links``, and ``relationships`` are required in front matter
     but may be empty; ``effective_start``, ``effective_end``, and
-    ``source_publisher`` are optional.  ``links`` entries are page ids or
-    repository-relative corpus paths and are not resolved here: link-graph
-    resolution is the separate link layer's job.  Duplicate relationship
-    entries are preserved so the link layer can flag them.
+    ``source_publisher`` are optional.  ``collections`` is optional and absent
+    front matter parses as an empty tuple; each entry is a unique kebab-case
+    token.  ``links`` entries are page ids or repository-relative corpus paths
+    and are not resolved here: link-graph resolution is the separate link
+    layer's job.  Duplicate relationship entries are preserved so the link
+    layer can flag them.
     """
 
     page_id: str
@@ -127,6 +130,7 @@ class PageMetadata:
     source_url: str
     source_content_hash: str
     tags: tuple[str, ...] = ()
+    collections: tuple[str, ...] = ()
     links: tuple[str, ...] = ()
     relationships: tuple[PageRelationship, ...] = ()
     trust_tier: TrustTier = TrustTier.UNTRUSTED
@@ -179,6 +183,7 @@ class PageMetadata:
         ):
             raise MetadataError("effective_start must not be after effective_end")
         object.__setattr__(self, "tags", _clean_strings(self.tags, "tags"))
+        object.__setattr__(self, "collections", _clean_collections(self.collections))
         object.__setattr__(self, "links", _clean_strings(self.links, "links"))
         if isinstance(self.relationships, (PageRelationship, str)) or not isinstance(
             self.relationships, (tuple, list)
@@ -213,6 +218,24 @@ def _clean_strings(values: Sequence[object], label: str) -> tuple[str, ...]:
         item = value.strip()
         if item not in cleaned:
             cleaned.append(item)
+    return tuple(cleaned)
+
+
+def _clean_collections(values: Sequence[object]) -> tuple[str, ...]:
+    if isinstance(values, str) or not isinstance(values, (tuple, list)):
+        raise MetadataError("collections must be a tuple of strings")
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            raise MetadataError("collections must contain non-empty strings")
+        item = value.strip()
+        if _COLLECTION_RE.fullmatch(item) is None:
+            raise MetadataError("collections must contain kebab-case tokens")
+        if item in seen:
+            raise MetadataError(f"duplicate collection: {item!r}")
+        seen.add(item)
+        cleaned.append(item)
     return tuple(cleaned)
 
 
@@ -433,6 +456,15 @@ def _string_list(raw: Mapping[str, object], key: str) -> tuple[str, ...]:
     return _clean_strings(value, f"front matter {key!r}")
 
 
+def _collections(raw: Mapping[str, object]) -> tuple[str, ...]:
+    if "collections" not in raw:
+        return ()
+    value = raw.get("collections")
+    if not isinstance(value, list) or isinstance(value, str):
+        raise MetadataError("front matter 'collections' must be a list of strings")
+    return _clean_collections(value)
+
+
 def _relationships(raw: Mapping[str, object]) -> tuple[PageRelationship, ...]:
     value = raw.get("relationships")
     if not isinstance(value, list) or isinstance(value, str):
@@ -550,6 +582,7 @@ def _metadata_from_raw(raw: Mapping[str, object]) -> PageMetadata:
         source_publisher=source_publisher,
         source_content_hash=source_content_hash,
         tags=_string_list(raw, "tags"),
+        collections=_collections(raw),
         links=_string_list(raw, "links"),
         relationships=_relationships(raw),
         trust_tier=trust_tier,
@@ -604,6 +637,11 @@ def render_front_matter(metadata: PageMetadata) -> str:
         lines.extend(f"  - {_format_scalar(tag)}" for tag in metadata.tags)
     else:
         lines.append("tags: []")
+    if metadata.collections:
+        lines.append("collections:")
+        lines.extend(
+            f"  - {_format_scalar(collection)}" for collection in metadata.collections
+        )
     if metadata.links:
         lines.append("links:")
         lines.extend(f"  - {_format_scalar(link)}" for link in metadata.links)

@@ -39,9 +39,9 @@ EMULATOR_KEY = (
 DEFAULT_ENDPOINT = "https://localhost:8081"
 DEFAULT_DATABASE = "thesis"
 
-#: One container holds every chat-scoped timeline item (messages + events).
-TIMELINE_CONTAINER = "timeline"
-#: One container holds the workspace-scoped records (chats, executions, ...).
+#: One container holds every workspace-scoped conversation document; messages
+#: and events carry the indexed ``chatId``/``seq`` fields that form the
+#: unified per-chat timeline.
 CATALOG_CONTAINER = "catalog"
 #: One container holds the execution-store documents (one per execution).
 EXECUTIONS_CONTAINER = "executions"
@@ -110,9 +110,6 @@ def ensure_database(
     resolved = settings or CosmosSettings.from_environment()
     database = client.create_database_if_not_exists(resolved.database)
     database.create_container_if_not_exists(
-        id=TIMELINE_CONTAINER, partition_key=PartitionKey(path="/chatId")
-    )
-    database.create_container_if_not_exists(
         id=CATALOG_CONTAINER, partition_key=PartitionKey(path="/workspaceId")
     )
     database.create_container_if_not_exists(
@@ -127,7 +124,6 @@ __all__ = [
     "DEFAULT_ENDPOINT",
     "EMULATOR_KEY",
     "EXECUTIONS_CONTAINER",
-    "TIMELINE_CONTAINER",
     "CosmosSettings",
     "ensure_database",
     "open_cosmos_client",

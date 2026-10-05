@@ -23,9 +23,9 @@
 	const executionId = $derived(
 		readString(structured, 'executionId') ?? readString(structured, 'execution_id')
 	);
+	const view = $derived(executionId ? liveView?.(executionId) : null);
 
 	const live = $derived.by<WorkflowExecutionRecord | null>(() => {
-		const view = liveView?.();
 		if (!view?.execution || !executionId) return null;
 		return view.execution.execution_id === executionId ? view.execution : null;
 	});
@@ -40,7 +40,7 @@
 			workflow_id:
 				readString(structured, 'workflowId') ??
 				readString(structured, 'workflow_id') ??
-				'workflow-execution',
+				'',
 			workflow_version:
 				readString(structured, 'version') ??
 				readString(structured, 'workflowVersion') ??
@@ -74,18 +74,17 @@
 	});
 
 	const phases = $derived(
-		live ? (liveView?.()?.phases ?? persistedPhases) : persistedPhases
+		live ? (view?.phases ?? persistedPhases) : persistedPhases
 	);
 
 	const attentionPhases = $derived(
-		live ? (liveView?.()?.attentionPhases ?? []) : []
+		live ? (view?.attentionPhases ?? []) : []
 	);
 
 	const status = $derived(
 		live?.state ??
 			readString(structured, 'state') ??
 			readString(structured, 'status') ??
-			readString(structured, 'phase') ??
 			'running'
 	);
 
@@ -101,7 +100,7 @@
 		return result.summary || (readString(structured, 'summary') ?? '');
 	});
 
-	const onEnterPhase = $derived(liveView?.()?.onEnterPhase ?? (() => {}));
+	const onEnterPhase = $derived(view?.onEnterPhase ?? (() => {}));
 </script>
 
 <WorkflowCard

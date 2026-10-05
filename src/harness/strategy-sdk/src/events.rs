@@ -5,7 +5,7 @@
 //! and valid for the duration of one callback, so authors read without any
 //! per-event allocation. Prices are exact [`Decimal`] values.
 
-use num::PyDecimal;
+use num::Decimal;
 use std::collections::BTreeMap;
 
 /// A top-of-book quote as the engine dispatched it.
@@ -20,13 +20,13 @@ pub struct QuoteEvent<'a> {
     /// Instrument symbol.
     pub symbol: &'a str,
     /// Best bid.
-    pub bid: PyDecimal,
+    pub bid: Decimal,
     /// Best ask.
-    pub ask: PyDecimal,
+    pub ask: Decimal,
     /// Bid size.
-    pub bid_quantity: PyDecimal,
+    pub bid_quantity: Decimal,
     /// Ask size.
-    pub ask_quantity: PyDecimal,
+    pub ask_quantity: Decimal,
     /// Reporting venue.
     pub venue: &'a str,
 }
@@ -34,10 +34,10 @@ pub struct QuoteEvent<'a> {
 impl<'a> QuoteEvent<'a> {
     /// The quote midpoint, or the bid when the midpoint cannot be formed.
     #[must_use]
-    pub fn mid(&self) -> PyDecimal {
+    pub fn mid(&self) -> Decimal {
         self.bid
             .checked_add(self.ask)
-            .and_then(|sum| sum.checked_div(PyDecimal::from_i128(2)))
+            .and_then(|sum| sum.checked_div(Decimal::from_i128(2)))
             .unwrap_or(self.bid)
     }
 }
@@ -54,9 +54,9 @@ pub struct TradeEvent<'a> {
     /// Instrument symbol.
     pub symbol: &'a str,
     /// Print price.
-    pub price: PyDecimal,
+    pub price: Decimal,
     /// Print quantity.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// Reporting venue.
     pub venue: &'a str,
     /// Trade identifier.
@@ -70,17 +70,15 @@ impl<'a> TradeEvent<'a> {
     ///
     /// Returns an error when the exact product does not fit the pinned
     /// arithmetic context.
-    pub fn notional(&self) -> Result<PyDecimal, num::DecimalError> {
+    pub fn notional(&self) -> Result<Decimal, num::DecimalError> {
         self.price.checked_mul(self.quantity)
     }
 }
 
 /// One OHLCV bar as the engine dispatched it.
 ///
-/// Studies read these bars inside an atomic [`BarFrame`]; quotes and trades
-/// remain on [`StrategyProgram`](crate::program::StrategyProgram) and the
-/// indicator surface. Every decimal field is exact, so a study reads bar
-/// values without a float roundtrip.
+/// Consumers read these bars inside an atomic [`BarFrame`]. Every decimal field
+/// is exact, without a float roundtrip.
 #[derive(Clone, Copy, Debug)]
 pub struct BarEvent<'a> {
     /// Event identifier.
@@ -92,21 +90,23 @@ pub struct BarEvent<'a> {
     /// Instrument symbol.
     pub symbol: &'a str,
     /// Interval open.
-    pub open: PyDecimal,
+    pub open: Decimal,
     /// Interval high.
-    pub high: PyDecimal,
+    pub high: Decimal,
     /// Interval low.
-    pub low: PyDecimal,
+    pub low: Decimal,
     /// Interval close.
-    pub close: PyDecimal,
+    pub close: Decimal,
     /// Interval volume.
-    pub volume: PyDecimal,
+    pub volume: Decimal,
 }
 
 /// One complete atomic interval delivered to a study, including missing symbols.
 /// The map is constructed locally by the SDK and never crosses the C ABI.
 #[derive(Clone, Debug)]
 pub struct BarFrame<'a> {
+    /// Canonical interval identity: `1min` or `1d`.
+    pub interval: &'a str,
     /// Inclusive interval start in epoch nanoseconds.
     pub interval_start_ns: i64,
     /// Exclusive interval end in epoch nanoseconds; strictly after start.
@@ -137,11 +137,11 @@ pub struct Fill<'a> {
     /// `buy` or `sell`.
     pub side: &'a str,
     /// Fill quantity.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// Fill price.
-    pub price: PyDecimal,
+    pub price: Decimal,
     /// Fill fee.
-    pub fee: PyDecimal,
+    pub fee: Decimal,
     /// Liquidity role.
     pub liquidity: &'a str,
 }
@@ -149,7 +149,7 @@ pub struct Fill<'a> {
 impl<'a> Fill<'a> {
     /// The signed quantity against the current position.
     #[must_use]
-    pub fn signed_quantity(&self) -> PyDecimal {
+    pub fn signed_quantity(&self) -> Decimal {
         if self.side == "buy" {
             self.quantity
         } else {
@@ -170,7 +170,7 @@ pub struct ProgramStart<'a> {
     /// Run seed.
     pub seed: u64,
     /// Initial book cash.
-    pub initial_cash: PyDecimal,
+    pub initial_cash: Decimal,
     /// Run start in epoch nanoseconds.
     pub start_ns: i64,
 }

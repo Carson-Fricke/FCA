@@ -1,4 +1,4 @@
-"""Serving capability isolation and artifact-backed Strategies HTTP reads."""
+"""Serving capability isolation and committed strategy reference completion."""
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -6,18 +6,20 @@ from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
+from tests.thesis.http.test_study_validation_recovery import Harness
 
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.chat import ChatService
-from thesis.chat.contracts import SubAgentRecord
+from thesis.chat.contracts import CompletionMode, SubAgentRecord, WorkflowDefinition
 from thesis.http import serving
 from thesis.http.application import create_app
 from thesis.http.workspaces import build_local_workspace_data
 from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import load_workspace_manifest
+from thesis.workspaces.programs import STRATEGY_TEMPLATE, WorkspacePrograms
 
 
 class _Key:
@@ -51,6 +53,7 @@ def test_design_tool_to_files_http_and_completion_isolation(
 
     def control(**kwargs: Any) -> Any:
         callbacks["validator"] = kwargs["contract_validator"]
+        callbacks["apply"] = kwargs["phase_completions"]
         return serving.ControlToolService(**kwargs)
 
     monkeypatch.setattr(serving, "Conversations", conversations)
@@ -62,72 +65,114 @@ def test_design_tool_to_files_http_and_completion_isolation(
             _Transport(),
         ),
         strategy_artifacts=artifacts,
+        workspace_repositories=provider,
         control_factory=control,
     )
     store = PersistenceSubAgentStore(chat.persistence)
+    assert stack.workflow_runtime is None
+    thread = chat.create_chat(wid, title="Strategy design", owner_actor_id="operator")
+    execution = chat.launch_workflow(
+        wid,
+        thread.chat_id,
+        workflow=WorkflowDefinition(
+            workflow_id="hypothesis-development",
+            version="1.0.0",
+            title="Strategy design",
+            phases=("strategy_design",),
+        ),
+        actor_id="operator",
+        body="Design a strategy",
+    )
     record = SubAgentRecord(
         workspace_id=wid,
         created_at=datetime.now(UTC),
         created_by="operator",
         sub_agent_id="design-1",
-        chat_id="chat-1",
+        chat_id=thread.chat_id,
         role="coding",
         phase="strategy_design",
-        workflow_execution_id="exec-1",
-        allowed_tools=("author_strategy",),
+        workflow_execution_id=execution.execution_id,
+        phase_executor=True,
+        phase_attempt_id="strategy-design-attempt",
+        completion_mode=CompletionMode.EXPLICIT_COMPLETION,
+        allowed_tools=("author_strategy", "validate_strategy"),
     )
     store.save_sub_agent(record)
 
-    def context(node: str | None, execution: str = "exec-1") -> ToolContext:
+    def context(
+        node: str | None,
+        execution_id: str = execution.execution_id,
+        *,
+        phase_executor: bool = True,
+    ) -> ToolContext:
         return ToolContext(
             workspace_id=wid,
-            chat_id="chat-1",
-            conversation_id=node or "chat-1",
+            chat_id=thread.chat_id,
+            conversation_id=node or thread.chat_id,
             sub_agent_id=node,
-            workflow_execution_id=execution,
+            workflow_execution_id=execution_id,
+            phase_executor=phase_executor,
             actor_id="agent",
-            allowed_tools=("author_strategy",),
+            allowed_tools=("author_strategy", "validate_strategy"),
         )
 
     registry = callbacks["registry"](context("design-1"))
     arguments: dict[str, object] = {
-        "name": "Momentum",
-        "symbol": "SPY",
-        "description": "Accepted design",
-        "strategy": {
-            "strategyId": "momentum",
-            "version": "1.0.0",
-            "entrypoint": "src/lib.rs",
-            "files": {
-                "src/lib.rs": "use harness_strategy_sdk::{StrategyProgram, export_strategy_program};\n"
-                "struct Momentum;\nimpl StrategyProgram for Momentum {\n"
-                "fn new(_: harness_strategy_sdk::serde_json::Value) -> Self { Self }\n}\n"
-                "export_strategy_program!(Momentum);\n"
-            },
-            "tests": {
-                "tests/program.rs": "#[test]\nfn smoke() { assert_eq!(1, 1); }\n"
-            },
-            "harnessConfiguration": {},
-            "exitCriteria": [
-                {
-                    "falsifierId": "f1",
-                    "observable": "signal",
-                    "condition": "lt",
-                    "threshold": 0.0,
-                    "description": "Flatten on falsification",
-                }
+        "program_id": "momentum",
+        "source": STRATEGY_TEMPLATE,
+        "configuration": {
+            "start": "2024-01-01T00:00:00Z",
+            "end": "2024-01-02T00:00:00Z",
+            "subscriptions": [
+                {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}
             ],
-            "limitations": [],
         },
     }
     result = registry.dispatch("author_strategy", arguments)
     assert result.ok
-    receipt = result.structured
+    assert "source" not in result.structured
+    checked = WorkspacePrograms(provider, Harness()).validate(
+        wid, "strategy", "momentum"
+    )
+    receipt = {
+        key: checked[key]
+        for key in ("workspaceId", "kind", "programId", "gitCommit", "version")
+    }
     assert isinstance(receipt, Mapping)
-    assert callbacks["validator"](wid, record, {"strategy": receipt}) is None
+    assert "compiler identity" in callbacks["validator"](
+        wid, record, {"strategy": receipt, "intentEpoch": execution.intent_epoch}
+    )  # A model-only stack cannot attest to the current serving compiler.
+    from thesis.workflows.registry.hypothesis_development.session_services import (
+        HypothesisSessionServices,
+    )
+
+    configured = HypothesisSessionServices(
+        chat=chat,
+        store=store,
+        harness_tools=None,
+        programs=WorkspacePrograms(provider, Harness()),
+        activity=lambda context, tool, arguments, execute: execute(),
+    )
+    assert (
+        configured.validate_completion(
+            wid, record, {"strategy": receipt, "intentEpoch": execution.intent_epoch}
+        )
+        is None
+    )
+    assert (
+        callbacks["apply"](
+            wid, record, {"strategy": receipt, "intentEpoch": execution.intent_epoch}
+        )
+        is None
+    )
     assert (
         callbacks["validator"](
-            wid, record, {"strategy": {**receipt, "bundleSha256": "f" * 64}}
+            wid,
+            record,
+            {
+                "strategy": {**receipt, "version": "f" * 64},
+                "intentEpoch": execution.intent_epoch,
+            },
         )
         is not None
     )
@@ -142,22 +187,43 @@ def test_design_tool_to_files_http_and_completion_isolation(
         .dispatch("author_strategy", arguments)
         .ok
     )
+    wrong_chat = ToolContext(
+        workspace_id=wid,
+        chat_id="other-chat",
+        conversation_id="design-1",
+        sub_agent_id="design-1",
+        workflow_execution_id=execution.execution_id,
+        phase_executor=True,
+        actor_id="agent",
+        allowed_tools=("author_strategy",),
+    )
+    assert (
+        not callbacks["registry"](wrong_chat).dispatch("author_strategy", arguments).ok
+    )
     helper = SubAgentRecord(
         workspace_id=wid,
         created_at=datetime.now(UTC),
         sub_agent_id="helper",
         created_by="agent",
-        chat_id="chat-1",
+        chat_id=thread.chat_id,
         role="coding",
         parent_sub_agent_id="design-1",
-        workflow_execution_id="exec-1",
+        workflow_execution_id=execution.execution_id,
+        phase_executor=False,
+        completion_mode=CompletionMode.EXPLICIT_COMPLETION,
         allowed_tools=("author_strategy",),
     )
     store.save_sub_agent(helper)
     assert (
-        not callbacks["registry"](context("helper"))
+        not callbacks["registry"](context("helper", phase_executor=False))
         .dispatch("author_strategy", arguments)
         .ok
+    )
+    assert (
+        callbacks["validator"](
+            wid, helper, {"strategy": receipt, "intentEpoch": execution.intent_epoch}
+        )
+        is not None
     )
     app = create_app(
         bearer_token="test-token", chat_service=stack.chat_service, workspace_data=data
@@ -166,15 +232,26 @@ def test_design_tool_to_files_http_and_completion_isolation(
     headers = {"Authorization": "Bearer test-token"}
     response = client.get(f"/v1/workspaces/{wid}/strategies", headers=headers)
     assert response.status_code == 200
-    assert response.json()["items"][0]["id"] == "momentum"
-    assert "impl StrategyProgram" in response.json()["items"][0]["code"]
+    # The legacy Strategies catalog must not become a second program truth.
+    assert response.json()["items"] == []
+    loaded = WorkspacePrograms(provider).load(
+        wid, "strategy", "momentum", str(receipt["gitCommit"])
+    )
+    assert loaded["source"] == STRATEGY_TEMPLATE
+    assert loaded["validation"] is None  # Validation receipt names the source commit.
+    latest_validation = WorkspacePrograms(provider).load(wid, "strategy", "momentum")[
+        "validation"
+    ]
+    assert (
+        isinstance(latest_validation, Mapping) and latest_validation["accepted"] is True
+    )
     assert (
         client.post(
             f"/v1/workspaces/{wid}/strategies",
             headers=headers,
             json={"name": "Phantom", "symbol": "SPY"},
         ).status_code
-        == 409
+        == 422
     )
     restarted = build_local_workspace_data(workspace_root=provider.root)
     assert restarted.strategies.list_strategies(wid) == data.strategies.list_strategies(

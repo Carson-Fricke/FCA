@@ -10,6 +10,61 @@ use super::config::BacktestConfig;
 use super::errors::BacktestError;
 use super::fixture::{synthetic_fixture, DataPreflight, ReplayFixture, SyntheticDataOptions};
 
+/// Require at least one dispatchable completed frame for every requested bar symbol.
+///
+/// # Errors
+/// Rejects raw bars whose intervals never complete within the run window.
+pub fn validate_completed_bar_coverage(
+    subscriptions: &[super::engine_core::MarketSubscription],
+    frames: &[super::engine_core::EngineBarFrame],
+) -> Result<(), BacktestError> {
+    for input in subscriptions
+        .iter()
+        .filter(|input| input.data_type == "bars")
+    {
+        for symbol in &input.symbols {
+            if !frames.iter().any(|frame| {
+                input.interval.as_deref() == Some(frame.interval.as_str())
+                    && frame.bars_by_symbol.contains_key(symbol)
+            }) {
+                return Err(BacktestError::DataPreflight(format!(
+                    "fixture is missing requested bars/{symbol} completed frame coverage"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Require coverage for each exact symbol/type, not merely any stream.
+///
+/// # Errors
+/// Rejects requested inputs with no rows in the replay window.
+pub fn validate_subscription_coverage(
+    fixture: &ReplayFixture,
+    subscriptions: &[super::engine_core::MarketSubscription],
+) -> Result<(), BacktestError> {
+    for input in subscriptions {
+        for symbol in &input.symbols {
+            if !fixture.events.iter().any(|event| {
+                event.symbol() == symbol
+                    && matches!(
+                        (input.data_type.as_str(), event),
+                        ("quote", super::fixture::MarketEvent::Quote { .. })
+                            | ("trade", super::fixture::MarketEvent::Trade { .. })
+                            | ("bars", super::fixture::MarketEvent::Bar { .. })
+                    )
+            }) {
+                return Err(BacktestError::DataPreflight(format!(
+                    "fixture is missing requested {}/{} coverage",
+                    input.data_type, symbol
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Validate one fixture against a run and return assurance evidence.
 ///
 /// # Errors

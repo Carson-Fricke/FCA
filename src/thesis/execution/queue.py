@@ -865,7 +865,7 @@ class ExecutionQueue:
         mutation_id: str | None = None,
         intent_epoch: int | None = None,
     ) -> Mutation:
-        """Publish one protected strategy, CLEO, Git, or findings mutation."""
+        """Publish one protected strategy, Git, or findings mutation."""
         projection = self._projection()
         workflow = self._get_workflow(projection, workflow_id)
         expected_epoch = lease.intent_epoch if intent_epoch is None else intent_epoch

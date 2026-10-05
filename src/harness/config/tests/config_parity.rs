@@ -23,7 +23,7 @@ fn existing_configuration_hashes_match_the_goldens() {
     let cases = [
         (
             "backtest.yaml",
-            "ea59ca33c8c764b0b2304d3e3b0ae15cdb8c71f44bb37493274f347535d89d22",
+            "791f5a95d84a912dc147bd7b69e5aaed3dd5fbaa24f7a2ac769f0aec70f14a1d",
         ),
         (
             "api.yaml",
@@ -31,11 +31,11 @@ fn existing_configuration_hashes_match_the_goldens() {
         ),
         (
             "trader.yaml",
-            "ee86c6031c6a6ab00c6539bc6f2f7419a0514c15cc3fbb171944d0344eeb15fe",
+            "11542adc1828c07c032542fbed14ab95a3b1d34ed2f94d37d1e39fe442273c35",
         ),
         (
             "trader-crypto.yaml",
-            "e279b8f16aa3a4c78c673d9f2b06d8d92acec26daa4cb4a39be14b2f0f986c5d",
+            "2b2f18bc457ebb37a5a64eb81ea0e4c6f813e13a03ca8c337f15a3bc2003fbac",
         ),
     ];
     for (name, expected) in cases {
@@ -74,7 +74,7 @@ fn backtest_canonical_json_is_pinned() {
         r#""parameters":{"limit":{"$decimal":"50000"}},"rule_id":"max-position-notional"}]},"#,
         r#""run_id":"momentum-spy-2024-01","schema_version":1,"seed":1729,"shell":"backtest","#,
         r#""start":{"$datetime":"2024-01-02T14:30:00.000000Z"},"strategy_instances":[{"#,
-        r#""bundle_hash":"a5447b54e9ce7ae0d8be7d5c3271d70cca0fd815791b615beef86394d7296b02","#,
+        r#""bundle_hash":"dca3e6dda63c83d8a9d7cc0688e180a42e3d3e0dd502c3d4d731db505c2d8998","#,
         r#""capital_fraction":{"$decimal":"1"},"#,
         r#""implementation":"jit","#,
         r#""instance_id":"spy-momentum","parameters":{"lookback":4,"quantity":20,"#,
@@ -105,5 +105,58 @@ fn validation_rejects_malformed_documents() {
                 "{fixture} should not validate"
             );
         }
+    }
+}
+
+#[test]
+fn subscription_snapshot_is_strict_and_legacy_serialization_is_unchanged() {
+    use config::{models::build_backtest, parse_yaml_mapping, YamlValue};
+    use std::collections::BTreeMap;
+
+    let text = std::fs::read_to_string(config_dir().join("backtest.yaml")).unwrap();
+    let original = parse_yaml_mapping(&text).unwrap();
+    let legacy = build_backtest(&original).unwrap();
+    assert!(legacy["data"].get("subscriptions").is_none());
+    let subscription = |kind: &str, interval: Option<&str>| {
+        let mut map = BTreeMap::from([
+            ("data_type".into(), YamlValue::Str(kind.into())),
+            (
+                "symbols".into(),
+                YamlValue::Seq(vec![YamlValue::Str("QQQ".into())]),
+            ),
+        ]);
+        if let Some(interval) = interval {
+            map.insert("interval".into(), YamlValue::Str(interval.into()));
+        }
+        YamlValue::Map(map)
+    };
+    let with_inputs = |inputs: Vec<YamlValue>| {
+        let mut mapping = original.clone();
+        let YamlValue::Map(data) = mapping.get_mut("data").unwrap() else {
+            panic!("data mapping")
+        };
+        data.remove("bar_interval");
+        data.insert("subscriptions".into(), YamlValue::Seq(inputs));
+        mapping
+    };
+    let ticks = build_backtest(&with_inputs(vec![subscription("quote", None)])).unwrap();
+    assert!(ticks["data"].get("bar_interval").is_none());
+    assert_eq!(
+        ticks["data"]["subscriptions"],
+        serde_json::json!([{"data_type": "quote", "symbols": ["QQQ"]}])
+    );
+    let mixed = build_backtest(&with_inputs(vec![
+        subscription("quote", None),
+        subscription("bars", Some("1min")),
+    ]))
+    .unwrap();
+    assert_eq!(mixed["data"]["subscriptions"][0]["interval"], "1min");
+    for input in [
+        subscription("bars", None),
+        subscription("quote", Some("1min")),
+        subscription("bars", Some("1m")),
+        subscription("ticks", None),
+    ] {
+        assert!(build_backtest(&with_inputs(vec![input])).is_err());
     }
 }

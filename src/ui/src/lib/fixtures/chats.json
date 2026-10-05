@@ -3,27 +3,37 @@
 		"items": [
 			{
 				"chat_id": "chat-1",
+				"conversation_id": "chat-1",
+				"root_conversation_id": "chat-1",
+				"parent_conversation_id": null,
 				"workspace_id": "alpha-lab",
 				"title": "Momentum breakout tuning",
 				"state": "active",
-				"kind": "chat",
 				"owner_actor_id": "user-alex",
 				"created_at": "2026-09-08T17:12:00Z",
 				"updated_at": "2026-09-08T18:04:00Z",
-				"investigation_ids": [],
-				"strategy_ids": ["str-1"]
+				"created_by": "user-alex",
+				"schema_version": 1,
+				"content_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+				"input_consumed_positions": {"root": 0},
+				"links": {"chat_ids": [], "investigation_ids": [], "strategy_ids": ["str-1"], "experiment_ids": [], "workflow_execution_ids": ["exec-1"], "tool_job_ids": []}
 			},
 			{
 				"chat_id": "chat-2",
+				"conversation_id": "chat-2",
+				"root_conversation_id": "chat-2",
+				"parent_conversation_id": null,
 				"workspace_id": "alpha-lab",
 				"title": "H-41: overnight drift decay",
 				"state": "active",
-				"kind": "investigation",
 				"owner_actor_id": "user-alex",
 				"created_at": "2026-09-05T10:00:00Z",
 				"updated_at": "2026-09-06T09:47:00Z",
-				"investigation_ids": ["inv-41"],
-				"strategy_ids": []
+				"created_by": "user-alex",
+				"schema_version": 1,
+				"content_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+				"input_consumed_positions": {},
+				"links": {"chat_ids": [], "investigation_ids": ["inv-41"], "strategy_ids": [], "experiment_ids": [], "workflow_execution_ids": [], "tool_job_ids": []}
 			}
 		]
 	},
@@ -31,15 +41,20 @@
 		"items": [
 			{
 				"chat_id": "chat-b1",
+				"conversation_id": "chat-b1",
+				"root_conversation_id": "chat-b1",
+				"parent_conversation_id": null,
 				"workspace_id": "beta-quant",
 				"title": "Term structure carry study",
 				"state": "active",
-				"kind": "chat",
 				"owner_actor_id": "user-alex",
 				"created_at": "2026-09-07T08:20:00Z",
 				"updated_at": "2026-09-08T13:10:00Z",
-				"investigation_ids": [],
-				"strategy_ids": ["str-b1"]
+				"created_by": "user-alex",
+				"schema_version": 1,
+				"content_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+				"input_consumed_positions": {"root": 0},
+				"links": {"chat_ids": [], "investigation_ids": [], "strategy_ids": ["str-b1"], "experiment_ids": [], "workflow_execution_ids": ["exec-b1"], "tool_job_ids": []}
 			}
 		]
 	}

@@ -1,20 +1,19 @@
 //! Typed backtest configuration and its canonical-hash representation.
 //!
-//! Port of the resolved fields of `harness.configuration.models.BacktestConfig`
-//! plus `harness.configuration.hashing`. The canonical JSON mirrors pydantic's
-//! `model_dump(mode="python")` followed by `_canonical_value`, so
-//! [`BacktestConfig::configuration_hash`] reproduces the Python
-//! `configuration_hash` byte for byte.
+//! Projects the shared `config` document schema into engine decimal and time
+//! types. Resolved engine identities retain the shipped ASCII-escaped v1 hash;
+//! submitted API document identities deliberately remain separate.
 
 use std::collections::BTreeMap;
 
-use num::PyDecimal;
+use num::Decimal;
 
+use crate::backtest::engine_core::{normalize_subscriptions, MarketSubscription};
 use crate::backtest::errors::BacktestError;
 use crate::backtest::yaml::{self, YamlValue};
 use crate::canonical_json::JsonValue;
 
-use super::manifest::{configuration_hash, utc_timestamp};
+use super::manifest::{configuration_hash, configuration_timestamp};
 
 /// The fee basis used to derive a fee schedule from configuration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,9 +57,9 @@ pub struct FeeRule {
     /// Whether the rule is flat, per-unit, or notional-bps.
     pub basis: FeeBasis,
     /// The string-exact rate.
-    pub rate: PyDecimal,
+    pub rate: Decimal,
     /// The string-exact minimum.
-    pub minimum: PyDecimal,
+    pub minimum: Decimal,
     /// The order side the rule applies to (`buy`, `sell`, or `both`).
     pub side: String,
 }
@@ -136,7 +135,7 @@ impl Default for RiskPipelineConfig {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceLimitsConfig {
     /// Fixed-point CPU cores.
-    pub cpu_cores: PyDecimal,
+    pub cpu_cores: Decimal,
     /// Memory in mebibytes.
     pub memory_mib: i64,
 }
@@ -173,7 +172,7 @@ impl Default for DeploymentConfig {
             restart_policy: "never".to_string(),
             network_access: "disabled".to_string(),
             resources: ResourceLimitsConfig {
-                cpu_cores: PyDecimal::from_i128(1),
+                cpu_cores: Decimal::from_i128(1),
                 memory_mib: 1024,
             },
         }
@@ -204,13 +203,17 @@ pub struct BacktestConfig {
     /// String-exact initial cash.
     pub initial_cash: String,
     /// Initial cash as an exact decimal.
-    pub initial_cash_decimal: PyDecimal,
+    pub initial_cash_decimal: Decimal,
     /// Data snapshot identifier.
     pub data_snapshot_id: String,
     /// Data fingerprint.
     pub data_fingerprint: String,
     /// Data bar interval.
     pub data_bar_interval: String,
+    /// Optional expected echo of the runtime requirement union.
+    pub data_subscriptions: Vec<MarketSubscription>,
+    /// Distinguishes an absent echo from an explicitly empty echo.
+    pub data_subscriptions_declared: bool,
     /// Configured symbols.
     pub symbols: Vec<String>,
     /// Fee policy.
@@ -257,10 +260,12 @@ impl BacktestConfig {
             end_ns,
             base_currency: "USD".to_string(),
             initial_cash: "1000000".to_string(),
-            initial_cash_decimal: PyDecimal::from_i128(1_000_000),
+            initial_cash_decimal: Decimal::from_i128(1_000_000),
             data_snapshot_id: "synthetic".to_string(),
             data_fingerprint: String::new(),
             data_bar_interval: "1min".to_string(),
+            data_subscriptions: Vec::new(),
+            data_subscriptions_declared: false,
             symbols: vec!["SPY".to_string()],
             fees: FeeConfig::default(),
             risk_pipeline: RiskPipelineConfig::default(),
@@ -284,6 +289,12 @@ impl BacktestConfig {
         self.shell == "backtest" || self.shell == "study"
     }
 
+    /// Whether an expected subscription echo was provided.
+    #[must_use]
+    pub fn has_subscription_echo(&self) -> bool {
+        self.data_subscriptions_declared || !self.data_subscriptions.is_empty()
+    }
+
     /// The domain-separated canonical configuration hash.
     #[must_use]
     pub fn configuration_hash(&self) -> String {
@@ -301,14 +312,14 @@ impl BacktestConfig {
                 "start",
                 JsonValue::object([(
                     "$datetime",
-                    JsonValue::string(utc_timestamp(self.start_ns, true)),
+                    JsonValue::string(configuration_timestamp(self.start_ns)),
                 )]),
             ),
             (
                 "end",
                 JsonValue::object([(
                     "$datetime",
-                    JsonValue::string(utc_timestamp(self.end_ns, true)),
+                    JsonValue::string(configuration_timestamp(self.end_ns)),
                 )]),
             ),
             ("clock", JsonValue::String(self.clock.clone())),
@@ -322,32 +333,7 @@ impl BacktestConfig {
                 JsonValue::String(self.base_currency.clone()),
             ),
             ("initial_cash", decimal_json(self.initial_cash_decimal)),
-            (
-                "data",
-                JsonValue::object([
-                    (
-                        "snapshot_id",
-                        JsonValue::String(self.data_snapshot_id.clone()),
-                    ),
-                    (
-                        "fingerprint",
-                        JsonValue::String(self.data_fingerprint.clone()),
-                    ),
-                    (
-                        "symbols",
-                        JsonValue::Array(
-                            self.symbols
-                                .iter()
-                                .map(|symbol| JsonValue::String(symbol.clone()))
-                                .collect(),
-                        ),
-                    ),
-                    (
-                        "bar_interval",
-                        JsonValue::String(self.data_bar_interval.clone()),
-                    ),
-                ]),
-            ),
+            ("data", self.data_json()),
             (
                 "strategy_instances",
                 JsonValue::Array(
@@ -414,6 +400,39 @@ impl BacktestConfig {
         ])
     }
 
+    fn data_json(&self) -> JsonValue {
+        let mut data = BTreeMap::from([
+            (
+                "snapshot_id",
+                JsonValue::String(self.data_snapshot_id.clone()),
+            ),
+            (
+                "fingerprint",
+                JsonValue::String(self.data_fingerprint.clone()),
+            ),
+            (
+                "symbols",
+                JsonValue::Array(
+                    self.symbols
+                        .iter()
+                        .map(|symbol| JsonValue::String(symbol.clone()))
+                        .collect(),
+                ),
+            ),
+            (
+                "bar_interval",
+                JsonValue::String(self.data_bar_interval.clone()),
+            ),
+        ]);
+        if self.has_subscription_echo() {
+            data.insert(
+                "subscriptions",
+                subscriptions_json(&self.data_subscriptions),
+            );
+        }
+        JsonValue::object(data)
+    }
+
     /// Parse a validated backtest configuration from a YAML document.
     ///
     /// # Errors
@@ -430,6 +449,17 @@ impl BacktestConfig {
     ///
     /// Returns [`BacktestError::Configuration`] on any malformed document.
     pub fn from_yaml_value(value: &YamlValue) -> Result<Self, BacktestError> {
+        // The strict document schema is shared with API and MCP; below is only
+        // an engine projection of already validated, normalized fields.
+        let submitted = to_contract_yaml(value);
+        let config::YamlValue::Map(mapping) = submitted else {
+            return Err(BacktestError::Configuration(
+                "configuration root must be a mapping".into(),
+            ));
+        };
+        let canonical = config::replay::validate_mapping(&mapping)
+            .map_err(|e| BacktestError::Configuration(e.0))?;
+        let value = canonical_to_engine_yaml(&canonical)?;
         let root = value.as_mapping().ok_or_else(|| {
             BacktestError::Configuration("configuration root must be a mapping".to_string())
         })?;
@@ -441,8 +471,8 @@ impl BacktestConfig {
         }
         let run_id = string_field(root, "run_id")?;
         let start_ns =
-            datetime_field(root, "start").unwrap_or(crate::backtest::job::DEFAULT_START_NS);
-        let end_ns = datetime_field(root, "end").unwrap_or(crate::backtest::job::DEFAULT_END_NS);
+            datetime_field(root, "start")?.unwrap_or(crate::backtest::job::DEFAULT_START_NS);
+        let end_ns = datetime_field(root, "end")?.unwrap_or(crate::backtest::job::DEFAULT_END_NS);
         let seed = int_field(root, "seed").unwrap_or(0);
         if seed < 0 {
             return Err(BacktestError::Configuration(
@@ -466,6 +496,61 @@ impl BacktestConfig {
             config.initial_cash = py_decimal_fixed(cash);
         }
         if let Some(data) = root.get("data").and_then(YamlValue::as_mapping) {
+            if let Some(value) = data.get("subscriptions") {
+                config.data_subscriptions_declared = true;
+                let items = value.as_sequence().ok_or_else(|| {
+                    BacktestError::Configuration("data.subscriptions must be an array".into())
+                })?;
+                let mut inputs = Vec::new();
+                for item in items {
+                    let mapping = item.as_mapping().ok_or_else(|| {
+                        BacktestError::Configuration(
+                            "data.subscriptions entries must be mappings".into(),
+                        )
+                    })?;
+                    if mapping
+                        .keys()
+                        .any(|key| !matches!(key.as_str(), "data_type" | "symbols" | "interval"))
+                    {
+                        return Err(BacktestError::Configuration(
+                            "unknown field in data.subscriptions".into(),
+                        ));
+                    }
+                    let symbols = mapping
+                        .get("symbols")
+                        .and_then(YamlValue::as_sequence)
+                        .ok_or_else(|| {
+                            BacktestError::Configuration(
+                                "subscription symbols must be an array".into(),
+                            )
+                        })?;
+                    let symbols = symbols
+                        .iter()
+                        .map(|s| {
+                            s.as_str().map(str::to_string).ok_or_else(|| {
+                                BacktestError::Configuration(
+                                    "subscription symbols must be strings".into(),
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let interval = match mapping.get("interval") {
+                        None | Some(YamlValue::Null) => None,
+                        Some(YamlValue::String(s)) => Some(s.clone()),
+                        _ => {
+                            return Err(BacktestError::Configuration(
+                                "subscription interval must be a string".into(),
+                            ))
+                        }
+                    };
+                    inputs.push(MarketSubscription {
+                        data_type: string_field(mapping, "data_type")?,
+                        symbols,
+                        interval,
+                    });
+                }
+                config.data_subscriptions = normalize_subscriptions(&inputs)?;
+            }
             if let Some(snapshot) = data.get("snapshot_id").and_then(YamlValue::as_str) {
                 config.data_snapshot_id = snapshot.to_string();
             }
@@ -483,8 +568,92 @@ impl BacktestConfig {
         config.risk_pipeline = parse_risk(root.get("risk_pipeline"))?;
         config.deployment = parse_deployment(root.get("deployment"))?;
         config.strategy_instances = parse_strategy_instances(root.get("strategy_instances"))?;
+        if config.shell == "study"
+            && !config.has_subscription_echo()
+            && !matches!(config.data_bar_interval.as_str(), "1min" | "1d")
+        {
+            return Err(BacktestError::Configuration(
+                "study replay interval must be 1min or 1d".into(),
+            ));
+        }
         Ok(config)
     }
+}
+
+pub(crate) fn to_contract_yaml(value: &YamlValue) -> config::YamlValue {
+    match value {
+        YamlValue::Null => config::YamlValue::Null,
+        YamlValue::Bool(v) => config::YamlValue::Bool(*v),
+        YamlValue::Int(v) => config::YamlValue::Int(*v),
+        YamlValue::Decimal(v) => config::YamlValue::Decimal(py_decimal_fixed(*v)),
+        YamlValue::String(v) => config::YamlValue::Str(v.clone()),
+        YamlValue::Sequence(v) => config::YamlValue::Seq(v.iter().map(to_contract_yaml).collect()),
+        YamlValue::Mapping(v) => config::YamlValue::Map(
+            v.iter()
+                .map(|(k, v)| (k.clone(), to_contract_yaml(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn canonical_to_engine_yaml(value: &serde_json::Value) -> Result<YamlValue, BacktestError> {
+    use serde_json::Value;
+    Ok(match value {
+        Value::Object(map) if map.len() == 1 && map.contains_key("$decimal") => YamlValue::Decimal(
+            map["$decimal"]
+                .as_str()
+                .unwrap_or_default()
+                .parse()
+                .map_err(|_| {
+                    BacktestError::Configuration("decimal exceeds engine precision".into())
+                })?,
+        ),
+        Value::Object(map) if map.len() == 1 && map.contains_key("$datetime") => {
+            YamlValue::String(map["$datetime"].as_str().unwrap_or_default().to_string())
+        }
+        Value::Object(map) => YamlValue::Mapping(
+            map.iter()
+                .map(|(k, v)| Ok((k.clone(), canonical_to_engine_yaml(v)?)))
+                .collect::<Result<_, BacktestError>>()?,
+        ),
+        Value::Array(items) => YamlValue::Sequence(
+            items
+                .iter()
+                .map(canonical_to_engine_yaml)
+                .collect::<Result<_, _>>()?,
+        ),
+        Value::String(v) => YamlValue::String(v.clone()),
+        Value::Number(v) => {
+            YamlValue::Int(v.as_i64().ok_or_else(|| {
+                BacktestError::Configuration("integer outside engine range".into())
+            })?)
+        }
+        Value::Bool(v) => YamlValue::Bool(*v),
+        Value::Null => YamlValue::Null,
+    })
+}
+
+pub(crate) fn subscriptions_json(inputs: &[MarketSubscription]) -> JsonValue {
+    JsonValue::Array(
+        inputs
+            .iter()
+            .map(|s| {
+                let mut entries = vec![
+                    ("data_type", JsonValue::String(s.data_type.clone())),
+                    (
+                        "symbols",
+                        JsonValue::Array(
+                            s.symbols.iter().cloned().map(JsonValue::String).collect(),
+                        ),
+                    ),
+                ];
+                if let Some(interval) = &s.interval {
+                    entries.push(("interval", JsonValue::String(interval.clone())));
+                }
+                JsonValue::object(entries)
+            })
+            .collect(),
+    )
 }
 
 fn strategy_instance_json(instance: &StrategyInstanceConfig) -> JsonValue {
@@ -506,8 +675,8 @@ fn strategy_instance_json(instance: &StrategyInstanceConfig) -> JsonValue {
             decimal_json(
                 instance
                     .capital_fraction
-                    .parse::<PyDecimal>()
-                    .unwrap_or(PyDecimal::ZERO),
+                    .parse::<Decimal>()
+                    .unwrap_or(Decimal::ZERO),
             ),
         ),
         (
@@ -562,13 +731,13 @@ fn deployment_json(deployment: &DeploymentConfig) -> JsonValue {
 }
 
 /// One `{"$decimal": <fixed>}` wrapper, matching `_decimal_text`.
-fn decimal_json(value: PyDecimal) -> JsonValue {
+fn decimal_json(value: Decimal) -> JsonValue {
     JsonValue::object([("$decimal", JsonValue::string(normalized_fixed(value)))])
 }
 
 /// Python `format(value.normalize(), "f")`.
 #[must_use]
-pub fn normalized_fixed(value: PyDecimal) -> String {
+pub fn normalized_fixed(value: Decimal) -> String {
     if value.is_zero() {
         return "0".to_string();
     }
@@ -578,7 +747,7 @@ pub fn normalized_fixed(value: PyDecimal) -> String {
 
 /// Render an exact decimal in fixed-point notation, expanding any exponent.
 #[must_use]
-pub fn py_decimal_fixed(value: PyDecimal) -> String {
+pub fn py_decimal_fixed(value: Decimal) -> String {
     let negative = value.is_signed() && !value.is_zero();
     let coefficient = value.coefficient();
     let scale = value.scale();
@@ -660,7 +829,7 @@ fn parse_fees(value: Option<&YamlValue>) -> Result<FeeConfig, BacktestError> {
                 minimum: rule
                     .get("minimum")
                     .and_then(YamlValue::as_decimal)
-                    .unwrap_or(PyDecimal::ZERO),
+                    .unwrap_or(Decimal::ZERO),
                 side: rule
                     .get("side")
                     .and_then(YamlValue::as_str)
@@ -829,14 +998,27 @@ fn int_field(mapping: &BTreeMap<String, YamlValue>, key: &str) -> Option<i64> {
 fn decimal_field(
     mapping: &BTreeMap<String, YamlValue>,
     key: &str,
-) -> Result<PyDecimal, BacktestError> {
+) -> Result<Decimal, BacktestError> {
     mapping
         .get(key)
         .and_then(YamlValue::as_decimal)
         .ok_or_else(|| BacktestError::Configuration(format!("missing decimal field {key:?}")))
 }
 
-fn datetime_field(mapping: &BTreeMap<String, YamlValue>, key: &str) -> Option<i64> {
-    let text = mapping.get(key).and_then(YamlValue::as_str)?;
+fn datetime_field(
+    mapping: &BTreeMap<String, YamlValue>,
+    key: &str,
+) -> Result<Option<i64>, BacktestError> {
+    let Some(value) = mapping.get(key) else {
+        return Ok(None);
+    };
+    let invalid = || {
+        BacktestError::Configuration(format!(
+            "{key} must be a valid RFC3339 timestamp within nanosecond range"
+        ))
+    };
+    let text = value.as_str().ok_or_else(invalid)?;
     crate::backtest::job::parse_timestamp_ns(text)
+        .map(Some)
+        .ok_or_else(invalid)
 }

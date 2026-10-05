@@ -1,8 +1,7 @@
 """Composed Thesis HTTP application.
 
-The app composes the UI-facing surface described by the chat/execution
-boundary: authentication, the chat router (the sole messaging surface), and
-the SSE streaming router (both surfaces of an execution).  Authentication
+The app composes authentication, chat and execution REST routes, and the
+unified chat timeline SSE router. Authentication
 mirrors the market-lake ``CombinedAuthenticator`` pattern: a single static
 bearer token, optional Entra JWT validation, a uniform 401 error shape, and
 fail-closed behavior when no token is configured.
@@ -11,7 +10,7 @@ fail-closed behavior when no token is configured.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,9 +36,8 @@ from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.policy import OperatorPolicyRegistry
 from thesis.auth.session import OperatorSessionService
 from thesis.auth.workspace_access import WorkspaceAuthorizer
-from thesis.chat import ChatMessage, ChatService
-from thesis.chat.responder import ReplyChunk, ToolResultChunk, ToolResultObserver
-from thesis.chat.streaming import InMemoryChatStreamBroker
+from thesis.chat import ChatService
+from thesis.chat.responder import ToolResultChunk, ToolResultObserver
 from thesis.http.auth import (
     CsrfTokenGuard,
     OidcVerifier,
@@ -51,16 +49,13 @@ from thesis.http.chat import create_chat_router
 from thesis.http.chat_sub_agents import create_chat_sub_agent_router
 from thesis.http.dashboards import create_dashboard_router
 from thesis.http.deployments import create_deployment_router
+from thesis.http.errors import ErrorResponse
 from thesis.http.harness import HarnessDataService, create_harness_router
 from thesis.http.knowledge import create_knowledge_router
 from thesis.http.screeners import create_screener_router
 from thesis.http.state import create_workspace_state_router
 from thesis.http.strategies import create_strategy_router
-from thesis.http.streaming import (
-    ProviderDeltaSource,
-    StreamSleeper,
-    create_streaming_router,
-)
+from thesis.http.streaming import StreamSleeper
 from thesis.http.timeline import create_timeline_router
 from thesis.http.workflows import create_workflow_router
 from thesis.http.workspaces import (
@@ -71,10 +66,7 @@ from thesis.http.workspaces import (
 )
 from thesis.identity.ports import AccountStore, SessionStore
 from thesis.providers.openrouter import OpenRouterProvider
-from thesis.providers.transports import (
-    DEFAULT_SYSTEM_PROMPT,
-    openrouter_reply_provider,
-)
+from thesis.providers.transports import DEFAULT_SYSTEM_PROMPT
 from thesis.screening.service import ScreenerService
 
 if TYPE_CHECKING:
@@ -306,19 +298,28 @@ def _error_response(
     )
 
 
+class ThesisApplication(FastAPI):
+    """Publish the same source-derived contract as the offline schema exporter."""
+
+    def openapi(self) -> dict:
+        if self.openapi_schema is None:
+            from thesis.http.schema import enrich_schema
+
+            self.openapi_schema = enrich_schema(super().openapi())
+        return self.openapi_schema
+
+
 def create_app(
     *,
     bearer_token: str | None = None,
     chat_service: ChatService | None = None,
-    chat_stream_broker: InMemoryChatStreamBroker | None = None,
     conversations: Conversations | None = None,
     entra_tenant_id: str | None = None,
     entra_audience: str | None = None,
     entra_role: str = "Thesis.Access",
     jwks_client: PyJWKClient | None = None,
-    stream_poll_interval_seconds: float = 1.0,
+    stream_recovery_interval_seconds: float = 15.0,
     stream_sleeper: StreamSleeper | None = None,
-    provider_delta_source: ProviderDeltaSource | None = None,
     stream_max_poll_cycles: int | None = None,
     workspace_data: WorkspaceDataBundle | None = None,
     workflow_runtime: WorkflowRuntime | None = None,
@@ -335,23 +336,26 @@ def create_app(
     session_clock: Callable[[], datetime] | None = None,
     timeline: CosmosTimeline | None = None,
     operator_policies: OperatorPolicyRegistry | None = None,
+    in_memory: bool | None = None,
 ) -> FastAPI:
     """Build the Thesis API app with injectable services and authentication.
 
-    The chat and streaming routers resolve their :class:`ChatService` from
-    ``app.state.chat_service``; pass ``chat_service`` to inject one, otherwise
-    the first request constructs an in-memory service.  The workspace DATA
+    The chat and timeline routers resolve their :class:`ChatService` from
+    ``app.state.chat_service``. With no supplied container, explicit in-memory
+    defaults are composed once here; ``in_memory=False`` disables them.
+    Missing services fail closed rather than being created by requests. The workspace DATA
     routers (workspaces, backtests, deployments, dashboards, and workspace
     state) resolve their services from ``app.state`` the same way; pass
     ``workspace_data`` — typically built by
     :func:`thesis.http.workspaces.build_local_workspace_data` — to compose the
     local-mode services.
 
+    A configured chat service always gets canonical conversation intake, even
+    without a model provider; delivery-only intake must not start workers.
     Pass ``model_provider`` (with an optional ``harness_tool_provider``) to
-    compose the conversations service without injecting one directly.  The
-    composed service runs root replies through the plain single-shot
-    provider; tool-calling replies come from the session-backed reply source
-    a composition injects, and the harness tool surface is consumed by the
+    enable execution without injecting conversations directly.  The
+    composed service runs root replies through the canonical session provider
+    with an empty tool registry, and the harness tool surface is consumed by the
     backtest coordinator.  A ``harness_client`` shared with the backtest
     boundary is adapted into the tool provider without opening or
     initializing a second MCP transport.  ``app.state.operator_policies`` is
@@ -366,6 +370,22 @@ def create_app(
     The login router is registered on both the root and ``/api`` surfaces
     without the shared bearer dependency; every other route is unchanged.
     """
+    if in_memory is None:
+        in_memory = (
+            chat_service is None and conversations is None and workspace_data is None
+        )
+    if chat_service is None and conversations is not None:
+        chat_service = conversations.chat
+    if conversations is not None and chat_service is not conversations.chat:
+        raise ValueError("conversations must share the injected chat service")
+    if chat_service is None and in_memory:
+        chat_service = ChatService()
+    if workspace_data is None and in_memory:
+        from thesis.http.workspaces import build_local_workspace_data
+
+        workspace_data = build_local_workspace_data(chat_service=chat_service)
+    if harness_data_service is None and in_memory:
+        harness_data_service = HarnessDataService()
     if harness_tool_provider is None and harness_client is not None:
         harness_tool_provider = open_harness_tool_provider(client=harness_client)
     entra_authenticator = (
@@ -429,12 +449,12 @@ def create_app(
             workspace_id=session_workspace_id,
             clock=resolved_session_clock,
         )
-    application = FastAPI(
+    application = ThesisApplication(
         title="Thesis API",
         version="0.1.0",
         responses={
-            status.HTTP_401_UNAUTHORIZED: {"description": "missing credentials"},
-            422: {"description": "validation error"},
+            code: {"model": ErrorResponse, "description": "request failed"}
+            for code in (400, 401, 403, 404, 409, 422, 500, 502, 503)
         },
     )
     # Per-node operator policy is always present so the chat sub-agent router
@@ -458,8 +478,6 @@ def create_app(
     )
     if chat_service is not None:
         application.state.chat_service = chat_service
-    if chat_stream_broker is not None:
-        application.state.chat_stream_broker = chat_stream_broker
     if conversations is not None:
         application.state.conversations = conversations
         if (
@@ -467,29 +485,19 @@ def create_app(
             and conversations.tool_result_observer is None
         ):
             conversations.tool_result_observer = tool_result_observer
-    if conversations is None and model_provider is not None:
-        resolved_chat_service = chat_service
-        if resolved_chat_service is None:
-            resolved_chat_service = ChatService()
-            application.state.chat_service = resolved_chat_service
-        resolved_broker = chat_stream_broker
-        if resolved_broker is None:
-            resolved_broker = InMemoryChatStreamBroker()
-            application.state.chat_stream_broker = resolved_broker
-
-        def _reply_source(
-            workspace_id: str, chat_id: str, history: Sequence[ChatMessage]
-        ) -> Iterator[str | ReplyChunk | ToolResultChunk]:
-            del workspace_id, chat_id
-            return openrouter_reply_provider(
-                model_provider, system_prompt=DEFAULT_SYSTEM_PROMPT
-            )(history)
+    if conversations is None and model_provider is not None and chat_service is None:
+        raise ValueError("model_provider requires a configured chat service")
+    if conversations is None and chat_service is not None:
+        from thesis.agent.runtime.session import SessionToolRegistry
 
         application.state.conversations = Conversations(
-            chat=resolved_chat_service,
-            broker=resolved_broker,
-            reply_for=_reply_source,
+            chat=chat_service,
+            provider=model_provider,
+            registry_factory=lambda context: SessionToolRegistry(),
+            root_system_prompt=DEFAULT_SYSTEM_PROMPT,
             tool_result_observer=tool_result_observer,
+            read_consumed_input=chat_service.read_consumed_input,
+            acknowledge_input=chat_service.acknowledge_input,
         )
     if workspace_data is not None:
         application.state.workspace_service = workspace_data.workspaces
@@ -524,6 +532,7 @@ def create_app(
                     # state before the process serves requests.
                     chat_service.stop_active_executions(workspace_id)
                     reconcile_stranded_sub_agents(chat_service, workspace_id)
+                    chat_service.resume_conversation_cleanup(workspace_id)
     if workflow_runtime is not None:
         application.state.workflow_runtime = workflow_runtime
     if harness_data_service is not None:
@@ -544,12 +553,29 @@ def create_app(
                     code,
                     message,
                     headers=exception.headers,
+                    details=detail.get(
+                        "details",
+                        {
+                            key: value
+                            for key, value in detail.items()
+                            if key not in ("code", "message")
+                        }
+                        or None,
+                    ),
                 )
         return _error_response(
             exception.status_code,
-            "http_error",
+            {
+                400: "invalid_request",
+                401: "unauthorized",
+                403: "forbidden",
+                404: "not_found",
+                409: "conflict",
+                422: "validation_error",
+            }.get(exception.status_code, "http_error"),
             str(detail),
             headers=exception.headers,
+            details=detail if not isinstance(detail, str) else None,
         )
 
     @application.exception_handler(RequestValidationError)
@@ -564,12 +590,30 @@ def create_app(
             details=exception.errors(),
         )
 
+    @application.exception_handler(Exception)
+    async def unexpected_exception_handler(
+        request: Request, exception: Exception
+    ) -> JSONResponse:
+        import logging
+
+        logging.getLogger(__name__).error(
+            "Unhandled HTTP request failure", exc_info=exception
+        )
+        return _error_response(500, "internal_error", "request failed")
+
     @application.get("/health", tags=["health"])
     @application.get("/healthz", include_in_schema=False)
+    @application.get("/api/health", tags=["health"])
+    @application.get("/api/healthz", include_in_schema=False)
     async def health() -> dict[str, str]:
         """Return a probe-safe liveness response without requiring credentials."""
         return {"status": "ok"}
 
+    @application.get(
+        "/api/v1/auth/check",
+        dependencies=[Depends(primary_authenticator)],
+        tags=["auth"],
+    )
     @application.get(
         "/v1/auth/check",
         dependencies=[Depends(primary_authenticator)],
@@ -581,19 +625,9 @@ def create_app(
 
     routers = (
         create_chat_router(),
-        create_streaming_router(
-            poll_interval_seconds=stream_poll_interval_seconds,
-            sleeper=stream_sleeper,
-            provider_delta_source=provider_delta_source,
-            max_poll_cycles=stream_max_poll_cycles,
-        ),
-        create_chat_sub_agent_router(
-            poll_interval_seconds=stream_poll_interval_seconds,
-            sleeper=stream_sleeper,
-            max_poll_cycles=stream_max_poll_cycles,
-        ),
+        create_chat_sub_agent_router(),
         create_timeline_router(
-            poll_interval_seconds=min(stream_poll_interval_seconds, 0.5),
+            recovery_interval_seconds=stream_recovery_interval_seconds,
             sleeper=stream_sleeper,
             max_poll_cycles=stream_max_poll_cycles,
         ),
@@ -627,50 +661,18 @@ def create_app(
         )
     for router in routers:
         application.include_router(router, dependencies=auth_dependency)
+        application.include_router(router, prefix="/api", dependencies=auth_dependency)
 
     # The auth router establishes its own credential (OIDC) and its session
     # endpoints carry their own cookie/CSRF dependencies, so it is registered
     # without the shared bearer dependency on both surfaces.
     if auth_router is not None:
         application.include_router(auth_router)
+        application.include_router(auth_router, prefix="/api")
 
-    # The Static Web App linked backend forwards the browser's ``/api/*`` path
-    # unchanged, so the same routers are also served from a mounted sub-app
-    # under ``/api``. Root routes (`/health`, `/v1/*`) stay for direct Container
-    # App probes and the existing clients.
-    api_application = FastAPI(
-        title=f"{application.title} (api prefix)",
-        docs_url=None,
-        redoc_url=None,
-        openapi_url=None,
-    )
-    for router in routers:
-        api_application.include_router(router, dependencies=auth_dependency)
-
+    # Both route surfaces resolve the same application state and handlers.
     if timeline is not None:
-        # Serve the same timeline from both the root app and the /api sub-app,
-        # since the mounted sub-app has its own state namespace.
         application.state.timeline = timeline
-        api_application.state.timeline = timeline
-
-    if auth_router is not None:
-        api_application.include_router(auth_router)
-
-    @api_application.get("/health", tags=["health"])
-    async def api_health() -> dict[str, str]:
-        """Return a probe-safe liveness response on the prefixed API surface."""
-        return {"status": "ok"}
-
-    @api_application.get(
-        "/v1/auth/check",
-        dependencies=auth_dependency,
-        tags=["auth"],
-    )
-    async def api_auth_check() -> dict[str, str]:
-        """Return the protected credential probe on the prefixed API surface."""
-        return {"status": "ok"}
-
-    application.mount("/api", api_application)
     return application
 
 
@@ -774,16 +776,16 @@ def serving_app_from_environment() -> FastAPI:
     both.  A missing or half-configured authentication boundary raises a
     clear :class:`ValueError` instead of binding an unauthenticated server.
 
-    The remaining routers share the :func:`create_app` defaults: the chat and
-    streaming surfaces answer with an in-memory service, and the workspace
-    DATA routes fail closed with 503 until a data bundle is composed by a
-    later runtime task.
+    Production explicitly disables in-memory defaults. Chat and workspace
+    services are supplied by the durable composition; absent services fail
+    closed with 503 rather than constructing request-local replacements.
 
     The serving stack composes the conversations service, control tools, and
     workflow runtime when ``OPENROUTER_API_KEY`` and ``HARNESS_MCP_URL`` are
     configured (see :mod:`thesis.http.serving`); the execution store then
     shares the same Cosmos database as the chat surface.
     """
+    require_single_worker()
     bearer_token = _environment_value("THESIS_API__BEARER_TOKEN")
     tenant_id = _environment_value("THESIS_API__ENTRA_TENANT_ID")
     audience = _environment_value("THESIS_API__ENTRA_AUDIENCE")
@@ -840,14 +842,32 @@ def serving_app_from_environment() -> FastAPI:
         entra_role=role,
         chat_service=stack.chat_service,
         workspace_data=workspace_data,
-        chat_stream_broker=stack.broker,
         conversations=stack.conversations,
         workflow_runtime=stack.workflow_runtime,
         workflow_registry=stack.workflow_registry,
         harness_tool_provider=stack.harness_tool_provider,
         operator_policies=stack.operator_policies,
         timeline=timeline,
+        in_memory=False,
     )
+
+
+def require_single_worker() -> None:
+    """Reject Uvicorn's WEB_CONCURRENCY setting above one.
+
+    Conversation scheduling and timeline wake channels are process-local. Serve entrypoints
+    support one Uvicorn worker only; this is not a distributed ownership mechanism.
+    Uvicorn's programmatic workers argument must also remain one at the launcher.
+    """
+    value = os.environ.get("WEB_CONCURRENCY", "1")
+    try:
+        workers = int(value)
+    except ValueError as error:
+        raise ValueError("WEB_CONCURRENCY must be 1 for Thesis serving") from error
+    if workers != 1:
+        raise ValueError(
+            "Thesis serving supports one worker only; WEB_CONCURRENCY must be 1"
+        )
 
 
 __all__ = [

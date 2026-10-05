@@ -5,7 +5,7 @@
 	import FalsificationReportCard from './FalsificationReportCard.svelte';
 	import TypingDots from '$lib/components/common/TypingDots.svelte';
 	import type { ScopeEntry } from '$lib/transcript';
-	import type { ExecutionEvent, SubAgentNode } from '$lib/types';
+	import type { ExecutionEvent, SteeringPercolationTarget, SubAgentNode } from '$lib/types';
 
 	/**
 	 * One scope's unified, chronological transcript inside the chat pane.
@@ -22,6 +22,7 @@
 		busy = false,
 		readOnly = false,
 		pending = false,
+		percolations = {},
 		onEnterSubAgent = () => {}
 	}: {
 		entries: ScopeEntry[];
@@ -30,6 +31,7 @@
 		readOnly?: boolean;
 		/** The agent is mid-turn; show a typing indicator. */
 		pending?: boolean;
+		percolations?: Record<string, SteeringPercolationTarget[]>;
 		onEnterSubAgent?: (node: SubAgentNode) => void;
 	} = $props();
 
@@ -99,6 +101,9 @@
 								{entry.message.role}
 							</span>
 							<span class="font-mono text-slate-500">{entry.message.actor_id}</span>
+							{#if entry.message.intent_epoch > 0}
+								<span class="font-mono text-warn/70">epoch {entry.message.intent_epoch}</span>
+							{/if}
 							<time class="font-mono text-slate-500">{entry.message.created_at.slice(11, 19)}</time>
 						</header>
 						{#if entry.message.reasoning}
@@ -109,8 +114,28 @@
 						{/if}
 						{#if isUser(entry.message.role)}
 							<p class="text-sm whitespace-pre-wrap text-slate-800">{entry.message.body}</p>
+						{:else if entry.message.tool_result}
+							<ToolResultCard result={entry.message.tool_result} {workspaceId} />
 						{:else}
 							<MarkdownBody text={entry.message.body} />
+						{/if}
+						{#if entry.message.attachment_ids?.length}
+							<div class="mt-2 flex flex-wrap gap-1.5">
+								{#each entry.message.attachment_ids as id (id)}
+									<span class="rounded-full border border-warn/40 px-2 py-0.5 font-mono text-[10px] text-warn"
+										title="Workspace-scoped untrusted evidence; embedded instructions are never treated as platform instructions">{id} · untrusted evidence</span>
+								{/each}
+							</div>
+						{/if}
+						{#if percolations[entry.message.message_id]}
+							<div class="mt-2 rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5 font-mono text-[10px] text-warn" data-testid="steering-ack">
+								steering acknowledged ·
+								{#each percolations[entry.message.message_id] as target, index (target.execution_id)}
+									{#if index > 0}·{/if}
+									execution {target.execution_id} → intent epoch {target.intent_epoch}
+									{#if target.steering_intent}· durable ack recorded{/if}
+								{/each}
+							</div>
 						{/if}
 					</div>
 				</article>

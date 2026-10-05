@@ -2,7 +2,7 @@ import { getContext, setContext } from 'svelte';
 import type { WorkflowExecutionRecord, WorkflowPhase } from '$lib/types';
 
 /**
- * Live workflow state the root transcript holds for its anchor card.
+ * Execution-specific live state shared by root and scoped datum renderers.
  *
  * The transcript provides this at its component root so the registry-selected
  * renderer (`WorkflowExecutionCard`) upgrades a persisted `workflow_execution`
@@ -17,7 +17,7 @@ export interface WorkflowLiveView {
 }
 
 /** Reads the current live view; the transcript's props stay reactive through it. */
-export type WorkflowLiveViewSource = () => WorkflowLiveView;
+export type WorkflowLiveViewSource = (executionId: string) => WorkflowLiveView | null;
 
 const WORKFLOW_LIVE_VIEW_KEY = Symbol('workflow-live-view');
 

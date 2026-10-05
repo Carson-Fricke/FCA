@@ -6,11 +6,19 @@ workflow's typed :class:`HypothesisDevelopmentState`.  Each transition moves
 the phase and carries its completion contract; the fold dispatches on
 ``(from_phase, to_phase)`` to apply the contract's payload to the typed state:
 
-- the creation→trials contract's ``hypothesis`` payload becomes the draft,
+- the discovery→model-creation contract's ``discovery`` payload becomes the
+  discovery draft, and the model artifacts are reset while keeping it,
+- the model-creation→trials contract's ``hypothesis`` payload becomes the draft,
 - the trials→verdict contract's ``trials`` list becomes ``state.trials``,
 - verdict contracts set ``state.verdict``,
-- the verdict→creation circle-back resets to a fresh creation state per
-  ``reset_premise`` semantics.
+- the verdict→model-creation circle-back records the verdict and resets to a
+  fresh model state per ``reset_premise`` semantics (keeping discovery),
+- the verdict→discovery restart records the verdict and resets everything per
+  ``reset_discovery`` semantics.
+
+Stored runs written before the model-creation rename name the retired
+``hypothesis_creation`` value; :func:`phase_from_value` decodes it to
+``model_creation`` so the old transitions fold through the live handlers.
 
 The hypothesis document side-store is deliberately not read: the fold is
 store-only, so a rebuild never reaches into the workspace.  Strategy-chain
@@ -24,20 +32,21 @@ from dataclasses import replace
 
 from thesis.workflows.core.execution_store import StoreTransition
 
+from .contracts.discovery import DiscoveryDraft
 from .contracts.trials import FalsificationTrial
 from .contracts.verdict import FalsificationVerdict
 from .errors import WorkflowError
 from .phases import (
+    _DISCOVERY,
     _FALSIFICATION_TRIALS,
-    _HYPOTHESIS_CREATION,
+    _MODEL_CREATION,
     _STRATEGY_DESIGN,
-    _STRATEGY_RCA,
     _VERDICT,
     HypothesisDevelopmentPhase,
     PhaseTransition,
+    phase_from_value,
 )
 from .phases.trials import _draft_from_contract
-from .piping import reset_backtests, reset_premise
 from .state import HypothesisDevelopmentState
 
 #: One transition's payload fold: typed state in, typed state out.
@@ -48,12 +57,7 @@ PayloadFold = Callable[
 
 
 def _phase(value: str) -> HypothesisDevelopmentPhase:
-    try:
-        return HypothesisDevelopmentPhase(value)
-    except ValueError as error:
-        raise WorkflowError(
-            f"stored transition names an unknown phase: {value!r}"
-        ) from error
+    return phase_from_value(value)
 
 
 def _required_payload(
@@ -81,6 +85,23 @@ def _verdict_from_contract(payload: Mapping[str, object]) -> FalsificationVerdic
     )
 
 
+def _fold_discovery(
+    state: HypothesisDevelopmentState, completion: Mapping[str, object]
+) -> HypothesisDevelopmentState:
+    """Apply the accepted discovery contract, resetting the model artifacts.
+
+    The selected candidate survives the reset because model creation consumes
+    it; the previous attempt's model, plan, trials, and strategy artifacts do
+    not.
+    """
+    payload = _required_payload(
+        completion,
+        "discovery",
+        (_DISCOVERY.value, _MODEL_CREATION.value),
+    )
+    return replace(state, discovery=DiscoveryDraft.from_dict(payload))
+
+
 def _fold_draft(
     state: HypothesisDevelopmentState, completion: Mapping[str, object]
 ) -> HypothesisDevelopmentState:
@@ -88,9 +109,9 @@ def _fold_draft(
     payload = _required_payload(
         completion,
         "hypothesis",
-        (_HYPOTHESIS_CREATION.value, _FALSIFICATION_TRIALS.value),
+        (_MODEL_CREATION.value, _FALSIFICATION_TRIALS.value),
     )
-    return replace(state, draft=_draft_from_contract(payload))
+    return replace(state, draft=_draft_from_contract(payload, persisted=True))
 
 
 def _fold_trials(
@@ -116,45 +137,20 @@ def _fold_verdict(
     return replace(state, verdict=_verdict_from_contract(payload))
 
 
-def _fold_circle_back(
-    state: HypothesisDevelopmentState, completion: Mapping[str, object]
-) -> HypothesisDevelopmentState:
-    """Record the refuting verdict, then reset to a fresh creation state."""
-    payload = completion.get("verdict")
-    if isinstance(payload, Mapping) and payload:
-        state = replace(state, verdict=_verdict_from_contract(payload))
-    return reset_premise(state)
-
-
-def _fold_reset_backtests(
-    state: HypothesisDevelopmentState, completion: Mapping[str, object]
-) -> HypothesisDevelopmentState:
-    """Clear the previous revision's backtests before a redesign."""
-    del completion
-    return reset_backtests(state)
-
-
 #: The per-transition payload folds.  Unlisted transitions (the strategy
 #: chain's structural moves) carry state unchanged; handlers are additive
 #: follow-ups keyed by their (from_phase, to_phase) pair.
-_PAYLOAD_FOLDS: Mapping[
-    tuple[HypothesisDevelopmentPhase, HypothesisDevelopmentPhase],
-    PayloadFold,
-] = {
-    (_HYPOTHESIS_CREATION, _FALSIFICATION_TRIALS): _fold_draft,
-    (_FALSIFICATION_TRIALS, _VERDICT): _fold_trials,
-    (_VERDICT, _STRATEGY_DESIGN): _fold_verdict,
-    (_VERDICT, _HYPOTHESIS_CREATION): _fold_circle_back,
-    (_STRATEGY_RCA, _STRATEGY_DESIGN): _fold_reset_backtests,
-}
-
-
 def rebuild_state(
     workspace_id: str,
     execution_id: str,
     transitions: Sequence[StoreTransition],
     *,
-    initial_phase: HypothesisDevelopmentPhase = HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
+    initial_phase: HypothesisDevelopmentPhase = HypothesisDevelopmentPhase.DISCOVERY,
+    pipes: Mapping[
+        tuple[str, str],
+        Callable[[HypothesisDevelopmentState], HypothesisDevelopmentState],
+    ]
+    | None = None,
 ) -> HypothesisDevelopmentState:
     """Fold an ordered transition sequence into the typed run state.
 
@@ -164,6 +160,8 @@ def rebuild_state(
     rests in before its first transition: live runs start at the workflow's
     declared initial phase.
     """
+    if transitions and transitions[0].from_phase == "hypothesis_creation":
+        initial_phase = _MODEL_CREATION
     state = HypothesisDevelopmentState(
         workspace_id=workspace_id,
         execution_id=execution_id,
@@ -171,17 +169,33 @@ def rebuild_state(
         intent_epoch=0,
     )
     for transition in transitions:
-        state = fold_transition(state, transition)
+        state = fold_transition(state, transition, pipes)
     return state
 
 
 def fold_transition(
     state: HypothesisDevelopmentState,
     transition: StoreTransition,
+    pipes: Mapping[
+        tuple[str, str],
+        Callable[[HypothesisDevelopmentState], HypothesisDevelopmentState],
+    ]
+    | None = None,
 ) -> HypothesisDevelopmentState:
     """Fold one stored transition into the typed state."""
     source = _phase(transition.from_phase)
     target = _phase(transition.to_phase)
+    from .spec import phase_declarations, piping
+
+    if source != state.phase or transition.sequence != len(state.transitions) + 1:
+        raise WorkflowError(
+            "stored transition does not follow the current phase/history"
+        )
+    declaration = next(
+        item for item in phase_declarations() if item.spec.phase == source.value
+    )
+    if target.value not in declaration.edges:
+        raise WorkflowError("stored transition names an undeclared edge")
     state = replace(
         state,
         phase=target,
@@ -198,10 +212,11 @@ def fold_transition(
             ),
         ),
     )
-    handler = _PAYLOAD_FOLDS.get((source, target))
-    if handler is not None:
+    handler = declaration.payload_fold
+    if handler is not None and target is not HypothesisDevelopmentPhase.FAILED:
         state = handler(state, transition.completion)
-    return state
+    declared_pipes = piping() if pipes is None else pipes
+    return declared_pipes[(source.value, target.value)](state)
 
 
 __all__ = [

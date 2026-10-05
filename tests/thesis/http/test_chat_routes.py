@@ -2,13 +2,195 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping, Sequence
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
+from thesis.agent.messages import SessionMessage, from_record
+from thesis.agent.runtime.conversation import Conversations
 from thesis.chat import ChatMessage, ChatService, MessageRole, TranscriptItemKind
+from thesis.http.application import create_app
+from thesis.http.chat_sub_agents import authenticated_actor_id
+from thesis.providers.invocations import ChatMessage as ProviderChatMessage
+from thesis.providers.invocations import ModelCompletion, Role
 
 WORKSPACE = "workspace-a"
+
+
+@pytest.mark.parametrize("prefix", ["", "/api"])
+@pytest.mark.parametrize("steering", [False, True])
+def test_root_intake_uses_one_canonical_writer_and_trusted_actor(
+    prefix: str,
+    steering: bool,
+    service: ChatService,
+    launch: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thread = service.create_chat(
+        WORKSPACE, title="Canonical", owner_actor_id="operator"
+    )
+    execution = launch(thread.chat_id)
+    seed = service.create_message(
+        WORKSPACE, thread.chat_id, actor_id="operator", body="Attachment seed"
+    )
+    attachment = service.create_attachment(
+        WORKSPACE,
+        thread.chat_id,
+        seed.message_id,
+        actor_id="operator",
+        filename="evidence.txt",
+        media_type="text/plain",
+        size_bytes=0,
+    )
+    conversations = Conversations(chat=service)
+    accepted: list[SessionMessage] = []
+    scheduled: list[ChatMessage] = []
+    writer = conversations.deliver_session_message
+
+    def deliver(*args: Any, **kwargs: Any) -> SessionMessage:
+        canonical = writer(*args, **kwargs)
+        accepted.append(canonical)
+        return canonical
+
+    monkeypatch.setattr(conversations, "deliver_session_message", deliver)
+    monkeypatch.setattr(conversations, "schedule_input", scheduled.append)
+    client = TestClient(create_app(bearer_token="token", conversations=conversations))
+    payload: dict[str, Any] = {
+        "actor_id": "spoofed-actor",
+        "body": "Focus on evidence",
+        "attachment_ids": [attachment.attachment_id],
+    }
+    if steering:
+        payload.update(
+            targets_execution_id=execution.execution_id, steering_intent="refocus"
+        )
+    before = len(service.list_messages(WORKSPACE, thread.chat_id))
+    response = client.post(
+        prefix + f"/v1/workspaces/{WORKSPACE}/chats/{thread.chat_id}/messages",
+        headers={"Authorization": "Bearer token"},
+        json=payload,
+    )
+    assert response.status_code == 200
+    record = service.get_message(WORKSPACE, response.json()["message_id"])
+    assert len(service.list_messages(WORKSPACE, thread.chat_id)) == before + 1
+    assert accepted == [from_record(record)]
+    assert [message.message_id for message in scheduled] == [record.message_id]
+    assert record.actor_id == authenticated_actor_id("token")
+    assert record.attachment_ids == (attachment.attachment_id,)
+    assert accepted[0].direction == "incoming"
+    assert accepted[0].content.source == "user"
+    assert accepted[0].content.text == payload["body"]
+    assert accepted[0].position == record.input_position > 0
+    assert bool(response.json().get("steering")) is steering
+
+
+@pytest.mark.parametrize("prefix", ["", "/api"])
+@pytest.mark.parametrize("alias", [False, True])
+def test_steering_effects_precede_first_provider_dispatch(
+    prefix: str,
+    alias: bool,
+    service: ChatService,
+    launch: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thread = service.create_chat(
+        WORKSPACE, title="Ordered steering", owner_actor_id="operator"
+    )
+    execution = launch(thread.chat_id)
+    observed: list[int] = []
+
+    class Provider:
+        def complete(
+            self,
+            *,
+            messages: Sequence[ProviderChatMessage],
+            role: Role = "primary",
+            tools: Sequence[Mapping[str, object]] | None = None,
+            response_format: Mapping[str, object] | None = None,
+        ) -> ModelCompletion:
+            current = service.get_execution(WORKSPACE, execution.execution_id)
+            observed.append(current.intent_epoch)
+            assert current.intent_epoch == 1
+            assert len(current.steering_message_ids) == 1
+            accepted = service.get_message(WORKSPACE, current.steering_message_ids[0])
+            assert accepted.intent_epoch == current.intent_epoch
+            assert accepted.actor_id == authenticated_actor_id("token")
+            assert from_record(accepted).direction == "incoming"
+            inputs = [
+                json.loads(message.content)
+                for message in messages
+                if message.role == "user"
+            ]
+            assert sum(item["text"] == "Refocus now" for item in inputs) == 1
+            return ModelCompletion(
+                content="Acknowledged",
+                model="test",
+                provider="test",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
+
+    conversations = Conversations(chat=service, provider=Provider())
+    # Run the real queued worker inline so premature scheduling is observable.
+    monkeypatch.setattr(conversations._workers, "_spawn_thread", lambda work: work())
+    scheduled: list[str] = []
+    schedule = conversations.schedule_input
+
+    def schedule_input(message: ChatMessage) -> None:
+        scheduled.append(message.message_id)
+        schedule(message)
+
+    monkeypatch.setattr(conversations, "schedule_input", schedule_input)
+    client = TestClient(create_app(bearer_token="token", conversations=conversations))
+    payload: dict[str, object] = {"actor_id": "spoofed", "body": "Refocus now"}
+    if alias:
+        route = f"/v1/workspaces/{WORKSPACE}/executions/{execution.execution_id}/steer"
+    else:
+        route = f"/v1/workspaces/{WORKSPACE}/chats/{thread.chat_id}/messages"
+        payload.update(
+            targets_execution_id=execution.execution_id, steering_intent="refocus"
+        )
+    response = client.post(
+        prefix + route, headers={"Authorization": "Bearer token"}, json=payload
+    )
+    assert response.status_code == 200
+    current = service.get_execution(WORKSPACE, execution.execution_id)
+    assert scheduled == list(current.steering_message_ids)
+    assert observed == [1]
+    accepted = service.get_message(WORKSPACE, scheduled[0])
+    assert (
+        service.read_consumed_input(WORKSPACE, thread.chat_id, "")
+        == accepted.input_position
+    )
+    assert conversations._workers._states == {}
+
+
+def test_chat_only_intake_is_canonical_without_starting_a_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(bearer_token="token", in_memory=True)
+    conversations = app.state.conversations
+    assert isinstance(conversations, Conversations)
+    spawned: list[object] = []
+    monkeypatch.setattr(conversations._workers, "_spawn_thread", spawned.append)
+    thread = conversations.chat.create_chat(
+        WORKSPACE, title="Durable only", owner_actor_id="operator"
+    )
+    response = TestClient(app).post(
+        f"/api/v1/workspaces/{WORKSPACE}/chats/{thread.chat_id}/messages",
+        headers={"Authorization": "Bearer token"},
+        json={"actor_id": "spoofed", "body": "Keep this"},
+    )
+    assert response.status_code == 200
+    record = conversations.chat.get_message(WORKSPACE, response.json()["message_id"])
+    assert from_record(record).direction == "incoming"
+    assert record.input_position > 0
+    assert spawned == []
+    assert conversations.chat.read_consumed_input(WORKSPACE, thread.chat_id, "") == 0
 
 
 def test_message_percolates_steering_to_targeted_execution(
@@ -360,6 +542,7 @@ def test_delete_chat_removes_thread_and_cascades(
     deleted = client.delete(route, headers=headers)
     assert deleted.status_code == 204
     assert client.get(route, headers=headers).status_code == 404
+    service._cleanup_queue.join()
     assert service.persistence.list(ChatMessage, WORKSPACE) == ()
 
     listing = client.get(f"/v1/workspaces/{WORKSPACE}/chats", headers=headers).json()

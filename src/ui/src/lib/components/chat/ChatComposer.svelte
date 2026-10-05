@@ -7,27 +7,34 @@
 	 */
 	let {
 		onSubmit,
-		activeExecutionId = null,
+		anyActiveWorkflow = false,
 		busy = false
 	}: {
-		onSubmit: (input: { body: string; attachmentIds: string[]; steeringIntent: string | null }) => void;
-		activeExecutionId?: string | null;
+		onSubmit: (input: { body: string; attachmentIds: string[]; steeringIntent: string | null }) => void | Promise<void>;
+		anyActiveWorkflow?: boolean;
 		busy?: boolean;
 	} = $props();
 
 	let body = $state('');
+	let submitting = $state(false);
+	let error = $state('');
 
-	const canSend = $derived(body.trim().length > 0 && !busy);
+	const canSend = $derived(body.trim().length > 0 && !busy && !submitting);
 
-	function send(): void {
+	async function send(): Promise<void> {
 		if (!canSend) return;
-		const steering = activeExecutionId && isSteering(body) ? body.trim() : null;
-		onSubmit({
-			body: body.trim(),
-			attachmentIds: [],
-			steeringIntent: steering
-		});
-		body = '';
+		const draft = body;
+		const steering = anyActiveWorkflow && isSteering(body) ? body.trim() : null;
+		submitting = true;
+		error = '';
+		try {
+			await onSubmit({ body: draft.trim(), attachmentIds: [], steeringIntent: steering });
+			if (body === draft) body = '';
+		} catch (failure) {
+			error = failure instanceof Error ? `Message could not be sent: ${failure.message}` : 'Message could not be sent.';
+		} finally {
+			submitting = false;
+		}
 	}
 
 	function isSteering(text: string): boolean {
@@ -42,7 +49,7 @@
 		<textarea
 			data-testid="composer-input"
 			class="max-h-32 min-h-10 flex-1 resize-y rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-500 focus:border-accent/50"
-			placeholder={activeExecutionId
+			placeholder={anyActiveWorkflow
 				? 'Message the workspace agent — an execution is active; messages percolate as steering…'
 				: 'Message the workspace agent…'}
 			bind:value={body}
@@ -64,8 +71,11 @@
 			Send
 		</button>
 	</div>
+	{#if error}
+		<p class="mt-2 text-xs text-warn" data-testid="composer-error" role="status">{error}</p>
+	{/if}
 
-	{#if activeExecutionId}
+	{#if anyActiveWorkflow}
 		<div class="mt-2 flex items-center gap-1 font-mono text-[10px] text-warn/80">
 			<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" aria-hidden="true"></span>
 			execution active · messages percolate (durable ack)

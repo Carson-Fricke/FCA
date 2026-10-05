@@ -1,7 +1,10 @@
 <script lang="ts">
-	import type { WorkflowExecutionRecord, WorkflowPhase } from '$lib/types';
+	import { page } from '$app/state';
+	import type { WorkflowDefinition, WorkflowExecutionRecord, WorkflowPhase } from '$lib/types';
+	import { getWorkflowDefinition } from '$lib/api';
 	import {
 		computeWorkflowGraph,
+		canonicalPhaseName,
 		NODE_WIDTH,
 		NODE_HEIGHT,
 		type GraphNode,
@@ -46,16 +49,43 @@
 	};
 
 	const currentPhase = $derived(
-		phases.find((phase) => phase.status === 'active')?.name ??
-			execution?.phase ??
-			[...phases].reverse().find((phase) => phase.status === 'done')?.name ??
-			'orchestrator'
+		canonicalPhaseName(
+			phases.find((phase) => phase.status === 'active')?.name ??
+				execution?.phase ??
+				[...phases].reverse().find((phase) => phase.status === 'done')?.name ??
+				'orchestrator'
+		)
 	);
 
-	const title = $derived(execution?.workflow_id ?? 'Workflow execution');
+	/** Attention phases on their canonical names, so retired wire values still label. */
+	const attentionPhaseNames = $derived(attentionPhases.map(canonicalPhaseName));
+
+	let definition = $state<WorkflowDefinition | null>(null);
+	let definitionError = $state('');
+	$effect(() => {
+		const id = execution?.workflow_id;
+		const version = execution?.workflow_version;
+		const workspaceId = execution?.workspace_id ?? page.params?.workspace ?? '';
+		let cancelled = false;
+		definition = null;
+		definitionError = '';
+		if (!id) return;
+		void getWorkflowDefinition(id, { workspaceId, version }).then((value) => {
+			if (cancelled) return;
+			if (version && value.version !== version) {
+				definitionError = `Topology unavailable for recorded version ${version}; API exposes ${value.version}.`;
+				return;
+			}
+			definition = value;
+		}).catch((error) => {
+			if (!cancelled) definitionError = error instanceof Error ? error.message : 'Workflow definition unavailable.';
+		});
+		return () => { cancelled = true; };
+	});
+	const title = $derived(definition?.title || execution?.workflow_id || 'Workflow execution');
 
 	const graphModel = $derived.by<WorkflowGraphModel>(() => {
-		return computeWorkflowGraph(phases, execution?.workflow_id);
+		return computeWorkflowGraph(phases, definition);
 	});
 
 	// Canvas & Pan/Zoom state
@@ -72,6 +102,8 @@
 	let hoveredNode = $state<string | null>(null);
 	let animFrameId: number | null = null;
 	let initialFitDone = false;
+	let inViewport = $state(false);
+	let documentVisible = $state(true);
 
 	function getPointerPos(e: MouseEvent | TouchEvent): { x: number; y: number } {
 		if ('touches' in e && e.touches.length > 0) {
@@ -336,14 +368,8 @@
 			}
 
 			// Arrowheads
-			if (edge.id === 'vd-to-hc-loop') {
-				drawArrow(ctx, 104, 101, -Math.PI / 2, strokeColor);
-			} else if (edge.id === 'sb-to-rca') {
-				drawArrow(ctx, 938, 145, Math.PI / 2, strokeColor);
-			} else if (edge.id === 'rca-to-sd-loop') {
-				drawArrow(ctx, 734, 101, -Math.PI / 2, strokeColor);
-			} else if (edge.id === 'opt-to-rca-loop') {
-				drawArrow(ctx, 1025, 169, Math.PI, strokeColor);
+			if (edge.arrow) {
+				drawArrow(ctx, edge.arrow.x, edge.arrow.y, edge.arrow.angle, strokeColor);
 			} else {
 				// Forward horizontal edges point right
 				const match = edge.pathD.match(/L\s+([0-9.]+)\s+([0-9.]+)/);
@@ -389,7 +415,7 @@
 
 		// 3. Draw Nodes
 		for (const node of graphModel.nodes) {
-			const isAttention = attentionPhases.includes(node.name);
+			const isAttention = attentionPhaseNames.includes(node.name);
 			const isHovered = hoveredNode === node.name;
 			const isActive = node.status === 'active';
 			const isDone = node.status === 'done';
@@ -505,8 +531,10 @@
 	}
 
 	function startAnimLoop() {
+		animFrameId = null;
+		if (!inViewport || !documentVisible) return;
 		const hasActive = graphModel.nodes.some(
-			(n) => n.status === 'active' || attentionPhases.includes(n.name)
+			(n) => n.status === 'active' || attentionPhaseNames.includes(n.name)
 		);
 		if (hasActive) {
 			redraw();
@@ -515,6 +543,22 @@
 			redraw();
 		}
 	}
+
+	$effect(() => {
+		if (!containerEl) return;
+		const updateVisibility = () => { documentVisible = !document.hidden; };
+		updateVisibility();
+		document.addEventListener('visibilitychange', updateVisibility);
+		const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
+			inViewport = entries.some((entry) => entry.isIntersecting);
+		});
+		inViewport = observer === null;
+		observer?.observe(containerEl);
+		return () => {
+			observer?.disconnect();
+			document.removeEventListener('visibilitychange', updateVisibility);
+		};
+	});
 
 	$effect(() => {
 		if (containerEl && !initialFitDone && graphModel.nodes.length) {
@@ -526,10 +570,11 @@
 	});
 
 	$effect(() => {
-		if (animFrameId) cancelAnimationFrame(animFrameId);
+		if (animFrameId !== null) cancelAnimationFrame(animFrameId);
 		startAnimLoop();
 		return () => {
-			if (animFrameId) cancelAnimationFrame(animFrameId);
+			if (animFrameId !== null) cancelAnimationFrame(animFrameId);
+			animFrameId = null;
 		};
 	});
 </script>
@@ -559,7 +604,7 @@
 				</span>
 				{#if execution}
 					<span class="font-mono text-xs text-slate-500">
-						phase {execution.phase ?? '—'} · {execution.execution_id}
+						phase {canonicalPhaseName(execution.phase ?? '—')} · {execution.execution_id}
 					</span>
 				{/if}
 			</header>
@@ -568,13 +613,13 @@
 					{summary}
 				</p>
 			{/if}
-			{#if attentionPhases.length}
+			{#if attentionPhaseNames.length}
 				<p
 					class="mt-2.5 inline-flex items-center gap-2 rounded-lg border border-warn/30 bg-warn/10 px-2.5 py-1 text-xs font-semibold text-warn"
 					data-testid="workflow-card-needs-input"
 				>
 					<span class="h-2 w-2 animate-pulse rounded-full bg-warn" aria-hidden="true"></span>
-					Input needed for {attentionPhases.join(', ')} — click to answer.
+					Input needed for {attentionPhaseNames.join(', ')} — click to answer.
 				</p>
 			{/if}
 		</div>
@@ -582,6 +627,9 @@
 	</button>
 
 	<!-- Directed Phase Graph Area with HTML5 Canvas Pan & Zoom -->
+	{#if definitionError}
+		<p class="px-4 pb-3 text-xs text-warn" role="status" data-testid="workflow-definition-error">{definitionError}</p>
+	{/if}
 	{#if graphModel.nodes.length}
 		<div class="border-t border-surface-700 bg-surface-950/40">
 			<!-- Graph Sub-header with Legend -->
@@ -637,7 +685,7 @@
 					style="transform: translate({panX}px, {panY}px) scale({zoom}); transform-origin: 0 0;"
 				>
 					{#each graphModel.nodes as node (node.name)}
-						{@const isAttention = attentionPhases.includes(node.name)}
+						{@const isAttention = attentionPhaseNames.includes(node.name)}
 						{@const isDone = node.status === 'done'}
 						{@const isPending = node.status === 'pending'}
 						<button

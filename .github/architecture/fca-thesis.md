@@ -2,30 +2,127 @@
 
 ## Status
 
-This document is the architecture and phased roadmap for **FCA Thesis**. It is
-the design basis for the CLEO Thesis saga `T143` and its current descendants
-through `T178`. The presence of those pending tasks records planned work; it
-does not claim that the described services are implemented.
+Market-input authoring now uses SDK ABI v4: studies, strategies and authored
+indicators implement `MarketConsumer` with `on_quote`, `on_trade`, `on_bar`
+and explicit subscriptions. Studies can combine bars, quotes and trades;
+tick-only studies need no global interval. Owned indicator dependencies compose
+their exact input union before acquisition and update before the parent.
+Thesis prompts, schemas, model compiler, `validate_study` feedback and harness
+launches preserve the subscription echo. The compiled union must match before
+any lake ensure/read. A study requesting quotes and bars fetches those two
+types only; the lake does not fetch trades on behalf of bars. Backtests add
+execution-required quote/trade streams separately. Bar frames remain atomic
+and available at interval end. Only one bars interval per run is currently
+supported; conflicting intervals fail validation before lake acquisition rather
+than being mixed. The native built-in indicator registry has not migrated;
+the shared interface applies only to SDK-authored consumers and their owned
+indicator dependencies.
 
-Implemented within this roadmap so far: the strategy-development vertical
-workflow (`thesis.workflows`, T160), the falsification-first
-hypothesis-development workflow with verdict evidence
-(`thesis.workflows.hypothesis_development`), bounded autonomous discovery with
-budget guards and
-candidate accounting (T162, plus `thesis.agent.search_policy`), the RCA and
-strategy revision loop with revision lineage (`thesis.workflows.rca`,
-`thesis.research`, T163), the statistical-discipline substrate
-(`thesis.experiments`: pre-registered experiment contracts, dependency-interval
-audits, hash-chained attempt and influence ledgers, evidence grades with
-explicit downgrade semantics — T164), the harness MCP tool gateway
-(`thesis.integrations.mcp`, `thesis.agent.harness_tools`, T281), and the
-falsification-first hypothesis-development workflow
-(`thesis.workflows.hypothesis_development`, `thesis.research.hypothesis`,
-`thesis.agent.hypothesis_skills`). The backend
-process boundary (`thesis` entrypoint, `Dockerfile.thesis`) is implemented
-(T178). Local and Azure security, recovery, and repository-integrity hardening
-is implemented by `thesis.operations`, with the operator procedures in
-`.github/runbooks/thesis.md` (T175).
+This document is the architecture and phased roadmap for **FCA Thesis**.
+Roadmap provisions record planned work; they do not claim that the described
+services are implemented.
+
+The current concrete workflow (version `2.0.0`) lives behind the
+`thesis.workflows.registry.hypothesis_development` public facade: discovery,
+model creation, trials, verdict, and the strategy/backtest/RCA/optimization
+chain are phases of that workflow. The older standalone strategy-development,
+discovery, and RCA workflows are retired, not separate current packages.
+`thesis.experiments` implements experiment contracts, dependency-interval audits,
+attempt/influence ledgers, and evidence grades. The hosted harness MCP gateway,
+backend process boundary (`thesis`, `Dockerfile.thesis`), and operations/security
+substrate are implemented. Broader roadmap provisions below are not a claim that
+all planned orchestration or deployment capabilities exist.
+
+Workspace program authoring is implemented through `thesis.workspaces.WorkspacePrograms`
+and context-bound `agent/runtime/program_tools.py`. Authoritative files live under
+`studies/<program_id>/`, `strategies/<program_id>/`, or `indicators/<program_id>/`
+as `program.rs`, `manifest.json`, and, after validation, `validation.json`.
+Agent-facing list/read/validate/run use latest committed contents, never working-tree
+source or caller paths. Updates require the current content version and targeted
+exact-match patches. Content versions hash source/manifest digests including
+transitive indicators; pinned snapshot loads resolve all dependencies at the same
+reachable commit. Harness compilation is authoritative, and runs require accepted
+validation matching content and SDK identity. Completion carries artifact references,
+not inline Rust; completion-time checks verify stored validation without compiling
+or repairing source. The phase agent owns SDK lookup, validation, and repair.
+
+The shared minimal templates in `workspaces/programs.py` back `read_sdk_reference` (including the `decimal` kernel topic)
+and `template=basic` authoring; they are SDK contracts, not substantive research
+implementations. Wheels and source distributions carry canonical `strategy-sdk`,
+`contracts`, and `num` Cargo manifests/Rust sources with portable relative
+dependencies. SDK version and ABI are read from packaged metadata; SDK identity
+hashes all three crates' manifests and source files. Remote harness access does not
+replace these local reference assets. Shared `prompts/sdk.py` asks for operator
+input after three unsuccessful compiler repairs; there is no runtime repair cap.
+
+Root, child, tool-enabled, and model-only execution use `AgentSession` through
+`Conversations.run_node_turn`, one `seed_messages` history decoder, and one
+`_persist_turn` transcript writer, including runtime-internal tools. The
+`SessionReplyProvider`, `reply_for`, and legacy executor paths are removed;
+model-only composition uses an empty registry in the same session. Durable
+`CompletionMode`, return anchor, and phase-executor authority do not derive from
+input kind at runtime; historical inference is confined to persistence decoding.
+Discriminated runtime activity serves every
+anchor. Per-conversation intake positions persist consumed high-water marks in
+`ChatThread.input_consumed_positions`; bounded recent-ID memory and paired
+durable cursor callbacks permit idle worker retirement without reviving consumed
+wakes. Child sends use anchored input admission. Provider adapters normalize concrete
+`httpx`/SSL transport errors rather than teaching the session transport heuristics.
+
+Every incoming producer converges on `runtime/incoming.py::write_incoming` through
+the conversation service or injected inbox port; `_persist_turn` writes outgoing
+envelopes only. Live and replay share pure `NativeSessionAdapter` projection.
+Before provider execution, the session saves the actual opaque `provider_request`
+and its hash with ordered reference-only `request_messages` (`message_id`,
+`direction`, `position`) in a `STARTED` invocation. Canonical message bodies remain
+in the neutral transcript rather than a full duplicate audit. Cosmos forces the
+opaque request into immutable content-addressed chunks before its invocation
+manifest; reads verify and hydrate the complete JSON audit. Terminal updates
+preserve it, and persistence failure prevents provider execution. Historical full
+message audits remain readable. See runtime `REQ-DEL` for executable enforcement.
+
+Workflow session policies and completion services are typed ports in
+`workflows/runtime.py`, implemented in
+`registry/hypothesis_development/session_services.py`, not HTTP serving. Spec-only
+services preserve schemas and retrieval restrictions without a harness; without
+an execution runtime they cannot accept phase completion. One phase declaration
+derives topology, policy, and piping. Live acceptance and replay share the pure
+`fold_transition` reducer through the core port, applying each pipe once.
+Acceptance rechecks intent epoch, executor and attempt, commits with store revision
+CAS, projects the phase, and closes the executor under the same guard used by
+steering, cancellation, and job attachment. Events and successor entry are outside
+that guard. Deterministic executor failures fail the workflow, never become
+agent-recoverable tool errors.
+
+Cosmos keeps one authoritative conversation store in the workspace-partitioned
+catalog: records, messages, events, and per-chat sequence counters share the
+container, and a message or event create commits the counter CAS and the item
+in one transactional batch. Messages and immutable first-save execution
+snapshots are the same documents the timeline reads, so there is no projection
+outbox, repair scan, or second container. Timeline readers wake on an
+in-process post-commit notification and resume from their durable sequence
+cursor. Stack bootstrap creates the database and catalog/executions containers
+if absent; `open_cosmos_chat_stack` and `open_execution_store` are not
+side-effect-free, and chunk storage uses the catalog container.
+The UI's `TimelineController` is the single owner of chat history/live sequence
+and thread indexes; scoped navigation has no duplicate transcript cache or
+execution SSE subscription. See `thesis-agent-workflow-runtime.md` and
+`thesis-ui-design.md` for these implemented boundaries.
+
+`/v1` and `/api/v1` use the same FastAPI application state, services, handlers,
+and authentication. Defaults are fresh per factory and composed once; request
+dependencies never create replacement services. Production explicitly disables
+in-memory defaults and missing services return 503. Conversation scheduling and
+stream brokers are process-local: serving requires `WEB_CONCURRENCY=1`, not a
+distributed ownership or multi-worker deployment.
+
+`thesis.http.schema` exports OpenAPI 3.1 plus source-derived runtime tree,
+message, activity, datum, and tool-result schemas. The UI generates TypeScript
+and JSON Schema from that export; endpoint decoders and one AJV registry validate
+HTTP, SSE, and fixture timeline records before presentation adaptation. Complete
+node-input receipts, steering acknowledgements, and structured errors are part
+of that contract. Full chat and copilot share host/timeline/navigation controllers;
+fixtures use the same record shape, not another agent runtime.
 
 FCA Thesis is a workspace-scoped chat agent for generating, implementing,
 testing, evaluating, and improving stock, option, and crypto hypotheses and
@@ -221,7 +318,6 @@ A user creates a workspace in the UI before starting a Thesis chat. The
 workspace represents a strategy family and receives a fresh:
 
 - private Git repository;
-- CLEO project and database;
 - chat and investigation namespace;
 - agent memory and retrieval namespace;
 - strategy, experiment, report, and activation history;
@@ -278,8 +374,6 @@ A new workspace should start from a versioned scaffold similar to:
 
 ```text
 <workspace>/
-|-- .cleo/
-|   `-- cleo.db                    Workspace-scoped planning state
 |-- .thesis/
 |   |-- workspace.yaml             Identity, charter, limits, and settings
 |   |-- platform.lock              Effective Thesis bundle and model policy
@@ -335,50 +429,15 @@ jobs may be active in one workspace. Their mutable scopes must be explicit:
 - Git commits include the workflow, model, input, and artifact identifiers that
   produced the change.
 
-`.cleo/cleo.db` is intentionally tracked, but SQLite cannot be safely merged as
-text. A workspace coordinator is the only CLEO writer. Concurrent agents may
-propose plan mutations; the coordinator queues, applies, validates, and
-publishes them under a fenced single-writer lease. Investigation branches do
-not carry independently modified copies of the CLEO database.
+The workspace coordinator serializes canonical mutations and Git publication
+under a fenced single-writer lease. Each accepted mutation has an idempotency ID
+and journaled outbox record. Publication verifies the committed artifacts before
+marking the outbox item complete. Startup reconciliation safely completes an
+interrupted publication without replaying the logical mutation twice.
 
-A SQLite transaction and a Git commit are not one atomic transaction. Every
-CLEO mutation therefore has an idempotency ID and journaled outbox record. The
-coordinator checkpoints and closes WAL state, creates and integrity-checks a
-consistent database snapshot, publishes it with its mutation record, and marks
-the outbox item complete. Startup reconciliation safely completes or rolls back
-an interrupted publication without replaying the logical mutation twice.
-
-The workspace CLEO profile tracks exactly the canonical `.cleo/cleo.db` and
-excludes WAL, journal, backup, credential, and process-runtime files. Only the
-coordinator's canonical worktree contains a writable database. Agents and
-investigation worktrees read plans and submit proposed changes through the
-coordinator API.
-
-## CLEO Role
-
-Each workspace owns one durable CLEO project. It sits above all investigations
-in that workspace rather than being recreated for each chat, experiment, or
-backtest. A new workspace starts with a completely fresh CLEO project; nothing
-is inherited from another workspace.
-
-CLEO provides:
-
-- the workspace research and implementation plan;
-- dependency-aware decomposition across investigations and strategies;
-- visible task state and evidence links in the UI;
-- a structured handoff between fresh agent sessions; and
-- an auditable planning record committed with the workspace.
-
-Users do not need to know CLEO commands or tell Thesis to use CLEO. Versioned
-workflow instructions tell Thesis when to inspect, update, reconcile, and
-validate the plan. The UI renders CLEO concepts as the workspace plan and may
-offer an optional diagnostic view with native IDs.
-
-CLEO is not the durable job queue and does not own in-flight model or tool
-execution. The Thesis execution service owns checkpoints, leases, retries,
-cancellation, and recovery. This separation makes CLEO durable planning state
-while allowing each model invocation or subagent context to be fresh and
-least-privileged.
+The Thesis execution service owns in-flight model and tool execution,
+checkpoints, leases, retries, cancellation, and recovery. Each model invocation
+or subagent context can remain fresh and least-privileged.
 
 ## Agent Runtime
 
@@ -391,7 +450,7 @@ a durable event stream. At minimum, the backend stores:
 - the triggering user message and attachments;
 - selected workflow and effective workflow version;
 - current custom phase and phase history;
-- CLEO tasks and investigation links;
+- investigation links;
 - effective instruction/skill bundle hashes;
 - model roles, provider model identifiers, and registry records;
 - tool submissions, correlation IDs, status, and results;
@@ -477,7 +536,7 @@ When an earlier tool completes after steering:
 - the result is never silently discarded; and
 - an idempotent job can be reused rather than submitted again.
 
-Every model continuation, tool result, CLEO proposal, Git publication, and
+Every model continuation, tool result, workspace mutation, Git publication, and
 finding carries its intent epoch. A stale epoch may attach a completed result as
 evidence but cannot mutate canonical strategy, plan, contract, or findings
 until Thesis reevaluates it under the current epoch. Workflow definitions state
@@ -495,19 +554,20 @@ route `POST /v1/workspaces/{ws}/executions/{id}/steer` survives only as a
 deprecated alias that posts a steering message into the execution's
 originating chat so transcripts hold every steering act.
 
-Executions are streamed over Server-Sent Events at `GET
-/v1/workspaces/{ws}/executions/{id}/events/stream`. The stream fans out both
-surfaces: durable execution machine events (SSE `id` is the replay cursor, so
-`Last-Event-ID` resume reuses the existing cursor semantics through
-reconnects) and, per chat subscription, chat message events as ephemeral
-frames without an `id` that clients deduplicate by message ID. Provider token
-deltas are allowed as a documented ephemeral `provider.delta` event kind
-during model phases. Each dispatched harness tool call is persisted as an
-ordered `tool`-role chat message carrying the tool name, call id, success flag,
-summary, structured payload, text, and canonical failure mapping, so the
-conversation retains the call at the position it ran; the message streams on
-the same `chat.message` frame as any other message and survives replay.
-Ephemeral events are never replayed from the event store.
+The implemented chat UI streams `GET
+/v1/workspaces/{ws}/chats/{chat}/timeline/stream`, one durable sequence of
+messages and events. SSE `id` is `seq`, resumed with `Last-Event-ID`; backward
+history reads the same timeline with `thread` and `before` until exhaustion.
+The existing execution event endpoint remains a backend surface, not a second
+UI subscription. Provider deltas are ephemeral, not durable timeline history.
+Each tool result is a durable anchored `tool` message carrying call identity,
+success/failure, structured output, and typed datum metadata. Root and child
+transcripts use the shared projection, including multiple datums from one call.
+Scope state controls navigation and capabilities only. Re-entry reconciles
+attempt identities and snapshot/event freshness rather than keeping a prior
+terminal node permanently closed. Graph edges come only from a fetched current
+workflow definition matching the execution version; missing/mismatched topology
+is explicitly unavailable, not synthesized.
 
 ### Model Router
 
@@ -561,7 +621,6 @@ Tools are narrow capabilities rather than arbitrary credentials:
 | Tool family | Allowed responsibility |
 | --- | --- |
 | Workspace Git | Read, branch, edit, test, checkpoint, and publish within the selected workspace. |
-| CLEO | Read and propose workspace plans; mutations pass through the single-writer coordinator. |
 | Market lake | Ensure and query point-in-time equity, option, and crypto data through published contracts. |
 | Quant harness | Validate strategy code, launch deterministic backtests/sweeps, and query complete result artifacts. |
 | Code sandbox | Run generated Rust programs and their tests with bounded CPU, memory, filesystem, and no implicit network or secrets. |
@@ -585,18 +644,16 @@ The client discovers the catalog with `tools/list` and executes it with
 `tools/call`, so a launch can only route through a tool the harness actually
 publishes.
 
-The gateway covers all four Thesis/harness topology combinations through one
-selectable transport:
+The gateway uses the harness-hosted MCP endpoint for local and remote serving:
 
 | Thesis | Harness | Transport |
 | --- | --- | --- |
-| local | local | In-process MCP handler for a single-process runtime, else a `StdioMcpTransport` that spawns `harness mcp` and exchanges newline-delimited JSON-RPC over stdio. |
-| remote | local | `StdioMcpTransport`; valid only when the Thesis process can reach a local `harness` executable, so operators co-locate the processes or inject an in-process handler. |
+| local | local | HTTP JSON-RPC to the local harness's `POST /mcp`. |
+| remote | local | HTTP JSON-RPC to a reachable hosted harness endpoint; no Thesis-spawned process. |
 | local | remote | `RemoteHttpMcpTransport` posting JSON-RPC to `POST /mcp` with a bearer credential. |
 | remote | remote | `RemoteHttpMcpTransport` posting JSON-RPC to `POST /mcp` with a bearer credential. |
 
-A remote harness endpoint (`HARNESS_MCP_URL`) wins over a local command
-(`HARNESS_MCP_COMMAND`); `THESIS_LOCATION` names where Thesis runs and
+`HARNESS_MCP_URL` selects the hosted endpoint; `THESIS_LOCATION` names where Thesis runs and
 `HARNESS_API_BEARER_TOKEN` supplies the remote credential. The bearer token is
 sent only as an `Authorization` header and is excluded from every
 representation. `thesis.agent.harness_tools` wraps the client in a
@@ -607,21 +664,33 @@ bundle and permit `HARNESS_TOOL_NAMES`. The unified session registry enforces
 the resolved `allowedTools` before a model tool request reaches the provider;
 there is no second policy-enforcing dispatcher.
 
-Backtest launches route through the MCP `run_backtest` tool via a
-`HarnessMcpBoundary` whose capabilities derive from the discovered catalog. The
-local harness HTTP `/mcp` endpoint composes `NativeBacktestSubmitter` over the
-same durable run and job stores as its REST routes, so local HTTP MCP launches
-never depend on an external process runner. The
-local composition prefers the MCP boundary and falls back to the direct
-`LocalHarnessProcess` process boundary when the MCP server cannot be started;
-a remote harness never silently falls back to local execution. That direct
-boundary serves non-agent workspace integration only: workflow sub-agents and
-their research/backtest operations are composed only when the MCP tool provider
-is available and always execute through `McpBacktestRunner`.
+Backtest launches route through the MCP `run_backtest` tool; capabilities derive
+from the discovered catalog. The local harness HTTP `/mcp` endpoint composes
+`NativeBacktestSubmitter` over the same durable run/job stores as REST. Thesis
+does not spawn a harness process or fall back to local execution when MCP is
+unavailable. Workflow execution is composed only with the harness tool provider;
+spec-only session policy and knowledge tools still work without it.
+
+`McpBacktestRunner` and `McpStudyRunner` send configuration mappings inline;
+explicit path strings name a file on the harness host. A confirmed domain
+not-found response permits a new launch; transport/auth/protocol failures and
+unknown states do not count as absence. Pending jobs are joined, terminal jobs
+can be relaunched for revised artifacts, and polling uses a monotonic deadline,
+bounded backoff, and cancellation checks. Deterministic run failures fail the
+owning workflow rather than sending it into an agent recovery loop.
+
+The harness owns study validation reuse. Its local `StudyValidator` uses the
+JIT service's bounded 64-entry full-input cache and compiler identity, with
+source/configuration invalidation affecting the actual artifact. MCP accepts an
+injected validator's optional opaque identity and forwards `reused`, `cacheable`,
+and `deterministicCompilerDiagnostic` metadata from Cargo JSON diagnostics. MCP
+does not inspect compiler files or probe tools; Python keeps no validation LRU,
+identity probes, or regex diagnostic inference. Infrastructure errors are never
+cached as deterministic compiler errors. See `rust-native-authoring-plan.md`.
 
 The local harness submitter is asynchronous like the remote one: `run_backtest`
 returns a `run_id` with `state: running` immediately and completes on a worker,
-so the caller follows `get_backtest_status` to a terminal state, then `get_run`
+so the caller follows `get_job_status` to a terminal state, then `get_run`
 and `list_artifacts`. A run's result set (`backtest.json`, `metrics.json`,
 `report.html`, and the recorded Parquet trail such as `artifacts/equity.parquet`)
 is registered in the durable run store, and `read_artifact` returns any artifact's
@@ -711,7 +780,11 @@ The model serves two falsification layers:
   therefore a falsification instrument whose declared exit criteria are
   monitor re-checks, and PnL is only a guardrail.
 
-The hypothesis-creation agent proposes the model itself -- assets, estimator,
+The discovery agent runs small targeted studies on the starting intuition,
+records every attempt including negative results, and hands model creation one
+candidate opportunity with its signal, information timing, direction, holding
+period, profit source, expected effect, and main competing explanation. The
+model-creation agent proposes the model itself -- assets, estimator,
 sampling frequency, windows, sample period, expected estimates versus the
 null, falsifiers, and negative controls -- and infers rather than interrogates.
 It never proposes a forward-looking experiment, and it does not ask about
@@ -720,88 +793,131 @@ design.
 
 Indicators and strategies are separate contracts. The immutable global
 indicator registry contains platform implementations such as `sma`, `rsi`,
-and `realized_vol`. Workspace indicator definitions remain content-addressed
-under `indicators/<name>/<content-sha>/`. Every `IndicatorRef`
+and `realized_vol`. The legacy indicator-definition surface remains content-addressed
+under `indicators/<name>/<content-sha>/`; current authored program dependencies
+instead live under `indicators/<program_id>/` with committed source/manifests.
+Every legacy `IndicatorRef`
 explicitly declares `global` or `workspace` scope; workspace refs also carry
 the owning workspace and content hash, so they cannot shadow a built-in or
-resolve from a sibling workspace. A statistical research model is published
-independently under
+resolve from a sibling workspace. The accepted study program lives under
+`studies/<program_id>/`; its completion reference pins content and Git commit.
+Research execution also publishes the resolved statistical model independently under
 `models/<model-id>/<content-sha>/` as an authored Rust program whose source
-implements the SDK `StudyProgram` contract (`new(parameters)`,
-`on_bar_frame(&BarFrame)`, `on_stop(&mut MetricPublisher)`): it folds atomic
-interval frames and publishes its Layer A observables as metrics, and `fits/<fit-sha>.json`
+implements `MarketConsumer<Context = ObservationContext>` plus the SDK
+`StudyProgram` lifecycle (`new(parameters)`, `on_stop(&mut MetricPublisher)`).
+Its `subscriptions()` declares exact bars (`1min` or `1d`), quote, and trade
+inputs; `indicators() -> Vec<&mut dyn Indicator>` exposes owned nested
+dependencies. Requirements and topology remain stable after construction;
+cycles and zero-sized indicator dependencies are rejected. Dependencies update
+before their parent, with consumer-local routing. Common callbacks are
+`on_quote`, `on_trade`, and `on_bar(&BarFrame, &mut ObservationContext)`;
+there is no study raw-bar callback. It publishes Layer A observables as metrics,
+and `fits/<fit-sha>.json`
 contains the immutable numeric Layer A parameters and calibration bounds. The
 fitted reference is workspace-local and is the only model state a Layer B
 strategy may consume; the model is never represented as a strategy.
 
-The workflow phases and their conversational checkpoints (all workflow gates, gate resolution schemas, and gate tools are permanently removed; all operator review, step validation, and blockage route conversationally via `_emit_orchestrator_text` and `SUB_AGENT_NEEDS_INPUT`) are:
+The workflow phases use no operator workflow gates, gate-resolution schemas, or
+gate tools. Phase agents ask through `request_workflow_input` at their own anchor
+and request completion after operator acceptance. The engine does not author or
+relay operator questions.
 
 Every request for operator input or direction is model-authored from a structured reason, never a canned workflow string; only mechanical text (phase names, counts, digests, ledger statements, activity labels) is deterministic. See `thesis-operator-text.md` for the rule and the current inventory.
 
-1. `requested` -- the chat request is accepted.
-2. `hypothesis_creation` -- a durable conversation in which the agent turns the
-    intuition into the candidate model, states the Layer A falsifiers, and
-    returns `{message, advance}` on every proposal turn. `advance` reports that
-    the proposal is ready for operator review; it never authorizes a phase
-    transition. The workflow pauses at a durable `needs_input` gate after every
-    proposal. On subsequent turns the model judges whether the operator's prose
-    clearly confirms the proposal; positive confirmation composes the structured
-    hypothesis document and falsification plan, while feedback or ambiguity
-    returns to the input gate. Raw structured model responses remain internal,
-    while the transcript records concise finalization summaries. The hypothesis
-    is projected into a workspace artifact under `hypotheses/<slug>.md`.
+1. `discovery` -- a durable conversation in which the research agent runs small
+    targeted studies on the launching premise, logs every attempt, and returns
+    one candidate opportunity with its competing explanation, the data it left
+    untouched, and its limitations. Discovery is deliberately weaker than
+    validation: it never runs the final model or a backtest.
+2. `model_creation` -- a durable conversation in which the agent turns the
+    accepted candidate into the statistical model, states the Layer A
+     falsifiers, and authors the Rust study. It asks for review through
+     `request_workflow_input`; confirmation is a conversational instruction,
+     not an engine-enforced approval gate. After acceptance it submits the
+     structured hypothesis and plan through `request_phase_completion`, with a
+     committed study reference plus description, outputs, and tests. The agent
+     validates the latest study ID before completion. Contract/evidence errors
+     and explicit compilation-tool failures return to that agent for repair;
+     completion itself checks stored validation without recompiling.
+     Prose alone never advances the phase. The transcript records concise
+    finalization summaries. The hypothesis is projected into a workspace
+     immutable artifact under `hypotheses/<slug>/<sha256>.md`.
    **Gate (falsifiability):** the front matter must carry a non-empty
    disagreement (what the no-structure null predicts instead) and at least one
    falsifier with `{observable, condition, threshold, test}`. No departure
    from the null or no falsifier cannot advance; without a regularity there is
    nothing to trade. **Gate (model):** the separate research model must declare
    every falsifier observable as a finite named output and declare its
-   `harnessConfiguration` window (`start`/`end`) and bar interval (`1min` or
-   `1d`). **Gate (plan):** at least one falsifier test bound to a declared
+   `harnessConfiguration` window (`start`/`end`) and exact `subscriptions`,
+   including owned indicator requirements. Only bars declare an interval
+   (`1min` or `1d`); tick-only inputs need no global interval. **Gate (plan):**
+   at least one falsifier test bound to a declared
    falsifier and at least one negative/placebo control.
 3. `falsification_trials` -- the planned trials run through the harness and
    bind every falsifier to a metric from one historical model execution. The
-   model's authored Rust study program runs once as a `study`-shell replay at
-   the interval the model declares in `harnessConfiguration.interval` (emitted
-   as `data.bar_interval` in the study configuration), folds the replayed
-   `BarFrame`s, and publishes its Layer A observables in `on_stop` through
+   model's authored Rust study program runs once as a `study`-shell replay over
+   the exact inputs it declares in `harnessConfiguration.subscriptions`
+   (preserved as `data.subscriptions` in the study configuration). The compiled
+   ABI v4 JSON union of source and dependencies must canonically equal that
+   echo before any ensure/read; `validate_study` returns the union for author
+   feedback. Legacy interval-only documents remain readable, but their authored
+   sources must migrate to the current SDK API and rebuild. The study observes
+   subscribed ticks and `BarFrame`s, and publishes Layer A observables in
+   `on_stop` through
    `MetricPublisher::publish`; the `fit.<parameter>` metrics are frozen as the
-   content-addressed fitted-model artifact. Model source sees bars only; it
-   has no order, position, sizing, portfolio, or venue capability, and ticks
-   are not part of the study contract. Thesis writes a workspace evidence
+   content-addressed fitted-model artifact. Model source has no order, position,
+   sizing, portfolio, or venue capability. Study acquisition fetches only the
+   effective union; backtests add quote/trade execution feeds and distinguish
+   effective, execution, and acquired subscriptions in the manifest. Mixed
+   replay orders by availability, with ticks, completed frames, then generated
+   execution events at equal time. Bars are available at interval end, not bar
+   start. Thesis writes a workspace evidence
    record under `models/runs/` containing the model ref, run ID, state,
-   metrics, and result artifacts. The phase agent receives the MCP result in
-   the same logical turn, authors a Markdown interpretation, and emits a structured
-    visual report. Scorecards use observed metrics and declared thresholds;
+    metrics, and result artifacts. This is a deterministic phase in topology
+    `2.0.0`: `run_falsification_trials` resolves the recorded result and returns
+    the trials contract without creating a phase agent or model turn. The report
+    projection uses observed metrics and declared thresholds;
     distribution and time-series charts render only when the evidence artifact
     contains real samples, never client-generated placeholder data. Missing
-    evidence pauses as an execution/data problem; it does not rewrite the premise.
+     evidence is an execution/data problem, not permission to rewrite the premise.
+     Agent tool failures can be repaired within the turn; deterministic executor
+     failures instead fail the workflow durably.
 4. `verdict` -- the deterministic verdict is `refuted` when any falsifier
     fires, `supported` when none fires and every falsifier has evidence, and
     `inconclusive` otherwise. A supported verdict advances to strategy design.
     A refuted verdict posts the observed findings into the persistent
-    `hypothesis_creation` conversation, reopens that same phase node, and asks
-    the agent for a revised proposal before the manual approval gate. This
-    premise loop is bounded to five approved hypothesis attempts.
+    `model_creation` conversation, reopens that same phase node, and asks
+     the agent for a revised model and conversational operator review. When the
+    premise itself is not worth pursuing, the verdict instead loops back to
+    `discovery`, reopening the persistent discovery conversation with the
+    superseding verdict. This premise loop is bounded to five approved
+    hypothesis attempts.
 5. `strategy_design` -- a conversational phase. The agent implements the
     surviving hypothesis from the finalized model specification and its declared
     falsifiers, explains the strategy to the operator in prose, and authors it
     through the `author_strategy` tool as pure Rust source against
     `harness-strategy-sdk` (the harness JIT-compiles it). The strategy
    references the surviving workspace model and fitted-model hashes instead of
-   copying their definitions, feeds trailing events to the model monitor, and
+   copying their definitions, implements `MarketConsumer<Context = OrderSink>`
+   for exact subscriptions and common quote/trade/frame callbacks, and keeps
+   `new`, `on_start`, `on_fill`, and `on_stop` in `StrategyProgram`. It feeds
+   trailing events to the model monitor and
    publishes each current Layer B observation under the exact falsifier name.
-   A falsifier hit submits flattening orders and prevents new entries. The
-   published strategy is a workspace artifact at
-   `strategies/<slug>/<version>/` (Rust source, tests, and `manifest.json`) and
-   the Strategies page is a projection over it; strategies are never stored in
-   Cosmos or any standalone store.
-    **Completion validation:** the strategy must pass structural validation, declare exit criteria
-    phrased as re-checks of the declared falsifiers (Layer B), and be published
-    as a workspace artifact before the phase advances. Structural validation
-    does not compile Rust, execute tests, or provide a security sandbox;
-    compilation belongs to the harness JIT path.
-6. `strategy_backtesting` -- the validated strategy is run through the harness.
+   A falsifier hit submits flattening orders and prevents new entries. The current
+   authoring path commits `strategies/<program_id>/program.rs` and `manifest.json`,
+   then writes the accepted `validation.json` receipt through `validate_strategy`.
+   The older `WorkspaceStrategyArtifacts` service and Strategies HTTP projection
+   remain separate domain surfaces, not this program-bound completion path.
+     **Completion validation:** submit `workspaceId`, `kind=strategy`, `programId`,
+     `gitCommit`, and content-hash `version` from successful validation. Acceptance
+     verifies pinned/latest committed content, stored validation, and SDK identity;
+     it does not compile, execute tests, rewrite source, or provide a security sandbox.
+6. `strategy_backtesting` -- a `OneShotPhase` agent, not a deterministic executor.
+   It reads the handed-off `strategy.programId` with `read_strategy`, calls
+   `run_backtest {program_id: ...}` using latest committed content and its current
+   accepted validation, records the actual run receipt, and requests completion.
+   Stale or rejected validation is reported as a blocker, not bypassed with inline
+   source or caller paths.
    A successful terminal run advances to optimization. A failed run advances to
    `strategy_rca`; no economic threshold is invented unless a future strategy
    contract explicitly declares one.
@@ -826,6 +942,15 @@ finalized model, not only the claim: the claim, the null/disagreement, the
 horizon and universe, every declared falsifier with its id, observable,
 condition, threshold and computation, the workspace model reference, and the
 Markdown model specification.
+
+`WorkspaceHypothesisStore` resolves every path through the selected local or
+Gitea repository provider and requires a workspace ID for save/load/list. New
+versions publish canonical bytes at `hypotheses/<slug>/<sha256>.md`, selected by
+`.thesis/hypotheses/<slug>.json`. A workspace command journal and fenced Git
+publication preserve immutable accepted content and exclude unrelated index or
+worktree edits; reads verify identity, digest, canonical bytes, and committed
+content. Legacy `hypotheses/<slug>.md` remains readable only in that explicit
+workspace. There is no shared-root fallback or guessed legacy ownership migration.
 
 The hypothesis artifact is a workspace Markdown document whose small,
 strictly validated YAML front matter (rendered in the deterministic JSON
@@ -1140,11 +1265,47 @@ contain or make a strategy-generation process unbiased. The evidence grade and
 influence ledger separately account for the models and external information
 involved in hypothesis generation and strategy selection.
 
-## Global Knowledge Library
+## Shared And Workspace Knowledge
 
-The knowledge library is global and readable by every workspace by default. It
-is a versioned evidence library for trading, market structure, statistics,
-backtesting, data quality, risk, execution, and FCA operational knowledge.
+The shared library lives under `src/thesis/knowledge/library/` and ships as
+Thesis package data. Every workspace also owns a separate `knowledge/` corpus
+inside its verified repository checkout. Both hold versioned research evidence;
+workspace content never crosses another workspace boundary.
+
+Thesis model sessions expose `search_knowledge` and `read_knowledge`, including
+the discovery, model-creation, verdict, and strategy-design phase agents. Search
+queries both sources by default; the model can select `shared`, `workspace`, or
+`both`. `WorkflowSpec.knowledge_scope` restricts workflow retrieval, including
+helpers carrying workflow attribution. Serving configures this through
+`THESIS_KNOWLEDGE_SCOPE` (default `both`). The requested scope intersects the
+trusted scope; a disjoint request fails rather than falling back to both.
+`WorkflowSpec.phase_knowledge` additionally restricts individual phases to
+named collections: discovery may retrieve only `discovery`, `data-quality`, and
+`trading-costs`; model creation only `model-cards`, `inference`, `validation`,
+and `trading-costs`; every other phase is unrestricted. The allowlist filters
+the searched page set before lexical, semantic, or hyperlink expansion, and is
+re-checked on read, so an excluded page cannot be reached by any retrieval
+path. Workspace identity comes from runtime context, not tool arguments.
+Knowledge tools also work when the harness is unavailable.
+
+Search builds separate in-memory hybrid indexes over actual corpus bytes and
+returns bounded excerpts with source-qualified references. Reads resolve those
+references against the same byte snapshot and reject changed content. Results
+preserve page versions, provenance and typed relationship annotations; their
+`snapshot_id` is a SHA-256 content identity, not a claimed Git commit. Serving
+embeds with `Xenova/all-MiniLM-L6-v2` (384-dimension sentence encoder)
+through onnxruntime, downloaded and cached on first
+use; the hashed bag-of-words baseline remains an automatic offline fallback and
+`THESIS_EMBEDDING_DISABLE=1` forces it. Retrieved content remains data, never
+instruction authority.
+
+Embedding artifacts are pinned to commit
+`751bff37182d3f1213fa05d7196b954e230abad9` with verified model/tokenizer checksums.
+Loading and downloads are single-flight; successful vectors use a bounded cache
+keyed by backend identity and text, with no failure publication. One search
+operation binds a coherent embedding backend for its indexes and query. If
+primary inference fails, the whole operation retries once on the lexical
+fallback; it never mixes semantic and fallback vector spaces in one result.
 
 The canonical corpus is a directory tree of Markdown files. Each page is a
 normal Git-versioned `.md` file; front matter or a sidecar index supplies
@@ -1160,35 +1321,23 @@ page or source record should carry:
 - supersession and contradiction links;
 - curation and trust state; and
 - lexical and semantic-search representations, generated as rebuildable index
-  data rather than canonical content.
+   data rather than canonical content.
 
 Search should combine hyperlink traversal, lexical retrieval, metadata filters,
 semantic embeddings, and optional reranking. The embedding/index implementation
 is replaceable; word2vec is one possible baseline, not a contract. Search
-results always retain the Markdown path, Git revision, page version, and source
+results always retain the Markdown path, byte snapshot identity, page version, and source
 provenance so a workflow can cite the exact corpus state it used.
 
 The separate ingestion pipeline fetches, parses, deduplicates, links, embeds,
 and proposes Markdown revisions. Curation and publication are explicit Git
 operations; a fetched page does not automatically become trusted knowledge.
 
-Each workspace has full read access to the global Markdown corpus by default.
-The agent can retrieve pages directly through the knowledge service. The
-recommended initialization behavior is not to load the full corpus into CLEO:
-
-- CLEO `Nexus` is intended for code intelligence and cross-project code/task
-  relationships, not a general trading-knowledge corpus.
-- CLEO `Brain` is a memory/runtime surface. It can consume Markdown memory
-  files, but its database is not the canonical global library and bulk-loading
-  the corpus would pollute workspace memory and context.
-- Thesis may seed the workspace CLEO project with a compact, version-pinned
-  knowledge manifest or selected reference records that link back to global
-  Markdown paths and Git revisions.
-
-That projection is optional, rebuildable, and never a second canonical copy.
-The exact CLEO projection mechanism remains a later implementation decision;
-the repository currently contains no FCA contract that names it `Nexus`,
-`Brain`, or another facility.
+Each workspace has full read access to the global Markdown corpus by default,
+subject to the retrieval restrictions above. The agent retrieves pages directly
+through the knowledge service rather than loading the full corpus into agent
+memory or context. The Markdown corpus remains the canonical library; search
+indexes are rebuildable representations, not a second canonical copy.
 
 Trust tiers are:
 
@@ -1366,7 +1515,6 @@ The Thesis UI should eventually provide:
 - ordered cursor-based reconnect/replay with duplicate suppression and visible
   message/upload retry states;
 - safe workspace switching while background executions continue;
-- the workspace CLEO plan and dependencies without requiring CLEO knowledge;
 - investigation, strategy lineage, experiment, and artifact navigation;
 - experiment-contract cards and change history;
 - evidence grades, cutoff overlap notices, exposure history, and limitations;
@@ -1375,6 +1523,9 @@ The Thesis UI should eventually provide:
 - model role/version/cutoff provenance;
 - explicit consent-grant and activation-gatekeeper controls; and
 - workspace repository archive, export, restore, and deletion controls.
+
+The workspace-state API and UI expose only `lineages`, `evidence`, and
+`consentAudit`; they do not include a planning DAG or planning demo.
 
 The standard view shows an event timeline plus periodic synthesized findings.
 Diagnostic views may expose prompts, model outputs, tool inputs, logs, and
@@ -1394,8 +1545,7 @@ chain-of-thought.
 | Execution service | Durable queue, leases, checkpoints, retries, cancellation, and event stream. |
 | Workflow registry | Versioned custom-phase workflows, required artifacts, subagent roles, and gates. |
 | Agent runtime | Prompt assembly, model routing, context boundaries, subagents, skills, and budgets. |
-| CLEO coordinator | Workspace plan projection and queued single-writer mutations. |
-| Tool gateway | Least-privilege lake, harness, sandbox, web, Git, knowledge, protected-test, and activation-request tools. The harness family is implemented as the MCP tool gateway described under Agent Runtime; the remaining families are roadmap work. |
+| Tool gateway | Least-privilege tools. Harness MCP and scoped shared/workspace knowledge search/read are implemented; sandbox, web, Git, protected-test, and activation-request families remain roadmap work. |
 | Experiment service | Contracts, strategy lineages, observed/declared attempt ledger, and a read-only mirror of protected eligibility/exposure. |
 | Evidence service | Claims, grades, modifiers, citations, limitations, and report assembly. |
 | Knowledge service | Global Markdown corpus, hybrid search, links, citations, and workspace trust overlays. |
@@ -1473,8 +1623,8 @@ metric values in prose.
 - Define the public Thesis-to-harness client boundary.
 - Create the versioned workspace repository template and local workspace
   provider.
-- Initialize one CLEO project per workspace and implement the queued
-  fenced single-writer coordinator, journal/outbox, and crash reconciliation.
+- Implement the queued fenced single-writer workspace coordinator,
+  journal/outbox, and crash reconciliation.
 - Define immutable content-addressed strategy bundles and use their identity for
   every backtest and evidence record from the start.
 - Define platform bundle signing/versioning and bounded workspace overlays.
@@ -1488,7 +1638,7 @@ Deliver the shortest complete user outcome:
 create workspace
   -> open chat and upload files
   -> request strategy implementation
-  -> see a durable workflow timeline and CLEO plan
+  -> see a durable workflow timeline
   -> generate and test Rust strategy code
   -> launch quant-harness backtest jobs
   -> inspect results and evidence report
@@ -1501,7 +1651,7 @@ create workspace
   submission, intent-epoch writes, command deduplication, checkpoint-version
   validation, restart recovery, and explicit failed/dead-letter states.
 - Implement the model router with a configurable primary, coder, and reviewer.
-- Implement sandbox, workspace Git, CLEO, market-lake, and quant-harness tools.
+- Implement sandbox, workspace Git, market-lake, and quant-harness tools.
 - Integrate harness strategy validation, manifests, metrics, and result queries.
 - Integrate both harness adapters required by the local-first slice: local
   `api`, `backtest-job`, and `trader` processes with filesystem/state adapters,
@@ -1525,7 +1675,7 @@ create workspace
 - Add workflow-specific custom phases and phase-required subagent roles.
 - Add investigation and strategy-lineage navigation across multiple chats.
 - Support concurrent investigations with isolated branches/artifacts and
-  serialized canonical/CLEO mutations.
+  serialized canonical workspace mutations.
 - Add parameter sweeps, attempt ledger, robustness skills, statistical critique,
   and ordinary RCA loops.
 - Add evidence claims, grades, modifiers, and claim-to-artifact traceability.
@@ -1542,9 +1692,6 @@ create workspace
 - Preserve source/version/effective-date citations in agent outputs.
 - Implement separate ingestion, deduplication, link extraction, embedding,
   curation, and Markdown Git publication stages.
-- Define the optional workspace-initialization projection into CLEO, including
-  its global Markdown revision, rebuild behavior, and whether the selected CLEO
-  facility is called Nexus, Brain, or something else.
 - Implement workspace trust overlays bounded below platform policy.
 - Red-team retrieved content for prompt injection and provenance confusion.
 - Defer direct agent publication; support reviewed proposals only in a later
@@ -1656,12 +1803,12 @@ conversation abstraction is `thesis-conversation-abstraction-v1`.
 Thesis reaches its intended architecture when:
 
 - a local operator can create two workspaces and automated tests prove their
-  files, memory, CLEO state, tools, and artifacts cannot cross;
+  files, memory, tools, and artifacts cannot cross;
 - local Thesis and its UI can reopen workspace history while offline, acquire
   Azure AI Foundry access through backend-only Entra credentials when online,
   and never expose provider tokens to the browser or Git;
-- multiple chats and concurrent investigations can safely advance one
-  workspace plan without merging SQLite databases or losing Git history;
+- multiple chats and concurrent investigations can safely publish canonical
+  workspace state without overwriting unrelated work or losing Git history;
 - an autonomous workflow survives disconnect/restart, accepts immediate
   steering, and retains in-flight tool results;
 - a generated Rust strategy runs through the same published quant-harness

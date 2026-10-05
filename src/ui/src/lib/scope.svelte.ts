@@ -18,8 +18,22 @@ export interface ScopeSegment {
 	label: string;
 	role?: string;
 	phase?: string;
+	executionId?: string;
 	/** A finished phase's orchestrator is entered read-only. */
 	readOnly?: boolean;
+}
+
+/** JSON tuple avoids collisions even when execution/phase names contain separators. */
+export function phaseScopeId(executionId: string, phase: string): string {
+	return JSON.stringify([executionId, phase]);
+}
+
+export function phaseScopeTarget(id: string): { executionId: string; phase: string } | null {
+	try {
+		const value = JSON.parse(id);
+		return Array.isArray(value) && value.length === 2 && value.every((part) => typeof part === 'string' && part.length > 0)
+			? { executionId: value[0], phase: value[1] } : null;
+	} catch { return null; }
 }
 
 const SCOPE_KINDS: ScopeSegmentKind[] = [
@@ -45,7 +59,7 @@ export function defaultScopeLabel(kind: ScopeSegmentKind, id: string): string {
 export function serializeScope(segments: ScopeSegment[]): string {
 	return segments
 		.filter((segment) => segment.id)
-		.map((segment) => `${segment.kind}:${encodeURIComponent(segment.id)}`)
+		.map((segment) => `${segment.kind}:${encodeURIComponent(segment.id)}${segment.readOnly === true ? '?readOnly=1' : ''}`)
 		.join('/');
 }
 
@@ -57,9 +71,13 @@ export function parseScope(value: string | null | undefined): ScopeSegment[] {
 		if (!part) continue;
 		const separator = part.indexOf(':');
 		const kind = separator === -1 ? part : part.slice(0, separator);
-		const id = decodeURIComponent(separator === -1 ? '' : part.slice(separator + 1));
+		const encoded = separator === -1 ? '' : part.slice(separator + 1);
+		const readOnly = encoded.endsWith('?readOnly=1');
+		const id = decodeURIComponent(readOnly ? encoded.slice(0, -11) : encoded);
 		if (!id || !isScopeKind(kind)) continue;
-		segments.push({ kind, id, label: defaultScopeLabel(kind, id) });
+		const target = kind === 'phase' ? phaseScopeTarget(id) : null;
+		segments.push({ kind, id, label: defaultScopeLabel(kind, target?.phase ?? id), ...target,
+			...(readOnly ? { readOnly: true } : {}) });
 	}
 	return segments;
 }

@@ -1,7 +1,7 @@
 """Workspace-state HTTP surface over the local persistence records.
 
-The route projects one workspace's CLEO projection view, evidence index,
-consent/audit trail, and strategy lineage exactly as persisted by the local
+The route projects one workspace's evidence index, consent/audit trail,
+and strategy lineage exactly as persisted by the local
 persistence layer.  The router translates payloads only; the document source
 is injected through app state.
 """
@@ -11,9 +11,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Annotated, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, Path, Request
 
-_STATE_DOCUMENT_KEYS = ("cleo", "taskTimeline", "lineages", "evidence", "consentAudit")
+from thesis.http.errors import service_error
+
+_STATE_DOCUMENT_KEYS = ("lineages", "evidence", "consentAudit")
 
 
 class WorkspaceStateStore(Protocol):
@@ -46,11 +48,11 @@ def _validate_document(document: dict[str, object]) -> dict[str, object]:
     for key in _STATE_DOCUMENT_KEYS:
         if key not in document:
             raise ValueError(f"workspace state document requires {key!r}")
-    return document
+    return {key: document[key] for key in _STATE_DOCUMENT_KEYS}
 
 
 class WorkspaceStateService:
-    """Serves one workspace's persisted CLEO projection and audit records."""
+    """Serves one workspace's persisted lineage, evidence, and audit records."""
 
     def __init__(
         self,
@@ -69,24 +71,17 @@ class WorkspaceStateService:
         document = self._store.load(workspace_id)
         if document is None:
             raise KeyError(workspace_id)
-        return document
+        return _validate_document(document)
 
     def save_state(self, workspace_id: str, document: dict[str, object]) -> None:
-        _validate_document(document)
-        self._store.save(workspace_id, document)
+        self._store.save(workspace_id, _validate_document(document))
 
 
 def get_workspace_state_service(request: Request) -> WorkspaceStateService:
     """Resolve the service from app state so applications control persistence."""
-    service = getattr(request.app.state, "workspace_state_service", None)
-    if service is None:
-        service = WorkspaceStateService()
-        request.app.state.workspace_state_service = service
-    if not isinstance(service, WorkspaceStateService):
-        raise RuntimeError(
-            "app.state.workspace_state_service must be a WorkspaceStateService"
-        )
-    return service
+    from thesis.http.errors import require_service
+
+    return require_service(request, "workspace_state_service", WorkspaceStateService)
 
 
 def create_workspace_state_router() -> APIRouter:
@@ -101,15 +96,9 @@ def create_workspace_state_router() -> APIRouter:
         try:
             return service.state(workspace_id)
         except KeyError as error:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "workspace_state_not_found",
-                    "message": f"no persisted state for workspace {workspace_id!r}",
-                },
-            ) from error
+            raise service_error(error, resource="workspace_state") from error
         except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
+            raise service_error(error) from error
 
     @router.put("/state")
     async def put_workspace_state(
@@ -120,7 +109,7 @@ def create_workspace_state_router() -> APIRouter:
         try:
             service.save_state(workspace_id, document)
         except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
+            raise service_error(error) from error
         return service.state(workspace_id)
 
     return router

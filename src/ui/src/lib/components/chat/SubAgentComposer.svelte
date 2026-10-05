@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { canonicalPhaseName } from '$lib/workflow-graph';
+
 	/**
 	 * Capability-gated composer for one sub-agent node. The composer is
 	 * rendered only when the node declares `accepts_input`; a node that does
@@ -8,34 +10,34 @@
 		acceptsInput,
 		phase = '',
 		busy = false,
+		draft = $bindable(''),
 		onSubmit = () => {}
 	}: {
 		acceptsInput: boolean;
 		phase?: string;
 		busy?: boolean;
+		draft?: string;
 		onSubmit?: (body: string) => void | Promise<void>;
 	} = $props();
 
-	let body = $state('');
-	const canSend = $derived(acceptsInput && body.trim().length > 0 && !busy);
-	const placeholder = $derived(
-		phase === 'verdict'
-			? 'Say "check off" to apply the verdict, or "circle back" to revise the hypothesis...'
-			: phase === 'hypothesis_creation'
-				? 'Confirm to approve hypothesis (e.g. "approved"), or message feedback to revise...'
-				: 'Message this sub-agent...'
-	);
+	let submitting = $state(false);
+	const canSend = $derived(acceptsInput && draft.trim().length > 0 && !busy && !submitting);
+	const phaseName = $derived(canonicalPhaseName(phase));
+	const placeholder = $derived(phaseName ? `Message the ${phaseName.replace(/_/g, ' ')} agent...` : 'Message this sub-agent...');
 
 	async function send(): Promise<void> {
 		if (!canSend) return;
-		const draft = body.trim();
+		const sentBody = draft;
+		submitting = true;
 		try {
-			await onSubmit(draft);
+			await onSubmit(sentBody.trim());
 		} catch {
 			// Keep the draft so a rejected send can be retried or edited.
 			return;
+		} finally {
+			submitting = false;
 		}
-		body = '';
+		if (draft === sentBody) draft = '';
 	}
 </script>
 
@@ -45,8 +47,7 @@
 			<textarea
 				class="max-h-28 min-h-9 flex-1 resize-y rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-1.5 text-sm text-slate-800 outline-none placeholder:text-slate-500 focus:border-accent/50"
 				{placeholder}
-				bind:value={body}
-				disabled={busy}
+				bind:value={draft}
 				data-testid="sub-agent-composer-input"
 				onkeydown={(e) => {
 					if (e.key !== 'Enter' || e.isComposing || e.shiftKey) return;

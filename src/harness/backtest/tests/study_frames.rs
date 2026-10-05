@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::{
     assemble_study_frames, build_default_manifest, run_native_engine, BacktestOutcome,
-    EngineBarFrame, EngineMarket, EngineOptions, EngineOrder, StrategyInstance, StrategyRuntime,
-    StrategyStart,
+    EngineBarFrame, EngineMarket, EngineOptions, EngineOrder, MarketSubscription, StrategyInstance,
+    StrategyRuntime, StrategyStart,
 };
 use backtest::backtest::errors::BacktestError;
 use backtest::backtest::fixture::{
@@ -182,7 +182,7 @@ fn dispatches_once_at_availability_with_raw_counts_and_order_independent_hash() 
 }
 
 #[test]
-fn rejects_duplicates_unexpected_symbols_ticks_and_misaligned_starts() {
+fn rejects_duplicates_unexpected_symbols_and_misaligned_starts_but_ignores_ticks() {
     let config = config("1min");
     for events in [
         vec![bar("SPY", config.start_ns), bar("SPY", config.start_ns)],
@@ -198,7 +198,11 @@ fn rejects_duplicates_unexpected_symbols_ticks_and_misaligned_starts() {
         .is_err());
     }
     let ticks = synthetic_fixture(&config, &SyntheticDataOptions::default()).unwrap();
-    assert!(assemble_study_frames(&config, &ticks, &SyntheticDataOptions::default()).is_err());
+    assert!(
+        assemble_study_frames(&config, &ticks, &SyntheticDataOptions::default())
+            .unwrap()
+            .is_empty()
+    );
     assert!(preflight_data(&config, &fixture(&config, Vec::new())).is_err());
 }
 
@@ -367,4 +371,621 @@ fn dispatch_hash_covers_missing_symbols_bounds_and_bar_values() {
         Observer::default(),
     );
     assert_ne!(first.dispatch_hash, third.dispatch_hash);
+}
+
+fn subscription(kind: &str, symbols: &[&str], interval: Option<&str>) -> MarketSubscription {
+    MarketSubscription {
+        data_type: kind.into(),
+        symbols: symbols.iter().map(|s| (*s).into()).collect(),
+        interval: interval.map(str::to_string),
+    }
+}
+
+struct RoutedObserver {
+    inputs: Vec<MarketSubscription>,
+    seen: Arc<Mutex<Vec<String>>>,
+}
+
+impl StrategyRuntime for RoutedObserver {
+    fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+        Some(self.inputs.clone())
+    }
+    fn on_start(&mut self, _: &StrategyStart) -> Result<(), BacktestError> {
+        Ok(())
+    }
+    fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
+        let kind = match event {
+            EngineMarket::Quote { .. } => "quote",
+            EngineMarket::Trade { .. } => "trade",
+            _ => panic!("raw bar"),
+        };
+        self.seen.lock().unwrap().push(format!(
+            "{kind}:{}:{}",
+            event.symbol(),
+            event.timestamp_ns()
+        ));
+        Ok(Vec::new())
+    }
+    fn on_bar_frame(&mut self, frame: &EngineBarFrame) -> Result<(), BacktestError> {
+        self.seen.lock().unwrap().push(format!(
+            "{}:{}:{}",
+            frame.interval,
+            frame
+                .bars_by_symbol
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(","),
+            frame.available_at_ns
+        ));
+        Ok(())
+    }
+}
+
+fn quote(symbol: &str, timestamp_ns: i64) -> MarketEvent {
+    MarketEvent::Quote {
+        event_id: format!("q-{symbol}-{timestamp_ns}"),
+        timestamp_ns,
+        sequence: 1,
+        symbol: symbol.into(),
+        bid: Decimal18::from_i64(10),
+        ask: Decimal18::from_i64(11),
+        bid_quantity: Decimal18::from_i64(100),
+        ask_quantity: Decimal18::from_i64(100),
+        venue: "test".into(),
+    }
+}
+
+#[test]
+fn mixed_replay_routes_each_consumer_and_never_dispatches_future_frames_ahead_of_ticks() {
+    for shell in ["study", "backtest"] {
+        let mut config = config("1min");
+        config.shell = shell.into();
+        config.symbols = vec!["SPY".into(), "AAPL".into()];
+        config.data_subscriptions = vec![
+            subscription("quote", &["SPY", "AAPL"], None),
+            subscription("bars", &["SPY", "AAPL"], Some("1min")),
+        ];
+        let start = config.start_ns;
+        let fixture = fixture(
+            &config,
+            vec![
+                bar("SPY", start),
+                bar("AAPL", start),
+                quote("SPY", start + MINUTE / 2),
+                quote("AAPL", start + MINUTE / 3),
+                quote("SPY", start + MINUTE + 1),
+            ],
+        );
+        let mixed = Arc::new(Mutex::new(Vec::new()));
+        let other = Arc::new(Mutex::new(Vec::new()));
+        let strategies = vec![
+            StrategyInstance {
+                instance_id: "mixed".into(),
+                runtime: Box::new(RoutedObserver {
+                    inputs: vec![
+                        subscription("quote", &["SPY"], None),
+                        subscription("bars", &["SPY"], Some("1min")),
+                    ],
+                    seen: mixed.clone(),
+                }),
+            },
+            StrategyInstance {
+                instance_id: "other".into(),
+                runtime: Box::new(RoutedObserver {
+                    inputs: vec![
+                        subscription("quote", &["AAPL"], None),
+                        subscription("bars", &["AAPL"], Some("1min")),
+                    ],
+                    seen: other.clone(),
+                }),
+            },
+        ];
+        let preflight = preflight_data(&config, &fixture).unwrap();
+        let manifest = build_default_manifest(&config, &fixture, &preflight).unwrap();
+        let outcome = run_native_engine(
+            &config,
+            &fixture,
+            &preflight,
+            manifest,
+            &EngineOptions::default(),
+            strategies,
+            &SyntheticDataOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            *mixed.lock().unwrap(),
+            [
+                format!("quote:SPY:{}", start + MINUTE / 2),
+                format!("1min:SPY:{}", start + MINUTE),
+                format!("quote:SPY:{}", start + MINUTE + 1)
+            ]
+        );
+        assert_eq!(
+            *other.lock().unwrap(),
+            [
+                format!("quote:AAPL:{}", start + MINUTE / 3),
+                format!("1min:AAPL:{}", start + MINUTE)
+            ]
+        );
+        assert_eq!(outcome.bar_frame_count, 1);
+        assert!(outcome.manifest.effective_subscriptions.is_some());
+        assert_eq!(outcome.order_count, 0);
+    }
+}
+
+#[test]
+fn tick_only_study_parses_without_bar_interval_and_rejects_invalid_echoes() {
+    let document = serde_json::json!({"shell":"study", "run_id":"ticks", "data":{"subscriptions":[{"data_type":"trade", "symbols":["SPY"]}]}});
+    let parsed = parse_study_document(&document).unwrap();
+    assert_eq!(
+        parsed.data_subscriptions,
+        [subscription("trade", &["SPY"], None)]
+    );
+    for input in [
+        serde_json::json!({"data_type":"trade","symbols":[]}),
+        serde_json::json!({"data_type":"trade","symbols":["SPY"],"interval":"1min"}),
+        serde_json::json!({"data_type":"bars","symbols":["SPY"]}),
+        serde_json::json!({"data_type":"bars","symbols":["SPY"],"interval":"1m"}),
+        serde_json::json!({"data_type":"quote","symbols":["SPY"],"extra":1}),
+    ] {
+        let mut invalid = document.clone();
+        invalid["data"]["subscriptions"] = serde_json::json!([input]);
+        assert!(parse_study_document(&invalid).is_err());
+    }
+    let mut bars = document;
+    bars["data"]["subscriptions"] =
+        serde_json::json!([{"data_type":"bars","symbols":["SPY"],"interval":"1d"}]);
+    assert!(parse_study_document(&bars).is_ok());
+}
+
+#[test]
+fn requested_type_cannot_be_satisfied_by_other_stream_and_echo_is_exact() {
+    let mut config = config("1min");
+    config.symbols = vec!["SPY".into()];
+    let fixture = fixture(&config, vec![quote("SPY", config.start_ns)]);
+    let input = subscription("trade", &["SPY"], None);
+    assert!(
+        backtest::backtest::preflight::validate_subscription_coverage(
+            &fixture,
+            std::slice::from_ref(&input)
+        )
+        .is_err()
+    );
+    config.data_subscriptions = vec![input];
+    let strategies = vec![StrategyInstance {
+        instance_id: "quotes".into(),
+        runtime: Box::new(RoutedObserver {
+            inputs: vec![subscription("quote", &["SPY"], None)],
+            seen: Arc::default(),
+        }),
+    }];
+    assert!(backtest::backtest::engine_core::runtime_subscriptions(&config, &strategies).is_err());
+    assert!(backtest::backtest::engine_core::normalize_subscriptions(&[
+        subscription("bars", &["SPY"], Some("1min")),
+        subscription("bars", &["SPY"], Some("1d"))
+    ])
+    .is_err());
+}
+
+#[test]
+fn frame_orders_execute_only_in_backtests_and_never_fill_from_bars() {
+    struct FrameBuyer;
+    impl StrategyRuntime for FrameBuyer {
+        fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+            Some(vec![subscription("bars", &["SPY"], Some("1min"))])
+        }
+        fn on_start(&mut self, _: &StrategyStart) -> Result<(), BacktestError> {
+            Ok(())
+        }
+        fn on_market(&mut self, _: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
+            panic!("execution feeds must not reach a bars consumer")
+        }
+        fn on_frame_orders(
+            &mut self,
+            frame: &EngineBarFrame,
+        ) -> Result<Vec<EngineOrder>, BacktestError> {
+            Ok(vec![EngineOrder {
+                order_id: "buy".into(),
+                symbol: "SPY".into(),
+                side: "buy".into(),
+                quantity: num::Decimal::from_i128(1),
+                order_type: "market".into(),
+                time_in_force: "day".into(),
+                limit_price: None,
+                stop_price: None,
+                timestamp_ns: frame.available_at_ns,
+                sequence: 0,
+                event_id: "buy-event".into(),
+            }])
+        }
+    }
+    for (shell, ticks, succeeds, fills) in [
+        ("study", false, false, 0),
+        ("backtest", false, true, 0),
+        ("backtest", true, true, 1),
+    ] {
+        let mut config = config("1min");
+        config.shell = shell.into();
+        config.symbols = vec!["SPY".into()];
+        let mut events = vec![bar("SPY", config.start_ns)];
+        if ticks {
+            events.push(quote("SPY", config.start_ns + MINUTE + 1));
+        }
+        let fixture = fixture(&config, events);
+        let preflight = preflight_data(&config, &fixture).unwrap();
+        let manifest = build_default_manifest(&config, &fixture, &preflight).unwrap();
+        let outcome = run_native_engine(
+            &config,
+            &fixture,
+            &preflight,
+            manifest,
+            &EngineOptions::default(),
+            vec![StrategyInstance {
+                instance_id: "buyer".into(),
+                runtime: Box::new(FrameBuyer),
+            }],
+            &SyntheticDataOptions::default(),
+        );
+        assert_eq!(outcome.is_ok(), succeeds);
+        if succeeds {
+            assert_eq!(outcome.unwrap().fills.len(), fills);
+        }
+    }
+}
+
+#[test]
+fn subscription_serde_contract_is_strict_and_round_trips() {
+    let input = subscription("quote", &["SPY"], None);
+    let text = serde_json::to_string(&input).unwrap();
+    assert_eq!(
+        serde_json::from_str::<MarketSubscription>(&text).unwrap(),
+        input
+    );
+    assert!(serde_json::from_str::<MarketSubscription>(
+        r#"{"data_type":"quote","symbols":["SPY"],"unknown":true}"#
+    )
+    .is_err());
+}
+
+fn buy(id: &str, timestamp_ns: i64) -> EngineOrder {
+    EngineOrder {
+        order_id: id.into(),
+        symbol: "SPY".into(),
+        side: "buy".into(),
+        quantity: num::Decimal::from_i128(1),
+        order_type: "market".into(),
+        time_in_force: "day".into(),
+        limit_price: None,
+        stop_price: None,
+        timestamp_ns,
+        sequence: 0,
+        event_id: id.into(),
+    }
+}
+
+#[test]
+fn same_time_ticks_precede_frames_and_generated_fills_use_current_quotes() {
+    struct Buyer {
+        seen: Arc<Mutex<Vec<String>>>,
+        availability: i64,
+    }
+    impl StrategyRuntime for Buyer {
+        fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+            Some(vec![
+                subscription("quote", &["SPY"], None),
+                subscription("bars", &["SPY"], Some("1min")),
+            ])
+        }
+        fn on_start(&mut self, _: &StrategyStart) -> Result<(), BacktestError> {
+            Ok(())
+        }
+        fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
+            self.seen
+                .lock()
+                .unwrap()
+                .push(format!("quote:{}", event.sequence()));
+            Ok(
+                if event.timestamp_ns() == self.availability && event.sequence() == 1 {
+                    vec![buy("tick-buy", self.availability)]
+                } else {
+                    Vec::new()
+                },
+            )
+        }
+        fn on_frame_orders(
+            &mut self,
+            frame: &EngineBarFrame,
+        ) -> Result<Vec<EngineOrder>, BacktestError> {
+            self.seen.lock().unwrap().push("frame".into());
+            Ok(vec![buy("frame-buy", frame.available_at_ns)])
+        }
+        fn on_fill(
+            &mut self,
+            fill: &backtest::backtest::engine_core::EngineFill,
+        ) -> Result<(), BacktestError> {
+            self.seen
+                .lock()
+                .unwrap()
+                .push(format!("fill:{}", fill.order_id));
+            Ok(())
+        }
+    }
+    let mut config = config("1min");
+    config.shell = "backtest".into();
+    config.symbols = vec!["SPY".into()];
+    let availability = config.start_ns + MINUTE;
+    let mut first = quote("SPY", availability);
+    let mut last = quote("SPY", availability);
+    if let MarketEvent::Quote { ask, .. } = &mut first {
+        *ask = Decimal18::from_i64(21);
+    }
+    if let MarketEvent::Quote {
+        sequence,
+        ask,
+        event_id,
+        ..
+    } = &mut last
+    {
+        *sequence = 100;
+        *ask = Decimal18::from_i64(31);
+        *event_id = "last-quote".into();
+    }
+    // Deliberately unordered raw inputs, with a cached pre-availability quote.
+    let fixture = fixture(
+        &config,
+        vec![
+            last,
+            bar("SPY", config.start_ns),
+            first,
+            quote("SPY", config.start_ns),
+        ],
+    );
+    let preflight = preflight_data(&config, &fixture).unwrap();
+    let manifest = build_default_manifest(&config, &fixture, &preflight).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let outcome = run_native_engine(
+        &config,
+        &fixture,
+        &preflight,
+        manifest,
+        &EngineOptions::default(),
+        vec![StrategyInstance {
+            instance_id: "buyer".into(),
+            runtime: Box::new(Buyer {
+                seen: seen.clone(),
+                availability,
+            }),
+        }],
+        &SyntheticDataOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [
+            "quote:1",
+            "quote:1",
+            "quote:100",
+            "frame",
+            "fill:tick-buy",
+            "fill:frame-buy"
+        ]
+    );
+    assert_eq!(
+        outcome
+            .fills
+            .iter()
+            .map(|fill| fill.price)
+            .collect::<Vec<_>>(),
+        [num::Decimal::from_i128(21), num::Decimal::from_i128(31)]
+    );
+    assert_eq!(
+        outcome
+            .manifest
+            .execution_subscriptions
+            .as_ref()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        outcome
+            .manifest
+            .acquired_subscriptions
+            .as_ref()
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn stop_rejection_and_duplicate_metrics_fail_after_all_runtimes_stop() {
+    struct Stopper {
+        reject: bool,
+        stops: Arc<Mutex<u64>>,
+    }
+    impl StrategyRuntime for Stopper {
+        fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+            Some(vec![subscription("quote", &["SPY"], None)])
+        }
+        fn on_start(&mut self, _: &StrategyStart) -> Result<(), BacktestError> {
+            Ok(())
+        }
+        fn on_market(&mut self, _: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
+            Ok(Vec::new())
+        }
+        fn on_stop(&mut self) -> Result<(), BacktestError> {
+            *self.stops.lock().unwrap() += 1;
+            if self.reject {
+                Err(BacktestError::StrategyExecution(
+                    "stop metric rejected".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        fn published_metrics(&self) -> BTreeMap<String, String> {
+            if self.reject {
+                BTreeMap::new()
+            } else {
+                BTreeMap::from([("shared".into(), "1".into())])
+            }
+        }
+    }
+    for reject in [true, false] {
+        let mut config = config("1min");
+        config.symbols = vec!["SPY".into()];
+        config.data_subscriptions = vec![subscription("quote", &["SPY"], None)];
+        let fixture = fixture(&config, vec![quote("SPY", config.start_ns)]);
+        let preflight = preflight_data(&config, &fixture).unwrap();
+        let manifest = build_default_manifest(&config, &fixture, &preflight).unwrap();
+        let stops = Arc::new(Mutex::new(0));
+        let strategies = (0..2)
+            .map(|i| StrategyInstance {
+                instance_id: format!("stopper-{i}"),
+                runtime: Box::new(Stopper {
+                    reject: reject && i == 0,
+                    stops: stops.clone(),
+                }) as Box<dyn StrategyRuntime>,
+            })
+            .collect();
+        let error = run_native_engine(
+            &config,
+            &fixture,
+            &preflight,
+            manifest,
+            &EngineOptions::default(),
+            strategies,
+            &SyntheticDataOptions::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, BacktestError::StrategyExecution(_)));
+        assert!(error.to_string().contains(if reject {
+            "stop metric rejected"
+        } else {
+            "published by both"
+        }));
+        assert_eq!(*stops.lock().unwrap(), 2);
+    }
+}
+
+#[test]
+fn explicit_bars_need_completed_frames_for_each_symbol_before_start() {
+    let mut config = config("1min");
+    config.symbols = vec!["SPY".into(), "AAPL".into()];
+    config.end_ns = config.start_ns + MINUTE + MINUTE / 2;
+    let fixture = fixture(
+        &config,
+        vec![
+            bar("SPY", config.start_ns),
+            bar("AAPL", config.start_ns + MINUTE),
+        ],
+    );
+    let preflight = preflight_data(&config, &fixture).unwrap();
+    let manifest = build_default_manifest(&config, &fixture, &preflight).unwrap();
+    let strategies = vec![StrategyInstance {
+        instance_id: "observer".into(),
+        runtime: Box::new(RoutedObserver {
+            inputs: vec![subscription("bars", &["SPY", "AAPL"], Some("1min"))],
+            seen: Arc::default(),
+        }),
+    }];
+    let error = run_native_engine(
+        &config,
+        &fixture,
+        &preflight,
+        manifest,
+        &EngineOptions::default(),
+        strategies,
+        &SyntheticDataOptions::default(),
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("bars/AAPL completed frame coverage"));
+}
+
+#[test]
+fn rfc3339_bounds_preserve_nanoseconds_offsets_and_reject_provided_invalid_values() {
+    let base = stamp("2024-01-02T14:30:00Z");
+    for text in [
+        "2024-01-02T14:30:00.123456789Z",
+        "2024-01-02T16:30:00.123456789+02:00",
+        "2024-01-02T09:00:00.123456789-05:30",
+    ] {
+        assert_eq!(parse_timestamp_ns(text), Some(base + 123_456_789));
+    }
+    assert_eq!(
+        parse_timestamp_ns("1969-12-31T23:59:59.999999999Z"),
+        Some(-1)
+    );
+    let document = serde_json::json!({"shell":"study", "run_id":"bounds", "start":"2024-01-02T16:30:00.123456789+02:00", "end":"2024-01-02T14:30:00.123456790Z", "data":{"subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
+    let parsed = parse_study_document(&document).unwrap();
+    assert_eq!(
+        (parsed.start_ns, parsed.end_ns),
+        (base + 123_456_789, base + 123_456_790)
+    );
+    for invalid in [
+        "2024-02-30T00:00:00Z",
+        "2024-01-02T24:00:00Z",
+        "2024-01-02T00:60:00Z",
+        "2024-01-02T00:00:60Z",
+        "2024-01-02T00:00:00+24:00",
+        "2024-01-02T00:00:00+00:60",
+        "2024-01-02T00:00:00+0a:00",
+        "2024-01-02T00:00:00.1aZ",
+        "2024-01-02T00:00:00.Z",
+        "2024-01-02T00:00:00.1234567891Z",
+        "2024-01-02T00:00:00",
+        "9999-01-02T00:00:00Z",
+    ] {
+        assert_eq!(parse_timestamp_ns(invalid), None, "{invalid}");
+        for key in ["start", "end"] {
+            let mut bad = document.clone();
+            bad[key] = serde_json::json!(invalid);
+            assert!(parse_study_document(&bad)
+                .unwrap_err()
+                .to_string()
+                .contains(key));
+        }
+    }
+    for key in ["start", "end"] {
+        for value in [serde_json::Value::Null, serde_json::json!(123)] {
+            let mut bad = document.clone();
+            bad[key] = value;
+            assert!(parse_study_document(&bad).is_err());
+        }
+    }
+    assert!(BacktestConfig::from_yaml("shell: backtest\nrun_id: defaults\n").is_ok());
+}
+
+#[test]
+fn authored_legacy_studies_must_match_global_bar_requirements_unless_echo_is_present() {
+    let mut config = config("1min");
+    config.symbols = vec!["SPY".into()];
+    for inputs in [
+        vec![subscription("bars", &["SPY"], Some("1min"))],
+        vec![subscription("bars", &["AAPL"], Some("1min"))],
+        vec![subscription("bars", &["SPY"], Some("1d"))],
+        vec![subscription("quote", &["SPY"], None)],
+    ] {
+        config.data_subscriptions.clear();
+        let strategies = vec![StrategyInstance {
+            instance_id: "study".into(),
+            runtime: Box::new(RoutedObserver {
+                inputs: inputs.clone(),
+                seen: Arc::default(),
+            }),
+        }];
+        let expected = inputs == vec![subscription("bars", &["SPY"], Some("1min"))];
+        assert_eq!(
+            backtest::backtest::engine_core::runtime_subscriptions(&config, &strategies).is_ok(),
+            expected
+        );
+        config.data_subscriptions = inputs;
+        assert!(
+            backtest::backtest::engine_core::runtime_subscriptions(&config, &strategies).is_ok()
+        );
+    }
 }

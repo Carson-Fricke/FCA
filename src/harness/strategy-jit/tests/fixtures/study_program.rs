@@ -8,7 +8,8 @@
 
 use harness_strategy_sdk::serde_json::Value;
 use harness_strategy_sdk::{
-    export_study_program, BarFrame, Decimal, MetricPublisher, StudyProgram,
+    export_study_program, BarFrame, Decimal, MarketConsumer, MetricPublisher, ObservationContext,
+    StudyProgram, Subscription,
 };
 
 #[derive(Debug, Default)]
@@ -67,7 +68,28 @@ impl StudyProgram for BarStudy {
         }
     }
 
-    fn on_bar_frame(&mut self, frame: &BarFrame) {
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("study_frame_count", self.frames as f64);
+        let _ = metrics.publish("study_missing_count", self.missing as f64);
+        let _ = metrics.publish("study_bar_count", self.bars as f64);
+        let _ = metrics.publish("study_bar_mismatches", self.mismatches as f64);
+        publish_decimal(metrics, "study_last_open", self.last_open);
+        publish_decimal(metrics, "study_last_high", self.last_high);
+        publish_decimal(metrics, "study_last_low", self.last_low);
+        publish_decimal(metrics, "study_last_close", self.last_close);
+        publish_decimal(metrics, "study_last_volume", self.last_volume);
+    }
+}
+
+impl MarketConsumer for BarStudy {
+    type Context = ObservationContext;
+    fn subscriptions(&self) -> Vec<Subscription> {
+        vec![Subscription::Bars {
+            symbols: vec!["AAA".into(), "BBB".into(), "CCC".into()],
+            interval: "1min".into(),
+        }]
+    }
+    fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {
         self.frames += 1;
         self.missing += frame.missing_symbols.len() as u64;
         for event in frame.bars_by_symbol.values() {
@@ -88,23 +110,11 @@ impl StudyProgram for BarStudy {
             self.last_volume = Some(event.volume);
         }
     }
-
-    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("study_frame_count", self.frames as f64);
-        let _ = metrics.publish("study_missing_count", self.missing as f64);
-        let _ = metrics.publish("study_bar_count", self.bars as f64);
-        let _ = metrics.publish("study_bar_mismatches", self.mismatches as f64);
-        publish_decimal(metrics, "study_last_open", self.last_open);
-        publish_decimal(metrics, "study_last_high", self.last_high);
-        publish_decimal(metrics, "study_last_low", self.last_low);
-        publish_decimal(metrics, "study_last_close", self.last_close);
-        publish_decimal(metrics, "study_last_volume", self.last_volume);
-    }
 }
 
 fn publish_decimal(metrics: &mut MetricPublisher, name: &str, value: Option<Decimal>) {
     if let Some(value) = value {
-        let _ = metrics.publish(name, value.to_string().parse().unwrap_or(0.0));
+        let _ = metrics.publish(name, value.to_f64());
     }
 }
 

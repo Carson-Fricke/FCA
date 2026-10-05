@@ -18,6 +18,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol, cast
 
+from thesis.paths import InvalidRelativePath, confined_relative_path
 from thesis.research.grammar import (
     IDENTIFIER as _IDENTIFIER,
 )
@@ -36,9 +37,41 @@ class WorkspacePathProvider(Protocol):
 
 MODEL_DIRECTORY = "models"
 
-#: Bar intervals the harness study replay accepts. A study replays bars at
-#: exactly one of these intervals over its declared sample window.
+#: Bar intervals accepted by each explicit bars subscription.
 BAR_INTERVALS: tuple[str, ...] = ("1min", "1d")
+MARKET_SYMBOL_PATTERN = r"^[A-Z0-9][A-Z0-9._/:-]*$"
+
+MARKET_SUBSCRIPTIONS_SCHEMA: dict[str, object] = {
+    "type": "array",
+    "minItems": 1,
+    "items": {
+        "anyOf": [
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "data_type",
+                    "symbols",
+                    *(["interval"] if kind == "bars" else []),
+                ],
+                "properties": {
+                    "data_type": {"type": "string", "enum": [kind]},
+                    "symbols": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string", "pattern": MARKET_SYMBOL_PATTERN},
+                    },
+                    **(
+                        {"interval": {"type": "string", "enum": list(BAR_INTERVALS)}}
+                        if kind == "bars"
+                        else {}
+                    ),
+                },
+            }
+            for kind in ("bars", "quote", "trade")
+        ]
+    },
+}
 
 _HASH_DOMAIN = b"fca:thesis-research-model:v1\0"
 _WORKSPACE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
@@ -47,6 +80,98 @@ _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 class ResearchModelError(ValueError):
     """A research model, dependency, or publication is invalid."""
+
+
+def validate_market_subscriptions(value: object) -> None:
+    """Validate an exact subscription echo without normalizing or widening it."""
+    if not isinstance(value, list) or not value:
+        raise ResearchModelError("subscriptions must be a non-empty list")
+    intervals: set[str] = set()
+    for index, item in enumerate(value):
+        label = f"subscriptions[{index}]"
+        if not isinstance(item, Mapping):
+            raise ResearchModelError(f"{label} must be an object")
+        kind = item.get("data_type")
+        if not isinstance(kind, str) or kind not in ("bars", "quote", "trade"):
+            raise ResearchModelError(f"{label}.data_type must be bars, quote or trade")
+        expected = {"data_type", "symbols"}
+        if kind == "bars":
+            expected.add("interval")
+        if set(item) != expected:
+            raise ResearchModelError(
+                f"{label} must contain exactly {', '.join(sorted(expected))}"
+            )
+        symbols = item["symbols"]
+        if (
+            not isinstance(symbols, list)
+            or not symbols
+            or any(
+                not isinstance(symbol, str)
+                or not symbol.strip()
+                or symbol != symbol.strip()
+                or re.fullmatch(MARKET_SYMBOL_PATTERN, symbol) is None
+                for symbol in symbols
+            )
+        ):
+            raise ResearchModelError(
+                f"{label}.symbols must be a non-empty list of canonical uppercase "
+                "market symbols (letters, digits and ._/:-); no padding or normalization"
+            )
+        if kind == "bars" and item["interval"] not in BAR_INTERVALS:
+            raise ResearchModelError(
+                f"{label}.interval must be one of {', '.join(BAR_INTERVALS)}"
+            )
+        if kind == "bars":
+            intervals.add(item["interval"])
+    if len(intervals) > 1:
+        raise ResearchModelError("subscriptions must use a single bars interval")
+
+
+def validate_market_configuration(configuration: Mapping[str, object]) -> None:
+    """Reject legacy fetch fields that contradict an explicit subscription echo."""
+    data = configuration.get("data", {})
+    if not isinstance(data, Mapping):
+        if "subscriptions" in configuration:
+            raise ResearchModelError(
+                "data must be an object with explicit subscriptions"
+            )
+        return
+    if "subscriptions" not in configuration and "subscriptions" not in data:
+        return
+    subscriptions = configuration.get("subscriptions", data.get("subscriptions"))
+    validate_market_subscriptions(subscriptions)
+    assert isinstance(subscriptions, list)
+    if "subscriptions" in configuration and "subscriptions" in data:
+        validate_market_subscriptions(data["subscriptions"])
+        if data["subscriptions"] != subscriptions:
+            raise ResearchModelError(
+                "data.subscriptions conflicts with model subscriptions"
+            )
+    symbols = {symbol for item in subscriptions for symbol in item["symbols"]}
+    intervals = {
+        item["interval"] for item in subscriptions if item["data_type"] == "bars"
+    }
+    for fields, prefix in ((configuration, ""), (data, "data.")):
+        for key in ("symbols", "requiredSymbols", "required_symbols"):
+            if key not in fields:
+                continue
+            declared = fields[key]
+            if (
+                not isinstance(declared, list)
+                or any(not isinstance(symbol, str) for symbol in declared)
+                or set(declared) != symbols
+            ):
+                raise ResearchModelError(
+                    f"{prefix}{key} must equal the exact subscription symbol union"
+                )
+        for key in ("interval", "bar_interval"):
+            if key in fields and (
+                not isinstance(fields[key], str) or intervals != {fields[key]}
+            ):
+                raise ResearchModelError(
+                    f"{prefix}{key} must match the single subscribed bars interval; "
+                    "tick-only subscriptions cannot declare an interval"
+                )
 
 
 def _workspace_id(value: str) -> str:
@@ -97,11 +222,13 @@ class ResearchModel:
             or _IDENTIFIER.fullmatch(self.model_id) is None
         ):
             raise ResearchModelError("model_id must be a safe identifier")
-        if (
-            not isinstance(self.version, str)
-            or _VERSION.fullmatch(self.version) is None
+        if not isinstance(self.version, str) or (
+            _VERSION.fullmatch(self.version) is None
+            and _DIGEST.fullmatch(self.version) is None
         ):
-            raise ResearchModelError("model version must use semantic versioning")
+            raise ResearchModelError(
+                "model version must be a content hash or historical semantic version"
+            )
         if not isinstance(self.description, str) or not self.description.strip():
             raise ResearchModelError("model description must be non-empty")
         if not isinstance(self.source, str) or not self.source.strip():
@@ -138,6 +265,11 @@ class ResearchModel:
             raise ResearchModelError(
                 "model tests must be a non-empty path-to-text mapping"
             )
+        for path in self.tests:
+            try:
+                confined_relative_path(path, f"model test path {path!r}")
+            except InvalidRelativePath as error:
+                raise ResearchModelError(str(error)) from error
         object.__setattr__(self, "description", self.description.strip())
         object.__setattr__(self, "outputs", outputs)
         object.__setattr__(
@@ -147,16 +279,36 @@ class ResearchModel:
         )
         object.__setattr__(self, "tests", MappingProxyType(dict(self.tests)))
         interval = self.harness_configuration.get("interval")
-        if not isinstance(interval, str) or interval.strip() not in BAR_INTERVALS:
+        validate_market_configuration(self.harness_configuration)
+        data = self.harness_configuration.get("data")
+        explicit = "subscriptions" in self.harness_configuration or (
+            isinstance(data, Mapping) and "subscriptions" in data
+        )
+        if (not explicit or "interval" in self.harness_configuration) and (
+            not isinstance(interval, str) or interval not in BAR_INTERVALS
+        ):
             raise ResearchModelError(
                 "model harness_configuration must declare its bar interval as "
                 f"one of {', '.join(BAR_INTERVALS)}"
             )
 
     @property
-    def bar_interval(self) -> str:
-        """Return the declared bar interval the study replays at."""
-        return str(self.harness_configuration["interval"]).strip()
+    def bar_interval(self) -> str | None:
+        """Return the declared bar interval, or None for tick-only subscriptions."""
+        subscriptions = self.harness_configuration.get("subscriptions")
+        if "subscriptions" not in self.harness_configuration:
+            data = self.harness_configuration.get("data")
+            subscriptions = (
+                data.get("subscriptions") if isinstance(data, Mapping) else None
+            )
+        if isinstance(subscriptions, list):
+            intervals = {
+                item["interval"]
+                for item in subscriptions
+                if item["data_type"] == "bars"
+            }
+            return next(iter(intervals)) if len(intervals) == 1 else None
+        return str(self.harness_configuration["interval"])
 
     @property
     def canonical_document(self) -> dict[str, object]:
@@ -594,6 +746,8 @@ def _confined_path(root: Path, relative: str) -> Path:
 __all__ = [
     "BAR_INTERVALS",
     "MODEL_DIRECTORY",
+    "MARKET_SUBSCRIPTIONS_SCHEMA",
+    "MARKET_SYMBOL_PATTERN",
     "FittedModelRef",
     "InMemoryResearchModelStore",
     "ResearchModel",
@@ -601,4 +755,6 @@ __all__ = [
     "ResearchModelRef",
     "ResearchModelStore",
     "WorkspaceResearchModelStore",
+    "validate_market_subscriptions",
+    "validate_market_configuration",
 ]

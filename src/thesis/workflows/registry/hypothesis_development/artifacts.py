@@ -57,8 +57,26 @@ def project_hypothesis(
         evidence=tuple(trial.digest for trial in state.trials),
     )
     projected = document.projected(status=projected_status, links=links)
-    services_of(workflow).store.save(projected)
+    services_of(workflow).store.save(projected, workspace_id=request.workspace_id)
     return replace(state, hypothesis=projected)
+
+
+def discovery_report_artifact(
+    state: HypothesisDevelopmentState,
+) -> dict[str, object] | None:
+    """Build the discovery phase's structured candidate artifact."""
+    draft = state.discovery
+    if draft is None:
+        return None
+    candidate = draft.candidate
+    return {
+        "type": "discovery",
+        "content": f"Discovery candidate: {candidate.opportunity}",
+        "candidate": candidate.as_dict(),
+        "attempts": [attempt.as_dict() for attempt in draft.attempts],
+        "untouchedData": draft.untouched_data,
+        "limitations": draft.limitations,
+    }
 
 
 def falsification_report_artifact(

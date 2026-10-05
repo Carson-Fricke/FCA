@@ -10,8 +10,7 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+harness-contracts = { path = "../contracts" }
 chrono = { version = "0.4", features = ["serde"] }
-hex = "0.4"
 rust_decimal = "1"
 serde_json = "1"
-sha2 = "0.10"

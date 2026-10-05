@@ -10,6 +10,7 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+backtest = { path = "../backtest" }
 chrono = { version = "0.4", features = ["serde"] }
 hex = "0.4"
 percent-encoding = "2"

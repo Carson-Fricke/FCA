@@ -6,10 +6,11 @@
 //! JSON-RPC error objects with precise codes.
 
 use std::fmt;
+use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
 
-use crate::tools::{build_catalog, ContextError, HarnessToolsContext, ToolCatalog};
+use crate::tools::{build_catalog, ContextError, HarnessToolsContext, StudyValidator, ToolCatalog};
 
 /// Fixed MCP protocol version.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -219,6 +220,7 @@ pub struct McpServer {
     pub server_version: String,
     /// Protocol version reported by `initialize`.
     pub protocol_version: String,
+    study_validator: Option<Arc<dyn StudyValidator>>,
 }
 
 impl McpServer {
@@ -310,11 +312,37 @@ impl McpServer {
 
     fn dispatch(&self, method: &str, params: &Map<String, Value>) -> Result<Value, JsonRpcError> {
         match method {
-            "initialize" => Ok(json!({
-                "protocolVersion": self.protocol_version,
-                "capabilities": {"tools": {"listChanged": false}},
-                "serverInfo": {"name": self.server_name, "version": self.server_version},
-            })),
+            "initialize" => {
+                let mut result = json!({
+                    "protocolVersion": self.protocol_version,
+                    "capabilities": {"tools": {"listChanged": false}},
+                    "serverInfo": {"name": self.server_name, "version": self.server_version},
+                });
+                if let Some(identity) = self
+                    .study_validator
+                    .as_ref()
+                    .and_then(|validator| validator.validation_identity())
+                {
+                    result["serverInfo"]["validationIdentity"] = Value::String(identity);
+                }
+                if let Some(reference) = self
+                    .catalog
+                    .resolve(crate::tools::TOOL_READ_SDK_REFERENCE)
+                    .and_then(|tool| tool.call(&Map::new()).ok())
+                {
+                    for key in [
+                        "sdkIdentity",
+                        "sdkVersion",
+                        "sdkAbiVersion",
+                        "validationIdentity",
+                    ] {
+                        if let Some(value) = reference.get(key) {
+                            result["serverInfo"][key] = value.clone();
+                        }
+                    }
+                }
+                Ok(result)
+            }
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({
                 "tools": self.catalog.tools().iter().map(|tool| tool.schema_entry()).collect::<Vec<_>>(),
@@ -407,10 +435,16 @@ pub fn create_server_named(
     server_version: &str,
     protocol_version: &str,
 ) -> Result<McpServer, ContextError> {
+    let study_validator = context.study_validator.clone();
     Ok(McpServer {
         catalog: build_catalog(context)?,
         server_name: server_name.to_string(),
         server_version: server_version.to_string(),
         protocol_version: protocol_version.to_string(),
+        study_validator,
     })
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/validation_identity.rs"]
+mod validation_identity_tests;

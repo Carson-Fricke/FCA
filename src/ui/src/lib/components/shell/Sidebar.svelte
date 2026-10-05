@@ -6,6 +6,7 @@
 	/** Persistent sidebar: brand, switcher, search, nav with counts, pinned, footer. */
 	let {
 		snapshot,
+		ready,
 		workspaceId,
 		page,
 		widgets,
@@ -16,6 +17,7 @@
 		canConfigureBackend
 	}: {
 		snapshot: WorkspaceSnapshot;
+		ready: boolean;
 		workspaceId: string;
 		page: string;
 		widgets: WidgetDefinition[];
@@ -148,8 +150,16 @@
 				></span>
 				<span class="relative inline-flex h-2 w-2 rounded-full bg-profit"></span>
 			</span>
-			<span class="font-medium {snapshot.overview.health === 'operational' ? 'text-profit' : 'text-warn'}">
-				{snapshot.overview.health === 'operational' ? 'All systems operational' : 'Degraded surfaces'}
+			<span class="font-medium {!ready
+				? 'text-slate-500'
+				: snapshot.overview.health === 'operational'
+					? 'text-profit'
+					: 'text-warn'}">
+				{!ready
+					? 'Checking status…'
+					: snapshot.overview.health === 'operational'
+						? 'All systems operational'
+						: 'Degraded surfaces'}
 			</span>
 		</div>
 		<div class="mt-2 flex items-center gap-2">

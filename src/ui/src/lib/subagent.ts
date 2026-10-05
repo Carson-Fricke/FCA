@@ -86,6 +86,8 @@ function statusFor(eventType: string): SubAgentStatus {
 			return 'completed';
 		case 'sub_agent.failed':
 			return 'failed';
+		case 'sub_agent.cancelled':
+			return 'cancelled';
 		case 'sub_agent.progress':
 		case 'sub_agent.output':
 			return 'progress';
@@ -94,7 +96,8 @@ function statusFor(eventType: string): SubAgentStatus {
 	}
 }
 
-function contextFor(event: ExecutionEvent): SubAgentContext {
+function contextFor(event: ExecutionEvent): SubAgentContext | null {
+	if (!hasContext(event)) return null;
 	const raw = recordField(event, 'context');
 	const mcp = typeof raw['mcp'] === 'object' && raw['mcp'] !== null
 		? (raw['mcp'] as Record<string, unknown>)
@@ -116,16 +119,36 @@ function nodeFrom(
 ): SubAgentNode | null {
 	const subAgentId = stringField(event, 'subAgentId');
 	if (!subAgentId) return null;
+	const at = Date.parse(event.occurredAt);
+	const createdAt = Date.parse(previous?.createdAt ?? '');
+	const updatedAt = Date.parse(previous?.updatedAt ?? '');
+	const attempt = stringField(event, 'phaseAttemptId');
+	// Sequence orders events; record timestamps compare a snapshot to those events.
+	// A spawn is an attempt boundary, not another update to an absorbing terminal state.
+	const reentry = event.eventType === 'sub_agent.spawned' &&
+		!(attempt && previous?.phaseAttemptId === attempt) &&
+		(!previous || at >= Math.max(Number.isNaN(createdAt) ? Infinity : createdAt, Number.isNaN(updatedAt) ? 0 : updatedAt));
+	if (previous && (at < createdAt ||
+		(attempt && previous.phaseAttemptId && attempt !== previous.phaseAttemptId && !reentry))) return previous;
+	if (!reentry && (previous?.status === 'completed' || previous?.status === 'failed' || previous?.status === 'cancelled')) {
+		return { ...previous, acceptsInput: false };
+	}
 	const status = statusFor(event.eventType);
 	const context = contextFor(event);
 	return {
+		...previous,
 		subAgentId,
 		parentSubAgentId: stringField(event, 'parentSubAgentId') ?? previous?.parentSubAgentId ?? null,
 		phase: stringField(event, 'phase') ?? previous?.phase ?? '',
 		role: stringField(event, 'role') ?? previous?.role ?? 'sub-agent',
 		status: status === 'running' && previous ? previous.status : status,
+		createdAt: reentry ? event.occurredAt : previous?.createdAt ?? event.occurredAt,
+		updatedAt: event.occurredAt,
+		phaseAttemptId: attempt ?? previous?.phaseAttemptId,
+		phaseExecutor: booleanField(event, 'phaseExecutor') ?? booleanField(event, 'phase_executor') ?? previous?.phaseExecutor,
+		specVersion: stringField(event, 'specVersion') ?? previous?.specVersion,
 		context: hasContext(event) ? context : (previous?.context ?? context),
-		acceptsInput:
+		acceptsInput: ['completed', 'failed', 'cancelled'].includes(status) ? false :
 			booleanField(event, 'acceptsInput') ?? previous?.acceptsInput ?? false,
 		workflowExecutionId: previous?.workflowExecutionId ?? event.executionId
 	};
@@ -159,18 +182,34 @@ export function deriveSubAgentTree(
 	const attributed = new Map<string, ExecutionEvent[]>();
 	const hidden = new Set<string>();
 
+	const ordered = [...events].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor));
+	const snapshotById = new Map(known.map((node) => [node.subAgentId, node]));
+	const snapshots = new Map(snapshotById);
+	const applySnapshot = (snapshot: SubAgentNode): void => {
+		const previous = nodes.get(snapshot.subAgentId);
+		const newAttempt = previous && (Date.parse(snapshot.createdAt ?? '') > Date.parse(previous.createdAt ?? '') ||
+			(snapshot.phaseAttemptId && previous.phaseAttemptId && snapshot.phaseAttemptId !== previous.phaseAttemptId));
+		const terminal = previous && ['completed', 'failed', 'cancelled'].includes(previous.status);
+		nodes.set(snapshot.subAgentId, terminal && !newAttempt
+			? { ...snapshot, status: previous.status, acceptsInput: false }
+			: { ...snapshot, acceptsInput: ['completed', 'failed', 'cancelled'].includes(snapshot.status) ? false : snapshot.acceptsInput });
+		snapshots.delete(snapshot.subAgentId);
+	};
 	for (const node of known) {
 		if (isWorkflowNodeRole(node.role)) hidden.add(node.subAgentId);
-		nodes.set(node.subAgentId, { ...node });
+		// Unversioned historical records retain snapshot precedence over replay.
+		if (!node.updatedAt && !node.createdAt) applySnapshot(node);
 	}
-
-	const ordered = [...events].sort((a, b) => a.cursor - b.cursor);
 	for (const event of ordered) {
 		const subAgentId = eventSubAgentId(event);
 		if (!subAgentId) continue;
+		const snapshot = snapshots.get(subAgentId);
+		if (snapshot && Date.parse(snapshot.updatedAt ?? snapshot.createdAt ?? '') <= Date.parse(event.occurredAt)) applySnapshot(snapshot);
 		if (isWorkflowNodeRole(stringField(event, 'role'))) hidden.add(subAgentId);
 		if (isSubAgentEvent(event.eventType)) {
-			const next = nodeFrom(event, nodes.get(subAgentId));
+			const record = snapshotById.get(subAgentId);
+			const snapshotOwnsEvent = record && Date.parse(record.updatedAt ?? record.createdAt ?? '') === Date.parse(event.occurredAt);
+			const next = snapshotOwnsEvent ? nodes.get(subAgentId) : nodeFrom(event, nodes.get(subAgentId));
 			if (next) nodes.set(subAgentId, next);
 		} else if (!nodes.has(subAgentId)) {
 			// A non-lifecycle event referencing an unknown node still proves it
@@ -190,11 +229,14 @@ export function deriveSubAgentTree(
 		bucket.push(event);
 		attributed.set(subAgentId, bucket);
 	}
+	for (const snapshot of snapshots.values()) applySnapshot(snapshot);
 
 	// Re-anchor every node whose parent is a hidden implementation record to the
 	// nearest visible ancestor, then remove the hidden records entirely.
 	for (const [id, node] of nodes) {
 		let parent = node.parentSubAgentId;
+		// Retained legacy spawn provenance identifies direct children of the workflow record.
+		if (node.phaseExecutor === undefined && parent && hidden.has(parent)) node.phaseExecutor = true;
 		const seen = new Set<string>([id]);
 		while (parent && hidden.has(parent) && !seen.has(parent)) {
 			seen.add(parent);
@@ -237,7 +279,7 @@ export function mergeEvents(
 	const byId = new Map<string, ExecutionEvent>();
 	for (const event of existing) byId.set(event.eventId, event);
 	for (const event of incoming) byId.set(event.eventId, event);
-	return [...byId.values()].sort((a, b) => a.cursor - b.cursor);
+	return [...byId.values()].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor));
 }
 
 /** Events belonging to one execution in a chat-wide timeline. */
@@ -251,15 +293,25 @@ export function projectExecution(
 	events: ExecutionEvent[]
 ): WorkflowExecutionRecord {
 	let state = execution.state;
-	let phase = execution.phase;
-	for (const event of [...events].sort((a, b) => a.cursor - b.cursor)) {
+	let phase = isWorkflowPhase(execution.phase) ? execution.phase : null;
+	const workflowNodes = new Set<string>();
+	for (const event of [...events].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor))) {
+		const nodeId = stringField(event, 'subAgentId');
+		if (nodeId && isWorkflowNodeRole(stringField(event, 'role'))) workflowNodes.add(nodeId);
 		const eventPhase = event.payload?.phase;
-		if (typeof eventPhase === 'string' && eventPhase.length > 0) phase = eventPhase;
-	switch (event.eventType) {
-		case 'workflow.started':
-			state = 'running';
-			break;
-		case 'workflow.stopped':
+		const phaseLifecycle = ['workflow.launched', 'workflow.started', 'workflow.phase', 'workflow.stopped',
+			'workflow.cancelled', 'workflow.completed', 'workflow.failed'].includes(event.eventType);
+		const explicitExecutor = booleanField(event, 'phaseExecutor') ?? booleanField(event, 'phase_executor');
+		const parentId = stringField(event, 'parentSubAgentId');
+		const initialExecutor = !phase && event.eventType === 'sub_agent.spawned' &&
+			!isWorkflowNodeRole(stringField(event, 'role')) &&
+			(explicitExecutor === true || (explicitExecutor === null && !!parentId && workflowNodes.has(parentId)));
+		if ((phaseLifecycle || initialExecutor) && typeof eventPhase === 'string' && isWorkflowPhase(eventPhase)) phase = eventPhase;
+		switch (event.eventType) {
+			case 'workflow.started':
+				state = 'running';
+				break;
+			case 'workflow.stopped':
 				state = 'stopped';
 				break;
 			case 'workflow.cancelled':
@@ -274,6 +326,11 @@ export function projectExecution(
 		}
 	}
 	return { ...execution, state, phase };
+}
+
+/** Historical workflow status markers are not executable phase names. */
+export function isWorkflowPhase(phase: string | null | undefined): phase is string {
+	return !!phase && !['requested', 'queued', 'running', 'completed', 'failed', 'cancelled', 'stopped', 'paused', 'needs_input'].includes(phase);
 }
 
 /** Decode a `tool.result` payload into a `ToolResult`, when present. */
@@ -309,7 +366,7 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 	// the attempt counter.
 	const spawns = new Map<string, number>();
 	const entries = new Map<string, number>();
-	for (const event of [...events].sort((a, b) => a.cursor - b.cursor)) {
+	for (const event of [...events].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor))) {
 		if (event.eventType === 'workflow.launched') {
 			const workflow = recordField(event, 'workflow');
 			const declared = workflow['phases'];
@@ -393,7 +450,7 @@ export function derivePhaseAttempts(
 		runs.push(run);
 		return run;
 	};
-	for (const event of [...events].sort((a, b) => a.cursor - b.cursor)) {
+	for (const event of [...events].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor))) {
 		if (event.payload['phase'] !== phase) continue;
 		if (event.eventType === 'workflow.phase') {
 			open();
@@ -449,7 +506,7 @@ export function derivePhaseSteps(
 				collected.push({
 					phase: node.node.phase,
 					status: node.node.status,
-					cursor: spawn?.cursor ?? Number.MAX_SAFE_INTEGER
+					cursor: spawn?.seq ?? spawn?.cursor ?? Number.MAX_SAFE_INTEGER
 				});
 			}
 			visit(node.children);
@@ -475,7 +532,7 @@ export function derivePhaseSteps(
  */
 export function buildTranscriptItems(events: ExecutionEvent[]): TranscriptItem[] {
 	return [...events]
-		.sort((a, b) => a.cursor - b.cursor)
+		.sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor))
 		.map((event) => {
 			if (event.eventType.startsWith('tool.')) {
 				return { id: event.eventId, kind: 'tool', data: { event } } satisfies TranscriptItem;

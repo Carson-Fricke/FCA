@@ -15,6 +15,7 @@ from thesis.strategies.bundles import StrategyBundle
 from thesis.workflows.backtests import BacktestRunResult
 
 from .contracts import (
+    DiscoveryDraft,
     ExitCriterion,
     FalsificationPlan,
     FalsificationTrial,
@@ -34,6 +35,7 @@ class HypothesisDevelopmentState:
     phase: HypothesisDevelopmentPhase
     intent_epoch: int
     transitions: tuple[PhaseTransition, ...] = ()
+    discovery: DiscoveryDraft | None = None
     hypothesis: HypothesisDocument | None = None
     draft: HypothesisDraft | None = None
     research_model_reference: ResearchModelRef | None = None
@@ -67,6 +69,7 @@ class HypothesisDevelopmentOutcome:
     phase: HypothesisDevelopmentPhase
     fenced: bool
     transitions: tuple[PhaseTransition, ...]
+    discovery: DiscoveryDraft | None = None
     hypothesis: HypothesisDocument | None = None
     research_model_reference: ResearchModelRef | None = None
     research_model_artifact: str | None = None
@@ -92,6 +95,7 @@ class HypothesisDevelopmentOutcome:
             "executionId": self.execution_id,
             "exitCriteria": [item.as_dict() for item in self.exit_criteria],
             "fenced": self.fenced,
+            "discovery": (None if self.discovery is None else self.discovery.as_dict()),
             "hypothesis": (
                 None
                 if self.hypothesis is None

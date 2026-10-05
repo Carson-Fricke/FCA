@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
@@ -55,6 +55,23 @@ class EmbeddingPort(Protocol):
     def embed(self, text: str) -> list[float]:
         """Return one embedding vector for ``text``."""
         ...
+
+
+def embedding_identity(embedder: EmbeddingPort) -> str:
+    """Identify the vector space, including backend-specific configuration."""
+    return str(
+        getattr(embedder, "cache_identity", None)
+        or getattr(embedder, "model_id", None)
+        or f"{type(embedder).__module__}.{type(embedder).__qualname__}"
+    )
+
+
+def embedding_operation[T](
+    embedder: EmbeddingPort, operation: Callable[[EmbeddingPort], T]
+) -> T:
+    """Bind optional fallback providers for the entire operation, not each text."""
+    runner = getattr(embedder, "run_operation", None)
+    return runner(operation) if runner is not None else operation(embedder)
 
 
 class RelationshipKind(StrEnum):
@@ -149,6 +166,19 @@ def _checked_str_tuple(values: Sequence[str], label: str) -> tuple[str, ...]:
     return tuple(prepared)
 
 
+def _checked_collections(values: Sequence[str]) -> tuple[str, ...]:
+    if isinstance(values, str) or not isinstance(values, (tuple, list)):
+        raise KnowledgeIndexError("collections must be a tuple of strings")
+    prepared: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or _SLUG_RE.fullmatch(value) is None:
+            raise KnowledgeIndexError("collections must be kebab-case tokens")
+        if value in prepared:
+            raise KnowledgeIndexError(f"duplicate collection: {value!r}")
+        prepared.append(value)
+    return tuple(prepared)
+
+
 @dataclass(frozen=True, slots=True)
 class PageRecord:
     """One canonical page as seen by the index and search layers.
@@ -171,6 +201,7 @@ class PageRecord:
     effective_end: date | None = None
     source_publisher: str | None = None
     tags: tuple[str, ...] = ()
+    collections: tuple[str, ...] = ()
     links: tuple[str, ...] = ()
     relationships: tuple[Relationship, ...] = ()
     trust_tier: TrustTier = TrustTier.UNTRUSTED
@@ -204,6 +235,7 @@ class PageRecord:
         ):
             raise KnowledgeIndexError("source_publisher must be a string or None")
         object.__setattr__(self, "tags", _checked_str_tuple(self.tags, "tags"))
+        object.__setattr__(self, "collections", _checked_collections(self.collections))
         object.__setattr__(self, "links", _checked_str_tuple(self.links, "links"))
         for relationship in self.relationships:
             if not isinstance(relationship, Relationship):
@@ -244,6 +276,7 @@ class IndexEntry:
     relationships: tuple[Relationship, ...]
     trust_tier: TrustTier
     trust_state: TrustState
+    collections: tuple[str, ...] = ()
     terms: Mapping[str, int] = field(default_factory=dict)
     embedding: tuple[float, ...] = ()
 
@@ -269,6 +302,7 @@ class IndexEntry:
         _checked_hex64(self.source_content_hash, "source_content_hash")
         object.__setattr__(self, "tags", _checked_str_tuple(self.tags, "tags"))
         object.__setattr__(self, "links", _checked_str_tuple(self.links, "links"))
+        object.__setattr__(self, "collections", _checked_collections(self.collections))
         for relationship in self.relationships:
             if not isinstance(relationship, Relationship):
                 raise KnowledgeIndexError(
@@ -307,17 +341,22 @@ class SearchIndex:
 
     corpus_revision: str
     entries: tuple[IndexEntry, ...]
+    embedding_model: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.corpus_revision, str) or not self.corpus_revision:
             raise KnowledgeIndexError("corpus_revision must be a non-empty string")
         seen: set[str] = set()
+        width: int | None = None
         for entry in self.entries:
             if not isinstance(entry, IndexEntry):
                 raise KnowledgeIndexError("entries must contain IndexEntry values")
             if entry.page_id in seen:
                 raise KnowledgeIndexError(f"duplicate index entry: {entry.page_id}")
             seen.add(entry.page_id)
+            if width is not None and len(entry.embedding) != width:
+                raise KnowledgeIndexError("index contains mixed embedding dimensions")
+            width = len(entry.embedding)
 
     def serialize(self) -> bytes:
         """Return the canonical byte serialization of this index.
@@ -331,6 +370,8 @@ class SearchIndex:
             "corpus_revision": self.corpus_revision,
             "entries": [_entry_payload(entry) for entry in self.entries],
         }
+        if self.embedding_model:
+            payload["embedding_model"] = self.embedding_model
         text = json.dumps(
             payload,
             sort_keys=True,
@@ -342,7 +383,7 @@ class SearchIndex:
 
 
 def _entry_payload(entry: IndexEntry) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "page_id": entry.page_id,
         "path": entry.path,
         "revision": entry.revision,
@@ -370,6 +411,10 @@ def _entry_payload(entry: IndexEntry) -> dict[str, object]:
         "terms": dict(entry.terms),
         "embedding": [round(value, EMBEDDING_DECIMALS) for value in entry.embedding],
     }
+    # Emit the key only when non-empty: pre-collections index bytes stay stable.
+    if entry.collections:
+        payload["collections"] = list(entry.collections)
+    return payload
 
 
 def _date_from_payload(value: object, label: str) -> date:
@@ -450,6 +495,7 @@ def _entry_from_payload(payload: object) -> IndexEntry:
         relationships=tuple(relationships),
         trust_tier=trust_tier,
         trust_state=trust_state,
+        collections=tuple(payload.get("collections", ())),
         terms=raw_terms,
         embedding=tuple(raw_embedding),
     )
@@ -476,7 +522,10 @@ def load_index(data: bytes) -> SearchIndex:
     revision = payload.get("corpus_revision")
     if not isinstance(revision, str) or not revision:
         raise KnowledgeIndexError("corpus_revision must be a non-empty string")
-    return SearchIndex(corpus_revision=revision, entries=entries)
+    model = payload.get("embedding_model", "")
+    if not isinstance(model, str):
+        raise KnowledgeIndexError("embedding_model must be a string")
+    return SearchIndex(corpus_revision=revision, entries=entries, embedding_model=model)
 
 
 def build_index(
@@ -491,6 +540,14 @@ def build_index(
     over title and body, and embeddings are stored at
     :data:`EMBEDDING_DECIMALS` precision.
     """
+    return embedding_operation(
+        embedder, lambda backend: _build_index(pages, backend, corpus_revision)
+    )
+
+
+def _build_index(
+    pages: Sequence[PageRecord], embedder: EmbeddingPort, corpus_revision: str
+) -> SearchIndex:
     if not isinstance(corpus_revision, str) or not corpus_revision:
         raise KnowledgeIndexError("corpus_revision must be a non-empty string")
     entries: list[IndexEntry] = []
@@ -525,6 +582,7 @@ def build_index(
                 relationships=page.relationships,
                 trust_tier=page.trust_tier,
                 trust_state=page.trust_state,
+                collections=page.collections,
                 terms=terms,
                 embedding=tuple(
                     round(float(value), EMBEDDING_DECIMALS) for value in vector
@@ -532,7 +590,11 @@ def build_index(
             )
         )
     entries.sort(key=lambda entry: entry.page_id)
-    return SearchIndex(corpus_revision=corpus_revision, entries=tuple(entries))
+    return SearchIndex(
+        corpus_revision=corpus_revision,
+        entries=tuple(entries),
+        embedding_model=embedding_identity(embedder),
+    )
 
 
 __all__ = [

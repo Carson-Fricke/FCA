@@ -4,14 +4,13 @@
 //! Python interpreter: a model authors a small Rust crate against these types
 //! and traits, the platform JIT-compiles it into a `cdylib`, and the engine
 //! drives it through the C ABI defined in [`abi`] behind the existing
-//! [`StrategyRuntime`](crate::program::StrategyRuntime) engine seam.
+//! `StrategyRuntime` engine seam.
 //!
 //! Layering:
 //!
 //! * [`events`] — the author-facing event and start views (borrowed strings,
 //!   exact [`Decimal`]s) mirroring the engine's `EngineMarket`/`EngineFill`.
-//!   A study program folds [`BarFrame`](events::BarFrame)s only; quote and
-//!   trade events remain on the strategy and indicator surfaces.
+//!   All market consumers observe requested quotes, trades, and atomic frames.
 //! * [`program`] — the authoring traits ([`StudyProgram`](program::StudyProgram),
 //!   [`StrategyProgram`](program::StrategyProgram),
 //!   [`ScreeningProgram`], [`Indicator`](indicator::Indicator)) and the
@@ -33,6 +32,7 @@
 //! version ([`SDK_VERSION`]) is recorded with every compiled artifact.
 
 mod abi;
+mod consumer;
 mod events;
 /// Macro-support trampolines; reachable only through the exported macros.
 #[doc(hidden)]
@@ -44,10 +44,14 @@ pub use abi::{
     CBarEvent, CBarFrame, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent,
     CSlice, CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn, ScreeningCreateFn,
     ScreeningDestroyFn, ScreeningProgramVTable, ScreeningResultFn, ScreeningScreenFn,
-    StrategyProgramVTable, StudyBarFrameFn, StudyProgramVTable, ABI_EXPORT, LAST_ERROR_EXPORT,
-    METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED, METRIC_RESERVED_NAME,
-    SCREENING_VTABLE_EXPORT, SDK_ABI_VERSION, SDK_ERROR, SDK_OK, STRATEGY_VTABLE_EXPORT,
-    STUDY_VTABLE_EXPORT,
+    StrategyBarFrameFn, StrategyProgramVTable, StudyBarFrameFn, StudyProgramVTable, StudyQuoteFn,
+    StudyTradeFn, SubscriptionsFn, ABI_EXPORT, LAST_ERROR_EXPORT, METRIC_INVALID_NAME,
+    METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED, METRIC_RESERVED_NAME, SCREENING_VTABLE_EXPORT,
+    SDK_ABI_VERSION, SDK_ERROR, SDK_OK, STRATEGY_VTABLE_EXPORT, STUDY_VTABLE_EXPORT,
+};
+pub use consumer::{
+    canonical_subscriptions, effective_subscriptions, route_bar, route_quote, route_trade,
+    MarketConsumer, ObservationContext, Subscription,
 };
 pub use events::{BarEvent, BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
 pub use indicator::{
@@ -63,11 +67,13 @@ pub use program::{
 /// The SDK crate version, compiled into every authored artifact manifest.
 pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The exact decimal type shared with the engine and Python's `decimal.Decimal`.
+/// The exact decimal type shared with the engine.
 ///
 /// Scale, coefficient, and sign are preserved exactly, so authored programs
-/// compute with the same arithmetic contract the engine records.
-pub use num::PyDecimal as Decimal;
+/// compute with the same arithmetic contract the engine records. Convert to
+/// `f64` only at the metric boundary with [`Decimal::to_f64`] or
+/// [`Decimal::to_f64_checked`].
+pub use num::Decimal;
 
 /// The fixed-scale decimal kernel used by lake Arrow schemas.
 pub use num::Decimal18;

@@ -17,17 +17,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from thesis.agent.runtime.datum import Datum, DatumType
+from thesis.agent.messages import MessageContent, SessionMessage, from_record
+from thesis.agent.runtime.activity import Delivery, activity_data, decode_activity
+from thesis.agent.runtime.datum import Datum, DatumType, tool_result_payload
+from thesis.agent.runtime.incoming import DeliveryError, write_incoming
 from thesis.agent.runtime.policy import (
     OperatorPolicyDecision,
 )
 from thesis.chat.contracts import (
     ChatMessage,
     MessageRole,
+    RecordNotFound,
     SubAgentRecord,
     SubAgentStatus,
     TranscriptItemKind,
@@ -43,10 +48,6 @@ ROOT_ANCHOR_ID = ""
 
 #: Message data key carrying the durable idempotency key of a delivery.
 DELIVERY_KEY_FIELD = "deliveryKey"
-
-
-class DeliveryError(ValueError):
-    """Raised when a delivery request is malformed."""
 
 
 class NodeInputNotFound(LookupError):
@@ -142,12 +143,28 @@ def delivery_key(anchor: Anchor, datum: Datum) -> str:
 def find_delivered(
     chat: ChatService, anchor: Anchor, idempotency_key: str
 ) -> ChatMessage | None:
-    """Return the durable message carrying ``idempotency_key``, or ``None``."""
-    for message in chat.list_messages(anchor.workspace_id, anchor.chat_id):
-        data = message.data
-        if data is not None and data.get(DELIVERY_KEY_FIELD) == idempotency_key:
-            return message
+    """Return the durable message carrying ``idempotency_key``, or ``None``.
+
+    Delivery identity is deterministic from the anchor and key, so the durable
+    record's identity is the idempotency check: one point read, no history scan.
+    """
+    try:
+        message = chat.get_message(
+            anchor.workspace_id, _delivery_id(anchor, idempotency_key)
+        )
+    except RecordNotFound:
+        return None
+    if (
+        message.chat_id == anchor.chat_id
+        and decode_activity(message).sub_agent_id == anchor.sub_agent_id
+    ):
+        return message
     return None
+
+
+def _delivery_id(anchor: Anchor, key: str) -> str:
+    scope = json.dumps([anchor.workspace_id, anchor.chat_id, anchor.sub_agent_id, key])
+    return f"message-{uuid.uuid5(uuid.NAMESPACE_URL, scope).hex}"
 
 
 def _datum_payload(datum: Datum) -> dict[str, object]:
@@ -177,11 +194,15 @@ class DeliveryService:
         chat: ChatService,
         *,
         schedule: TurnScheduler | None = None,
+        schedule_input: Callable[[ChatMessage], None] | None = None,
         clock: Callable[[], datetime] = _utc_now,
+        deliver_session_message: Callable[..., SessionMessage] | None = None,
     ) -> None:
         self._chat = chat
         self._schedule = schedule
+        self._schedule_input = schedule_input
         self._clock = clock
+        self._deliver_session_message = deliver_session_message
 
     def deliver(
         self,
@@ -243,22 +264,72 @@ class DeliveryService:
             payload = _datum_payload(datum)
             payload.update(dict(data or {}))
             message_body = body or _default_body(datum)
-            message_tool_result = payload if tool_result is None else tool_result
-        payload["subAgentId"] = anchor.sub_agent_id
-        payload[DELIVERY_KEY_FIELD] = key
-        message = self._chat.create_message(
-            anchor.workspace_id,
-            anchor.chat_id,
-            actor_id=actor_id,
-            body=message_body,
-            role=role,
-            kind=kind,
-            tool_result=message_tool_result,
-            data=payload,
-            execution_id=execution_id,
+            message_tool_result = (
+                tool_result_payload(
+                    call_id=None,
+                    tool=None,
+                    datum_type=datum.datum_type,
+                    ok=datum.ok,
+                    structured=datum.structured,
+                    summary=datum.summary,
+                    text=datum.text,
+                    failure=datum.failure,
+                )
+                if tool_result is None
+                else tool_result
+            )
+        payload.update(activity_data(Delivery(anchor.sub_agent_id, key)))
+        canonical = SessionMessage(
+            _delivery_id(anchor, key),
+            "incoming",
+            MessageContent(
+                text=message_body,
+                source=datum.datum_type
+                if datum is not None
+                else "user"
+                if role is MessageRole.USER
+                else "delivery",
+                result=payload if datum is not None else None,
+            ),
         )
-        scheduled = schedule and self._schedule is not None
-        if schedule and self._schedule is not None:
+        writer = self._deliver_session_message
+        if writer is None:
+            message = write_incoming(
+                self._chat,
+                anchor,
+                canonical,
+                actor_id=actor_id,
+                body=message_body,
+                role=role,
+                kind=kind,
+                tool_result=message_tool_result,
+                data=payload,
+                execution_id=execution_id,
+            )
+        else:
+            durable = writer(
+                anchor,
+                canonical,
+                actor_id=actor_id,
+                body=message_body,
+                role=role,
+                kind=kind,
+                tool_result=message_tool_result,
+                data=payload,
+                execution_id=execution_id,
+                schedule=False,
+            )
+            message = self._chat.get_message(anchor.workspace_id, durable.message_id)
+            if from_record(message) != durable:
+                raise DeliveryError(
+                    "delivery writer returned a different durable message"
+                )
+        scheduled = schedule and (
+            self._schedule is not None or self._schedule_input is not None
+        )
+        if schedule and self._schedule_input is not None:
+            self._schedule_input(message)
+        elif schedule and self._schedule is not None:
             self._schedule(anchor.workspace_id, anchor.chat_id, anchor.schedule_id)
         return DeliveryReceipt(
             message=message,
@@ -277,6 +348,19 @@ class DeliveryService:
         conversation, so its continuation is the engine reaction that already
         ran in the completing tool call.
         """
+        current = self._chat.persistence.get(
+            SubAgentRecord, child.workspace_id, child.sub_agent_id
+        )
+        if current is not None:
+            child = current
+        if child.status not in (
+            SubAgentStatus.COMPLETED,
+            SubAgentStatus.FAILED,
+            SubAgentStatus.CANCELLED,
+        ):
+            raise DeliveryError("only a terminal child can deliver a result")
+        if child.workspace_id != anchor.workspace_id or child.chat_id != anchor.chat_id:
+            raise DeliveryError("child result belongs to another conversation scope")
         text = (
             f"Sub-agent {child.role} ({child.sub_agent_id}) ended: "
             f"{child.status.value}."

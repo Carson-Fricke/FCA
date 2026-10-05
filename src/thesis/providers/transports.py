@@ -8,17 +8,11 @@ process environment, keeping credentials out of provider and agent code.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Mapping, Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
 
 import httpx
 
-from thesis.providers.invocations import ChatMessage as ProviderChatMessage
-from thesis.providers.openrouter import OpenRouterProvider
-
-if TYPE_CHECKING:  # avoid importing chat types at module load
-    from thesis.chat.contracts import ChatMessage
-    from thesis.chat.responder import ReplyChunk, ReplyProvider
+from thesis.providers.invocations import ProviderUnreachableError
 
 #: Default system instruction for a chat reply.
 DEFAULT_SYSTEM_PROMPT = (
@@ -39,7 +33,7 @@ DEFAULT_SYSTEM_PROMPT = (
 HARNESS_TOOL_SYSTEM_PROMPT = (
     DEFAULT_SYSTEM_PROMPT
     + " You can call the quant-harness tools for deterministic research "
-    "execution: run_backtest and run_study launch jobs, get_backtest_status "
+    "execution: run_backtest and run_study launch jobs, get_job_status "
     "and get_run report state, list_artifacts enumerates outputs, and "
     "launch_trader starts a supervised session. Call a tool only when the "
     "operator's request needs it, pass typed arguments, and summarize the "
@@ -51,7 +45,6 @@ HARNESS_TOOL_SYSTEM_PROMPT = (
     "fails, report the returned error message verbatim instead of "
     "paraphrasing it."
 )
-_CHAT_ROLES = frozenset(("user", "assistant", "system", "tool"))
 
 
 class HttpOpenRouterTransport:
@@ -75,11 +68,22 @@ class HttpOpenRouterTransport:
         headers: Mapping[str, str],
         payload: Mapping[str, object],
     ) -> tuple[int, str]:
-        response = self._client.post(
+        # Build (including JSON serialization) outside the network error boundary.
+        request = self._client.build_request(
+            "POST",
             f"{self._base_url}{path}",
             headers=dict(headers),
             json=dict(payload),
         )
+        try:
+            response = self._client.send(request)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # The provider can safely retry these known-unsent requests.
+            raise
+        except (httpx.TransportError, OSError) as error:
+            raise ProviderUnreachableError(
+                "openrouter transport is unreachable"
+            ) from error
         return response.status_code, response.text
 
 
@@ -93,56 +97,9 @@ class EnvironmentApiKeySource:
         return os.environ.get(self._variable, "")
 
 
-def openrouter_reply_provider(
-    provider: OpenRouterProvider,
-    *,
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-    chunk_size: int = 24,
-) -> ReplyProvider:
-    """Adapt an :class:`OpenRouterProvider` into a streamed chat reply provider.
-
-    The provider completes the request and any chain-of-thought is emitted
-    first as reasoning chunks, followed by the answer text in deterministic
-    chunks, so the SSE transport can keep the two channels separate while
-    streaming progressively to the client.
-    """
-    if chunk_size < 1:
-        raise ValueError("chunk_size must be a positive integer")
-
-    def stream(history: Sequence[ChatMessage]) -> Iterator[str | ReplyChunk]:
-        from thesis.chat.responder import ReplyChunk
-
-        messages: list[ProviderChatMessage] = []
-        if system_prompt:
-            messages.append(ProviderChatMessage(role="system", content=system_prompt))
-        for message in history:
-            role = (
-                message.role.value
-                if hasattr(message.role, "value")
-                else str(message.role)
-            )
-            body = message.body.strip()
-            if role in _CHAT_ROLES and body:
-                messages.append(ProviderChatMessage(role=role, content=body))
-        if not messages:
-            return
-        completion = provider.complete(messages=messages)
-        for index in range(0, len(completion.reasoning), chunk_size):
-            yield ReplyChunk(
-                text=completion.reasoning[index : index + chunk_size],
-                kind="reasoning",
-            )
-        text = completion.content
-        for index in range(0, len(text), chunk_size):
-            yield text[index : index + chunk_size]
-
-    return stream
-
-
 __all__ = [
     "DEFAULT_SYSTEM_PROMPT",
     "HARNESS_TOOL_SYSTEM_PROMPT",
     "EnvironmentApiKeySource",
     "HttpOpenRouterTransport",
-    "openrouter_reply_provider",
 ]

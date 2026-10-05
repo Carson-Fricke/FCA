@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 
 use harness_strategy_sdk::{ScreenContext, ScreenRow};
-use num::PyDecimal;
+use num::Decimal;
 
 use crate::compile::{compile, ProgramKind};
 use crate::error::JitError;
@@ -51,13 +51,13 @@ pub fn run_screening_source(
 /// produce byte-identical results.
 #[must_use]
 pub fn rank_rows(rows: Vec<ScreenRow>, rank_metric: &str) -> Vec<ScreenRow> {
-    let mut ranked: Vec<(Option<PyDecimal>, ScreenRow)> = rows
+    let mut ranked: Vec<(Option<Decimal>, ScreenRow)> = rows
         .into_iter()
         .map(|row| {
             let value = row
                 .metrics
                 .get(rank_metric)
-                .and_then(|text| text.parse::<PyDecimal>().ok());
+                .and_then(|text| text.parse::<Decimal>().ok());
             (value, row)
         })
         .collect();

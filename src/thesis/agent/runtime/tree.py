@@ -16,24 +16,45 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
-from thesis.chat.contracts import SubAgentRecord
+from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic.alias_generators import to_camel
+from pydantic.json_schema import JsonSchemaValue
+
+from thesis.chat.contracts import (
+    CompletionMode,
+    SubAgentKind,
+    SubAgentRecord,
+    SubAgentStatus,
+)
 
 
 class ChatSubAgentProjectionError(ValueError):
     """Raised when durable sub-agent records cannot form a tree."""
 
 
-@dataclass(frozen=True, slots=True)
-class ChatSubAgentNode:
+class SubAgentNodeWire(BaseModel):
     """One chat-scoped sub-agent node and its direct children."""
 
     sub_agent_id: str
     chat_id: str
     role: str
-    kind: str
-    status: str
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        alias_generator=to_camel,
+        populate_by_name=True,
+        from_attributes=True,
+    )
+
+    kind: SubAgentKind
+    status: SubAgentStatus
     parent_sub_agent_id: str | None
     workflow_execution_id: str | None
+    phase_attempt_id: str | None
+    spec_version: str
+    completion_mode: CompletionMode
+    phase_executor: bool
+    returns_to_sub_agent_id: str | None
     phase: str | None
     accepts_input: bool
     allowed_tools: tuple[str, ...]
@@ -44,32 +65,34 @@ class ChatSubAgentNode:
     result: Mapping[str, object] | None
     created_at: datetime
     updated_at: datetime | None
-    children: tuple[ChatSubAgentNode, ...] = ()
+    children: tuple[SubAgentNodeWire, ...] = ()
+
+    @field_serializer("created_at", "updated_at")
+    def _timestamp(self, value: datetime | None) -> str | None:
+        return None if value is None else value.isoformat()
 
     def as_dict(self) -> dict[str, object]:
         """Return the canonical, JSON-ready node including its subtree."""
-        return {
-            "subAgentId": self.sub_agent_id,
-            "chatId": self.chat_id,
-            "role": self.role,
-            "kind": self.kind,
-            "status": self.status,
-            "parentSubAgentId": self.parent_sub_agent_id,
-            "workflowExecutionId": self.workflow_execution_id,
-            "phase": self.phase,
-            "acceptsInput": self.accepts_input,
-            "allowedTools": list(self.allowed_tools),
-            "delegatedBudget": self.delegated_budget,
-            "inputContractRef": self.input_contract_ref,
-            "completionContractRef": self.completion_contract_ref,
-            "resultRef": self.result_ref,
-            "result": None if self.result is None else dict(self.result),
-            "createdAt": self.created_at.isoformat(),
-            "updatedAt": None
-            if self.updated_at is None
-            else self.updated_at.isoformat(),
-            "children": [child.as_dict() for child in self.children],
-        }
+        return self.model_dump(mode="json", by_alias=True)
+
+
+ChatSubAgentNode = SubAgentNodeWire
+
+
+class ChatSubAgentTreeWire(BaseModel):
+    """Canonical tree response used by the projection and HTTP schema export."""
+
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", alias_generator=to_camel, populate_by_name=True
+    )
+
+    chat_id: str
+    roots: tuple[SubAgentNodeWire, ...]
+    items: tuple[SubAgentNodeWire, ...]
+
+
+def chat_sub_agent_tree_schema() -> JsonSchemaValue:
+    return ChatSubAgentTreeWire.model_json_schema(by_alias=True, mode="serialization")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,11 +130,9 @@ class ChatSubAgentTree:
 
     def as_dict(self) -> dict[str, object]:
         """Return the canonical, JSON-ready tree."""
-        return {
-            "chatId": self.chat_id,
-            "roots": [root.as_dict() for root in self.roots],
-            "items": [node.as_dict() for node in self.nodes.values()],
-        }
+        return ChatSubAgentTreeWire(
+            chat_id=self.chat_id, roots=self.roots, items=tuple(self.nodes.values())
+        ).model_dump(mode="json", by_alias=True)
 
 
 def project_chat_sub_agents(
@@ -145,25 +166,8 @@ def project_chat_sub_agents(
         visiting.add(record.sub_agent_id)
         nested = tuple(build(child) for child in children.get(record.sub_agent_id, ()))
         visiting.discard(record.sub_agent_id)
-        node = ChatSubAgentNode(
-            sub_agent_id=record.sub_agent_id,
-            chat_id=record.chat_id,
-            role=record.role,
-            kind=record.kind.value,
-            status=record.status.value,
-            parent_sub_agent_id=record.parent_sub_agent_id,
-            workflow_execution_id=record.workflow_execution_id,
-            phase=record.phase,
-            accepts_input=record.accepts_input,
-            allowed_tools=tuple(record.allowed_tools),
-            delegated_budget=record.delegated_budget,
-            input_contract_ref=record.input_contract_ref,
-            completion_contract_ref=record.completion_contract_ref,
-            result_ref=record.result_ref,
-            result=record.result,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
-            children=nested,
+        node = SubAgentNodeWire.model_validate(record).model_copy(
+            update={"children": nested}
         )
         built[record.sub_agent_id] = node
         return node
@@ -176,5 +180,8 @@ __all__ = [
     "ChatSubAgentNode",
     "ChatSubAgentProjectionError",
     "ChatSubAgentTree",
+    "ChatSubAgentTreeWire",
+    "SubAgentNodeWire",
+    "chat_sub_agent_tree_schema",
     "project_chat_sub_agents",
 ]

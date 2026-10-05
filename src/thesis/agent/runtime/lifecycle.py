@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import MappingProxyType
 
@@ -23,6 +24,7 @@ from thesis.agent.runtime.store import PersistenceSubAgentStore, SubAgentStore
 from thesis.chat.contracts import (
     WORKFLOW_NODE_ROLE,
     ChatContractError,
+    CompletionMode,
     RecordNotFound,
     SubAgentKind,
     SubAgentRecord,
@@ -41,6 +43,7 @@ _TERMINAL_STATUSES = frozenset(
         SubAgentStatus.CANCELLED,
     }
 )
+
 
 #: Statuses that occupy a concurrency slot.  ``NEEDS_INPUT`` is deliberately
 #: absent: a node paused for operator review is not doing work.
@@ -164,6 +167,9 @@ class SubAgentLifecycle:
         workflow_execution_id: str | None = None,
         phase_attempt_id: str | None = None,
         sub_agent_id: str | None = None,
+        completion_mode: CompletionMode | None = None,
+        returns_to_sub_agent_id: str | None = None,
+        phase_executor: bool = False,
     ) -> SubAgentRecord:
         """Create one durable child after enforcing every deterministic guard.
 
@@ -224,6 +230,14 @@ class SubAgentLifecycle:
             phase=spec.phase,
             spec_version=spec.spec_version,
             kind=spec.kind,
+            completion_mode=completion_mode
+            or (
+                CompletionMode.COMPLETE_ON_TEXT
+                if spec.kind is SubAgentKind.ONE_SHOT and not spec.phase
+                else CompletionMode.EXPLICIT_COMPLETION
+            ),
+            returns_to_sub_agent_id=returns_to_sub_agent_id,
+            phase_executor=phase_executor,
             allowed_tools=spec.allowed_tools,
             status=SubAgentStatus.PENDING,
             accepts_input=spec.kind is SubAgentKind.CONVERSATION,
@@ -346,10 +360,20 @@ class SubAgentLifecycle:
         cancelled: list[str] = []
         for node_id in _subtree_order(records, (sub_agent_id,)):
             record = self.get(workspace_id, node_id)
-            if record is None or record.status in _TERMINAL_STATUSES:
+            if record is None:
                 continue
-            self.cancel(workspace_id, node_id)
-            cancelled.append(node_id)
+            guard = (
+                self._chat.execution_guard(workspace_id, record.workflow_execution_id)
+                if record.workflow_execution_id is not None
+                else nullcontext()
+            )
+            with guard:
+                current = self.get(workspace_id, node_id)
+                if current is None or current.status in _TERMINAL_STATUSES:
+                    continue
+                updated = self.cancel(workspace_id, node_id)
+                if updated.status is SubAgentStatus.CANCELLED:
+                    cancelled.append(node_id)
         return tuple(cancelled)
 
     def reconcile_stranded(self, workspace_id: str) -> tuple[str, ...]:
@@ -393,6 +417,11 @@ class SubAgentLifecycle:
         cancelled: list[str] = []
         for node_id in _subtree_order(records, roots):
             record = by_id[node_id]
+            from thesis.chat.contracts import ChatState, ChatThread
+
+            root = self._chat.persistence.get(ChatThread, workspace_id, record.chat_id)
+            if root is not None and root.state is ChatState.DELETED:
+                continue
             if record.status in _TERMINAL_STATUSES:
                 continue
             updated = replace_record(
@@ -444,9 +473,41 @@ class SubAgentLifecycle:
         record = self.get(workspace_id, sub_agent_id)
         if record is None:
             raise SubAgentLifecycleError("sub-agent does not exist")
-        if record.status in _TERMINAL_STATUSES and status not in _TERMINAL_STATUSES:
+        guard = (
+            self._chat.execution_guard(workspace_id, record.workflow_execution_id)
+            if record.workflow_execution_id is not None
+            else nullcontext()
+        )
+        with guard:
+            return self._update_locked(
+                workspace_id,
+                sub_agent_id,
+                status=status,
+                accepts_input=accepts_input,
+                result=result,
+                result_ref=result_ref,
+            )
+
+    def _update_locked(
+        self,
+        workspace_id: str,
+        sub_agent_id: str,
+        *,
+        status: SubAgentStatus,
+        accepts_input: bool,
+        result: Mapping[str, object] | None,
+        result_ref: str | None,
+    ) -> SubAgentRecord:
+        # Re-read after acquiring the acceptance guard: cancellation and phase
+        # completion must never decide from a pre-lock lifecycle snapshot.
+        record = self.get(workspace_id, sub_agent_id)
+        if record is None:
+            raise SubAgentLifecycleError("sub-agent does not exist")
+        if record.status in _TERMINAL_STATUSES:
+            if record.status is status or status is SubAgentStatus.CANCELLED:
+                return record
             raise SubAgentLifecycleError(
-                f"cannot move a terminal sub-agent to {status.value}"
+                f"cannot move a {record.status.value} sub-agent to {status.value}"
             )
         if (
             status is SubAgentStatus.NEEDS_INPUT

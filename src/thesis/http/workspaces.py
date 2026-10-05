@@ -255,7 +255,7 @@ class WorkspaceDataService:
         }
         counts: dict[str, int] = {key: 0 for key in _COUNT_KEYS}
         counts["chats"] = len(open_chats)
-        for key in _COUNT_KEYS:
+        for key in self._count_providers:
             provider = self._count_providers.get(key)
             if provider is not None:
                 counts[key] = provider(workspace_id)
@@ -264,13 +264,9 @@ class WorkspaceDataService:
 
 def get_workspace_service(request: Request) -> WorkspaceDataService:
     """Resolve the service from app state so applications control persistence."""
-    service = getattr(request.app.state, "workspace_service", None)
-    if service is None:
-        service = WorkspaceDataService()
-        request.app.state.workspace_service = service
-    if not isinstance(service, WorkspaceDataService):
-        raise RuntimeError("app.state.workspace_service must be a WorkspaceDataService")
-    return service
+    from thesis.http.errors import require_service
+
+    return require_service(request, "workspace_service", WorkspaceDataService)
 
 
 def manifest_owner_lookup(store: WorkspaceStore) -> WorkspaceOwnerLookup:
@@ -388,7 +384,7 @@ def create_workspaces_router(
         router.dependencies.append(Depends(guard))
 
     @router.get("/workspaces")
-    async def list_workspaces(
+    def list_workspaces(
         service: Annotated[WorkspaceDataService, Depends(get_workspace_service)],
     ) -> dict[str, object]:
         return {"items": list(service.list_workspaces())}
@@ -403,20 +399,33 @@ def create_workspaces_router(
         )
 
     @router.get("/workspaces/{workspace_id}/snapshot")
-    async def get_snapshot(
+    def get_snapshot(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[WorkspaceDataService, Depends(get_workspace_service)],
     ) -> dict[str, object]:
         try:
             return service.snapshot(workspace_id)
         except KeyError as error:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "workspace_not_found",
-                    "message": f"workspace {workspace_id!r} does not exist",
-                },
-            ) from error
+            from thesis.http.errors import service_error
+
+            raise service_error(error, resource="workspace") from error
+
+    @router.get("/workspaces/{workspace_id}")
+    def get_workspace(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        service: Annotated[WorkspaceDataService, Depends(get_workspace_service)],
+    ) -> dict[str, object]:
+        """Return one workspace summary for the render gate.
+
+        Counts and activity are loaded by the separate snapshot request after
+        the workspace shell renders.
+        """
+        summary = service.store.get(workspace_id)
+        if summary is None:
+            from thesis.http.errors import service_error
+
+            raise service_error(KeyError(workspace_id), resource="workspace")
+        return summary
 
     return router
 
@@ -678,6 +687,9 @@ def build_local_workspace_data(
             "chats": lambda workspace_id: len(open_chats(workspace_id)),
             "strategies": lambda workspace_id: len(
                 strategies.list_strategies(workspace_id)
+            ),
+            "screeners": lambda workspace_id: len(
+                screeners.list_definitions(workspace_id)
             ),
         },
         open_chats_provider=open_chats,

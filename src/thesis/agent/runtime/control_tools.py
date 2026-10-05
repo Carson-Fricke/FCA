@@ -437,7 +437,7 @@ def control_registered_tools(
         ),
     ]
     if context.sub_agent_id is not None:
-        if in_workflow:
+        if context.phase_executor:
             # The workflow owns this node's completion: only the phase contract
             # is advertised, never the plain sub-agent return.
             tools.append(

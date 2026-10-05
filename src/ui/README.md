@@ -8,14 +8,34 @@ documents the local slice only.
 
 ## Purpose
 
-Provide the interactive Thesis surfaces: canvas-based charting for backtest
-reports (PnL, executions, per-instrument prices) and a CLEO task DAG viewer,
-both demonstrable today against deterministic fixtures and designed to be
-populated later by Thesis backend payloads (T207 artifact-view endpoint, CLEO
-task data).
+Provide the interactive Thesis surfaces: workspace conversations, strategy
+lineage, evidence and consent/audit views, and canvas-based charting for
+backtest reports (PnL, executions, per-instrument prices). Deterministic
+fixtures support local demos alongside Thesis backend payloads.
 
 ## Architecture and design decisions
 
+- **One conversation timeline.** Full chat and copilot share `ChatHostController`
+  and `TimelineController`. REST history establishes a watermark before the sole
+  `TimelineStream` SSE client subscribes; root and scoped views select from the
+  same ordered items without extra streams.
+- **Execution-indexed live cards.** `src/lib/workflow-live.ts` derives a map keyed
+  by execution ID from timeline anchors, snapshots, events, and durable nodes.
+  Each card selects its own live state; the singleton `effectiveExecution` is
+  removed. Legacy execution, chat-message,
+  and sub-agent SSE routes are removed; REST event replay endpoints remain.
+- **Snapshot and phase projection.** First-save execution snapshots may arrive
+  late, so all available lifecycle events replay against them, not only events
+  after their sequence. Declared phases and explicit phase executors own phase
+  steps; helpers do not. Phase navigation is keyed by execution ID and canonical
+  phase name to keep concurrent workflows separate.
+- **Bounded topology and rendering.** `src/lib/api.ts` shares workflow-definition
+  reads in a 64-entry cache, including tracked in-flight requests, keyed by
+  backend, API URL, workspace, workflow ID, and version. Matching explicit-version
+  definitions expire after five minutes; failures, mismatches, and unversioned
+  reads are not retained after completion. Workflow-card canvas animation uses
+  `requestAnimationFrame` only for active/attention nodes while visible, pausing
+  offscreen and in hidden tabs without pausing runtime execution.
 - **Two-layer chart design.** `TimeSeriesChart` is the base chart component:
   one instance renders one dataset (or a small named series list on a shared
   time axis) and owns all interaction — pan, wheel time-zoom, shift+wheel
@@ -65,7 +85,8 @@ task data).
 
 ## What this folder must not contain
 
-- Backend or network code; data always arrives via props or fixtures.
+- Backend execution or admission policy. HTTP and SSE transport belong in
+  `src/lib/`; presentation receives decoded data through props and shared context.
 - Router/page dependencies inside `src/lib/components/` components.
 - Metric or strategy computation — the UI only renders and formats.
 - Any Python, Zig, or harness code; those live in sibling `src/` packages.
@@ -85,6 +106,10 @@ task data).
 | `package-lock.json` | Lockfile for the npm dependencies. |
 | `svelte.config.js` | SvelteKit configuration; static adapter with an `index.html` fallback. |
 | `vite.config.js` | Vite configuration; wires the SvelteKit plugin. |
+| `generate-wire.mjs` | Deterministic type/schema generation from committed backend OpenAPI 3.1 and explicit JSON Schema exports; `--check` detects stale artifacts. |
+| `backend-wire.json` | Authoritative backend-generated OpenAPI 3.1 export consumed by the frontend generator. |
+| `vitest.config.ts` | Frontend test configuration and SvelteKit navigation test adapters. |
+| `src/lib/` | Transport, generated wire decoding, shared chat/timeline controllers, execution-indexed workflow projection, and presentation; see its local README. |
 | `.gitignore` | Ignores `node_modules/`, `.svelte-kit/`, build output, and env files. |
 | `src/app.html` | HTML shell for the SvelteKit app. |
 | `src/app.css` | Global dark theme: CSS custom properties (`--panel`, `--border`, `--text`, `--muted`, `--accent`, `--green`, `--red`, ...), base typography, and shared `.page`/`.card` layout helpers. |
@@ -92,17 +117,14 @@ task data).
 | `src/lib/components/charts/HistogramChart.svelte` | Small canvas bar histogram with zero-crossing buckets and green/red trade-outcome coloring, hover bucket tooltip; used for the trade PnL distribution in the Risk analysis tab. |
 | `src/lib/components/backtest-view/BacktestReport.svelte` | Collapsible chat report card: header (title, headline stat tiles, expand control) with a PnL preview chart when collapsed and a tabbed body when expanded — PnL & orders (filled equity curve with entry/exit markers plus fills table), per-instrument candlestick panels, Risk analysis (risk tiles, equity and drawdown areas, PnL histogram), model-provided `report.panels` groups as extra tabs, and a Statistics tab; all `TimeSeriesChart` instances bound to one shared camera. No router or page dependencies. |
 | `src/lib/components/backtest-view/StatsTable.svelte` | Generic grouped key/value stats table: renders the backend `report.stats` metrics dict with a known-key registry (label, group, percent/ratio/money/ms/duration/bool formatting); unknown keys fall into an "Other" group. No computation beyond formatting. |
-| `src/lib/components/task-dag/TaskDag.svelte` | Canvas CLEO task DAG viewer: hierarchy/dependency layout, pan/zoom, status coloring, node selection callback. |
 | `src/lib/data/backtestFixture.js` | Deterministic seeded backtest fixture: OHLC daily bars for two instruments, consistent equity curve and trades, full placeholder stats dict shaped like the T207 artifact-view payload, and model-provided risk/benchmark panels. |
-| `src/lib/data/dagFixture.js` | Deterministic CLEO task-graph sample data (ids, hierarchy, dependencies, statuses) for the DAG viewer. |
 | `src/routes/+layout.js` | Enables prerendering for all routes. |
 | `src/routes/+layout.svelte` | Root layout; imports `app.css` and renders the page. |
 | `src/routes/+page.svelte` | Workbench index linking the demo routes with fixture-derived summaries. |
 | `src/routes/demo/backtest/+page.svelte` | Backtest visualizer demo: renders `BacktestReport` with the fixture and a page-owned camera bound into the report. |
-| `src/routes/demo/dag/+page.svelte` | Task DAG demo: renders `TaskDag` with fixture nodes and a node-detail aside. |
 
 ## Verification
 
 Focused verification for this slice: `npm run build` from this directory must
-succeed and produce the prerendered demo pages (`build/demo/backtest.html`,
-`build/demo/dag.html`) without any backend.
+succeed and produce the prerendered backtest demo page
+(`build/demo/backtest.html`) without any backend.

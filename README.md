@@ -21,13 +21,13 @@ duplication without merging the two products into one package.
 
 ## Status
 
-The repository currently contains the CLEO roadmap, project guidance, the
+The repository currently contains project guidance, the
 tracked directory skeleton, an installable market-lake package, a shared
 runtime image, versioned market-lake configuration, core partition, schema,
 and calendar contracts, build-validated Azure foundation modules, a reusable
 GHCR publication workflow, a protected main-branch deployment workflow, the
 quant-harness package scaffold, and a supported local market-lake mode. The
-quant-harness runtime capabilities remain assigned to later CLEO tasks.
+quant-harness runtime capabilities remain planned for later implementation.
 
 ## Architecture
 
@@ -52,8 +52,6 @@ later tasks own their implementation.
 
 ```text
 .
-|-- .cleo-export.json              Portable CLEO roadmap export
-|-- .cleo/                         Allow-listed CLEO context and RCASD records
 |-- .github/
 |   |-- architecture/              Project architecture documentation
 |   |-- instructions/              Repository-scoped agent guidance
@@ -190,12 +188,3 @@ repository path.
 The one-time identity, immutable OIDC subject, GitHub Environment, and recovery
 procedure is documented in
 [`.github/runbooks/github-azure-oidc-bootstrap.md`](.github/runbooks/github-azure-oidc-bootstrap.md).
-
-## Roadmap
-
-The portable roadmap is [`.cleo-export.json`](.cleo-export.json). The
-`market-lake` roadmap is rooted at CLEO task `T001`; the `quant-harness`
-roadmap is rooted at `T068`. Tracked research and lifecycle material lives
-under [`.cleo/rcasd/`](.cleo/rcasd/). The local CLEO database and runtime state
-are intentionally excluded from Git; the export is the reviewable project
-roadmap.

@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import logging
+import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Protocol, TypeVar, cast
+from queue import Queue
+from threading import Lock, RLock, Thread
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 from thesis.chat.contracts import (
     WORKFLOW_NODE_ROLE,
     AgentInvocation,
     Attachment,
     AttachmentState,
+    ChatContractError,
     ChatMessage,
     ChatState,
     ChatThread,
+    ConversationRecord,
     CrossWorkspaceLinkError,
     InvalidLifecycleTransition,
     Investigation,
@@ -43,6 +49,9 @@ from thesis.execution.events import (
     InMemoryExecutionEventStore,
 )
 
+if TYPE_CHECKING:
+    from thesis.agent.messages import ToolCorrelation, ToolRequest
+
 Record = (
     ChatThread
     | ChatMessage
@@ -55,6 +64,14 @@ Record = (
 )
 RecordType = type[Record]
 RecordT = TypeVar("RecordT", bound=Record)
+TransitionT = TypeVar("TransitionT")
+
+
+@dataclass(slots=True)
+class _InputState:
+    guard: RLock = field(default_factory=RLock)
+    high_water: int | None = None
+
 
 _STEERABLE_EXECUTION_STATES = frozenset(
     {
@@ -97,6 +114,27 @@ class ChatPersistence(Protocol):
         self, record_type: type[RecordT], workspace_id: str, record_id: str
     ) -> None: ...
 
+    def list_conversation(
+        self,
+        record_type: type[RecordT],
+        workspace_id: str,
+        root_conversation_id: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> tuple[RecordT, ...]: ...
+
+    def mark_conversation_deleted(
+        self, workspace_id: str, chat_id: str, deleted_at: datetime
+    ) -> None: ...
+
+    def purge_conversation(
+        self, workspace_id: str, chat_id: str, limit: int = 100
+    ) -> bool: ...
+
+    def list_deleted_conversations(
+        self, workspace_id: str
+    ) -> tuple[ChatThread, ...]: ...
+
 
 class InMemoryChatPersistence:
     """Small deterministic persistence adapter suitable for local runtime tests."""
@@ -113,6 +151,7 @@ class InMemoryChatPersistence:
     )
 
     def __init__(self, records: Iterable[Record] = ()) -> None:
+        self._guard = RLock()
         self._records: dict[type[Record], dict[tuple[str, str], Record]] = {
             record_type: {} for record_type in self._record_types
         }
@@ -120,6 +159,14 @@ class InMemoryChatPersistence:
             self.save(record)
 
     def save(self, record: RecordT) -> RecordT:
+        with self._guard:
+            if isinstance(record, ConversationRecord):
+                root = self.get(ChatThread, record.workspace_id, record.chat_id)
+                if root is not None and root.state is ChatState.DELETED:
+                    raise ChatContractError("conversation has been deleted")
+            return self._save(record)
+
+    def _save(self, record: RecordT) -> RecordT:
         record_type = type(record)
         if record_type not in self._records:
             raise TypeError(f"unsupported chat record type: {record_type.__name__}")
@@ -142,8 +189,62 @@ class InMemoryChatPersistence:
             record
             for (stored_workspace, _), record in self._records[record_type].items()
             if stored_workspace == workspace_id
+            and not (
+                isinstance(record, ChatThread) and record.state is ChatState.DELETED
+            )
         )
         return cast(tuple[RecordT, ...], values)
+
+    def list_conversation(
+        self,
+        record_type: type[RecordT],
+        workspace_id: str,
+        root_conversation_id: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> tuple[RecordT, ...]:
+        return tuple(
+            record
+            for record in self.list(record_type, workspace_id)
+            if isinstance(record, ConversationRecord)
+            and record.root_conversation_id == root_conversation_id
+            and (conversation_id is None or record.conversation_id == conversation_id)
+        )
+
+    def mark_conversation_deleted(
+        self, workspace_id: str, chat_id: str, deleted_at: datetime
+    ) -> None:
+        with self._guard:
+            root = self.get(ChatThread, workspace_id, chat_id)
+            if root is not None and root.state is not ChatState.DELETED:
+                self._save(
+                    replace_record(root, state=ChatState.DELETED, updated_at=deleted_at)
+                )
+
+    def list_deleted_conversations(self, workspace_id: str) -> tuple[ChatThread, ...]:
+        return tuple(
+            cast(ChatThread, record)
+            for (ws, _), record in self._records[ChatThread].items()
+            if ws == workspace_id
+            and cast(ChatThread, record).state is ChatState.DELETED
+        )
+
+    def purge_conversation(
+        self, workspace_id: str, chat_id: str, limit: int = 100
+    ) -> bool:
+        with self._guard:
+            remaining = limit
+            for record_type in self._record_types:
+                if record_type is ChatThread:
+                    continue
+                for record in self.list_conversation(
+                    record_type, workspace_id, chat_id
+                ):
+                    if remaining == 0:
+                        return False
+                    self.delete(type(record), workspace_id, _record_id(record))
+                    remaining -= 1
+            return True
 
     def delete(
         self, record_type: type[RecordT], workspace_id: str, record_id: str
@@ -177,8 +278,43 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex}"
 
 
+def _legacy_tool_requests(
+    data: Mapping[str, object] | None,
+) -> tuple[ToolRequest, ...]:
+    """Decode retired native tool-call metadata into neutral requests."""
+    from thesis.agent.messages import ToolRequest
+
+    raw = (data or {}).get("toolCalls")
+    if not isinstance(raw, list | tuple):
+        return ()
+    requests: list[ToolRequest] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        call_id = item.get("id")
+        function = item.get("function")
+        if (
+            not isinstance(call_id, str)
+            or not call_id
+            or not isinstance(function, Mapping)
+        ):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        arguments = function.get("arguments")
+        requests.append(
+            ToolRequest(call_id, name, arguments if isinstance(arguments, str) else "")
+        )
+    return tuple(requests)
+
+
 class ChatService:
-    """Workspace-safe chat and workflow service with injected durable ports."""
+    """Workspace-safe service requiring one process and service owner per chat.
+
+    Intake and acceptance guards are process-local, not distributed leases.
+    Sharing owned chats between service instances or replicas is unsupported.
+    """
 
     def __init__(
         self,
@@ -187,13 +323,60 @@ class ChatService:
         events: ExecutionEventStore | None = None,
         clock: Callable[[], datetime] = _utc_now,
         id_factory: Callable[[str], str] = _new_id,
+        single_process: bool = True,
     ) -> None:
+        if not single_process:
+            raise ValueError("ChatService requires single-process chat ownership")
         self._persistence = (
             InMemoryChatPersistence() if persistence is None else persistence
         )
         self._events = InMemoryExecutionEventStore() if events is None else events
         self._clock = clock
         self._id_factory = id_factory
+        self._guard = Lock()
+        self._inputs: dict[tuple[str, str, str | None], _InputState] = {}
+        self._executions: dict[tuple[str, str], RLock] = {}
+        self._chat_records: dict[tuple[str, str], RLock] = {}
+        self._cleanup_guard = Lock()
+        self._cleanup_queue: Queue[tuple[str, str]] = Queue()
+        self._cleanup_pending: set[tuple[str, str]] = set()
+        self._cleanup_worker: Thread | None = None
+
+    def _input_state(
+        self, workspace_id: str, chat_id: str, anchor_id: str | None
+    ) -> _InputState:
+        with self._guard:
+            return self._inputs.setdefault(
+                (workspace_id, chat_id, anchor_id or None), _InputState()
+            )
+
+    def _chat_record_guard(self, workspace_id: str, chat_id: str) -> RLock:
+        with self._guard:
+            return self._chat_records.setdefault((workspace_id, chat_id), RLock())
+
+    def _update_chat(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        update: Callable[[ChatThread], ChatThread],
+    ) -> ChatThread:
+        # Anchor locks precede this narrow record lock; never acquire them here.
+        with self._chat_record_guard(workspace_id, chat_id):
+            chat = self.get_chat(workspace_id, chat_id)
+            updated = update(chat)
+            return chat if updated is chat else self._save(updated)
+
+    def execution_guard(self, workspace_id: str, execution_id: str) -> RLock:
+        """Return the shared reentrant boundary for execution-owned mutations.
+
+        Runtime lifecycle and workflow callers may compose storage mutations
+        with acceptance under this same single-owner guard. Reread records
+        after acquiring it; locking a stale snapshot does not make it current.
+        Never hold it across model/tool calls, intake, scheduling, or node-lock
+        acquisition. Publish events after releasing the outermost guard.
+        """
+        with self._guard:
+            return self._executions.setdefault((workspace_id, execution_id), RLock())
 
     @property
     def persistence(self) -> ChatPersistence:
@@ -247,64 +430,119 @@ class ChatService:
         return chat
 
     def get_chat(self, workspace_id: str, chat_id: str) -> ChatThread:
-        return self._require(ChatThread, workspace_id, chat_id)
+        chat = self._require(ChatThread, workspace_id, chat_id)
+        if chat.state is ChatState.DELETED:
+            raise RecordNotFound("conversation has been deleted")
+        return chat
 
     def list_chats(self, workspace_id: str) -> tuple[ChatThread, ...]:
         return self._list(ChatThread, workspace_id)
 
+    def admit_conversation_dispatch(self, workspace_id: str, chat_id: str) -> bool:
+        """Claim already-in-flight work atomically against logical deletion."""
+        with self._chat_record_guard(workspace_id, chat_id):
+            try:
+                self.get_chat(workspace_id, chat_id)
+            except RecordNotFound:
+                return False
+            return True
+
     def archive_chat(self, workspace_id: str, chat_id: str) -> ChatThread:
-        chat = self.get_chat(workspace_id, chat_id)
-        if chat.state is ChatState.ARCHIVED:
-            return chat
-        return self._save(
-            replace_record(chat, state=ChatState.ARCHIVED, updated_at=self._now())
+        return self._update_chat(
+            workspace_id,
+            chat_id,
+            lambda chat: (
+                chat
+                if chat.state is ChatState.ARCHIVED
+                else replace_record(
+                    chat, state=ChatState.ARCHIVED, updated_at=self._now()
+                )
+            ),
         )
 
-    def delete_chat(self, workspace_id: str, chat_id: str) -> None:
-        """Remove a chat and the records it owns.
+    def read_consumed_input(
+        self, workspace_id: str, chat_id: str, anchor_id: str
+    ) -> int:
+        """Read the durable consumption fence; the root anchor is ``""``.
 
-        Deletion cascades to the chat's messages and attachments and to any
-        workflow executions and tool jobs launched from it, so the workspace
-        retains no orphaned references to the conversation.  The chat's
-        durable sub-agent forest is cancelled first, so a deleted conversation
-        frees its own concurrency budget and no background node turn keeps
-        working for a chat that no longer exists.
+        An existing chat with no acknowledgement returns zero. Missing chats
+        raise ``RecordNotFound``. Like intake, this port is single-owner only.
         """
-        self.get_chat(workspace_id, chat_id)
-        self._cancel_chat_sub_agents(workspace_id, chat_id)
-        for message in self._list(ChatMessage, workspace_id):
-            if message.chat_id == chat_id:
-                self._delete(ChatMessage, workspace_id, message.message_id)
-        for attachment in self._list(Attachment, workspace_id):
-            if attachment.chat_id == chat_id:
-                self._delete(Attachment, workspace_id, attachment.attachment_id)
-        executions = [
-            execution
-            for execution in self._list(WorkflowExecution, workspace_id)
-            if execution.chat_id == chat_id
-        ]
-        execution_ids = {execution.execution_id for execution in executions}
-        # Cancel before deleting the records. Background workflow workers use
-        # the terminal execution state as their cooperative cancellation fence;
-        # deleting first would remove the signal and let in-flight work run on.
-        for execution in executions:
-            if execution.state not in {
-                WorkflowExecutionState.COMPLETED,
-                WorkflowExecutionState.FAILED,
-                WorkflowExecutionState.STOPPED,
-                WorkflowExecutionState.CANCELLED,
-            }:
-                self.cancel_workflow(
-                    workspace_id,
-                    execution.execution_id,
-                    actor_id="chat-deletion",
+        with self._input_state(workspace_id, chat_id, anchor_id).guard:
+            with self._chat_record_guard(workspace_id, chat_id):
+                chat = self.get_chat(workspace_id, chat_id)
+                return chat.input_consumed_positions.get(anchor_id, 0)
+
+    def acknowledge_input(
+        self, workspace_id: str, chat_id: str, anchor_id: str, position: int
+    ) -> None:
+        """Persist the maximum observed position without losing other anchors.
+
+        Paired with ``read_consumed_input`` for runtime composition. Holds the
+        same anchor guard as position assignment, then the chat-record guard
+        for a fresh read/merge/write. No scheduling or tool calls occur here.
+        """
+        if isinstance(position, bool) or not isinstance(position, int) or position < 0:
+            raise ValueError("consumed input position must be a non-negative integer")
+
+        def acknowledge(chat: ChatThread) -> ChatThread:
+            if position <= chat.input_consumed_positions.get(anchor_id, 0):
+                return chat
+            positions = dict(chat.input_consumed_positions)
+            positions[anchor_id] = position
+            return replace_record(
+                chat, input_consumed_positions=positions, updated_at=self._now()
+            )
+
+        with self._input_state(workspace_id, chat_id, anchor_id).guard:
+            self._update_chat(workspace_id, chat_id, acknowledge)
+
+    def delete_chat(self, workspace_id: str, chat_id: str) -> None:
+        """Durably hide/fence the entire root; physical cleanup is asynchronous."""
+        with self._chat_record_guard(workspace_id, chat_id):
+            self._persistence.mark_conversation_deleted(
+                workspace_id, chat_id, self._now()
+            )
+        self._enqueue_purge(workspace_id, chat_id)
+
+    def resume_conversation_cleanup(self, workspace_id: str) -> None:
+        for root in self._persistence.list_deleted_conversations(workspace_id):
+            self._enqueue_purge(workspace_id, root.chat_id)
+
+    def _enqueue_purge(self, workspace_id: str, chat_id: str) -> None:
+        with self._cleanup_guard:
+            key = (workspace_id, chat_id)
+            if key in self._cleanup_pending:
+                return
+            self._cleanup_pending.add(key)
+            self._cleanup_queue.put(key)
+            if self._cleanup_worker is None:
+                self._cleanup_worker = Thread(
+                    target=self._purge_worker, name="conversation-cleanup", daemon=True
                 )
-        for job in self._list(ToolJob, workspace_id):
-            if job.execution_id in execution_ids:
-                self._delete(ToolJob, workspace_id, job.tool_job_id)
-        for execution in executions:
-            self._delete(WorkflowExecution, workspace_id, execution.execution_id)
-        self._delete(ChatThread, workspace_id, chat_id)
+                self._cleanup_worker.start()
+
+    def _purge_worker(self) -> None:
+        while True:
+            workspace_id, chat_id = self._cleanup_queue.get()
+            try:
+                complete = self._persistence.purge_conversation(
+                    workspace_id, chat_id, limit=50
+                )
+            except Exception as error:  # noqa: BLE001 - durable tombstone survives restart
+                logging.getLogger(__name__).warning(
+                    "conversation cleanup deferred",
+                    extra={"error_type": type(error).__name__},
+                )
+                time.sleep(1)
+                complete = False
+            with self._cleanup_guard:
+                if complete:
+                    self._cleanup_pending.discard((workspace_id, chat_id))
+                else:
+                    self._cleanup_queue.put((workspace_id, chat_id))
+            self._cleanup_queue.task_done()
+            time.sleep(0.01)
 
     def _cancel_chat_sub_agents(
         self, workspace_id: str, chat_id: str
@@ -383,14 +621,16 @@ class ChatService:
         )
         self._save(investigation)
         for chat in chats:
-            self._save(
-                replace_record(
-                    chat,
-                    links=chat.links.add(
+            self._update_chat(
+                workspace_id,
+                chat.chat_id,
+                lambda current: replace_record(
+                    current,
+                    links=current.links.add(
                         investigation_ids=(investigation.investigation_id,)
                     ),
                     updated_at=now,
-                )
+                ),
             )
         return investigation
 
@@ -449,6 +689,7 @@ class ChatService:
         intent_epoch: int = 0,
         kind: TranscriptItemKind = TranscriptItemKind.MESSAGE,
         data: Mapping[str, object] | None = None,
+        message_id: str | None = None,
     ) -> ChatMessage:
         """Persist an accepted message and verify every workspace link.
 
@@ -460,6 +701,17 @@ class ChatService:
         message, tool, workflow anchor, sub-agent, gate, and artifact payloads
         while every existing message keeps the ``message`` default.
         """
+        if message_id is not None and (
+            not isinstance(message_id, str) or not message_id.strip()
+        ):
+            raise ValueError("message_id must be non-empty text")
+        canonical = (data or {}).get("sessionMessage")
+        if isinstance(canonical, Mapping):
+            from thesis.agent.messages import SessionMessage
+
+            SessionMessage.from_dict(canonical)
+            if message_id is None or canonical.get("message_id") != message_id:
+                raise ValueError("canonical message identity must match message_id")
         chat = self.get_chat(workspace_id, chat_id)
         if chat.state is ChatState.ARCHIVED:
             raise InvalidLifecycleTransition(
@@ -483,13 +735,29 @@ class ChatService:
                 raise CrossWorkspaceLinkError(
                     "attachment does not belong to the selected chat"
                 )
+        if (
+            role is MessageRole.ASSISTANT
+            and not body.strip()
+            and data
+            and data.get("toolCalls")
+        ):
+            body = "Tool calls requested"
         now = self._now()
+        anchor = (data or {}).get("subAgentId")
+        parent_conversation_id = None
+        if isinstance(anchor, str) and anchor:
+            node = self._persistence.get(SubAgentRecord, workspace_id, anchor)
+            parent_conversation_id = node.parent_conversation_id if node else chat_id
         message = ChatMessage(
             workspace_id=workspace_id,
             created_at=now,
             created_by=actor_id,
-            message_id=self._id_factory("message"),
+            message_id=message_id
+            if message_id is not None
+            else self._id_factory("message"),
             chat_id=chat_id,
+            conversation_id=anchor if isinstance(anchor, str) and anchor else chat_id,
+            parent_conversation_id=parent_conversation_id,
             actor_id=actor_id,
             role=role,
             body=body,
@@ -507,18 +775,148 @@ class ChatService:
             intent_epoch=intent_epoch,
             updated_at=now,
         )
-        self._save(message)
-        self._save(
-            replace_record(
-                chat,
-                links=chat.links.add(
+        # Import locally: runtime consumers themselves depend on ChatService.
+        from thesis.agent.runtime.activity import (
+            Delivery,
+            activity_data,
+            decode_activity,
+            is_external_input,
+        )
+
+        if not isinstance(canonical, Mapping) and role is MessageRole.ASSISTANT:
+            from thesis.agent.messages import MessageContent, SessionMessage
+
+            canonical = SessionMessage(
+                message.message_id,
+                "outgoing",
+                MessageContent(
+                    message.body,
+                    "agent",
+                    result={"reasoning": message.reasoning}
+                    if message.reasoning
+                    else None,
+                    requests=_legacy_tool_requests(data),
+                ),
+            ).as_dict()
+            message = replace_record(
+                message,
+                data={**dict(message.data or {}), "sessionMessage": canonical},
+            )
+        elif (
+            not isinstance(canonical, Mapping)
+            and role is MessageRole.TOOL
+            and tool_result is not None
+        ):
+            from thesis.agent.messages import MessageContent, SessionMessage
+
+            datum_type = tool_result.get("datumType")
+            canonical = SessionMessage(
+                message.message_id,
+                "incoming",
+                MessageContent(
+                    message.body,
+                    datum_type
+                    if isinstance(datum_type, str) and datum_type
+                    else "tool_result",
+                    correlation=self._legacy_tool_correlation(message, tool_result),
+                    result=tool_result,
+                ),
+            ).as_dict()
+            message = replace_record(
+                message,
+                data={
+                    **dict(message.data or {}),
+                    **activity_data(
+                        Delivery(
+                            anchor if isinstance(anchor, str) and anchor else None,
+                            message.message_id,
+                        )
+                    ),
+                    "sessionMessage": canonical,
+                },
+            )
+
+        if is_external_input(message):
+            anchor = decode_activity(message).sub_agent_id
+            intake = self._input_state(workspace_id, chat_id, anchor)
+            with intake.guard:
+                existing = self._persistence.get(
+                    ChatMessage, workspace_id, message.message_id
+                )
+                if existing is not None:
+                    if (
+                        existing.chat_id != chat_id
+                        or decode_activity(existing).sub_agent_id != anchor
+                    ):
+                        raise CrossWorkspaceLinkError(
+                            "message identity belongs to another conversation"
+                        )
+                    if not isinstance(canonical, Mapping) or not isinstance(
+                        (existing.data or {}).get("sessionMessage"), Mapping
+                    ):
+                        raise ValueError("message identity already exists")
+                    previous = (existing.data or {})["sessionMessage"]
+                    if isinstance(previous, Mapping) and (
+                        previous.get("direction") != canonical.get("direction")
+                        or previous.get("content") != canonical.get("content")
+                    ):
+                        raise ValueError(
+                            "message identity already has different content"
+                        )
+                    return existing
+                if intake.high_water is None:
+                    intake.high_water = max(
+                        (
+                            persisted.input_position
+                            for persisted in self._persistence.list_conversation(
+                                ChatMessage,
+                                workspace_id,
+                                chat_id,
+                                conversation_id=message.conversation_id,
+                            )
+                            if persisted.chat_id == chat_id
+                            and decode_activity(persisted).sub_agent_id == anchor
+                        ),
+                        default=0,
+                    )
+                accepted_at = self._now()
+                message = replace_record(
+                    message,
+                    input_position=intake.high_water + 1,
+                    data={
+                        **dict(message.data or {}),
+                        "sessionMessage": {
+                            **dict(canonical),
+                            "position": intake.high_water + 1,
+                        },
+                    }
+                    if isinstance(canonical, Mapping)
+                    else message.data,
+                    created_at=accepted_at,
+                    updated_at=accepted_at,
+                )
+                self._save(message)
+                intake.high_water = message.input_position
+        else:
+            if (
+                self._persistence.get(ChatMessage, workspace_id, message.message_id)
+                is not None
+            ):
+                raise ValueError("message identity already exists")
+            self._save(message)
+        self._update_chat(
+            workspace_id,
+            chat_id,
+            lambda current: replace_record(
+                current,
+                links=current.links.add(
                     investigation_ids=message.investigation_ids,
                     workflow_execution_ids=()
                     if execution is None
                     else (execution.execution_id,),
                 ),
                 updated_at=now,
-            )
+            ),
         )
         for investigation in investigations:
             self._save(
@@ -529,6 +927,31 @@ class ChatService:
                 )
             )
         return message
+
+    def _legacy_tool_correlation(
+        self, message: ChatMessage, tool_result: Mapping[str, object]
+    ) -> ToolCorrelation | None:
+        """Join a retired tool-result shape to its durable model request."""
+        from thesis.agent.messages import ToolCorrelation, from_record
+
+        call_id = tool_result.get("callId")
+        if not isinstance(call_id, str) or not call_id:
+            return None
+        conversation_id = message.conversation_id or message.chat_id
+        for record in reversed(
+            self.list_conversation_messages(
+                message.workspace_id, message.chat_id, conversation_id
+            )
+        ):
+            if not isinstance((record.data or {}).get("sessionMessage"), Mapping):
+                continue
+            canonical = from_record(record)
+            if canonical.direction != "outgoing":
+                continue
+            for request in canonical.content.requests:
+                if request.id == call_id:
+                    return ToolCorrelation(record.message_id, call_id, request.name)
+        return None
 
     def send_message(
         self,
@@ -547,14 +970,44 @@ class ChatService:
         kind: TranscriptItemKind = TranscriptItemKind.MESSAGE,
         data: Mapping[str, object] | None = None,
     ) -> ChatMessage:
-        """UI-friendly alias for :meth:`create_message`."""
-        return self.create_message(
+        """Store incoming messages canonically, or explicit assistant output."""
+        if role is MessageRole.ASSISTANT and tool_result is None:
+            from thesis.agent.messages import SessionMessage
+
+            if data is not None and "sessionMessage" in data:
+                canonical = data["sessionMessage"]
+                if not isinstance(canonical, Mapping):
+                    raise ValueError("sessionMessage must be a mapping")
+                message = SessionMessage.from_dict(canonical)
+                if message.direction != "outgoing":
+                    raise ValueError("assistant output requires an outgoing message")
+                message_id = message.message_id
+            else:
+                message_id = None
+            return self.create_message(
+                workspace_id,
+                chat_id,
+                actor_id=actor_id,
+                body=body,
+                role=role,
+                reasoning=reasoning,
+                tool_result=tool_result,
+                attachment_ids=attachment_ids,
+                investigation_ids=investigation_ids,
+                execution_id=execution_id,
+                intent_epoch=intent_epoch,
+                kind=kind,
+                data=data,
+                message_id=message_id,
+            )
+        if reasoning is not None:
+            raise ValueError("incoming messages cannot contain reasoning")
+        return self._accept_input(
             workspace_id,
             chat_id,
             actor_id=actor_id,
             body=body,
             role=role,
-            reasoning=reasoning,
             tool_result=tool_result,
             attachment_ids=attachment_ids,
             investigation_ids=investigation_ids,
@@ -564,29 +1017,135 @@ class ChatService:
             data=data,
         )
 
+    def _accept_input(
+        self,
+        workspace_id: str,
+        chat_id: str,
+        *,
+        actor_id: str,
+        body: str,
+        role: MessageRole = MessageRole.USER,
+        tool_result: Mapping[str, object] | None = None,
+        attachment_ids: tuple[str, ...] = (),
+        investigation_ids: tuple[str, ...] = (),
+        execution_id: str | None = None,
+        intent_epoch: int = 0,
+        kind: TranscriptItemKind = TranscriptItemKind.MESSAGE,
+        data: Mapping[str, object] | None = None,
+    ) -> ChatMessage:
+        """Converge storage-only convenience intake on the incoming writer."""
+        # Local imports avoid the runtime's dependency on this storage service.
+        from thesis.agent.messages import MessageContent, SessionMessage
+        from thesis.agent.runtime.activity import decode_activity
+        from thesis.agent.runtime.delivery import Anchor
+        from thesis.agent.runtime.incoming import write_incoming
+
+        if role not in (MessageRole.USER, MessageRole.TOOL, MessageRole.SYSTEM):
+            raise ValueError("convenience intake requires an incoming role")
+        supplied = data or {}
+        canonical = supplied.get("sessionMessage")
+        if "sessionMessage" in supplied:
+            if not isinstance(canonical, Mapping):
+                raise ValueError("sessionMessage must be a mapping")
+            message = SessionMessage.from_dict(canonical)
+            if message.direction != "incoming":
+                raise ValueError("incoming intake requires an incoming message")
+        else:
+            if role is MessageRole.SYSTEM:
+                source = "runtime"
+            elif tool_result is not None:
+                datum_type = tool_result.get("datumType")
+                source = (
+                    datum_type
+                    if isinstance(datum_type, str) and datum_type
+                    else "tool_result"
+                )
+            elif (
+                supplied.get("toolActivity")
+                or supplied.get("activityKind") == "runtime_tool"
+            ):
+                source = "runtime"
+            elif role is MessageRole.TOOL or supplied.get("deliveryKey"):
+                source = "delivery"
+            else:
+                source = "user"
+            message = SessionMessage(
+                self._id_factory("message"),
+                "incoming",
+                MessageContent(body, source, result=tool_result),
+            )
+        now = self._now()
+        record = ChatMessage(
+            workspace_id=workspace_id,
+            created_at=now,
+            created_by=actor_id,
+            message_id=message.message_id,
+            chat_id=chat_id,
+            actor_id=actor_id,
+            role=role,
+            body=body,
+            tool_result=tool_result,
+            kind=kind,
+            data=data,
+            updated_at=now,
+        )
+        return write_incoming(
+            self,
+            Anchor(workspace_id, chat_id, decode_activity(record).sub_agent_id),
+            message,
+            actor_id=actor_id,
+            body=body,
+            role=role,
+            kind=kind,
+            data=data,
+            tool_result=tool_result,
+            execution_id=execution_id,
+            attachment_ids=attachment_ids,
+            investigation_ids=investigation_ids,
+            intent_epoch=intent_epoch,
+        )
+
     def get_message(self, workspace_id: str, message_id: str) -> ChatMessage:
         return self._require(ChatMessage, workspace_id, message_id)
 
     def list_messages(self, workspace_id: str, chat_id: str) -> tuple[ChatMessage, ...]:
         self.get_chat(workspace_id, chat_id)
-        messages = [
-            message
-            for message in self._list(ChatMessage, workspace_id)
-            if message.chat_id == chat_id
-        ]
+        messages = self._persistence.list_conversation(
+            ChatMessage, workspace_id, chat_id
+        )
         # Conversation order is chronological; a stable sort keeps insertion
         # order for records that share one clock tick.
         return tuple(sorted(messages, key=lambda message: message.created_at))
+
+    def list_conversation_messages(
+        self, workspace_id: str, chat_id: str, conversation_id: str
+    ) -> tuple[ChatMessage, ...]:
+        self.get_chat(workspace_id, chat_id)
+        return self._persistence.list_conversation(
+            ChatMessage, workspace_id, chat_id, conversation_id=conversation_id
+        )
 
     def list_attachments(
         self, workspace_id: str, chat_id: str
     ) -> tuple[Attachment, ...]:
         """Return upload metadata for one chat in deterministic order."""
         self.get_chat(workspace_id, chat_id)
-        return tuple(
-            attachment
-            for attachment in self._list(Attachment, workspace_id)
-            if attachment.chat_id == chat_id
+        return self._persistence.list_conversation(Attachment, workspace_id, chat_id)
+
+    def list_chat_executions(
+        self, workspace_id: str, chat_id: str
+    ) -> tuple[WorkflowExecution, ...]:
+        self.get_chat(workspace_id, chat_id)
+        return self._persistence.list_conversation(
+            WorkflowExecution, workspace_id, chat_id, conversation_id=chat_id
+        )
+
+    def list_chat_sub_agents(
+        self, workspace_id: str, chat_id: str
+    ) -> tuple[SubAgentRecord, ...]:
+        self.get_chat(workspace_id, chat_id)
+        return self._persistence.list_conversation(
+            SubAgentRecord, workspace_id, chat_id
         )
 
     def transition_message(
@@ -798,7 +1357,7 @@ class ChatService:
         if message_id is None:
             if body is None:
                 raise ValueError("body or message_id is required to launch a workflow")
-            trigger = self.create_message(
+            trigger = self._accept_input(
                 workspace_id,
                 chat_id,
                 actor_id=actor_id,
@@ -820,6 +1379,8 @@ class ChatService:
             created_by=actor_id,
             execution_id=self._id_factory("execution"),
             chat_id=chat_id,
+            conversation_id=trigger.conversation_id,
+            parent_conversation_id=trigger.parent_conversation_id,
             trigger_message_id=trigger.message_id,
             workflow_id=workflow.workflow_id,
             workflow_version=workflow.version,
@@ -836,19 +1397,25 @@ class ChatService:
             state=WorkflowExecutionState.RUNNING,
             updated_at=now,
         )
-        self._save(execution)
+        with self.execution_guard(workspace_id, execution.execution_id):
+            self._save(execution)
         self._save(replace_record(trigger, execution_id=execution.execution_id))
-        chat = self.get_chat(workspace_id, chat_id)
-        chat_links = chat.links.add(workflow_execution_ids=(execution.execution_id,))
-        chat_links = chat_links.add(
-            strategy_ids=strategy_ids,
-            experiment_ids=experiment_ids,
+        self._update_chat(
+            workspace_id,
+            chat_id,
+            lambda current: replace_record(
+                current,
+                links=current.links.add(
+                    workflow_execution_ids=(execution.execution_id,),
+                    strategy_ids=strategy_ids,
+                    experiment_ids=experiment_ids,
+                    investigation_ids=()
+                    if investigation is None
+                    else (investigation.investigation_id,),
+                ),
+                updated_at=now,
+            ),
         )
-        if investigation is not None:
-            chat_links = chat_links.add(
-                investigation_ids=(investigation.investigation_id,)
-            )
-        self._save(replace_record(chat, links=chat_links, updated_at=now))
         if investigation is not None:
             self._save(
                 replace_record(
@@ -904,10 +1471,12 @@ class ChatService:
         anchor.
         """
         anchors = self._execution_anchors(workspace_id)
+        active_roots = {root.chat_id for root in self.list_chats(workspace_id)}
         return tuple(
             execution
             for execution in self._list(WorkflowExecution, workspace_id)
-            if anchors.get(execution.execution_id) is None
+            if execution.chat_id in active_roots
+            and anchors.get(execution.execution_id) is None
         )
 
     def list_node_executions(
@@ -915,10 +1484,12 @@ class ChatService:
     ) -> tuple[WorkflowExecution, ...]:
         """Return the executions owned by one sub-agent anchor."""
         anchors = self._execution_anchors(workspace_id)
+        active_roots = {root.chat_id for root in self.list_chats(workspace_id)}
         return tuple(
             execution
             for execution in self._list(WorkflowExecution, workspace_id)
-            if anchors.get(execution.execution_id) == sub_agent_id
+            if execution.chat_id in active_roots
+            and anchors.get(execution.execution_id) == sub_agent_id
         )
 
     def execution_anchor(self, workspace_id: str, execution_id: str) -> str | None:
@@ -946,10 +1517,12 @@ class ChatService:
         UI from waiting on work that no longer has a worker and prevents a
         restarted service from treating stale queued work as live.
         """
+        active_roots = {root.chat_id for root in self.list_chats(workspace_id)}
         active = tuple(
             execution
             for execution in self._list(WorkflowExecution, workspace_id)
-            if execution.state
+            if execution.chat_id in active_roots
+            and execution.state
             in {WorkflowExecutionState.QUEUED, WorkflowExecutionState.RUNNING}
         )
         return tuple(
@@ -973,6 +1546,8 @@ class ChatService:
         investigation_ids: tuple[str, ...] | None = None,
         targets_execution_id: str | None = None,
         steering_intent: str | None = None,
+        message_factory: Callable[..., ChatMessage] | None = None,
+        after_delivery: Callable[[ChatMessage], None] | None = None,
     ) -> SteeringPercolation:
         """Post a chat message and percolate its steering intent downward.
 
@@ -1017,15 +1592,28 @@ class ChatService:
             message_investigation_ids = tuple(dict.fromkeys(derived))
         else:
             message_investigation_ids = tuple(investigation_ids)
-        message = self.create_message(
-            workspace_id,
-            chat_id,
+
+        def create(**fields: object) -> ChatMessage:
+            return self._accept_input(
+                workspace_id,
+                chat_id,
+                actor_id=actor_id,
+                body=body,
+                role=role,
+                attachment_ids=attachment_ids,
+                investigation_ids=message_investigation_ids,
+                execution_id=targets_execution_id,
+                intent_epoch=max(next_epochs, default=0),
+            )
+
+        factory = message_factory or create
+        message = factory(
             actor_id=actor_id,
             body=body,
             role=role,
             attachment_ids=attachment_ids,
             investigation_ids=message_investigation_ids,
-            execution_id=None if targets_execution_id is None else targets_execution_id,
+            execution_id=targets_execution_id,
             intent_epoch=max(next_epochs, default=0),
         )
         percolated = tuple(
@@ -1037,6 +1625,8 @@ class ChatService:
             )
             for execution, epoch in zip(targets, next_epochs, strict=True)
         )
+        if after_delivery is not None:
+            after_delivery(message)
         return SteeringPercolation(message=message, executions=percolated)
 
     def steer_workflow(
@@ -1047,6 +1637,8 @@ class ChatService:
         actor_id: str,
         body: str,
         message_id: str | None = None,
+        message_factory: Callable[..., ChatMessage] | None = None,
+        after_delivery: Callable[[ChatMessage], None] | None = None,
     ) -> WorkflowExecution:
         """Steer one execution through its originating chat transcript.
 
@@ -1064,6 +1656,8 @@ class ChatService:
                 actor_id=actor_id,
                 body=body,
                 targets_execution_id=execution_id,
+                message_factory=message_factory,
+                after_delivery=after_delivery,
             )
             return next(
                 item
@@ -1085,12 +1679,15 @@ class ChatService:
                     message, execution_id=execution_id, updated_at=self._now()
                 )
             )
-        return self._apply_steering(
+        updated = self._apply_steering(
             execution,
             message,
             intent_epoch=execution.intent_epoch + 1,
             steering_intent=None,
         )
+        if after_delivery is not None:
+            after_delivery(message)
+        return updated
 
     def stop_workflow(
         self, workspace_id: str, execution_id: str, *, actor_id: str
@@ -1107,18 +1704,21 @@ class ChatService:
         self, workspace_id: str, execution_id: str, *, actor_id: str
     ) -> WorkflowExecution:
         """Move a queued execution into its active running state."""
-        execution = self.get_execution(workspace_id, execution_id)
-        if execution.state is WorkflowExecutionState.RUNNING:
-            return execution
-        if execution.state is not WorkflowExecutionState.QUEUED:
-            raise InvalidLifecycleTransition(
-                f"execution cannot start while {execution.state.value}"
+        with self.execution_guard(workspace_id, execution_id):
+            execution = self.get_execution(workspace_id, execution_id)
+            if execution.state is WorkflowExecutionState.RUNNING:
+                return execution
+            if execution.state is not WorkflowExecutionState.QUEUED:
+                raise InvalidLifecycleTransition(
+                    f"execution cannot start while {execution.state.value}"
+                )
+            updated = self._save(
+                replace_record(
+                    execution,
+                    state=WorkflowExecutionState.RUNNING,
+                    updated_at=self._now(),
+                )
             )
-        updated = self._save(
-            replace_record(
-                execution, state=WorkflowExecutionState.RUNNING, updated_at=self._now()
-            )
-        )
         self._append_event(
             updated,
             ExecutionEventType.WORKFLOW_STARTED,
@@ -1133,12 +1733,91 @@ class ChatService:
         self, workspace_id: str, execution_id: str, phase: str
     ) -> WorkflowExecution:
         """Persist the workflow's current phase on the durable execution."""
-        execution = self.get_execution(workspace_id, execution_id)
-        if execution.phase == phase:
-            return execution
-        return self._save(
-            replace_record(execution, phase=phase, updated_at=self._now())
-        )
+        with self.execution_guard(workspace_id, execution_id):
+            execution = self.get_execution(workspace_id, execution_id)
+            if execution.phase == phase:
+                return execution
+            return self._save(
+                replace_record(execution, phase=phase, updated_at=self._now())
+            )
+
+    def accept_transition(
+        self,
+        workspace_id: str,
+        execution_id: str,
+        *,
+        expected_intent_epoch: int,
+        expected_phase: str,
+        expected_node_id: str | None,
+        expected_attempt_id: str | None,
+        commit: Callable[[], TransitionT],
+        target_phase: str | None = None,
+    ) -> TransitionT:
+        """Validate live ownership, commit the store CAS, then project its phase.
+
+        Atomic against steering, termination and phase updates on this service
+        owner only. ``commit`` must perform storage CAS only, never model/tool
+        execution, conversation intake, or node-lock acquisition. Commit errors
+        propagate without changing the phase. Supply ``target_phase`` to fence
+        duplicate acceptance before releasing the execution guard. Publication
+        and downstream scheduling belong after this call, outside the guard.
+        """
+        with (
+            self.execution_guard(workspace_id, execution_id),
+            self._chat_record_guard(
+                workspace_id, self.get_execution(workspace_id, execution_id).chat_id
+            ),
+        ):
+            execution = self.get_execution(workspace_id, execution_id)
+            if execution.state not in _STEERABLE_EXECUTION_STATES:
+                raise InvalidLifecycleTransition(
+                    "execution is no longer accepting completions"
+                )
+            if execution.intent_epoch != expected_intent_epoch:
+                raise InvalidLifecycleTransition("completion intent epoch is stale")
+            if execution.phase != expected_phase:
+                raise InvalidLifecycleTransition("completion phase is stale")
+            if expected_node_id is not None:
+                record = self._persistence.get(
+                    SubAgentRecord, workspace_id, expected_node_id
+                )
+                owners = tuple(
+                    node
+                    for node in self._persistence.list_conversation(
+                        SubAgentRecord, workspace_id, execution.chat_id
+                    )
+                    if node.role == WORKFLOW_NODE_ROLE
+                    and node.workflow_execution_id == execution_id
+                    and node.chat_id == execution.chat_id
+                )
+                ordinal = sum(
+                    event.event_type is ExecutionEventType.WORKFLOW_PHASE
+                    and event.payload.get("phase") == expected_phase
+                    for event in self.replay_events(workspace_id, execution_id).events
+                )
+                current_attempt = f"{execution_id}:{expected_phase}:{ordinal}"
+                if (
+                    record is None
+                    or not record.phase_executor
+                    or record.workflow_execution_id != execution_id
+                    or record.chat_id != execution.chat_id
+                    or len(owners) != 1
+                    or record.parent_sub_agent_id != owners[0].sub_agent_id
+                    or record.phase != expected_phase
+                    or record.phase_attempt_id != expected_attempt_id
+                    or expected_attempt_id != current_attempt
+                    or record.status in _TERMINAL_SUB_AGENT_STATUSES
+                    or owners[0].status in _TERMINAL_SUB_AGENT_STATUSES
+                ):
+                    raise InvalidLifecycleTransition(
+                        "completion does not belong to the current phase executor"
+                    )
+            elif expected_attempt_id is not None:
+                raise InvalidLifecycleTransition("completion has no phase executor")
+            result = commit()
+            if target_phase is not None:
+                self.set_execution_phase(workspace_id, execution_id, target_phase)
+            return result
 
     def cancel_workflow(
         self, workspace_id: str, execution_id: str, *, actor_id: str
@@ -1164,51 +1843,56 @@ class ChatService:
         experiment_ids: tuple[str, ...] = (),
     ) -> ToolJob:
         """Submit a tool job while preserving its execution correlation."""
-        execution = self.get_execution(workspace_id, execution_id)
-        if execution.state in {
-            WorkflowExecutionState.CANCELLED,
-            WorkflowExecutionState.COMPLETED,
-            WorkflowExecutionState.FAILED,
-        }:
-            raise InvalidLifecycleTransition(
-                f"tool jobs cannot be submitted while {execution.state.value}"
-            )
         if investigation_id is not None:
-            if execution.investigation_id != investigation_id:
+            self.get_investigation(workspace_id, investigation_id)
+        now = self._now()
+        tool_job_id = self._id_factory("tool-job")
+        correlation_id = (
+            self._id_factory("correlation")
+            if correlation_id is None
+            else correlation_id
+        )
+        with self.execution_guard(workspace_id, execution_id):
+            execution = self.get_execution(workspace_id, execution_id)
+            if execution.state not in _STEERABLE_EXECUTION_STATES:
+                raise InvalidLifecycleTransition(
+                    f"tool jobs cannot be submitted while {execution.state.value}"
+                )
+            if (
+                investigation_id is not None
+                and execution.investigation_id != investigation_id
+            ):
                 raise CrossWorkspaceLinkError(
                     "tool job investigation does not match the execution"
                 )
-            self.get_investigation(workspace_id, investigation_id)
-        now = self._now()
-        job = ToolJob(
-            workspace_id=workspace_id,
-            created_at=now,
-            created_by=actor_id,
-            tool_job_id=self._id_factory("tool-job"),
-            execution_id=execution_id,
-            chat_id=execution.chat_id,
-            correlation_id=(
-                self._id_factory("correlation")
-                if correlation_id is None
-                else correlation_id
-            ),
-            tool_name=tool_name,
-            submitted_by=actor_id,
-            investigation_id=investigation_id or execution.investigation_id,
-            strategy_ids=strategy_ids,
-            experiment_ids=experiment_ids,
-            intent_epoch=execution.intent_epoch,
-            updated_at=now,
-        )
-        self._save(job)
-        updated = replace_record(
-            execution,
-            strategy_ids=(*execution.strategy_ids, *strategy_ids),
-            experiment_ids=(*execution.experiment_ids, *experiment_ids),
-            tool_job_ids=(*execution.tool_job_ids, job.tool_job_id),
-            updated_at=now,
-        )
-        self._save(updated)
+            job = ToolJob(
+                workspace_id=workspace_id,
+                created_at=now,
+                created_by=actor_id,
+                tool_job_id=tool_job_id,
+                execution_id=execution_id,
+                chat_id=execution.chat_id,
+                conversation_id=execution.conversation_id,
+                parent_conversation_id=execution.parent_conversation_id,
+                correlation_id=correlation_id,
+                tool_name=tool_name,
+                submitted_by=actor_id,
+                investigation_id=investigation_id or execution.investigation_id,
+                strategy_ids=strategy_ids,
+                experiment_ids=experiment_ids,
+                intent_epoch=execution.intent_epoch,
+                updated_at=now,
+            )
+            self._save(job)
+            updated = self._save(
+                replace_record(
+                    execution,
+                    strategy_ids=(*execution.strategy_ids, *strategy_ids),
+                    experiment_ids=(*execution.experiment_ids, *experiment_ids),
+                    tool_job_ids=(*execution.tool_job_ids, job.tool_job_id),
+                    updated_at=now,
+                )
+            )
         if updated.investigation_id is not None:
             investigation = self.get_investigation(
                 workspace_id, updated.investigation_id
@@ -1224,17 +1908,18 @@ class ChatService:
                     updated_at=now,
                 )
             )
-        chat = self.get_chat(workspace_id, execution.chat_id)
-        self._save(
-            replace_record(
-                chat,
-                links=chat.links.add(
+        self._update_chat(
+            workspace_id,
+            execution.chat_id,
+            lambda current: replace_record(
+                current,
+                links=current.links.add(
                     strategy_ids=strategy_ids,
                     experiment_ids=experiment_ids,
                     tool_job_ids=(job.tool_job_id,),
                 ),
                 updated_at=now,
-            )
+            ),
         )
         self._append_event(
             updated,
@@ -1254,16 +1939,18 @@ class ChatService:
         self, workspace_id: str, tool_job_id: str, *, actor_id: str
     ) -> ToolJob:
         job = self.get_tool_job(workspace_id, tool_job_id)
-        if job.state is ToolJobState.RUNNING:
-            return job
-        if job.state is not ToolJobState.SUBMITTED:
-            raise InvalidLifecycleTransition(
-                f"tool job cannot start while {job.state.value}"
+        with self.execution_guard(workspace_id, job.execution_id):
+            job = self.get_tool_job(workspace_id, tool_job_id)
+            if job.state is ToolJobState.RUNNING:
+                return job
+            if job.state is not ToolJobState.SUBMITTED:
+                raise InvalidLifecycleTransition(
+                    f"tool job cannot start while {job.state.value}"
+                )
+            execution = self.get_execution(workspace_id, job.execution_id)
+            updated = self._save(
+                replace_record(job, state=ToolJobState.RUNNING, updated_at=self._now())
             )
-        updated = self._save(
-            replace_record(job, state=ToolJobState.RUNNING, updated_at=self._now())
-        )
-        execution = self.get_execution(workspace_id, job.execution_id)
         self._append_event(
             execution,
             ExecutionEventType.TOOL_STARTED,
@@ -1288,29 +1975,31 @@ class ChatService:
     ) -> ToolJob:
         """Attach a result even when steering, stop, or cancel happened first."""
         job = self.get_tool_job(workspace_id, tool_job_id)
-        execution = self.get_execution(workspace_id, job.execution_id)
-        if job.state is ToolJobState.SUCCEEDED:
-            return job
-        observed_epoch = job.intent_epoch if intent_epoch is None else intent_epoch
-        late = (
-            job.late_result
-            or execution.state
-            in {
-                WorkflowExecutionState.STOPPED,
-                WorkflowExecutionState.CANCELLED,
-            }
-            or observed_epoch < execution.intent_epoch
-        )
-        updated = self._save(
-            replace_record(
-                job,
-                state=ToolJobState.SUCCEEDED if success else ToolJobState.FAILED,
-                result=None if result is None else dict(result),
-                error_message=error_message,
-                late_result=late,
-                updated_at=self._now(),
+        with self.execution_guard(workspace_id, job.execution_id):
+            job = self.get_tool_job(workspace_id, tool_job_id)
+            execution = self.get_execution(workspace_id, job.execution_id)
+            if job.state is ToolJobState.SUCCEEDED:
+                return job
+            observed_epoch = job.intent_epoch if intent_epoch is None else intent_epoch
+            late = (
+                job.late_result
+                or execution.state
+                in {
+                    WorkflowExecutionState.STOPPED,
+                    WorkflowExecutionState.CANCELLED,
+                }
+                or observed_epoch < execution.intent_epoch
             )
-        )
+            updated = self._save(
+                replace_record(
+                    job,
+                    state=ToolJobState.SUCCEEDED if success else ToolJobState.FAILED,
+                    result=None if result is None else dict(result),
+                    error_message=error_message,
+                    late_result=late,
+                    updated_at=self._now(),
+                )
+            )
         self._append_event(
             execution,
             ExecutionEventType.TOOL_RESULT
@@ -1355,21 +2044,26 @@ class ChatService:
         steering_intent: str | None,
     ) -> WorkflowExecution:
         """Bump one execution's intent epoch for an acknowledged steering message."""
-        if execution.state not in _STEERABLE_EXECUTION_STATES:
-            raise InvalidLifecycleTransition(
-                f"execution cannot be steered while {execution.state.value}"
+        with self.execution_guard(execution.workspace_id, execution.execution_id):
+            execution = self.get_execution(
+                execution.workspace_id, execution.execution_id
             )
-        updated = self._save(
-            replace_record(
-                execution,
-                intent_epoch=intent_epoch,
-                steering_message_ids=(
-                    *execution.steering_message_ids,
-                    message.message_id,
-                ),
-                updated_at=self._now(),
+            if execution.state not in _STEERABLE_EXECUTION_STATES:
+                raise InvalidLifecycleTransition(
+                    f"execution cannot be steered while {execution.state.value}"
+                )
+            intent_epoch = execution.intent_epoch + 1
+            updated = self._save(
+                replace_record(
+                    execution,
+                    intent_epoch=intent_epoch,
+                    steering_message_ids=(
+                        *execution.steering_message_ids,
+                        message.message_id,
+                    ),
+                    updated_at=self._now(),
+                )
             )
-        )
         self._append_event(
             updated,
             ExecutionEventType.WORKFLOW_STEERED,
@@ -1395,23 +2089,22 @@ class ChatService:
         state: WorkflowExecutionState,
         event_type: ExecutionEventType,
     ) -> WorkflowExecution:
-        execution = self.get_execution(workspace_id, execution_id)
-        if execution.state is state:
-            return execution
-        if execution.state in {
-            WorkflowExecutionState.COMPLETED,
-            WorkflowExecutionState.FAILED,
-            WorkflowExecutionState.STOPPED,
-            WorkflowExecutionState.CANCELLED,
-        }:
-            raise InvalidLifecycleTransition(
-                f"execution cannot move from {execution.state.value} to {state.value}"
+        with self.execution_guard(workspace_id, execution_id):
+            execution = self.get_execution(workspace_id, execution_id)
+            if execution.state is state:
+                return execution
+            if execution.state not in _STEERABLE_EXECUTION_STATES:
+                raise InvalidLifecycleTransition(
+                    f"execution cannot move from {execution.state.value} to {state.value}"
+                )
+            updated = self._save(
+                replace_record(
+                    execution,
+                    state=state,
+                    finished_at=self._now(),
+                    updated_at=self._now(),
+                )
             )
-        updated = self._save(
-            replace_record(
-                execution, state=state, finished_at=self._now(), updated_at=self._now()
-            )
-        )
         self._append_event(
             updated,
             event_type,
@@ -1472,6 +2165,10 @@ class ChatService:
             )
         if record.workspace_id != workspace_id:
             raise CrossWorkspaceLinkError("record belongs to another workspace")
+        if isinstance(record, ConversationRecord) and not isinstance(
+            record, ChatThread
+        ):
+            self.get_chat(workspace_id, record.chat_id)
         return record
 
     def _list(

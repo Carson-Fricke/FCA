@@ -18,6 +18,54 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
+from pydantic.json_schema import JsonSchemaValue
+
+
+class _DatumFields(BaseModel):
+    """Typed wire contract shared by datum and tool-result serializers."""
+
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", alias_generator=to_camel, populate_by_name=True
+    )
+
+    failure: dict[str, object] | None
+    ok: bool
+    structured: dict[str, object]
+    summary: str | None
+    text: str
+
+
+class DatumWire(_DatumFields):
+    datum_type: str
+
+
+class ToolResultWire(_DatumFields):
+    datum_type: str | None = None
+    call_id: str | None
+    tool: str | None
+
+
+class DeliveredDatumWire(DatumWire):
+    """Persisted deliveries carried datum fields plus routing metadata.
+
+    These are not model-requested calls, so they have no call ID or tool name.
+    Keep this shape readable without weakening direct tool-result validation.
+    """
+
+    model_config = ConfigDict(
+        frozen=True, extra="allow", alias_generator=to_camel, populate_by_name=True
+    )
+
+
+def tool_result_schema() -> JsonSchemaValue:
+    return ToolResultWire.model_json_schema(by_alias=True, mode="serialization")
+
+
+def datum_schema() -> JsonSchemaValue:
+    return DatumWire.model_json_schema(by_alias=True, mode="serialization")
+
 
 class DatumType(StrEnum):
     """Well-known datum types with a canonical surface rendering."""
@@ -59,17 +107,20 @@ def tool_result_payload(
     messages through this function so the stored shape is identical on every
     anchor.
     """
-    payload: dict[str, object] = {
-        "callId": call_id,
-        "failure": dict(failure) if isinstance(failure, Mapping) else None,
-        "ok": ok,
-        "structured": dict(structured) if isinstance(structured, Mapping) else {},
-        "summary": summary,
-        "text": text,
-        "tool": tool,
-    }
-    if datum_type is not None:
-        payload["datumType"] = datum_type
+    payload = ToolResultWire.model_validate(
+        {
+            "call_id": call_id,
+            "failure": dict(failure) if isinstance(failure, Mapping) else None,
+            "ok": ok,
+            "structured": dict(structured) if isinstance(structured, Mapping) else {},
+            "summary": summary,
+            "text": text,
+            "tool": tool,
+            "datum_type": datum_type,
+        }
+    ).model_dump(mode="json", by_alias=True)
+    if datum_type is None:
+        payload.pop("datumType")
     return payload
 
 
@@ -93,14 +144,14 @@ class Datum:
 
     def as_dict(self) -> dict[str, object]:
         """Return the canonical, JSON-ready datum."""
-        return {
-            "datumType": self.datum_type,
-            "failure": None if self.failure is None else dict(self.failure),
-            "ok": self.ok,
-            "structured": dict(self.structured),
-            "summary": self.summary,
-            "text": self.text,
-        }
+        return DatumWire(
+            datum_type=self.datum_type,
+            failure=None if self.failure is None else dict(self.failure),
+            ok=self.ok,
+            structured=dict(self.structured),
+            summary=self.summary,
+            text=self.text,
+        ).model_dump(mode="json", by_alias=True)
 
 
 def datum_from_result(
@@ -149,6 +200,11 @@ def normalize_datums(
 __all__ = [
     "Datum",
     "DatumType",
+    "DatumWire",
+    "ToolResultWire",
+    "datum_schema",
+    "tool_result_payload",
+    "tool_result_schema",
     "datum_from_result",
     "normalize_datums",
 ]

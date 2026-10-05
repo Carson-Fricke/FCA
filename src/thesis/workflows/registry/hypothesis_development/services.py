@@ -18,7 +18,7 @@ from thesis.research.hypothesis import HypothesisStore
 from thesis.strategies.validation import StrategySandboxValidator
 from thesis.workflows.backtests import BacktestRunner
 from thesis.workflows.core.workflow import Workflow
-from thesis.workflows.research_models import ResearchModelRunner
+from thesis.workflows.research_models import ProgramSnapshots, ResearchModelRunner
 
 from .contracts.creation import HypothesisDevelopmentRequest
 from .state import HypothesisDevelopmentState
@@ -37,6 +37,7 @@ class HypothesisDevelopmentServices:
     router: ModelRouter | None = None
     runner: BacktestRunner | None = None
     research_runner: ResearchModelRunner | None = None
+    programs: ProgramSnapshots | None = None
     validator: StrategySandboxValidator | None = None
     ledger: AttemptLedger | None = None
     journal: CommandJournal | None = None

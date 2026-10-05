@@ -22,18 +22,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from thesis.integrations.harness_activation import (
-    CapabilityUnavailableError,
-    HarnessActivationError,
-)
 from thesis.integrations.mcp import (
-    HarnessMcpAuthError,
     HarnessMcpClient,
     HarnessMcpError,
-    HarnessMcpProtocolError,
     HarnessMcpToolError,
     HarnessMcpTopology,
-    HarnessMcpTransportError,
     McpToolResult,
     RemoteHttpMcpTransport,
     harness_mcp_topology_from_env,
@@ -143,10 +136,8 @@ class HarnessDataService:
         }
 
     def job_status(self, job_id: str) -> dict[str, object]:
-        """Return one backtest job row from the ``get_backtest_status`` tool."""
-        result = self._tool_result(
-            lambda client: client.get_backtest_status(job_id=job_id)
-        )
+        """Return one job row from the ``get_job_status`` tool."""
+        result = self._tool_result(lambda client: client.get_job_status(job_id=job_id))
         return _object(result.structured)
 
     def get_run(self, run_id: str) -> dict[str, object]:
@@ -242,59 +233,15 @@ def _exit_state(exit_code: int | None) -> str | None:
 
 def get_harness_service(request: Request) -> HarnessDataService:
     """Resolve the service from app state so applications control the topology."""
-    service = getattr(request.app.state, "harness_data_service", None)
-    if service is None:
-        service = HarnessDataService()
-        request.app.state.harness_data_service = service
-    if not isinstance(service, HarnessDataService):
-        raise RuntimeError(
-            "app.state.harness_data_service must be a HarnessDataService"
-        )
-    return service
+    from thesis.http.errors import require_service
+
+    return require_service(request, "harness_data_service", HarnessDataService)
 
 
 def _service_error(error: Exception) -> HTTPException:
-    if isinstance(error, HarnessMcpAuthError):
-        return HTTPException(
-            status_code=503,
-            detail={"code": "harness_mcp_auth_error", "message": str(error)},
-        )
-    if isinstance(error, HarnessMcpTransportError):
-        return HTTPException(
-            status_code=503,
-            detail={"code": "harness_mcp_unreachable", "message": str(error)},
-        )
-    if isinstance(error, HarnessMcpToolError):
-        if "does not exist" in str(error):
-            return HTTPException(
-                status_code=404,
-                detail={"code": "harness_resource_not_found", "message": str(error)},
-            )
-        return HTTPException(
-            status_code=502,
-            detail={"code": "harness_tool_error", "message": str(error)},
-        )
-    if isinstance(error, HarnessMcpProtocolError):
-        return HTTPException(
-            status_code=502,
-            detail={"code": "harness_protocol_error", "message": str(error)},
-        )
-    if isinstance(error, HarnessMcpError):
-        return HTTPException(
-            status_code=502,
-            detail={"code": "harness_mcp_error", "message": str(error)},
-        )
-    if isinstance(error, (CapabilityUnavailableError, HarnessActivationError)):
-        return HTTPException(
-            status_code=503,
-            detail={"code": "harness_unavailable", "message": str(error)},
-        )
-    if isinstance(error, ValueError):
-        return HTTPException(status_code=422, detail=str(error))
-    return HTTPException(
-        status_code=500,
-        detail={"code": "harness_error", "message": "request failed"},
-    )
+    from thesis.http.errors import service_error
+
+    return service_error(error)
 
 
 def create_harness_router() -> APIRouter:

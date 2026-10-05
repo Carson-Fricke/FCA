@@ -8,6 +8,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
+from thesis.research.models import (
+    MARKET_SUBSCRIPTIONS_SCHEMA,
+    ResearchModelError,
+    validate_market_configuration,
+)
 from thesis.strategies.bundles import StrategyBundle, StrategyBundleError
 
 _TEXT: dict[str, object] = {"type": "string", "minLength": 1, "pattern": r"\S"}
@@ -57,7 +62,16 @@ STRATEGY_DESIGN_SCHEMA: dict[str, object] = {
             "description": "Rust test sources keyed by tests/*.rs paths; "
             "never inline test modules in src/lib.rs.",
         },
-        "harnessConfiguration": {"type": "object"},
+        "harnessConfiguration": {
+            "type": "object",
+            "properties": {
+                "subscriptions": MARKET_SUBSCRIPTIONS_SCHEMA,
+                "data": {
+                    "type": "object",
+                    "properties": {"subscriptions": MARKET_SUBSCRIPTIONS_SCHEMA},
+                },
+            },
+        },
         "exitCriteria": {
             "type": "array",
             "minItems": 1,
@@ -179,6 +193,19 @@ class StrategyDesign:
         criteria = cast(list[Mapping[str, object]], value["exitCriteria"])
         limitations = cast(list[str], value["limitations"])
         configuration = cast(Mapping[str, object], value["harnessConfiguration"])
+        try:
+            validate_market_configuration(configuration)
+        except ResearchModelError as error:
+            raise StrategyBundleError(str(error)) from error
+        if "subscriptions" in configuration:
+            configuration = dict(configuration)
+            data = configuration.get("data", {})
+            if not isinstance(data, Mapping):
+                raise StrategyBundleError("harnessConfiguration.data must be an object")
+            subscriptions = configuration.pop("subscriptions")
+            if "subscriptions" in data and data["subscriptions"] != subscriptions:
+                raise StrategyBundleError("conflicting subscription echoes")
+            configuration["data"] = {**data, "subscriptions": subscriptions}
         # Include design metadata in the canonical bundle, not only its manifest.
         evidence = cast(Mapping[str, object], value.get("evidenceSummary", {}))
         dependencies = value.get("dependencies", {})

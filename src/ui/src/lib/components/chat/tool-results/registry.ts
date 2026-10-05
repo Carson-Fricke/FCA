@@ -38,6 +38,7 @@ export const TOOL_RESULT_RENDERERS: Record<string, Component<ToolResultCardProps
 	run_sweep: SweepToolCard,
 	get_run: RunToolCard,
 	get_backtest_status: JobToolCard,
+	get_job_status: JobToolCard,
 	list_artifacts: ArtifactsToolCard
 };
 

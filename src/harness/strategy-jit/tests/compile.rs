@@ -28,7 +28,16 @@ fn compile_failures_report_the_build_error() {
     let error =
         compile(&workspace, "this is not rust", ProgramKind::Study).expect_err("must not compile");
     match error {
-        harness_strategy_jit::JitError::Compile { detail, .. } => {
+        harness_strategy_jit::JitError::Compile {
+            detail,
+            diagnostics,
+            ..
+        } => {
+            assert!(
+                !diagnostics.is_empty(),
+                "authored error must carry rustc JSON diagnostics"
+            );
+            assert_eq!(diagnostics[0]["level"], "error");
             assert!(
                 detail.contains("error"),
                 "expected the compiler detail, got {detail}"
@@ -85,6 +94,7 @@ fn the_workspace_records_provenance_for_every_artifact() {
         volume: "0.000000001".parse().unwrap(),
     };
     let frame = EngineBarFrame {
+        interval: "1min".into(),
         interval_start_ns: 10,
         interval_end_ns: 20,
         available_at_ns: 25,
@@ -119,7 +129,7 @@ fn the_workspace_records_provenance_for_every_artifact() {
         ask_quantity: Decimal::ZERO,
         venue: "test".into(),
     };
-    assert!(runtime.on_market(&quote).is_err());
+    assert!(runtime.on_market(&quote).unwrap().is_empty());
     let trade = EngineMarket::Trade {
         event_id: "trade".into(),
         timestamp_ns: 10,
@@ -130,7 +140,7 @@ fn the_workspace_records_provenance_for_every_artifact() {
         venue: "test".into(),
         trade_id: "trade".into(),
     };
-    assert!(runtime.on_market(&trade).is_err());
+    assert!(runtime.on_market(&trade).unwrap().is_empty());
     runtime.on_stop().expect("publish metrics");
     let metrics = runtime.published_metrics();
     assert_eq!(metrics["study_frame_count"], "1");
@@ -146,15 +156,15 @@ fn persisted_raw_bar_study_source_fails_to_build() {
     let directory = temp_dir("old-study-source");
     let workspace = ManagedWorkspace::open(&directory).expect("workspace");
     let old_source = STUDY_SOURCE.replace(
+        "fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext)",
         "fn on_bar_frame(&mut self, frame: &BarFrame)",
-        "fn on_bar(&mut self, frame: &BarFrame)",
     );
     let error =
         compile(&workspace, &old_source, ProgramKind::Study).expect_err("old callback rejected");
     match error {
         harness_strategy_jit::JitError::Compile { detail, .. } => {
             assert!(
-                detail.contains("on_bar") && detail.contains("not a member"),
+                detail.contains("on_bar_frame") && detail.contains("not a member"),
                 "{detail}"
             );
         }

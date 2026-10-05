@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlsplit
+
+import httpx
 
 from thesis.providers.foundry import (
     CapabilityReason,
@@ -27,6 +30,16 @@ from thesis.providers.invocations import (
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,127}$")
+
+#: Retry only connection establishment failures, where the request is unsent.
+#: Protocol errors and read/write failures may follow a billable completion;
+#: replaying them could duplicate both work and charges.
+_TRANSPORT_ATTEMPTS = 3
+_TRANSPORT_BACKOFF_SECONDS = 0.25
+_RETRYABLE_TRANSPORT_ERRORS = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+)
 
 
 class EnvironmentKeySource(Protocol):
@@ -235,12 +248,21 @@ class OpenRouterProvider:
         headers: Mapping[str, str],
         payload: Mapping[str, object],
     ) -> tuple[int, str]:
-        try:
-            return self._transport.post(path, headers, payload)
-        except Exception as error:
-            raise ProviderUnreachableError(
-                "openrouter transport is unreachable"
-            ) from error
+        last_error: Exception | None = None
+        for attempt in range(_TRANSPORT_ATTEMPTS):
+            try:
+                return self._transport.post(path, headers, payload)
+            except _RETRYABLE_TRANSPORT_ERRORS as error:
+                last_error = error
+                if attempt + 1 < _TRANSPORT_ATTEMPTS:
+                    time.sleep(_TRANSPORT_BACKOFF_SECONDS * (2**attempt))
+            except (httpx.TransportError, OSError) as error:
+                raise ProviderUnreachableError(
+                    "openrouter transport is unreachable"
+                ) from error
+        raise ProviderUnreachableError(
+            "openrouter transport is unreachable"
+        ) from last_error
 
     def _snapshot(
         self,

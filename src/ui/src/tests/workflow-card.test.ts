@@ -1,7 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import WorkflowCard from '$lib/components/chat/WorkflowCard.svelte';
 import type { WorkflowExecutionRecord, WorkflowPhase } from '$lib/types';
+import { getWorkflowDefinition } from '$lib/api';
+
+vi.mock('$lib/api', () => ({ getWorkflowDefinition: vi.fn(async () => {
+	throw new Error('Definition unavailable');
+}) }));
 
 describe('WorkflowCard phase transition graph', () => {
 	const execution: WorkflowExecutionRecord = {
@@ -19,7 +24,8 @@ describe('WorkflowCard phase transition graph', () => {
 	};
 
 	const phases: WorkflowPhase[] = [
-		{ name: 'hypothesis_creation', status: 'done', attempts: 1 },
+		{ name: 'discovery', status: 'done', attempts: 1 },
+		{ name: 'model_creation', status: 'done', attempts: 1 },
 		{ name: 'falsification_trials', status: 'active', attempts: 1 },
 		{ name: 'verdict', status: 'pending' },
 		{ name: 'strategy_design', status: 'pending' },
@@ -56,15 +62,19 @@ describe('WorkflowCard phase transition graph', () => {
 		// Stepper container preserved
 		expect(screen.getByTestId('workflow-phase-stepper')).toBeInTheDocument();
 
-		// All 7 nodes rendered
+		// All 8 nodes rendered
 		const stepNodes = screen.getAllByTestId('phase-step');
-		expect(stepNodes).toHaveLength(7);
+		expect(stepNodes).toHaveLength(8);
 
 		const trialsNode = getPhaseNode(container, 'falsification_trials');
 		expect(trialsNode).toHaveAttribute('data-status', 'active');
 		expect(trialsNode).not.toBeDisabled();
 
-		const creationNode = getPhaseNode(container, 'hypothesis_creation');
+		const discoveryNode = getPhaseNode(container, 'discovery');
+		expect(discoveryNode).toHaveAttribute('data-status', 'done');
+		expect(discoveryNode).not.toBeDisabled();
+
+		const creationNode = getPhaseNode(container, 'model_creation');
 		expect(creationNode).toHaveAttribute('data-status', 'done');
 		expect(creationNode).not.toBeDisabled();
 
@@ -85,9 +95,9 @@ describe('WorkflowCard phase transition graph', () => {
 		});
 
 		// Clicking a completed phase drills in as readOnly: true
-		const creationNode = getPhaseNode(container, 'hypothesis_creation');
+		const creationNode = getPhaseNode(container, 'model_creation');
 		await fireEvent.click(creationNode);
-		expect(onEnterPhase).toHaveBeenCalledWith('hypothesis_creation', { readOnly: true });
+		expect(onEnterPhase).toHaveBeenCalledWith('model_creation', { readOnly: true });
 
 		// Clicking an active phase drills in as readOnly: false
 		const trialsNode = getPhaseNode(container, 'falsification_trials');
@@ -105,14 +115,71 @@ describe('WorkflowCard phase transition graph', () => {
 				execution,
 				phases,
 				status: 'running',
-				attentionPhases: ['hypothesis_creation']
+				attentionPhases: ['model_creation']
 			}
 		});
 
 		expect(screen.getByTestId('workflow-card-needs-input')).toHaveTextContent(
-			'Input needed for hypothesis_creation'
+			'Input needed for model_creation'
 		);
-		const creationNode = getPhaseNode(container, 'hypothesis_creation');
+		const creationNode = getPhaseNode(container, 'model_creation');
 		expect(creationNode).toHaveAttribute('data-attention', 'true');
+	});
+
+	it('labels retired hypothesis_creation payloads as model_creation', () => {
+		const legacyPhases: WorkflowPhase[] = [
+			{ name: 'hypothesis_creation', status: 'done', attempts: 1 },
+			{ name: 'falsification_trials', status: 'active', attempts: 1 }
+		];
+		const { container } = render(WorkflowCard, {
+			props: {
+				execution: { ...execution, phase: 'hypothesis_creation' },
+				phases: legacyPhases,
+				status: 'running',
+				attentionPhases: ['hypothesis_creation']
+			}
+		});
+
+		const creationNode = getPhaseNode(container, 'model_creation');
+		expect(creationNode).toHaveAttribute('data-status', 'done');
+		expect(creationNode).toHaveAttribute('data-attention', 'true');
+		expect(container.querySelector('[data-phase="hypothesis_creation"]')).toBeNull();
+		expect(screen.getByTestId('workflow-card-needs-input')).toHaveTextContent(
+			'Input needed for model_creation'
+		);
+	});
+
+	it('fetches definition phases and title instead of inventing a hypothesis topology', async () => {
+		vi.mocked(getWorkflowDefinition).mockResolvedValueOnce({
+			workflow_id: execution.workflow_id, version: execution.workflow_version, title: 'Versioned backend workflow',
+			phases: ['discovery', 'new_backend_phase', 'completed'], terminal_phases: ['completed'],
+			transitions: { discovery: ['new_backend_phase'], new_backend_phase: ['completed'], completed: [] }
+		});
+		render(WorkflowCard, { props: { execution, phases: [{ name: 'discovery', status: 'active' }] } });
+		await screen.findByText('Versioned backend workflow');
+		expect(screen.getAllByTestId('phase-step').map((node) => node.dataset.phase))
+			.toEqual(['discovery', 'new_backend_phase', 'completed']);
+		expect(getWorkflowDefinition).toHaveBeenCalledWith(execution.workflow_id, {
+			workspaceId: '', version: execution.workflow_version
+		});
+	});
+
+	it('keeps persisted phases readable but refuses current topology for an older version', async () => {
+		vi.mocked(getWorkflowDefinition).mockResolvedValueOnce({ workflow_id: execution.workflow_id, version: '2.0.0',
+			title: 'New workflow', phases: ['replacement'], terminal_phases: [], transitions: { replacement: [] } });
+		render(WorkflowCard, { props: { execution, phases: [{ name: 'hypothesis_creation', status: 'done' }] } });
+		await waitFor(() => expect(screen.getByTestId('workflow-definition-error')).toHaveTextContent('recorded version 1.0.0'));
+		expect(screen.getAllByTestId('phase-step').map((node) => node.dataset.phase)).toEqual(['model_creation']);
+	});
+
+	it('does not query the API with an invented id when the execution has no workflow id', () => {
+		vi.mocked(getWorkflowDefinition).mockClear();
+		render(WorkflowCard, {
+			props: { execution: { ...execution, workflow_id: '' }, phases }
+		});
+
+		expect(getWorkflowDefinition).not.toHaveBeenCalled();
+		expect(screen.queryByTestId('workflow-definition-error')).toBeNull();
+		expect(screen.getByText('Workflow execution')).toBeInTheDocument();
 	});
 });

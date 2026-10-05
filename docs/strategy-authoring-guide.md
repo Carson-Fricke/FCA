@@ -18,10 +18,12 @@ implemented harness contract, and
 A strategy is one Rust source file (a small crate) that implements the
 `StrategyProgram` trait and exports itself with `export_strategy_program!`. It
 is compiled on submit, loaded through the versioned C ABI, and driven through
-the engine's strategy runtime. Strategies are **tick-based**: they receive
-top-of-book quotes and trade prints, submit orders, and observe their own
-fills. (Studies fold bars only; screening programs evaluate one cross-section.
-Neither is a strategy.)
+the engine's strategy runtime. Studies, strategies and authored indicators all
+implement `MarketConsumer`: subscribed top-of-book quotes, trade prints and
+atomic bar frames use the same callbacks. Strategies alone have an `OrderSink`
+context and observe their own fills. Studies and indicators use
+`ObservationContext`, which has no order capability. Screening programs still
+evaluate a separate cross-sectional context.
 
 The SDK owns the ABI. The loader rejects an artifact whose SDK ABI version
 differs from the host's, so an authored strategy never silently links against a
@@ -30,31 +32,85 @@ mismatched runtime. One authored crate exports exactly one program.
 ## 2. Program contract
 
 ```rust
-pub trait StrategyProgram {
+pub trait MarketConsumer {
+    type Context;
+    fn subscriptions(&self) -> Vec<Subscription>;
+    fn indicators(&mut self) -> Vec<&mut dyn Indicator> { vec![] }
+    fn on_quote(&mut self, event: &QuoteEvent, ctx: &mut Self::Context) {}
+    fn on_trade(&mut self, event: &TradeEvent, ctx: &mut Self::Context) {}
+    fn on_bar(&mut self, frame: &BarFrame, ctx: &mut Self::Context) {}
+}
+
+pub trait StrategyProgram: MarketConsumer<Context = OrderSink> {
     fn new(parameters: serde_json::Value) -> Self where Self: Sized;
     fn on_start(&mut self, start: &ProgramStart) {}
-    fn on_quote(&mut self, event: &QuoteEvent, orders: &mut OrderSink) {}
-    fn on_trade(&mut self, event: &TradeEvent, orders: &mut OrderSink) {}
     fn on_fill(&mut self, fill: &Fill) {}
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {}
+}
+
+pub trait StudyProgram: MarketConsumer<Context = ObservationContext> {
+    fn new(parameters: serde_json::Value) -> Self where Self: Sized;
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {}
+}
+
+pub trait Indicator: MarketConsumer<Context = ObservationContext> {
+    fn value(&self) -> Option<Decimal>;
 }
 ```
 
 - `new` receives the configured JSON `parameters` exactly as submitted.
 - `on_start` runs once before the first market event and carries the instance
   id, account id, universe symbols, run seed, initial cash, and start time.
-- `on_quote`/`on_trade` fold market events and are the only places that submit
-  orders.
+- `on_quote`/`on_trade`/`on_bar` belong to `MarketConsumer`; strategy callbacks
+  may submit orders through their context. Bar callbacks see complete intervals
+  at interval end, never bar-start lookahead.
 - `on_fill` folds a fill owned by this program.
 - `on_stop` runs once after the replay and is the only place that publishes
   metrics.
 
 Every callback has a no-op default, so a strategy implements only what it uses.
+Keep `new`, `on_start`, `on_fill`, and `on_stop` in the `StrategyProgram` impl;
+market methods belong in its separate `MarketConsumer` impl. Studies likewise
+keep `new` and `on_stop` in `StudyProgram`; `on_bar` receives a `BarFrame`, not
+a raw single bar. SDK indicators expose their current value and references to
+owned nested indicators; the native built-in indicator registry has not
+migrated to this authored SDK interface.
+
+Subscriptions are tagged as `bars` (symbols plus interval `1min` or `1d`),
+`quote` (symbols), or `trade` (symbols). Requirements of program-owned
+indicators are recursively unioned and deduplicated before data acquisition.
+Each dependency is updated before its parent and receives only its own inputs.
+Declarations and dependency topology must remain stable after construction;
+cycles and zero-sized indicator dependencies fail validation. One run supports
+one bars interval; incompatible intervals fail before acquisition.
+
+Studies fetch only their effective subscription union. Backtests additionally
+fetch quote/trade feeds needed by the execution model; these are recorded
+separately as execution subscriptions. An optional `data.subscriptions` echo
+must match compiled consumer requirements, not execution feeds.
+
+ABI v4 exposes the constructed source-and-dependency union as tagged JSON before
+any lake ensure/read. Thesis authors `harnessConfiguration.subscriptions`,
+preserves it as `data.subscriptions`, and uses `validate_study` to return the
+compiled union and reject canonically unequal echoes. Entries have exactly
+`data_type` and `symbols`, with `interval` only for `bars`; unknown fields and
+tick intervals are rejected. Optional global symbols must equal the subscription
+symbol union; a legacy interval must match the single bars interval. Tick-only
+inputs need no global interval. Legacy interval-only configuration documents
+remain readable, but old authored source must migrate and artifacts must rebuild
+for ABI v4.
+
+The manifest distinguishes `effective_subscriptions` (source plus dependencies),
+`execution_subscriptions` (backtest quote/trade feeds), and
+`acquired_subscriptions` (their deduplicated union). Bars ensures do not fetch
+undeclared trades: they use provider bars or already stored trades. Mixed replay
+uses one causal availability queue; ticks precede completed frames, then
+generated execution events at equal time. Frames are available at interval end.
 
 ## 3. Events and the capability surface
 
-Event fields are borrowed, so there is no per-event allocation, and every price
-and quantity is an exact `Decimal` (never `f64`):
+Event string fields are borrowed across the ABI; frame maps are constructed
+locally by the SDK. Every price and quantity is an exact `Decimal` (never `f64`):
 
 - `QuoteEvent` — `event_id`, `timestamp_ns`, `sequence`, `symbol`, `bid`, `ask`,
   `bid_quantity`, `ask_quantity`, `venue`, plus `mid()`.
@@ -65,6 +121,10 @@ and quantity is an exact `Decimal` (never `f64`):
   `signed_quantity()`.
 - `ProgramStart` — `instance_id`, `account_id`, `symbols`, `seed`,
   `initial_cash`, `start_ns`.
+- `BarFrame` contains `interval`, `interval_start_ns`, `interval_end_ns`,
+  `available_at_ns`, exact OHLCV `bars_by_symbol`, and `missing_symbols`.
+  Handle missing symbols explicitly; never align by row position, forward-fill,
+  or read a complete bar at its start time.
 
 The SDK's engine-facing surface is the event, `OrderSink`, and
 `MetricPublisher`. This is not a security sandbox: native Rust can still call
@@ -72,6 +132,13 @@ standard-library filesystem, network, clock, process, and threading APIs.
 Structural authoring checks do not prevent those operations, and successful
 JIT compilation is not proof of isolation. Strategies must follow the
 determinism rules below; hostile source requires a separate execution sandbox.
+
+Decimals stay exact through the data, order, fill, fee, and cash surfaces.
+Analytics and metrics are `f64`: convert explicitly and once at that boundary
+with `Decimal::to_f64` (nearest, ties to even) or the fail-loud
+`Decimal::to_f64_checked`, which returns `Err(DecimalError::Overflow)` when the
+magnitude is outside the `f64` range. `f64::try_from(decimal)` is the same
+checked conversion. Never build a `Decimal` from a float.
 
 ## 4. Orders
 
@@ -109,6 +176,16 @@ reserved harness name (`cagr`, `fees_total`, `fill_count`, `max_drawdown`,
 `slippage_total`, `strategy_id`, `total_return`). A rejection is recorded
 host-side and fails the run even when the return value is ignored.
 
+Metrics take `f64`; exact decimals convert at publish time:
+
+```rust
+let mean_close = close_sum.to_f64() / bars as f64;
+let _ = metrics.publish("mean_close", mean_close);
+```
+
+Use `to_f64_checked` (or `f64::try_from`) when a non-finite conversion must
+fail the run instead of saturating to infinity.
+
 ## 6. Export
 
 ```rust
@@ -130,8 +207,8 @@ use std::cmp::Ordering;
 
 use harness_strategy_sdk::serde_json::Value;
 use harness_strategy_sdk::{
-    export_strategy_program, Decimal, Fill, MetricPublisher, OrderSink, OrderType, QuoteEvent,
-    Side, StrategyProgram, SubmittedOrder, TimeInForce,
+    export_strategy_program, Decimal, Fill, MarketConsumer, MetricPublisher, OrderSink,
+    OrderType, QuoteEvent, Side, StrategyProgram, SubmittedOrder, Subscription, TimeInForce,
 };
 
 struct Momentum {
@@ -145,6 +222,22 @@ struct Momentum {
 impl StrategyProgram for Momentum {
     fn new(_parameters: Value) -> Self {
         Self { streak: 0, last_mid: None, entered: false, filled: false, liquidated: false }
+    }
+
+    fn on_fill(&mut self, _fill: &Fill) {
+        self.filled = true;
+    }
+
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("momentum_liquidated", f64::from(self.liquidated));
+    }
+}
+
+impl MarketConsumer for Momentum {
+    type Context = OrderSink;
+
+    fn subscriptions(&self) -> Vec<Subscription> {
+        vec![Subscription::Quote { symbols: vec!["SPY".into()] }]
     }
 
     fn on_quote(&mut self, event: &QuoteEvent, orders: &mut OrderSink) {
@@ -184,13 +277,6 @@ impl StrategyProgram for Momentum {
         }
     }
 
-    fn on_fill(&mut self, _fill: &Fill) {
-        self.filled = true;
-    }
-
-    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("momentum_liquidated", f64::from(self.liquidated));
-    }
 }
 
 export_strategy_program!(Momentum);
@@ -240,7 +326,8 @@ containment, and metric rejection handling.
 
 1. The only engine access is the event, the `OrderSink`, and the
    `MetricPublisher`.
-2. Every price and quantity is built from `str`/`i128`/`Decimal`, never `f64`.
+2. Every price and quantity is built from `str`/`i128`/`Decimal`, never `f64`;
+   decimals convert to `f64` only at the metric or statistic boundary.
 3. Do not use wall clocks, networks, subprocesses, threads, or unseeded
    randomness. These are authoring rules, not compile-time Rust restrictions.
 4. `order_id` values are deterministic and unique for the instance.

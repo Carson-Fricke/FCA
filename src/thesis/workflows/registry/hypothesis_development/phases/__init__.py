@@ -1,7 +1,9 @@
 """Phase vocabulary, transition table, and phase metadata.
 
-Extracted from the original single-module hypothesis-development
-implementation; behavior is unchanged.
+The live workflow is discovery -> model creation -> falsification trials ->
+verdict -> the strategy chain.  ``HYPOTHESIS_CREATION`` is a retired member
+kept only so stored runs written before the model-creation rename stay
+readable: :func:`phase_from_value` decodes it to ``MODEL_CREATION``.
 """
 
 from __future__ import annotations
@@ -12,18 +14,22 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from thesis.chat.contracts import WorkflowDefinition
-from thesis.workflows.core.workflow import ActiveSubAgent as _ActiveSubAgent
 
 from ..errors import InvalidPhaseTransition, WorkflowError
 from ..primitives import _WORKFLOW_ID, _WORKFLOW_TITLE, _WORKFLOW_VERSION, _iso
 
-__all__ = ["_ActiveSubAgent"]
+__all__ = ["phase_from_value"]
 
 
 class HypothesisDevelopmentPhase(StrEnum):
     """The explicit, ordered phases of the hypothesis-development workflow."""
 
+    #: Retired: the workflow now starts in DISCOVERY and models in
+    #: MODEL_CREATION.  Stored runs that name this value decode to
+    #: MODEL_CREATION through :func:`phase_from_value`.
     HYPOTHESIS_CREATION = "hypothesis_creation"
+    DISCOVERY = "discovery"
+    MODEL_CREATION = "model_creation"
     FALSIFICATION_TRIALS = "falsification_trials"
     VERDICT = "verdict"
     STRATEGY_DESIGN = "strategy_design"
@@ -34,7 +40,35 @@ class HypothesisDevelopmentPhase(StrEnum):
     FAILED = "failed"
 
 
-_HYPOTHESIS_CREATION = HypothesisDevelopmentPhase.HYPOTHESIS_CREATION
+_RETIRED_PHASES: Mapping[str, HypothesisDevelopmentPhase] = {
+    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value: (
+        HypothesisDevelopmentPhase.MODEL_CREATION
+    ),
+}
+
+
+def phase_from_value(value: str) -> HypothesisDevelopmentPhase:
+    """Decode one stored phase value, mapping retired names forward.
+
+    A run stored before the model-creation rename names
+    ``hypothesis_creation``; it decodes to ``model_creation`` so the old run
+    remains readable and resumes in the live vocabulary.
+    """
+    retired = _RETIRED_PHASES.get(value)
+    if retired is not None:
+        return retired
+    try:
+        return HypothesisDevelopmentPhase(value)
+    except ValueError as error:
+        raise WorkflowError(
+            f"stored transition names an unknown phase: {value!r}"
+        ) from error
+
+
+_DISCOVERY = HypothesisDevelopmentPhase.DISCOVERY
+
+
+_MODEL_CREATION = HypothesisDevelopmentPhase.MODEL_CREATION
 
 
 _FALSIFICATION_TRIALS = HypothesisDevelopmentPhase.FALSIFICATION_TRIALS
@@ -61,100 +95,29 @@ _COMPLETED = HypothesisDevelopmentPhase.COMPLETED
 _FAILED = HypothesisDevelopmentPhase.FAILED
 
 
-_ACTIVE_PHASES = (
-    _HYPOTHESIS_CREATION,
-    _VERDICT,
-    _STRATEGY_DESIGN,
-    _STRATEGY_BACKTESTING,
-    _STRATEGY_RCA,
-    _OPTIMIZATION,
-)
+def workflow_definition() -> WorkflowDefinition:
+    from ..spec import phase_declarations
 
-
-#: Role family and human label for each phase's top-level orchestrator.
-#: The deterministic falsification-trials phase is not a sub-agent (REQ-C1):
-#: it has no durable node and no orchestrator, so it is not listed here.
-_PHASE_ORCHESTRATORS: Mapping[HypothesisDevelopmentPhase, tuple[str, str]] = {
-    _HYPOTHESIS_CREATION: (
-        "research",
-        "Thesis hypothesis-creation orchestrator",
-    ),
-    _VERDICT: ("research", "Thesis research verdict orchestrator"),
-    _STRATEGY_DESIGN: ("coding", "Thesis coding strategy-design orchestrator"),
-    _STRATEGY_BACKTESTING: (
-        "coding",
-        "Thesis strategy-backtesting orchestrator",
-    ),
-    _STRATEGY_RCA: ("critique", "Thesis strategy root-cause orchestrator"),
-    _OPTIMIZATION: ("coding", "Thesis coding optimization orchestrator"),
-}
-
-
-#: What each phase orchestrator is prompted to do, recorded as visible thinking
-#: so the operator can see the phase's intent even when it makes no model call.
-#: The deterministic falsification-trials phase is not a sub-agent (REQ-C1):
-#: it has no durable node and no orchestrator, so it declares no task here.
-_PHASE_TASKS: Mapping[HypothesisDevelopmentPhase, str] = {
-    _HYPOTHESIS_CREATION: (
-        "Turn the operator's intuition into one statistical model of the assets "
-        "involved, estimated on historical data: the regularity it predicts, the "
-        "no-structure null it must beat, the Layer A falsifiers that would refute "
-        "it, and the negative controls."
-    ),
-    _VERDICT: "Record the falsification verdict from the trial results.",
-    _STRATEGY_DESIGN: (
-        "Implement a sandbox-valid strategy whose exits re-check the "
-        "hypothesis falsifiers."
-    ),
-    _STRATEGY_BACKTESTING: (
-        "Run the designed strategy through the harness and record its test result."
-    ),
-    _STRATEGY_RCA: (
-        "Diagnose the failed strategy backtest and prescribe a concrete revision."
-    ),
-    _OPTIMIZATION: "Run the optimization backtest for the designed strategy.",
-}
-
-
-_TRANSITIONS: Mapping[
-    HypothesisDevelopmentPhase, frozenset[HypothesisDevelopmentPhase]
-] = {
-    _HYPOTHESIS_CREATION: frozenset({_FALSIFICATION_TRIALS, _FAILED}),
-    _FALSIFICATION_TRIALS: frozenset({_VERDICT, _FAILED}),
-    _VERDICT: frozenset({_STRATEGY_DESIGN, _HYPOTHESIS_CREATION, _FAILED}),
-    _STRATEGY_DESIGN: frozenset({_STRATEGY_BACKTESTING, _FAILED}),
-    _STRATEGY_BACKTESTING: frozenset({_OPTIMIZATION, _STRATEGY_RCA, _FAILED}),
-    _STRATEGY_RCA: frozenset({_STRATEGY_DESIGN, _FAILED}),
-    _OPTIMIZATION: frozenset({_COMPLETED, _STRATEGY_RCA, _FAILED}),
-    _COMPLETED: frozenset(),
-    _FAILED: frozenset(),
-}
-
-
-HYPOTHESIS_DEVELOPMENT_PHASES: tuple[str, ...] = (
-    _HYPOTHESIS_CREATION.value,
-    _FALSIFICATION_TRIALS.value,
-    _VERDICT.value,
-    _STRATEGY_DESIGN.value,
-    _STRATEGY_BACKTESTING.value,
-    _STRATEGY_RCA.value,
-    _OPTIMIZATION.value,
-)
-
-
-HYPOTHESIS_DEVELOPMENT_WORKFLOW = WorkflowDefinition(
-    workflow_id=_WORKFLOW_ID,
-    version=_WORKFLOW_VERSION,
-    title=_WORKFLOW_TITLE,
-    phases=HYPOTHESIS_DEVELOPMENT_PHASES,
-)
+    return WorkflowDefinition(
+        workflow_id=_WORKFLOW_ID,
+        version=_WORKFLOW_VERSION,
+        title=_WORKFLOW_TITLE,
+        phases=tuple(
+            item.spec.phase for item in phase_declarations() if not item.spec.terminal
+        ),
+    )
 
 
 def transition_phase(
     current: HypothesisDevelopmentPhase, target: HypothesisDevelopmentPhase
 ) -> HypothesisDevelopmentPhase:
     """Move between phases through the explicit transition table."""
-    if target not in _TRANSITIONS[current]:
+    from ..spec import phase_declarations
+
+    declaration = next(
+        item for item in phase_declarations() if item.spec.phase == current.value
+    )
+    if target.value not in declaration.edges:
         raise InvalidPhaseTransition(
             f"workflow phase cannot move from {current.value} to {target.value}"
         )

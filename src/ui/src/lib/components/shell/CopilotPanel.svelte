@@ -1,20 +1,9 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
-	import {
-		conversationTitleFrom,
-		createChat,
-		deleteChat,
-		getExecution,
-		listChats,
-		postMessage
-	} from '$lib/api';
-	import { TimelineController } from '$lib/timeline.svelte';
-	import type {
-		ChatThread,
-		SteeringPercolationTarget,
-		WorkflowExecutionRecord
-	} from '$lib/types';
+	import { ChatHostController, DRAFT_CHAT_ID } from '$lib/chat-host.svelte';
+	import type { ChatThread } from '$lib/types';
 
 	/**
 	 * Collapsible right-hand assistant on every page except the full-page
@@ -35,131 +24,41 @@
 		onClose: () => void;
 	} = $props();
 
-	let chats = $state<ChatThread[]>([]);
-	let chatId = $state<string | null>(null);
-	let drafting = $state(false);
-	let execution = $state<WorkflowExecutionRecord | null>(null);
-	let busy = $state(false);
+	const host = new ChatHostController();
+	const chatId = $derived(host.chatId);
+	const drafting = $derived(host.drafting);
+	const busy = $derived(host.busy);
+	const percolations = $derived(host.percolations);
+	const timeline = host.timeline;
 	let historyOpen = $state(false);
 	/** The conversation queued for modal delete confirmation. */
 	let deleteTarget = $state<ChatThread | null>(null);
-	let percolations = $state<Record<string, SteeringPercolationTarget[]>>({});
-	const timeline = new TimelineController();
-	const messages = $derived(timeline.messages);
-	const events = $derived(timeline.events);
-
-	const activeThread = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
-	const DRAFT_CHAT_ID = '__draft_conversation__';
-	function draftThread(): ChatThread {
-		return {
-			chat_id: DRAFT_CHAT_ID,
-			workspace_id: workspaceId,
-			title: 'New conversation',
-			state: 'active',
-			kind: 'chat',
-			owner_actor_id: 'local-operator',
-			created_at: new Date().toISOString(),
-			updated_at: null,
-			investigation_ids: [],
-			strategy_ids: []
-		};
-	}
-	const visibleChats = $derived(drafting ? [draftThread(), ...chats] : chats);
-	const selectedThread = $derived(drafting ? draftThread() : activeThread);
+	const visibleChats = $derived(host.visibleChats);
+	const selectedThread = $derived(host.selectedChat);
 
 	$effect(() => {
-		let cancelled = false;
-		listChats(workspaceId).then((items) => {
-			if (cancelled) return;
-			chats = items;
-			if (!drafting) chatId = items[0]?.chat_id ?? null;
+		const id = workspaceId;
+		untrack(() => {
+			historyOpen = false;
+			deleteTarget = null;
+			void host.open(id);
 		});
-		return () => {
-			cancelled = true;
-		};
-	});
-
-	$effect(() => {
-		const id = chatId;
-		if (!id) {
-			execution = null;
-			timeline.stop();
-			return;
-		}
-		let cancelled = false;
-		timeline.start(workspaceId, id);
-		getExecution(workspaceId, id).then((exec) => {
-			if (!cancelled) execution = exec;
-		});
-		return () => {
-			cancelled = true;
-			timeline.stop();
-		};
+		return () => host.stop();
 	});
 
 	/** Start a draft conversation; it persists only when the first message is sent. */
 	function newConversation(): void {
-		timeline.reset();
-		drafting = true;
-		chatId = null;
+		host.newConversation();
 		historyOpen = false;
 		deleteTarget = null;
-	}
-
-	async function removeConversation(id: string): Promise<void> {
-		try {
-			await deleteChat(workspaceId, id);
-			chats = chats.filter((thread) => thread.chat_id !== id);
-			if (chatId === id) {
-				chatId = chats[0]?.chat_id ?? null;
-				drafting = false;
-			}
-		} catch {
-			// surfaced by toast in the full conversations view; copilot stays quiet
-		}
 	}
 
 	async function confirmDelete(): Promise<void> {
 		const target = deleteTarget;
 		if (!target) return;
 		deleteTarget = null;
-		await removeConversation(target.chat_id);
-	}
-
-	async function send(input: {
-		body: string;
-		attachmentIds: string[];
-		steeringIntent: string | null;
-	}): Promise<void> {
-		busy = true;
-		try {
-			let id = chatId;
-			let created: ChatThread | null = null;
-			if (!id) {
-				created = await createChat(workspaceId, {
-					title: conversationTitleFrom(input.body)
-				});
-				id = created.chat_id;
-			}
-			const result = await postMessage(workspaceId, id, input);
-			if (created) {
-				chats = [created, ...chats];
-				chatId = created.chat_id;
-				drafting = false;
-			}
-			// The unified timeline stream delivers the persisted message; do not
-			// append locally or it would duplicate.
-			if (result.percolated.length) {
-				percolations = {
-					...percolations,
-					[result.message.message_id]: result.percolated
-				};
-			}
-		} catch {
-			// surfaced by toast in the full chat view; copilot stays quiet
-		} finally {
-			busy = false;
-		}
+		historyOpen = false;
+		await host.remove(target.chat_id);
 	}
 </script>
 
@@ -252,8 +151,7 @@
 								if (thread.chat_id === DRAFT_CHAT_ID) {
 									newConversation();
 								} else {
-									chatId = thread.chat_id;
-									drafting = false;
+									host.select(thread.chat_id);
 								}
 								historyOpen = false;
 								deleteTarget = null;
@@ -295,26 +193,36 @@
 					</div>
 				{:else}
 					<p class="px-1 py-4 text-center text-xs text-slate-500">
-						No conversations yet. Send a message to start one.
+						{host.loadingChats ? 'Loading conversations...' : 'No conversations yet. Send a message to start one.'}
 					</p>
 				{/each}
 			</div>
 		</div>
 	{/if}
 
+	{#if host.error}
+		<p class="px-3 py-2 text-xs text-warn" role="status" data-testid="chat-host-error">{host.error}</p>
+	{/if}
+	{#key `${workspaceId}:copilot`}
+	{#if host.workspaceId === workspaceId}
 	<ChatSurface
+		{timeline}
 		{workspaceId}
 		{chatId}
-		{messages}
-		{events}
-		{execution}
+		{drafting}
+		terminal={['completed', 'failed', 'cancelled', 'closed', 'archived'].includes(selectedThread?.state ?? '')}
 		{percolations}
 		proposal={null}
 		{busy}
-		onSend={send}
+		onSend={(input) => host.send(input)}
+		onScopeChange={(scope) => host.syncScope(scope)}
+		initialScope={host.scopeGrant}
+		initialHash={host.hashGrant}
 		hostId="copilot"
 		rootLabel={selectedThread?.title ?? 'Conversation'}
 	/>
+	{/if}
+	{/key}
 </aside>
 
 {#if deleteTarget}

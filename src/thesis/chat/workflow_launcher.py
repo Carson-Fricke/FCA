@@ -214,6 +214,7 @@ class RuntimeWorkflowLauncher:
         self._detach(lambda: self._finish(request, anchor))
         return {
             "executionId": request.execution_id,
+            "state": "running",
             "phase": _LAUNCHED_PHASE,
             "summary": (
                 f"Hypothesis development {request.execution_id} started and is "

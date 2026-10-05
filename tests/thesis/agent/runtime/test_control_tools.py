@@ -21,6 +21,7 @@ def _context(
     *,
     sub_agent_id: str | None = None,
     workflow_execution_id: str | None = None,
+    phase_executor: bool = False,
 ) -> ToolContext:
     return ToolContext(
         workspace_id="ws",
@@ -29,6 +30,7 @@ def _context(
         actor_id="actor",
         sub_agent_id=sub_agent_id,
         workflow_execution_id=workflow_execution_id,
+        phase_executor=phase_executor,
     )
 
 
@@ -45,7 +47,13 @@ def test_chat_scope_receives_no_completion_tool() -> None:
 
 
 def test_workflow_phase_scope_receives_only_the_phase_completion() -> None:
-    names = _names(_context(sub_agent_id="phase-node", workflow_execution_id="exec-1"))
+    names = _names(
+        _context(
+            sub_agent_id="phase-node",
+            workflow_execution_id="exec-1",
+            phase_executor=True,
+        )
+    )
     assert "request_workflow_input" in names
     assert "request_phase_completion" in names
     assert "request_operator_input" not in names

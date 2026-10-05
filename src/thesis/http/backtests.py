@@ -28,7 +28,6 @@ from thesis.integrations.harness_activation import (
     ActivationEnvironment,
     ActivationOutcome,
     CapabilityUnavailableError,
-    HarnessActivationError,
     HarnessActivationRequest,
     HarnessBoundary,
 )
@@ -454,39 +453,15 @@ def _receipt_document(receipt: ArtifactImportReceipt) -> dict[str, object]:
 
 def get_backtest_service(request: Request) -> BacktestDataService:
     """Resolve the service from app state so applications control persistence."""
-    service = getattr(request.app.state, "backtest_service", None)
-    if service is None:
-        service = BacktestDataService()
-        request.app.state.backtest_service = service
-    if not isinstance(service, BacktestDataService):
-        raise RuntimeError("app.state.backtest_service must be a BacktestDataService")
-    return service
+    from thesis.http.errors import require_service
+
+    return require_service(request, "backtest_service", BacktestDataService)
 
 
 def _service_error(error: Exception) -> HTTPException:
-    if isinstance(error, KeyError):
-        return HTTPException(
-            status_code=404,
-            detail={
-                "code": "backtest_not_found",
-                "message": f"backtest {error.args[0]!r} does not exist",
-            },
-        )
-    if isinstance(error, (CapabilityUnavailableError, HarnessActivationError)):
-        return HTTPException(
-            status_code=503,
-            detail={"code": "harness_unavailable", "message": str(error)},
-        )
-    if isinstance(error, ArtifactImportError):
-        return HTTPException(
-            status_code=500,
-            detail={"code": "artifact_import_failed", "message": str(error)},
-        )
-    if isinstance(error, ValueError):
-        return HTTPException(status_code=422, detail=str(error))
-    return HTTPException(
-        status_code=500, detail={"code": "backtest_error", "message": "request failed"}
-    )
+    from thesis.http.errors import service_error
+
+    return service_error(error, resource="backtest")
 
 
 def create_backtest_router() -> APIRouter:

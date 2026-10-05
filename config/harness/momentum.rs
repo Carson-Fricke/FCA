@@ -6,11 +6,12 @@ use std::cmp::Ordering;
 
 use harness_strategy_sdk::serde_json::Value;
 use harness_strategy_sdk::{
-    export_strategy_program, Decimal, Fill, MetricPublisher, OrderSink, OrderType, QuoteEvent,
-    Side, StrategyProgram, SubmittedOrder, TimeInForce,
+    export_strategy_program, Decimal, Fill, MarketConsumer, MetricPublisher, OrderSink, OrderType,
+    QuoteEvent, Side, StrategyProgram, SubmittedOrder, Subscription, TimeInForce,
 };
 
 struct Momentum {
+    symbols: Vec<String>,
     lookback: u64,
     quantity: String,
     streak: u64,
@@ -34,6 +35,10 @@ impl StrategyProgram for Momentum {
             _ => "10".to_string(),
         };
         Self {
+            symbols: parameters
+                .get("symbols")
+                .and_then(|v| harness_strategy_sdk::serde_json::from_value(v.clone()).ok())
+                .unwrap_or_else(|| vec!["SPY".into()]),
             lookback,
             quantity,
             streak: 0,
@@ -45,6 +50,23 @@ impl StrategyProgram for Momentum {
         }
     }
 
+    fn on_fill(&mut self, _fill: &Fill) {
+        self.fills += 1;
+        self.filled = true;
+    }
+
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        let _ = metrics.publish("mom_fills", self.fills as f64);
+    }
+}
+
+impl MarketConsumer for Momentum {
+    type Context = OrderSink;
+    fn subscriptions(&self) -> Vec<Subscription> {
+        vec![Subscription::Quote {
+            symbols: self.symbols.clone(),
+        }]
+    }
     fn on_quote(&mut self, event: &QuoteEvent, orders: &mut OrderSink) {
         let mid = event.mid();
         if let Some(previous) = self.last_mid {
@@ -62,15 +84,6 @@ impl StrategyProgram for Momentum {
             self.liquidated = true;
             let _ = orders.submit(self.sell(event));
         }
-    }
-
-    fn on_fill(&mut self, _fill: &Fill) {
-        self.fills += 1;
-        self.filled = true;
-    }
-
-    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("mom_fills", self.fills as f64);
     }
 }
 

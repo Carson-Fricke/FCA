@@ -55,6 +55,7 @@ class ToolContext:
     #: and permits nothing.
     allowed_tools: tuple[str, ...] | None = None
     intent_epoch: int = 0
+    phase_executor: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -113,6 +114,7 @@ class ToolContext:
             idempotency_key=self.idempotency_key,
             allowed_tools=allowed_tools,
             intent_epoch=self.intent_epoch,
+            phase_executor=self.phase_executor,
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -131,6 +133,7 @@ class ToolContext:
             "toolInvocationId": self.tool_invocation_id,
             "idempotencyKey": self.idempotency_key,
             "intentEpoch": self.intent_epoch,
+            "phaseExecutor": self.phase_executor,
         }
 
 

@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from thesis.chat import ChatService, WorkflowDefinition, WorkflowExecution
 from thesis.http.application import create_app
-from thesis.http.streaming import ProviderDeltaSource
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 WORKFLOW = WorkflowDefinition(
@@ -69,7 +68,6 @@ def make_client() -> Callable[..., TestClient]:
     def factory(
         chat_service: ChatService,
         *,
-        provider_delta_source: ProviderDeltaSource | None = None,
         stream_max_poll_cycles: int | None = 1,
     ) -> TestClient:
         app = create_app(
@@ -77,7 +75,6 @@ def make_client() -> Callable[..., TestClient]:
             chat_service=chat_service,
             stream_sleeper=_no_sleeper,
             stream_max_poll_cycles=stream_max_poll_cycles,
-            provider_delta_source=provider_delta_source,
         )
         return TestClient(app)
 

@@ -39,7 +39,7 @@ engine callers and what covers them now:
 | --- | --- |
 | `_transition_checked` | the phase agent's own completion-contract repair via the tool result |
 | `_pause_for_compose` | the phase agent re-derives and retries the completion in-turn |
-| `_hypothesis_creation` | the creation phase agent asks with `request_workflow_input` |
+| `_hypothesis_creation` (retired) | the model-creation phase agent asks with `request_workflow_input`; discovery does the same before it |
 | `_emit_verdict_review` / `_resume_verdict` | the verdict phase agent asks, then advances via `request_phase_completion` |
 | `_stop_for_cycle_budget` | the phase agent reports the exhausted budget in its completion or question |
 

@@ -189,8 +189,8 @@ pub enum MarketEvent {
     },
     /// One OHLCV bar.
     ///
-    /// Bars replay only in study runs; a study fixture carries bars and
-    /// nothing else.
+    /// Bars may coexist with ticks. Their interval comes from the validated
+    /// requirement plan; incompatible multi-interval plans are rejected.
     Bar {
         /// Event identifier.
         event_id: String,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
@@ -35,6 +35,9 @@ from thesis.chat.service import ChatService
 from thesis.execution.events import ExecutionEventType
 from thesis.experiments.ledger import AttemptLedger
 from thesis.persistence import CommandJournal
+from thesis.providers.invocations import ChatMessage as ProviderChatMessage
+from thesis.providers.invocations import ModelCompletion
+from thesis.providers.invocations import Role as ProviderRole
 from thesis.research.hypothesis import (
     InMemoryHypothesisStore,
 )
@@ -83,25 +86,33 @@ def _id_factory() -> Callable[[str], str]:
     return lambda prefix: f"{prefix}-{next(counter)}"
 
 
-def _model() -> dict[str, object]:
+def _legacy_model() -> dict[str, object]:
     return {
         "modelId": "momentum-model",
         "version": "1.0.0",
         "description": "Estimate the historical momentum continuation regularity.",
         "source": (
             "use harness_strategy_sdk::{\n"
-            "    export_study_program, BarFrame, MetricPublisher, StudyProgram,\n"
+            "    export_study_program, BarFrame, MarketConsumer, ObservationContext,\n"
+            "    Subscription, MetricPublisher, StudyProgram,\n"
             "};\n"
             "use harness_strategy_sdk::serde_json::Value;\n"
             "\n"
             "struct MomentumModel;\n"
             "\n"
+            "impl MarketConsumer for MomentumModel {\n"
+            "    type Context = ObservationContext;\n"
+            "    fn subscriptions(&self) -> Vec<Subscription> {\n"
+            '        vec![Subscription::Bars { symbols: vec!["SPY".into()],\n'
+            '            interval: "1min".into() }]\n'
+            "    }\n"
+            "    fn on_bar(&mut self, _frame: &BarFrame, _c: &mut ObservationContext) {}\n"
+            "}\n"
+            "\n"
             "impl StudyProgram for MomentumModel {\n"
             "    fn new(_parameters: Value) -> Self {\n"
             "        Self\n"
             "    }\n"
-            "\n"
-            "    fn on_bar_frame(&mut self, _frame: &BarFrame) {}\n"
             "\n"
             "    fn on_stop(&mut self, metrics: &mut MetricPublisher) {\n"
             '        let _ = metrics.publish("sharpe", 1.0);\n'
@@ -121,6 +132,54 @@ def _model() -> dict[str, object]:
             "interval": "1min",
         },
     }
+
+
+def _model() -> dict[str, object]:
+    legacy = _legacy_model()
+    return {
+        "workspaceId": WORKSPACE,
+        "kind": "study",
+        "programId": "momentum-model",
+        "gitCommit": "a" * 40,
+        "version": "b" * 64,
+        "description": legacy["description"],
+        "outputs": legacy["outputs"],
+        "tests": legacy["tests"],
+    }
+
+
+class FakePrograms:
+    """Committed snapshot fixture for reference-based workflow tests."""
+
+    def load(self, workspace_id, kind, program_id, commit=None):
+        legacy = _legacy_model()
+        return {
+            "workspaceId": workspace_id,
+            "kind": kind,
+            "programId": program_id,
+            "gitCommit": commit or "c" * 40,
+            "version": "b" * 64,
+            "source": legacy["source"],
+            "configuration": legacy["harnessConfiguration"],
+            "sourceSha256": "d" * 64,
+            "bundleSha256": "b" * 64,
+            "files": {"program.rs": "d" * 64},
+            "sdkIdentity": "sdk-current",
+            "validationIdentity": "compiler-current",
+            "validation": {
+                "gitCommit": "a" * 40,
+                "workspaceId": workspace_id,
+                "kind": kind,
+                "programId": program_id,
+                "version": "b" * 64,
+                "accepted": True,
+                "sdkIdentity": "sdk-current",
+                "validationIdentity": "compiler-current",
+                "sourceSha256": "d" * 64,
+                "bundleSha256": "b" * 64,
+                "files": {"program.rs": "d" * 64},
+            },
+        }
 
 
 def _hypothesis_envelope(
@@ -150,6 +209,41 @@ def _hypothesis_envelope(
         "sizing": "fixed fraction 0.1 of equity",
         "body": "The continuation thesis.",
         "model": _model(),
+    }
+
+
+def _discovery_envelope() -> dict[str, object]:
+    return {
+        "candidate": {
+            "opportunity": (
+                "Five-day momentum in SPY continues over the next five days."
+            ),
+            "signal": "Five-day return sign, measured at each daily close.",
+            "informationTime": "At the daily close that ends the five-day window.",
+            "direction": "long continuation",
+            "holdingPeriod": "five trading days",
+            "profitSource": (
+                "Slow information diffusion: the other side hedges too early."
+            ),
+            "effect": "positive conditional mean forward return",
+            "competingExplanation": (
+                "Time-series momentum proxies a slow macro drift."
+            ),
+            "evidence": "Small studies showed continuation after five-day gains.",
+        },
+        "attempts": [
+            {
+                "purpose": "Check momentum continuation on SPY daily bars.",
+                "studyId": "study-momentum",
+                "dataTypes": ["bars"],
+                "window": "2024-01-01T00:00:00Z to 2024-03-01T00:00:00Z",
+                "result": "Positive continuation, weak but consistent.",
+                "changed": True,
+                "runId": "run-momentum",
+            }
+        ],
+        "untouchedData": "Quote and trade data were left untouched for validation.",
+        "limitations": "One market and one regime; the effect is weak.",
     }
 
 
@@ -226,6 +320,24 @@ class FakeProvider:
         return ModelResponse(output=output)
 
 
+class FakeNativeFixture:
+    """Enable captured workers without allowing fixture-owned model execution."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(
+        self,
+        *,
+        messages: Sequence[ProviderChatMessage],
+        role: ProviderRole = "primary",
+        tools: Sequence[Mapping[str, object]] | None = None,
+        response_format: Mapping[str, object] | None = None,
+    ) -> ModelCompletion:
+        self.calls += 1
+        raise AssertionError("fixture workers must remain captured, not call a model")
+
+
 class FakeRunner:
     """Deterministic fake runner returning queued ``(state, metrics)`` pairs."""
 
@@ -290,6 +402,7 @@ class _Kit:
         ],
         chat: ChatService,
         provider: FakeProvider,
+        native_provider: FakeNativeFixture,
         runner: FakeRunner,
         store: InMemoryHypothesisStore,
         ledger: AttemptLedger,
@@ -302,6 +415,7 @@ class _Kit:
         self.workflow = workflow
         self.chat = chat
         self.provider = provider
+        self.native_provider = native_provider
         self.runner = runner
         self.store = store
         self.ledger = ledger
@@ -398,10 +512,12 @@ def _kit(
         max_children=max_children,
     )
     woke: list[object] = []
+    native_provider = FakeNativeFixture()
     conversations = Conversations(
         chat=chat,
         store=sub_agent_store,
         lifecycle=lifecycle,
+        provider=native_provider,
         # A dropped wake leaves the conversation in flight, so a test can
         # assert exactly which conversations the engine woke.
         spawn_thread=lambda target: woke.append(target),
@@ -424,6 +540,7 @@ def _kit(
             if research_runner is not None
             else None
         ),
+        programs=FakePrograms(),
         conversations=conversations,
         execution_store=execution_store,
         detach=detach,
@@ -432,6 +549,7 @@ def _kit(
         workflow=workflow,
         chat=chat,
         provider=provider,
+        native_provider=native_provider,
         runner=runner,
         store=store,
         ledger=ledger,
@@ -478,8 +596,8 @@ def _workflow_node(kit: _Kit, request: HypothesisDevelopmentRequest) -> SubAgent
     raise AssertionError("no durable workflow node was created")
 
 
-def _creation_node_id(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
-    return _phase_node_id(kit, request, "hypothesis_creation")
+def _discovery_node_id(kit: _Kit, request: HypothesisDevelopmentRequest) -> str:
+    return _phase_node_id(kit, request, "discovery")
 
 
 def _node_record(kit: _Kit, sub_agent_id: str) -> SubAgentRecord:

@@ -3,8 +3,8 @@
 The verdict agent receives the deterministic trials in its seed and must ask
 the operator before completing: it proposes the verdict and the next step in
 one response together with a ``request_workflow_input`` call, and finalizes
-only once the operator confirms — the same confirmation protocol the creation
-phase follows.
+only once the operator confirms — the same confirmation protocol the discovery
+and model-creation phases follow.
 """
 
 from __future__ import annotations
@@ -40,13 +40,16 @@ _VERDICT_COMPLETION_PROTOCOL = (
     "request_workflow_input.",
     "3. An explicit operator instruction to loop back (for example 'loop "
     "back - we only had a single falsifier') authorizes target "
-    "hypothesis_creation now. Include their reason in the verdict contract "
-    "and call request_phase_completion in this response; do not ask them to "
-    "confirm the same direction again. Do not claim the loopback occurred "
-    "unless the completion tool accepted it. If the operator instead replies "
-    "with corrections without authorizing a next step, post the revised proposal "
-    "AND call request_workflow_input again, in that same response. Repeat "
-    "until the operator's latest message confirms the proposal.",
+    "model_creation now when the selected candidate still stands and only the "
+    "model needs revision, or target discovery when the candidate itself no "
+    "longer holds and discovery must start over. Include their reason in the "
+    "verdict contract and call request_phase_completion in this response; do "
+    "not ask them to confirm the same direction again. Do not claim the "
+    "loopback occurred unless the completion tool accepted it. If the "
+    "operator instead replies with corrections without authorizing a next "
+    "step, post the revised proposal AND call request_workflow_input again, "
+    "in that same response. Repeat until the operator's latest message "
+    "confirms the proposal.",
     "4. Only then finalize: call request_phase_completion with the completion "
     "contract at the end of this prompt.",
     'Never name target "failed": that ends the whole workflow. If you believe '
@@ -62,7 +65,10 @@ _VERDICT_TARGET_RULES = (
     "- If a falsifier fired (the regularity was refuted on history), or every "
     "trial shows the model could not be evaluated (the data or the sample was "
     "invalid, so no regularity was measured), propose looping back so the "
-    'hypothesis is adjusted and tried again: target "hypothesis_creation".',
+    'hypothesis is adjusted and tried again: target "model_creation" when '
+    "the selected discovery candidate still stands and only the model needs "
+    'revision, or target "discovery" when the candidate itself no longer '
+    "holds and discovery must start over.",
     "Base the proposal only on the recorded trials below; never fabricate "
     "observations the trials do not carry.",
     "A data-availability check surviving is not evidence that the statistical "
@@ -89,8 +95,9 @@ _VERDICT_CONTRACT = (
     '- verdict: an object with outcome ("supported", "refuted" or '
     '"inconclusive") and reason (one concise sentence grounded in the '
     "recorded trials).",
-    '- target: "strategy_design" to progress, or "hypothesis_creation" to '
-    "loop back and adjust the hypothesis.",
+    '- target: "strategy_design" to progress, "model_creation" to loop back '
+    'and re-model the same selected candidate, or "discovery" to start '
+    "discovery over.",
 )
 
 

@@ -6,7 +6,6 @@ from thesis.cosmos.client import (
     DEFAULT_ENDPOINT,
     EMULATOR_KEY,
     EXECUTIONS_CONTAINER,
-    TIMELINE_CONTAINER,
     CosmosSettings,
     ensure_database,
     open_cosmos_client,
@@ -15,7 +14,6 @@ from thesis.cosmos.events import CosmosExecutionEventStore
 from thesis.cosmos.execution_store import CosmosExecutionStore
 from thesis.cosmos.records import CosmosChatPersistence
 from thesis.cosmos.timeline import (
-    KIND_CHAT,
     KIND_COUNTER,
     KIND_EVENT,
     KIND_EXECUTION,
@@ -35,13 +33,11 @@ __all__ = [
     "DEFAULT_ENDPOINT",
     "EMULATOR_KEY",
     "EXECUTIONS_CONTAINER",
-    "KIND_CHAT",
     "KIND_COUNTER",
     "KIND_EVENT",
     "KIND_EXECUTION",
     "KIND_MESSAGE",
     "ROOT_THREAD",
-    "TIMELINE_CONTAINER",
     "ensure_database",
     "open_cosmos_client",
 ]

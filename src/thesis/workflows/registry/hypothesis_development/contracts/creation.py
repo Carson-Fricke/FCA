@@ -71,7 +71,7 @@ class HypothesisDevelopmentRequest:
     ) -> HypothesisDevelopmentRequest:
         """Rebuild the runnable request for a durable execution.
 
-        Used when an operator message resumes the hypothesis-creation
+        Used when an operator message resumes the hypothesis-development
         conversation: the original idea is recovered from the trigger message
         and everything else from the execution record.
         """
@@ -81,7 +81,7 @@ class HypothesisDevelopmentRequest:
             )
             ideas = _ideas_from_trigger(trigger.body)
         except (LookupError, ValueError):
-            ideas = "Continue the hypothesis-creation conversation."
+            ideas = "Continue the hypothesis-development conversation."
         return cls(
             workspace_id=execution.workspace_id,
             chat_id=execution.chat_id,
@@ -101,9 +101,9 @@ def _ideas_from_trigger(body: str) -> str:
         try:
             document = json.loads(text)
         except json.JSONDecodeError:
-            return text or "Continue the hypothesis-creation conversation."
+            return text or "Continue the hypothesis-development conversation."
         if isinstance(document, Mapping):
             ideas = document.get("ideas")
             if isinstance(ideas, str) and ideas.strip():
                 return ideas.strip()
-    return text or "Continue the hypothesis-creation conversation."
+    return text or "Continue the hypothesis-development conversation."

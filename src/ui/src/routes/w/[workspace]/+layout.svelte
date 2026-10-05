@@ -9,7 +9,8 @@
 	import TopBar from '$lib/components/shell/TopBar.svelte';
 import ToastStack from '$lib/components/common/ToastStack.svelte';
 import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
-	import { createWorkspace, isLocalHosting, listStrategies, listWidgets } from '$lib/api';
+	import { createWorkspace, getSnapshot, isLocalHosting, listStrategies, listWidgets } from '$lib/api';
+	import { placeholderSnapshot, provideWorkspaceContext } from '$lib/workspace-context.svelte';
 	import {
 		COPILOT_MAX_FRACTION,
 		COPILOT_MIN_WIDTH,
@@ -24,6 +25,14 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 	let { data, children }: { data: LayoutData; children: any } = $props();
 
 	const workspaceId = $derived(data.workspaceId);
+	// Workspace context: the summary is available before render; counts,
+	// activity, and the catalog fill in after render.
+	// The summary is fixed for the lifetime of the route.
+	// svelte-ignore state_referenced_locally
+	const workspaceContext = provideWorkspaceContext(data.workspace);
+	const workspaceName = $derived(data.workspace.name);
+	const detailReady = $derived(workspaceContext.detail !== null);
+	const snapshot = $derived(workspaceContext.detail ?? placeholderSnapshot(data.workspace));
 	const pageLabel = $derived(
 		page.url.pathname.replace(new RegExp(`^/w/${workspaceId}/?`), '').split('/')[0] || 'overview'
 	);
@@ -116,6 +125,23 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 	});
 
 	$effect(() => {
+		// Counts, activity, open chats, and the workspace catalog load after the
+		// shell renders. A failure leaves the placeholder values in place.
+		const id = workspaceId;
+		let cancelled = false;
+		getSnapshot(id)
+			.then((detail) => {
+				if (!cancelled) workspaceContext.detail = detail;
+			})
+			.catch(() => {
+				// The shell already rendered; leave placeholder counts.
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	$effect(() => {
 		let cancelled = false;
 		listStrategies(workspaceId).then((items) => {
 			if (!cancelled) strategies = items;
@@ -151,11 +177,12 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 
 <svelte:window onkeydown={onKeydown} onresize={clampCopilotWidth} />
 
-<svelte:head><title>Thesis — {data.snapshot.overview.workspace.name}</title></svelte:head>
+<svelte:head><title>Thesis — {workspaceName}</title></svelte:head>
 
 <div class="grid-bg flex h-screen overflow-hidden bg-surface-950">
 	<Sidebar
-		snapshot={data.snapshot}
+		snapshot={snapshot}
+		ready={detailReady}
 		{workspaceId}
 		page={pageLabel}
 		{widgets}
@@ -169,9 +196,10 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 	<div class="flex min-w-0 flex-1 flex-col">
 		<TopBar
 			{workspaceId}
-			workspaceName={data.snapshot.overview.workspace.name}
+			workspaceName={workspaceName}
 			page={pageLabel}
-			activity={data.snapshot.overview.activity}
+			activity={snapshot.overview.activity}
+			ready={detailReady}
 			copilotHidden={isChats}
 			copilotVisible={copilotVisible}
 			onToggleCopilot={() => (ui.copilotOpen = !ui.copilotOpen)}
@@ -206,7 +234,7 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 			</div>
 			<CopilotPanel
 				{workspaceId}
-				workspaceName={data.snapshot.overview.workspace.name}
+				workspaceName={workspaceName}
 				onExpand={switchToConversations}
 				onClose={() => (ui.copilotOpen = false)}
 			/>

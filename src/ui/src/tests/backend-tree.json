@@ -1,0 +1,57 @@
+{
+  "chatId": "chat",
+  "roots": [
+    {
+      "subAgentId": "node",
+      "chatId": "chat",
+      "role": "researcher",
+      "kind": "conversation",
+      "status": "running",
+      "parentSubAgentId": null,
+      "workflowExecutionId": "exec",
+      "phaseAttemptId": "attempt-b",
+      "specVersion": "2.0.0",
+      "completionMode": "explicit_completion",
+      "phaseExecutor": true,
+      "returnsToSubAgentId": null,
+      "phase": "model_creation",
+      "acceptsInput": true,
+      "allowedTools": ["validate_study"],
+      "delegatedBudget": 20,
+      "inputContractRef": null,
+      "completionContractRef": null,
+      "resultRef": null,
+      "result": null,
+      "createdAt": "2026-01-01T00:00:05+00:00",
+      "updatedAt": "2026-01-01T00:00:06+00:00",
+      "children": []
+    }
+  ],
+  "items": [
+    {
+      "subAgentId": "node",
+      "chatId": "chat",
+      "role": "researcher",
+      "kind": "conversation",
+      "status": "running",
+      "parentSubAgentId": null,
+      "workflowExecutionId": "exec",
+      "phaseAttemptId": "attempt-b",
+      "specVersion": "2.0.0",
+      "completionMode": "explicit_completion",
+      "phaseExecutor": true,
+      "returnsToSubAgentId": null,
+      "phase": "model_creation",
+      "acceptsInput": true,
+      "allowedTools": ["validate_study"],
+      "delegatedBudget": 20,
+      "inputContractRef": null,
+      "completionContractRef": null,
+      "resultRef": null,
+      "result": null,
+      "createdAt": "2026-01-01T00:00:05+00:00",
+      "updatedAt": "2026-01-01T00:00:06+00:00",
+      "children": []
+    }
+  ]
+}

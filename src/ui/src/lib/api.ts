@@ -20,6 +20,11 @@
  */
 import { browser } from '$app/environment';
 import { fixtures } from './fixtures';
+import { fetchJson, ThesisApiError } from './transport';
+import { fixtureTimeline } from './fixture-timeline';
+import { decodeWire } from './wire';
+import type { TimelinePageWire, CreateMessageResponseWire, SubAgentNodeWire, ChatThreadWire, NodeInputReceiptWire } from './generated';
+export { ThesisApiError } from './transport';
 import type {
 	ArtifactEntry,
 	BackendKind,
@@ -27,12 +32,10 @@ import type {
 	BacktestLaunchResult,
 	BacktestRunCard,
 	BacktestSummaryRow,
-	Capabilities,
 	ChatMessage,
 	ChatThread,
 	ConsentProposal,
 	DeploymentCard,
-	ExecutionEvent,
 	ExecutionNodeRef,
 	HarnessArtifactManifest,
 	HarnessJobResult,
@@ -55,6 +58,7 @@ import type {
 	SubAgentNode,
 	WidgetDefinition,
 	WorkflowExecutionRecord,
+	WorkflowDefinition,
 	WorkspaceSnapshot,
 	WorkspaceStateData,
 	WorkspaceSummary
@@ -242,6 +246,7 @@ export function backendOptions(): {
  */
 export function setBackend(kind: BackendKind, azureBase?: string): void {
 	if (!browser) return;
+	workflowDefinitions.clear();
 	localStorage.setItem('thesis.backend', kind);
 	if (azureBase !== undefined) {
 		const trimmed = azureBase.trim();
@@ -269,27 +274,8 @@ export const uiEnvironment: string =
  */
 export const localActorId = 'user-alex';
 
-/** Non-2xx response from the Thesis API; carries the HTTP status. */
-export class ThesisApiError extends Error {
-	constructor(
-		readonly status: number,
-		readonly path: string
-	) {
-		super(`Thesis API ${status} on ${path}`);
-		this.name = 'ThesisApiError';
-	}
-}
-
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-	const headers = new Headers(init?.headers);
-	if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-	const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers });
-	if (!response.ok) {
-		throw new ThesisApiError(response.status, path);
-	}
-	if (response.status === 204) return undefined as T;
-	const text = await response.text();
-	return (text ? JSON.parse(text) : undefined) as T;
+	return fetchJson<T>(apiBaseUrl, path, init);
 }
 
 /**
@@ -405,6 +391,22 @@ export function createWorkspace(input: {
 	});
 }
 
+/**
+ * Fetch one workspace summary. This is the render gate for a workspace route:
+ * it proves the workspace exists and carries its name without loading counts or
+ * activity. The heavier snapshot is fetched after the shell renders.
+ */
+export function getWorkspace(workspaceId: string): Promise<WorkspaceSummary> {
+	if (fixtureMode) {
+		return wait(5).then(() => {
+			const summary = fixtures.workspaces.items.find((item) => item.id === workspaceId);
+			if (!summary) throw new Error(`unknown workspace ${workspaceId}`);
+			return plain(summary);
+		});
+	}
+	return apiFetch<WorkspaceSummary>(`/v1/workspaces/${encodeURIComponent(workspaceId)}`);
+}
+
 export function getSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
 	if (fixtureMode) {
 		return wait(5).then(() => {
@@ -413,7 +415,7 @@ export function getSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
 				return {
 					workspaces: plain(fixtures.workspaces.items),
 					overview: plain(doc.overview),
-					counts: { ...doc.counts }
+					counts: { ...doc.counts, chats: fixtures.chats[workspaceId]?.items.length ?? 0 }
 				};
 			}
 			// Locally created workspaces have no fixture document: synthesize
@@ -456,16 +458,21 @@ export function getSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
 	}));
 }
 
-export function listChats(workspaceId: string): Promise<ChatThread[]> {
+export function listChats(workspaceId: string, signal?: AbortSignal): Promise<ChatThread[]> {
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/chats`;
 	if (fixtureMode) {
 		return wait(5).then(() => {
 			const doc = fixtures.chats[workspaceId];
-			return doc ? plain(doc.items) : [];
+			return decodeWire('ChatThreadListWire', plain(doc ?? { items: [] }), path).items.map(toChatThread);
 		});
 	}
-	return apiFetch<{ items: ChatThread[] }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats`
-	).then((r) => r.items);
+	return apiFetch<unknown>(path, { signal }).then((raw) => decodeWire('ChatThreadListWire', raw, path).items.map(toChatThread));
+}
+
+function toChatThread(raw: ChatThreadWire): ChatThread {
+	const investigation_ids = raw.links.investigation_ids ?? [];
+	return { ...raw, kind: investigation_ids.length ? 'investigation' : 'chat',
+		investigation_ids, strategy_ids: raw.links.strategy_ids ?? [] };
 }
 
 export interface CreateChatInput {
@@ -487,38 +494,45 @@ export function conversationTitleFrom(body: string): string {
  */
 export function createChat(
 	workspaceId: string,
-	input: CreateChatInput = {}
+	input: CreateChatInput = {},
+	signal?: AbortSignal
 ): Promise<ChatThread> {
 	const title = input.title?.trim() || 'New conversation';
 	const owner = input.ownerActorId ?? localActorId;
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/chats`;
 	if (fixtureMode) {
 		return wait(10).then(() => {
-			const created: ChatThread = {
-				chat_id: `chat-local-${store.nextId++}`,
+			const chatId = `chat-local-${store.nextId++}`;
+			const created = decodeWire('ChatThreadWire', {
+				chat_id: chatId,
+				conversation_id: chatId, root_conversation_id: chatId, parent_conversation_id: null,
 				workspace_id: workspaceId,
 				title,
 				state: 'active',
-				kind: 'chat',
 				owner_actor_id: owner,
 				created_at: new Date().toISOString(),
 				updated_at: null,
-				investigation_ids: [],
-				strategy_ids: []
-			};
+				links: { chat_ids: [], investigation_ids: [], strategy_ids: [], experiment_ids: [], workflow_execution_ids: [], tool_job_ids: [] },
+				input_consumed_positions: {},
+				created_by: owner,
+				schema_version: 1,
+				content_hash: fixtureDigest(JSON.stringify([workspaceId, store.nextId, title, owner]))
+			}, path);
 			const doc = fixtures.chats[workspaceId] ?? { items: [] };
 			doc.items.unshift(plain(created));
 			fixtures.chats[workspaceId] = doc;
 			store.messages[created.chat_id] = [];
-			return created;
+			return toChatThread(created);
 		});
 	}
-	return apiFetch<ChatThread>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats`, {
+	return apiFetch<unknown>(path, {
 		method: 'POST',
-		body: JSON.stringify({ title, owner_actor_id: owner })
-	});
+		body: JSON.stringify({ title, owner_actor_id: owner }),
+		signal
+	}).then((raw) => toChatThread(decodeWire('ChatThreadWire', raw, path)));
 }
 
-export function deleteChat(workspaceId: string, chatId: string): Promise<void> {
+export function deleteChat(workspaceId: string, chatId: string, signal?: AbortSignal): Promise<void> {
 	if (fixtureMode) {
 		return wait(10).then(() => {
 			const doc = fixtures.chats[workspaceId];
@@ -526,25 +540,100 @@ export function deleteChat(workspaceId: string, chatId: string): Promise<void> {
 				doc.items = doc.items.filter((chat) => chat.chat_id !== chatId);
 			}
 			delete store.messages[chatId];
+			fixtureTimeline.remove(workspaceId, chatId);
 		});
 	}
 	return apiFetch<void>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}`,
-		{ method: 'DELETE' }
+		{ method: 'DELETE', signal }
 	);
 }
 
-export function listMessages(workspaceId: string, chatId: string): Promise<ChatMessage[]> {
+export type TimelinePage = TimelinePageWire;
+
+/** Fetch a snapshot page and its chat-wide stream watermark; null thread selects all threads. */
+export async function listTimelinePage(
+	workspaceId: string, chatId: string, threadId: string | null, before: number | null,
+	signal?: AbortSignal
+): Promise<TimelinePage> {
 	if (fixtureMode) {
-		return wait(5).then(() => {
-			const doc = store.messages[chatId];
-			if (!doc) throw new Error(`unknown chat ${chatId}`);
-			return plain(doc);
-		});
+		signal?.throwIfAborted();
+		return decodeWire('TimelinePageWire', fixtureTimeline.page(workspaceId, chatId, threadId, before), 'fixture/timeline');
 	}
-	return apiFetch<{ items: ChatMessage[] }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/messages`
-	).then((r) => r.items);
+	signal?.throwIfAborted();
+	const query = new URLSearchParams({ limit: '1000' });
+	if (threadId !== null) query.set('thread', threadId);
+	if (before !== null) query.set('before', String(before));
+	const request = new AbortController();
+	const cancel = () => request.abort(signal?.reason);
+	signal?.addEventListener('abort', cancel, { once: true });
+	const timeout = setTimeout(() => request.abort(new Error('Conversation history page timed out after 30 seconds.')), 30_000);
+	let rejectAbort!: () => void;
+	const aborted = new Promise<never>((_, reject) => {
+		rejectAbort = () => reject(request.signal.reason);
+		request.signal.addEventListener('abort', rejectAbort, { once: true });
+	});
+	try {
+		const page = await Promise.race([apiFetch<TimelinePage>(
+			`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/timeline?${query}`,
+			{ signal: request.signal }
+		), aborted]);
+		signal?.throwIfAborted();
+		return decodeWire('TimelinePageWire', page, `/chats/${chatId}/timeline`);
+	} finally {
+		clearTimeout(timeout);
+		signal?.removeEventListener('abort', cancel);
+		request.signal.removeEventListener('abort', rejectAbort);
+	}
+}
+
+const workflowDefinitions = new Map<string, {
+	promise: Promise<WorkflowDefinition>;
+	expiresAt: number;
+}>();
+const WORKFLOW_DEFINITION_CACHE_LIMIT = 64;
+const WORKFLOW_DEFINITION_CACHE_TTL = 5 * 60_000;
+
+/** Share topology reads, not mutable execution state or failed/missing definitions. */
+export function getWorkflowDefinition(
+	workflowId: string,
+	options: { workspaceId?: string; version?: string } = {}
+): Promise<WorkflowDefinition> {
+	const version = options.version || '';
+	const key = JSON.stringify([backendKind, apiBaseUrl, options.workspaceId ?? '', workflowId, version]);
+	const now = Date.now();
+	for (const [storedKey, entry] of workflowDefinitions) {
+		if (entry.expiresAt <= now) workflowDefinitions.delete(storedKey);
+	}
+	const cached = workflowDefinitions.get(key);
+	if (cached) {
+		workflowDefinitions.delete(key);
+		workflowDefinitions.set(key, cached);
+		return cached.promise;
+	}
+	const path = `/v1/workflows/${encodeURIComponent(workflowId)}${version ? `?${new URLSearchParams({ version })}` : ''}`;
+	const entry: { promise: Promise<WorkflowDefinition>; expiresAt: number } = {
+		promise: apiFetch<unknown>(path).then((raw) => {
+			const value = decodeWire('WorkflowDefinitionWire', raw, path);
+			if (workflowDefinitions.get(key) === entry) {
+				// The route exposes only the current version. Never pin a latest read or mismatch.
+				if (version && value.version === version && value.workflow_id === workflowId) {
+					entry.expiresAt = Date.now() + WORKFLOW_DEFINITION_CACHE_TTL;
+				} else workflowDefinitions.delete(key);
+			}
+			return value;
+		}).catch((error) => {
+			if (workflowDefinitions.get(key) === entry) workflowDefinitions.delete(key);
+			throw error;
+		}),
+		expiresAt: Infinity
+	};
+	workflowDefinitions.set(key, entry);
+	// Eviction also bounds tracked in-flight reads; late completions cannot reinsert themselves.
+	while (workflowDefinitions.size > WORKFLOW_DEFINITION_CACHE_LIMIT) {
+		workflowDefinitions.delete(workflowDefinitions.keys().next().value!);
+	}
+	return entry.promise;
 }
 
 export interface PostMessageInput {
@@ -557,7 +646,8 @@ export interface PostMessageInput {
 export function postMessage(
 	workspaceId: string,
 	chatId: string,
-	input: PostMessageInput
+	input: PostMessageInput,
+	signal?: AbortSignal
 ): Promise<PostMessageResult> {
 	if (fixtureMode) {
 		return wait(20).then(() => {
@@ -566,6 +656,7 @@ export function postMessage(
 			const message: ChatMessage = {
 				message_id: `msg-local-${store.nextId++}`,
 				chat_id: chatId,
+				conversation_id: chatId, root_conversation_id: chatId, parent_conversation_id: null,
 				workspace_id: workspaceId,
 				actor_id: 'user-alex',
 				role: 'user',
@@ -575,27 +666,42 @@ export function postMessage(
 				created_at: new Date().toISOString(),
 				updated_at: null,
 				execution_id: input.targetsExecutionId ?? null,
-				intent_epoch: input.steeringIntent ? 1 : 0
+				intent_epoch: input.steeringIntent ? 1 : 0,
+				created_by: localActorId,
+				schema_version: 1,
+				content_hash: fixtureDigest(JSON.stringify([workspaceId, chatId, store.nextId, input.body])),
+				input_position: 0,
+				investigation_ids: [],
+				kind: 'message',
+				data: null,
+				reasoning: null,
+				tool_result: null
 			};
+			decodeWire('ChatMessageWire', message, 'fixture/post');
 			doc.push(message);
+			fixtureTimeline.message(message);
 			// Fixture percolation mirrors the API: steering bumps the active
 			// execution's intent epoch once and records the ack.
-			const percolated =
-				input.steeringIntent || input.targetsExecutionId
+			const targetId = input.targetsExecutionId ?? activeExecutionId(chatId);
+			const percolatedTo =
+				targetId && (input.steeringIntent || input.targetsExecutionId)
 					? [
 							{
-								execution_id: input.targetsExecutionId ?? activeExecutionId(chatId),
-								intent_epoch: message.intent_epoch,
-								steering_intent: input.steeringIntent ?? null
+								executionId: targetId,
+								intentEpoch: message.intent_epoch
 							}
 						]
 					: [];
-			return { message, percolated };
+			return messageResult(decodeWire('CreateMessageResponseWire', { ...message,
+				steering: { intent: input.steeringIntent ?? null, targetsExecutionId: input.targetsExecutionId ?? null, percolatedTo }
+			}, 'fixture/post'));
 		});
 	}
-	return apiFetch<ChatMessage & { steering?: RawSteering }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/messages`,
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/messages`;
+	return apiFetch<unknown>(
+		path,
 		{
+			signal,
 			method: 'POST',
 			body: JSON.stringify({
 				actor_id: localActorId,
@@ -605,23 +711,20 @@ export function postMessage(
 				targets_execution_id: input.targetsExecutionId ?? null
 			})
 		}
-	).then((raw) => ({
-		message: raw,
+	).then((raw) => messageResult(decodeWire('CreateMessageResponseWire', raw, path)));
+}
+
+function messageResult(raw: CreateMessageResponseWire): PostMessageResult {
+	const { steering, ...message } = raw;
+	return {
+		message,
 		// The API returns the persisted message directly and, for a steering
 		// message, nests the percolation under `steering`; normalize it to the
 		// `PostMessageResult` shape the components consume.
-		percolated: (raw.steering?.percolatedTo ?? []).map((target) => ({
-			execution_id: target.executionId,
-			intent_epoch: target.intentEpoch,
-			steering_intent: raw.steering?.intent ?? null
+		percolated: (steering?.percolatedTo ?? []).map((target) => ({
+			execution_id: target.executionId, intent_epoch: target.intentEpoch, steering_intent: steering!.intent
 		}))
-	}));
-}
-
-interface RawSteering {
-	intent: string | null;
-	targetsExecutionId: string | null;
-	percolatedTo: { executionId: string; intentEpoch: number }[];
+	};
 }
 
 function activeExecutionId(chatId: string): string {
@@ -631,37 +734,21 @@ function activeExecutionId(chatId: string): string {
 
 export function getExecution(
 	workspaceId: string,
-	chatId: string
+	chatId: string,
+	signal?: AbortSignal
 ): Promise<WorkflowExecutionRecord | null> {
 	if (fixtureMode) {
 		return wait(5).then(() => {
 			const doc = fixtures.executions[chatId];
 			if (!doc?.execution_id) return null;
-			return plain(doc);
+			return decodeWire('WorkflowExecutionWire', plain(doc), 'fixture/execution');
 		});
 	}
-	return apiFetchOptional<WorkflowExecutionRecord | null>(
+	return apiFetchOptional<unknown>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/execution`,
-		null
-	);
-}
-
-/** One page of the durable event store (exclusive `afterCursor`). */
-export function replayExecutionEvents(
-	workspaceId: string,
-	executionId: string,
-	afterCursor: number
-): Promise<ExecutionEvent[]> {
-	if (fixtureMode) {
-		return wait(5).then(() => {
-			const doc = fixtures.executionEvents[executionId];
-			const items = doc ? doc.items : [];
-			return plain(items).filter((e) => e.cursor > afterCursor);
-		});
-	}
-	return apiFetch<{ events: ExecutionEvent[] }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}/events?after_cursor=${afterCursor}`
-	).then((r) => r.events);
+		null,
+		{ signal }
+	).then((raw) => raw === null ? null : decodeWire('WorkflowExecutionWire', raw, `/chats/${chatId}/execution`));
 }
 
 // ---------------------------------------------------------------------------
@@ -691,26 +778,9 @@ export function chatNodeBase(
  * Normalize the backend's durable sub-agent node to the camelCase UI
  * contract. The chat-scoped tree serializes `ChatSubAgentNode.as_dict()`.
  */
-function toSubAgentNode(raw: Record<string, unknown>): SubAgentNode {
-	const context = (raw.context as SubAgentNode['context'] | undefined) ?? {
-		isolated: false,
-		knowledge_cutoff: null,
-		mcp: { enabled: false, tools: [] }
-	};
-	return {
-		subAgentId: String(raw.subAgentId ?? raw.sub_agent_id ?? ''),
-		parentSubAgentId: (raw.parentSubAgentId ?? raw.parent_sub_agent_id ?? null) as
-			| string
-			| null,
-		phase: String(raw.phase ?? ''),
-		role: String(raw.role ?? ''),
-		status: String(raw.status ?? 'pending') as SubAgentNode['status'],
-		acceptsInput: Boolean(raw.acceptsInput ?? raw.accepts_input ?? false),
-		context,
-		workflowExecutionId: (raw.workflowExecutionId ??
-			raw.workflow_execution_id ??
-			null) as string | null
-	};
+function toSubAgentNode(raw: SubAgentNodeWire): SubAgentNode {
+	const { children, ...node } = raw;
+	return { ...node, context: null };
 }
 
 /**
@@ -722,64 +792,18 @@ function toSubAgentNode(raw: Record<string, unknown>): SubAgentNode {
  */
 export function listChatSubAgents(
 	workspaceId: string,
-	chatId: string
-): Promise<SubAgentNode[]> {
-	if (fixtureMode) return wait(5).then(() => []);
-	return apiFetch<{
-		roots: Record<string, unknown>[];
-		items: Record<string, unknown>[];
-	}>(`${chatNodeBase(workspaceId, chatId)}/sub_agents`).then((r) =>
-		r.items.map(toSubAgentNode)
-	);
-}
-
-/** Read one page of an execution's own activity (the execution itself). */
-export function listExecutionEvents(
-	workspaceId: string,
-	executionId: string,
-	options: { afterCursor?: number } = {}
-): Promise<ExecutionEvent[]> {
-	const afterCursor = options.afterCursor ?? 0;
-	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}/events?after_cursor=${afterCursor}`;
-	if (fixtureMode) {
-		return wait(5).then(() => {
-			const doc = fixtures.executionEvents[executionId];
-			const items = doc ? doc.items : [];
-			return plain(items).filter((e) => e.cursor > afterCursor);
-		});
-	}
-	return apiFetch<{ events: ExecutionEvent[] }>(path).then((r) => r.events);
-}
-
-/**
- * Read one page of a chat node's activity. Node activity lives on the
- * execution's event log, attributed to the node by its durable record.
- */
-export function listNodeEvents(
-	workspaceId: string,
 	chatId: string,
-	node: ExecutionNodeRef,
-	options: { afterCursor?: number; includeDescendants?: boolean } = {}
-): Promise<ExecutionEvent[]> {
-	const afterCursor = options.afterCursor ?? 0;
-	const descendants = options.includeDescendants ? '&include_descendants=true' : '';
-	const path = `${chatNodeBase(workspaceId, chatId, node)}/events?after_cursor=${afterCursor}${descendants}`;
-	if (fixtureMode) {
-		return wait(5).then(() => {
-			const doc = fixtures.executionEvents[chatId];
-			const items = doc ? doc.items : [];
-			return plain(items).filter((e) => e.cursor > afterCursor);
-		});
-	}
-	return apiFetch<{ events: ExecutionEvent[] }>(path).then((r) => r.events);
+	signal?: AbortSignal
+): Promise<SubAgentNode[]> {
+	const path = `${chatNodeBase(workspaceId, chatId)}/sub_agents`;
+	if (fixtureMode) return wait(5).then(() => decodeWire('ChatSubAgentTreeWire', { chatId, roots: [], items: [] }, path).items.map(toSubAgentNode));
+	return apiFetch<unknown>(path, { signal }).then((raw) =>
+		decodeWire('ChatSubAgentTreeWire', raw, path).items.map(toSubAgentNode)
+	);
 }
 
 export interface PostNodeMessageInput {
 	body: string;
-	/** Deprecated: the answering actor is derived from the authenticated session. */
-	actorId?: string;
-	/** Structured payload for gate resolutions and other control messages. */
-	metadata?: Record<string, unknown>;
 }
 
 /**
@@ -791,35 +815,54 @@ export function postNodeMessage(
 	workspaceId: string,
 	chatId: string,
 	node: ExecutionNodeRef,
-	input: PostNodeMessageInput
+	input: PostNodeMessageInput,
+	signal?: AbortSignal
 ): Promise<ChatMessage> {
 	const path = `${chatNodeBase(workspaceId, chatId, node)}/messages`;
 	if (fixtureMode) {
-		return wait(10).then(() => ({
-			message_id: `msg-node-${store.nextId++}`,
-			chat_id: '',
-			workspace_id: workspaceId,
-			actor_id: localActorId,
-			role: 'user' as const,
-			body: input.body,
-			state: 'accepted',
-			attachment_ids: [],
-			created_at: new Date().toISOString(),
-			updated_at: null,
-			execution_id: null,
-			intent_epoch: 0,
-			kind: 'sub_agent' as const,
-			data: { subAgentId: node.id }
-		}));
+		return wait(10).then(() => {
+			const receipt = decodeWire('NodeInputReceiptWire', {
+				message_id: `msg-node-${store.nextId++}`,
+				chat_id: chatId,
+				conversation_id: node.id, root_conversation_id: chatId, parent_conversation_id: chatId,
+				workspace_id: workspaceId,
+				actor_id: localActorId,
+				role: 'user',
+				body: input.body,
+				state: 'accepted',
+				attachment_ids: [],
+				created_at: new Date().toISOString(),
+				updated_at: null,
+				execution_id: null,
+				intent_epoch: 0,
+				kind: 'sub_agent',
+				data: { subAgentId: node.id },
+				created_by: localActorId,
+				schema_version: 1,
+				content_hash: fixtureDigest(JSON.stringify([workspaceId, chatId, node.id, store.nextId, input.body])),
+				input_position: 0,
+				investigation_ids: [],
+				reasoning: null,
+				tool_result: null,
+				subAgentId: node.id,
+				operatorPolicy: { allowed: true, actorId: localActorId, actorKind: 'human_operator',
+					allowedActorKinds: ['human_operator'], policy: 'human_only', role: 'operator', nodeId: node.id }
+			}, path);
+			const message = nodeMessage(receipt);
+			fixtureTimeline.message(message);
+			return message;
+		});
 	}
-	return apiFetch<ChatMessage & { subAgentId?: string }>(path, {
+	return apiFetch<unknown>(path, {
 		method: 'POST',
-		body: JSON.stringify({ body: input.body })
-	}).then((raw) => ({
-		...raw,
-		kind: 'sub_agent' as const,
-		data: { ...(raw.data ?? {}), subAgentId: raw.subAgentId ?? node.id }
-	}));
+		body: JSON.stringify({ body: input.body }),
+		signal
+	}).then((raw) => nodeMessage(decodeWire('NodeInputReceiptWire', raw, path)));
+}
+
+function nodeMessage(receipt: NodeInputReceiptWire): ChatMessage {
+	const { subAgentId, operatorPolicy, ...message } = receipt;
+	return { ...message, kind: 'sub_agent', data: { ...(message.data ?? {}), subAgentId } };
 }
 
 /** Fetch one workflow execution record by its execution id. */
@@ -832,13 +875,13 @@ export function getWorkflowExecution(
 			const found = Object.values(fixtures.executions).find(
 				(record) => record.execution_id === executionId
 			);
-			return found ? plain(found) : null;
+			return found ? decodeWire('WorkflowExecutionWire', plain(found), 'fixture/execution') : null;
 		});
 	}
-	return apiFetchOptional<WorkflowExecutionRecord | null>(
+	return apiFetchOptional<unknown>(
 		`/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}`,
 		null
-	);
+	).then((raw) => raw === null ? null : decodeWire('WorkflowExecutionWire', raw, `/executions/${executionId}`));
 }
 
 export function listStrategies(workspaceId: string): Promise<Strategy[]> {
@@ -1080,7 +1123,7 @@ export function getHarnessStatus(): Promise<HarnessStatus> {
 			server: { serverInfo: { name: 'harness', version: '0.1.0' } },
 			tools: [
 				{ name: 'run_backtest', description: 'Run one deterministic backtest' },
-				{ name: 'get_backtest_status', description: 'Read a backtest job' },
+				{ name: 'get_job_status', description: 'Read a backtest job' },
 				{ name: 'get_run', description: 'Read a stored run' },
 				{ name: 'list_artifacts', description: 'List a run artifact manifest' }
 			],
@@ -1468,16 +1511,4 @@ export async function checkAuth(): Promise<boolean> {
 	} catch {
 		return false;
 	}
-}
-
-export function getCapabilities(): Promise<Capabilities> {
-	const available: StatusSurface<true> = { state: 'available', value: true, reason: null };
-	return wait(5).then(() => ({
-		backend: backendKind,
-		chatMessages: true,
-		executionStream: true,
-		portfolio: available,
-		riskDecisions: available,
-		artifacts: available
-	}));
 }

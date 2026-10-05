@@ -388,11 +388,26 @@ class ControlToolService:
         record = self._lifecycle.get(workspace_id, sub_agent_id)
         if record is None:
             raise RuntimeError("sub-agent does not exist")
-        if record.workflow_execution_id is None:
+        parent = (
+            self._lifecycle.get(workspace_id, record.parent_sub_agent_id)
+            if record.parent_sub_agent_id
+            else None
+        )
+        if not (
+            record.phase_executor
+            and record.phase
+            and record.phase_attempt_id
+            and record.workflow_execution_id
+            and parent is not None
+            and parent.role == "workflow-node"
+            and parent.workflow_execution_id == record.workflow_execution_id
+            and parent.chat_id == record.chat_id
+        ):
             raise PhaseCompletionRejected(
                 "request_phase_completion requires a workflow phase node; "
                 "use request_sub_agent_completion for a sub-agent"
             )
+        self._reject_stale_completion(workspace_id, record, completion)
         if self._contract_validator is not None:
             # An authoritative validation (for example a harness compile of
             # the authored program) runs before any transition commits, so
@@ -400,6 +415,7 @@ class ControlToolService:
             failure = self._contract_validator(workspace_id, record, completion)
             if failure:
                 raise PhaseCompletionRejected(failure)
+        self._reject_stale_completion(workspace_id, record, completion)
         if self._phase_completions is None:
             raise PhaseCompletionRejected(
                 "no workflow is available to apply this completion"
@@ -426,6 +442,10 @@ class ControlToolService:
         record = child.record
         if record is None:
             raise RuntimeError("sub-agent does not exist")
+        if record.phase_executor:
+            raise PhaseCompletionRejected(
+                "phase executors must request phase completion"
+            )
         self._reject_stale_completion(workspace_id, record, result)
         return child.complete(result)
 
@@ -448,12 +468,18 @@ class ControlToolService:
         re-derive the contract; conversations and queued turns never check the
         epoch themselves.
         """
-        if self._execution_epochs is None or record.workflow_execution_id is None:
+        if record.workflow_execution_id is None:
             return
         raw_epoch = result.get("intentEpoch")
-        stamped = raw_epoch if isinstance(raw_epoch, int) else 0
-        current = self._execution_epochs(workspace_id, record.workflow_execution_id)
-        if current is None or current == stamped:
+        stamped = raw_epoch if type(raw_epoch) is int else None
+        current = (
+            self._execution_epochs(workspace_id, record.workflow_execution_id)
+            if self._execution_epochs is not None
+            else self._conversations.chat.get_execution(
+                workspace_id, record.workflow_execution_id
+            ).intent_epoch
+        )
+        if current is not None and current == stamped:
             return
         raise StaleCompletionError(
             f"completion is stamped with intent epoch {stamped} but the "

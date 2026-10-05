@@ -1,78 +1,42 @@
-"""Deterministic, complete shape validation for completion contracts.
+"""Advertised contract schemas and semantic checks beyond structure.
 
-The creation phase's completion contract is the one handoff whose payload the
-deterministic successor phase composes into typed objects.  These helpers give
-that contract one authoritative shape: a machine-checkable JSON Schema the
-tool catalog advertises so the provider constrains the call at decode time,
-and an error collector that reports every missing or wrongly-typed field in
-one deterministic pass so the repair turn is precise.
-
-The advertised schema and the collector are both mirrored from the composer
-the trials phase runs (:func:`..phases.trials._draft_from_contract` plus the
-compose helpers it delegates to), and both read the identifier, name, and
-version grammars from :mod:`thesis.research.grammar`, so the three can never
-drift apart.  The schema and the collector are only ever stricter than the
-composer, never weaker; the spec's creation validator additionally re-runs the
-composer as a drift guard, so a contract is accepted here if and only if the
-deterministic successor can consume it.
+The canonical agent JSON Schema validator owns structural validation. Domain
+checks cover subscription consistency and the authored model's observables;
+phase validators additionally compose typed contracts before acceptance.
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
-from pydantic import ValidationError
+from thesis.agent.runtime.schema import violations
+from thesis.paths import InvalidRelativePath, confined_relative_path
+from thesis.research.grammar import IDENTIFIER_PATTERN
+from thesis.research.models import MARKET_SYMBOL_PATTERN
+from thesis.workflows.research_models import PROGRAM_REFERENCE_SCHEMA
 
-from thesis.research.grammar import (
-    IDENTIFIER_PATTERN,
-    NAME_PATTERN,
-    VERSION_PATTERN,
-)
-from thesis.research.hypothesis import HypothesisFalsifier
-from thesis.research.models import BAR_INTERVALS
-
-#: The identifier grammar shared with the strictly validated front matter.
-_IDENTIFIER = re.compile(IDENTIFIER_PATTERN)
-_NAME = re.compile(NAME_PATTERN)
-_VERSION = re.compile(VERSION_PATTERN)
-
-_CONDITIONS = ("lt", "lte", "gt", "gte")
-_SCOPES = ("global", "workspace")
-
-#: Text caps mirrored from the hypothesis front matter's ``NonEmptyText``.
-_MAX_HYPOTHESIS_TEXT = 8_192
-
-#: The machine-checkable shape of the ``hypothesis`` payload, mirrored exactly
-#: from the prompt-side schema string and the composer's requirements.  It is
-#: never weaker than the composer: every declarative constraint the composer
-#: enforces is expressed here, and where the composer is more permissive (for
-#: example its tolerance of alternate harness-window key spellings) this shape
-#: stays with the stricter primary spelling instead.
 HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "claim": {
             "type": "string",
             "minLength": 1,
-            "maxLength": _MAX_HYPOTHESIS_TEXT,
+            "maxLength": 8192,
+            "pattern": r"\S",
         },
         "disagreement": {
             "type": "string",
             "minLength": 1,
-            "maxLength": _MAX_HYPOTHESIS_TEXT,
+            "maxLength": 8192,
+            "pattern": r"\S",
         },
-        "riskFactor": {"type": "string"},
-        "horizon": {"type": "string"},
+        "riskFactor": {"type": "string", "maxLength": 4096},
+        "horizon": {"type": "string", "maxLength": 4096},
         "universe": {
             "type": "array",
             "minItems": 1,
-            "items": {
-                "type": "string",
-                "minLength": 1,
-                "pattern": IDENTIFIER_PATTERN,
-            },
+            "items": {"type": "string", "pattern": MARKET_SYMBOL_PATTERN},
         },
         "falsifiers": {
             "type": "array",
@@ -86,44 +50,30 @@ HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
             ),
             "items": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
-                    "falsifierId": {
-                        "type": "string",
-                        "pattern": IDENTIFIER_PATTERN,
-                    },
-                    "falsifier_id": {
-                        "type": "string",
-                        "pattern": IDENTIFIER_PATTERN,
-                    },
-                    "observable": {
-                        "type": "string",
-                        "minLength": 1,
-                        "pattern": IDENTIFIER_PATTERN,
-                    },
-                    "condition": {"type": "string", "enum": list(_CONDITIONS)},
+                    "falsifierId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+                    "falsifier_id": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+                    "observable": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+                    "condition": {"type": "string", "enum": ["lt", "lte", "gt", "gte"]},
                     "threshold": {"type": "number"},
                     "test": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": _MAX_HYPOTHESIS_TEXT,
+                        "maxLength": 8192,
+                        "pattern": r"\S",
                     },
                 },
                 "required": ["observable", "condition", "threshold", "test"],
-                # The strictly validated falsifier model forbids extra keys;
-                # both identifier spellings the composer normalizes are legal.
-                "additionalProperties": False,
             },
         },
         "model": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
-                "modelId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
-                "version": {"type": "string", "pattern": VERSION_PATTERN},
-                "description": {"type": "string", "minLength": 1},
-                "source": {"type": "string", "minLength": 1},
-                # The composer accepts an array of identifier strings only:
-                # observables are the model's own statistic names, never
-                # objects carrying a separate type field.
+                **cast(dict[str, object], PROGRAM_REFERENCE_SCHEMA["properties"]),
+                "kind": {"type": "string", "enum": ["study"]},
+                "description": {"type": "string", "minLength": 1, "pattern": r"\S"},
                 "outputs": {
                     "type": "array",
                     "minItems": 1,
@@ -135,58 +85,16 @@ HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
                     "minProperties": 1,
                     "additionalProperties": {"type": "string"},
                 },
-                "harnessConfiguration": {
-                    "type": "object",
-                    "properties": {
-                        "start": {"type": "string", "minLength": 1},
-                        "end": {"type": "string", "minLength": 1},
-                        # The bar interval the study replays at; the harness
-                        # validates the same enum in the next wave.
-                        "interval": {
-                            "type": "string",
-                            "minLength": 1,
-                            "enum": list(BAR_INTERVALS),
-                        },
-                    },
-                    "required": ["start", "end", "interval"],
-                },
-                "indicators": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "alias": {
-                                "type": "string",
-                                "minLength": 1,
-                                "pattern": IDENTIFIER_PATTERN,
-                            },
-                            "scope": {"type": "string", "enum": list(_SCOPES)},
-                            "name": {
-                                "type": "string",
-                                "minLength": 1,
-                                "pattern": NAME_PATTERN,
-                            },
-                            "symbol": {
-                                "type": "string",
-                                "minLength": 1,
-                                "pattern": IDENTIFIER_PATTERN,
-                            },
-                            "parameters": {"type": "object"},
-                            "contentSha256": {"type": ["string", "null"]},
-                            "definition": {"type": ["object", "null"]},
-                        },
-                        "required": ["alias", "scope", "name", "symbol"],
-                    },
-                },
             },
             "required": [
-                "modelId",
+                "workspaceId",
+                "kind",
+                "programId",
+                "gitCommit",
                 "version",
                 "description",
-                "source",
                 "outputs",
                 "tests",
-                "harnessConfiguration",
             ],
         },
         "sizing": {"type": "string"},
@@ -196,10 +104,6 @@ HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
     "required": ["claim", "disagreement", "falsifiers", "model"],
 }
 
-#: The advertised completion contract for the hypothesis-creation phase. The
-#: target enum names only the real successor: the engine still accepts a
-#: terminal failure target, but the advertised shape never invites the agent
-#: to end the whole run itself.
 HYPOTHESIS_COMPLETION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -209,280 +113,123 @@ HYPOTHESIS_COMPLETION_SCHEMA: dict[str, Any] = {
     "required": ["hypothesis"],
 }
 
+DISCOVERY_CANDIDATE_FIELDS: tuple[str, ...] = (
+    "opportunity",
+    "signal",
+    "informationTime",
+    "direction",
+    "holdingPeriod",
+    "profitSource",
+    "effect",
+    "competingExplanation",
+    "evidence",
+)
 
-def _is_number(value: object) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool)
+DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "candidate": {
+            "type": "object",
+            "properties": {
+                name: {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": r"\S",
+                    "maxLength": 8192 if name == "evidence" else 4096,
+                }
+                for name in DISCOVERY_CANDIDATE_FIELDS
+            },
+            "required": list(DISCOVERY_CANDIDATE_FIELDS),
+        },
+        "attempts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "purpose": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": r"\S",
+                    },
+                    "studyId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+                    "dataTypes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+                    },
+                    "window": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": r"\S",
+                    },
+                    "result": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": r"\S",
+                    },
+                    "changed": {"type": "boolean"},
+                    "runId": {
+                        "type": ["string", "null"],
+                        "pattern": IDENTIFIER_PATTERN,
+                    },
+                },
+                "required": ["purpose", "studyId", "dataTypes", "window", "result"],
+            },
+        },
+        "untouchedData": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": r"\S",
+        },
+        "limitations": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": r"\S",
+        },
+    },
+    "required": ["candidate", "attempts", "untouchedData", "limitations"],
+}
 
-
-def _text_error(
-    path: str, value: object, *, max_length: int | None = None
-) -> str | None:
-    if value is None:
-        return f"{path}: required non-empty text is missing"
-    if not isinstance(value, str):
-        return f"{path}: must be text, got {type(value).__name__}"
-    if not value.strip():
-        return f"{path}: must be non-empty text"
-    if max_length is not None and len(value.strip()) > max_length:
-        return f"{path}: exceeds maximum length of {max_length} characters"
-    return None
-
-
-def _sequence_error(path: str, value: object, label: str) -> str | None:
-    if value is None:
-        return f"{path}: required {label} is missing"
-    if isinstance(value, str) or not isinstance(value, Sequence):
-        return f"{path}: must be a {label}, got {type(value).__name__}"
-    return None
-
-
-def _output_errors(outputs: Sequence[object]) -> list[str]:
-    """Collect every output-identifier problem, mirroring the composer."""
-    if not outputs:
-        return ["hypothesis.model.outputs: must contain at least one output"]
-    errors: list[str] = []
-    normalized: list[str] = []
-    for index, item in enumerate(outputs):
-        path = f"hypothesis.model.outputs[{index}]"
-        if not isinstance(item, str) or not item.strip():
-            errors.append(f"{path}: must be a non-empty identifier")
-            continue
-        text = item.strip()
-        if _IDENTIFIER.fullmatch(text) is None:
-            errors.append(f"{path}: must match the identifier grammar {item!r}")
-            continue
-        normalized.append(text)
-    if len(set(normalized)) != len(normalized):
-        errors.append("hypothesis.model.outputs: entries must be unique")
-    return errors
-
-
-def _tests_errors(tests: Mapping[object, object]) -> list[str]:
-    """Collect every test-mapping problem, mirroring the composer."""
-    errors: list[str] = []
-    if not tests:
-        errors.append("hypothesis.model.tests: must contain at least one test")
-    for path, content in tests.items():
-        if not isinstance(path, str) or not path.strip():
-            errors.append("hypothesis.model.tests: test paths must be non-empty text")
-        if not isinstance(content, str):
-            errors.append(
-                f"hypothesis.model.tests[{path!r}]: must be text, "
-                f"got {type(content).__name__}"
-            )
-    return errors
-
-
-def _model_errors(model: object) -> list[str]:
-    if not isinstance(model, Mapping):
-        return [
-            "hypothesis.model: required object is missing"
-            if model is None
-            else f"hypothesis.model: must be an object, got {type(model).__name__}"
-        ]
-    errors: list[str] = []
-    model_id = model.get("modelId")
-    error = _text_error("hypothesis.model.modelId", model_id)
-    if error:
-        errors.append(error)
-    elif _IDENTIFIER.fullmatch(str(model_id).strip()) is None:
-        errors.append(
-            f"hypothesis.model.modelId: must match the identifier grammar {model_id!r}"
-        )
-    version = model.get("version")
-    error = _text_error("hypothesis.model.version", version)
-    if error:
-        errors.append(error)
-    elif _VERSION.fullmatch(str(version).strip()) is None:
-        errors.append(
-            f"hypothesis.model.version: must match the semantic-version grammar "
-            f"{version!r}"
-        )
-    for key in ("description", "source"):
-        error = _text_error(f"hypothesis.model.{key}", model.get(key))
-        if error:
-            errors.append(error)
-    outputs = model.get("outputs")
-    error = _sequence_error("hypothesis.model.outputs", outputs, "sequence")
-    if error:
-        errors.append(error)
-    else:
-        assert isinstance(outputs, Sequence)
-        errors.extend(_output_errors(outputs))
-    tests = model.get("tests")
-    if tests is None:
-        errors.append("hypothesis.model.tests: required mapping is missing")
-    elif not isinstance(tests, Mapping):
-        errors.append(
-            f"hypothesis.model.tests: must be a mapping, got {type(tests).__name__}"
-        )
-    else:
-        errors.extend(_tests_errors(tests))
-    configuration = model.get("harnessConfiguration")
-    if configuration is not None and not isinstance(configuration, Mapping):
-        errors.append(
-            f"hypothesis.model.harnessConfiguration: must be an object, "
-            f"got {type(configuration).__name__}"
-        )
-    else:
-        declared = configuration or {}
-        for key in ("start", "end"):
-            error = _text_error(
-                f"hypothesis.model.harnessConfiguration.{key}", declared.get(key)
-            )
-            if error:
-                errors.append(error)
-        interval = declared.get("interval")
-        error = _text_error("hypothesis.model.harnessConfiguration.interval", interval)
-        if error:
-            errors.append(error)
-        elif str(interval).strip() not in BAR_INTERVALS:
-            errors.append(
-                "hypothesis.model.harnessConfiguration.interval: must be one "
-                f"of {', '.join(BAR_INTERVALS)}, got {interval!r}"
-            )
-    indicators = model.get("indicators")
-    if indicators is not None:
-        indicator_error = _sequence_error(
-            "hypothesis.model.indicators", indicators, "sequence"
-        )
-        if indicator_error:
-            errors.append(indicator_error)
-        else:
-            assert isinstance(indicators, Sequence)
-            errors.extend(_indicator_errors(indicators))
-    return errors
+DISCOVERY_COMPLETION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "target": {"type": "string", "enum": ["model_creation"]},
+        "discovery": DISCOVERY_PAYLOAD_SCHEMA,
+    },
+    "required": ["discovery"],
+}
 
 
-def _indicator_errors(indicators: Sequence[object]) -> list[str]:
-    errors: list[str] = []
-    aliases: list[str] = []
-    for index, item in enumerate(indicators):
-        path = f"hypothesis.model.indicators[{index}]"
-        if not isinstance(item, Mapping):
-            errors.append(f"{path}: must be an object, got {type(item).__name__}")
-            continue
-        for key in ("alias", "name", "symbol"):
-            error = _text_error(f"{path}.{key}", item.get(key))
-            if error:
-                errors.append(error)
-        scope = item.get("scope")
-        if scope is None:
-            errors.append(f"{path}.scope: required non-empty text is missing")
-        elif not isinstance(scope, str) or scope not in _SCOPES:
-            errors.append(
-                f"{path}.scope: must be one of {', '.join(_SCOPES)}, got {scope!r}"
-            )
-        parameters = item.get("parameters")
-        if parameters is not None and not isinstance(parameters, Mapping):
-            errors.append(
-                f"{path}.parameters: must be an object, got {type(parameters).__name__}"
-            )
-        alias = item.get("alias")
-        if isinstance(alias, str) and alias.strip():
-            text = alias.strip()
-            aliases.append(text)
-            if _IDENTIFIER.fullmatch(text) is None:
-                errors.append(
-                    f"{path}.alias: must match the identifier grammar {alias!r}"
-                )
-        symbol = item.get("symbol")
-        if (
-            isinstance(symbol, str)
-            and symbol.strip()
-            and _IDENTIFIER.fullmatch(symbol.strip()) is None
-        ):
-            errors.append(
-                f"{path}.symbol: must match the identifier grammar {symbol!r}"
-            )
-        name = item.get("name")
-        if (
-            isinstance(name, str)
-            and name.strip()
-            and _NAME.fullmatch(name.strip()) is None
-        ):
-            errors.append(
-                f"{path}.name: must match the indicator-name grammar {name!r}"
-            )
-    if len(set(aliases)) != len(aliases):
-        errors.append("hypothesis.model.indicators: aliases must be unique")
-    return errors
-
-
-def _universe_errors(universe: object) -> list[str]:
-    if universe is None:
-        return []
-    error = _sequence_error("hypothesis.universe", universe, "sequence")
-    if error:
-        return [error]
-    errors: list[str] = []
-    assert isinstance(universe, Sequence)
-    if not universe:
-        errors.append("hypothesis.universe: must contain at least one symbol")
-    for index, item in enumerate(universe):
-        path = f"hypothesis.universe[{index}]"
-        if not isinstance(item, str) or not item.strip():
-            errors.append(f"{path}: must be a non-empty symbol")
-        elif not _IDENTIFIER.match(item.strip()):
-            errors.append(f"{path}: must match the identifier grammar {item!r}")
-    return errors
-
-
-def _falsifier_errors(falsifiers: object) -> list[str]:
-    if falsifiers is None:
-        return ["hypothesis.falsifiers: required sequence is missing"]
-    error = _sequence_error("hypothesis.falsifiers", falsifiers, "sequence")
-    if error:
-        return [error]
-    assert isinstance(falsifiers, Sequence)
-    if not falsifiers:
-        # The deterministic successor derives one trial per falsifier and the
-        # trials contract requires a non-empty trial list, so a hypothesis
-        # without a falsifier can never be consumed: it is a contract problem
-        # to repair here, before any transition commits.
-        return ["hypothesis.falsifiers: must contain at least one falsifier"]
-    errors: list[str] = []
-    for index, item in enumerate(falsifiers):
-        path = f"hypothesis.falsifiers[{index}]"
-        if not isinstance(item, Mapping):
-            errors.append(f"{path}: must be an object, got {type(item).__name__}")
-            continue
-        # The composer normalizes the camelCase id key before validation, so
-        # the collector must accept exactly the same spelling.
-        normalized = dict(item)
-        if "falsifierId" in normalized and "falsifier_id" not in normalized:
-            normalized["falsifier_id"] = normalized.pop("falsifierId")
-        if not normalized.get("falsifier_id"):
-            normalized["falsifier_id"] = f"f{index + 1}"
-        try:
-            HypothesisFalsifier.model_validate(normalized)
-        except ValidationError as validation:
-            for entry in validation.errors():
-                field = ".".join(str(part) for part in entry["loc"])
-                errors.append(f"{path}.{field}: {entry['msg']}")
-    return errors
+def discovery_payload_errors(payload: Mapping[str, object]) -> list[str]:
+    """Return every structural miss using the advertised discovery schema."""
+    return [
+        miss.render()
+        for miss in violations(DISCOVERY_PAYLOAD_SCHEMA, payload, "discovery")
+    ]
 
 
 def hypothesis_payload_errors(payload: Mapping[str, object]) -> list[str]:
-    """Return every deterministic shape violation in one hypothesis payload.
-
-    The list is complete — every missing or wrongly-typed field is reported
-    once, in declaration order — and deterministic: the same payload always
-    yields the same lines, so a repair turn can be asserted exactly.
-    """
-    errors: list[str] = []
-    for key in ("claim", "disagreement"):
-        error = _text_error(
-            f"hypothesis.{key}", payload.get(key), max_length=_MAX_HYPOTHESIS_TEXT
-        )
-        if error:
-            errors.append(error)
-    errors.extend(_model_errors(payload.get("model")))
-    errors.extend(_universe_errors(payload.get("universe")))
-    errors.extend(_falsifier_errors(payload.get("falsifiers")))
+    """Collect structural misses and cross-field authored-model constraints."""
+    errors = [
+        miss.render()
+        for miss in violations(HYPOTHESIS_PAYLOAD_SCHEMA, payload, "hypothesis")
+    ]
     model = payload.get("model")
     falsifiers = payload.get("falsifiers")
     if isinstance(model, Mapping):
+        tests = model.get("tests")
+        if isinstance(tests, Mapping):
+            for path in tests:
+                try:
+                    confined_relative_path(path, f"hypothesis.model.tests[{path!r}]")
+                except InvalidRelativePath as error:
+                    errors.append(str(error))
         outputs = model.get("outputs")
         if isinstance(outputs, Sequence) and not isinstance(outputs, str):
             declared = {name for name in outputs if isinstance(name, str)}
@@ -501,53 +248,25 @@ def hypothesis_payload_errors(payload: Mapping[str, object]) -> list[str]:
                         "hypothesis.falsifiers: observable(s) absent from the newly "
                         f"authored model.outputs: {', '.join(missing)}"
                     )
-            source = model.get("source")
-            if isinstance(source, str):
-                # Tokenize literals before comments so URLs/comment-like text in
-                # string values cannot hide or invent a publish declaration.
-                tokens = [
-                    match.group()
-                    for match in re.finditer(
-                        r'r\#*".*?"\#*|"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*|'
-                        r"[A-Za-z_][A-Za-z_0-9]*|[^\s]",
-                        source,
-                        re.DOTALL,
-                    )
-                    if not match.group().startswith(("//", "/*"))
-                ]
-                published: set[str] = set()
-                for index in range(len(tokens) - 4):
-                    if tokens[index : index + 3] != [".", "publish", "("]:
-                        continue
-                    literal = tokens[index + 3]
-                    if tokens[index + 4] != ",":
-                        continue
-                    if literal.startswith('"') and literal.endswith('"'):
-                        published.add(literal[1:-1])
-                    elif literal.startswith("r") and '"' in literal:
-                        published.add(literal.split('"', 1)[1].rsplit('"', 1)[0])
-                unpublished = sorted(declared - published)
-                if unpublished:
-                    errors.append(
-                        "hypothesis.model.source: newly authored model.outputs "
-                        "must be published under exact literal names; missing: "
-                        f"{', '.join(unpublished)}"
-                    )
     return errors
 
 
 def format_contract_errors(errors: Sequence[str]) -> str:
-    """Format one collected error list as the rejection repair reason."""
+    """Format every miss in one repair response."""
     listed = "\n".join(f"- {error}" for error in errors)
     return (
-        f"completion contract rejected with {len(errors)} problem(s) — fix "
+        f"completion contract rejected with {len(errors)} problem(s) - fix "
         f"every problem and call request_phase_completion again:\n{listed}"
     )
 
 
 __all__ = [
+    "DISCOVERY_CANDIDATE_FIELDS",
+    "DISCOVERY_COMPLETION_SCHEMA",
+    "DISCOVERY_PAYLOAD_SCHEMA",
     "HYPOTHESIS_COMPLETION_SCHEMA",
     "HYPOTHESIS_PAYLOAD_SCHEMA",
+    "discovery_payload_errors",
     "format_contract_errors",
     "hypothesis_payload_errors",
 ]

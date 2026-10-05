@@ -53,7 +53,7 @@ tool.
   `tests/harness/execution/test_orders.py`.
 - Keep cross-product contract tests at an explicit integration boundary rather
   than mixing them into one product's unit-test package.
-- New CLEO tasks that add several modules must reserve capability directories,
+- Changes that add several modules must reserve capability directories,
   not a list of flat product-root files. Include package metadata, entrypoints,
   documentation, and mirrored test paths in the owning task when they change.
 - Historical verification records remain immutable when files move. Update

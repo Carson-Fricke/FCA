@@ -33,7 +33,6 @@ from thesis.chat import (
 if TYPE_CHECKING:
     from thesis.agent.runtime.control import AwaitResult
     from thesis.agent.runtime.conversation import (
-        ChatSubscription,
         Conversation,
         Conversations,
     )
@@ -61,7 +60,12 @@ class OneShotPolicy:
         from thesis.agent.runtime.session import SessionResult
         from thesis.chat import SubAgentStatus
 
-        if not isinstance(result, SessionResult) or result.status != "completed":
+        if (
+            not isinstance(result, SessionResult)
+            or result.status != "completed"
+            or result.completion is not None
+            or not result.content.strip()
+        ):
             return
         current = self._service.store.get_sub_agent(
             record.workspace_id, record.sub_agent_id
@@ -146,6 +150,10 @@ class ChildConversation:
         )
         if record is None:
             raise RuntimeError("sub-agent does not exist")
+        from thesis.chat import SubAgentStatus
+
+        if record.status is not SubAgentStatus.COMPLETED:
+            raise RuntimeError("only a completed child can deliver a completed result")
         self._service.delivery.deliver_child_result(self._returns_to, record)
         return record
 
@@ -249,10 +257,6 @@ class ChildConversation:
         """Return whether a turn is currently running for the child."""
         return self._inner.in_flight()
 
-    def subscribe(self) -> ChatSubscription:
-        """Return the live frame reader for the child's chat timeline."""
-        return self._inner.subscribe()
-
     def transcript(self) -> tuple[ChatMessage, ...]:
         """Return the child's own anchored messages, in order."""
         return self._inner.transcript()
@@ -260,6 +264,12 @@ class ChildConversation:
     def run_turn(self) -> object:
         """Run the child's next turn (the worker body)."""
         return self._inner.run_turn()
+
+    def turn_ended(self, result: object) -> None:
+        """Apply the policy resolved from this child's durable record."""
+        record = self.record
+        if record is not None:
+            self._policy.turn_ended(record, result)
 
 
 __all__ = [

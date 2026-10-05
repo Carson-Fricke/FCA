@@ -752,11 +752,8 @@ impl std::error::Error for ConfigurationError {}
 
 /// Read the top-level `shell` scalar from a configuration document.
 ///
-/// This is a minimal stand-in for the typed loader in
-/// `harness.configuration.loader`; it only needs to distinguish the backtest
-/// shell from the other shells so the CLI can reproduce the Python usage
-/// errors. The typed validation remains owned by the Python engine until the
-/// configuration port lands.
+/// Uses the shared document syntax parser. Full document validation happens in
+/// the selected native job loader before execution.
 ///
 /// # Errors
 ///
@@ -771,24 +768,9 @@ pub fn configuration_shell(path: &Path) -> Result<String, ConfigurationError> {
 /// Extract a top-level `shell: <value>` (YAML) or `"shell": "<value>"` (JSON).
 #[must_use]
 pub fn parse_configuration_shell(text: &str) -> Option<String> {
-    for line in text.lines() {
-        let trimmed = line.trim_end();
-        if trimmed.trim_start().len() != trimmed.len() {
-            continue;
-        }
-        let rest = match trimmed
-            .strip_prefix("shell:")
-            .or_else(|| trimmed.strip_prefix("\"shell\":"))
-        {
-            Some(rest) => rest,
-            None => continue,
-        };
-        let value = rest
-            .trim()
-            .trim_matches(|character| character == '"' || character == '\'');
-        if !value.is_empty() {
-            return Some(value.to_string());
-        }
+    let mapping = config::replay::parse_document(text).ok()?;
+    match mapping.get("shell") {
+        Some(config::YamlValue::Str(shell)) if !shell.is_empty() => Some(shell.clone()),
+        _ => None,
     }
-    None
 }

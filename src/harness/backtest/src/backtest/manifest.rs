@@ -23,7 +23,6 @@ pub const ENGINE_ID: &str = "harness.backtest";
 pub const ENGINE_VERSION: &str = "1";
 
 /// Domain prefix used by `harness.configuration.hashing`.
-const HASH_DOMAIN: &[u8] = b"fca:harness-configuration:v1\0";
 /// Domain prefix used by `harness.configuration.hashing` run digests.
 pub const RUN_DIGEST_DOMAIN: &[u8] = b"fca:harness-results:run:v1\0";
 /// Run digest version tag.
@@ -32,10 +31,10 @@ pub const RUN_DIGEST_VERSION: &str = "harness.results.run.v1";
 /// Return a domain-separated SHA-256 hash of canonical configuration.
 #[must_use]
 pub fn configuration_hash(value: &JsonValue) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(HASH_DOMAIN);
-    hasher.update(value.to_canonical_string().as_bytes());
-    hasher.finalize_hex()
+    harness_contracts::configuration_hash(
+        &value.to_serde_value(),
+        harness_contracts::HashEncoding::HistoricalAscii,
+    )
 }
 
 /// Return the SHA-256 hex digest of one artifact payload.
@@ -221,6 +220,12 @@ pub struct BacktestManifest {
     pub risk_pipeline_fingerprint: String,
     /// Strategy identities.
     pub strategies: Vec<StrategyIdentity>,
+    /// Effective consumer plan, absent for legacy runs.
+    pub effective_subscriptions: Option<Vec<super::engine_core::MarketSubscription>>,
+    /// Consumer union plus execution inputs planned for acquisition; absent for legacy runs.
+    pub acquired_subscriptions: Option<Vec<super::engine_core::MarketSubscription>>,
+    /// Separate quote/trade execution plan; empty for studies, absent for legacy runs.
+    pub execution_subscriptions: Option<Vec<super::engine_core::MarketSubscription>>,
 }
 
 impl BacktestManifest {
@@ -233,7 +238,7 @@ impl BacktestManifest {
     /// Return a canonical JSON-ready representation.
     #[must_use]
     pub fn to_json(&self) -> JsonValue {
-        JsonValue::object([
+        let mut value = JsonValue::object([
             (
                 "manifest_version",
                 JsonValue::String(self.manifest_version.clone()),
@@ -309,7 +314,26 @@ impl BacktestManifest {
                         .collect(),
                 ),
             ),
-        ])
+        ]);
+        if let (Some(plan), JsonValue::Object(entries)) =
+            (&self.effective_subscriptions, &mut value)
+        {
+            entries.insert(
+                "effective_subscriptions".into(),
+                super::config::subscriptions_json(plan),
+            );
+        }
+        if let JsonValue::Object(entries) = &mut value {
+            for (name, plan) in [
+                ("acquired_subscriptions", &self.acquired_subscriptions),
+                ("execution_subscriptions", &self.execution_subscriptions),
+            ] {
+                if let Some(plan) = plan {
+                    entries.insert(name.into(), super::config::subscriptions_json(plan));
+                }
+            }
+        }
+        value
     }
 }
 
@@ -483,6 +507,9 @@ pub fn build_manifest(
         fee_fingerprint: configuration_hash(fee_identity),
         risk_pipeline_fingerprint: configuration_hash(risk_pipeline_identity),
         strategies: strategy_identities,
+        effective_subscriptions: None,
+        acquired_subscriptions: None,
+        execution_subscriptions: None,
     })
 }
 
@@ -504,6 +531,18 @@ pub fn utc_timestamp(timestamp_ns: i64, with_z: bool) -> String {
     } else if text.ends_with('Z') {
         text.pop();
         text.push_str("+00:00");
+    }
+    text
+}
+
+/// Preserve exact replay bounds in configuration identity, retaining historical
+/// six-digit formatting unless the instant has submicrosecond precision.
+#[must_use]
+pub fn configuration_timestamp(timestamp_ns: i64) -> String {
+    let mut text = utc_timestamp(timestamp_ns, true);
+    if timestamp_ns.rem_euclid(1_000) != 0 {
+        text.truncate(text.len() - 7);
+        text.push_str(&format!("{:09}Z", timestamp_ns.rem_euclid(1_000_000_000)));
     }
     text
 }

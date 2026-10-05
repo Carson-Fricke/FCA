@@ -619,6 +619,10 @@ pub struct LocalBarsBackfillOptions {
     pub retry_settle_seconds: Option<f64>,
     /// Shared catalog store; the layout's file is opened when absent.
     pub catalog: Option<Arc<JsonCatalogStore>>,
+    /// Incremental progress observer: one planned snapshot leads the walk so a
+    /// running job shows its total, then each planned session reports once its
+    /// symbol window commits.
+    pub progress: Option<BackfillProgressSink>,
 }
 
 /// Produce every session-aligned bars partition a symbol set still misses.
@@ -627,7 +631,9 @@ pub struct LocalBarsBackfillOptions {
 /// already invalidates derived rows whose trade revision changed), the
 /// provider is tried first, and the stored trades derive the remainder. One
 /// transaction commits a whole symbol window atomically; transient provider
-/// failures get at most one settle-delayed retry pass in the same run.
+/// failures get at most one settle-delayed retry pass in the same run. Each
+/// planned session reports one progress snapshot after its symbol window
+/// commits.
 pub async fn run_local_bars_backfill(
     options: LocalBarsBackfillOptions,
 ) -> Result<BackfillResult, LocalIngestError> {
@@ -662,8 +668,7 @@ pub async fn run_local_bars_backfill(
         Arc::new(CatalogTradeReader::new(Arc::clone(&repository), readable));
     let provider = bars_provider(options.provider, &options.settings)?;
 
-    let mut entries: Vec<SessionIngestEntry> = Vec::new();
-    let mut succeeded = 0usize;
+    let mut planned: Vec<(String, Vec<CoverageSession>)> = Vec::new();
     for symbol in &symbols {
         let report = calculate_coverage(
             catalog.as_ref(),
@@ -683,9 +688,29 @@ pub async fn run_local_bars_backfill(
             .filter(|entry| entry.is_actionable())
             .map(|entry| entry.session)
             .collect();
-        if sessions.is_empty() {
-            continue;
+        if !sessions.is_empty() {
+            planned.push((symbol.clone(), sessions));
         }
+    }
+    let sessions_total: usize = planned.iter().map(|(_, sessions)| sessions.len()).sum();
+    if let Some(sink) = &options.progress {
+        if let Some((symbol, sessions)) = planned.first() {
+            if let Some(first) = sessions.first() {
+                sink(BackfillProgress {
+                    sessions_total,
+                    sessions_done: 0,
+                    symbol: symbol.clone(),
+                    session_date: first.session_date.isoformat(),
+                    data_type_rows: BTreeMap::new(),
+                    error: None,
+                });
+            }
+        }
+    }
+    let mut sessions_done = 0usize;
+    let mut entries: Vec<SessionIngestEntry> = Vec::new();
+    let mut succeeded = 0usize;
+    for (symbol, sessions) in &planned {
         let transaction = BarsIngestTransaction::new(
             Arc::clone(&provider),
             Arc::clone(&reader),
@@ -697,11 +722,11 @@ pub async fn run_local_bars_backfill(
             options.asset_class,
             symbol,
             options.interval,
-            &sessions,
+            sessions,
             options.retry_settle_seconds,
         )
         .await?;
-        for session in &sessions {
+        for session in sessions {
             let record = result
                 .coverage
                 .iter()
@@ -725,6 +750,17 @@ pub async fn run_local_bars_backfill(
             };
             if entry.error.is_none() {
                 succeeded += 1;
+            }
+            if let Some(sink) = &options.progress {
+                sessions_done += 1;
+                sink(BackfillProgress {
+                    sessions_total,
+                    sessions_done,
+                    symbol: symbol.clone(),
+                    session_date: entry.session_date.clone(),
+                    data_type_rows: entry.data_type_rows.clone(),
+                    error: entry.error.clone(),
+                });
             }
             entries.push(entry);
         }

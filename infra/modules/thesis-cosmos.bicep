@@ -2,11 +2,11 @@ targetScope = 'resourceGroup'
 
 // Thesis durable conversation store (Azure Cosmos DB, SQL API)
 // ------------------------------------------------------------
-// The Thesis backend keeps every chat, timeline item, execution document, and
-// workflow event in Cosmos DB (src/thesis/cosmos/*). Local development uses
-// the Cosmos emulator (.github/runbooks/thesis-local-stack.md); this module
-// provisions the deployed account so the container app never falls back to
-// the emulator defaults that `CosmosSettings.from_environment()` would
+// The Thesis backend keeps every chat, conversation timeline item, execution
+// document, and workflow event in Cosmos DB (src/thesis/cosmos/*). Local
+// development uses the Cosmos emulator (.github/runbooks/thesis-local-stack.md);
+// this module provisions the deployed account so the container app never falls
+// back to the emulator defaults that `CosmosSettings.from_environment()` would
 // otherwise resolve inside the image.
 //
 // Isolation and account shape: a dedicated account, separate from any
@@ -23,10 +23,11 @@ targetScope = 'resourceGroup'
 // reads.
 //
 // Schema ownership: the container ids and partition keys below are the same
-// closed set the runtime composes (`TIMELINE_CONTAINER`/`CATALOG_CONTAINER`/
-// `EXECUTIONS_CONTAINER` in src/thesis/cosmos/client.py). Changing a partition
-// key here without changing that module would silently break point reads, so
-// keep the two in lockstep.
+// closed set the runtime composes (`CATALOG_CONTAINER` and
+// `EXECUTIONS_CONTAINER` in src/thesis/cosmos/client.py). The catalog holds
+// every conversation document, including messages and events that form the
+// per-chat timeline. Changing a partition key here without changing that
+// module would silently break point reads, so keep the two in lockstep.
 //
 // Additive monthly cost envelope (per the cost-controls.bicep style):
 // serverless has no fixed hourly charge; storage is billed per GB-month and
@@ -65,14 +66,11 @@ var dataContributorRoleDefinitionId = resourceId(
   '00000000-0000-0000-0000-000000000002'
 )
 
-// The container set mirrors src/thesis/cosmos/client.py: one chat-scoped
-// timeline, one workspace-scoped catalog, one execution-store document per
+// The container set mirrors src/thesis/cosmos/client.py: one workspace-scoped
+// catalog holding every conversation document (records, messages, events, and
+// per-chat sequence counters), plus one execution-store document per
 // execution. Partition keys are the only read paths the runtime uses.
 var containers = [
-  {
-    id: 'timeline'
-    partitionPath: '/chatId'
-  }
   {
     id: 'catalog'
     partitionPath: '/workspaceId'

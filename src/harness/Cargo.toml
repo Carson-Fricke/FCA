@@ -13,6 +13,7 @@ members = [
     "live",
     "mcp",
     "config",
+    "contracts",
     "strategy-sdk",
     "strategy-jit",
     "lakeclient",

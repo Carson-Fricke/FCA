@@ -7,7 +7,6 @@
 //! enough to reject the same malformed documents.
 
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -164,18 +163,9 @@ fn currency(text: &str, field: &str) -> Result<String, ConfigError> {
 }
 
 fn bar_interval(text: &str, field: &str) -> Result<String, ConfigError> {
-    let bytes = text.as_bytes();
-    if bytes.is_empty() || !(b'1'..=b'9').contains(&bytes[0]) {
-        return Err(ConfigError(format!("{field} has an invalid interval")));
-    }
-    let mut index = 1usize;
-    while index < bytes.len() && bytes[index].is_ascii_digit() {
-        index += 1;
-    }
-    if matches!(&text[index..], "s" | "min" | "h" | "d") {
-        return Ok(text.to_string());
-    }
-    Err(ConfigError(format!("{field} has an invalid interval")))
+    harness_contracts::validate_bar_interval(text)
+        .map_err(|e| ConfigError(format!("{field}: {e}")))?;
+    Ok(text.to_string())
 }
 
 fn enum_value(text: &str, allowed: &[&str], field: &str) -> Result<String, ConfigError> {
@@ -207,7 +197,8 @@ fn image_digest(text: &str, field: &str) -> Result<String, ConfigError> {
 }
 
 fn parse_decimal(text: &str, field: &str) -> Result<Decimal, ConfigError> {
-    Decimal::from_str(text.trim())
+    Decimal::from_str_exact(text.trim())
+        .or_else(|_| Decimal::from_scientific(text.trim()))
         .map_err(|_| ConfigError(format!("{field} must be an exact decimal")))
 }
 
@@ -216,15 +207,30 @@ fn decimal_value(decimal: Decimal) -> Value {
 }
 
 fn datetime_value(text: &str, field: &str) -> Result<Value, ConfigError> {
+    if let Some((_, fraction)) = text.split_once('.') {
+        let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 || digits > 9 {
+            return Err(ConfigError(format!(
+                "{field} must have 1 to 9 fractional digits"
+            )));
+        }
+    }
     let parsed = DateTime::parse_from_rfc3339(text).map_err(|_| {
         ConfigError(format!(
             "{field} must be an ISO 8601 datetime with a UTC offset"
         ))
     })?;
-    let formatted = parsed
-        .with_timezone(&Utc)
-        .format("%Y-%m-%dT%H:%M:%S%.6fZ")
-        .to_string();
+    if parsed.timestamp_subsec_nanos() >= 1_000_000_000 || parsed.timestamp_nanos_opt().is_none() {
+        return Err(ConfigError(format!(
+            "{field} must be within nanosecond range, without leap seconds"
+        )));
+    }
+    let precision = if parsed.timestamp_subsec_nanos() % 1000 == 0 {
+        "%Y-%m-%dT%H:%M:%S%.6fZ"
+    } else {
+        "%Y-%m-%dT%H:%M:%S%.9fZ"
+    };
+    let formatted = parsed.with_timezone(&Utc).format(precision).to_string();
     Ok(json!({"$datetime": formatted}))
 }
 
@@ -333,11 +339,6 @@ fn build_strategy_instance(value: YamlValue) -> Result<Value, ConfigError> {
 
 fn build_strategy_instances(value: YamlValue) -> Result<(Value, Decimal), ConfigError> {
     let items = as_seq(value, "strategy_instances")?;
-    if items.is_empty() {
-        return Err(ConfigError(
-            "strategy_instances must not be empty".to_string(),
-        ));
-    }
     let mut output = Vec::with_capacity(items.len());
     let mut ids: Vec<String> = Vec::new();
     let mut capital = Decimal::ZERO;
@@ -396,11 +397,6 @@ fn build_risk_pipeline(value: YamlValue) -> Result<Value, ConfigError> {
         "on_reject",
     )?;
     let rules_value = as_seq(take(&mut map, "rules")?, "rules")?;
-    if rules_value.is_empty() {
-        return Err(ConfigError(
-            "risk_pipeline.rules must not be empty".to_string(),
-        ));
-    }
     let mut rules = Vec::with_capacity(rules_value.len());
     let mut ids: Vec<String> = Vec::new();
     for rule in rules_value {
@@ -466,9 +462,6 @@ fn build_fees(value: YamlValue) -> Result<Value, ConfigError> {
         "rounding",
     )?;
     let rules_value = as_seq(take(&mut map, "rules")?, "rules")?;
-    if rules_value.is_empty() {
-        return Err(ConfigError("fees.rules must not be empty".to_string()));
-    }
     let mut rules = Vec::with_capacity(rules_value.len());
     let mut ids: Vec<String> = Vec::new();
     for rule in rules_value {
@@ -565,22 +558,46 @@ fn build_data_snapshot(value: YamlValue) -> Result<Value, ConfigError> {
         &as_str(take(&mut map, "snapshot_id")?, "snapshot_id")?,
         "snapshot_id",
     )?;
-    let fingerprint = sha256(
-        &as_str(take(&mut map, "fingerprint")?, "fingerprint")?,
-        "fingerprint",
-    )?;
+    let fingerprint = as_str(take(&mut map, "fingerprint")?, "fingerprint")?;
+    if !fingerprint.is_empty() {
+        sha256(&fingerprint, "fingerprint")?;
+    }
     let symbols = symbols(take(&mut map, "symbols")?, "symbols")?;
-    let bar_interval = bar_interval(
-        &as_str(take(&mut map, "bar_interval")?, "bar_interval")?,
-        "bar_interval",
-    )?;
+    let subscriptions = take_opt(&mut map, "subscriptions")
+        .map(|value| {
+            let items = as_seq(value, "data.subscriptions")?;
+            let mut inputs = Vec::new();
+            for item in items {
+                inputs.push(
+                    serde_json::from_value::<harness_contracts::Subscription>(config_value(&item)?)
+                        .map_err(|e| ConfigError(format!("data.subscriptions: {e}")))?,
+                );
+            }
+            let output = harness_contracts::canonical_subscriptions(inputs).map_err(ConfigError)?;
+            serde_json::to_value(output).map_err(|e| ConfigError(e.to_string()))
+        })
+        .transpose()?;
+    let interval = match take_opt(&mut map, "bar_interval") {
+        Some(value) => Some(bar_interval(
+            &as_str(value, "bar_interval")?,
+            "bar_interval",
+        )?),
+        None if subscriptions.is_some() => None,
+        None => return Err(ConfigError("Field required: bar_interval".to_string())),
+    };
     ensure_empty(&map, "data")?;
-    Ok(json!({
+    let mut data = json!({
         "snapshot_id": snapshot_id,
         "fingerprint": fingerprint,
         "symbols": symbols,
-        "bar_interval": bar_interval,
-    }))
+    });
+    if let Some(interval) = interval {
+        data["bar_interval"] = json!(interval);
+    }
+    if let Some(subscriptions) = subscriptions {
+        data["subscriptions"] = subscriptions;
+    }
+    Ok(data)
 }
 
 fn build_runtime_adapter(value: YamlValue, field: &str) -> Result<Value, ConfigError> {
@@ -676,13 +693,17 @@ pub fn build_api(mapping: &Mapping) -> Result<Value, ConfigError> {
 ///
 /// Returns [`ConfigError`] for any validation failure.
 pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
-    let mut map = mapping.clone();
-    take_shell(&mut map, "backtest")?;
+    let mut map = crate::replay::with_defaults(mapping)?;
+    let shell = as_str(take(&mut map, "shell")?, "shell")?;
+    let version = as_int(take(&mut map, "schema_version")?, "schema_version")?;
+    if version != 1 {
+        return Err(ConfigError("schema_version must be 1".into()));
+    }
     let run_id = identifier(&as_str(take(&mut map, "run_id")?, "run_id")?, "run_id")?;
     let start = datetime_value(&as_str(take(&mut map, "start")?, "start")?, "start")?;
     let end = datetime_value(&as_str(take(&mut map, "end")?, "end")?, "end")?;
-    if start["$datetime"].as_str().unwrap_or_default()
-        >= end["$datetime"].as_str().unwrap_or_default()
+    if DateTime::parse_from_rfc3339(start["$datetime"].as_str().unwrap_or_default()).unwrap()
+        >= DateTime::parse_from_rfc3339(end["$datetime"].as_str().unwrap_or_default()).unwrap()
     {
         return Err(ConfigError("backtest start must be before end".to_string()));
     }
@@ -729,7 +750,7 @@ pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
     }
     Ok(json!({
         "schema_version": 1,
-        "shell": "backtest",
+        "shell": shell,
         "run_id": run_id,
         "start": start,
         "end": end,

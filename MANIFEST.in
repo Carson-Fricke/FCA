@@ -1,7 +1,6 @@
-# Source distribution payload for the Rust PyO3 bridge. The pure-Python
-# packages are discovered by setuptools; the Rust workspace and the setup.py
-# that builds its cdylib must travel with the sdist so a wheel can be rebuilt
-# from it.
+# Source distribution payload for the packaged SDK references. The pure-Python
+# packages are discovered by setuptools; the canonical Rust crate sources and
+# manifests travel with the sdist so a wheel can be rebuilt from it.
 include setup.py
 include src/harness/Cargo.toml
 include src/harness/Cargo.lock
@@ -13,3 +12,14 @@ include src/lake/Cargo.lock
 include src/lake/rust-toolchain.toml
 recursive-include src/lake *.rs
 recursive-include src/lake Cargo.toml
+recursive-include src/thesis/knowledge/library *.md
+# Wheel SDK references and their portable Cargo path dependencies use these
+# canonical sources directly, not a separately maintained Python-side copy.
+include src/harness/strategy-sdk/Cargo.toml
+recursive-include src/harness/strategy-sdk/src *.rs
+include src/harness/contracts/Cargo.toml
+recursive-include src/harness/contracts/src *.rs
+include src/harness/num/Cargo.toml
+recursive-include src/harness/num/src *.rs
+prune src/harness/target
+prune src/lake/target

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, cast
 
+from thesis.paths import InvalidRelativePath, confined_relative_path
+
 _HASH_DOMAIN = b"fca:thesis-strategy-bundle:v1\0"
 
 
@@ -47,33 +49,10 @@ def _version(value: str) -> str:
 
 
 def _relative_name(value: str, label: str) -> str:
-    if not isinstance(value, str):
-        raise StrategyBundleError(f"{label} must be a string")
-    normalized = value.replace("\\", "/")
-    parts = normalized.split("/")
-    if (
-        not normalized
-        or normalized.startswith("/")
-        or any(part in {"", ".", ".."} for part in parts)
-        or any(
-            ":" in part
-            or part.casefold() in {".git", "manifest.json"}
-            or part.endswith((".", " "))
-            or any(ord(character) < 32 or character in '<>"|?*' for character in part)
-            or part.split(".")[0].casefold()
-            in {
-                "con",
-                "prn",
-                "aux",
-                "nul",
-                *(f"com{i}" for i in range(1, 10)),
-                *(f"lpt{i}" for i in range(1, 10)),
-            }
-            for part in parts
-        )
-    ):
-        raise StrategyBundleError(f"{label} must be a confined relative path")
-    return "/".join(parts)
+    try:
+        return confined_relative_path(value, label)
+    except InvalidRelativePath as error:
+        raise StrategyBundleError(str(error)) from error
 
 
 def _freeze(value: object) -> object:

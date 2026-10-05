@@ -24,7 +24,7 @@ from thesis.agent.runtime.delivery import (
 )
 from thesis.agent.runtime.lifecycle import SubAgentLifecycle
 from thesis.agent.runtime.specs import SubAgentSpec
-from thesis.chat.contracts import MessageRole, SubAgentRecord
+from thesis.chat.contracts import CompletionMode, MessageRole, SubAgentRecord
 
 __all__ = ["SpawnedAgent", "SubAgentSpawner"]
 
@@ -75,6 +75,9 @@ class SubAgentSpawner:
         sub_agent_id: str | None = None,
         prompt_key: str | None = None,
         prompt_data: Mapping[str, object] | None = None,
+        completion_mode: CompletionMode | None = None,
+        returns_to_sub_agent_id: str | None = None,
+        phase_executor: bool = False,
     ) -> SpawnedAgent:
         """Create the agent and deliver its first prompt, waking its own turn.
 
@@ -94,6 +97,9 @@ class SubAgentSpawner:
             workflow_execution_id=workflow_execution_id,
             phase_attempt_id=phase_attempt_id,
             sub_agent_id=sub_agent_id,
+            completion_mode=completion_mode,
+            returns_to_sub_agent_id=returns_to_sub_agent_id,
+            phase_executor=phase_executor,
         )
         delivery = self.deliver_prompt(
             workspace_id,

@@ -43,6 +43,7 @@ from thesis.cosmos.stack import (  # noqa: E402
 )
 from thesis.http.application import (  # noqa: E402
     create_app,
+    require_single_worker,
     serving_workspace_store,
 )
 from thesis.http.serving import (  # noqa: E402
@@ -167,6 +168,7 @@ class _LoggingControlToolService(ControlToolService):
         return record
 
 
+require_single_worker()
 _harness, _harness_tools = _harness_composition()
 
 # Conversations persist in Cosmos DB (the local emulator by default) and every
@@ -211,13 +213,13 @@ stack = build_serving_stack(
 app = create_app(
     chat_service=stack.chat_service,
     workspace_data=workspace_data,
-    chat_stream_broker=stack.broker,
     conversations=stack.conversations,
     workflow_runtime=stack.workflow_runtime,
     workflow_registry=stack.workflow_registry,
     harness_tool_provider=stack.harness_tool_provider,
     operator_policies=stack.operator_policies,
     timeline=timeline,
+    in_memory=False,
 )
 app.add_middleware(
     CORSMiddleware,

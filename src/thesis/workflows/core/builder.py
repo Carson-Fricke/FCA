@@ -16,7 +16,7 @@ cross-field validation, only structural checks over names and tables.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 from thesis.workflows.core.phase import PhaseSpec, WorkflowSpecError
 from thesis.workflows.core.spec import (
@@ -42,6 +42,8 @@ class WorkflowBuilder[
         self._workflow_id = ""
         self._version = ""
         self._title = ""
+        self._knowledge_scope: Literal["shared", "workspace", "both"] = "both"
+        self._phase_knowledge: dict[str, tuple[str, ...]] = {}
         self._phases: list[PhaseSpec[WorkflowT, RequestT, StateT]] = []
         self._transitions: dict[str, set[str]] = {}
         self._piping: dict[tuple[str, str], PipingFunction[StateT]] = {}
@@ -50,11 +52,19 @@ class WorkflowBuilder[
         self._services: object | None = None
         self._ports: WorkflowPorts | None = None
 
-    def workflow(self, workflow_id: str, *, version: str, title: str) -> Self:
+    def workflow(
+        self,
+        workflow_id: str,
+        *,
+        version: str,
+        title: str,
+        knowledge_scope: Literal["shared", "workspace", "both"] = "both",
+    ) -> Self:
         """Set the workflow identity and version."""
         self._workflow_id = workflow_id
         self._version = version
         self._title = title
+        self._knowledge_scope = knowledge_scope
         return self
 
     def phase(self, spec: PhaseSpec[WorkflowT, RequestT, StateT]) -> Self:
@@ -94,6 +104,14 @@ class WorkflowBuilder[
         self._start_handoff = cast(StartHandoff[Any, Any], handoff)
         return self
 
+    def knowledge(self, phase: str, collections: Iterable[str]) -> Self:
+        """Restrict one phase's knowledge retrieval to these collections."""
+        existing = dict(self._phase_knowledge)
+        merged = tuple(dict.fromkeys((*existing.get(phase, ()), *collections)))
+        existing[phase] = merged
+        self._phase_knowledge = existing
+        return self
+
     def doctrine(self, doctrine: WorkflowDoctrine[RequestT, StateT, Any]) -> Self:
         """Bind the workflow-specific phase data the engine reads."""
         self._doctrine = doctrine
@@ -125,6 +143,8 @@ class WorkflowBuilder[
             },
             piping=dict(self._piping),
             start_handoff=self._start_handoff,
+            knowledge_scope=self._knowledge_scope,
+            phase_knowledge=self._phase_knowledge,
         )
         return Workflow(
             spec,
@@ -164,6 +184,15 @@ class WorkflowBuilder[
             for target in targets:
                 if target not in declared:
                     errors.append(f"transition target {target!r} is not a phase")
+        for phase in self._phases:
+            if phase.phase not in self._transitions:
+                errors.append(
+                    f"phase {phase.phase!r} has no explicit transition declaration"
+                )
+            if phase.terminal and self._transitions.get(phase.phase):
+                errors.append(
+                    f"terminal phase {phase.phase!r} has outgoing transitions"
+                )
         if not any(phase.terminal for phase in self._phases):
             errors.append("workflow requires at least one terminal phase")
         for source, target in self._piping:

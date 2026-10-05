@@ -170,38 +170,15 @@ class SurfaceUnavailable(RuntimeError):
 
 def get_deployment_service(request: Request) -> DeploymentDataService:
     """Resolve the service from app state so applications control persistence."""
-    service = getattr(request.app.state, "deployment_service", None)
-    if service is None:
-        service = DeploymentDataService(
-            status_client=RuntimeStatusClient(
-                "http://127.0.0.1:1", _UnavailableTransport()
-            )
-        )
-        request.app.state.deployment_service = service
-    if not isinstance(service, DeploymentDataService):
-        raise RuntimeError(
-            "app.state.deployment_service must be a DeploymentDataService"
-        )
-    return service
+    from thesis.http.errors import require_service
+
+    return require_service(request, "deployment_service", DeploymentDataService)
 
 
 def _service_error(error: Exception) -> HTTPException:
-    if isinstance(error, SurfaceUnavailable):
-        return HTTPException(
-            status_code=503,
-            detail={"code": "surface_unavailable", "message": str(error)},
-        )
-    if isinstance(error, HarnessStatusError):
-        return HTTPException(
-            status_code=503,
-            detail={"code": "harness_status_unavailable", "message": str(error)},
-        )
-    if isinstance(error, ValueError):
-        return HTTPException(status_code=422, detail=str(error))
-    return HTTPException(
-        status_code=500,
-        detail={"code": "deployment_error", "message": "request failed"},
-    )
+    from thesis.http.errors import service_error
+
+    return service_error(error)
 
 
 def create_deployment_router() -> APIRouter:

@@ -12,6 +12,8 @@ from thesis.chat.contracts import (
     ChatMessage,
     ChatState,
     ChatThread,
+    CompletionMode,
+    ConversationRecord,
     CrossWorkspaceLinkError,
     InvalidLifecycleTransition,
     Investigation,
@@ -35,12 +37,7 @@ from thesis.chat.contracts import (
 from thesis.chat.persistence import FileChatPersistence
 from thesis.chat.responder import ReplyChunk, ReplyProvider
 from thesis.chat.service import ChatPersistence, ChatService, InMemoryChatPersistence
-from thesis.chat.streaming import (
-    CHAT_MESSAGE,
-    PROVIDER_DELTA,
-    ChatStreamFrame,
-    InMemoryChatStreamBroker,
-)
+from thesis.chat.streaming import CommitNotifier
 
 __all__ = [
     "AgentInvocation",
@@ -49,24 +46,23 @@ __all__ = [
     "Attachment",
     "AttachmentState",
     "AzureBlobChatPersistence",
-    "CHAT_MESSAGE",
     "ChatContractError",
     "ChatMessage",
     "ChatPersistence",
     "ChatService",
     "ChatState",
-    "ChatStreamFrame",
     "ChatThread",
+    "CommitNotifier",
+    "CompletionMode",
+    "ConversationRecord",
     "CrossWorkspaceLinkError",
     "FileChatPersistence",
     "InMemoryChatPersistence",
-    "InMemoryChatStreamBroker",
     "InvalidLifecycleTransition",
     "Investigation",
     "InvestigationState",
     "MessageRole",
     "MessageState",
-    "PROVIDER_DELTA",
     "RECORD_ANCHOR_ROLES",
     "RecordLinks",
     "RecordNotFound",

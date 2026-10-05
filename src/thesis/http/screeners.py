@@ -45,13 +45,9 @@ class RunScreenerRequest(BaseModel):
 
 def get_screener_service(request: Request) -> ScreenerService:
     """Resolve the service from app state so applications control the boundary."""
-    service = getattr(request.app.state, "screener_service", None)
-    if service is None:
-        service = ScreenerService()
-        request.app.state.screener_service = service
-    if not isinstance(service, ScreenerService):
-        raise RuntimeError("app.state.screener_service must be a ScreenerService")
-    return service
+    from thesis.http.errors import require_service
+
+    return require_service(request, "screener_service", ScreenerService)
 
 
 def _validation_error(error: Exception) -> HTTPException:

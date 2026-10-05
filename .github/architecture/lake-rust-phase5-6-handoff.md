@@ -282,8 +282,6 @@ package directories (`src/lake/local`, `http`, `ingestion`, `storage`,
   Hive paths including `%2F`-encoded crypto pairs, local `catalog.json`
   bytes. Do not add shims or adapter layers to avoid touching call sites;
   change the real code path.
-* Evidence before `cleo verify`: assemble all gates, then one invocation.
-  This session does not use CLEO orchestration.
 
 ## Known pitfalls (each one cost real debugging time)
 

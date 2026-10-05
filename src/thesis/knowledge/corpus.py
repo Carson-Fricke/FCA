@@ -2,8 +2,8 @@
 
 :func:`KnowledgeCorpus.load` walks the canonical Markdown tree, parses every
 page with the strict front-matter contract, builds the link graph, and
-captures the corpus Git revision — the explicit adapter boundary that lets a
-workflow cite the exact corpus state it used.
+captures a SHA-256 snapshot of the loaded bytes, allowing a
+workflow to cite the exact corpus state it used.
 
 Loading is deliberately two-phase:
 
@@ -15,13 +15,13 @@ Loading is deliberately two-phase:
 Structural problems that should not abort a load — duplicate page ids,
 dangling links, unresolved relationships, trust mismatches — are collected
 and reported by :meth:`CorpusSnapshot.validate` as structured problem lines.
-``knowledge/index/`` is derived, rebuildable data and never canonical
-content; nothing here writes to it.
+Search indexes are derived, rebuildable data and never canonical content;
+nothing here writes them.
 """
 
 from __future__ import annotations
 
-import subprocess
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,7 +36,6 @@ from thesis.knowledge.metadata import (
 )
 
 _DELIMITER = "---"
-_GIT_TIMEOUT_SECONDS = 30.0
 
 
 class CorpusError(ValueError):
@@ -66,37 +65,6 @@ class CorpusPage:
         return self.metadata.page_id
 
 
-def _git_revision(root: Path) -> str:
-    """Capture ``git rev-parse HEAD`` for ``root``.
-
-    The subprocess call is the explicit Git adapter boundary: nothing else in
-    this package shells out, and every failure mode raises
-    :class:`CorpusError` with the command, directory, and stderr attached.
-    """
-    command = ["git", "rev-parse", "HEAD"]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CorpusError(f"could not run git in {root}: {error}") from error
-    if completed.returncode != 0:
-        stderr = (completed.stderr or "").strip()
-        raise CorpusError(
-            f"git rev-parse HEAD failed in {root} "
-            f"(exit {completed.returncode}): {stderr}"
-        )
-    revision = (completed.stdout or "").strip()
-    if not revision:
-        raise CorpusError(f"git rev-parse HEAD returned no revision in {root}")
-    return revision
-
-
 class KnowledgeCorpus:
     """A read-only loader over the canonical Markdown corpus at ``root``."""
 
@@ -118,9 +86,18 @@ class KnowledgeCorpus:
         other Markdown files are not corpus pages and are skipped.  Duplicate
         page ids do not abort the load: the first path wins and the conflict
         is reported by :meth:`CorpusSnapshot.validate`.
+
+        ``revision`` is a ``sha256:`` snapshot ID over sorted relative paths
+        and the exact Markdown bytes read, including unstructured Markdown.
+        It changes for uncommitted edits and requires no Git installation.
         """
         if not self._root.is_dir():
             raise CorpusError(f"corpus root is not a directory: {self._root}")
+        resolved_root = self._root.resolve()
+        # Check directories too: rglob does not traverse symlinked directories.
+        for candidate in self._root.rglob("*"):
+            if not candidate.resolve().is_relative_to(resolved_root):
+                raise CorpusError("corpus entry escapes its root")
         pages: dict[str, CorpusPage] = {}
         nodes: list[PageNode] = []
         id_paths: dict[str, str] = {}
@@ -129,9 +106,18 @@ class KnowledgeCorpus:
             self._root.rglob("*.md"),
             key=lambda path: path.relative_to(self._root).as_posix(),
         )
+        digest = hashlib.sha256()
         for path in markdown_files:
             relative = path.relative_to(self._root).as_posix()
-            text = path.read_text(encoding="utf-8")
+            if not path.resolve().is_relative_to(resolved_root):
+                raise CorpusError("corpus page escapes its root")
+            data = path.read_bytes()
+            name = relative.encode("utf-8")
+            digest.update(len(name).to_bytes(8, "big"))
+            digest.update(name)
+            digest.update(len(data).to_bytes(8, "big"))
+            digest.update(data)
+            text = data.decode("utf-8")
             if not _has_front_matter(text):
                 continue
             metadata, body = parse_front_matter(text)
@@ -144,7 +130,7 @@ class KnowledgeCorpus:
             pages[page_id] = page
             nodes.append(PageNode(path=relative, metadata=metadata))
         graph = LinkGraph(nodes, strict=False)
-        revision = _git_revision(self._root)
+        revision = f"sha256:{digest.hexdigest()}"
         return CorpusSnapshot(
             root=self._root,
             revision=revision,
@@ -160,7 +146,7 @@ def _has_front_matter(text: str) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class CorpusSnapshot:
-    """An immutable view of one corpus revision.
+    """An immutable view of one corpus byte snapshot (not a Git commit).
 
     ``pages`` maps page id to page; ``graph`` is the lenient link graph over
     the loaded pages; ``duplicate_ids`` records ``(page_id, first_path,

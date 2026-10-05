@@ -2,7 +2,7 @@
 //!
 //! These implement the engine's `StrategyRuntime` seam with the exact
 //! capability split the Python adapters established: a study runtime folds
-//! atomic bar frames only and never returns orders, a strategy runtime submits
+//! quotes, trades, and atomic bar frames and never returns orders; a strategy submits
 //! intents the host stamps with the event time, and every metric publish is
 //! validated host-side so a rejected metric fails the run.
 
@@ -10,14 +10,15 @@ use std::collections::BTreeMap;
 use std::os::raw::c_void;
 
 use backtest::backtest::engine_core::{
-    EngineBar, EngineBarFrame, EngineFill, EngineMarket, EngineOrder, StrategyInstance,
-    StrategyRuntime, StrategyStart,
+    EngineBar, EngineBarFrame, EngineFill, EngineMarket, EngineOrder, MarketSubscription,
+    StrategyInstance, StrategyRuntime, StrategyStart,
 };
 use backtest::backtest::errors::BacktestError;
 use harness_strategy_sdk::{
-    CBarEvent, CBarFrame, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent,
-    CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn, METRIC_INVALID_NAME,
-    METRIC_NOT_FINITE, METRIC_OK, METRIC_RESERVED_NAME, RESERVED_METRIC_NAMES, SDK_OK,
+    canonical_subscriptions, CBarEvent, CBarFrame, CDecimal, CFill, CMarketOrder, CMetricSink,
+    COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn,
+    Subscription, METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK, METRIC_RESERVED_NAME,
+    RESERVED_METRIC_NAMES, SDK_OK,
 };
 
 use crate::compile::{compile, ProgramKind};
@@ -30,11 +31,85 @@ const METRIC_REJECTED: i32 = 4;
 /// The order sink result code for any rejection.
 const ORDER_REJECTED: i32 = 1;
 
-/// The typed failure every raw market event raises for a study program.
+/// The failure for raw individual bars rather than atomic frames.
 ///
-/// Studies consume atomic frames only; raw bars and ticks never reach authors.
-pub const STUDY_BARS_ONLY: &str =
-    "studies consume atomic bar frames only: raw bars, quotes and trades are not part of the study contract";
+/// Quotes and trades use the shared consumer callbacks; bars must be atomic.
+pub const STUDY_BARS_ONLY: &str = "raw bars must be delivered as atomic bar frames";
+
+fn read_subscriptions(view: CStr) -> Result<Vec<MarketSubscription>, JitError> {
+    let text = unsafe { view.as_str() }
+        .ok_or_else(|| JitError::Invalid("subscription JSON is not valid UTF-8".into()))?;
+    let inputs: Vec<Subscription> = serde_json::from_str(text)
+        .map_err(|error| JitError::Invalid(format!("invalid subscriptions: {error}")))?;
+    let canonical = canonical_subscriptions(inputs).map_err(JitError::Invalid)?;
+    Ok(canonical.into_iter().map(engine_subscription).collect())
+}
+
+pub(crate) fn engine_subscription(input: Subscription) -> MarketSubscription {
+    match input {
+        Subscription::Bars { symbols, interval } => MarketSubscription {
+            data_type: "bars".into(),
+            symbols,
+            interval: Some(interval),
+        },
+        Subscription::Quote { symbols } => MarketSubscription {
+            data_type: "quote".into(),
+            symbols,
+            interval: None,
+        },
+        Subscription::Trade { symbols } => MarketSubscription {
+            data_type: "trade".into(),
+            symbols,
+            interval: None,
+        },
+    }
+}
+
+fn frame_storage(frame: &EngineBarFrame) -> Result<(Vec<CBarEvent>, Vec<CStr>), BacktestError> {
+    if frame
+        .bars_by_symbol
+        .iter()
+        .any(|(symbol, bar)| symbol != &bar.symbol)
+    {
+        return Err(BacktestError::StrategyExecution(
+            "bar frame map key does not match bar symbol".into(),
+        ));
+    }
+    let bars = frame
+        .bars_by_symbol
+        .values()
+        .map(|bar| CBarEvent {
+            event_id: CStr::from_slice(&bar.event_id),
+            timestamp_ns: bar.timestamp_ns,
+            sequence: bar.sequence,
+            symbol: CStr::from_slice(&bar.symbol),
+            open: CDecimal::from_decimal(bar.open),
+            high: CDecimal::from_decimal(bar.high),
+            low: CDecimal::from_decimal(bar.low),
+            close: CDecimal::from_decimal(bar.close),
+            volume: CDecimal::from_decimal(bar.volume),
+        })
+        .collect();
+    let missing = frame
+        .missing_symbols
+        .iter()
+        .map(|symbol| CStr::from_slice(symbol))
+        .collect();
+    Ok((bars, missing))
+}
+
+fn frame_view(frame: &EngineBarFrame, bars: &[CBarEvent], missing: &[CStr]) -> CBarFrame {
+    CBarFrame {
+        interval: CStr::from_slice(&frame.interval),
+        interval_start_ns: frame.interval_start_ns,
+        interval_end_ns: frame.interval_end_ns,
+        available_at_ns: frame.available_at_ns,
+        bars: bars.as_ptr(),
+        bars_len: bars.len(),
+        missing_symbols: missing.as_ptr(),
+        missing_symbols_len: missing.len(),
+    }
+}
 
 struct MetricCollector {
     values: BTreeMap<String, String>,
@@ -140,6 +215,7 @@ extern "C" fn order_submit(ctx: *mut c_void, order: *const CMarketOrder) -> i32 
 /// A JIT-loaded study program driven through the engine seam.
 pub struct JitStudyRuntime {
     loaded: LoadedStudy,
+    subscriptions: Vec<MarketSubscription>,
     metrics: BTreeMap<String, String>,
 }
 
@@ -157,8 +233,11 @@ impl JitStudyRuntime {
     ) -> Result<Self, JitError> {
         let artifact = compile(workspace, source, ProgramKind::Study)?;
         let loaded = unsafe { LoadedStudy::load(&artifact.artifact_path, parameters)? };
+        let subscriptions =
+            read_subscriptions(unsafe { (loaded.vtable().subscriptions)(loaded.state()) })?;
         Ok(Self {
             loaded,
+            subscriptions,
             metrics: BTreeMap::new(),
         })
     }
@@ -176,45 +255,9 @@ impl JitStudyRuntime {
     /// Returns [`BacktestError::StrategyExecution`] when the authored callback
     /// fails, panics, or reports malformed frame data.
     pub fn on_bar_frame(&mut self, frame: &EngineBarFrame) -> Result<(), BacktestError> {
-        if frame
-            .bars_by_symbol
-            .iter()
-            .any(|(symbol, bar)| symbol != &bar.symbol)
-        {
-            return Err(BacktestError::StrategyExecution(
-                "study bar frame map key does not match bar symbol".to_string(),
-            ));
-        }
         let vtable = self.loaded.vtable();
-        let bars: Vec<CBarEvent> = frame
-            .bars_by_symbol
-            .values()
-            .map(|bar| CBarEvent {
-                event_id: CStr::from_slice(&bar.event_id),
-                timestamp_ns: bar.timestamp_ns,
-                sequence: bar.sequence,
-                symbol: CStr::from_slice(&bar.symbol),
-                open: CDecimal::from_decimal(bar.open),
-                high: CDecimal::from_decimal(bar.high),
-                low: CDecimal::from_decimal(bar.low),
-                close: CDecimal::from_decimal(bar.close),
-                volume: CDecimal::from_decimal(bar.volume),
-            })
-            .collect();
-        let missing: Vec<CStr> = frame
-            .missing_symbols
-            .iter()
-            .map(|symbol| CStr::from_slice(symbol))
-            .collect();
-        let view = CBarFrame {
-            interval_start_ns: frame.interval_start_ns,
-            interval_end_ns: frame.interval_end_ns,
-            available_at_ns: frame.available_at_ns,
-            bars: bars.as_ptr(),
-            bars_len: bars.len(),
-            missing_symbols: missing.as_ptr(),
-            missing_symbols_len: missing.len(),
-        };
+        let (bars, missing) = frame_storage(frame)?;
+        let view = frame_view(frame, &bars, &missing);
         let code = unsafe { (vtable.on_bar_frame)(self.loaded.state(), &view) };
         if code != SDK_OK {
             return Err(BacktestError::StrategyExecution(study_failure(
@@ -227,6 +270,9 @@ impl JitStudyRuntime {
 }
 
 impl StrategyRuntime for JitStudyRuntime {
+    fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+        Some(self.subscriptions.clone())
+    }
     fn on_start(&mut self, _start: &StrategyStart) -> Result<(), BacktestError> {
         // Study programs are constructed with their parameters at load time;
         // there is no per-run start callback, matching the Python study
@@ -234,10 +280,26 @@ impl StrategyRuntime for JitStudyRuntime {
         Ok(())
     }
 
-    fn on_market(&mut self, _event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
-        Err(BacktestError::StrategyExecution(
-            STUDY_BARS_ONLY.to_string(),
-        ))
+    fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
+        let vtable = self.loaded.vtable();
+        let code = match event {
+            EngineMarket::Quote { .. } => unsafe {
+                (vtable.on_quote)(self.loaded.state(), &quote_event(event))
+            },
+            EngineMarket::Trade { .. } => unsafe {
+                (vtable.on_trade)(self.loaded.state(), &trade_event(event))
+            },
+            EngineMarket::Bar(_) => {
+                return Err(BacktestError::StrategyExecution(STUDY_BARS_ONLY.into()))
+            }
+        };
+        if code != SDK_OK {
+            return Err(BacktestError::StrategyExecution(study_failure(
+                self,
+                "study market callback failed",
+            )));
+        }
+        Ok(Vec::new())
     }
 
     fn on_bar(&mut self, _bar: &EngineBar) -> Result<Vec<EngineOrder>, BacktestError> {
@@ -285,6 +347,7 @@ impl StrategyRuntime for JitStudyRuntime {
 /// A JIT-loaded strategy program driven through the engine seam.
 pub struct JitStrategyRuntime {
     loaded: LoadedStrategy,
+    subscriptions: Vec<MarketSubscription>,
     metrics: BTreeMap<String, String>,
 }
 
@@ -302,8 +365,11 @@ impl JitStrategyRuntime {
     ) -> Result<Self, JitError> {
         let artifact = compile(workspace, source, ProgramKind::Strategy)?;
         let loaded = unsafe { LoadedStrategy::load(&artifact.artifact_path, parameters)? };
+        let subscriptions =
+            read_subscriptions(unsafe { (loaded.vtable().subscriptions)(loaded.state()) })?;
         Ok(Self {
             loaded,
+            subscriptions,
             metrics: BTreeMap::new(),
         })
     }
@@ -316,6 +382,45 @@ impl JitStrategyRuntime {
 }
 
 impl StrategyRuntime for JitStrategyRuntime {
+    fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+        Some(self.subscriptions.clone())
+    }
+
+    fn on_bar_frame(&mut self, _frame: &EngineBarFrame) -> Result<(), BacktestError> {
+        Err(BacktestError::StrategyExecution(
+            "strategy frames require on_frame_orders; observation-only dispatch would discard orders".into(),
+        ))
+    }
+
+    fn on_frame_orders(
+        &mut self,
+        frame: &EngineBarFrame,
+    ) -> Result<Vec<EngineOrder>, BacktestError> {
+        let (bars, missing) = frame_storage(frame)?;
+        let view = frame_view(frame, &bars, &missing);
+        let mut collector = OrderCollector {
+            orders: Vec::new(),
+            rejection: None,
+        };
+        let sink = COrderSink {
+            ctx: (&mut collector as *mut OrderCollector).cast(),
+            submit: order_submit,
+        };
+        let code =
+            unsafe { (self.loaded.vtable().on_bar_frame)(self.loaded.state(), &view, &sink) };
+        if code != SDK_OK || collector.rejection.is_some() {
+            return Err(BacktestError::StrategyExecution(
+                collector
+                    .rejection
+                    .or_else(|| self.last_error())
+                    .unwrap_or_else(|| "strategy frame callback failed".into()),
+            ));
+        }
+        for order in &mut collector.orders {
+            order.timestamp_ns = frame.available_at_ns;
+        }
+        Ok(collector.orders)
+    }
     fn on_start(&mut self, start: &StrategyStart) -> Result<(), BacktestError> {
         let vtable = self.loaded.vtable();
         let symbols: Vec<CStr> = start

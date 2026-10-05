@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from thesis.workflows.core.phase import (
     HandoffContext,
@@ -108,8 +108,36 @@ class WorkflowSpec[WorkflowT, RequestT, StateT]:
         default_factory=lambda: MappingProxyType({})
     )
     start_handoff: StartHandoff[Any, Any] | None = None
+    knowledge_scope: Literal["shared", "workspace", "both"] = "both"
+    #: Per-phase knowledge collection allowlist; a phase absent here is unrestricted.
+    phase_knowledge: Mapping[str, tuple[str, ...]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     def __post_init__(self) -> None:
+        if self.knowledge_scope not in ("shared", "workspace", "both"):
+            raise WorkflowSpecError(
+                "knowledge_scope must be shared, workspace, or both"
+            )
+        collections: dict[str, tuple[str, ...]] = {}
+        for phase, allowed in self.phase_knowledge.items():
+            if not isinstance(phase, str) or not phase.strip():
+                raise WorkflowSpecError(
+                    "phase_knowledge keys must be non-empty phase names"
+                )
+            checked = tuple(
+                dict.fromkeys(
+                    entry
+                    for entry in allowed
+                    if isinstance(entry, str) and entry.strip()
+                )
+            )
+            if len(checked) != len(allowed):
+                raise WorkflowSpecError(
+                    "phase_knowledge collections must be non-empty strings"
+                )
+            collections[phase] = checked
+        object.__setattr__(self, "phase_knowledge", MappingProxyType(collections))
         if not isinstance(self.workflow_id, str) or not self.workflow_id.strip():
             raise WorkflowSpecError("workflow_id must be non-empty text")
         object.__setattr__(self, "workflow_id", self.workflow_id.strip())

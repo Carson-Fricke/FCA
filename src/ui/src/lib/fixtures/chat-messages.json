@@ -4,6 +4,9 @@
 			{
 				"message_id": "msg-1",
 				"chat_id": "chat-1",
+				"conversation_id": "chat-1",
+				"root_conversation_id": "chat-1",
+				"parent_conversation_id": null,
 				"workspace_id": "alpha-lab",
 				"actor_id": "user-alex",
 				"role": "user",
@@ -13,11 +16,23 @@
 				"created_at": "2026-09-08T17:14:00Z",
 				"updated_at": null,
 				"execution_id": "exec-1",
-				"intent_epoch": 0
+				"intent_epoch": 0,
+				"created_by": "user-alex",
+				"schema_version": 1,
+				"reasoning": null,
+				"tool_result": null,
+				"kind": "message",
+				"data": null,
+				"investigation_ids": [],
+				"input_position": 0,
+				"content_hash": "cd69132b0134b3fd90326ce323e3f423b8cec20bb970ef4d38b8dca5a609669e"
 			},
 			{
 				"message_id": "msg-2",
 				"chat_id": "chat-1",
+				"conversation_id": "chat-1",
+				"root_conversation_id": "chat-1",
+				"parent_conversation_id": null,
 				"workspace_id": "alpha-lab",
 				"actor_id": "thesis-agent",
 				"role": "assistant",
@@ -27,11 +42,23 @@
 				"created_at": "2026-09-08T17:14:12Z",
 				"updated_at": null,
 				"execution_id": "exec-1",
-				"intent_epoch": 0
+				"intent_epoch": 0,
+				"created_by": "thesis-agent",
+				"schema_version": 1,
+				"reasoning": null,
+				"tool_result": null,
+				"kind": "message",
+				"data": null,
+				"investigation_ids": [],
+				"input_position": 0,
+				"content_hash": "9cf62fe4450b5436a0d327a9e5b42846eca174cb8e05b163d7fc555f13ccfb60"
 			},
 			{
 				"message_id": "msg-3",
 				"chat_id": "chat-1",
+				"conversation_id": "chat-1",
+				"root_conversation_id": "chat-1",
+				"parent_conversation_id": null,
 				"workspace_id": "alpha-lab",
 				"actor_id": "user-alex",
 				"role": "user",
@@ -41,11 +68,23 @@
 				"created_at": "2026-09-08T17:40:00Z",
 				"updated_at": null,
 				"execution_id": "exec-1",
-				"intent_epoch": 1
+				"intent_epoch": 1,
+				"created_by": "user-alex",
+				"schema_version": 1,
+				"reasoning": null,
+				"tool_result": null,
+				"kind": "message",
+				"data": null,
+				"investigation_ids": [],
+				"input_position": 0,
+				"content_hash": "8a0c3a282029d3507010c68299c548bc1f6b47513da3fc1285087afca8c64c27"
 			},
 			{
 				"message_id": "msg-4",
 				"chat_id": "chat-1",
+				"conversation_id": "chat-1",
+				"root_conversation_id": "chat-1",
+				"parent_conversation_id": null,
 				"workspace_id": "alpha-lab",
 				"actor_id": "thesis-agent",
 				"role": "assistant",
@@ -55,7 +94,16 @@
 				"created_at": "2026-09-08T17:40:09Z",
 				"updated_at": null,
 				"execution_id": "exec-1",
-				"intent_epoch": 1
+				"intent_epoch": 1,
+				"created_by": "thesis-agent",
+				"schema_version": 1,
+				"reasoning": null,
+				"tool_result": null,
+				"kind": "message",
+				"data": null,
+				"investigation_ids": [],
+				"input_position": 0,
+				"content_hash": "ac7d4c92f9bd54190dc889c44294de256c3c588adf4ca71666071272fc0fa964"
 			}
 		]
 	},
@@ -64,20 +112,37 @@
 			{
 				"message_id": "msg-i1",
 				"chat_id": "chat-2",
+				"conversation_id": "chat-2",
+				"root_conversation_id": "chat-2",
+				"parent_conversation_id": null,
 				"workspace_id": "alpha-lab",
 				"actor_id": "user-alex",
 				"role": "user",
 				"body": "Test the hypothesis that overnight drift decays after large gap-ups. Design a falsification test.",
 				"state": "accepted",
-				"attachment_ids": ["att-9"],
+				"attachment_ids": [
+					"att-9"
+				],
 				"created_at": "2026-09-05T10:02:00Z",
 				"updated_at": null,
 				"execution_id": null,
-				"intent_epoch": 0
+				"intent_epoch": 0,
+				"created_by": "user-alex",
+				"schema_version": 1,
+				"reasoning": null,
+				"tool_result": null,
+				"kind": "message",
+				"data": null,
+				"investigation_ids": [],
+				"input_position": 0,
+				"content_hash": "baf62c9e532e865784d275ff3ff19a825d277b49652d62014e3d22f8ec7b23e7"
 			},
 			{
 				"message_id": "msg-i2",
 				"chat_id": "chat-2",
+				"conversation_id": "chat-2",
+				"root_conversation_id": "chat-2",
+				"parent_conversation_id": null,
 				"workspace_id": "alpha-lab",
 				"actor_id": "thesis-agent",
 				"role": "assistant",
@@ -87,7 +152,16 @@
 				"created_at": "2026-09-05T10:03:30Z",
 				"updated_at": null,
 				"execution_id": null,
-				"intent_epoch": 0
+				"intent_epoch": 0,
+				"created_by": "thesis-agent",
+				"schema_version": 1,
+				"reasoning": null,
+				"tool_result": null,
+				"kind": "message",
+				"data": null,
+				"investigation_ids": [],
+				"input_position": 0,
+				"content_hash": "8a17f05d0712817b3bc3e0b1326a1d7eb9934ff9415de72f7d28f0158da40a23"
 			}
 		]
 	},
@@ -96,6 +170,9 @@
 			{
 				"message_id": "msg-b1",
 				"chat_id": "chat-b1",
+				"conversation_id": "chat-b1",
+				"root_conversation_id": "chat-b1",
+				"parent_conversation_id": null,
 				"workspace_id": "beta-quant",
 				"actor_id": "user-alex",
 				"role": "user",
@@ -105,11 +182,23 @@
 				"created_at": "2026-09-07T08:22:00Z",
 				"updated_at": null,
 				"execution_id": "exec-b1",
-				"intent_epoch": 0
+				"intent_epoch": 0,
+				"created_by": "user-alex",
+				"schema_version": 1,
+				"reasoning": null,
+				"tool_result": null,
+				"kind": "message",
+				"data": null,
+				"investigation_ids": [],
+				"input_position": 0,
+				"content_hash": "c845f1054b4796b28d56709342369ce50697ab241dc495b9085fab47826d2aae"
 			},
 			{
 				"message_id": "msg-b2",
 				"chat_id": "chat-b1",
+				"conversation_id": "chat-b1",
+				"root_conversation_id": "chat-b1",
+				"parent_conversation_id": null,
 				"workspace_id": "beta-quant",
 				"actor_id": "thesis-agent",
 				"role": "assistant",
@@ -119,7 +208,16 @@
 				"created_at": "2026-09-07T08:22:15Z",
 				"updated_at": null,
 				"execution_id": "exec-b1",
-				"intent_epoch": 0
+				"intent_epoch": 0,
+				"created_by": "thesis-agent",
+				"schema_version": 1,
+				"reasoning": null,
+				"tool_result": null,
+				"kind": "message",
+				"data": null,
+				"investigation_ids": [],
+				"input_position": 0,
+				"content_hash": "c034d27db04fb7ccc1496ef562d93247d999c85d084ad6e55a38fe85e23f00b9"
 			}
 		]
 	}

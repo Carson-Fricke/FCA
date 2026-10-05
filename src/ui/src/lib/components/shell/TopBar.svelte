@@ -9,6 +9,7 @@
 		workspaceName,
 		page,
 		activity,
+		ready,
 		copilotHidden,
 		onToggleCopilot,
 		copilotVisible
@@ -17,6 +18,7 @@
 		workspaceName: string;
 		page: string;
 		activity: ActivityItem[];
+		ready: boolean;
 		copilotHidden: boolean;
 		copilotVisible: boolean;
 		onToggleCopilot: () => void;
@@ -115,7 +117,7 @@
 						</div>
 					{:else}
 						<p class="px-2 py-3 text-center text-xs text-slate-500">
-							You’re all caught up. Your activity will appear here.
+							{ready ? 'You’re all caught up. Your activity will appear here.' : 'Loading workspace updates…'}
 						</p>
 					{/each}
 				</div>

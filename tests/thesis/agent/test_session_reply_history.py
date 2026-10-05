@@ -1,14 +1,17 @@
 """Root turns retain tool evidence without invalid orphaned tool messages."""
 
-from thesis.agent.session_reply import _seed_messages
+import json
+
+from thesis.agent.messages import decode_transcript
 from thesis.chat import ChatService
 from thesis.chat.contracts import MessageRole
+from thesis.providers.session_adapter import project_native_messages
 
 
 def test_orphaned_result_and_async_failure_remain_visible() -> None:
     chat = ChatService()
     thread = chat.create_chat("workspace-1", title="History", owner_actor_id="operator")
-    message = chat.create_message(
+    message = chat.send_message(
         "workspace-1",
         thread.chat_id,
         actor_id="runtime",
@@ -17,46 +20,86 @@ def test_orphaned_result_and_async_failure_remain_visible() -> None:
         tool_result={"ok": False, "structured": {"missing": ["residual_ar1"]}},
     )
 
-    seeded = _seed_messages([message], "System")
+    canonical = decode_transcript([message])
+    assert canonical[0].direction == "incoming"
+    assert canonical[0].content.correlation is None
+    seeded = project_native_messages(canonical)
 
     assert seeded[-1].role == "user"
-    assert "residual_ar1" in seeded[-1].content
-    assert "Workflow failed" in seeded[-1].content
-    assert '"ok":false' in seeded[-1].content
+    payload = json.loads(seeded[-1].content)
+    assert payload["text"] == "Workflow failed"
+    assert payload["source"] == "tool_result"
+    assert payload["result"] == {
+        "ok": False,
+        "structured": {"missing": ["residual_ar1"]},
+    }
+    assert payload["correlation"] is None
 
 
 def test_paired_tool_results_keep_native_tool_roles() -> None:
+    from thesis.agent.messages import (
+        MessageContent,
+        SessionMessage,
+        ToolCorrelation,
+        ToolRequest,
+    )
+
     chat = ChatService()
     thread = chat.create_chat("workspace-1", title="History", owner_actor_id="operator")
-    envelope = chat.create_message(
+    envelope = SessionMessage(
+        "envelope",
+        "outgoing",
+        MessageContent(
+            "Checking",
+            "agent",
+            requests=(ToolRequest("call-1", "validate_study", "{}"),),
+        ),
+    )
+    chat.create_message(
         "workspace-1",
         thread.chat_id,
         actor_id="agent",
+        message_id="envelope",
         body="Checking",
         role=MessageRole.ASSISTANT,
-        data={
-            "toolCalls": [
-                {
-                    "id": "call-1",
-                    "type": "function",
-                    "function": {"name": "validate_study", "arguments": "{}"},
-                }
-            ]
-        },
+        data={"sessionMessage": envelope.as_dict()},
     )
-    result = chat.create_message(
+    result_envelope = SessionMessage(
+        "result",
+        "incoming",
+        MessageContent(
+            "Valid",
+            "validate_study",
+            correlation=ToolCorrelation("envelope", "call-1", "validate_study"),
+            result={"ok": True, "structured": {"valid": True}},
+        ),
+    )
+    chat.send_message(
         "workspace-1",
         thread.chat_id,
         actor_id="runtime",
         body="Valid",
         role=MessageRole.TOOL,
-        data={"toolCallId": "call-1"},
-        tool_result={"ok": True, "structured": {"valid": True}},
+        data={"sessionMessage": result_envelope.as_dict()},
+        tool_result={
+            "ok": True,
+            "structured": {"valid": True},
+            "callId": "call-1",
+            "tool": "validate_study",
+        },
     )
 
-    seeded = _seed_messages([envelope, result], "System")
+    canonical = decode_transcript(chat.list_messages("workspace-1", thread.chat_id))
+    correlation = canonical[-1].content.correlation
+    assert correlation is not None
+    assert correlation.request_message_id == "envelope"
+    assert correlation.request_id == "call-1"
+    assert correlation.tool_name == "validate_study"
+    seeded = project_native_messages(canonical)
 
     assert seeded[-2].tool_calls[0].id == "call-1"
     assert seeded[-1].role == "tool"
     assert seeded[-1].tool_call_id == "call-1"
-    assert '"valid":true' in seeded[-1].content
+    payload = json.loads(seeded[-1].content)
+    assert payload["result"]["structured"] == {"valid": True}
+    assert payload["correlation"] == correlation.as_dict()

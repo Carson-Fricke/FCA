@@ -1,81 +1,51 @@
-"""In-process streaming log for chat replies.
+"""In-process commit notification for the chat timeline stream.
 
-Assistant replies stream to the UI as ephemeral SSE frames: ``provider.delta``
-frames carry incremental model text, and a final ``chat.message`` frame carries
-the persisted durable message.  The log is bounded, rebuildable runtime state
-(never canonical): chat history is served by the chat service, and the broker
-only tails live frames for a connected chat.
+Writers record a post-commit version per chat, and timeline readers snapshot
+that version before reading durable items and wait for it to change. The counter
+is an in-process wake hint, never a durable cursor; the database sequence
+remains the only cursor. Ephemeral provider deltas and broker frame logs are
+removed: every visible message, activity, and event is durable timeline data.
 """
 
 from __future__ import annotations
 
-from collections import deque
-from collections.abc import Mapping
-from dataclasses import dataclass
-from threading import Lock
+from threading import Condition
 
-PROVIDER_DELTA = "provider.delta"
-CHAT_MESSAGE = "chat.message"
+__all__ = ["CommitNotifier"]
 
 
-@dataclass(frozen=True, slots=True)
-class ChatStreamFrame:
-    """One framed chat-stream event with its per-chat replay cursor."""
+class CommitNotifier:
+    """Thread-safe per-chat commit counter that wakes timeline readers.
 
-    cursor: int
-    event: str
-    data: Mapping[str, object]
+    Writers call :meth:`notify` after a durable commit. A reader snapshots the
+    version before reading durable items and then waits for a version change,
+    so a commit between the read and the wait cannot be lost. Multiple commits
+    may coalesce into one wake; a timeout bounds a lost or missed wake.
+    """
 
-    def as_dict(self) -> dict[str, object]:
-        return {"cursor": self.cursor, "event": self.event, "data": dict(self.data)}
+    def __init__(self) -> None:
+        self._condition = Condition()
+        self._versions: dict[tuple[str, str], int] = {}
 
-
-class InMemoryChatStreamBroker:
-    """Bounded, thread-safe per-chat frame log for live streaming."""
-
-    def __init__(self, *, max_frames_per_chat: int = 2_000) -> None:
-        self._frames: dict[tuple[str, str], deque[ChatStreamFrame]] = {}
-        self._cursors: dict[tuple[str, str], int] = {}
-        self._lock = Lock()
-        self._max_frames = max_frames_per_chat
-
-    def publish(
-        self,
-        workspace_id: str,
-        chat_id: str,
-        event: str,
-        data: Mapping[str, object],
-    ) -> ChatStreamFrame:
-        """Append one frame and return it with its assigned cursor."""
+    def notify(self, workspace_id: str, chat_id: str) -> None:
+        """Record one committed change and wake every waiting reader."""
         key = (workspace_id, chat_id)
-        with self._lock:
-            cursor = self._cursors.get(key, 0) + 1
-            self._cursors[key] = cursor
-            frame = ChatStreamFrame(cursor=cursor, event=event, data=dict(data))
-            self._frames.setdefault(key, deque(maxlen=self._max_frames)).append(frame)
-            return frame
+        with self._condition:
+            self._versions[key] = self._versions.get(key, 0) + 1
+            self._condition.notify_all()
 
-    def read(
-        self, workspace_id: str, chat_id: str, *, after_cursor: int = 0
-    ) -> tuple[ChatStreamFrame, ...]:
-        """Return frames published after ``after_cursor`` in cursor order."""
+    def version(self, workspace_id: str, chat_id: str) -> int:
+        """Return the chat's current commit version, or ``0``."""
+        with self._condition:
+            return self._versions.get((workspace_id, chat_id), 0)
+
+    def wait(
+        self, workspace_id: str, chat_id: str, version: int, timeout: float
+    ) -> int:
+        """Block until the chat's version differs from ``version`` or ``timeout``."""
         key = (workspace_id, chat_id)
-        with self._lock:
-            return tuple(
-                frame
-                for frame in self._frames.get(key, ())
-                if frame.cursor > after_cursor
-            )
-
-    def latest_cursor(self, workspace_id: str, chat_id: str) -> int:
-        """Return the newest published cursor for the chat, or 0."""
-        with self._lock:
-            return self._cursors.get((workspace_id, chat_id), 0)
-
-
-__all__ = [
-    "CHAT_MESSAGE",
-    "PROVIDER_DELTA",
-    "ChatStreamFrame",
-    "InMemoryChatStreamBroker",
-]
+        with self._condition:
+            if self._versions.get(key, 0) != version:
+                return self._versions.get(key, 0)
+            self._condition.wait(timeout)
+            return self._versions.get(key, 0)

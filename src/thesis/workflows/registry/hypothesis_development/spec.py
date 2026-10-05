@@ -14,16 +14,15 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from functools import cache
+from types import MappingProxyType
+from typing import Any, Literal, cast
 
 from thesis.agent.router import ModelRouter, Role
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.schema import render_violations, validate_arguments
-from thesis.agent.runtime.strategy_tools import (
-    STRATEGY_RECEIPT_SCHEMA,
-    TOOL_AUTHOR_STRATEGY,
-)
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.service import ChatService
 from thesis.experiments.ledger import AttemptLedger
@@ -35,43 +34,53 @@ from thesis.workflows.core.builder import WorkflowBuilder
 from thesis.workflows.core.execution_store import ExecutionStore
 from thesis.workflows.core.phase import (
     ConversationPhase,
-    DeterministicExecutor,
     DeterministicPhase,
     OneShotPhase,
     PhaseSpec,
+    TerminalPhase,
 )
 from thesis.workflows.core.spec import HandoffContext, PipingFunction, WorkflowSpec
 from thesis.workflows.core.workflow import Detach, Workflow, WorkflowPorts
 from thesis.workflows.research_models import (
+    PROGRAM_REFERENCE_SCHEMA,
     BacktestResearchModelRunner,
+    ProgramSnapshots,
     ResearchModelRunner,
 )
 
 from .contracts.creation import HypothesisDevelopmentRequest
+from .contracts.discovery import DiscoveryDraft
 from .contracts.validation import (
+    DISCOVERY_COMPLETION_SCHEMA,
     HYPOTHESIS_COMPLETION_SCHEMA,
+    discovery_payload_errors,
     format_contract_errors,
     hypothesis_payload_errors,
 )
-from .doctrine import hypothesis_development_doctrine
 from .errors import FalsificationComposeError, WorkflowError
 from .phases import (
-    _COMPLETED,
     _FAILED,
-    _PHASE_TASKS,
-    _TRANSITIONS,
-    HYPOTHESIS_DEVELOPMENT_WORKFLOW,
+    _VERDICT,
     HypothesisDevelopmentPhase,
 )
 from .phases.trials import _draft_from_contract, run_falsification_trials
-from .piping import identity_pipe, reset_backtests, reset_premise
+from .piping import (
+    identity_pipe,
+    reset_backtests,
+    reset_discovery,
+    reset_premise,
+)
 from .primitives import (
-    _FALSIFICATION_PLAN_SCHEMA,
-    _HYPOTHESIS_SCHEMA,
     _RCA_SCHEMA,
-    _STRATEGY_DESIGN_SCHEMA,
     _new_id,
     _utc_now,
+)
+from .rebuild import (
+    PayloadFold,
+    _fold_discovery,
+    _fold_draft,
+    _fold_trials,
+    _fold_verdict,
 )
 from .services import (
     DevelopmentEngine,
@@ -85,58 +94,6 @@ __all__ = [
     "piping",
 ]
 
-_TERMINAL_PHASES: frozenset[HypothesisDevelopmentPhase] = frozenset(
-    {_COMPLETED, _FAILED}
-)
-
-#: The phases whose agents accept operator input from birth.
-_CONVERSATIONAL_PHASES: frozenset[HypothesisDevelopmentPhase] = frozenset(
-    {
-        HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
-        HypothesisDevelopmentPhase.VERDICT,
-        HypothesisDevelopmentPhase.STRATEGY_DESIGN,
-    }
-)
-
-#: MCP tools each agent-backed phase may call, by phase. The creation agent
-#: authors the Rust study program, so it gets the compilation gate to check its
-#: own draft; strategy design authors through a Thesis-native tool instead.
-#: The agent-facing policy unions these with local phase grants and controls.
-_PHASE_MCP_TOOLS: Mapping[str, tuple[str, ...]] = {
-    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION.value: ("validate_study",),
-}
-
-_PHASE_TOOLS: Mapping[str, tuple[str, ...]] = {
-    HypothesisDevelopmentPhase.STRATEGY_DESIGN.value: (TOOL_AUTHOR_STRATEGY,),
-}
-
-#: The deterministic contract function for each deterministic phase.
-_CONTRACTS: Mapping[
-    HypothesisDevelopmentPhase,
-    DeterministicExecutor[
-        DevelopmentEngine,
-        HypothesisDevelopmentRequest,
-        HypothesisDevelopmentState,
-    ],
-] = {
-    HypothesisDevelopmentPhase.FALSIFICATION_TRIALS: run_falsification_trials,
-}
-
-#: Typed state pipes that replace the state movement the phases used to inline.
-_PIPES: Mapping[
-    tuple[HypothesisDevelopmentPhase, HypothesisDevelopmentPhase],
-    PipingFunction[HypothesisDevelopmentState],
-] = {
-    (
-        HypothesisDevelopmentPhase.VERDICT,
-        HypothesisDevelopmentPhase.HYPOTHESIS_CREATION,
-    ): reset_premise,
-    (
-        HypothesisDevelopmentPhase.STRATEGY_RCA,
-        HypothesisDevelopmentPhase.STRATEGY_DESIGN,
-    ): reset_backtests,
-}
-
 
 def _start_handoff(
     workflow: Workflow[Any, Any, Any],
@@ -145,48 +102,136 @@ def _start_handoff(
 ) -> str | None:
     """Create the first phase's prompt from the operator's launching message.
 
-    The workflow starts in hypothesis creation, so the start adapter builds the
-    creation prompt around the caller's message, verbatim.  A non-start handoff
-    returns ``None`` so each later phase keeps its declared seed.
+    The workflow starts in discovery, so the start adapter builds the discovery
+    prompt around the caller's message, verbatim.  A non-start handoff returns
+    ``None`` so each later phase keeps its declared seed.
     """
     if context.source is not None:
         return None
-    return _creation_prompt(workflow, request)
+    return _discovery_prompt(workflow, request)
 
 
-def _creation_prompt(
+def _discovery_prompt(
     workflow: Workflow[Any, Any, Any],
     request: HypothesisDevelopmentRequest,
 ) -> str:
-    """Build the creation prompt: phase instructions plus the operator's words."""
+    """Build the discovery prompt: phase instructions plus the operator's words."""
     from .phases.creation import trigger_text
-    from .prompts.creation import _creation_turn_prompt
+    from .prompts.discovery import _discovery_turn_prompt
 
-    return _creation_turn_prompt([("user", trigger_text(workflow, request))])
+    return _discovery_turn_prompt([("user", trigger_text(workflow, request))])
 
 
-def _creation_seed(
+def _discovery_seed(
     workflow: Workflow[Any, Any, Any],
     request: HypothesisDevelopmentRequest,
     state: HypothesisDevelopmentState,
     context: HandoffContext,
 ) -> str:
-    """Seed the creation agent with its instructions and the operator's words.
+    """Seed the discovery agent with its instructions or a restart brief.
 
-    A loop-back re-entry is a revision, not a fresh start: the conversation
-    already holds the original instructions, the previous proposal, and the
-    operator back-and-forth, so the re-entry seed is only the compact revision
-    brief — the verdict and the recorded falsification-trial findings.
+    The workflow's first entry is a fresh start: the full discovery prompt
+    carries the operator's launching message.  A verdict restart re-enters the
+    same durable conversation, so its brief carries only the verdict that
+    superseded the previous candidate.
     """
     del state
     if context is None or context.source is None:
-        return _creation_prompt(workflow, request)
-    from .prompts.creation import _creation_revision_section
+        return _discovery_prompt(workflow, request)
+    from .prompts.discovery import _discovery_restart_section
 
-    report = _latest_phase_artifact(workflow, request, "falsification_trials")
-    return _creation_revision_section(
-        dict(context.completion) if context.completion else None, report
+    return _discovery_restart_section(
+        dict(context.completion) if context.completion else None
     )
+
+
+def _discovery_handoff(
+    draft: DiscoveryDraft | None,
+) -> dict[str, object] | None:
+    """Render the accepted candidate compactly for the model-creation seed."""
+    if draft is None:
+        return None
+    return {
+        "candidate": draft.candidate.as_dict(),
+        "attempts": [
+            f"{attempt.study_id}: {attempt.result}" for attempt in draft.attempts
+        ],
+        "untouchedData": draft.untouched_data,
+        "limitations": draft.limitations,
+    }
+
+
+def _accepted_discovery(
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> DiscoveryDraft | None:
+    """Return the selected candidate from state or the accepted handoff.
+
+    The live pipe keeps an already-selected draft, but the first
+    discovery→model-creation transition carries the candidate in the accepted
+    completion rather than the pre-transition state; both paths seed the same
+    handoff.
+    """
+    if state.discovery is not None:
+        return state.discovery
+    payload = context.completion.get("discovery") if context else None
+    if not isinstance(payload, Mapping) or not payload:
+        return None
+    try:
+        return DiscoveryDraft.from_dict(payload)
+    except WorkflowError:
+        return None
+
+
+def _model_creation_seed(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> str:
+    """Seed the model-creation agent with its instructions and the candidate.
+
+    A fresh entry hands over the full model-creation instructions; a verdict
+    circle-back re-enters the same durable conversation with the compact
+    revision brief that points back at the recorded trial findings.  Both
+    entries carry the still-selected discovery candidate when the state or the
+    accepted handoff holds one, because model creation must model exactly that
+    candidate.
+    """
+    from .prompts.model_creation import (
+        _model_creation_instructions,
+        _model_creation_revision_section,
+    )
+
+    if context is not None and context.source == _VERDICT.value:
+        report = _latest_phase_artifact(workflow, request, "falsification_trials")
+        parts = [
+            _model_creation_revision_section(
+                dict(context.completion) if context.completion else None,
+                report,
+            )
+        ]
+    else:
+        parts = [_model_creation_instructions()]
+        if context is not None and context.completion:
+            parts += [
+                "",
+                f"Accepted completion from the {context.source} phase:",
+                json.dumps(
+                    dict(context.completion),
+                    ensure_ascii=True,
+                    indent=2,
+                    default=str,
+                ),
+            ]
+    handoff = _discovery_handoff(_accepted_discovery(state, context))
+    if handoff is not None:
+        parts += [
+            "",
+            "Selected discovery candidate:",
+            json.dumps(handoff, ensure_ascii=True, indent=2, default=str),
+        ]
+    return "\n".join(parts)
 
 
 def _latest_phase_artifact(
@@ -246,11 +291,6 @@ def _strategy_design_seed(
                 dict(context.completion), ensure_ascii=True, indent=2, default=str
             ),
         ]
-    parts += [
-        "",
-        "Authoring input design shape (not the completion receipt): "
-        + _STRATEGY_DESIGN_SCHEMA,
-    ]
     return "\n".join(parts)
 
 
@@ -362,6 +402,29 @@ def _list_field(name: str) -> Callable[[Mapping[str, object]], str | None]:
     return validate
 
 
+def _discovery_validator(completion: Mapping[str, object]) -> str | None:
+    """Deeply validate the discovery contract before any transition commits.
+
+    Every missing or wrongly-typed candidate or attempt field is reported at
+    once, so the agent repairs the whole contract in one turn, and the typed
+    :class:`DiscoveryDraft` decoder re-runs as a drift guard: anything the
+    collector missed still rejects the contract here rather than later in the
+    rebuild fold.
+    """
+    payload = completion.get("discovery")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'discovery' must be a non-empty object"
+    errors = discovery_payload_errors(payload)
+    if not errors:
+        try:
+            DiscoveryDraft.from_dict(payload)
+        except WorkflowError as error:
+            errors = [str(error)]
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
 def _creation_validator(completion: Mapping[str, object]) -> str | None:
     """Deeply validate the creation contract before any transition commits.
 
@@ -395,29 +458,29 @@ def _strategy_receipt_validator(completion: Mapping[str, object]) -> str | None:
     receipt = completion.get("strategy")
     if not isinstance(receipt, Mapping):
         return "completion field 'strategy' must be a strategy authoring receipt"
-    misses = validate_arguments(STRATEGY_RECEIPT_SCHEMA, receipt)
+    misses = validate_arguments(PROGRAM_REFERENCE_SCHEMA, receipt)
     if misses:
         return "invalid strategy authoring receipt: " + render_violations(misses)
-    validation = receipt.get("validation")
-    if isinstance(validation, Mapping) and validation.get("accepted") is False:
-        return "strategy authoring receipt records rejected validation"
-    path = str(receipt["artifactPath"])
-    if any(part in {".", ".."} for part in path.split("/")):
-        return "strategy artifactPath must be a confined workspace-relative path"
+    if receipt["kind"] != "strategy":
+        return "strategy completion must reference a strategy program"
     return None
 
 
 def _phase_completion_schema(
     phase: HypothesisDevelopmentPhase,
+    required: tuple[str, ...],
+    targets: tuple[str, ...],
 ) -> Mapping[str, object] | None:
     """Return the completion JSON Schema advertised for one phase's agent.
 
-    The creation phase carries its full deep schema; every other agent phase
-    advertises its required handoff fields and the declared target enum, so
-    the provider constrains the contract at decode time instead of relying
-    on prompt text alone.
+    Discovery and model creation carry their full deep schemas; every other
+    agent phase advertises its required handoff fields and the declared target
+    enum, so the provider constrains the contract at decode time instead of
+    relying on prompt text alone.
     """
-    if phase is HypothesisDevelopmentPhase.HYPOTHESIS_CREATION:
+    if phase is HypothesisDevelopmentPhase.DISCOVERY:
+        return DISCOVERY_COMPLETION_SCHEMA
+    if phase is HypothesisDevelopmentPhase.MODEL_CREATION:
         return HYPOTHESIS_COMPLETION_SCHEMA
     if phase is HypothesisDevelopmentPhase.STRATEGY_DESIGN:
         return {
@@ -426,18 +489,21 @@ def _phase_completion_schema(
             "required": ["strategy"],
             "properties": {
                 "target": {"type": "string", "enum": ["strategy_backtesting"]},
-                "strategy": STRATEGY_RECEIPT_SCHEMA,
+                "strategy": {
+                    **PROGRAM_REFERENCE_SCHEMA,
+                    "properties": {
+                        **cast(
+                            dict[str, object], PROGRAM_REFERENCE_SCHEMA["properties"]
+                        ),
+                        "kind": {"type": "string", "enum": ["strategy"]},
+                    },
+                },
             },
         }
-    required = _REQUIRED.get(phase, ())
     # The advertised target enum names only real successors: the engine still
     # accepts a terminal failure target, but the advertised shape never
     # invites the agent to end the whole run itself.
-    targets = sorted(
-        target.value
-        for target in _TRANSITIONS.get(phase, frozenset())
-        if target is not _FAILED
-    )
+    targets = tuple(target for target in targets if target != _FAILED.value)
     if not required and not targets:
         return None
     properties: dict[str, object] = {
@@ -451,64 +517,307 @@ def _phase_completion_schema(
     return schema
 
 
-#: The required handoff obligation for each phase.
-_REQUIRED: Mapping[HypothesisDevelopmentPhase, tuple[str, ...]] = {
-    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: ("hypothesis",),
-    HypothesisDevelopmentPhase.FALSIFICATION_TRIALS: ("trials",),
-    HypothesisDevelopmentPhase.VERDICT: ("verdict",),
-    HypothesisDevelopmentPhase.STRATEGY_DESIGN: ("strategy",),
-    HypothesisDevelopmentPhase.STRATEGY_BACKTESTING: ("backtest",),
-    HypothesisDevelopmentPhase.STRATEGY_RCA: ("diagnosis",),
-    HypothesisDevelopmentPhase.OPTIMIZATION: ("optimization",),
-}
+@dataclass(frozen=True, slots=True)
+class PhaseDeclaration:
+    """One authoritative phase, executor policy, and outgoing edge declaration."""
 
-#: The structural validator for each phase's completion contract.
-_VALIDATORS: Mapping[
-    HypothesisDevelopmentPhase, Callable[[Mapping[str, object]], str | None]
-] = {
-    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: _creation_validator,
-    HypothesisDevelopmentPhase.FALSIFICATION_TRIALS: _list_field("trials"),
-    HypothesisDevelopmentPhase.VERDICT: _mapping_field("verdict"),
-    HypothesisDevelopmentPhase.STRATEGY_DESIGN: _strategy_receipt_validator,
-    HypothesisDevelopmentPhase.STRATEGY_BACKTESTING: _mapping_field("backtest"),
-    HypothesisDevelopmentPhase.STRATEGY_RCA: _mapping_field("diagnosis"),
-    HypothesisDevelopmentPhase.OPTIMIZATION: _mapping_field("optimization"),
-}
+    spec: PhaseSpec[
+        DevelopmentEngine, HypothesisDevelopmentRequest, HypothesisDevelopmentState
+    ]
+    edges: Mapping[str, PipingFunction[HypothesisDevelopmentState]]
+    orchestrator: tuple[str, str] | None
+    task: str | None
+    activity: str | None
+    mcp_tools: tuple[str, ...]
+    tools: tuple[str, ...]
+    knowledge: tuple[str, ...] | None
+    payload_fold: PayloadFold | None
 
-#: The declared shape echoed to the agent for phases with a known payload.
-_SCHEMAS: Mapping[HypothesisDevelopmentPhase, str] = {
-    HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: _HYPOTHESIS_SCHEMA,
-    HypothesisDevelopmentPhase.FALSIFICATION_TRIALS: _FALSIFICATION_PLAN_SCHEMA,
-    HypothesisDevelopmentPhase.STRATEGY_DESIGN: _STRATEGY_DESIGN_SCHEMA,
-    HypothesisDevelopmentPhase.STRATEGY_RCA: _RCA_SCHEMA,
-}
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "edges", MappingProxyType(dict(self.edges)))
 
 
-def _seeds() -> Mapping[HypothesisDevelopmentPhase, Callable[..., str]]:
-    """Build one prompt seed per phase from its task, obligation, and shape."""
-    seeds: dict[HypothesisDevelopmentPhase, Callable[..., str]] = {
-        HypothesisDevelopmentPhase.HYPOTHESIS_CREATION: _creation_seed,
-        HypothesisDevelopmentPhase.VERDICT: _verdict_seed,
-        HypothesisDevelopmentPhase.STRATEGY_DESIGN: _strategy_design_seed,
-    }
-    for phase, task in _PHASE_TASKS.items():
-        if phase in seeds or phase not in _REQUIRED:
-            continue
-        seeds[phase] = _contract_seed(
-            task,
-            schema=_SCHEMAS.get(phase),
+@cache
+def phase_declarations() -> tuple[PhaseDeclaration, ...]:
+    """Declare every live phase; all secondary lookup maps derive from here."""
+    phase = HypothesisDevelopmentPhase
+    knowledge_tools = ("search_knowledge", "read_knowledge")
+    program_tools = (
+        tuple(
+            f"{operation}_{kind}"
+            for kind in ("study", "strategy", "indicator")
+            for operation in ("author", "update", "read", "validate", "publish")
         )
-    return seeds
+        + tuple(f"list_{plural}" for plural in ("studies", "strategies", "indicators"))
+        + ("read_sdk_reference",)
+    )
+    backtest_tools = (
+        *knowledge_tools,
+        "read_strategy",
+        "run_backtest",
+        "read_sdk_reference",
+    )
+    run_evidence_tools = (
+        "get_job_status",
+        "get_run",
+        "list_artifacts",
+        "read_artifact",
+    )
+    backtest_execution_guidance = (
+        "Use the handed-off strategy.programId with read_strategy and "
+        "run_backtest {program_id: ...}. Execution uses the latest committed "
+        "content and requires its current accepted validation. Use read_sdk_reference "
+        "for exact SDK signatures, not guessed APIs. If validation is stale or "
+        "rejected, report the blocker rather than supplying inline source or "
+        "bypassing validation. Launch acceptance is not a successful completed run: "
+        "never assume launch success means results are available. Retain the returned "
+        "job_id/run_id and inspect get_job_status {job_id: ...} while queued or "
+        "running. After terminal status, call get_run {run_id: ...}, list_artifacts "
+        "{run_id: ...} and read_artifact {run_id: ..., name: ...} to inspect actual "
+        "metrics and evidence. Record terminal failures honestly; do not fabricate "
+        "metrics or artifacts. Include strategy.programId and the actual executed "
+        "version/gitCommit from the launch receipt in the completion handoff so the "
+        "next phase can identify the latest-ID run. Request phase completion yourself "
+        "only after inspecting the terminal outcome. These are agent instructions, "
+        "not runtime polling or repair caps."
+    )
+
+    def agent(
+        name: HypothesisDevelopmentPhase,
+        kind: type[ConversationPhase] | type[OneShotPhase],
+        edges: Mapping[str, PipingFunction[HypothesisDevelopmentState]],
+        family: str,
+        label: str,
+        task: str,
+        activity: str,
+        required: str,
+        validator: Callable[[Mapping[str, object]], str | None],
+        seed: Callable[..., str],
+        payload_fold: PayloadFold | None,
+        mcp_tools: tuple[str, ...] = (),
+        tools: tuple[str, ...] = knowledge_tools,
+        knowledge: tuple[str, ...] | None = None,
+    ) -> PhaseDeclaration:
+        targets = tuple(edges)
+        return PhaseDeclaration(
+            spec=kind(
+                phase=name.value,
+                validate=validator,
+                required=(required,),
+                seed=seed,
+                completion_schema=_phase_completion_schema(name, (required,), targets),
+            ),
+            edges=edges,
+            orchestrator=(family, label),
+            task=task,
+            activity=activity,
+            mcp_tools=mcp_tools,
+            tools=tools,
+            knowledge=knowledge,
+            payload_fold=payload_fold,
+        )
+
+    declarations = (
+        agent(
+            phase.DISCOVERY,
+            ConversationPhase,
+            {
+                phase.MODEL_CREATION.value: reset_premise,
+                phase.FAILED.value: identity_pipe,
+            },
+            "research",
+            "Thesis discovery orchestrator",
+            "Run small targeted studies on the premise, record every attempt, and identify a candidate opportunity with its signal, information timing, holding period and profit source, plus the main competing explanation; stop when nothing is worth pursuing.",
+            "Running targeted studies to find a candidate opportunity.",
+            "discovery",
+            _discovery_validator,
+            _discovery_seed,
+            _fold_discovery,
+            (
+                "get_job_status",
+                "get_run",
+                "list_artifacts",
+                "read_artifact",
+            ),
+            tools=(*knowledge_tools, *program_tools, "run_study"),
+            knowledge=("discovery", "data-quality", "trading-costs", "model-cards"),
+        ),
+        agent(
+            phase.MODEL_CREATION,
+            ConversationPhase,
+            {
+                phase.FALSIFICATION_TRIALS.value: identity_pipe,
+                phase.FAILED.value: identity_pipe,
+            },
+            "research",
+            "Thesis model-creation orchestrator",
+            "Turn the selected discovery candidate into ONE statistical model and pre-register the falsifier tests from the knowledge cards.",
+            "Finalizing the structured hypothesis model.",
+            "hypothesis",
+            _creation_validator,
+            _model_creation_seed,
+            _fold_draft,
+            tools=(*knowledge_tools, *program_tools),
+            knowledge=("model-cards", "inference", "validation", "trading-costs"),
+        ),
+        PhaseDeclaration(
+            spec=DeterministicPhase(
+                phase=phase.FALSIFICATION_TRIALS.value,
+                contract=run_falsification_trials,
+                validate=_list_field("trials"),
+                required=("trials",),
+                on_complete=phase.VERDICT.value,
+            ),
+            edges={
+                phase.VERDICT.value: identity_pipe,
+                phase.FAILED.value: identity_pipe,
+            },
+            orchestrator=None,
+            task=None,
+            activity=None,
+            mcp_tools=(),
+            tools=(),
+            knowledge=None,
+            payload_fold=_fold_trials,
+        ),
+        agent(
+            phase.VERDICT,
+            ConversationPhase,
+            {
+                phase.STRATEGY_DESIGN.value: identity_pipe,
+                phase.MODEL_CREATION.value: reset_premise,
+                phase.DISCOVERY.value: reset_discovery,
+                phase.FAILED.value: identity_pipe,
+            },
+            "research",
+            "Thesis research verdict orchestrator",
+            "Record the falsification verdict from the trial results.",
+            "Recording the falsification verdict.",
+            "verdict",
+            _mapping_field("verdict"),
+            _verdict_seed,
+            _fold_verdict,
+        ),
+        agent(
+            phase.STRATEGY_DESIGN,
+            ConversationPhase,
+            {
+                phase.STRATEGY_BACKTESTING.value: identity_pipe,
+                phase.FAILED.value: identity_pipe,
+            },
+            "coding",
+            "Thesis coding strategy-design orchestrator",
+            "Implement a sandbox-valid strategy whose exits re-check the hypothesis falsifiers.",
+            "Preparing the strategy design from the surviving model.",
+            "strategy",
+            _strategy_receipt_validator,
+            _strategy_design_seed,
+            None,
+            tools=(*knowledge_tools, *program_tools),
+        ),
+        agent(
+            phase.STRATEGY_BACKTESTING,
+            OneShotPhase,
+            {
+                phase.OPTIMIZATION.value: identity_pipe,
+                phase.STRATEGY_RCA.value: identity_pipe,
+                phase.FAILED.value: identity_pipe,
+            },
+            "coding",
+            "Thesis strategy-backtesting orchestrator",
+            "Run the designed strategy through the harness and record its test result.",
+            "Testing the designed strategy through the harness.",
+            "backtest",
+            _mapping_field("backtest"),
+            _contract_seed(
+                "Run the designed strategy through the harness and record its test result. "
+                + backtest_execution_guidance
+            ),
+            None,
+            mcp_tools=run_evidence_tools,
+            tools=backtest_tools,
+        ),
+        agent(
+            phase.STRATEGY_RCA,
+            OneShotPhase,
+            {
+                phase.STRATEGY_DESIGN.value: reset_backtests,
+                phase.FAILED.value: identity_pipe,
+            },
+            "critique",
+            "Thesis strategy root-cause orchestrator",
+            "Diagnose the failed strategy backtest and prescribe a concrete revision.",
+            "Diagnosing the failed strategy backtest.",
+            "diagnosis",
+            _mapping_field("diagnosis"),
+            _contract_seed(
+                "Diagnose the failed strategy backtest and prescribe a concrete revision.",
+                schema=_RCA_SCHEMA,
+            ),
+            None,
+        ),
+        agent(
+            phase.OPTIMIZATION,
+            OneShotPhase,
+            {
+                phase.COMPLETED.value: identity_pipe,
+                phase.STRATEGY_RCA.value: identity_pipe,
+                phase.FAILED.value: identity_pipe,
+            },
+            "coding",
+            "Thesis coding optimization orchestrator",
+            "Run the optimization backtest for the designed strategy.",
+            "Preparing the bounded strategy optimization run.",
+            "optimization",
+            _mapping_field("optimization"),
+            _contract_seed(
+                "Run the optimization backtest for the designed strategy. "
+                + backtest_execution_guidance
+            ),
+            None,
+            mcp_tools=run_evidence_tools,
+            tools=backtest_tools,
+        ),
+        PhaseDeclaration(
+            TerminalPhase(phase=phase.COMPLETED.value),
+            {},
+            None,
+            None,
+            None,
+            (),
+            (),
+            None,
+            None,
+        ),
+        PhaseDeclaration(
+            TerminalPhase(phase=phase.FAILED.value),
+            {},
+            None,
+            None,
+            None,
+            (),
+            (),
+            None,
+            None,
+        ),
+    )
+    names = [item.spec.phase for item in declarations]
+    if len(set(names)) != len(names) or set(names) != {
+        item.value for item in phase if item is not phase.HYPOTHESIS_CREATION
+    }:
+        raise WorkflowError(
+            "phase declarations must cover every live phase exactly once"
+        )
+    return declarations
 
 
 def piping() -> Mapping[tuple[str, str], PipingFunction[HypothesisDevelopmentState]]:
     """Return the real pipe for every declared transition, by phase name."""
-    pipes: dict[tuple[str, str], PipingFunction[HypothesisDevelopmentState]] = {}
-    for source, targets in _TRANSITIONS.items():
-        for target in targets:
-            pipe = _PIPES.get((source, target), identity_pipe)
-            pipes[(source.value, target.value)] = pipe
-    return pipes
+    return {
+        (item.spec.phase, target): pipe
+        for item in phase_declarations()
+        for target, pipe in item.edges.items()
+    }
 
 
 def build_hypothesis_development_spec() -> WorkflowSpec[
@@ -526,6 +835,7 @@ def build_hypothesis_development_workflow(
     router: ModelRouter | None = None,
     runner: BacktestRunner | None = None,
     research_runner: ResearchModelRunner | None = None,
+    programs: ProgramSnapshots | None = None,
     validator: StrategySandboxValidator | None = None,
     hypothesis_store: HypothesisStore | None = None,
     ledger: AttemptLedger | None = None,
@@ -540,6 +850,7 @@ def build_hypothesis_development_workflow(
     conversations: Conversations | None = None,
     execution_store: ExecutionStore | None = None,
     detach: Detach | None = None,
+    knowledge_scope: Literal["shared", "workspace", "both"] = "both",
 ) -> Workflow[
     HypothesisDevelopmentRequest,
     HypothesisDevelopmentState,
@@ -551,6 +862,11 @@ def build_hypothesis_development_workflow(
     and the production runtime (all ports, services, and doctrine bound).
     """
     del subagent_factory, knowledge_cutoff
+    from .doctrine import hypothesis_development_doctrine
+    from .phases import workflow_definition
+
+    declarations = phase_declarations()
+    definition = workflow_definition()
     resolved_research_runner = research_runner
     if resolved_research_runner is None and runner is not None:
         resolved_research_runner = BacktestResearchModelRunner(runner)
@@ -569,14 +885,15 @@ def build_hypothesis_development_workflow(
         router=router,
         runner=runner,
         research_runner=resolved_research_runner,
+        programs=programs,
         validator=validator,
         ledger=ledger,
         journal=journal,
         research_role=research_role,
         experiment_id=experiment_id,
         mcp_tools=tools,
-        phase_mcp_tools=dict(_PHASE_MCP_TOOLS),
-        phase_tools=dict(_PHASE_TOOLS),
+        phase_mcp_tools={item.spec.phase: item.mcp_tools for item in declarations},
+        phase_tools={item.spec.phase: item.tools for item in declarations},
     )
     builder = WorkflowBuilder[
         DevelopmentEngine,
@@ -584,38 +901,17 @@ def build_hypothesis_development_workflow(
         HypothesisDevelopmentState,
     ]()
     builder.workflow(
-        HYPOTHESIS_DEVELOPMENT_WORKFLOW.workflow_id,
-        version=HYPOTHESIS_DEVELOPMENT_WORKFLOW.version,
-        title=HYPOTHESIS_DEVELOPMENT_WORKFLOW.title,
+        definition.workflow_id,
+        version=definition.version,
+        title=definition.title,
+        knowledge_scope=knowledge_scope,
     )
-    seeds = _seeds()
-    for phase in _TRANSITIONS:
-        targets = sorted(target.value for target in _TRANSITIONS[phase])
-        common = {
-            "phase": phase.value,
-            "terminal": phase in _TERMINAL_PHASES,
-            "validate": _VALIDATORS.get(phase),
-            "on_complete": targets[0] if len(targets) == 1 else None,
-            "required": _REQUIRED.get(phase, ()),
-            "completion_schema": _phase_completion_schema(phase),
-        }
-        declared: PhaseSpec[
-            DevelopmentEngine,
-            HypothesisDevelopmentRequest,
-            HypothesisDevelopmentState,
-        ]
-        if phase in _CONTRACTS:
-            declared = DeterministicPhase(contract=_CONTRACTS[phase], **common)
-        elif phase in _CONVERSATIONAL_PHASES:
-            declared = ConversationPhase(seed=seeds.get(phase), **common)
-        else:
-            declared = OneShotPhase(seed=seeds.get(phase), **common)
-        builder.phase(declared)
+    for item in declarations:
+        if item.knowledge is not None:
+            builder.knowledge(item.spec.phase, item.knowledge)
+        builder.phase(item.spec)
     builder.transitions(
-        {
-            phase.value: frozenset(target.value for target in targets)
-            for phase, targets in _TRANSITIONS.items()
-        }
+        {item.spec.phase: frozenset(item.edges) for item in declarations}
     )
     for (source, target), pipe in piping().items():
         builder.piping(source, target, pipe)

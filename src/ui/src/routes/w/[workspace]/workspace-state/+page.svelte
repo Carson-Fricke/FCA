@@ -1,5 +1,4 @@
 <script lang="ts">
-	import CleoPlanPanel from '$lib/components/chat/CleoPlanPanel.svelte';
 	import ConsentAuditList from '$lib/components/state/ConsentAuditList.svelte';
 	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import EvidenceIndex from '$lib/components/state/EvidenceIndex.svelte';
@@ -31,18 +30,13 @@
 	<header>
 		<h1 class="text-xl font-semibold text-slate-800">Workspace state</h1>
 		<p class="text-sm text-slate-500">
-			CLEO projection (read-only), strategy lineage, evidence index, and consent/audit trail.
+			Strategy lineage, evidence index, and consent/audit trail.
 		</p>
 	</header>
 
 	{#if !state}
 		<div class="h-40 animate-pulse rounded-xl border border-surface-700 bg-surface-900"></div>
 	{:else}
-		<section class="space-y-2">
-			<h2 class="text-sm font-semibold text-slate-800">CLEO plan &amp; workflow</h2>
-			<CleoPlanPanel plan={state.cleo} timeline={state.taskTimeline} />
-		</section>
-
 		<section class="space-y-2">
 			<h2 class="text-sm font-semibold text-slate-800">Strategy lineage</h2>
 			{#if state.lineages.length}

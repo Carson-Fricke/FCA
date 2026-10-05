@@ -7,14 +7,178 @@
 use std::collections::BTreeMap;
 
 use backtest::backtest::config::BacktestConfig;
-use backtest::backtest::job::{lake_fixture, parse_timestamp_ns};
-use harness_lakeclient::testing::{bars_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer};
+use backtest::backtest::engine_core::MarketSubscription;
+use backtest::backtest::job::{lake_fixture, lake_fixture_with_subscriptions, parse_timestamp_ns};
+use harness_lakeclient::testing::{
+    bars_stream, quote_stream, trade_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer,
+    FakeQuoteRow, FakeTradeRow,
+};
 use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
 
 const TOKEN: &str = "parallel-study-token";
 
 fn stamp(text: &str) -> i64 {
     parse_timestamp_ns(text).expect("timestamp")
+}
+
+#[test]
+fn exact_mixed_and_trade_only_study_plans_never_acquire_unrequested_streams() {
+    for kinds in [vec!["quote", "bars"], vec!["trade"], vec!["quote"]] {
+        let start = config().start_ns;
+        let server = FakeLakeServer::start(FakeLakeConfig {
+            read_bodies_by_type: BTreeMap::from([
+                ("bars".into(), bars_stream("SPY", &[bar_row(0)])),
+                (
+                    "quote".into(),
+                    quote_stream(
+                        "SPY",
+                        &[FakeQuoteRow::new(start, "10", "11", 100, 100, "XNYS")],
+                    ),
+                ),
+                (
+                    "trade".into(),
+                    trade_stream("SPY", &[FakeTradeRow::new(start, 1, "10", 100, "XNYS")]),
+                ),
+            ]),
+            ..FakeLakeConfig::new(TOKEN)
+        });
+        let inputs: Vec<_> = kinds
+            .iter()
+            .map(|kind| MarketSubscription {
+                data_type: (*kind).into(),
+                symbols: vec!["SPY".into()],
+                interval: (*kind == "bars").then(|| "1min".into()),
+            })
+            .collect();
+        let fixture =
+            lake_fixture_with_subscriptions(&config(), &client(&server), &inputs).unwrap();
+        assert_eq!(fixture.events.len(), kinds.len());
+        let requests = server.requests();
+        let ensures: Vec<_> = requests
+            .iter()
+            .filter(|r| r.path == "/v1/catalog/ensure")
+            .collect();
+        assert_eq!(ensures.len(), kinds.len());
+        for request in ensures {
+            let body: serde_json::Value =
+                serde_json::from_slice(request.body.as_ref().unwrap()).unwrap();
+            assert!(kinds.contains(&body["data_type"].as_str().unwrap()));
+            assert_eq!(body["symbol"], "SPY");
+        }
+        assert_eq!(
+            requests.iter().filter(|r| r.path == "/v1/read").count(),
+            kinds.len()
+        );
+    }
+}
+
+#[test]
+fn missing_requested_stream_is_not_covered_by_bars_and_incompatible_intervals_fail_before_io() {
+    let server = FakeLakeServer::start(FakeLakeConfig {
+        read_bodies_by_type: BTreeMap::from([
+            ("bars".into(), bars_stream("SPY", &[bar_row(0)])),
+            ("trade".into(), trade_stream("SPY", &[])),
+        ]),
+        ..FakeLakeConfig::new(TOKEN)
+    });
+    let client = client(&server);
+    let inputs = vec![
+        MarketSubscription {
+            data_type: "bars".into(),
+            symbols: vec!["SPY".into()],
+            interval: Some("1min".into()),
+        },
+        MarketSubscription {
+            data_type: "trade".into(),
+            symbols: vec!["SPY".into()],
+            interval: None,
+        },
+    ];
+    let error = lake_fixture_with_subscriptions(&config(), &client, &inputs).unwrap_err();
+    assert!(error.to_string().contains("trade/SPY coverage"));
+    let before = server.requests().len();
+    let mut conflicting = inputs;
+    conflicting.push(MarketSubscription {
+        data_type: "bars".into(),
+        symbols: vec!["SPY".into()],
+        interval: Some("1d".into()),
+    });
+    assert!(lake_fixture_with_subscriptions(&config(), &client, &conflicting).is_err());
+    assert_eq!(server.requests().len(), before);
+}
+
+#[test]
+fn acquisition_rejects_bars_without_completed_frame_coverage() {
+    let server = FakeLakeServer::start(FakeLakeConfig {
+        read_bodies_by_type: BTreeMap::from([("bars".into(), bars_stream("SPY", &[bar_row(0)]))]),
+        ..FakeLakeConfig::new(TOKEN)
+    });
+    let mut config = config();
+    config.end_ns = config.start_ns + 30_000_000_000;
+    let inputs = vec![MarketSubscription {
+        data_type: "bars".into(),
+        symbols: vec!["SPY".into()],
+        interval: Some("1min".into()),
+    }];
+    let error = lake_fixture_with_subscriptions(&config, &client(&server), &inputs).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("bars/SPY completed frame coverage"));
+}
+
+#[test]
+fn exclusive_end_dates_and_nanosecond_row_bounds_are_exact() {
+    let start = stamp("2024-01-02T14:30:00.000000001Z");
+    for (end, expected_date) in [
+        ("2024-01-03T00:00:00Z", "2024-01-02"),
+        ("2024-01-03T00:00:00.000000001Z", "2024-01-03"),
+        ("2024-01-03T14:30:00.000000001Z", "2024-01-03"),
+    ] {
+        let end_ns = stamp(end);
+        let server = FakeLakeServer::start(FakeLakeConfig {
+            read_bodies_by_type: BTreeMap::from([(
+                "quote".into(),
+                quote_stream(
+                    "SPY",
+                    &[
+                        FakeQuoteRow::new(start - 1, "10", "11", 100, 100, "XNYS"),
+                        FakeQuoteRow::new(start, "10", "11", 100, 100, "XNYS"),
+                        FakeQuoteRow::new(end_ns - 1, "10", "11", 100, 100, "XNYS"),
+                        FakeQuoteRow::new(end_ns, "10", "11", 100, 100, "XNYS"),
+                    ],
+                ),
+            )]),
+            ..FakeLakeConfig::new(TOKEN)
+        });
+        let mut config = config();
+        config.start_ns = start;
+        config.end_ns = end_ns;
+        let inputs = vec![MarketSubscription {
+            data_type: "quote".into(),
+            symbols: vec!["SPY".into()],
+            interval: None,
+        }];
+        let fixture = lake_fixture_with_subscriptions(&config, &client(&server), &inputs).unwrap();
+        assert_eq!(
+            fixture
+                .events
+                .iter()
+                .map(|event| event.timestamp_ns())
+                .collect::<Vec<_>>(),
+            [start, end_ns - 1]
+        );
+        for request in server.requests() {
+            if request.path == "/v1/catalog/ensure" {
+                let body: serde_json::Value =
+                    serde_json::from_slice(request.body.as_ref().unwrap()).unwrap();
+                assert_eq!(body["start_date"], "2024-01-02");
+                assert_eq!(body["end_date"], expected_date);
+            } else if request.path == "/v1/read" {
+                assert_eq!(request.query["start_date"], "2024-01-02");
+                assert_eq!(request.query["end_date"], expected_date);
+            }
+        }
+    }
 }
 
 fn config() -> BacktestConfig {
@@ -69,7 +233,7 @@ fn multi_symbol_study_acquires_every_symbol_and_keeps_canonical_order() {
         .iter()
         .map(backtest::backtest::fixture::MarketEvent::symbol)
         .collect();
-    assert_eq!(symbols, vec!["SPY", "QQQ", "SPY", "QQQ"]);
+    assert_eq!(symbols, vec!["QQQ", "SPY", "QQQ", "SPY"]);
     let timestamps: Vec<i64> = fixture
         .events
         .iter()

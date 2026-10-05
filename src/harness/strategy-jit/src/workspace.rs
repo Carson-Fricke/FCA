@@ -29,6 +29,8 @@ pub struct WorkspaceManifest {
     pub artifact_relpath: String,
     /// The resolved toolchain digest used for the build.
     pub toolchain_digest: String,
+    /// The SDK sources and local compiler contract used for the build.
+    pub compiler_fingerprint: String,
     /// The SDK crate version compiled into the artifact.
     pub sdk_version: String,
     /// The SDK ABI version compiled into the artifact.
@@ -37,9 +39,39 @@ pub struct WorkspaceManifest {
     pub built_at_unix: u64,
 }
 
-/// A managed cargo workspace with one shared `target/` and per-source crates.
+/// A managed cargo workspace with isolated build generations and locked manifests.
 pub struct ManagedWorkspace {
     root: PathBuf,
+}
+
+#[cfg(windows)]
+fn compiler_compatible_path(path: PathBuf) -> PathBuf {
+    use std::ffi::OsString;
+    use std::path::{Component, Prefix};
+
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return path;
+    };
+    // MSVC linker/object paths require conventional DOS or UNC prefixes.
+    let mut normalized = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => PathBuf::from(format!("{}:\\", char::from(drive))),
+        Prefix::VerbatimUNC(server, share) => {
+            let mut root = OsString::from("\\\\");
+            root.push(server);
+            root.push("\\");
+            root.push(share);
+            root.push("\\");
+            PathBuf::from(root)
+        }
+        _ => return path,
+    };
+    for component in components {
+        if !matches!(component, Component::RootDir) {
+            normalized.push(component.as_os_str());
+        }
+    }
+    normalized
 }
 
 impl ManagedWorkspace {
@@ -50,6 +82,12 @@ impl ManagedWorkspace {
     /// Returns [`JitError`] when the directories cannot be created or the
     /// toolchain pin cannot be written.
     pub fn open(root: &Path) -> Result<Self, JitError> {
+        let root = std::path::absolute(root)?;
+        std::fs::create_dir_all(&root)
+            .map_err(|error| JitError::Io(format!("creating {}: {error}", root.display())))?;
+        let root = root.canonicalize()?;
+        #[cfg(windows)]
+        let root = compiler_compatible_path(root);
         std::fs::create_dir_all(root.join("crates")).map_err(|error| {
             JitError::Io(format!(
                 "creating {}: {error}",
@@ -62,11 +100,14 @@ impl ManagedWorkspace {
                 root.join("target").display()
             ))
         })?;
-        std::fs::write(root.join("rust-toolchain.toml"), TOOLCHAIN_FILE)
-            .map_err(|error| JitError::Io(format!("writing the toolchain pin: {error}")))?;
-        Ok(Self {
-            root: root.to_path_buf(),
-        })
+        let workspace = Self { root };
+        let _lock = workspace.lock("setup")?;
+        let pin = workspace.root.join("rust-toolchain.toml");
+        if std::fs::read_to_string(&pin).ok().as_deref() != Some(TOOLCHAIN_FILE) {
+            std::fs::write(pin, TOOLCHAIN_FILE)
+                .map_err(|error| JitError::Io(format!("writing the toolchain pin: {error}")))?;
+        }
+        Ok(workspace)
     }
 
     /// Open the default managed workspace.
@@ -97,10 +138,44 @@ impl ManagedWorkspace {
         self.root.join("target")
     }
 
-    /// The directory holding one authored crate.
+    /// The directory holding one authored crate generation.
     #[must_use]
     pub fn crate_dir(&self, digest: &str) -> PathBuf {
         self.root.join("crates").join(digest)
+    }
+
+    /// Locks are kernel-owned and released on close or process exit. Never unlink them.
+    pub(crate) fn lock(&self, name: &str) -> Result<std::fs::File, JitError> {
+        let directory = self.root.join("locks");
+        std::fs::create_dir_all(&directory)?;
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(directory.join(format!("{name}.lock")))?;
+        file.lock()?;
+        Ok(file)
+    }
+
+    pub(crate) fn create_build_directory(&self) -> Result<String, JitError> {
+        static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        loop {
+            let nonce = format!(
+                "{}:{}:{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |time| time.as_nanos()),
+                SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
+            let name = backtest::sha256::digest_hex(nonce.as_bytes())[..16].to_string();
+            match std::fs::create_dir(self.target_dir().join(&name)) {
+                Ok(()) => return Ok(name),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
 
     /// Read the workspace manifest, ignoring unreadable content.
@@ -125,6 +200,11 @@ impl ManagedWorkspace {
                         crate_name: value.get("crate_name")?.as_str()?.to_string(),
                         artifact_relpath: value.get("artifact_relpath")?.as_str()?.to_string(),
                         toolchain_digest: value.get("toolchain_digest")?.as_str()?.to_string(),
+                        compiler_fingerprint: value
+                            .get("compiler_fingerprint")
+                            .and_then(Json::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
                         sdk_version: value.get("sdk_version")?.as_str()?.to_string(),
                         sdk_abi_version: u32::try_from(value.get("sdk_abi_version")?.as_u64()?)
                             .ok()?,
@@ -144,6 +224,26 @@ impl ManagedWorkspace {
         &self,
         entries: &BTreeMap<String, WorkspaceManifest>,
     ) -> Result<(), JitError> {
+        let _lock = self.lock("manifest")?;
+        self.write_manifest_locked(entries)
+    }
+
+    /// Merge one entry under the manifest lock so independent builds retain each other.
+    pub fn update_manifest(
+        &self,
+        digest: String,
+        entry: WorkspaceManifest,
+    ) -> Result<(), JitError> {
+        let _lock = self.lock("manifest")?;
+        let mut entries = self.read_manifest();
+        entries.insert(digest, entry);
+        self.write_manifest_locked(&entries)
+    }
+
+    fn write_manifest_locked(
+        &self,
+        entries: &BTreeMap<String, WorkspaceManifest>,
+    ) -> Result<(), JitError> {
         let document = serde_json::json!({
             "entries": entries
                 .iter()
@@ -153,6 +253,7 @@ impl ManagedWorkspace {
                         "crate_name": entry.crate_name,
                         "artifact_relpath": entry.artifact_relpath,
                         "toolchain_digest": entry.toolchain_digest,
+                        "compiler_fingerprint": entry.compiler_fingerprint,
                         "sdk_version": entry.sdk_version,
                         "sdk_abi_version": entry.sdk_abi_version,
                         "built_at_unix": entry.built_at_unix,
@@ -171,3 +272,7 @@ impl ManagedWorkspace {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/workspace.rs"]
+mod tests;

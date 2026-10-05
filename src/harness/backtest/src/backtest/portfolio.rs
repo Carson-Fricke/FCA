@@ -1,11 +1,11 @@
 //! Decimal-exact accounting for virtual books and the shared portfolio hub.
 //!
 //! Port of `harness.portfolio.book` and `harness.portfolio.hub` using
-//! [`PyDecimal`] so every rendered value matches Python's `decimal.Decimal`.
+//! [`Decimal`] so every rendered value keeps the exact canonical text.
 
 use std::collections::BTreeMap;
 
-use num::PyDecimal;
+use num::Decimal;
 
 use crate::canonical_json::JsonValue;
 
@@ -17,21 +17,21 @@ pub struct BookFill {
     /// `buy` or `sell`.
     pub side: String,
     /// Signed quantity as an exact decimal.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// Execution price.
-    pub price: PyDecimal,
+    pub price: Decimal,
     /// Fee recognized immediately.
-    pub fee: PyDecimal,
+    pub fee: Decimal,
     /// Instrument symbol.
     pub symbol: String,
 }
 
 #[derive(Clone, Debug)]
 struct PositionLedger {
-    quantity: PyDecimal,
-    cost_basis: PyDecimal,
-    cash_flow: PyDecimal,
-    realized_pnl: PyDecimal,
+    quantity: Decimal,
+    cost_basis: Decimal,
+    cash_flow: Decimal,
+    realized_pnl: Decimal,
 }
 
 impl PositionLedger {}
@@ -42,9 +42,9 @@ pub struct BookSnapshot {
     /// Book identifier.
     pub book_id: String,
     /// Opening cash.
-    pub initial_cash: PyDecimal,
+    pub initial_cash: Decimal,
     /// Current cash.
-    pub cash: PyDecimal,
+    pub cash: Decimal,
     /// Position snapshots in canonical order.
     pub positions: Vec<PositionSnapshot>,
     /// Fill count.
@@ -57,15 +57,15 @@ pub struct PositionSnapshot {
     /// Symbol.
     pub symbol: String,
     /// Signed quantity.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// Cost basis.
-    pub cost_basis: PyDecimal,
+    pub cost_basis: Decimal,
     /// Attributed cash flow.
-    pub cash_flow: PyDecimal,
+    pub cash_flow: Decimal,
     /// Realized PnL.
-    pub realized_pnl: PyDecimal,
+    pub realized_pnl: Decimal,
     /// Mark price, if a marker exists.
-    pub mark_price: Option<PyDecimal>,
+    pub mark_price: Option<Decimal>,
 }
 
 impl PositionSnapshot {
@@ -77,39 +77,39 @@ impl PositionSnapshot {
 
     /// Average entry price, or zero when flat.
     #[must_use]
-    pub fn average_cost(&self) -> PyDecimal {
+    pub fn average_cost(&self) -> Decimal {
         if self.is_flat() {
-            return PyDecimal::ZERO;
+            return Decimal::ZERO;
         }
         self.cost_basis
             .checked_div(self.quantity)
-            .unwrap_or(PyDecimal::ZERO)
+            .unwrap_or(Decimal::ZERO)
     }
 
     /// Signed marked value; zero when flat, `None` when open and unmarked.
     #[must_use]
-    pub fn market_value(&self) -> Option<PyDecimal> {
+    pub fn market_value(&self) -> Option<Decimal> {
         if self.is_flat() {
-            return Some(PyDecimal::ZERO);
+            return Some(Decimal::ZERO);
         }
         self.mark_price
-            .map(|mark| self.quantity.checked_mul(mark).unwrap_or(PyDecimal::ZERO))
+            .map(|mark| self.quantity.checked_mul(mark).unwrap_or(Decimal::ZERO))
     }
 
     /// Realized plus unrealized PnL, when marked.
     #[must_use]
-    pub fn total_pnl(&self) -> Option<PyDecimal> {
+    pub fn total_pnl(&self) -> Option<Decimal> {
         self.market_value()
             .map(|value| self.cash_flow.checked_add(value).unwrap_or(self.cash_flow))
     }
 
     /// Unrealized PnL as the remainder after realized PnL, when marked.
     #[must_use]
-    pub fn unrealized_pnl(&self) -> Option<PyDecimal> {
+    pub fn unrealized_pnl(&self) -> Option<Decimal> {
         self.total_pnl().map(|total| {
             total
                 .checked_sub(self.realized_pnl)
-                .unwrap_or(PyDecimal::ZERO)
+                .unwrap_or(Decimal::ZERO)
         })
     }
 }
@@ -117,8 +117,8 @@ impl PositionSnapshot {
 impl BookSnapshot {
     /// Realized PnL across all positions.
     #[must_use]
-    pub fn realized_pnl(&self) -> PyDecimal {
-        let mut total = PyDecimal::ZERO;
+    pub fn realized_pnl(&self) -> Decimal {
+        let mut total = Decimal::ZERO;
         for position in &self.positions {
             total = total.checked_add(position.realized_pnl).unwrap_or(total);
         }
@@ -127,8 +127,8 @@ impl BookSnapshot {
 
     /// Total signed market value when every open leg is marked.
     #[must_use]
-    pub fn market_value(&self) -> Option<PyDecimal> {
-        let mut total = PyDecimal::ZERO;
+    pub fn market_value(&self) -> Option<Decimal> {
+        let mut total = Decimal::ZERO;
         for position in &self.positions {
             let value = position.market_value()?;
             total = total.checked_add(value).unwrap_or(total);
@@ -138,30 +138,30 @@ impl BookSnapshot {
 
     /// Marked book equity.
     #[must_use]
-    pub fn equity(&self) -> Option<PyDecimal> {
+    pub fn equity(&self) -> Option<Decimal> {
         self.market_value()
             .map(|value| self.cash.checked_add(value).unwrap_or(self.cash))
     }
 
     /// Unrealized PnL when all open legs are marked.
     #[must_use]
-    pub fn unrealized_pnl(&self) -> Option<PyDecimal> {
+    pub fn unrealized_pnl(&self) -> Option<Decimal> {
         self.equity()
             .map(|equity| {
                 equity
                     .checked_sub(self.initial_cash)
-                    .unwrap_or(PyDecimal::ZERO)
+                    .unwrap_or(Decimal::ZERO)
             })
             .and_then(|total_pnl| total_pnl.checked_sub(self.realized_pnl()).ok())
     }
 
     /// Total PnL as the marked change in equity.
     #[must_use]
-    pub fn total_pnl(&self) -> Option<PyDecimal> {
+    pub fn total_pnl(&self) -> Option<Decimal> {
         self.equity().map(|equity| {
             equity
                 .checked_sub(self.initial_cash)
-                .unwrap_or(PyDecimal::ZERO)
+                .unwrap_or(Decimal::ZERO)
         })
     }
 }
@@ -171,17 +171,17 @@ impl BookSnapshot {
 pub struct VirtualBook {
     /// Book identifier.
     pub book_id: String,
-    initial_cash: PyDecimal,
-    cash: PyDecimal,
+    initial_cash: Decimal,
+    cash: Decimal,
     positions: BTreeMap<String, PositionLedger>,
-    markers: BTreeMap<String, PyDecimal>,
+    markers: BTreeMap<String, Decimal>,
     fill_ids: Vec<String>,
 }
 
 impl VirtualBook {
     /// Create a book with the given opening cash.
     #[must_use]
-    pub fn new(book_id: impl Into<String>, initial_cash: PyDecimal) -> Self {
+    pub fn new(book_id: impl Into<String>, initial_cash: Decimal) -> Self {
         Self {
             book_id: book_id.into(),
             initial_cash,
@@ -194,13 +194,13 @@ impl VirtualBook {
 
     /// Opening cash.
     #[must_use]
-    pub const fn initial_cash(&self) -> PyDecimal {
+    pub const fn initial_cash(&self) -> Decimal {
         self.initial_cash
     }
 
     /// Current cash.
     #[must_use]
-    pub const fn cash(&self) -> PyDecimal {
+    pub const fn cash(&self) -> Decimal {
         self.cash
     }
 
@@ -243,12 +243,7 @@ impl VirtualBook {
                 ledger.cash_flow,
                 ledger.realized_pnl,
             ),
-            None => (
-                PyDecimal::ZERO,
-                PyDecimal::ZERO,
-                PyDecimal::ZERO,
-                PyDecimal::ZERO,
-            ),
+            None => (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO),
         };
         let next_quantity = quantity.checked_add(signed_quantity).unwrap_or(quantity);
 
@@ -259,7 +254,7 @@ impl VirtualBook {
         {
             let addition = signed_quantity
                 .checked_mul(fill.price)
-                .unwrap_or(PyDecimal::ZERO);
+                .unwrap_or(Decimal::ZERO);
             cost_basis = cost_basis.checked_add(addition).unwrap_or(cost_basis);
         } else if abs_le(signed_quantity, quantity) {
             let released_basis = if abs_eq(signed_quantity, quantity) {
@@ -268,14 +263,14 @@ impl VirtualBook {
                 cost_basis
                     .checked_mul(signed_quantity.abs())
                     .and_then(|value| value.checked_div(quantity.abs()))
-                    .unwrap_or(PyDecimal::ZERO)
+                    .unwrap_or(Decimal::ZERO)
             };
             let term = signed_quantity
                 .negated()
                 .checked_mul(fill.price)
-                .unwrap_or(PyDecimal::ZERO)
+                .unwrap_or(Decimal::ZERO)
                 .checked_sub(released_basis)
-                .unwrap_or(PyDecimal::ZERO);
+                .unwrap_or(Decimal::ZERO);
             realized_pnl = realized_pnl.checked_add(term).unwrap_or(realized_pnl);
             cost_basis = cost_basis.checked_sub(released_basis).unwrap_or(cost_basis);
         } else {
@@ -283,25 +278,25 @@ impl VirtualBook {
             let term = closing_quantity
                 .negated()
                 .checked_mul(fill.price)
-                .unwrap_or(PyDecimal::ZERO)
+                .unwrap_or(Decimal::ZERO)
                 .checked_sub(cost_basis)
-                .unwrap_or(PyDecimal::ZERO);
+                .unwrap_or(Decimal::ZERO);
             realized_pnl = realized_pnl.checked_add(term).unwrap_or(realized_pnl);
             cost_basis = next_quantity
                 .checked_mul(fill.price)
-                .unwrap_or(PyDecimal::ZERO);
+                .unwrap_or(Decimal::ZERO);
         }
 
         realized_pnl = realized_pnl.checked_sub(fill.fee).unwrap_or(realized_pnl);
         let notional = signed_quantity
             .checked_mul(fill.price)
-            .unwrap_or(PyDecimal::ZERO);
+            .unwrap_or(Decimal::ZERO);
         cash_flow = cash_flow
             .checked_sub(notional)
             .and_then(|value| value.checked_sub(fill.fee))
             .unwrap_or(cash_flow);
         if next_quantity.is_zero() {
-            cost_basis = PyDecimal::ZERO;
+            cost_basis = Decimal::ZERO;
             realized_pnl = cash_flow;
         }
         let next_cash = self
@@ -323,7 +318,7 @@ impl VirtualBook {
     }
 
     /// Apply one explicit mark.
-    pub fn mark(&mut self, symbol: &str, price: PyDecimal) {
+    pub fn mark(&mut self, symbol: &str, price: Decimal) {
         self.markers.insert(symbol.to_string(), price);
     }
 
@@ -345,9 +340,9 @@ pub struct PortfolioSnapshot {
     /// Account identifier.
     pub account_id: String,
     /// Total opening cash.
-    pub initial_cash: PyDecimal,
+    pub initial_cash: Decimal,
     /// Total cash.
-    pub cash: PyDecimal,
+    pub cash: Decimal,
     /// Aggregated positions.
     pub positions: Vec<AggregatePosition>,
     /// Constituent book snapshots.
@@ -362,32 +357,32 @@ pub struct AggregatePosition {
     /// Symbol.
     pub symbol: String,
     /// Net quantity.
-    pub quantity: PyDecimal,
+    pub quantity: Decimal,
     /// Long quantity.
-    pub long_quantity: PyDecimal,
+    pub long_quantity: Decimal,
     /// Absolute short quantity.
-    pub short_quantity: PyDecimal,
+    pub short_quantity: Decimal,
     /// Aggregate cost basis.
-    pub cost_basis: PyDecimal,
+    pub cost_basis: Decimal,
     /// Aggregate cash flow.
-    pub cash_flow: PyDecimal,
+    pub cash_flow: Decimal,
     /// Average cost when the aggregate is one-directional.
-    pub average_cost: Option<PyDecimal>,
+    pub average_cost: Option<Decimal>,
     /// Realized PnL.
-    pub realized_pnl: PyDecimal,
+    pub realized_pnl: Decimal,
     /// Common mark when exactly one distinct non-null mark exists.
-    pub mark_price: Option<PyDecimal>,
+    pub mark_price: Option<Decimal>,
     /// Marked market value.
-    pub market_value: Option<PyDecimal>,
+    pub market_value: Option<Decimal>,
     /// Unrealized PnL.
-    pub unrealized_pnl: Option<PyDecimal>,
+    pub unrealized_pnl: Option<Decimal>,
 }
 
 impl PortfolioSnapshot {
     /// Realized PnL attributed across all books.
     #[must_use]
-    pub fn realized_pnl(&self) -> PyDecimal {
-        let mut total = PyDecimal::ZERO;
+    pub fn realized_pnl(&self) -> Decimal {
+        let mut total = Decimal::ZERO;
         for position in &self.positions {
             total = total.checked_add(position.realized_pnl).unwrap_or(total);
         }
@@ -396,8 +391,8 @@ impl PortfolioSnapshot {
 
     /// Total signed market value when every open leg is marked.
     #[must_use]
-    pub fn market_value(&self) -> Option<PyDecimal> {
-        let mut total = PyDecimal::ZERO;
+    pub fn market_value(&self) -> Option<Decimal> {
+        let mut total = Decimal::ZERO;
         for position in &self.positions {
             let value = position.market_value?;
             total = total.checked_add(value).unwrap_or(total);
@@ -407,24 +402,24 @@ impl PortfolioSnapshot {
 
     /// Shared marked equity.
     #[must_use]
-    pub fn equity(&self) -> Option<PyDecimal> {
+    pub fn equity(&self) -> Option<Decimal> {
         self.market_value()
             .map(|value| self.cash.checked_add(value).unwrap_or(self.cash))
     }
 
     /// Total PnL as the marked change in aggregate equity.
     #[must_use]
-    pub fn total_pnl(&self) -> Option<PyDecimal> {
+    pub fn total_pnl(&self) -> Option<Decimal> {
         self.equity().map(|equity| {
             equity
                 .checked_sub(self.initial_cash)
-                .unwrap_or(PyDecimal::ZERO)
+                .unwrap_or(Decimal::ZERO)
         })
     }
 
     /// Unrealized PnL when every open leg is marked.
     #[must_use]
-    pub fn unrealized_pnl(&self) -> Option<PyDecimal> {
+    pub fn unrealized_pnl(&self) -> Option<Decimal> {
         let total = self.total_pnl()?;
         total.checked_sub(self.realized_pnl()).ok()
     }
@@ -449,7 +444,7 @@ impl PortfolioHub {
     }
 
     /// Create and register a strategy book.
-    pub fn create_book(&mut self, book_id: impl Into<String>, initial_cash: PyDecimal) {
+    pub fn create_book(&mut self, book_id: impl Into<String>, initial_cash: Decimal) {
         self.books.push(VirtualBook::new(book_id, initial_cash));
     }
 
@@ -472,7 +467,7 @@ impl PortfolioHub {
     }
 
     /// Broadcast one explicit mark to every book.
-    pub fn mark(&mut self, symbol: &str, price: PyDecimal) {
+    pub fn mark(&mut self, symbol: &str, price: Decimal) {
         for book in &mut self.books {
             book.mark(symbol, price);
         }
@@ -491,8 +486,8 @@ impl PortfolioHub {
                     .push(position.clone());
             }
         }
-        let mut initial_cash = PyDecimal::ZERO;
-        let mut cash = PyDecimal::ZERO;
+        let mut initial_cash = Decimal::ZERO;
+        let mut cash = Decimal::ZERO;
         let mut fill_count = 0usize;
         for book in &books {
             initial_cash = initial_cash
@@ -517,12 +512,12 @@ impl PortfolioHub {
 }
 
 fn aggregate_position(symbol: &str, positions: &[PositionSnapshot]) -> AggregatePosition {
-    let mut quantity = PyDecimal::ZERO;
-    let mut long_quantity = PyDecimal::ZERO;
-    let mut short_quantity = PyDecimal::ZERO;
-    let mut cost_basis = PyDecimal::ZERO;
-    let mut cash_flow = PyDecimal::ZERO;
-    let mut realized_pnl = PyDecimal::ZERO;
+    let mut quantity = Decimal::ZERO;
+    let mut long_quantity = Decimal::ZERO;
+    let mut short_quantity = Decimal::ZERO;
+    let mut cost_basis = Decimal::ZERO;
+    let mut cash_flow = Decimal::ZERO;
+    let mut realized_pnl = Decimal::ZERO;
     for position in positions {
         quantity = quantity.checked_add(position.quantity).unwrap_or(quantity);
         if position.quantity.is_positive() {
@@ -550,7 +545,7 @@ fn aggregate_position(symbol: &str, positions: &[PositionSnapshot]) -> Aggregate
         } else {
             None
         };
-    let mut marks: Vec<PyDecimal> = Vec::new();
+    let mut marks: Vec<Decimal> = Vec::new();
     let mut saw_none = false;
     for position in positions.iter().filter(|p| !p.quantity.is_zero()) {
         match position.mark_price {
@@ -570,7 +565,7 @@ fn aggregate_position(symbol: &str, positions: &[PositionSnapshot]) -> Aggregate
     } else {
         None
     };
-    let mut market_value: Option<PyDecimal> = Some(PyDecimal::ZERO);
+    let mut market_value: Option<Decimal> = Some(Decimal::ZERO);
     for position in positions {
         match position.market_value() {
             Some(value) => {
@@ -587,7 +582,7 @@ fn aggregate_position(symbol: &str, positions: &[PositionSnapshot]) -> Aggregate
             .checked_add(value)
             .unwrap_or(cash_flow)
             .checked_sub(realized_pnl)
-            .unwrap_or(PyDecimal::ZERO)
+            .unwrap_or(Decimal::ZERO)
     });
     AggregatePosition {
         symbol: symbol.to_string(),
@@ -604,16 +599,16 @@ fn aggregate_position(symbol: &str, positions: &[PositionSnapshot]) -> Aggregate
     }
 }
 
-fn abs_eq(left: PyDecimal, right: PyDecimal) -> bool {
+fn abs_eq(left: Decimal, right: Decimal) -> bool {
     left.abs().cmp_value(right.abs()) == std::cmp::Ordering::Equal
 }
 
-fn abs_le(left: PyDecimal, right: PyDecimal) -> bool {
+fn abs_le(left: Decimal, right: Decimal) -> bool {
     left.abs().cmp_value(right.abs()) != std::cmp::Ordering::Greater
 }
 
 /// Render an optional decimal as a JSON string or null (Python `_decimal_or_none`).
-pub(crate) fn decimal_or_none(value: Option<PyDecimal>) -> JsonValue {
+pub(crate) fn decimal_or_none(value: Option<Decimal>) -> JsonValue {
     match value {
         Some(value) => JsonValue::String(value.to_string()),
         None => JsonValue::Null,

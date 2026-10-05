@@ -1,75 +1,70 @@
-import { expect, send, test, workflowCard } from './fixtures';
+import {
+	answerPhase,
+	backToRoot,
+	expect,
+	launchWorkflow,
+	openPhase,
+	phaseStep,
+	test,
+	waitForPhaseAttention
+} from './fixtures';
 
 /**
- * The hypothesis-development workflow, end to end, through the live UX:
- * launch -> creation proposal -> operator confirmation -> trials run view ->
- * verdict phase. The model is live, so timing is generous and every
- * assertion targets a durable UI outcome.
+ * The full hypothesis-development journey through the live UX, up to the
+ * deterministic falsification trials (the strategy phases that follow the
+ * verdict are out of scope until they are implemented properly):
+ *
+ *   launch -> discovery proposal -> operator confirmation
+ *          -> model-creation proposal -> operator confirmation
+ *          -> falsification trials run view.
+ *
+ * The per-phase surfaces are also covered by the focused specs under
+ * `e2e/phases/`; this spec is the cross-phase smoke that the handoffs work.
  */
 test.describe('hypothesis development workflow', () => {
-	// The trials phase runs the research model through the harness (data
-	// ensure + study), which can take several minutes.
-	test.setTimeout(900_000);
+	test.setTimeout(1_800_000);
 
-	test('launch, confirm the proposal, and watch the trials phase run', async ({
-		chatPage
+	test('launch, confirm discovery and model creation, and watch the trials run', async ({
+		chatPage: page
 	}) => {
-		const page = chatPage;
+		await launchWorkflow(page);
 
-		// Launch: the creation agent proposes, then asks for confirmation
-		// through the wrapped input tool (the confirmation protocol).
-		await send(
-			page,
-			'I think SPY momentum persists over the last month. Start the hypothesis development workflow.'
-		);
-		await expect(workflowCard(page)).toBeVisible({ timeout: 120_000 });
-		await expect(
-			page.getByTestId('workflow-card-status')
-		).toHaveText(/running|started|launched/, { timeout: 120_000 });
-
-		// The creation agent proposes, then asks for confirmation through the
-		// wrapped input tool. The question itself lives on the node's scope
-		// (root shows the card's attention line - the ask is on the agent).
-		await expect(page.getByTestId('workflow-card-needs-input')).toBeVisible({
+		// Discovery: the agent runs its targeted studies, then proposes and
+		// asks for confirmation through the wrapped input tool.
+		await waitForPhaseAttention(page, 'discovery', 900_000);
+		await openPhase(page, 'discovery');
+		// Study execution is mandatory UX: the studies behind the proposal must
+		// surface as scoped tool activity, not hidden work.
+		await expect(page.locator('[data-testid="scope-tool"]').first()).toBeVisible({
 			timeout: 300_000
 		});
+		await answerPhase(page, 'Confirmed — carry this candidate into model creation.');
+		await backToRoot(page);
 
-		// Drill into the current phase and answer the agent.
-		await page.getByTestId('workflow-card-body').click();
-		await expect(page.getByTestId('scope-transcript')).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByTestId('operator-question-card')).toBeVisible({
-			timeout: 60_000
+		// Model creation: author a study, compile-check it, propose, and ask.
+		await waitForPhaseAttention(page, 'model_creation', 1_200_000);
+		await openPhase(page, 'model_creation');
+		// The only harness tool in this phase is validate_study, so a tool card
+		// here is the compile check surfacing in the UX.
+		await expect(page.locator('[data-testid="scope-tool"]').first()).toBeVisible({
+			timeout: 600_000
 		});
-		await expect(page.getByTestId('sub-agent-composer')).toBeVisible();
-		await page.getByTestId('sub-agent-composer-input').fill('I confirm');
-		await page.getByTestId('sub-agent-composer-send').click();
+		await answerPhase(page, 'Approved — run the falsification trials.');
+		await backToRoot(page);
 
-		// Back out to the root: the workflow advances through the deterministic
-		// falsification-trials phase into verdict.
-		await expect(page.getByTestId('scope-back')).toBeVisible();
-		await page.getByTestId('scope-back').click();
-		await expect(workflowCard(page)).toBeVisible();
-
-		// The falsification_trials pill becomes enterable once the cascade
-		// reaches the verdict phase; the trials pill is a run view, not a chat.
-		const trialsPill = page.locator('[data-testid="phase-step"][data-phase="falsification_trials"]');
-		await expect(trialsPill).toBeVisible({ timeout: 600_000 });
-		await trialsPill.click();
-		await expect(page.getByTestId('phase-run-view')).toBeVisible({ timeout: 30_000 });
-
-		// The run view is the trials surface: a live progress log while the
-		// research model runs through the harness, and the result (or error)
-		// card when it completes - never a composer. The study itself can run
-		// for many minutes, so the e2e asserts the live monitoring surface;
-		// the result/error renderings are covered by the PhaseRunView
-		// component tests.
+		// Falsification trials: a deterministic run view with no composer.
+		await expect(phaseStep(page, 'falsification_trials')).toBeEnabled({
+			timeout: 1_200_000
+		});
+		await phaseStep(page, 'falsification_trials').click();
+		await expect(page.getByTestId('phase-run-view')).toBeVisible({ timeout: 60_000 });
+		await expect(page.getByTestId('phase-run-status')).toHaveText(
+			/Running|Completed|Failed/,
+			{ timeout: 120_000 }
+		);
 		await expect(
 			page.locator('[data-testid="phase-run-log"], [data-testid="phase-run-empty"]')
 		).toBeVisible();
-		await expect(page.getByTestId('phase-progress-line').first()).toBeVisible({
-			timeout: 120_000
-		});
 		await expect(page.getByTestId('sub-agent-composer')).toHaveCount(0);
-		await page.getByTestId('scope-back').click();
 	});
 });

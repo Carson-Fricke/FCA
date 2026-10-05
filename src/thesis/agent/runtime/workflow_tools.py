@@ -125,6 +125,10 @@ def workflow_registered_tools(
             ),
         )
         structured = dict(result)
+        # Stamp the resolved registration's identity into the handle so every
+        # client can resolve the execution's topology without inventing an id.
+        structured["workflowId"] = registration.spec.workflow_id
+        structured["version"] = registration.spec.version
         return ToolExecution(
             ok=True,
             structured=structured,

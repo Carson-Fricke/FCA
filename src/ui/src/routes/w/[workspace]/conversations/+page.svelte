@@ -1,29 +1,19 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
+	import { ChatHostController, DRAFT_CHAT_ID } from '$lib/chat-host.svelte';
+	import { conversationNavigation } from '$lib/chat-navigation';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
-	import CleoPlanPanel from '$lib/components/chat/CleoPlanPanel.svelte';
 	import ConversationDeleteDialog from '$lib/components/chat/ConversationDeleteDialog.svelte';
-	import EmptyState from '$lib/components/common/EmptyState.svelte';
 	import {
 		confirmConsent,
-		conversationTitleFrom,
-		createChat,
-		deleteChat,
-		getConsentProposal,
-		getExecution,
-		getWorkspaceState,
-		listChats,
-		postMessage
+		getConsentProposal
 	} from '$lib/api';
-	import { TimelineController } from '$lib/timeline.svelte';
 	import { notify } from '$lib/workspace.svelte';
 	import type {
 		ChatThread,
-		ConsentProposal,
-		SteeringPercolationTarget,
-		WorkflowExecutionRecord,
-		WorkspaceStateData
+		ConsentProposal
 	} from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -31,16 +21,18 @@
 
 	const workspaceId = $derived(data.workspaceId);
 
-	let chats = $state<ChatThread[]>([]);
-	let chatId = $state<string | null>(null);
-	let execution = $state<WorkflowExecutionRecord | null>(null);
-	let percolations = $state<Record<string, SteeringPercolationTarget[]>>({});
+	const host = new ChatHostController(conversationNavigation(
+		() => typeof location === 'undefined' ? page.url : new URL(location.href),
+		(url) => replaceState(url, {})
+	));
+	const chats = $derived(host.chats);
+	const chatId = $derived(host.chatId);
+	const percolations = $derived(host.percolations);
 	let proposal = $state<ConsentProposal | null>(null);
 	let consentBusy = $state(false);
-	let stateData = $state<WorkspaceStateData | null>(null);
-	let busy = $state(false);
+	const busy = $derived(host.busy);
 	/** A new conversation is a draft until its first message is sent. */
-	let drafting = $state(false);
+	const drafting = $derived(host.drafting);
 	/** The conversation queued for modal delete confirmation. */
 	let deleteTarget = $state<ChatThread | null>(null);
 	/**
@@ -49,156 +41,41 @@
 	 * conversation switch so the surface attaches at the root instead of
 	 * replaying a view that belongs to the previous conversation.
 	 */
-	let scopeGrant = $state<string | null>(page.url.searchParams.get('scope'));
-	let hashGrant = $state<string | null>(page.url.hash);
-	const timeline = new TimelineController();
-	const messages = $derived(timeline.messages);
-	const events = $derived(timeline.events);
-
-	const activeChat = $derived(chats.find((c) => c.chat_id === chatId) ?? null);
-	const DRAFT_CHAT_ID = '__draft_conversation__';
-	function draftChat(): ChatThread {
-		return {
-			chat_id: DRAFT_CHAT_ID,
-			workspace_id: workspaceId,
-			title: 'New conversation',
-			state: 'active',
-			kind: 'chat',
-			owner_actor_id: 'local-operator',
-			created_at: new Date().toISOString(),
-			updated_at: null,
-			investigation_ids: [],
-			strategy_ids: []
-		};
-	}
-	const visibleChats = $derived(drafting ? [draftChat(), ...chats] : chats);
-	const selectedChat = $derived(drafting ? draftChat() : activeChat);
-	const activeExecutionId = $derived(execution?.execution_id ?? null);
-	const cleoPlan = $derived(stateData?.cleo ?? null);
+	const scopeGrant = $derived(host.scopeGrant);
+	const hashGrant = $derived(host.hashGrant);
+	const timeline = host.timeline;
+	const visibleChats = $derived(host.visibleChats);
+	const selectedChat = $derived(host.selectedChat);
+	const anyActiveWorkflow = $derived(timeline.anyActiveWorkflow);
 
 	$effect(() => {
-		let cancelled = false;
-		listChats(workspaceId).then((items) => {
-			if (cancelled) return;
-			chats = items;
-			if (!drafting && !chatId) {
-				const requested = page.url.searchParams.get('chat');
-				chatId = requested && items.some((c) => c.chat_id === requested)
-					? requested
-					: (items[0]?.chat_id ?? null);
-			}
-		});
-		getWorkspaceState(workspaceId).then((ws) => {
-			if (!cancelled) stateData = ws;
-		});
-		getConsentProposal(workspaceId).then((p) => {
-			if (!cancelled) proposal = p;
-		});
-		return () => {
-			cancelled = true;
-		};
+		const id = workspaceId;
+		untrack(() => { deleteTarget = null; void host.open(id); });
+		return () => host.stop();
 	});
 
-	// Load the selected chat's unified timeline and its workflow execution.
 	$effect(() => {
-		const id = chatId;
-		if (!id) {
-			execution = null;
-			timeline.stop();
-			return;
-		}
 		let cancelled = false;
-		// `page.url` is frozen at mount (replaceState never updates it), so
-		// the live address bar is the only correct scope source here.
-		const requested = new URL(location.href).searchParams.get('chat');
-		if (requested !== id) {
-			replaceState(`/w/${workspaceId}/conversations?chat=${id}`, {});
-		}
-		timeline.start(workspaceId, id);
-		getExecution(workspaceId, id).then((exec) => {
-			if (!cancelled) execution = exec;
-		});
+		proposal = null;
+		getConsentProposal(workspaceId).then((p) => {
+			if (!cancelled) proposal = p;
+		}).catch((error) => { if (!cancelled) notify(error instanceof Error ? error.message : 'Consent proposal failed', true); });
 		return () => {
 			cancelled = true;
-			timeline.stop();
 		};
 	});
 
 	/** Start a draft conversation; it persists only when the first message is sent. */
 	function newConversation(): void {
-		timeline.reset();
-		drafting = true;
+		host.newConversation();
 		deleteTarget = null;
-		chatId = null;
-		execution = null;
-		scopeGrant = null;
-		hashGrant = null;
-		replaceState(`/w/${workspaceId}/conversations`, {});
-	}
-
-	async function removeConversation(id: string): Promise<void> {
-		try {
-			await deleteChat(workspaceId, id);
-			chats = chats.filter((chat) => chat.chat_id !== id);
-			if (chatId === id) {
-				timeline.stop();
-				chatId = chats[0]?.chat_id ?? null;
-				execution = null;
-				if (!chatId) drafting = false;
-				replaceState(
-					chatId
-						? `/w/${workspaceId}/conversations?chat=${chatId}`
-						: `/w/${workspaceId}/conversations`,
-					{}
-				);
-			}
-			notify('Conversation deleted');
-		} catch (error) {
-			notify(error instanceof Error ? error.message : 'Delete failed', true);
-		}
 	}
 
 	async function confirmDelete(): Promise<void> {
 		const target = deleteTarget;
 		if (!target) return;
 		deleteTarget = null;
-		await removeConversation(target.chat_id);
-	}
-
-	async function send(input: {
-		body: string;
-		attachmentIds: string[];
-		steeringIntent: string | null;
-	}): Promise<void> {
-		busy = true;
-		try {
-			let id = chatId;
-			let created: ChatThread | null = null;
-			if (!id) {
-				created = await createChat(workspaceId, {
-					title: conversationTitleFrom(input.body)
-				});
-				id = created.chat_id;
-			}
-			// Post before selecting so the new thread is durable when the
-			// selection effect reloads the message list.
-			const result = await postMessage(workspaceId, id, input);
-			if (result.percolated.length) {
-				percolations = { ...percolations, [result.message.message_id]: result.percolated };
-			}
-			if (created) {
-				chats = [created, ...chats];
-				chatId = created.chat_id;
-				drafting = false;
-			}
-			if (input.steeringIntent && activeExecutionId) {
-				notify('Steering acknowledged — durable percolation recorded');
-			}
-		} catch (error) {
-			notify(error instanceof Error ? error.message : 'Message failed', true);
-		} finally {
-			busy = false;
-		}
+		await host.remove(target.chat_id);
 	}
 
 	async function confirmProposal(confirmation: {
@@ -219,27 +96,8 @@
 		}
 	}
 
-	/** Reflect the in-pane scope path in the conversation URL. */
-	function syncScope(scope: string): void {
-		// `page.url` is frozen at mount; the live address bar is the truth.
-		const url = new URL(location.href);
-		const current = url.searchParams.get('scope') ?? '';
-		if (current === scope) return;
-		if (scope) url.searchParams.set('scope', scope);
-		else url.searchParams.delete('scope');
-		replaceState(url, {});
-	}
-
 	function switchChat(id: string): void {
-		// The URL is the scope carrier: switching conversations drops any
-		// `?scope=` from the previous conversation's drill-in *before* the
-		// surface re-attaches, so its scope reset lands on the conversation
-		// root instead of replaying a segment that belongs to another chat.
-		replaceState(`/w/${workspaceId}/conversations?chat=${id}`, {});
-		scopeGrant = null;
-		hashGrant = null;
-		chatId = id;
-		drafting = false;
+		host.select(id);
 		deleteTarget = null;
 	}
 </script>
@@ -316,7 +174,7 @@
 				</li>
 			{:else}
 				<li class="px-3 py-6 text-center text-xs text-slate-500">
-					Your next good idea starts with a conversation.
+					{host.loadingChats ? 'Loading conversations...' : 'Your next good idea starts with a conversation.'}
 				</li>
 			{/each}
 		</ul>
@@ -334,21 +192,26 @@
 						investigation
 					</span>
 				{/if}
-				{#if activeExecutionId}
+				{#if anyActiveWorkflow}
 					<span class="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-warn">
 						<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" aria-hidden="true"></span>
-						execution {activeExecutionId} · {execution?.state} · phase {execution?.phase ?? '—'}
+						workflow execution active
 					</span>
 				{/if}
 			</header>
 		{/if}
 
+		{#if host.error}
+			<p class="px-3 py-2 text-xs text-warn" role="status" data-testid="chat-host-error">{host.error}</p>
+		{/if}
+		{#key `${workspaceId}:conversation`}
+		{#if host.workspaceId === workspaceId}
 		<ChatSurface
+			{timeline}
 			{workspaceId}
 			{chatId}
-			{messages}
-			{events}
-			{execution}
+			{drafting}
+			terminal={['completed', 'failed', 'cancelled', 'closed', 'archived'].includes(selectedChat?.state ?? '')}
 			{percolations}
 			{proposal}
 			onConfirmConsent={confirmProposal}
@@ -358,25 +221,16 @@
 			}}
 			{consentBusy}
 			{busy}
-			onSend={send}
-			onScopeChange={syncScope}
+			onSend={(input) => host.send(input)}
+			onScopeChange={(scope) => host.syncScope(scope)}
 			hostId="conversation"
 			rootLabel={selectedChat?.title ?? 'Conversation'}
 			initialScope={scopeGrant}
 			initialHash={hashGrant}
 		/>
-	</section>
-
-	<aside class="hidden w-80 shrink-0 overflow-y-auto rounded-xl border border-surface-700 bg-surface-900 p-3 xl:block">
-		<h2 class="mb-2 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
-			CLEO projection · read-only
-		</h2>
-		{#if cleoPlan}
-			<CleoPlanPanel plan={cleoPlan} timeline={stateData?.taskTimeline ?? []} />
-		{:else}
-			<EmptyState title="No CLEO plan projected" hint="Plans appear when a workflow drives this workspace." />
 		{/if}
-	</aside>
+		{/key}
+	</section>
 </div>
 
 {#if deleteTarget}

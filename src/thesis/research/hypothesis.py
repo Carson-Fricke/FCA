@@ -1,6 +1,8 @@
 """Falsifiable hypothesis artifacts as workspace Markdown documents.
 
-A hypothesis artifact is one Markdown page under ``hypotheses/<slug>.md``.  Its
+A hypothesis artifact is one Markdown page. Published versions live under
+``hypotheses/<slug>/<sha256>.md``; legacy ``hypotheses/<slug>.md`` pages remain
+readable within their explicitly selected workspace. Its
 front matter is a small, strictly validated document rendered in the
 deterministic JSON subset of YAML 1.2, exactly like the workspace manifest, so
 no additional YAML dependency is required.  The prose body carries the agent's
@@ -26,7 +28,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -42,7 +46,10 @@ from pydantic import (
     model_validator,
 )
 
+from thesis.persistence.git import GitCoordinator
+from thesis.persistence.journal import ArtifactRef, CommandJournal, content_hash
 from thesis.research.grammar import IDENTIFIER_PATTERN
+from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 FRONT_MATTER_DELIMITER = "---"
 SCHEMA_VERSION = 1
@@ -50,6 +57,8 @@ HYPOTHESIS_DIRECTORY = "hypotheses"
 _ARTIFACT_MEDIA_TYPE = "text/markdown"
 
 _UNSAFE_SLUG = re.compile(r"[^a-z0-9]+")
+_WORKSPACE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 FalsifierCondition = Literal["gte", "lte", "gt", "lt"]
 FALSIFIER_CONDITIONS: frozenset[str] = frozenset({"gte", "lte", "gt", "lt"})
@@ -319,97 +328,297 @@ def parse_hypothesis(text: str) -> HypothesisDocument:
 class HypothesisStore(Protocol):
     """Workspace-backed persistence boundary for hypothesis artifacts."""
 
-    def save(self, document: HypothesisDocument) -> str:
+    def save(self, document: HypothesisDocument, *, workspace_id: str) -> str:
         """Persist the artifact and return its workspace-relative path."""
 
-    def load(self, hypothesis_id: str) -> HypothesisDocument:
+    def load(self, hypothesis_id: str, *, workspace_id: str) -> HypothesisDocument:
         """Load one artifact by identity."""
 
-    def list(self) -> tuple[str, ...]:
+    def list(self, *, workspace_id: str) -> tuple[str, ...]:
         """Return every stored hypothesis identifier in deterministic order."""
 
 
 class InMemoryHypothesisStore:
-    """Deterministic store used by tests and ephemeral runtimes."""
+    """Explicit, workspace-keyed store for tests."""
 
-    def __init__(self, documents: Iterable[HypothesisDocument] = ()) -> None:
-        self._documents: dict[str, HypothesisDocument] = {}
+    def __init__(
+        self,
+        documents: Iterable[HypothesisDocument] = (),
+        *,
+        workspace_id: str | None = None,
+    ) -> None:
+        self._documents: dict[tuple[str, str], HypothesisDocument] = {}
         for document in documents:
-            self._documents[document.hypothesis_id] = document
+            if workspace_id is None:
+                raise HypothesisArtifactError("seed documents require workspace_id")
+            self.save(document, workspace_id=workspace_id)
 
-    def save(self, document: HypothesisDocument) -> str:
-        self._documents[document.hypothesis_id] = document
+    def save(self, document: HypothesisDocument, *, workspace_id: str) -> str:
+        _validate_workspace_id(workspace_id)
+        document = _validated_document(document)
+        self._documents[(workspace_id, document.hypothesis_id)] = document
         return document.relative_path
 
-    def load(self, hypothesis_id: str) -> HypothesisDocument:
+    def load(self, hypothesis_id: str, *, workspace_id: str) -> HypothesisDocument:
+        _validate_workspace_id(workspace_id)
+        _validate_hypothesis_id(hypothesis_id)
         try:
-            return self._documents[hypothesis_id]
+            return self._documents[(workspace_id, hypothesis_id)]
         except KeyError as error:
             raise HypothesisArtifactError(
                 f"hypothesis {hypothesis_id!r} was not found"
             ) from error
 
-    def list(self) -> tuple[str, ...]:
-        return tuple(sorted(self._documents))
+    def list(self, *, workspace_id: str) -> tuple[str, ...]:
+        _validate_workspace_id(workspace_id)
+        return tuple(
+            sorted(key[1] for key in self._documents if key[0] == workspace_id)
+        )
 
 
 class WorkspaceHypothesisStore:
-    """Filesystem store rooted at a workspace repository.
+    """Publish immutable Markdown and a latest-version manifest per workspace.
 
-    The store owns only ``hypotheses/<slug>.md`` under the injected workspace
-    root.  Paths are resolved beneath the root and traversal is rejected, so a
-    caller cannot escape the selected workspace.
+    All paths come from the verified repository provider. The journal and Git
+    fences isolate publication from unrelated worktree/index edits. Legacy
+    ``hypotheses/<slug>.md`` is readable only in the selected workspace; no
+    provider-root fallback or cross-workspace discovery is performed.
     """
 
-    def __init__(self, workspace_root: str | Path) -> None:
-        root = Path(workspace_root).expanduser().resolve(strict=False)
-        root.mkdir(parents=True, exist_ok=True)
-        self._root = root
-        self._directory = root / HYPOTHESIS_DIRECTORY
-        self._directory.mkdir(parents=True, exist_ok=True)
+    def __init__(self, workspaces: WorkspaceRepositoryProvider) -> None:
+        if not all(
+            callable(getattr(workspaces, name, None))
+            for name in ("open", "resolve_path", "publish", "repository_uri")
+        ):
+            raise TypeError("workspaces must implement WorkspaceRepositoryProvider")
+        self._workspaces = workspaces
 
-    @property
-    def root(self) -> Path:
-        """Return the workspace root this store writes beneath."""
-        return self._root
+    def path_for(self, hypothesis_id: str, *, workspace_id: str) -> Path:
+        """Return the latest immutable artifact, or its scoped legacy path."""
+        _validate_workspace_id(workspace_id)
+        _validate_hypothesis_id(hypothesis_id)
+        manifest = self._manifest(hypothesis_id, workspace_id=workspace_id)
+        if manifest is None:
+            relative = f"{HYPOTHESIS_DIRECTORY}/{slugify(hypothesis_id)}.md"
+        else:
+            relative = _version_path(hypothesis_id, manifest["contentSha256"])
+        return self._workspaces.resolve_path(workspace_id, relative)
 
-    def path_for(self, hypothesis_id: str) -> Path:
-        """Return the validated absolute path for one hypothesis artifact."""
-        relative = f"{HYPOTHESIS_DIRECTORY}/{slugify(hypothesis_id)}.md"
-        candidate = (self._root / relative).resolve(strict=False)
-        if not candidate.is_relative_to(self._root):
-            raise HypothesisArtifactError("hypothesis path escapes the workspace")
-        return candidate
+    def save(self, document: HypothesisDocument, *, workspace_id: str) -> str:
+        _validate_workspace_id(workspace_id)
+        document = _validated_document(document)
+        root = self._workspaces.open(workspace_id).root
+        manifest_relative = _manifest_path(document.hypothesis_id)
+        self._workspaces.resolve_path(workspace_id, manifest_relative)
+        coordinator = GitCoordinator(root, manifest_path=manifest_relative)
+        transaction = GitCoordinator(root, lock_name="thesis-hypotheses.lock")
+        relative = _version_path(document.hypothesis_id, document.content_sha256)
+        payload = document.to_bytes()
+        with transaction.publication_lock():
+            previous = self._manifest(document.hypothesis_id, workspace_id=workspace_id)
+            legacy = self._workspaces.resolve_path(workspace_id, document.relative_path)
+            if previous is not None or legacy.exists():
+                existing = self.load(document.hypothesis_id, workspace_id=workspace_id)
+                if previous is not None and existing == document:
+                    self._workspaces.publish(workspace_id)
+                    return relative
+            path = self._workspaces.resolve_path(workspace_id, relative)
+            if path.exists() and path.read_bytes() != payload:
+                raise HypothesisArtifactError(
+                    "immutable hypothesis path has different content"
+                )
+            journal_path = self._workspaces.resolve_path(
+                workspace_id, ".thesis/hypotheses-journal.sqlite3"
+            )
+            journal = CommandJournal(journal_path)
+            state = {
+                "workspaceId": workspace_id,
+                "hypothesisId": document.hypothesis_id,
+                "contentSha256": document.content_sha256,
+            }
+            expected_head = coordinator.head()
+            entry = journal.accept(
+                "hypothesis.save",
+                {**state, "previous": previous, "headBefore": expected_head},
+                state,
+                workflow_hash=content_hash("fca:hypothesis-store:v1"),
+                model_hash=document.content_sha256,
+                artifacts=(
+                    ArtifactRef.from_bytes(
+                        relative, payload, media_type=document.media_type
+                    ),
+                ),
+            )
+            # Install complete bytes atomically before publication; failed pushes
+            # retain the accepted local version for an idempotent retry.
+            _atomic_write(path, payload)
+            coordinator.publish(
+                entry, expected_head=expected_head, artifacts={relative: payload}
+            )
+            self._workspaces.publish(workspace_id)
+        return relative
 
-    def save(self, document: HypothesisDocument) -> str:
-        path = self.path_for(document.hypothesis_id)
-        path.write_bytes(document.to_bytes())
-        return document.relative_path
-
-    def load(self, hypothesis_id: str) -> HypothesisDocument:
-        path = self.path_for(hypothesis_id)
+    def _manifest(
+        self, hypothesis_id: str, *, workspace_id: str
+    ) -> dict[str, str] | None:
+        path = self._workspaces.resolve_path(
+            workspace_id, _manifest_path(hypothesis_id)
+        )
+        if not path.exists():
+            coordinator = GitCoordinator(self._workspaces.open(workspace_id).root)
+            if coordinator.tracked_paths(_manifest_path(hypothesis_id)):
+                raise HypothesisArtifactError(
+                    "committed hypothesis manifest is missing"
+                )
+            return None
         try:
-            text = path.read_text(encoding="utf-8")
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            state = manifest["canonicalState"]
+            if (
+                state["workspaceId"] != workspace_id
+                or state["hypothesisId"] != hypothesis_id
+                or not isinstance(state["contentSha256"], str)
+                or _DIGEST.fullmatch(state["contentSha256"]) is None
+            ):
+                raise ValueError("hypothesis manifest identity or hash does not match")
+            return {
+                "workspaceId": workspace_id,
+                "hypothesisId": hypothesis_id,
+                "contentSha256": state["contentSha256"],
+            }
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError) as error:
+            raise HypothesisArtifactError(
+                "invalid hypothesis publication manifest"
+            ) from error
+
+    def load(self, hypothesis_id: str, *, workspace_id: str) -> HypothesisDocument:
+        _validate_workspace_id(workspace_id)
+        _validate_hypothesis_id(hypothesis_id)
+        manifest = self._manifest(hypothesis_id, workspace_id=workspace_id)
+        relative = (
+            f"{HYPOTHESIS_DIRECTORY}/{slugify(hypothesis_id)}.md"
+            if manifest is None
+            else _version_path(hypothesis_id, manifest["contentSha256"])
+        )
+        path = self._workspaces.resolve_path(workspace_id, relative)
+        try:
+            payload = path.read_bytes()
+            document = HypothesisDocument.parse(payload.decode("utf-8"))
         except (OSError, UnicodeError) as error:
             raise HypothesisArtifactError(
                 f"hypothesis {hypothesis_id!r} was not found"
             ) from error
-        document = HypothesisDocument.parse(text)
         if document.hypothesis_id != hypothesis_id:
             raise HypothesisArtifactError(
                 "stored hypothesis identity does not match its path"
             )
+        if manifest is not None and (
+            document.content_sha256 != manifest["contentSha256"]
+            or payload != document.to_bytes()
+        ):
+            raise HypothesisArtifactError(
+                "stored hypothesis content hash does not match"
+            )
+        if manifest is not None:
+            coordinator = GitCoordinator(self._workspaces.open(workspace_id).root)
+            head = coordinator.head()
+            manifest_relative = _manifest_path(hypothesis_id)
+            manifest_payload = self._workspaces.resolve_path(
+                workspace_id, manifest_relative
+            ).read_bytes()
+            if head is None or not (
+                coordinator.file_matches(head, relative, payload)
+                and coordinator.file_matches(head, manifest_relative, manifest_payload)
+            ):
+                raise HypothesisArtifactError(
+                    "hypothesis publication differs from committed content"
+                )
         return document
 
-    def list(self) -> tuple[str, ...]:
-        identifiers: list[str] = []
-        for path in sorted(self._directory.glob("*.md")):
+    def list(self, *, workspace_id: str) -> tuple[str, ...]:
+        _validate_workspace_id(workspace_id)
+        directory = self._workspaces.resolve_path(workspace_id, HYPOTHESIS_DIRECTORY)
+        manifests = self._workspaces.resolve_path(workspace_id, ".thesis/hypotheses")
+        coordinator = GitCoordinator(self._workspaces.open(workspace_id).root)
+        for relative in coordinator.tracked_paths(".thesis/hypotheses"):
+            if not self._workspaces.resolve_path(workspace_id, relative).is_file():
+                raise HypothesisArtifactError(
+                    "committed hypothesis manifest is missing"
+                )
+        identifiers: set[str] = set()
+        for path in sorted(manifests.glob("*.json")):
+            resolved = self._workspaces.resolve_path(
+                workspace_id, f".thesis/hypotheses/{path.name}"
+            )
             try:
-                document = HypothesisDocument.parse(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, HypothesisArtifactError):
-                continue
-            identifiers.append(document.hypothesis_id)
-        return tuple(identifiers)
+                identity = json.loads(resolved.read_text(encoding="utf-8"))[
+                    "canonicalState"
+                ]["hypothesisId"]
+                _validate_hypothesis_id(identity)
+                if _manifest_path(identity) != f".thesis/hypotheses/{path.name}":
+                    raise HypothesisArtifactError(
+                        "hypothesis manifest path does not match"
+                    )
+                self.load(identity, workspace_id=workspace_id)
+            except (OSError, UnicodeError, ValueError, KeyError, TypeError) as error:
+                raise HypothesisArtifactError(
+                    "invalid hypothesis publication manifest"
+                ) from error
+            identifiers.add(identity)
+        for path in sorted(directory.glob("*.md")):
+            resolved = self._workspaces.resolve_path(
+                workspace_id, f"hypotheses/{path.name}"
+            )
+            document = HypothesisDocument.parse(resolved.read_text(encoding="utf-8"))
+            if document.relative_path != f"hypotheses/{path.name}":
+                raise HypothesisArtifactError(
+                    "stored hypothesis identity does not match its path"
+                )
+            identifiers.add(document.hypothesis_id)
+        return tuple(sorted(identifiers))
+
+
+def _validate_workspace_id(value: str) -> None:
+    if not isinstance(value, str) or _WORKSPACE_ID.fullmatch(value) is None:
+        raise HypothesisArtifactError(
+            "workspace_id must be a safe workspace identifier"
+        )
+
+
+def _validate_hypothesis_id(value: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(IDENTIFIER_PATTERN, value) is None:
+        raise HypothesisArtifactError("hypothesis_id must be a safe identifier")
+
+
+def _validated_document(document: HypothesisDocument) -> HypothesisDocument:
+    if not isinstance(document, HypothesisDocument):
+        raise TypeError("document must be a HypothesisDocument")
+    validated = HypothesisDocument.parse(document.render())
+    if validated != document:
+        raise HypothesisArtifactError("hypothesis document must be canonical")
+    return validated
+
+
+def _manifest_path(hypothesis_id: str) -> str:
+    return f".thesis/hypotheses/{slugify(hypothesis_id)}.json"
+
+
+def _version_path(hypothesis_id: str, digest: str) -> str:
+    return f"{HYPOTHESIS_DIRECTORY}/{slugify(hypothesis_id)}/{digest}.md"
+
+
+def _atomic_write(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix=".hypothesis-", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 __all__ = [

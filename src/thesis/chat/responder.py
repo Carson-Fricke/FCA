@@ -33,11 +33,16 @@ class ReplyChunk:
 
     ``kind`` is ``"reasoning"`` for model chain-of-thought and ``"text"`` (the
     default) for answer text.  A bare ``str`` from a provider is treated as
-    answer text.
+    answer text. ``"assistant_turn"`` is a complete intermediate assistant
+    envelope: persist and publish it with ``data`` before requesting the next
+    chunk, never append it to final answer text. ``"runtime_notification"`` is
+    a runtime notice, also persisted separately from the answer. Closing the
+    iterator cancels further model/tool dispatch cooperatively.
     """
 
     text: str
     kind: str = "text"
+    data: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +54,8 @@ class ToolResultChunk:
     conversation retains the call in the exact position it ran.  ``call_id``
     ties the result to the model's ``tool_calls`` entry when the provider
     supplied one, and ``failure`` carries the canonical failure mapping for an
-    unsuccessful call.
+    unsuccessful call. ``data`` carries optional invocation metadata to merge
+    into the persisted chat message's data, not its structured tool outcome.
     """
 
     tool: str
@@ -60,6 +66,7 @@ class ToolResultChunk:
     text: str = ""
     failure: Mapping[str, object] | None = None
     datum_type: str | None = None
+    data: Mapping[str, object] | None = None
 
 
 #: Observes one tool result before it is persisted and may enrich it.
@@ -112,6 +119,8 @@ class LaunchableDevelopmentWorkflow(Protocol):
 _ACTIVE_DEVELOPMENT_PHASES = frozenset(
     {
         "requested",
+        "discovery",
+        "model_creation",
         "hypothesis_creation",
         "falsification_trials",
         "rca",

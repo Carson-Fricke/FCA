@@ -128,7 +128,7 @@ async fn mcp_health_publishes_the_tool_catalog() {
     let body = json_body(&body);
     assert_eq!(body["status"], "ok");
     let tools = body["tools"].as_array().expect("tools");
-    assert!(tools.iter().any(|tool| tool == "get_backtest_status"));
+    assert!(tools.iter().any(|tool| tool == "get_job_status"));
     assert!(tools.iter().any(|tool| tool == "list_artifacts"));
 }
 
@@ -159,7 +159,7 @@ async fn mcp_tool_call_list_artifacts_reads_the_durable_store() {
 }
 
 #[tokio::test]
-async fn mcp_tool_call_get_backtest_status_reads_the_durable_jobs() {
+async fn mcp_tool_call_get_job_status_reads_the_durable_jobs() {
     let root = temp_root("status");
     let router = durable_app(&root);
     let jobs = FileSystemJobRepository::new(&root);
@@ -169,7 +169,7 @@ async fn mcp_tool_call_get_backtest_status_reads_the_durable_jobs() {
         &router,
         post_mcp(
             Some(BEARER),
-            &tool_call("get_backtest_status", json!({"job_id": "job-mcp"})),
+            &tool_call("get_job_status", json!({"job_id": "job-mcp"})),
         ),
     )
     .await;

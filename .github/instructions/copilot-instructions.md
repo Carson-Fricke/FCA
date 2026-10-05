@@ -65,6 +65,10 @@ or bootstrapping the environment.
 
 ## Architecture Documentation
 
+For Thesis agent, provider, chat, workflow, UI, and test changes, read and follow
+`.github/instructions/agent-session-delivery.instructions.md`. It defines the
+required Option 1 delivery boundaries and executable architecture guard.
+
 - Update the affected architecture document in the same change whenever work
   adds, removes, renames, or repurposes a package or capability directory, or
   changes public facades, entrypoints, dependency direction, deployment, or
@@ -82,15 +86,14 @@ or bootstrapping the environment.
 
 - Work only within the task's assigned files and behavior.
 - Run focused tests and focused Ruff and ty checks only.
-- Check BRAIN for prior knowledge with `cleo memory find "<topic>"` before
-  exploring, then read files directly.
+- Explore with focused file and content searches, then read files directly.
 - Do not run the complete repository suite unless acting as the integration
   owner.
 - Use the Canonical Commands table above instead of ad-hoc interpreter or
   script invocation.
 - Treat architecture-documentation updates as integration-owned unless a task
   explicitly assigns that documentation.
-- Do not modify another task's verification record or mutate CLEO task state.
+- Do not modify another task's verification record.
 - Treat failures in files concurrently owned by another agent as integration
   findings, not final failures for the current task.
 
@@ -106,8 +109,6 @@ or bootstrapping the environment.
   before changing code. Do not rerun the unchanged full suite.
 - Keep completed task evidence unchanged when later tasks add tests. Record
   focused task evidence separately from one shared integration artifact.
-- Reconcile CLEO and run its full validation/export checklist once per batch,
-  immediately before commit or handoff.
 - Do not start work beyond the approved scope.
 
 ## Workflow Interaction & Gates Policy
@@ -120,4 +121,3 @@ or bootstrapping the environment.
   `SUB_AGENT_NEEDS_INPUT` (`_Fenced`), using the exact same conversational
   message pattern as hypothesis creation.
 - The operator always responds via standard chat input.
-

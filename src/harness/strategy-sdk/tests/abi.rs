@@ -6,8 +6,9 @@
 //! positive exponents, and full-width coefficients.
 
 use harness_strategy_sdk::{
-    export, BarFrame, CBarEvent, CBarFrame, CDecimal, CStr, Decimal, StudyProgram, SDK_ABI_VERSION,
-    SDK_ERROR, SDK_OK,
+    export, BarFrame, CBarEvent, CBarFrame, CDecimal, CStr, Decimal, MarketConsumer,
+    MetricPublisher, ObservationContext, StudyProgram, Subscription, SDK_ABI_VERSION, SDK_ERROR,
+    SDK_OK,
 };
 
 fn roundtrip(text: &str) {
@@ -52,6 +53,7 @@ fn bar(symbol: &'static str) -> CBarEvent {
 
 fn frame(bars: &[CBarEvent], missing: &[CStr]) -> CBarFrame {
     CBarFrame {
+        interval: CStr::from_slice("1min"),
         interval_start_ns: 10,
         interval_end_ns: 20,
         available_at_ns: 25,
@@ -64,7 +66,7 @@ fn frame(bars: &[CBarEvent], missing: &[CStr]) -> CBarFrame {
 
 #[test]
 fn frame_reconstruction_is_atomic_ordered_and_decimal_exact() {
-    assert_eq!(SDK_ABI_VERSION, 3);
+    assert_eq!(SDK_ABI_VERSION, 4);
     let bars = [bar("ZZZ"), bar("AAA")];
     let missing = [CStr::from_slice("BBB")];
     let raw = frame(&bars, &missing);
@@ -218,7 +220,20 @@ impl StudyProgram for FrameObserver {
         Self::default()
     }
 
-    fn on_bar_frame(&mut self, frame: &BarFrame) {
+    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        metrics.publish("callbacks", self.callbacks as f64).unwrap();
+    }
+}
+
+impl MarketConsumer for FrameObserver {
+    type Context = ObservationContext;
+    fn subscriptions(&self) -> Vec<Subscription> {
+        vec![Subscription::Bars {
+            symbols: vec!["AAA".into(), "BBB".into()],
+            interval: "1min".into(),
+        }]
+    }
+    fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {
         self.callbacks += 1;
         assert_eq!(frame.bars_by_symbol.len(), 2);
         assert!(!self.panic, "frame author panic");
@@ -227,15 +242,19 @@ impl StudyProgram for FrameObserver {
 
 #[test]
 fn frame_trampoline_calls_author_once_rejects_invalid_input_and_contains_panics() {
-    let mut observer = FrameObserver::default();
-    let state = (&mut observer as *mut FrameObserver).cast();
+    let state = unsafe { export::__study_create::<FrameObserver>(CStr::from_slice("{}")) };
+    assert!(!state.is_null());
+    let requirements = unsafe { export::__subscriptions::<FrameObserver>(state).as_str() }.unwrap();
+    assert_eq!(
+        requirements,
+        r#"[{"data_type":"bars","symbols":["AAA","BBB"],"interval":"1min"}]"#
+    );
     let bars = [bar("AAA"), bar("BBB")];
     let raw = frame(&bars, &[]);
     assert_eq!(
         unsafe { export::__study_on_bar_frame::<FrameObserver>(state, &raw) },
         SDK_OK
     );
-    assert_eq!(observer.callbacks, 1);
     let invalid = CBarFrame {
         available_at_ns: 0,
         ..raw
@@ -244,19 +263,40 @@ fn frame_trampoline_calls_author_once_rejects_invalid_input_and_contains_panics(
         unsafe { export::__study_on_bar_frame::<FrameObserver>(state, &invalid) },
         SDK_ERROR
     );
-    assert_eq!(observer.callbacks, 1);
     assert_eq!(
         unsafe { export::__study_on_bar_frame::<FrameObserver>(std::ptr::null_mut(), &raw) },
         SDK_ERROR
     );
-    observer.panic = true;
+    unsafe {
+        export::__study_destroy::<FrameObserver>(state);
+    }
+    // A separate authored consumer verifies panic containment without borrowing opaque state.
+    let state = unsafe { export::__study_create::<PanicObserver>(CStr::from_slice("{}")) };
     assert_eq!(
-        unsafe { export::__study_on_bar_frame::<FrameObserver>(state, &raw) },
+        unsafe { export::__study_on_bar_frame::<PanicObserver>(state, &raw) },
         SDK_ERROR
     );
-    assert_eq!(observer.callbacks, 2);
     let error = unsafe { std::ffi::CStr::from_ptr(export::last_error_ptr()) }
         .to_str()
         .unwrap();
     assert!(error.contains("frame author panic"));
+    unsafe {
+        export::__study_destroy::<PanicObserver>(state);
+    }
+}
+
+struct PanicObserver;
+impl StudyProgram for PanicObserver {
+    fn new(_: harness_strategy_sdk::serde_json::Value) -> Self {
+        Self
+    }
+}
+impl MarketConsumer for PanicObserver {
+    type Context = ObservationContext;
+    fn subscriptions(&self) -> Vec<Subscription> {
+        FrameObserver::default().subscriptions()
+    }
+    fn on_bar(&mut self, _: &BarFrame, _: &mut ObservationContext) {
+        panic!("frame author panic");
+    }
 }

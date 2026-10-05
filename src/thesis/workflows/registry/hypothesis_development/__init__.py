@@ -10,6 +10,9 @@ under ``thesis.workflows.core``; nothing here is imported by another workflow.
 from __future__ import annotations
 
 from .contracts import (
+    DiscoveryAttempt,
+    DiscoveryCandidate,
+    DiscoveryDraft,
     ExitCriterion,
     FalsificationPlan,
     FalsificationTrial,
@@ -27,13 +30,18 @@ from .errors import (
     WorkflowError,
 )
 from .phases import (
-    HYPOTHESIS_DEVELOPMENT_PHASES,
-    HYPOTHESIS_DEVELOPMENT_WORKFLOW,
     HypothesisDevelopmentPhase,
     PhaseTransition,
+    phase_from_value,
     transition_phase,
+    workflow_definition,
 )
-from .piping import identity_pipe, reset_backtests, reset_premise
+from .piping import (
+    identity_pipe,
+    reset_backtests,
+    reset_discovery,
+    reset_premise,
+)
 from .primitives import (
     VERDICT_INCONCLUSIVE,
     VERDICT_REFUTED,
@@ -55,8 +63,14 @@ from .state import (
     HypothesisDevelopmentState,
 )
 
+HYPOTHESIS_DEVELOPMENT_WORKFLOW = workflow_definition()
+HYPOTHESIS_DEVELOPMENT_PHASES = HYPOTHESIS_DEVELOPMENT_WORKFLOW.phases
+
 __all__ = [
     "DevelopmentEngine",
+    "DiscoveryAttempt",
+    "DiscoveryCandidate",
+    "DiscoveryDraft",
     "ExitCriterion",
     "FalsificationComposeError",
     "FalsificationPlan",
@@ -85,8 +99,10 @@ __all__ = [
     "build_hypothesis_development_workflow",
     "fold_transition",
     "identity_pipe",
+    "phase_from_value",
     "rebuild_state",
     "reset_backtests",
+    "reset_discovery",
     "reset_premise",
     "services_of",
     "transition_phase",

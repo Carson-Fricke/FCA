@@ -29,7 +29,6 @@ BACKEND_CAPABILITIES: tuple[str, ...] = (
     "artifacts",
     "auth",
     "chat",
-    "cleo",
     "execution",
     "http",
     "integrations",

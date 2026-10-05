@@ -25,7 +25,7 @@
 			class="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 font-mono text-[10px] text-warn"
 			data-testid="operator-question-waiting"
 		>
-			needs input
+			{result.requestState === 'answered' ? 'answered' : result.requestState === 'resolved' ? 'resolved' : 'needs input'}
 		</span>
 	</header>
 	<p class="text-sm whitespace-pre-wrap text-slate-800" data-testid="operator-question-message">
