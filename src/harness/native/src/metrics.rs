@@ -1,4 +1,4 @@
-//! Metrics kernels ported from `src/harness/native/metrics/*.zig`.
+//! Metrics kernels.
 //!
 //! Conventions (mirroring `src/harness/results/metrics.py`): money and ratios
 //! are exact fixed point on the scale-18 `i128` kernel; only the final

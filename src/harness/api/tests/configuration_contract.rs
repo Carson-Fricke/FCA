@@ -39,7 +39,8 @@ fn acceptance(document: &Value, expected: bool) {
 #[test]
 fn replay_acceptance_is_shared_at_real_boundaries() {
     let valid = json!({"shell":"study","run_id":"parity","initial_cash":123.5,
-        "data":{"subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
+        "data":{"symbols":["SPY"],
+            "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
     acceptance(&valid, true);
     for (field, value) in [
         ("seed", json!("wrong")),
@@ -61,14 +62,29 @@ fn replay_acceptance_is_shared_at_real_boundaries() {
         bad["data"]["subscriptions"] = json!([input]);
         acceptance(&bad, false);
     }
-    acceptance(&json!({"shell":"backtest","run_id":"defaults"}), true);
+    acceptance(
+        &json!({"shell":"backtest","run_id":"missing-subscriptions"}),
+        false,
+    );
+    acceptance(
+        &json!({"shell":"backtest","run_id":"interval-only",
+            "data":{"symbols":["SPY"],"bar_interval":"1min"}}),
+        false,
+    );
+    acceptance(
+        &json!({"shell":"backtest","run_id":"top-level-symbols","symbols":["SPY"],
+            "data":{"symbols":["SPY"],
+                "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}}),
+        false,
+    );
     acceptance(&json!({"shell":"study","run_id":"missing-interval"}), false);
 }
 
 #[test]
 fn submitted_and_resolved_identities_are_deliberately_distinct() {
-    let document =
-        json!({"shell":"backtest","run_id":"identity", "data":{"snapshot_id":"caf\u{e9}"}});
+    let document = json!({"shell":"backtest","run_id":"identity",
+        "data":{"snapshot_id":"caf\u{e9}","symbols":["SPY"],
+            "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
     let parsed = StrictJsonConfigurationParser
         .parse(document.to_string().as_bytes())
         .unwrap();
@@ -88,14 +104,15 @@ fn submitted_and_resolved_identities_are_deliberately_distinct() {
 #[test]
 fn numeric_parameters_and_normalized_symbols_agree_between_yaml_json_and_engine() {
     let document = json!({"shell":"backtest","run_id":"decimals","initial_cash":100.5,
-        "data":{"symbols":["spy","QQQ","spy"]},
+        "data":{"symbols":["spy","QQQ","spy"],
+            "subscriptions":[{"data_type":"quote","symbols":["spy","QQQ"]}]},
         "strategy_instances":[{"instance_id":"test","implementation":"jit",
             "bundle_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "capital_fraction":"1.00","symbols":["SPY"],"parameters":{"threshold":0.125}}]});
     let canonical = config::replay::validate_document(&document).unwrap();
     let engine = BacktestConfig::from_yaml(&document.to_string()).unwrap();
     assert_eq!(engine.canonical_json().to_serde_value(), canonical);
-    let yaml = "shell: backtest\nrun_id: decimals\ninitial_cash: 100.500\ndata:\n  symbols: [spy, QQQ, spy]\nstrategy_instances:\n  - instance_id: test\n    implementation: jit\n    bundle_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    capital_fraction: 1.00\n    symbols: [SPY]\n    parameters:\n      threshold: 0.1250\n";
+    let yaml = "shell: backtest\nrun_id: decimals\ninitial_cash: 100.500\ndata:\n  symbols: [spy, QQQ, spy]\n  subscriptions:\n    - data_type: quote\n      symbols: [spy, QQQ]\nstrategy_instances:\n  - instance_id: test\n    implementation: jit\n    bundle_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    capital_fraction: 1.00\n    symbols: [SPY]\n    parameters:\n      threshold: 0.1250\n";
     assert_eq!(
         BacktestConfig::from_yaml(yaml)
             .unwrap()
@@ -147,7 +164,9 @@ fn nanosecond_bounds_match_typed_resolved_identity_after_api_validation() {
         "2024-01-02T14:30:00.123456790Z",
     ] {
         let document = json!({"shell":"backtest","run_id":"nanos",
-            "start":"2024-01-02T16:30:00.123456788+02:00","end":end});
+            "start":"2024-01-02T16:30:00.123456788+02:00","end":end,
+            "data":{"symbols":["SPY"],
+                "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
         let parsed = StrictJsonConfigurationParser
             .parse(document.to_string().as_bytes())
             .unwrap();

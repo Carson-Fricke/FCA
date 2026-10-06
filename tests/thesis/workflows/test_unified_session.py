@@ -11,6 +11,7 @@ from thesis.agent.messages import (
     SessionMessage,
     ToolCorrelation,
     decode_transcript,
+    from_record,
 )
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.conversation import Conversations
@@ -64,7 +65,7 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
             anchor = Anchor(context.workspace_id, context.chat_id, context.sub_agent_id)
             envelope = service.transcript(anchor)[-1]
             assert envelope.role is MessageRole.ASSISTANT
-            assert envelope.data is not None and envelope.data["toolCalls"]
+            assert from_record(envelope).content.requests
             return ToolExecution(ok=True, text="Checked")
 
         return SessionToolRegistry(
@@ -122,8 +123,9 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
             MessageRole.ASSISTANT,
         ]
         assert durable[2].data is not None
-        assert durable[2].data["toolCallId"] == "call"
-        assert durable[2].data["arguments"] == {}
+        result_payload = from_record(durable[2]).content.result
+        assert result_payload is not None
+        assert result_payload["arguments"] == {}
         assert requests[-1][-1].tool_call_id == "call"
         canonical = decode_transcript(durable)
         assert [message.direction for message in canonical] == [

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from queue import Queue
 from threading import Lock, RLock, Thread
-from typing import TYPE_CHECKING, Protocol, TypeVar, cast
+from typing import Protocol, TypeVar, cast
 
 from thesis.chat.contracts import (
     WORKFLOW_NODE_ROLE,
@@ -48,9 +48,6 @@ from thesis.execution.events import (
     ExecutionEventType,
     InMemoryExecutionEventStore,
 )
-
-if TYPE_CHECKING:
-    from thesis.agent.messages import ToolCorrelation, ToolRequest
 
 Record = (
     ChatThread
@@ -276,37 +273,6 @@ def _utc_now() -> datetime:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex}"
-
-
-def _legacy_tool_requests(
-    data: Mapping[str, object] | None,
-) -> tuple[ToolRequest, ...]:
-    """Decode retired native tool-call metadata into neutral requests."""
-    from thesis.agent.messages import ToolRequest
-
-    raw = (data or {}).get("toolCalls")
-    if not isinstance(raw, list | tuple):
-        return ()
-    requests: list[ToolRequest] = []
-    for item in raw:
-        if not isinstance(item, Mapping):
-            continue
-        call_id = item.get("id")
-        function = item.get("function")
-        if (
-            not isinstance(call_id, str)
-            or not call_id
-            or not isinstance(function, Mapping)
-        ):
-            continue
-        name = function.get("name")
-        if not isinstance(name, str) or not name:
-            continue
-        arguments = function.get("arguments")
-        requests.append(
-            ToolRequest(call_id, name, arguments if isinstance(arguments, str) else "")
-        )
-    return tuple(requests)
 
 
 class ChatService:
@@ -735,13 +701,6 @@ class ChatService:
                 raise CrossWorkspaceLinkError(
                     "attachment does not belong to the selected chat"
                 )
-        if (
-            role is MessageRole.ASSISTANT
-            and not body.strip()
-            and data
-            and data.get("toolCalls")
-        ):
-            body = "Tool calls requested"
         now = self._now()
         anchor = (data or {}).get("subAgentId")
         parent_conversation_id = None
@@ -776,12 +735,7 @@ class ChatService:
             updated_at=now,
         )
         # Import locally: runtime consumers themselves depend on ChatService.
-        from thesis.agent.runtime.activity import (
-            Delivery,
-            activity_data,
-            decode_activity,
-            is_external_input,
-        )
+        from thesis.agent.runtime.activity import decode_activity, is_external_input
 
         if not isinstance(canonical, Mapping) and role is MessageRole.ASSISTANT:
             from thesis.agent.messages import MessageContent, SessionMessage
@@ -795,45 +749,11 @@ class ChatService:
                     result={"reasoning": message.reasoning}
                     if message.reasoning
                     else None,
-                    requests=_legacy_tool_requests(data),
                 ),
             ).as_dict()
             message = replace_record(
                 message,
                 data={**dict(message.data or {}), "sessionMessage": canonical},
-            )
-        elif (
-            not isinstance(canonical, Mapping)
-            and role is MessageRole.TOOL
-            and tool_result is not None
-        ):
-            from thesis.agent.messages import MessageContent, SessionMessage
-
-            datum_type = tool_result.get("datumType")
-            canonical = SessionMessage(
-                message.message_id,
-                "incoming",
-                MessageContent(
-                    message.body,
-                    datum_type
-                    if isinstance(datum_type, str) and datum_type
-                    else "tool_result",
-                    correlation=self._legacy_tool_correlation(message, tool_result),
-                    result=tool_result,
-                ),
-            ).as_dict()
-            message = replace_record(
-                message,
-                data={
-                    **dict(message.data or {}),
-                    **activity_data(
-                        Delivery(
-                            anchor if isinstance(anchor, str) and anchor else None,
-                            message.message_id,
-                        )
-                    ),
-                    "sessionMessage": canonical,
-                },
             )
 
         if is_external_input(message):
@@ -927,31 +847,6 @@ class ChatService:
                 )
             )
         return message
-
-    def _legacy_tool_correlation(
-        self, message: ChatMessage, tool_result: Mapping[str, object]
-    ) -> ToolCorrelation | None:
-        """Join a retired tool-result shape to its durable model request."""
-        from thesis.agent.messages import ToolCorrelation, from_record
-
-        call_id = tool_result.get("callId")
-        if not isinstance(call_id, str) or not call_id:
-            return None
-        conversation_id = message.conversation_id or message.chat_id
-        for record in reversed(
-            self.list_conversation_messages(
-                message.workspace_id, message.chat_id, conversation_id
-            )
-        ):
-            if not isinstance((record.data or {}).get("sessionMessage"), Mapping):
-                continue
-            canonical = from_record(record)
-            if canonical.direction != "outgoing":
-                continue
-            for request in canonical.content.requests:
-                if request.id == call_id:
-                    return ToolCorrelation(record.message_id, call_id, request.name)
-        return None
 
     def send_message(
         self,

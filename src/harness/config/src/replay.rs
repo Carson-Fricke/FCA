@@ -68,7 +68,11 @@ pub(crate) fn with_defaults(
             map.entry(key).or_insert(value);
         }
     }
-    let legacy_symbols = map.remove("symbols");
+    if map.contains_key("symbols") {
+        return Err(ConfigError(
+            "top-level symbols is not accepted; declare data.symbols".into(),
+        ));
+    }
     let shell = match map.get("shell") {
         Some(YamlValue::Str(v)) => v.as_str(),
         _ => "",
@@ -78,36 +82,21 @@ pub(crate) fn with_defaults(
             "configuration shell must be backtest or study".into(),
         ));
     }
-    let study = shell == "study";
     let data = map
         .entry("data".into())
         .or_insert_with(|| YamlValue::Map(BTreeMap::new()));
     let YamlValue::Map(data) = data else {
         return Err(ConfigError("data must be a mapping".into()));
     };
-    if let Some(symbols) = legacy_symbols {
-        if data
-            .get("symbols")
-            .is_some_and(|existing| existing != &symbols)
-        {
-            return Err(ConfigError("symbols conflicts with data.symbols".into()));
-        }
-        data.entry("symbols".into()).or_insert(symbols);
-    }
-    data.entry("symbols".into())
-        .or_insert_with(|| YamlValue::Seq(vec![YamlValue::Str("SPY".into())]));
     data.entry("snapshot_id".into())
         .or_insert_with(|| YamlValue::Str("synthetic".into()));
     // The empty fingerprint is the shipped unresolved synthetic identity, not a digest.
     data.entry("fingerprint".into())
         .or_insert_with(|| YamlValue::Str(String::new()));
-    if !data.contains_key("bar_interval") && !data.contains_key("subscriptions") {
-        if study {
-            return Err(ConfigError(
-                "study requires data.bar_interval or data.subscriptions".into(),
-            ));
-        }
-        data.insert("bar_interval".into(), YamlValue::Str("1min".into()));
+    if !data.contains_key("subscriptions") {
+        return Err(ConfigError(
+            "configuration requires data.subscriptions".into(),
+        ));
     }
     Ok(map)
 }

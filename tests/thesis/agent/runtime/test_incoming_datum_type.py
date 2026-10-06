@@ -118,11 +118,7 @@ def test_structured_datums_survive_restart_and_replay(tmp_path: Path) -> None:
     record = reloaded.get_message("workspace", durable.message_id)
     assert record is not None
     assert record.data is not None
-    stored = cast(list[Mapping[str, object]], record.data["datums"])
-    assert [datum["structured"] for datum in stored] == [
-        datums[0]["structured"],
-        datums[1]["structured"],
-    ]
+    assert "sessionMessage" in record.data
     replayed = from_record(record)
     assert replayed.content.result is not None
     replayed_datums = cast(

@@ -12,7 +12,7 @@ fn study_catalog_advertises_supported_configuration_and_current_sdk() {
     let configuration =
         &tool.input_schema["properties"]["model"]["properties"]["harnessConfiguration"];
     assert_eq!(configuration["required"], json!(["start", "end"]));
-    assert_eq!(configuration["anyOf"].as_array().unwrap().len(), 3);
+    assert_eq!(configuration["anyOf"].as_array().unwrap().len(), 2);
     let properties = &configuration["properties"];
     for key in ["start", "end"] {
         assert_eq!(properties[key]["format"], "date-time");
@@ -22,12 +22,10 @@ fn study_catalog_advertises_supported_configuration_and_current_sdk() {
             .unwrap()
             .contains("offset"));
     }
-    assert_eq!(properties["interval"]["enum"], json!(["1min", "1d"]));
+    assert!(properties.get("interval").is_none());
     let nested = &properties["data"]["properties"];
-    assert_eq!(
-        nested["bar_interval"]["enum"],
-        properties["interval"]["enum"]
-    );
+    assert!(nested.get("bar_interval").is_none());
+    assert_eq!(properties["data"]["required"], json!(["subscriptions"]));
     assert_eq!(nested["subscriptions"], properties["subscriptions"]);
     let branches = &properties["subscriptions"]["items"]["oneOf"];
     assert_eq!(

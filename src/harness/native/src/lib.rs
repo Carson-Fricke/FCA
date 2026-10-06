@@ -1,7 +1,7 @@
 //! Native core for the quant-harness Rust engine.
 //!
-//! This crate hosts the Rust port of the pinned Zig native core under
-//! `src/harness/native`. The C ABI surface consumed by `src/harness/_native.py`
+//! This crate hosts the Rust native core under `src/harness/native`. The C ABI
+//! surface consumed by `src/harness/_native.py`
 //! lives in [`capi`], and the deterministic domain kernels are exposed as
 //! focused modules:
 //!

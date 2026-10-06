@@ -36,7 +36,7 @@
 		{ id: 'deployments', label: 'Deployments', icon: '➤', count: 'deployments' },
 		{ id: 'dashboards', label: 'Dashboards', icon: '▤', count: 'dashboards' },
 		{ id: 'screener', label: 'Screener', icon: '⌕', count: 'screeners' },
-		{ id: 'workspace-state', label: 'Workspace state', icon: '⚙' }
+		{ id: 'artifacts', label: 'Workspace artifacts', icon: '⚙' }
 	];
 
 	const pinned = $derived(

@@ -152,7 +152,11 @@ def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> No
     assert (
         cast(dict[str, object], instance["parameters"])["source"] == validated["source"]
     )
-    assert document["symbols"] == instance["symbols"] == ["MSFT"]
+    assert (
+        cast(dict[str, object], document["data"])["symbols"]
+        == instance["symbols"]
+        == ["MSFT"]
+    )
     assert '"MSFT".into()' in str(validated["source"])
     assert document["data"] == {
         "subscriptions": cast(dict[str, object], validated["harnessConfiguration"])[

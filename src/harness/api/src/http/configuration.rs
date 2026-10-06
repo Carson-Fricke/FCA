@@ -46,7 +46,8 @@ pub(crate) fn parse_subscriptions(
 ) -> Result<Vec<MarketSubscription>, ConfigurationError> {
     // Tagged contract decoding rejects unknown types and interval on non-bars, including null.
     config::replay::validate_document(&serde_json::json!({
-        "shell":"backtest", "run_id":"subscriptions", "data":{"subscriptions":value}
+        "shell":"backtest", "run_id":"subscriptions",
+        "data":{"subscriptions":value, "symbols":["SPY"]}
     }))
     .map_err(|e| ConfigurationError(e.0))?;
     let inputs = serde_json::from_value::<Vec<MarketSubscription>>(value.clone())

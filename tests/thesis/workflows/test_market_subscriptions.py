@@ -149,7 +149,7 @@ def test_stored_model_and_runner_preserve_exact_subscriptions(
     assert "subscriptions" not in configuration
     assert configuration["start"] == _WINDOW["start"]
     assert configuration["end"] == _WINDOW["end"]
-    assert "UNREQUESTED" not in configuration["symbols"]
+    assert "UNREQUESTED" not in configuration["data"]["symbols"]
     assert configuration["strategy_instances"][0]["parameters"]["source"] == _SOURCE
 
 
@@ -274,21 +274,26 @@ def test_subscription_symbols_must_belong_to_universe() -> None:
         study_configuration(resolved, run_id="test", universe=("SPY",))
 
 
-def test_legacy_persisted_bar_model_remains_readable(tmp_path: Path) -> None:
-    model = ResearchModel(
-        "legacy",
-        "1.0.0",
-        "Legacy bars",
-        _SOURCE,
-        ("data_ok",),
-        {**_WINDOW, "interval": "1d", "symbols": ["SPY"]},
-        {"tests/model.rs": "#[test] fn publication() {}"},
-    )
+def test_persisted_bar_model_round_trips_its_subscriptions(tmp_path: Path) -> None:
+    subscriptions = [{"data_type": "bars", "symbols": ["SPY"], "interval": "1d"}]
+    model = _model(subscriptions)
     store = WorkspaceResearchModelStore(_WorkspacePaths(tmp_path))
     loaded = store.load("workspace-market", store.publish("workspace-market", model))
     assert loaded.bar_interval == "1d"
-    configuration = study_configuration(loaded, run_id="legacy")
-    assert cast(Mapping[str, object], configuration["data"])["bar_interval"] == "1d"
+    configuration = study_configuration(loaded, run_id="persisted")
+    assert cast(Mapping[str, object], configuration["data"])["subscriptions"] == (
+        subscriptions
+    )
+    with pytest.raises(ResearchModelError, match="subscriptions"):
+        ResearchModel(
+            "interval-only",
+            "1.0.0",
+            "Interval only",
+            _SOURCE,
+            ("data_ok",),
+            {**_WINDOW, "interval": "1d", "symbols": ["SPY"]},
+            {"tests/model.rs": "#[test] fn publication() {}"},
+        )
 
 
 @pytest.mark.parametrize(
@@ -332,11 +337,11 @@ def test_model_and_contract_reject_contradictory_fetch_fields(
 )
 def test_tick_only_rejects_unused_interval(fields: dict[str, object]) -> None:
     model = _model([{"data_type": "quote", "symbols": ["SPY"]}])
-    with pytest.raises(ResearchModelError, match="tick-only"):
+    with pytest.raises(ResearchModelError, match="interval"):
         replace(model, harness_configuration={**model.harness_configuration, **fields})
 
 
-def test_matching_legacy_fields_preserve_exact_echo_and_broader_universe() -> None:
+def test_global_symbols_preserve_exact_echo_and_broader_universe() -> None:
     subscriptions = [
         {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"},
         {"data_type": "quote", "symbols": ["BTC-USD", "BTC/USD"]},
@@ -346,9 +351,8 @@ def test_matching_legacy_fields_preserve_exact_echo_and_broader_universe() -> No
         model,
         harness_configuration={
             **model.harness_configuration,
-            "interval": "1min",
             "symbols": ["BTC/USD", "SPY", "BTC-USD"],
-            "data": {"bar_interval": "1min", "symbols": ["SPY", "BTC-USD", "BTC/USD"]},
+            "data": {"symbols": ["SPY", "BTC-USD", "BTC/USD"]},
         },
     )
     universe = ["SPY", "BTC-USD", "BTC/USD", "QQQ"]
@@ -361,7 +365,7 @@ def test_matching_legacy_fields_preserve_exact_echo_and_broader_universe() -> No
     configuration = study_configuration(model, run_id="mixed", universe=universe)
     data = cast(Mapping[str, object], configuration["data"])
     assert data["subscriptions"] == subscriptions
-    assert configuration["symbols"] == ["SPY", "BTC-USD", "BTC/USD"]
+    assert data["symbols"] == ["SPY", "BTC-USD", "BTC/USD"]
     assert "bar_interval" not in data
     assert configuration["start"] == _WINDOW["start"]
     assert configuration["end"] == _WINDOW["end"]
@@ -433,22 +437,25 @@ def test_crlf_runtime_source_hash_and_fractional_window_parity(tmp_path: Path) -
     assert configuration["end"] == window["end"]
 
 
-def test_legacy_nested_symbols_remain_exact_without_spy_widening() -> None:
+def test_nested_subscriptions_remain_exact_without_spy_widening() -> None:
+    subscriptions = [
+        {"data_type": "bars", "symbols": ["QQQ"], "interval": "1d"},
+        {"data_type": "quote", "symbols": ["QQQ", "BTC-USD"]},
+    ]
     model = replace(
-        _model([{"data_type": "quote", "symbols": ["SPY"]}]),
+        _model(subscriptions),
         harness_configuration={
             **_WINDOW,
-            "interval": "1d",
-            "data": {"symbols": ["QQQ", "BTC-USD"]},
+            "data": {"subscriptions": subscriptions},
         },
     )
     configuration = study_configuration(
-        model, run_id="legacy-nested", universe=("SPY", "QQQ", "BTC-USD")
+        model, run_id="nested", universe=("SPY", "QQQ", "BTC-USD")
     )
     data = cast(Mapping[str, object], configuration["data"])
+    assert data["subscriptions"] == subscriptions
     assert data["symbols"] == ["QQQ", "BTC-USD"]
-    assert data["bar_interval"] == "1d"
-    assert configuration["symbols"] == ["QQQ", "BTC-USD"]
+    assert "bar_interval" not in data
     instances = cast(list[dict[str, object]], configuration["strategy_instances"])
     assert instances[0]["symbols"] == ["QQQ", "BTC-USD"]
 
@@ -479,7 +486,7 @@ def test_nested_subscription_echo_is_supported_without_legacy_interval(
     data = cast(Mapping[str, object], configuration["data"])
     assert data["subscriptions"] == [subscription]
     assert "bar_interval" not in data
-    assert configuration["symbols"] == ["QQQ"]
+    assert data["symbols"] == ["QQQ"]
 
 
 def _strategy(configuration: Mapping[str, object]) -> dict[str, object]:

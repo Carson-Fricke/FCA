@@ -419,11 +419,17 @@ impl BacktestConfig {
                         .collect(),
                 ),
             ),
-            (
+        ]);
+        if self
+            .data_subscriptions
+            .iter()
+            .any(|input| input.data_type == "bars")
+        {
+            data.insert(
                 "bar_interval",
                 JsonValue::String(self.data_bar_interval.clone()),
-            ),
-        ]);
+            );
+        }
         if self.has_subscription_echo() {
             data.insert(
                 "subscriptions",
@@ -568,12 +574,9 @@ impl BacktestConfig {
         config.risk_pipeline = parse_risk(root.get("risk_pipeline"))?;
         config.deployment = parse_deployment(root.get("deployment"))?;
         config.strategy_instances = parse_strategy_instances(root.get("strategy_instances"))?;
-        if config.shell == "study"
-            && !config.has_subscription_echo()
-            && !matches!(config.data_bar_interval.as_str(), "1min" | "1d")
-        {
+        if config.is_replay() && !config.data_subscriptions_declared {
             return Err(BacktestError::Configuration(
-                "study replay interval must be 1min or 1d".into(),
+                "replay configurations must declare data.subscriptions".into(),
             ));
         }
         Ok(config)

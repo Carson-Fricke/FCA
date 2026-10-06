@@ -17,12 +17,12 @@ use std::path::{Path, PathBuf};
 use harness_lakeclient::{BlockingLakeClient, EnsureSpec, ReadSpec};
 use num::Decimal18;
 
-use marketdata::{BarInterval, DataType, Date};
+use marketdata::{DataType, Date};
 
 use crate::backtest::config::BacktestConfig;
 use crate::backtest::engine_core::{
-    build_default_manifest, default_subscriptions, normalize_subscriptions, run_native_engine,
-    runtime_subscriptions, BacktestOutcome, EngineOptions, MarketSubscription, StrategyInstance,
+    build_default_manifest, normalize_subscriptions, run_native_engine, runtime_subscriptions,
+    BacktestOutcome, EngineOptions, MarketSubscription, StrategyInstance,
 };
 use crate::backtest::errors::{BacktestError, ONE_DAY_NS};
 use crate::backtest::fixture::{
@@ -216,14 +216,13 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
 /// A study reuses the replay configuration shape but declares the `study`
 /// shell, so it is never confused with a backtest. The strategy-instance list
 /// names platform study programs rather than user strategies, and the raw
-/// document declares exact `data.subscriptions`, or a legacy explicit
-/// `data.bar_interval` (`1min`, `1d`). Tick-only subscriptions need no interval.
+/// document declares exact `data.subscriptions`. Tick-only inputs need no
+/// interval.
 ///
 /// # Errors
 ///
 /// Returns [`BacktestJobError`] when the document is missing a `study` shell,
-/// omits a string `data.bar_interval`, carries an invalid window or bar
-/// interval, or cannot be read.
+/// omits `data.subscriptions`, carries an invalid window, or cannot be read.
 pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJobError> {
     let text = std::fs::read_to_string(config_path)
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
@@ -231,14 +230,10 @@ pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJ
     if shell != "study" {
         return Err(BacktestJobError::WrongShell(shell));
     }
-    let configuration = resolve_authored_sources(
+    resolve_authored_sources(
         BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
         config_path,
-    )?;
-    if !configuration.data_subscriptions_declared {
-        study_bar_interval(&configuration)?;
-    }
-    Ok(configuration)
+    )
 }
 
 /// Load and validate one screening configuration document (shell `screen`).
@@ -293,9 +288,6 @@ pub fn parse_study_document(
     }
     let configuration =
         BacktestConfig::from_yaml(&document.to_string()).map_err(BacktestJobError::from)?;
-    if !configuration.data_subscriptions_declared {
-        study_bar_interval(&configuration)?;
-    }
     Ok(configuration)
 }
 
@@ -529,29 +521,23 @@ fn lake_scale_options() -> SyntheticDataOptions {
 
 /// Build a replay fixture from the market-lake read route.
 ///
-/// Uses the configuration echo when present, otherwise legacy shell defaults.
-/// Backtests also acquire separate quote/trade execution feeds. Equity symbols
-/// use the `equity` asset class;
-/// symbols shaped like a crypto pair (`BTC-USD`) use the `crypto` asset class
-/// with their canonical `BASE/QUOTE` symbol. Fetched crypto events are re-keyed
-/// to the configured dashed symbol so the fixture, preflight, and research
-/// context all agree.
+/// Uses the declared configuration subscriptions. Backtests also acquire
+/// separate quote/trade execution feeds. Equity symbols use the `equity` asset
+/// class; symbols shaped like a crypto pair (`BTC-USD`) use the `crypto` asset
+/// class with their canonical `BASE/QUOTE` symbol. Fetched crypto events are
+/// re-keyed to the configured dashed symbol so the fixture, preflight, and
+/// research context all agree.
 ///
 /// # Errors
 ///
 /// Returns [`BacktestJobError`] when the lake cannot serve the configured
-/// window, the study bar interval is not a canonical token, or the route
-/// payload cannot be decoded. There is no synthetic fallback.
+/// window or the route payload cannot be decoded. There is no synthetic
+/// fallback.
 pub fn lake_fixture(
     configuration: &BacktestConfig,
     client: &BlockingLakeClient,
 ) -> Result<ReplayFixture, BacktestJobError> {
-    let subscriptions = if configuration.has_subscription_echo() {
-        configuration.data_subscriptions.clone()
-    } else {
-        default_subscriptions(configuration)
-    };
-    lake_fixture_with_subscriptions(configuration, client, &subscriptions)
+    lake_fixture_with_subscriptions(configuration, client, &configuration.data_subscriptions)
 }
 
 /// Acquire exact consumer inputs plus separate backtest execution feeds.
@@ -573,7 +559,7 @@ pub fn lake_fixture_with_subscriptions(
     }
     let mut acquisition = requirements.clone();
     if configuration.shell != "study" {
-        acquisition.extend(default_subscriptions(configuration));
+        acquisition.extend(super::engine_core::execution_subscriptions(&requirements));
     }
     let acquisition = normalize_subscriptions(&acquisition)?;
     let start_date = Date::from_days(configuration.start_ns.div_euclid(ONE_DAY_NS) as i32);
@@ -628,22 +614,6 @@ pub fn lake_fixture_with_subscriptions(
         super::preflight::validate_completed_bar_coverage(&requirements, &frames)?;
     }
     Ok(fixture)
-}
-
-/// The canonical bar interval a study configuration must carry.
-///
-/// Backtests keep their existing behavior: the interval only constrains study
-/// bar replay, so a backtest with an out-of-vocabulary `bar_interval` is left
-/// untouched.
-///
-/// # Errors
-///
-/// Returns [`BacktestJobError::Engine`] when the configured interval is not one
-/// of the canonical tokens (`1min`, `1d`).
-fn study_bar_interval(configuration: &BacktestConfig) -> Result<BarInterval, BacktestJobError> {
-    BarInterval::parse(&configuration.data_bar_interval).map_err(|error| {
-        BacktestJobError::Engine(format!("study data.bar_interval is invalid: {error}"))
-    })
 }
 
 /// Ensure and read every normalized symbol/type requirement.

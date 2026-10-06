@@ -860,8 +860,8 @@ Every request for operator input or direction is model-authored from a structure
    (preserved as `data.subscriptions` in the study configuration). The compiled
    ABI v4 JSON union of source and dependencies must canonically equal that
    echo before any ensure/read; `validate_study` returns the union for author
-   feedback. Legacy interval-only documents remain readable, but their authored
-   sources must migrate to the current SDK API and rebuild. The study observes
+   feedback. Interval-only configuration is rejected, and authored sources use
+   the current SDK API. The study observes
    subscribed ticks and `BarFrame`s, and publishes Layer A observables in
    `on_stop` through
    `MetricPublisher::publish`; the `fit.<parameter>` metrics are frozen as the

@@ -27,6 +27,7 @@ import type { TimelinePageWire, CreateMessageResponseWire, SubAgentNodeWire, Cha
 export { ThesisApiError } from './transport';
 import type {
 	ArtifactEntry,
+	ArtifactFileContent,
 	BackendKind,
 	BacktestDetail,
 	BacktestLaunchResult,
@@ -59,8 +60,8 @@ import type {
 	WidgetDefinition,
 	WorkflowExecutionRecord,
 	WorkflowDefinition,
+	WorkspaceArtifactCatalog,
 	WorkspaceSnapshot,
-	WorkspaceStateData,
 	WorkspaceSummary
 } from './types';
 
@@ -280,10 +281,9 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 /**
  * Fetch that resolves to `fallback` on a 404. Used for optional resources
- * (a chat's execution, a workspace-state document that has not been
- * persisted) and for the activation-consent surface, which the local
- * composition does not serve yet. Any other failure still throws so real
- * backend or configuration errors are not masked.
+ * (a chat's execution, an activation-consent surface the local composition
+ * does not serve yet) so an expected absence stays quiet. Any other failure
+ * still throws so real backend or configuration errors are not masked.
  */
 async function apiFetchOptional<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
 	try {
@@ -1439,17 +1439,40 @@ export function getScreenerResult(
 	return apiFetch<ScreeningResult>(path);
 }
 
-export function getWorkspaceState(workspaceId: string): Promise<WorkspaceStateData | null> {
+/** Fetch the durable artifact catalog for one workspace. */
+export function listWorkspaceArtifacts(workspaceId: string): Promise<WorkspaceArtifactCatalog> {
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts`;
 	if (fixtureMode) {
 		return wait(5).then(() => {
-			const doc = fixtures.workspaceState[workspaceId];
-			return doc ? plain(doc) : null;
+			const doc = fixtures.workspaceArtifacts[workspaceId];
+			return doc
+				? plain(doc)
+				: {
+						workspace_id: workspaceId,
+						items: [],
+						sources: { strategies: 'empty', studies: 'empty', indicators: 'empty' }
+					};
 		});
 	}
-	return apiFetchOptional<WorkspaceStateData | null>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/state`,
-		null
-	);
+	return apiFetch<WorkspaceArtifactCatalog>(path);
+}
+
+/** Fetch one bounded UTF-8 artifact file for the in-page viewer. */
+export function getArtifactFile(
+	workspaceId: string,
+	artifactId: string,
+	filePath: string
+): Promise<ArtifactFileContent> {
+	const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/files/${encodedPath}`;
+	if (fixtureMode) {
+		return wait(3).then(() => {
+			const doc = fixtures.artifactFiles[`${artifactId}|${filePath}`];
+			if (!doc) throw new ThesisApiError(404, path);
+			return plain(doc);
+		});
+	}
+	return apiFetch<ArtifactFileContent>(path);
 }
 
 export function searchKnowledge(query: string): Promise<KnowledgeHit[]> {

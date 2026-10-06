@@ -89,7 +89,7 @@ fixtures support local demos alongside Thesis backend payloads.
   `src/lib/`; presentation receives decoded data through props and shared context.
 - Router/page dependencies inside `src/lib/components/` components.
 - Metric or strategy computation — the UI only renders and formats.
-- Any Python, Zig, or harness code; those live in sibling `src/` packages.
+- Any Python or harness code; those live in sibling `src/` packages.
 
 ## Neighbors
 

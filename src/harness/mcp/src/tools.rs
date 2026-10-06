@@ -1595,10 +1595,10 @@ fn study_configuration_schema() -> Value {
         json!({"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}});
     let data = json!({
         "type": "object", "additionalProperties": false,
+        "required": ["subscriptions"],
         "properties": {
             "snapshot_id": {"type": "string", "minLength": 1},
             "fingerprint": {"type": "string"},
-            "bar_interval": {"type": "string", "enum": ["1min", "1d"]},
             "subscriptions": study_subscription_schema(),
             "symbols": symbols
         }
@@ -1607,15 +1607,13 @@ fn study_configuration_schema() -> Value {
         "type": "object",
         "required": ["start", "end"],
         "anyOf": [
-            {"required": ["interval"]},
             {"required": ["subscriptions"]},
-            {"required": ["data"], "properties": {"data": {"anyOf": [{"required": ["bar_interval"]}, {"required": ["subscriptions"]}]}}}
+            {"required": ["data"]}
         ],
-        "description": "Supported replay configuration. Aliases must agree; interval must match bars and must be omitted for tick-only subscriptions. Symbols default to the validator universe only when no symbol declaration/subscriptions exist.",
+        "description": "Supported replay configuration. Declare exact subscriptions; bars support one shared interval (1min or 1d), tick-only inputs omit interval, and symbol aliases must equal the subscription union.",
         "properties": {
             "start": {"type": "string", "format": "date-time", "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$", "description": "RFC 3339 timestamp with Z or explicit UTC offset; must precede end."},
             "end": {"type": "string", "format": "date-time", "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$", "description": "RFC 3339 timestamp with Z or explicit UTC offset; must follow start."},
-            "interval": {"type": "string", "enum": ["1min", "1d"]},
             "subscriptions": study_subscription_schema(),
             "requiredSymbols": symbols,
             "required_symbols": symbols,
@@ -1748,8 +1746,8 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
              object the completion contract carries. model.source and \
              model.harnessConfiguration.start/.end are required RFC 3339 timestamps \
              with Z or an explicit offset (for example 2025-01-01T00:00:00-05:00), \
-             with start before end. Supply interval (1min or 1d) or subscriptions, \
-             directly or under data (data.bar_interval/data.subscriptions). \
+             with start before end. Declare exact subscriptions directly or under \
+             data (data.subscriptions); interval-only configuration is rejected. \
              Use harness_strategy_sdk imports and its serde_json::Value re-export. \
              Implement MarketConsumer with type Context = ObservationContext and \
              fn subscriptions(&self) -> Vec<Subscription>; use Subscription::Bars \
@@ -1868,8 +1866,9 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             "Validate an authored Rust strategy without replaying data: compile, load, construct, \
              and check effective subscriptions (including indicators) against harnessConfiguration. \
              Pass {model: {source, harnessConfiguration}} as for validate_study; timestamps require \
-             RFC 3339 with Z or an explicit offset; interval is 1min or 1d, or declare tagged \
-             subscriptions directly or under data. Implement MarketConsumer with type Context = \
+             RFC 3339 with Z or an explicit offset; declare exact tagged \
+             subscriptions directly or under data (interval-only configuration is \
+             rejected). Implement MarketConsumer with type Context = \
              OrderSink, fn subscriptions(&self) -> Vec<Subscription>, and market callbacks on \
              MarketConsumer; implement StrategyProgram::new(parameters: \
              harness_strategy_sdk::serde_json::Value) -> Self. Export at module scope with \

@@ -1,0 +1,114 @@
+{
+	"strategy:momentum-breakout|src/lib.rs": {
+		"path": "src/lib.rs",
+		"text": "use harness_strategy_sdk::{export_strategy_program, BarFrame, MarketConsumer, OrderSink, StrategyProgram, Subscription};\nuse harness_strategy_sdk::serde_json::Value;\n\nconst ENTRY_BAND: f64 = 0.9;\n\nstruct MomentumBreakout {\n    threshold: f64,\n}\n\nimpl MarketConsumer for MomentumBreakout {\n    type Context = OrderSink;\n\n    fn subscriptions(&self) -> Vec<Subscription> {\n        vec![Subscription::Bars { symbols: vec![\"SPY\".into()], interval: \"1min\".into() }]\n    }\n\n    fn on_bar(&mut self, frame: &BarFrame, orders: &mut OrderSink) {\n        let Some(bar) = frame.bars_by_symbol.get(\"SPY\") else { return };\n        if bar.close > bar.open * (1.0 + self.threshold) {\n            orders.submit_market_buy(\"SPY\");\n        }\n    }\n}\n\nimpl StrategyProgram for MomentumBreakout {\n    fn new(parameters: Value) -> Self {\n        Self { threshold: parameters[\"threshold\"].as_f64().unwrap_or(ENTRY_BAND) }\n    }\n}\n\nexport_strategy_program!(MomentumBreakout);\n",
+		"truncated": false,
+		"sha256": "3f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f",
+		"size_bytes": 949
+	},
+	"strategy:momentum-breakout|tests/breakout.rs": {
+		"path": "tests/breakout.rs",
+		"text": "#[test]\nfn threshold_defaults_to_entry_band() {\n    let program = MomentumBreakout::new(serde_json::json!({}));\n    assert_eq!(program.threshold, 0.9);\n}\n",
+		"truncated": false,
+		"sha256": "a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2",
+		"size_bytes": 158
+	},
+	"strategy:momentum-breakout|manifest.json": {
+		"path": "manifest.json",
+		"text": "{\n  \"artifactPath\": \"strategies/momentum-breakout/3.2.0\",\n  \"bundleSha256\": \"b7e4d1a9c3f6082e5a7c9e1b3d5f7a9c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f\",\n  \"entrypoint\": \"src/lib.rs\",\n  \"name\": \"Momentum Breakout\",\n  \"schema\": \"fca-workspace-strategy-v1\",\n  \"sourceSha256\": \"3f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f\",\n  \"status\": \"draft\",\n  \"strategyId\": \"momentum-breakout\",\n  \"symbol\": \"SPY\",\n  \"version\": \"3.2.0\"\n}\n",
+		"truncated": false,
+		"sha256": "d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b",
+		"size_bytes": 508
+	},
+	"strategy:momentum-breakout|publication.json": {
+		"path": "publication.json",
+		"text": "{\n  \"gitCommit\": \"6f1c9a2d4e8b0f3a5c7e9d1b2f4a6c8e0d2f4a6b\",\n  \"manifestSha256\": \"d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b\",\n  \"publicationId\": \"pub-6f1c9a2d4e8b0f3a5c7e9d1b2f4a6c8e0d2f4a6b\",\n  \"schema\": \"fca-strategy-publication-v1\"\n}\n",
+		"truncated": false,
+		"sha256": "c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6",
+		"size_bytes": 259
+	},
+	"study:breakout_thresholds|program.rs": {
+		"path": "program.rs",
+		"text": "use harness_strategy_sdk::{export_study_program, BarFrame, MarketConsumer, MetricPublisher, ObservationContext, StudyProgram, Subscription};\nuse harness_strategy_sdk::serde_json::Value;\n\n#[derive(Default)]\nstruct BreakoutThresholds {\n    frames: u64,\n    breaches: u64,\n}\n\nimpl MarketConsumer for BreakoutThresholds {\n    type Context = ObservationContext;\n\n    fn subscriptions(&self) -> Vec<Subscription> {\n        vec![Subscription::Bars { symbols: vec![\"SPY\".into()], interval: \"1min\".into() }]\n    }\n\n    fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {\n        self.frames += 1;\n        if let Some(bar) = frame.bars_by_symbol.get(\"SPY\") {\n            if bar.close > bar.open * 1.009 {\n                self.breaches += 1;\n            }\n        }\n    }\n}\n\nimpl StudyProgram for BreakoutThresholds {\n    fn new(_: Value) -> Self { Self::default() }\n\n    fn on_stop(&mut self, metrics: &mut MetricPublisher) {\n        let _ = metrics.publish(\"frames\", self.frames as f64);\n        let _ = metrics.publish(\"breaches\", self.breaches as f64);\n    }\n}\n\nexport_study_program!(BreakoutThresholds);\n",
+		"truncated": false,
+		"sha256": "5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a",
+		"size_bytes": 1120
+	},
+	"study:breakout_thresholds|manifest.json": {
+		"path": "manifest.json",
+		"text": "{\n  \"configuration\": {\n    \"end\": \"2026-01-01T00:00:00Z\",\n    \"start\": \"2025-01-01T00:00:00Z\",\n    \"subscriptions\": [\n      {\n        \"data_type\": \"bars\",\n        \"interval\": \"1min\",\n        \"symbols\": [\"SPY\"]\n      }\n    ]\n  },\n  \"id\": \"breakout_thresholds\",\n  \"indicatorIds\": [\"rsi_value\"],\n  \"indicatorType\": \"AuthoredIndicator\",\n  \"kind\": \"study\",\n  \"schema\": \"fca-workspace-program-v1\"\n}\n",
+		"truncated": false,
+		"sha256": "1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c",
+		"size_bytes": 392
+	},
+	"indicator:rsi_value|program.rs": {
+		"path": "program.rs",
+		"text": "use harness_strategy_sdk::{BarFrame, Decimal, Indicator, MarketConsumer, ObservationContext, Subscription};\n\n#[derive(Default)]\npub struct RsiValue {\n    last: Option<Decimal>,\n    gains: Decimal,\n    losses: Decimal,\n}\n\nimpl MarketConsumer for RsiValue {\n    type Context = ObservationContext;\n\n    fn subscriptions(&self) -> Vec<Subscription> {\n        vec![Subscription::Bars { symbols: vec![\"SPY\".into()], interval: \"1min\".into() }]\n    }\n\n    fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {\n        let Some(bar) = frame.bars_by_symbol.get(\"SPY\") else { return };\n        let change = bar.close - bar.open;\n        if change > Decimal::ZERO {\n            self.gains += change;\n        } else {\n            self.losses -= change;\n        }\n        self.last = Some(bar.close);\n    }\n}\n\nimpl Indicator for RsiValue {\n    fn value(&self) -> Option<Decimal> { self.last }\n}\n",
+		"truncated": false,
+		"sha256": "48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d",
+		"size_bytes": 894
+	},
+	"indicator:rsi_value|manifest.json": {
+		"path": "manifest.json",
+		"text": "{\n  \"configuration\": {\n    \"end\": \"2026-01-01T00:00:00Z\",\n    \"start\": \"2025-01-01T00:00:00Z\",\n    \"subscriptions\": [\n      {\n        \"data_type\": \"bars\",\n        \"interval\": \"1min\",\n        \"symbols\": [\"SPY\"]\n      }\n    ]\n  },\n  \"id\": \"rsi_value\",\n  \"indicatorIds\": [],\n  \"indicatorType\": \"RsiValue\",\n  \"kind\": \"indicator\",\n  \"schema\": \"fca-workspace-program-v1\"\n}\n",
+		"truncated": false,
+		"sha256": "c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f0",
+		"size_bytes": 356
+	},
+	"strategy:term-carry|src/lib.rs": {
+		"path": "src/lib.rs",
+		"text": "use harness_strategy_sdk::{export_strategy_program, MarketConsumer, OrderSink, StrategyProgram, Subscription, TradeEvent};\nuse harness_strategy_sdk::serde_json::Value;\n\nstruct TermCarry;\n\nimpl MarketConsumer for TermCarry {\n    type Context = OrderSink;\n\n    fn subscriptions(&self) -> Vec<Subscription> {\n        vec![Subscription::Trade { symbols: vec![\"TLT\".into()] }]\n    }\n\n    fn on_trade(&mut self, trade: &TradeEvent, orders: &mut OrderSink) {\n        if trade.price > trade.notional() {\n            orders.submit_market_sell(\"TLT\");\n        }\n    }\n}\n\nimpl StrategyProgram for TermCarry {\n    fn new(_: Value) -> Self { Self }\n}\n\nexport_strategy_program!(TermCarry);\n",
+		"truncated": false,
+		"sha256": "6c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f0",
+		"size_bytes": 646
+	},
+	"strategy:term-carry|tests/carry.rs": {
+		"path": "tests/carry.rs",
+		"text": "#[test]\nfn carry_constructs() {\n    let _ = TermCarry::new(serde_json::json!({}));\n}\n",
+		"truncated": false,
+		"sha256": "d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5",
+		"size_bytes": 78
+	},
+	"strategy:term-carry|manifest.json": {
+		"path": "manifest.json",
+		"text": "{\n  \"artifactPath\": \"strategies/term-carry/0.1.0\",\n  \"bundleSha256\": \"9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c\",\n  \"entrypoint\": \"src/lib.rs\",\n  \"name\": \"Term Structure Carry\",\n  \"schema\": \"fca-workspace-strategy-v1\",\n  \"sourceSha256\": \"6c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f0\",\n  \"status\": \"draft\",\n  \"strategyId\": \"term-carry\",\n  \"symbol\": \"TLT\",\n  \"version\": \"0.1.0\"\n}\n",
+		"truncated": false,
+		"sha256": "e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1",
+		"size_bytes": 460
+	},
+	"strategy:term-carry|publication.json": {
+		"path": "publication.json",
+		"text": "{\n  \"gitCommit\": \"2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d\",\n  \"manifestSha256\": \"e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1\",\n  \"publicationId\": \"pub-2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d\",\n  \"schema\": \"fca-strategy-publication-v1\"\n}\n",
+		"truncated": false,
+		"sha256": "f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48",
+		"size_bytes": 259
+	},
+	"study:carry_fit|program.rs": {
+		"path": "program.rs",
+		"text": "use harness_strategy_sdk::{export_study_program, MarketConsumer, MetricPublisher, ObservationContext, StudyProgram, Subscription, TradeEvent};\nuse harness_strategy_sdk::serde_json::Value;\n\n#[derive(Default)]\nstruct CarryFit {\n    trades: u64,\n    notional: f64,\n}\n\nimpl MarketConsumer for CarryFit {\n    type Context = ObservationContext;\n\n    fn subscriptions(&self) -> Vec<Subscription> {\n        vec![Subscription::Trade { symbols: vec![\"TLT\".into()] }]\n    }\n\n    fn on_trade(&mut self, trade: &TradeEvent, _: &mut ObservationContext) {\n        self.trades += 1;\n        self.notional += trade.notional().to_f64().unwrap_or_default();\n    }\n}\n\nimpl StudyProgram for CarryFit {\n    fn new(_: Value) -> Self { Self::default() }\n\n    fn on_stop(&mut self, metrics: &mut MetricPublisher) {\n        let _ = metrics.publish(\"trades\", self.trades as f64);\n        let _ = metrics.publish(\"notional\", self.notional);\n    }\n}\n\nexport_study_program!(CarryFit);\n",
+		"truncated": false,
+		"sha256": "9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f",
+		"size_bytes": 1010
+	},
+	"study:carry_fit|manifest.json": {
+		"path": "manifest.json",
+		"text": "{\n  \"configuration\": {\n    \"end\": \"2026-03-01T00:00:00Z\",\n    \"start\": \"2025-03-01T00:00:00Z\",\n    \"subscriptions\": [\n      {\n        \"data_type\": \"trade\",\n        \"symbols\": [\"TLT\"]\n      }\n    ]\n  },\n  \"id\": \"carry_fit\",\n  \"indicatorIds\": [\"carry_curve\"],\n  \"indicatorType\": \"CarryCurve\",\n  \"kind\": \"study\",\n  \"schema\": \"fca-workspace-program-v1\"\n}\n",
+		"truncated": false,
+		"sha256": "a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9",
+		"size_bytes": 355
+	},
+	"indicator:carry_curve|program.rs": {
+		"path": "program.rs",
+		"text": "use harness_strategy_sdk::{Decimal, Indicator, MarketConsumer, ObservationContext, Subscription, TradeEvent};\n\n#[derive(Default)]\npub struct CarryCurve {\n    last: Option<Decimal>,\n    volume: Decimal,\n}\n\nimpl MarketConsumer for CarryCurve {\n    type Context = ObservationContext;\n\n    fn subscriptions(&self) -> Vec<Subscription> {\n        vec![Subscription::Trade { symbols: vec![\"TLT\".into()] }]\n    }\n\n    fn on_trade(&mut self, trade: &TradeEvent, _: &mut ObservationContext) {\n        self.volume += trade.quantity;\n        self.last = Some(trade.price);\n    }\n}\n\nimpl Indicator for CarryCurve {\n    fn value(&self) -> Option<Decimal> { self.last }\n}\n",
+		"truncated": false,
+		"sha256": "2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a",
+		"size_bytes": 692
+	},
+	"indicator:carry_curve|manifest.json": {
+		"path": "manifest.json",
+		"text": "{\n  \"configuration\": {\n    \"end\": \"2026-03-01T00:00:00Z\",\n    \"start\": \"2025-03-01T00:00:00Z\",\n    \"subscriptions\": [\n      {\n        \"data_type\": \"trade\",\n        \"symbols\": [\"TLT\"]\n      }\n    ]\n  },\n  \"id\": \"carry_curve\",\n  \"indicatorIds\": [],\n  \"indicatorType\": \"CarryCurve\",\n  \"kind\": \"indicator\",\n  \"schema\": \"fca-workspace-program-v1\"\n}\n",
+		"truncated": false,
+		"sha256": "4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c",
+		"size_bytes": 344
+	}
+}

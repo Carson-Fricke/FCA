@@ -15,7 +15,9 @@ data:
   snapshot_id: market-lake-equities-2024-01-v1
   fingerprint: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   symbols: [SPY]
-  bar_interval: 1min
+  subscriptions:
+    - data_type: quote
+      symbols: [SPY]
 strategy_instances:
   -
     instance_id: spy-momentum

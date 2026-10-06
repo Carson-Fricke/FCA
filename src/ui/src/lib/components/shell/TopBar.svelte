@@ -40,7 +40,7 @@
 		deployments: 'Deployments',
 		dashboards: 'Dashboards',
 		screener: 'Screener',
-		'workspace-state': 'Workspace state'
+		artifacts: 'Workspace artifacts'
 	};
 </script>
 

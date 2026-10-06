@@ -1084,9 +1084,9 @@ The tool spans the harness Rust workspace and the harness-hosted MCP endpoint:
    constructs, returns effective `subscriptions`, and rejects an unequal echo
    without fetching data. Only one distinct bars interval is supported across
    a run, including dependencies and instances; conflicts fail before any lake
-   ensure/read. Tick-only studies need no global interval. Legacy interval-only
-   documents remain readable, but old authored source MUST migrate to the
-   current SDK API and compiled artifacts MUST rebuild for ABI v4.
+   ensure/read. Tick-only studies need no interval. Interval-only documents are
+   rejected; authored source MUST use the current SDK API and compiled artifacts
+   MUST rebuild for ABI v4.
 5. Thesis calls `run_study` through `McpStudyRunner` over the hosted MCP
    endpoint and binds phase completion to the returned study's metric
    references; the `fit.<parameter>` metrics freeze as the content-addressed
@@ -1284,9 +1284,9 @@ and falsification-plan fields. It MUST include:
   Entries are strict tagged objects with `data_type` and `symbols`, plus
   `interval` only for bars (`1min` or `1d`), and MUST canonically equal the
   compiled source-and-dependency union. All subscription symbols MUST belong
-  to the hypothesis universe. Optional global symbols MUST equal the
-  subscription symbol union, and any legacy interval MUST match the single
-  bars interval (never for tick-only inputs). The adapter materializes that
+   to the hypothesis universe. Interval-only configuration is rejected; optional
+   global symbols MUST equal the subscription symbol union, and no interval field
+   is accepted. The adapter materializes that
   symbol union and the unchanged start/end bounds into the study run; the
   strategy bundle materializes the universe symbols and the same
   window so a strategy backtest never relies on the design agent to declare

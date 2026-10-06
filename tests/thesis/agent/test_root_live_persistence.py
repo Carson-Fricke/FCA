@@ -70,10 +70,11 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
         assert envelope.role is MessageRole.ASSISTANT
         assert envelope.body == "Checking now"
         assert envelope.data is not None
-        assert envelope.data["toolCalls"] == [_CALL.as_wire()]
         canonical = from_record(envelope)
         assert canonical.direction == "outgoing"
         assert canonical.message_id == envelope.message_id
+        assert [request.id for request in canonical.content.requests] == [_CALL.id]
+        assert [request.name for request in canonical.content.requests] == [_CALL.name]
         assert envelope.data["sessionMessage"] == canonical.as_dict()
         dispatched.append(arguments)
         return ToolExecution(ok=True, text="Checked", structured={"value": 42})
@@ -91,15 +92,18 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
                 tool = chat.list_messages(_WORKSPACE, thread.chat_id)[-1]
                 assert tool.role is MessageRole.TOOL
                 assert tool.data is not None
-                assert tool.data["toolCallId"] == _CALL.id
-                assert tool.data["arguments"] == {"value": 42}
-                assert isinstance(tool.data["durationMs"], int)
-                assert tool.data["durationMs"] >= 0
-                assert tool.data["invocationId"]
+                canonical = from_record(tool)
+                assert canonical.content.correlation is not None
+                assert canonical.content.correlation.request_id == _CALL.id
+                result_payload = canonical.content.result
+                assert result_payload is not None
+                assert result_payload["arguments"] == {"value": 42}
+                assert isinstance(result_payload["durationMs"], int)
+                assert result_payload["durationMs"] >= 0
+                assert result_payload["invocationId"]
                 assert tool.tool_result is not None
                 assert tool.tool_result["ok"] is True
                 assert messages[-1].tool_call_id == _CALL.id
-                canonical = from_record(tool)
                 payload = json.loads(messages[-1].content)
                 assert payload["text"] == "Checked"
                 assert payload["source"] == canonical.content.source == "tool"
@@ -305,4 +309,6 @@ def test_root_accepts_tool_result_without_optional_metadata() -> None:
     assert result.body == "Finished"
     tool = chat.list_messages(_WORKSPACE, thread.chat_id)[-2]
     assert tool.role is MessageRole.TOOL
-    assert tool.data is not None and tool.data["toolCallId"] == _CALL.id
+    canonical = from_record(tool)
+    assert canonical.content.correlation is not None
+    assert canonical.content.correlation.request_id == _CALL.id

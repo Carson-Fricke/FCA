@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -14,6 +15,12 @@ from pathlib import Path, PurePosixPath
 from thesis.persistence.journal import JournalEntry, content_hash
 
 _OBJECT_ID_PATTERN = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+
+def _git_blob_oid(payload: bytes) -> str:
+    """Return the Git object id a regular blob payload hashes to."""
+    header = f"blob {len(payload)}\0".encode("ascii")
+    return hashlib.sha1(header + payload).hexdigest()
 
 
 class GitPublicationError(RuntimeError):
@@ -241,6 +248,49 @@ class GitCoordinator:
             ).stdout.splitlines()
         )
 
+    def path_revisions(self, prefix: str) -> tuple[tuple[str, str], ...]:
+        """Return (commit, commit time) touching a confined prefix, newest first."""
+        relative = _relative_path(prefix, "tracked prefix").as_posix()
+        if self.head() is None:
+            return ()
+        output = self._run("log", "--format=%H%x09%cI", "--", relative).stdout
+        revisions: list[tuple[str, str]] = []
+        for line in output.splitlines():
+            commit, separator, committed_at = line.partition("\t")
+            if separator and commit and committed_at:
+                revisions.append((commit, committed_at))
+        return tuple(revisions)
+
+    def path_revisions_many(
+        self, prefixes: Sequence[str]
+    ) -> dict[str, tuple[tuple[str, str], ...]]:
+        """Return per-prefix (commit, commit time) history in one ``git log`` pass."""
+        if not prefixes:
+            return {}
+        relative = [
+            _relative_path(prefix, "tracked prefix").as_posix() for prefix in prefixes
+        ]
+        if self.head() is None:
+            return {prefix: () for prefix in relative}
+        output = self._run(
+            "log", "--format=%x00%H%x09%cI", "--name-only", "--", *relative
+        ).stdout
+        collected: dict[str, list[tuple[str, str]]] = {
+            prefix: [] for prefix in relative
+        }
+        for chunk in output.split("\0"):
+            if not chunk:
+                continue
+            lines = chunk.splitlines()
+            commit, separator, committed_at = lines[0].partition("\t")
+            if not separator or not commit or not committed_at:
+                continue
+            for path in lines[1:]:
+                for prefix in relative:
+                    if path.startswith(prefix + "/"):
+                        collected[prefix].append((commit, committed_at))
+        return {prefix: tuple(entries) for prefix, entries in collected.items()}
+
     def recover_artifacts(
         self, commit_hash: str, artifacts: Mapping[str, bytes]
     ) -> None:
@@ -284,6 +334,61 @@ class GitCoordinator:
         if not self.file_matches(commit_hash, relative, payload):
             raise GitPublicationConflict("tracked artifact is not a regular file")
         return payload
+
+    def read_blobs(self, commit_hash: str, paths: Sequence[str]) -> dict[str, bytes]:
+        """Read several regular blobs in one verified ``cat-file`` batch.
+
+        Every path must exist at the commit as a regular (mode ``100644``)
+        blob; each payload is checked against the object id the batch resolved
+        so a truncated or mismatched response can never be projected.
+        """
+        _validate_object_id(commit_hash)
+        if not paths:
+            return {}
+        relative = [_relative_path(path, "tracked path").as_posix() for path in paths]
+        tree = self._run("ls-tree", "-z", commit_hash, "--", *relative).stdout
+        modes: dict[str, str] = {}
+        for record in tree.split("\0"):
+            if not record:
+                continue
+            meta, _, tree_path = record.partition("\t")
+            parts = meta.split(" ")
+            if len(parts) == 3 and parts[1] == "blob":
+                modes[tree_path] = parts[0]
+        for path in relative:
+            if modes.get(path) != "100644":
+                raise GitPublicationError(
+                    f"tracked artifact is not a regular file: {path}"
+                )
+        request = "".join(f"{commit_hash}:{path}\n" for path in relative).encode(
+            "utf-8"
+        )
+        output = self._run("cat-file", "--batch", input_bytes=request).stdout.encode(
+            "utf-8"
+        )
+        blobs: dict[str, bytes] = {}
+        position = 0
+        for path in relative:
+            header_end = output.find(b"\n", position)
+            if header_end < 0:
+                raise GitPublicationError("git cat-file batch response is truncated")
+            header = output[position:header_end].decode("utf-8")
+            parts = header.split(" ")
+            if len(parts) != 3 or parts[1] != "blob":
+                raise GitPublicationError(f"tracked artifact is not a blob: {path}")
+            oid, _object_type, size_text = parts
+            size = int(size_text)
+            content_start = header_end + 1
+            payload = output[content_start : content_start + size]
+            if len(payload) != size or _git_blob_oid(payload) != oid:
+                raise GitPublicationError(
+                    "tracked artifact bytes do not match the commit"
+                )
+            if output[content_start + size : content_start + size + 1] != b"\n":
+                raise GitPublicationError("git cat-file batch response is malformed")
+            blobs[path] = payload
+            position = content_start + size + 1
+        return blobs
 
     def find_artifact_publication(
         self, publication_id: str, artifacts: Mapping[str, bytes]

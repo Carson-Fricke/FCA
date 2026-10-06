@@ -23,7 +23,7 @@ fn existing_configuration_hashes_match_the_goldens() {
     let cases = [
         (
             "backtest.yaml",
-            "791f5a95d84a912dc147bd7b69e5aaed3dd5fbaa24f7a2ac769f0aec70f14a1d",
+            "0df9f731373560fd88847f433d672c76cee02c0d5f0cbd3f2884585adee1b167",
         ),
         (
             "api.yaml",
@@ -56,9 +56,9 @@ fn backtest_canonical_json_is_pinned() {
     let path = config_dir().join("backtest.yaml");
     let configuration = load_configuration(&path).expect("load backtest");
     let expected = concat!(
-        r#"{"base_currency":"USD","clock":"event_time","data":{"bar_interval":"1min","#,
-        r#""fingerprint":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","#,
-        r#""snapshot_id":"market-lake-equities-2024-01-v1","symbols":["SPY"]},"#,
+        r#"{"base_currency":"USD","clock":"event_time","data":{"fingerprint":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","#,
+        r#""snapshot_id":"market-lake-equities-2024-01-v1","#,
+        r#""subscriptions":[{"data_type":"quote","symbols":["SPY"]}],"symbols":["SPY"]},"#,
         r#""deployment":{"environment":"local","image":null,"name":"backtest-job-local","#,
         r#""network_access":"disabled","replicas":1,"resources":{"cpu_cores":{"$decimal":"1"},"#,
         r#""memory_mib":1024},"restart_policy":"never","target":"local"},"#,
@@ -109,14 +109,25 @@ fn validation_rejects_malformed_documents() {
 }
 
 #[test]
-fn subscription_snapshot_is_strict_and_legacy_serialization_is_unchanged() {
+fn subscription_snapshot_is_strict_and_canonical() {
     use config::{models::build_backtest, parse_yaml_mapping, YamlValue};
     use std::collections::BTreeMap;
 
     let text = std::fs::read_to_string(config_dir().join("backtest.yaml")).unwrap();
     let original = parse_yaml_mapping(&text).unwrap();
-    let legacy = build_backtest(&original).unwrap();
-    assert!(legacy["data"].get("subscriptions").is_none());
+    let canonical = build_backtest(&original).unwrap();
+    assert_eq!(
+        canonical["data"]["subscriptions"],
+        serde_json::json!([{"data_type": "quote", "symbols": ["SPY"]}])
+    );
+    assert!(canonical["data"].get("bar_interval").is_none());
+    let mut interval_only = original.clone();
+    let YamlValue::Map(data) = interval_only.get_mut("data").unwrap() else {
+        panic!("data mapping")
+    };
+    data.remove("subscriptions");
+    data.insert("bar_interval".into(), YamlValue::Str("1min".into()));
+    assert!(build_backtest(&interval_only).is_err());
     let subscription = |kind: &str, interval: Option<&str>| {
         let mut map = BTreeMap::from([
             ("data_type".into(), YamlValue::Str(kind.into())),

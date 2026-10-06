@@ -86,9 +86,13 @@ def _compose_universe(
     data = model.harness_configuration.get("data")
     if "subscriptions" not in model.harness_configuration and isinstance(data, Mapping):
         subscriptions = data.get("subscriptions")
+    if not isinstance(subscriptions, list) or not subscriptions:
+        raise FalsificationComposeError(
+            "model harness_configuration must declare subscriptions"
+        )
     if value is not None:
         universe = _compose_symbols(value, "universe")
-        if isinstance(subscriptions, list) and any(
+        if any(
             symbol not in universe
             for item in subscriptions
             for symbol in item["symbols"]
@@ -97,22 +101,9 @@ def _compose_universe(
                 "subscription symbols must be present in the declared universe"
             )
         return universe
-    if isinstance(subscriptions, list):
-        return tuple(
-            dict.fromkeys(
-                symbol for item in subscriptions for symbol in item["symbols"]
-            )
-        )
-    symbols = model.harness_configuration.get("symbols")
-    data = model.harness_configuration.get("data")
-    if not isinstance(symbols, Sequence) or isinstance(symbols, str):
-        symbols = data.get("symbols") if isinstance(data, Mapping) else None
-    if isinstance(symbols, Sequence) and not isinstance(symbols, str):
-        inferred = [item.strip() for item in symbols if isinstance(item, str)]
-        inferred = [item for item in inferred if item]
-        if inferred:
-            return tuple(dict.fromkeys(inferred))
-    return _DEFAULT_UNIVERSE
+    return tuple(
+        dict.fromkeys(symbol for item in subscriptions for symbol in item["symbols"])
+    )
 
 
 def _compose_symbols(value: object, label: str) -> tuple[str, ...]:

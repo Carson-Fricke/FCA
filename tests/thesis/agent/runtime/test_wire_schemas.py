@@ -87,12 +87,7 @@ def test_tree_serialization_preserves_durable_authority_and_generated_schema() -
         ExternalInput(),
         Delivery("child", "delivery"),
         RuntimeTool("child", "finished", "call"),
-        ModelOutput(
-            "child",
-            "invocation",
-            "call",
-            ({"id": "call", "function": {"name": "check", "arguments": "{}"}},),
-        ),
+        ModelOutput("child", "invocation"),
     ],
 )
 def test_activity_wire_and_discriminator_share_runtime_types(

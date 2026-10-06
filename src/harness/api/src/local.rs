@@ -204,9 +204,6 @@ pub struct NativeStudyValidator;
 #[path = "../tests/unit/local_validation.rs"]
 mod validation_tests;
 
-/// The symbols an authored model validates with when it declares none.
-const DEFAULT_STUDY_SYMBOLS: [&str; 1] = ["SPY"];
-
 /// Build the runtime study job document from one authored model document.
 ///
 /// The model's fields are exactly what the agent drafts; everything the
@@ -273,49 +270,15 @@ fn authored_program_document(model: &Value, shell: &str) -> Result<Value, String
         }
         subscriptions = Some(inputs);
     }
-    let mut interval: Option<String> = None;
-    for value in [configuration.get("interval"), data.get("bar_interval")]
-        .into_iter()
-        .flatten()
-    {
-        let declared = value
-            .as_str()
-            .filter(|value| matches!(*value, "1min" | "1d"))
-            .ok_or_else(|| {
-                "model.harnessConfiguration.interval and data.bar_interval must be 1min or 1d"
-                    .to_string()
-            })?;
-        if interval
-            .as_deref()
-            .is_some_and(|interval| interval != declared)
-        {
-            return Err(
-                "model.harnessConfiguration.interval conflicts with data.bar_interval".to_string(),
-            );
-        }
-        interval = Some(declared.to_string());
+    if configuration.contains_key("interval") || data.contains_key("bar_interval") {
+        return Err(
+            "model.harnessConfiguration.interval is not accepted; declare subscriptions"
+                .to_string(),
+        );
     }
-    if interval.is_none() && subscriptions.is_none() {
-        return Err("model.harnessConfiguration.interval or data.bar_interval must be 1min or 1d when subscriptions are absent".to_string());
-    }
-    if let (Some(inputs), Some(interval)) = (&subscriptions, interval.as_deref()) {
-        let bar_interval = inputs
-            .iter()
-            .find(|input| input.data_type == "bars")
-            .and_then(|input| input.interval.as_deref());
-        match bar_interval {
-            Some(declared) if declared == interval => {}
-            Some(_) => {
-                return Err(
-                    "model.harnessConfiguration.interval must match the bars subscription interval"
-                        .to_string(),
-                );
-            }
-            None => {
-                return Err("model.harnessConfiguration.interval is not allowed for tick-only subscriptions".to_string());
-            }
-        }
-    }
+    let Some(inputs) = subscriptions.as_ref() else {
+        return Err("model.harnessConfiguration.subscriptions is required".to_string());
+    };
     let mut explicit_symbols = None;
     for value in [
         configuration.get("symbols"),
@@ -375,54 +338,30 @@ fn authored_program_document(model: &Value, shell: &str) -> Result<Value, String
         .ok_or_else(|| {
             "model.harnessConfiguration.end must be a non-empty RFC 3339 string".to_string()
         })?;
-    let symbols: Vec<String> = if let Some(inputs) = &subscriptions {
-        let mut symbols: Vec<String> = inputs
-            .iter()
-            .flat_map(|input| input.symbols.clone())
-            .collect();
-        symbols.sort();
-        symbols.dedup();
-        if symbols.is_empty() {
-            return Err(
-                "model.harnessConfiguration.subscriptions must request symbols".to_string(),
-            );
-        }
-        if explicit_symbols
-            .as_ref()
-            .is_some_and(|declared| declared != &symbols)
-        {
-            return Err(
-                "model.harnessConfiguration.symbols must match the subscription symbol union"
-                    .to_string(),
-            );
-        }
-        symbols
-    } else {
-        match explicit_symbols {
-            Some(symbols) => symbols,
-            None => DEFAULT_STUDY_SYMBOLS
-                .iter()
-                .map(|symbol| (*symbol).to_string())
-                .collect(),
-        }
-    };
+    let mut symbols: Vec<String> = inputs
+        .iter()
+        .flat_map(|input| input.symbols.clone())
+        .collect();
+    symbols.sort();
+    symbols.dedup();
+    if symbols.is_empty() {
+        return Err("model.harnessConfiguration.subscriptions must request symbols".to_string());
+    }
+    if explicit_symbols
+        .as_ref()
+        .is_some_and(|declared| declared != &symbols)
+    {
+        return Err(
+            "model.harnessConfiguration.symbols must match the subscription symbol union"
+                .to_string(),
+        );
+    }
     let digest = backtest::sha256::digest_hex(source.as_bytes());
     let run_id = format!("validate-{shell}-{}", &digest[..16]);
     data.insert("symbols".to_string(), json!(&symbols));
-    if let Some(interval) = interval {
-        data.insert("bar_interval".to_string(), json!(interval));
-    }
     if let Some(echo) = subscription_echo {
         // Preserve the authored echo's exact tagged shape; normalization is validation only.
         data.insert("subscriptions".to_string(), echo);
-    } else if shell == "backtest" {
-        // An authored interval requests bars, not the legacy strategy tick defaults.
-        data.insert(
-            "subscriptions".to_string(),
-            json!([{
-                "data_type": "bars", "symbols": &symbols, "interval": data["bar_interval"]
-            }]),
-        );
     }
     let mut document = configuration.clone();
     for key in [
@@ -438,7 +377,6 @@ fn authored_program_document(model: &Value, shell: &str) -> Result<Value, String
     document.insert("run_id".to_string(), json!(&run_id));
     document.insert("start".to_string(), json!(start));
     document.insert("end".to_string(), json!(end));
-    document.insert("symbols".to_string(), json!(&symbols));
     document.insert("data".to_string(), Value::Object(data));
     document.insert(
         "strategy_instances".to_string(),

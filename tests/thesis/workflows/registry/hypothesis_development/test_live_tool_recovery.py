@@ -111,7 +111,13 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
         envelope = messages[-1]
         assert envelope.role is MessageRole.ASSISTANT
         assert envelope.data is not None
-        assert envelope.data["toolCalls"] == [_CALL.as_wire()]
+        canonical_envelope = from_record(envelope)
+        assert [request.id for request in canonical_envelope.content.requests] == [
+            _CALL.id
+        ]
+        assert [request.name for request in canonical_envelope.content.requests] == [
+            _CALL.name
+        ]
         assert envelope.body == "Checking the study"
         assert envelope.data["startedAt"]
         dispatched.append(arguments)
@@ -130,8 +136,10 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
                 durable = _node_messages(kit.chat, request.chat_id, node_id)[-1]
                 assert durable.role is MessageRole.TOOL
                 assert durable.data is not None
-                assert durable.data["toolCallId"] == _CALL.id
-                assert durable.data["arguments"] == {"source": "study"}
+                durable_canonical = from_record(durable)
+                durable_result = durable_canonical.content.result
+                assert durable_result is not None
+                assert durable_result["arguments"] == {"source": "study"}
                 assert durable.tool_result is not None
                 assert durable.tool_result["ok"] is True
                 assert messages[-1].tool_call_id == _CALL.id
@@ -331,8 +339,12 @@ def test_terminal_control_transition_completes_turn_and_skips_remaining_calls(
     durable = _node_messages(kit.chat, request.chat_id, node_id)
     tool_messages = [message for message in durable if message.role is MessageRole.TOOL]
     assert len(tool_messages) == 2
+    correlations = [
+        from_record(message).content.correlation for message in tool_messages
+    ]
     assert [
-        message.data["toolCallId"] for message in tool_messages if message.data
+        correlation.request_id if correlation is not None else None
+        for correlation in correlations
     ] == [call.id for call in calls]
     assert tool_messages[1].tool_result is not None
     assert tool_messages[1].tool_result["failure"] == skipped["failure"]
@@ -484,11 +496,11 @@ def test_multiple_typed_datums_persist_at_node_and_replay_as_one_tool_result(
     message = tool_messages[0]
     assert message.data is not None
     assert message.data["subAgentId"] == node_id
-    assert message.data["toolCallId"] == _CALL.id
-    assert message.data["arguments"] == {"source": "study"}
-    assert message.data["invocationId"]
-    assert message.data["datums"] == [datum.as_dict() for datum in datums]
     canonical = from_record(message)
+    result_payload = canonical.content.result
+    assert result_payload is not None
+    assert result_payload["arguments"] == {"source": "study"}
+    assert result_payload["invocationId"]
     assert canonical.direction == "incoming"
     assert canonical.content.source == "tool"
     assert canonical.content.text == ""
@@ -568,7 +580,8 @@ def test_handler_persistence_error_is_terminal_node_fault_not_tool_failure(
     durable = _node_messages(kit.chat, request.chat_id, node_id)
     assert durable[-1].role is MessageRole.ASSISTANT
     assert durable[-1].data is not None
-    assert durable[-1].data["toolCalls"] == [_CALL.as_wire()]
+    failed_envelope = from_record(durable[-1])
+    assert [request.id for request in failed_envelope.content.requests] == [_CALL.id]
     assert not any(message.role is MessageRole.TOOL for message in durable)
     assert not any(
         (message.data or {}).get("status") == "interrupted" for message in durable

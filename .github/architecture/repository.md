@@ -144,14 +144,13 @@ virtual book accounting, K-way replay merge, bar derivation, resting-order
 matching venue, SimpleTouch, latency-size, and trade-through fill models, the
 ported metrics modules, and the float64 batch quant kernels — the
 Cox-Ross-Rubinstein option pricer with tree greeks plus bracketed implied
-time-to-expiry and implied-underlying inversions). The pinned Zig toolchain and
-every `.zig` source were retired in T253; the shared image compiles the native
-library in a Rust build stage, and CI gates it with `cargo fmt --all --check`,
+time-to-expiry and implied-underlying inversions). The shared image compiles
+the native library in a Rust build stage, and CI gates it with
+`cargo fmt --all --check`,
 `cargo clippy`, and `cargo test`. The native-core parity suites assert
 byte-identical determinism artifacts against the pinned Python-reference
 goldens (masking the per-engine `manifest.code_fingerprint`); the Python
-oracle modules (`harness.runtime.zig_backtest`, `harness.testing.rust_oracle`)
-were deleted with the harness Python packages.
+oracle modules were deleted with the harness Python packages.
 
 The Rust migration is complete. The engine workspace lives under
 `src/harness/` and provides the authoritative engine core (clock, event
@@ -162,8 +161,8 @@ been deleted: strategies, indicators, studies, and screeners are authored in
 Rust against the `harness-strategy-sdk` crate and are JIT compiled and loaded
 through `harness-strategy-jit` when a configuration runs (see
 `rust-native-authoring-plan.md` and `screener-rust-migration.md`). The
-interpreter is no longer a harness build or test dependency. Zig was retired in T253, the Python engine paths
-were removed in the final decommission wave, and the Python authoring
+interpreter is no longer a harness build or test dependency. The Python engine
+paths were removed in the final decommission wave, and the Python authoring
 surface (host adapter, `py` extension, and the harness Python packages) was
 removed in the native-authoring deletion; only the `trader` supervision
 runner remains deferred (see below).
@@ -471,9 +470,9 @@ The implemented contract is:
   `acquired_subscriptions` union; execution feeds do not expand consumer routing
   or the configuration echo. Only one distinct bar interval is supported across
   a run, including dependencies and instances; conflicts fail before lake
-  ensure/read. Tick-only inputs need no global interval. Legacy interval-only
-  configuration documents remain readable, but old authored source must migrate
-  to `MarketConsumer` and be rebuilt for ABI v4. Mixed replay uses one causal
+   ensure/read. Tick-only inputs need no interval. Interval-only configuration
+   documents are rejected before any acquisition; authored source uses
+   `MarketConsumer` and rebuilds for ABI v4. Mixed replay uses one causal
   availability-ordered queue: at equal time, ticks precede completed frames,
   then generated execution events. Frames become available at interval end,
   never at bar start. Study artifacts remain `study.json` and `metrics.json`.
@@ -508,8 +507,7 @@ The implemented contract is:
 
 ## Decommission Status
 
-The Zig native core was retired in T253 (`build.zig`, `build.zig.zon`, and every
-`.zig` source deleted). The engine lives entirely in Rust under `src/harness/`;
+The engine lives entirely in Rust under `src/harness/`;
 the Python engine was deleted in the final decommission wave, and the
 embedded-Python authoring surface (host adapter, `py` extension, harness
 Python packages, and the `strategies/` tree) was deleted in the
@@ -625,8 +623,11 @@ Shared workflow prompt guidance owns targeted repair and
 asking after three unsuccessful compiler repairs, not a runtime repair cap.
 
 Workspace state exposes strategy lineages, evidence, and consent/audit records.
-Planning projections and external task-tracker initialization are not part of
-workspace provisioning, knowledge exports, or the UI.
+`thesis.http.artifacts` adds a read-only durable artifact catalog (committed
+strategies, studies, and indicators) with a bounded UTF-8 file reader behind the
+Workspace artifacts page; volatile stores are excluded. Planning projections and
+external task-tracker initialization are not part of workspace provisioning,
+knowledge exports, or the UI.
 
 The implemented runtime modules and facades are:
 
@@ -634,7 +635,7 @@ The implemented runtime modules and facades are:
 | --- | --- |
 | `thesis.agent.messages` | Immutable neutral session/content/request/correlation contracts and canonical-only transcript decoding. No execution or provider projection. |
 | `thesis.agent.runtime` | Public conversation, child, session, lifecycle, control, delivery, and store facade. `conversation.py` composes admission, execution, and outgoing persistence; `incoming.py` is the singular incoming writer; `inbox.py` owns injected delivery and success-bound consumption; `turns.py` owns locked worker intake. `session_reply.py` is removed. |
-| `thesis.agent.runtime.activity` | Immutable discriminated runtime activity, generated metadata/message schemas, and canonical activity decoding. |
+| `thesis.agent.runtime.activity` | Immutable discriminated runtime activity (anchor, stage, timing, delivery key), generated metadata/message schemas, and canonical activity decoding. Tool requests and correlations live only in the canonical session message. |
 | `thesis.providers.session_adapter` | Pure `project_native_messages` and versioned `NativeSessionAdapter.request_snapshot` shared by live/replay; completion calls only injected `provider.complete` and returns neutral output. |
 | `thesis.http.schema`, `wire`, `errors` | Source-derived OpenAPI/runtime schemas, typed response envelopes, and explicit error/service-resolution boundaries. |
 | `thesis.workflows.runtime` | Composition plus exported `WorkflowSessionServices`, `WorkflowSessionBindings`, `RuntimeToolActivity`, and `bind_workflow_session_services` ports. |
@@ -691,8 +692,7 @@ operational drift:
   builds the `native` C ABI core and the harness interface binaries. CI
   enforces `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`, and
-  `cargo test --workspace` alongside the Python gates. The pinned Zig toolchain
-  from the earlier native-core effort was retired in T253.
+  `cargo test --workspace` alongside the Python gates.
 - `Dockerfile` builds one immutable image with distinct runtime commands. A
   Rust build stage compiles and tests the workspace and produces the native
   core library plus the `harness`, `api`, `backtest-job`, `mcp`, and `trader`

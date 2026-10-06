@@ -29,7 +29,7 @@ export function deriveWorkflowLive(
 ): Map<string, WorkflowLiveState> {
 	const anchors = new Map<string, { execution: WorkflowExecutionRecord; phases: WorkflowPhase[] }>();
 	for (const message of messages) {
-		const datums = message.data?.sessionMessage?.content.result?.datums ?? message.data?.datums;
+		const datums = message.data?.sessionMessage?.content.result?.datums;
 		const sources = message.kind === 'workflow' ? [message.data ?? {}] :
 			Array.isArray(datums) ? datums.flatMap((datum) => datum && typeof datum === 'object' && datum.datumType === 'workflow_execution' ? [datum.structured] : []) :
 			message.tool_result?.datumType === 'workflow_execution' ? [message.tool_result.structured] : [];

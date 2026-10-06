@@ -306,56 +306,29 @@ def study_configuration(
     validate_market_configuration(configuration)
     configuration.pop("interval", None)
     subscriptions = configuration.pop("subscriptions", None)
-    shorthand_symbols = (
-        configuration.pop("symbols", None)
-        or configuration.pop("requiredSymbols", None)
-        or configuration.pop("required_symbols", None)
-    )
+    configuration.pop("symbols", None)
+    configuration.pop("requiredSymbols", None)
+    configuration.pop("required_symbols", None)
     data = configuration.get("data")
     if not isinstance(data, dict):
         data = {}
         configuration["data"] = data
     if subscriptions is None:
-        subscriptions = cast(object, data.get("subscriptions"))
-    if subscriptions is not None:
-        assert isinstance(subscriptions, list)
-        symbols = list(
-            dict.fromkeys(
-                symbol for item in subscriptions for symbol in item["symbols"]
-            )
+        subscriptions = cast(object, data.pop("subscriptions", None))
+    if not isinstance(subscriptions, list) or not subscriptions:
+        raise ResearchModelError("study configuration must declare subscriptions")
+    symbols = list(
+        dict.fromkeys(symbol for item in subscriptions for symbol in item["symbols"])
+    )
+    if universe and set(symbols) - set(universe):
+        raise ResearchModelError(
+            "subscription symbols must be present in the declared universe"
         )
-        if universe and set(symbols) - set(universe):
-            raise ResearchModelError(
-                "subscription symbols must be present in the declared universe"
-            )
-        if "subscriptions" in data and data["subscriptions"] != subscriptions:
-            raise ResearchModelError(
-                "data.subscriptions conflicts with model subscriptions"
-            )
-        data["subscriptions"] = subscriptions
-        data.pop("bar_interval", None)
-        data["symbols"] = symbols
-    else:
-        data["bar_interval"] = model.bar_interval
-        symbols = data.get("symbols")
-    if subscriptions is None and (not isinstance(symbols, list) or not symbols):
-        candidate_symbols: object = None
-        if isinstance(shorthand_symbols, list | tuple) and shorthand_symbols:
-            candidate_symbols = shorthand_symbols
-        elif universe:
-            candidate_symbols = universe
-        if isinstance(candidate_symbols, Sequence) and not isinstance(
-            candidate_symbols, str | bytes
-        ):
-            symbols = [str(item) for item in candidate_symbols if str(item).strip()]
-        if symbols:
-            data["symbols"] = list(dict.fromkeys(symbols))
-    if subscriptions is None and (not isinstance(symbols, list) or not symbols):
-        symbols = ["SPY"]
-        data["symbols"] = symbols
+    data["subscriptions"] = subscriptions
+    data.pop("bar_interval", None)
+    data["symbols"] = symbols
     resolved_symbols = data["symbols"]
     assert isinstance(resolved_symbols, list)
-    configuration["symbols"] = list(resolved_symbols)
     window_start, window_end = study_window(configuration)
     configuration["start"] = window_start
     configuration["end"] = window_end

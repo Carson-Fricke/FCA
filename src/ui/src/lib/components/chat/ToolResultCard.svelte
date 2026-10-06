@@ -11,7 +11,7 @@
 	const structured = $derived(isRecord(result.structured) ? result.structured : {});
 	const startedAt = $derived(result.startedAt ?? structured.startedAt);
 	const durationMs = $derived(result.durationMs ?? structured.durationMs);
-	const reused = $derived(result.reused ?? structured.reused);
+	const reused = $derived(structured.reused);
 	const argumentsData = $derived(result.arguments ?? structured.arguments);
 </script>
 

@@ -7,14 +7,13 @@ import { TimelineStream } from '$lib/sse';
 import backendMessage from './backend-message.json';
 import backendTree from './backend-tree.json';
 import backendThread from './backend-thread.json';
-import { aggregateMessage } from './timeline-fixture';
+import { aggregateDatums, aggregateMessage } from './timeline-fixture';
 
 describe('committed backend wire contract', () => {
 	it('decodes one aggregate incoming record with canonical correlation and typed datums', () => {
 		expect(decodeWire('ChatMessageWire', aggregateMessage, 'aggregate')).toEqual(aggregateMessage);
-		for (const datum of aggregateMessage.data.datums) expect(decodeWire('DatumWire', datum, 'aggregate/datum')).toEqual(datum);
-		expect(() => decodeWire('ChatMessageWire', { ...aggregateMessage, data: { ...aggregateMessage.data,
-			datums: [{ ...aggregateMessage.data.datums[0], ok: 'true' }] } }, 'bad-datum')).toThrow(WireDecodeError);
+		for (const datum of aggregateDatums) expect(decodeWire('DatumWire', datum, 'aggregate/datum')).toEqual(datum);
+		expect(() => decodeWire('DatumWire', { ...aggregateDatums[0], ok: 'true' }, 'bad-datum')).toThrow(WireDecodeError);
 		expect(() => decodeWire('ChatMessageWire', { ...aggregateMessage, data: { ...aggregateMessage.data,
 			sessionMessage: { ...aggregateMessage.data.sessionMessage, content: { ...aggregateMessage.data.sessionMessage.content,
 				correlation: { request_id: 'aggregate-call' } } } } }, 'bad-correlation')).toThrow(WireDecodeError);

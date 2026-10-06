@@ -9,7 +9,7 @@ import pytest
 from tests.thesis.workflows.registry.hypothesis_development._support import (
     _discovery_envelope,
     _hypothesis_envelope,
-    _legacy_model,
+    _inline_model,
 )
 
 from thesis.agent.harness_tools import (
@@ -187,7 +187,7 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         allowed_tools=record.allowed_tools,
     )
     registry = callbacks["registry"](context)
-    legacy = _legacy_model()
+    legacy = _inline_model()
     configuration = {
         **cast(dict, legacy["harnessConfiguration"]),
         "subscriptions": [
@@ -221,7 +221,7 @@ def completion_from(receipt: Mapping[str, object]) -> dict[str, object]:
         key: receipt[key]
         for key in ("workspaceId", "kind", "programId", "gitCommit", "version")
     }
-    model = _legacy_model()
+    model = _inline_model()
     return {
         "intentEpoch": 0,
         "target": "falsification_trials",
@@ -256,7 +256,7 @@ def test_author_validate_complete_then_trials_use_pinned_commit(tmp_path, monkey
     assert callbacks["validate"](request.workspace_id, record, completion) is None
     assert len(harness.calls) == validate_count  # Completion never recompiles.
     callbacks["apply"](request.workspace_id, record, completion)
-    original = str(_legacy_model()["source"])
+    original = str(_inline_model()["source"])
     updated = registry.dispatch(
         "update_study",
         {
@@ -355,8 +355,8 @@ def test_failed_validation_requires_patch_and_revalidate_id(tmp_path, monkeypatc
     finished = [
         message
         for message in messages
-        if (message.data or {}).get("tool") == "verify_program_reference"
-        and message.tool_result
+        if message.tool_result
+        and message.tool_result.get("tool") == "verify_program_reference"
     ]
     assert len(finished) == 2
     for message in finished:
@@ -398,7 +398,7 @@ def test_inline_validation_and_foreign_or_stale_completion_are_rejected(
     _, _, _, request, record, registry, _, callbacks, _ = setup_workflow(
         tmp_path, monkeypatch
     )
-    assert not registry.dispatch("validate_study", {"model": _legacy_model()}).ok
+    assert not registry.dispatch("validate_study", {"model": _inline_model()}).ok
     checked = registry.dispatch("validate_study", {"program_id": "momentum"})
     completion = completion_from(checked.structured)
     helper = replace(record, phase_executor=False)
@@ -627,8 +627,18 @@ def test_completion_receipt_writer_failure_propagates(
     create = stack.chat_service.create_message
 
     def fail_write(*args, **kwargs):
-        if kwargs.get("data", {}).get("toolActivity") == failed_activity:
+        data = kwargs.get("data") or {}
+        if data.get("toolActivity") == failed_activity:
             raise OSError("receipt writer unavailable")
+        session = data.get("sessionMessage")
+        result = (
+            session.get("content", {}).get("result")
+            if isinstance(session, dict) and isinstance(session.get("content"), dict)
+            else None
+        )
+        if failed_activity == "finished" and isinstance(result, dict):
+            if "toolCallId" in result:
+                raise OSError("receipt writer unavailable")
         return create(*args, **kwargs)
 
     monkeypatch.setattr(stack.chat_service, "create_message", fail_write)

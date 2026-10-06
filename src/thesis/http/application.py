@@ -38,6 +38,7 @@ from thesis.auth.session import OperatorSessionService
 from thesis.auth.workspace_access import WorkspaceAuthorizer
 from thesis.chat import ChatService
 from thesis.chat.responder import ToolResultChunk, ToolResultObserver
+from thesis.http.artifacts import ArtifactCatalogService, create_artifact_router
 from thesis.http.auth import (
     CsrfTokenGuard,
     OidcVerifier,
@@ -506,6 +507,9 @@ def create_app(
         application.state.dashboard_service = workspace_data.dashboards
         application.state.workspace_state_service = workspace_data.state
         application.state.strategy_service = workspace_data.strategies
+        application.state.artifact_catalog_service = ArtifactCatalogService(
+            workspace_data.strategy_artifacts, workspace_data.programs
+        )
         screener_service = workspace_data.screeners
         if (
             screener_service is not None
@@ -638,6 +642,7 @@ def create_app(
         create_dashboard_router(),
         create_workspace_state_router(),
         create_strategy_router(),
+        create_artifact_router(),
         create_screener_router(),
         create_knowledge_router(),
         create_workflow_router(workflow_registry),

@@ -106,7 +106,6 @@ def test_durable_positions_restart_and_scope(tmp_path: Path) -> None:
         (MessageRole.ASSISTANT, {}),
         (MessageRole.TOOL, {"activityKind": "runtime_tool"}),
         (MessageRole.TOOL, {"toolActivity": "finished"}),
-        (MessageRole.TOOL, {"toolCallId": "call-a"}),
         (MessageRole.USER, {"activityKind": "model_output"}),
     ],
 )

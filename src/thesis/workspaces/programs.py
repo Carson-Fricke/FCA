@@ -42,7 +42,6 @@ PROGRAM_CONFIGURATION_SCHEMA: dict[str, object] = {
         "start": {"type": "string", "pattern": _DATE_PATTERN},
         "end": {"type": "string", "pattern": _DATE_PATTERN},
         "subscriptions": MARKET_SUBSCRIPTIONS_SCHEMA,
-        "interval": {"type": "string", "enum": ["1min", "1d"]},
     },
 }
 
@@ -165,6 +164,90 @@ def _hash(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+_HistoryEntries = list[dict[str, object]]
+
+
+def _file_entry(path: str, sha256: str, size_bytes: int) -> dict[str, object]:
+    return {
+        "path": path,
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "viewer": _viewer_for(path),
+    }
+
+
+def _viewer_for(path: str) -> str:
+    suffix = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    if suffix == "json":
+        return "json"
+    if suffix in {"md", "markdown"}:
+        return "markdown"
+    if suffix in {"rs", "toml", "yaml", "yml", "lock"}:
+        return "code"
+    return "text"
+
+
+def _program_inputs(configuration: object) -> list[dict[str, object]]:
+    if not isinstance(configuration, Mapping):
+        return []
+    subscriptions = configuration.get("subscriptions")
+    if not isinstance(subscriptions, list):
+        return []
+    inputs: list[dict[str, object]] = []
+    for item in subscriptions:
+        if not isinstance(item, Mapping):
+            continue
+        data_type = item.get("data_type")
+        symbols = item.get("symbols")
+        interval = item.get("interval")
+        inputs.append(
+            {
+                "data_type": data_type if isinstance(data_type, str) else "unknown",
+                "symbols": (
+                    [symbol for symbol in symbols if isinstance(symbol, str)]
+                    if isinstance(symbols, list)
+                    else []
+                ),
+                "interval": interval if isinstance(interval, str) else None,
+            }
+        )
+    return inputs
+
+
+def _program_preview(
+    kind: ProgramKind, manifest: Mapping[str, object], configuration: object
+) -> dict[str, object]:
+    if kind == "study":
+        start = None
+        end = None
+        if isinstance(configuration, Mapping):
+            raw_start = configuration.get("start")
+            raw_end = configuration.get("end")
+            start = raw_start if isinstance(raw_start, str) else None
+            end = raw_end if isinstance(raw_end, str) else None
+        dependencies = manifest.get("indicatorIds")
+        return {
+            "type": "study",
+            "window": {"start": start, "end": end},
+            "indicator_ids": (
+                [item for item in dependencies if isinstance(item, str)]
+                if isinstance(dependencies, list)
+                else []
+            ),
+            "metrics": [],
+        }
+    if kind == "indicator":
+        return {"type": "indicator", "value_series": None, "used_by": []}
+    return {
+        "type": "strategy",
+        "entrypoint": "program.rs",
+        "symbol": "",
+        "exit_criteria": [],
+        "limitations": [],
+        "signals": None,
+    }
+
+
 class WorkspacePrograms:
     """Own author/update/read/validate/run by kind and ID, never caller paths.
 
@@ -185,8 +268,17 @@ class WorkspacePrograms:
         self.sdk_root = (
             sdk_root or Path(__file__).resolve().parents[2] / "harness" / "strategy-sdk"
         )
+        self._catalog_cache: dict[
+            tuple[str, str], tuple[str, tuple[dict[str, object], ...]]
+        ] = {}
 
-    def _path(self, workspace_id: str, kind: str, program_id: str) -> str:
+    def _path(
+        self,
+        workspace_id: str,
+        kind: str,
+        program_id: str,
+        root: Path | None = None,
+    ) -> str:
         if (
             kind not in _DIRECTORIES
             or re.fullmatch(PROGRAM_ID_PATTERN, program_id) is None
@@ -200,8 +292,9 @@ class WorkspacePrograms:
                 "kind and program_id must be safe program identifiers"
             )
         relative = f"{_DIRECTORIES[kind]}/{program_id}"
-        root = self.repositories.open(workspace_id).root
-        self.repositories.resolve_path(workspace_id, relative)
+        if root is None:
+            root = self.repositories.open(workspace_id).root
+            self.repositories.resolve_path(workspace_id, relative)
         current = root
         for part in relative.split("/"):
             if current.is_dir() and any(
@@ -552,6 +645,214 @@ class WorkspacePrograms:
         response["count"] = len(programs)
         return response
 
+    def catalog(
+        self, workspace_id: str, kind: ProgramKind
+    ) -> tuple[dict[str, object], ...]:
+        """Project committed programs with configuration, files and revisions.
+
+        The projection is cached per workspace, kind, and HEAD: repeated page
+        loads avoid re-reading every program while any new commit invalidates
+        the entry. Discovery does not call ``list`` first, so each program is
+        snapshotted exactly once per request.
+        """
+        if kind not in _DIRECTORIES:
+            raise ProgramArtifactError("kind must be study, strategy, or indicator")
+        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        commit = git.head()
+        if commit is None:
+            return ()
+        cache_key = (workspace_id, kind)
+        cached = self._catalog_cache.get(cache_key)
+        if cached is not None and cached[0] == commit:
+            return cached[1]
+        directory = _DIRECTORIES[kind]
+        discovered: dict[str, set[str]] = {}
+        for path in git.tracked_paths(directory):
+            rest = path.removeprefix(directory + "/")
+            parts = rest.split("/")
+            if len(parts) != 2 or parts[1] not in ("program.rs", "manifest.json"):
+                continue
+            program_id, filename = parts
+            if not self._valid_program_id(kind, program_id):
+                continue
+            discovered.setdefault(program_id, set()).add(filename)
+        complete = {
+            program_id: files
+            for program_id, files in discovered.items()
+            if files == {"program.rs", "manifest.json"}
+        }
+        # Filter on manifests first: legacy or malformed programs are rejected
+        # from one batched read without reading their sources.
+        manifest_paths = {
+            program_id: f"{directory}/{program_id}/manifest.json"
+            for program_id in complete
+        }
+        manifests: dict[str, bytes] = {}
+        try:
+            manifests.update(git.read_blobs(commit, sorted(manifest_paths.values())))
+        except GitPublicationError:
+            for path in sorted(manifest_paths.values()):
+                try:
+                    manifests.update(git.read_blobs(commit, [path]))
+                except GitPublicationError:
+                    continue
+        candidates: list[str] = []
+        for program_id, path in manifest_paths.items():
+            manifest_bytes = manifests.get(path)
+            if manifest_bytes is None:
+                continue
+            try:
+                manifest = json.loads(manifest_bytes)
+            except ValueError:
+                continue
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("kind") != kind
+                or manifest.get("id") != program_id
+            ):
+                continue
+            try:
+                self._check_configuration(manifest.get("configuration"))
+            except ProgramArtifactError:
+                continue
+            declared = manifest.get("indicatorIds")
+            if not isinstance(declared, list) or any(
+                not isinstance(item, str) for item in declared
+            ):
+                continue
+            candidates.append(program_id)
+        entries: list[dict[str, object]] = []
+        selected = sorted(candidates)[:MAX_LIST_RESULTS]
+        preloaded = dict(manifests)
+        if selected:
+            try:
+                preloaded.update(
+                    git.read_blobs(
+                        commit,
+                        [
+                            f"{directory}/{program_id}/program.rs"
+                            for program_id in selected
+                        ],
+                    )
+                )
+            except GitPublicationError:
+                # Individual snapshots fall back to their own verified reads.
+                pass
+        revisions = git.path_revisions_many(
+            [f"{directory}/{program_id}" for program_id in selected]
+        )
+        for program_id in selected:
+            try:
+                snapshot = self._snapshot(
+                    workspace_id, kind, program_id, commit, git, preloaded
+                )
+            except (ProgramArtifactError, WorkspaceRepositoryError):
+                continue
+            entries.append(
+                self._catalog_entry(
+                    workspace_id,
+                    kind,
+                    program_id,
+                    commit,
+                    snapshot,
+                    git,
+                    self._history_entries(revisions.get(f"{directory}/{program_id}")),
+                )
+            )
+        result = tuple(entries)
+        if len(self._catalog_cache) > 16:
+            self._catalog_cache.clear()
+        self._catalog_cache[cache_key] = (commit, result)
+        return result
+
+    def file_content(
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        relative_path: str,
+    ) -> bytes:
+        """Read one committed program file by its declared name."""
+        if relative_path not in ("program.rs", "manifest.json"):
+            raise KeyError(relative_path)
+        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        head = self._head(git)
+        relative = self._path(workspace_id, kind, program_id)
+        if f"{relative}/{relative_path}" not in git.tracked_paths(relative):
+            raise KeyError(relative_path)
+        return git.read_file(head, f"{relative}/{relative_path}")
+
+    def _catalog_entry(
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        commit: str,
+        snapshot: Mapping[str, object],
+        git: GitCoordinator,
+        history: _HistoryEntries | None = None,
+    ) -> dict[str, object]:
+        manifest = cast(dict[str, object], snapshot["manifest"])
+        relative = f"{_DIRECTORIES[kind]}/{program_id}"
+        sizes = cast(dict[str, int], snapshot["sizes"])
+        files = sorted(
+            (
+                _file_entry(
+                    path.removeprefix(relative + "/"),
+                    sha256,
+                    sizes.get(path, 0),
+                )
+                for path, sha256 in cast(dict[str, str], snapshot["files"]).items()
+                if path.startswith(relative + "/")
+            ),
+            key=lambda item: cast(str, item["path"]),
+        )
+        configuration = manifest.get("configuration")
+        revisions = (
+            history if history is not None else self._revision_history(git, relative)
+        )[:20]
+        return {
+            "id": program_id,
+            "workspace_id": workspace_id,
+            "kind": kind,
+            "title": program_id,
+            "subtitle": relative,
+            "description": "",
+            "status": "committed",
+            "version": snapshot["version"],
+            "artifact_path": relative,
+            "created_at": revisions[-1]["created_at"] if revisions else None,
+            "updated_at": revisions[0]["created_at"] if revisions else None,
+            "git_commit": commit,
+            "digests": {
+                "source_sha256": _hash(cast(str, snapshot["source"]).encode()),
+                "bundle_sha256": snapshot["version"],
+                "manifest_sha256": _hash(_bytes(manifest)),
+            },
+            "inputs": _program_inputs(configuration),
+            "files": files,
+            "file_count": len(files),
+            "size_bytes": sum(cast(int, item["size_bytes"]) for item in files),
+            "history": revisions,
+            "preview": _program_preview(kind, manifest, configuration),
+        }
+
+    def _revision_history(self, git: GitCoordinator, relative: str) -> _HistoryEntries:
+        return self._history_entries(git.path_revisions(relative))
+
+    @staticmethod
+    def _history_entries(
+        revisions: Sequence[tuple[str, str]] | None,
+    ) -> _HistoryEntries:
+        return [
+            {
+                "label": commit[:10],
+                "created_at": committed_at,
+                "note": "revision",
+            }
+            for commit, committed_at in (revisions or ())
+        ]
+
     def validate(
         self, workspace_id: str, kind: ProgramKind, program_id: str
     ) -> dict[str, object]:
@@ -659,30 +960,27 @@ class WorkspacePrograms:
         parameters = {"source": source}
         data = dict(cast(dict[str, object], configuration.get("data", {})))
         subscriptions = configuration.pop("subscriptions", None)
-        interval = configuration.pop("interval", None)
-        bar_interval = configuration.pop("bar_interval", None)
+        if subscriptions is None:
+            subscriptions = data.pop("subscriptions", None)
         configuration.pop("requiredSymbols", None)
         configuration.pop("required_symbols", None)
-        if subscriptions is not None:
-            data["subscriptions"] = subscriptions
-            symbols = sorted(
-                {
-                    symbol
-                    for item in cast(list[dict[str, object]], subscriptions)
-                    for symbol in cast(list[str], item["symbols"])
-                }
+        configuration.pop("symbols", None)
+        if not isinstance(subscriptions, list) or not subscriptions:
+            raise ProgramArtifactError(
+                "program configuration must declare subscriptions"
             )
-            data["symbols"] = symbols
-        else:
-            symbols = cast(
-                list[str], configuration.get("symbols", data.get("symbols", ["SPY"]))
-            )
-        for key in ("requiredSymbols", "required_symbols", "interval"):
+        symbols = sorted(
+            {
+                symbol
+                for item in cast(list[dict[str, object]], subscriptions)
+                for symbol in cast(list[str], item["symbols"])
+            }
+        )
+        data["subscriptions"] = subscriptions
+        data["symbols"] = symbols
+        for key in ("requiredSymbols", "required_symbols", "interval", "bar_interval"):
             data.pop(key, None)
-        if interval is not None or bar_interval is not None:
-            data["bar_interval"] = interval or bar_interval
         configuration["data"] = data
-        configuration["symbols"] = symbols
         scope = _hash(_bytes([workspace_id, kind, program_id, snapshot["version"]]))[
             :16
         ]
@@ -958,27 +1256,48 @@ class WorkspacePrograms:
         return package["version"], int(matched[1])
 
     def _snapshot(
-        self, workspace_id: str, kind: ProgramKind, program_id: str, commit: str
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        commit: str,
+        git: GitCoordinator | None = None,
+        fetched: Mapping[str, bytes] | None = None,
     ) -> dict[str, object]:
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        if git is None:
+            git = GitCoordinator(self.repositories.open(workspace_id).root)
         dependencies: dict[str, str] = {}
         files: dict[str, str] = {}
+        sizes: dict[str, int] = {}
         visiting: set[str] = set()
 
         def load(
             selected_kind: ProgramKind, selected_id: str
         ) -> tuple[str, dict[str, object]]:
-            relative = self._path(workspace_id, selected_kind, selected_id)
+            relative = self._path(
+                workspace_id, selected_kind, selected_id, git.repository
+            )
             if relative in visiting:
                 raise ProgramArtifactError("indicator dependency cycle")
             visiting.add(relative)
-            try:
-                source_bytes = git.read_file(commit, f"{relative}/program.rs")
-                manifest_bytes = git.read_file(commit, f"{relative}/manifest.json")
-            except GitPublicationError as error:
-                raise ProgramArtifactError(
-                    "committed program does not exist"
-                ) from error
+            source_key = f"{relative}/program.rs"
+            manifest_key = f"{relative}/manifest.json"
+            if (
+                fetched is not None
+                and source_key in fetched
+                and manifest_key in fetched
+            ):
+                source_bytes = fetched[source_key]
+                manifest_bytes = fetched[manifest_key]
+            else:
+                try:
+                    revision = git.read_blobs(commit, [source_key, manifest_key])
+                except GitPublicationError as error:
+                    raise ProgramArtifactError(
+                        "committed program does not exist"
+                    ) from error
+                source_bytes = revision[source_key]
+                manifest_bytes = revision[manifest_key]
             try:
                 manifest = json.loads(manifest_bytes)
             except ValueError as error:
@@ -993,6 +1312,8 @@ class WorkspacePrograms:
                 raise ProgramArtifactError("committed program identity mismatch")
             files[f"{relative}/program.rs"] = _hash(source_bytes)
             files[f"{relative}/manifest.json"] = _hash(manifest_bytes)
+            sizes[f"{relative}/program.rs"] = len(source_bytes)
+            sizes[f"{relative}/manifest.json"] = len(manifest_bytes)
             self._check_configuration(manifest.get("configuration"))
             declared = manifest.get("indicatorIds")
             if not isinstance(declared, list) or any(
@@ -1013,6 +1334,7 @@ class WorkspacePrograms:
             "manifest": manifest,
             "dependencies": dependencies,
             "files": files,
+            "sizes": sizes,
             "version": _hash(_bytes(files)),
         }
 
@@ -1058,6 +1380,7 @@ class WorkspacePrograms:
         configuration = manifest.get("configuration")
         configuration = configuration if isinstance(configuration, Mapping) else {}
         symbols: set[str] = set()
+        intervals: set[str] = set()
         subscriptions = configuration.get("subscriptions")
         if isinstance(subscriptions, list):
             for item in subscriptions:
@@ -1067,10 +1390,12 @@ class WorkspacePrograms:
                         symbols.update(
                             symbol for symbol in declared if isinstance(symbol, str)
                         )
-        interval = configuration.get("interval")
+                    interval = item.get("interval")
+                    if item.get("data_type") == "bars" and isinstance(interval, str):
+                        intervals.add(interval)
         dependencies = manifest.get("indicatorIds")
         return {
-            "interval": interval if isinstance(interval, str) else None,
+            "interval": next(iter(intervals)) if len(intervals) == 1 else None,
             "symbols": sorted(symbols),
             "indicatorIds": (
                 [item for item in dependencies if isinstance(item, str)]

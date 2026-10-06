@@ -162,12 +162,6 @@ fn currency(text: &str, field: &str) -> Result<String, ConfigError> {
     )))
 }
 
-fn bar_interval(text: &str, field: &str) -> Result<String, ConfigError> {
-    harness_contracts::validate_bar_interval(text)
-        .map_err(|e| ConfigError(format!("{field}: {e}")))?;
-    Ok(text.to_string())
-}
-
 fn enum_value(text: &str, allowed: &[&str], field: &str) -> Result<String, ConfigError> {
     if allowed.contains(&text) {
         return Ok(text.to_string());
@@ -563,39 +557,37 @@ fn build_data_snapshot(value: YamlValue) -> Result<Value, ConfigError> {
         sha256(&fingerprint, "fingerprint")?;
     }
     let symbols = symbols(take(&mut map, "symbols")?, "symbols")?;
-    let subscriptions = take_opt(&mut map, "subscriptions")
-        .map(|value| {
-            let items = as_seq(value, "data.subscriptions")?;
-            let mut inputs = Vec::new();
-            for item in items {
-                inputs.push(
-                    serde_json::from_value::<harness_contracts::Subscription>(config_value(&item)?)
-                        .map_err(|e| ConfigError(format!("data.subscriptions: {e}")))?,
-                );
-            }
-            let output = harness_contracts::canonical_subscriptions(inputs).map_err(ConfigError)?;
-            serde_json::to_value(output).map_err(|e| ConfigError(e.to_string()))
-        })
-        .transpose()?;
-    let interval = match take_opt(&mut map, "bar_interval") {
-        Some(value) => Some(bar_interval(
-            &as_str(value, "bar_interval")?,
-            "bar_interval",
-        )?),
-        None if subscriptions.is_some() => None,
-        None => return Err(ConfigError("Field required: bar_interval".to_string())),
-    };
+    if take_opt(&mut map, "bar_interval").is_some() {
+        return Err(ConfigError(
+            "data.bar_interval is not accepted; declare data.subscriptions".to_string(),
+        ));
+    }
+    let subscriptions_value = take_opt(&mut map, "subscriptions")
+        .ok_or_else(|| ConfigError("Field required: subscriptions".to_string()))?;
+    let items = as_seq(subscriptions_value, "data.subscriptions")?;
+    let mut inputs = Vec::new();
+    for item in items {
+        inputs.push(
+            serde_json::from_value::<harness_contracts::Subscription>(config_value(&item)?)
+                .map_err(|e| ConfigError(format!("data.subscriptions: {e}")))?,
+        );
+    }
+    let output = harness_contracts::canonical_subscriptions(inputs).map_err(ConfigError)?;
+    let subscriptions = serde_json::to_value(&output).map_err(|e| ConfigError(e.to_string()))?;
+    let interval = output.iter().find_map(|subscription| match subscription {
+        harness_contracts::Subscription::Bars { interval, .. } => Some(interval.clone()),
+        harness_contracts::Subscription::Quote { .. }
+        | harness_contracts::Subscription::Trade { .. } => None,
+    });
     ensure_empty(&map, "data")?;
     let mut data = json!({
         "snapshot_id": snapshot_id,
         "fingerprint": fingerprint,
         "symbols": symbols,
+        "subscriptions": subscriptions,
     });
     if let Some(interval) = interval {
         data["bar_interval"] = json!(interval);
-    }
-    if let Some(subscriptions) = subscriptions {
-        data["subscriptions"] = subscriptions;
     }
     Ok(data)
 }

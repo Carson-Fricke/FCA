@@ -170,9 +170,11 @@ async fn authenticated_http_mcp_exposes_and_executes_native_strategy_validation(
 }
 
 #[test]
-fn interval_only_strategy_configuration_derives_bar_echo_not_legacy_ticks() {
+fn authored_strategy_configuration_requires_explicit_subscriptions() {
     let input = json!({"source": SOURCE, "harnessConfiguration": {
-        "start": "2025-01-01T00:00:00Z", "end": "2025-01-02T00:00:00Z", "interval": "1d", "symbols": ["SPY"]
+        "start": "2025-01-01T00:00:00Z", "end": "2025-01-02T00:00:00Z",
+        "symbols": ["SPY"],
+        "subscriptions": [{"data_type": "bars", "symbols": ["SPY"], "interval": "1d"}]
     }});
     let document = authored_strategy_document(&input).unwrap();
     assert_eq!(
@@ -181,4 +183,11 @@ fn interval_only_strategy_configuration_derives_bar_echo_not_legacy_ticks() {
             {"data_type": "bars", "symbols": ["SPY"], "interval": "1d"}
         ])
     );
+    let interval_only = json!({"source": SOURCE, "harnessConfiguration": {
+        "start": "2025-01-01T00:00:00Z", "end": "2025-01-02T00:00:00Z",
+        "interval": "1d", "symbols": ["SPY"]
+    }});
+    assert!(authored_strategy_document(&interval_only)
+        .unwrap_err()
+        .contains("interval"));
 }

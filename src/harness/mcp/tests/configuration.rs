@@ -17,7 +17,9 @@ fn actual_tool_dispatch_validates_inline_configuration_before_submitter() {
     context.backtest_submitter = Some(Arc::new(Submitter));
     let server = mcp::create_server(context).unwrap();
     for invalid in [false, true] {
-        let mut document = json!({"shell":"backtest","run_id":"mcp-parity"});
+        let mut document = json!({"shell":"backtest","run_id":"mcp-parity",
+            "data":{"symbols":["SPY"],
+                "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
         if invalid {
             document["fees"] = json!([]);
         }

@@ -128,16 +128,12 @@ def validate_market_subscriptions(value: object) -> None:
 
 
 def validate_market_configuration(configuration: Mapping[str, object]) -> None:
-    """Reject legacy fetch fields that contradict an explicit subscription echo."""
+    """Require an explicit subscription echo and reject retired fetch fields."""
     data = configuration.get("data", {})
     if not isinstance(data, Mapping):
-        if "subscriptions" in configuration:
-            raise ResearchModelError(
-                "data must be an object with explicit subscriptions"
-            )
-        return
+        raise ResearchModelError("data must be an object with explicit subscriptions")
     if "subscriptions" not in configuration and "subscriptions" not in data:
-        return
+        raise ResearchModelError("harness_configuration must declare subscriptions")
     subscriptions = configuration.get("subscriptions", data.get("subscriptions"))
     validate_market_subscriptions(subscriptions)
     assert isinstance(subscriptions, list)
@@ -148,9 +144,6 @@ def validate_market_configuration(configuration: Mapping[str, object]) -> None:
                 "data.subscriptions conflicts with model subscriptions"
             )
     symbols = {symbol for item in subscriptions for symbol in item["symbols"]}
-    intervals = {
-        item["interval"] for item in subscriptions if item["data_type"] == "bars"
-    }
     for fields, prefix in ((configuration, ""), (data, "data.")):
         for key in ("symbols", "requiredSymbols", "required_symbols"):
             if key not in fields:
@@ -165,12 +158,9 @@ def validate_market_configuration(configuration: Mapping[str, object]) -> None:
                     f"{prefix}{key} must equal the exact subscription symbol union"
                 )
         for key in ("interval", "bar_interval"):
-            if key in fields and (
-                not isinstance(fields[key], str) or intervals != {fields[key]}
-            ):
+            if key in fields:
                 raise ResearchModelError(
-                    f"{prefix}{key} must match the single subscribed bars interval; "
-                    "tick-only subscriptions cannot declare an interval"
+                    f"{prefix}{key} is not accepted; declare subscriptions"
                 )
 
 
@@ -278,37 +268,23 @@ class ResearchModel:
             _mapping(self.harness_configuration, "harness_configuration"),
         )
         object.__setattr__(self, "tests", MappingProxyType(dict(self.tests)))
-        interval = self.harness_configuration.get("interval")
         validate_market_configuration(self.harness_configuration)
-        data = self.harness_configuration.get("data")
-        explicit = "subscriptions" in self.harness_configuration or (
-            isinstance(data, Mapping) and "subscriptions" in data
-        )
-        if (not explicit or "interval" in self.harness_configuration) and (
-            not isinstance(interval, str) or interval not in BAR_INTERVALS
-        ):
-            raise ResearchModelError(
-                "model harness_configuration must declare its bar interval as "
-                f"one of {', '.join(BAR_INTERVALS)}"
-            )
 
     @property
     def bar_interval(self) -> str | None:
-        """Return the declared bar interval, or None for tick-only subscriptions."""
+        """Return the declared bars interval, or None for tick-only subscriptions."""
         subscriptions = self.harness_configuration.get("subscriptions")
         if "subscriptions" not in self.harness_configuration:
             data = self.harness_configuration.get("data")
             subscriptions = (
                 data.get("subscriptions") if isinstance(data, Mapping) else None
             )
-        if isinstance(subscriptions, list):
-            intervals = {
-                item["interval"]
-                for item in subscriptions
-                if item["data_type"] == "bars"
-            }
-            return next(iter(intervals)) if len(intervals) == 1 else None
-        return str(self.harness_configuration["interval"])
+        if not isinstance(subscriptions, list):
+            return None
+        intervals = {
+            item["interval"] for item in subscriptions if item["data_type"] == "bars"
+        }
+        return next(iter(intervals)) if len(intervals) == 1 else None
 
     @property
     def canonical_document(self) -> dict[str, object]:

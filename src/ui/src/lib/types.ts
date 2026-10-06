@@ -119,17 +119,6 @@ export interface ConsentConfirmation {
 	environment: GrantEnvironment;
 }
 
-export interface ConsentAuditEntry {
-	grantId: string;
-	kind: 'proposal' | 'confirmation' | 'grant' | 'revocation';
-	at: string;
-	actor: string;
-	bundleHash: string;
-	environment: GrantEnvironment;
-	action: GrantAction;
-	summary: string;
-}
-
 // ---------- Chat + execution (chat/contracts.py serialization) ----------
 
 export type MessageRole = ChatMessageWire['role'];
@@ -260,7 +249,6 @@ export type ToolResult = ToolResultWire & {
 	arguments?: unknown;
 	durationMs?: number;
 	startedAt?: string;
-	reused?: boolean;
 };
 
 /** Response from the Thesis backtest-run materialization endpoint. */
@@ -645,7 +633,7 @@ export interface ScreenerRunInput {
 	as_of: string;
 }
 
-// ---------- Workspace state ----------
+// ---------- Lineage + evidence ----------
 
 export interface LineageNode {
 	id: string;
@@ -686,10 +674,116 @@ export interface KnowledgeHit {
 	excerpt: string;
 }
 
-export interface WorkspaceStateData {
-	lineages: StrategyLineage[];
-	evidence: EvidenceItem[];
-	consentAudit: ConsentAuditEntry[];
+// ---------- Workspace artifacts ----------
+
+export type ArtifactKind = 'strategy' | 'study' | 'indicator';
+export type ArtifactViewer = 'code' | 'json' | 'markdown' | 'text';
+
+export interface ArtifactInput {
+	data_type: string;
+	symbols: string[];
+	interval: string | null;
+}
+
+export interface ArtifactFileEntry {
+	path: string;
+	sha256: string;
+	size_bytes: number;
+	viewer: ArtifactViewer;
+}
+
+export interface ArtifactHistoryEntry {
+	label: string;
+	created_at: string | null;
+	note: string | null;
+}
+
+export interface ArtifactDigests {
+	source_sha256: string | null;
+	bundle_sha256: string | null;
+	manifest_sha256: string | null;
+}
+
+export interface ArtifactExitCriterion {
+	falsifier_id: string | null;
+	observable: string | null;
+	condition: string | null;
+	threshold: number | null;
+	description: string | null;
+}
+
+export interface StrategyArtifactPreview {
+	type: 'strategy';
+	entrypoint: string;
+	symbol: string;
+	exit_criteria: ArtifactExitCriterion[];
+	limitations: string[];
+	signals: null;
+}
+
+export interface StudyArtifactPreview {
+	type: 'study';
+	window: { start: string | null; end: string | null };
+	indicator_ids: string[];
+	metrics: { name: string; value: string }[];
+}
+
+export interface IndicatorUsage {
+	id: string;
+	kind: ArtifactKind;
+	title: string;
+}
+
+export interface IndicatorArtifactPreview {
+	type: 'indicator';
+	value_series: null;
+	used_by: IndicatorUsage[];
+}
+
+export type ArtifactPreview =
+	| StrategyArtifactPreview
+	| StudyArtifactPreview
+	| IndicatorArtifactPreview;
+
+export interface WorkspaceArtifact {
+	id: string;
+	kind: ArtifactKind;
+	title: string;
+	subtitle: string;
+	description: string;
+	status: string;
+	version: string;
+	artifact_path: string;
+	created_at: string | null;
+	updated_at: string | null;
+	git_commit: string | null;
+	digests: ArtifactDigests;
+	inputs: ArtifactInput[];
+	files: ArtifactFileEntry[];
+	file_count: number;
+	size_bytes: number;
+	history: ArtifactHistoryEntry[];
+	preview: ArtifactPreview;
+}
+
+export interface WorkspaceArtifactSources {
+	strategies: string;
+	studies: string;
+	indicators: string;
+}
+
+export interface WorkspaceArtifactCatalog {
+	workspace_id: string;
+	items: WorkspaceArtifact[];
+	sources: WorkspaceArtifactSources;
+}
+
+export interface ArtifactFileContent {
+	path: string;
+	text: string;
+	truncated: boolean;
+	sha256: string;
+	size_bytes: number;
 }
 
 // ---------- Backend selection ----------

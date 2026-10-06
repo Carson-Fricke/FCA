@@ -64,6 +64,16 @@ STRATEGY_DESIGN_SCHEMA: dict[str, object] = {
         },
         "harnessConfiguration": {
             "type": "object",
+            "anyOf": [
+                {"type": "object", "required": ["subscriptions"]},
+                {
+                    "type": "object",
+                    "required": ["data"],
+                    "properties": {
+                        "data": {"type": "object", "required": ["subscriptions"]}
+                    },
+                },
+            ],
             "properties": {
                 "subscriptions": MARKET_SUBSCRIPTIONS_SCHEMA,
                 "data": {

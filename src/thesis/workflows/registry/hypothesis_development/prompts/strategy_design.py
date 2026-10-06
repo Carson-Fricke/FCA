@@ -75,11 +75,11 @@ _STRATEGY_DESIGN_RULES = (
     '{"data_type":"bars","symbols":["SPY"],"interval":"1min"} and '
     '{"data_type":"quote","symbols":["SPY"]} entries and must canonically '
     "match the source union, including indicator dependencies. Only bars "
-    "require an interval; tick-only inputs need no global interval. Never "
+    "require an interval; tick-only inputs need no interval. Never "
     "use multiple distinct bars intervals or noncanonical/lowercase symbols. "
-    "Preserve BTC-USD or BTC/USD exactly. If global symbols are supplied, "
-    "they must equal the subscription union; legacy intervals must match "
-    "the bars interval and are invalid for tick-only inputs. Never "
+    "Preserve BTC-USD or BTC/USD exactly. Interval-only configuration is "
+    "rejected; if global symbols are supplied, "
+    "they must equal the subscription union. Never "
     "supply undeclared feeds or widen the operator window. Own indicators in "
     "the program and expose them through indicators(&mut self) -> "
     "Vec<&mut dyn Indicator>; indicators implement MarketConsumer with "

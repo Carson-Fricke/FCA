@@ -143,9 +143,8 @@ Rust. Research models store and emit authored Rust study programs
 source digest) that implement `MarketConsumer` and declare exact
 `harnessConfiguration.subscriptions`, emitted as `data.subscriptions` and
 checked against the compiled dependency union. Bars declare `1min` or `1d`;
-tick-only studies require no global interval. Persisted interval-only
-configuration stays readable, but authored sources using the older callbacks
-must migrate to `MarketConsumer` and rebuild for ABI v4. Studies publish their
+tick-only studies require no interval. Interval-only configuration is rejected,
+and authored sources use `MarketConsumer` for ABI v4. Studies publish their
 Layer A observables as metrics — the Python `model_source`/`fit`/`observe` plumbing
 and the indicator-binding schema are deleted. Strategy bundles persist Rust
 sources and hash those. Screener filters are Rust-authored `ScreeningProgram`
@@ -255,8 +254,8 @@ source-and-dependency union as tagged JSON before acquisition. Thesis preserves
 canonically equal that union; `validate_study` returns the compiled union.
 Only one distinct bars interval is supported per run, including dependencies
 and program instances; conflicts fail before lake ensure/read. Tick-only inputs
-need no global interval. Legacy interval-only documents remain readable, not
-legacy source APIs or compiled ABI v3 artifacts.
+need no interval. Interval-only documents are rejected; authored sources use
+the current SDK API and ABI v4.
 
 Studies ensure/read exactly their effective requirements through lake routes.
 Bars are provider-first, with derivation from already stored trades otherwise;

@@ -43,7 +43,9 @@ def design(**overrides: object) -> dict[str, object]:
         "entrypoint": "src/lib.rs",
         "files": {"src/lib.rs": SOURCE},
         "tests": {"tests/program.rs": TEST},
-        "harnessConfiguration": {},
+        "harnessConfiguration": {
+            "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}]
+        },
         "exitCriteria": [
             {
                 "falsifierId": "f1",

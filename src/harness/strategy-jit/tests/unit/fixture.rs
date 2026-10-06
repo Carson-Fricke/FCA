@@ -1,5 +1,8 @@
 use crate::{CompiledArtifact, ManagedWorkspace};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const SOURCE: &str =
     "#[no_mangle] pub extern \"C\" fn contract_value() -> u32 { harness_strategy_sdk::value() }";
@@ -13,12 +16,13 @@ pub struct Fixture {
 impl Fixture {
     pub fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "harness-jit-contract-{}-{}",
+            "harness-jit-contract-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
         let sdk = root.join("strategy-sdk");
         for (name, package, source) in [

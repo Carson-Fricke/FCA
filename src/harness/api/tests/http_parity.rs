@@ -316,6 +316,8 @@ fn backtest_document(run_id: &str) -> Value {
         "run_id": run_id,
         "start": "2024-01-02T14:30:00Z",
         "end": "2024-01-19T21:00:00Z",
+        "data": {"symbols": ["SPY"],
+            "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}]},
         "strategy_instances": [
             {"instance_id": "spy-momentum", "implementation": "x:Y", "bundle_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
              "capital_fraction": "1", "symbols": ["SPY"], "parameters": {"threshold": "0.05"}}
@@ -954,6 +956,8 @@ async fn native_engine_launch_reaches_a_terminal_state() {
         "start": "2024-01-02T14:30:00Z",
         "end": "2024-01-04T21:00:00Z",
         "seed": 7,
+        "data": {"symbols": ["SPY"],
+            "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}]},
         "strategy_instances": [{
             "instance_id": "spy-momentum",
             "implementation": "jit",
@@ -1027,7 +1031,8 @@ async fn native_research_metrics_are_queryable_over_http() {
         "start": "2024-01-02T14:30:00Z",
         "end": "2024-01-04T21:00:00Z",
         "seed": 7,
-        "data": {"symbols": ["SPY"], "bar_interval": "1min"},
+        "data": {"symbols": ["SPY"],
+            "subscriptions": [{"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}]},
         "strategy_instances": [{
             "instance_id": "research-model",
             "implementation": "jit",
@@ -1354,32 +1359,34 @@ fn authored_contract_rejects_symbol_and_interval_conflicts_before_lake() {
     assert!(api::local::NativeStudyValidator
         .validate(&ticks)
         .unwrap_err()
-        .contains("tick-only"));
+        .contains("interval"));
 
     let mut bars = base;
     bars["source"] = json!(include_str!("fixtures/parity_study.rs"));
     bars["harnessConfiguration"]["subscriptions"] = json!([
-        {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}
+        {"data_type": "bars", "symbols": ["SPY"], "interval": "1d"}
     ]);
-    bars["harnessConfiguration"]["interval"] = json!("1d");
     assert!(api::local::NativeStudyValidator
         .validate(&bars)
         .unwrap_err()
-        .contains("must match"));
-    bars["harnessConfiguration"]["interval"] = json!("1min");
+        .contains("does not match"));
+    bars["harnessConfiguration"]["subscriptions"] = json!([
+        {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}
+    ]);
     bars["harnessConfiguration"]["symbols"] = json!(["SPY", "SPY"]);
     assert!(api::local::NativeStudyValidator.validate(&bars).is_ok());
     assert!(server.requests().is_empty());
 }
 
 #[test]
-fn legacy_authored_contract_must_match_compiled_bar_requirements() {
+fn authored_subscriptions_must_match_compiled_bar_requirements() {
     use mcp::tools::StudyValidator;
 
     let server = spy_lake();
     let model = json!({"source": include_str!("fixtures/parity_study.rs"), "harnessConfiguration": {
         "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
-        "symbols": ["SPY"], "interval": "1min"
+        "symbols": ["SPY"],
+        "subscriptions": [{"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}]
     }});
     let response = api::local::NativeStudyValidator.validate(&model).unwrap();
     assert_eq!(
@@ -1389,16 +1396,16 @@ fn legacy_authored_contract_must_match_compiled_bar_requirements() {
         ])
     );
     let mut wrong_symbols = model.clone();
-    wrong_symbols["harnessConfiguration"]["symbols"] = json!(["QQQ"]);
+    wrong_symbols["harnessConfiguration"]["subscriptions"][0]["symbols"] = json!(["QQQ"]);
     let mut wrong_interval = model.clone();
-    wrong_interval["harnessConfiguration"]["interval"] = json!("1d");
+    wrong_interval["harnessConfiguration"]["subscriptions"][0]["interval"] = json!("1d");
     let mut wrong_type = model;
     wrong_type["source"] = json!(SUBSCRIPTION_STUDY);
     for mismatch in [wrong_symbols, wrong_interval, wrong_type] {
         assert!(api::local::NativeStudyValidator
             .validate(&mismatch)
             .unwrap_err()
-            .contains("legacy study symbols and interval"));
+            .contains("match"));
     }
     assert!(server.requests().is_empty());
 }
@@ -1413,7 +1420,8 @@ fn nested_authored_configuration_preserves_runtime_fields_and_normalized_source(
     let model = json!({"source": source.replace('\n', "\r\n"), "harnessConfiguration": {
         "start": "2024-01-02T09:30:00-05:00", "end": "2024-01-04T16:00:00-05:00",
         "seed": 31, "base_currency": "EUR", "initial_cash": "12345.50",
-        "data": {"symbols": ["QQQ"], "bar_interval": "1min",
+        "data": {"symbols": ["QQQ"],
+            "subscriptions": [{"data_type": "bars", "symbols": ["QQQ"], "interval": "1min"}],
             "snapshot_id": "authored-snapshot", "fingerprint": "b".repeat(64)},
         "strategy_instances": [{"parameters": {"source": "stale"}}],
         "shell": "backtest", "run_id": "stale"
@@ -1429,7 +1437,7 @@ fn nested_authored_configuration_preserves_runtime_fields_and_normalized_source(
     ] {
         assert_eq!(document[key], model["harnessConfiguration"][key], "{key}");
     }
-    assert_eq!(document["symbols"], json!(["QQQ"]));
+    assert_eq!(document["data"]["symbols"], json!(["QQQ"]));
     assert_eq!(document["shell"], "study");
     assert_ne!(document["run_id"], "stale");
     assert_eq!(
@@ -1483,7 +1491,7 @@ fn nested_and_shorthand_contracts_reject_contradictions_before_lake() {
     );
     let model = json!({"source": source, "harnessConfiguration": {
         "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
-        "data": {"subscriptions": echo, "symbols": ["SPY"], "bar_interval": "1min"}
+        "data": {"subscriptions": echo, "symbols": ["SPY"]}
     }});
     let document = api::local::authored_study_document(&model).unwrap();
     assert_eq!(document["data"], model["harnessConfiguration"]["data"]);
@@ -1493,7 +1501,6 @@ fn nested_and_shorthand_contracts_reject_contradictions_before_lake() {
         {"data_type": "bars", "symbols": ["SPY", "SPY"], "interval": "1min"},
         {"data_type": "quote", "symbols": ["SPY"]}
     ]);
-    equivalent["harnessConfiguration"]["interval"] = json!("1min");
     let document = api::local::authored_study_document(&equivalent).unwrap();
     assert!(document.get("subscriptions").is_none());
     assert!(document.get("interval").is_none());

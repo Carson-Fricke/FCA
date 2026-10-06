@@ -1,0 +1,239 @@
+{
+	"alpha-lab": {
+		"workspace_id": "alpha-lab",
+		"items": [
+			{
+				"id": "strategy:momentum-breakout",
+				"kind": "strategy",
+				"title": "Momentum Breakout",
+				"subtitle": "str-1 · SPY",
+				"description": "Breakout entries with a 0.9σ band and equity-only universe.",
+				"status": "draft",
+				"version": "3.2.0",
+				"artifact_path": "strategies/momentum-breakout/3.2.0",
+				"created_at": "2026-05-02T10:00:00+00:00",
+				"updated_at": "2026-09-08T17:16:00+00:00",
+				"git_commit": "6f1c9a2d4e8b0f3a5c7e9d1b2f4a6c8e0d2f4a6b",
+				"digests": {
+					"source_sha256": "3f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f",
+					"bundle_sha256": "b7e4d1a9c3f6082e5a7c9e1b3d5f7a9c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f",
+					"manifest_sha256": "d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b"
+				},
+				"inputs": [
+					{ "data_type": "bars", "symbols": ["SPY"], "interval": "1min" },
+					{ "data_type": "quote", "symbols": ["SPY"], "interval": null }
+				],
+				"files": [
+					{ "path": "src/lib.rs", "sha256": "3f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f", "size_bytes": 812, "viewer": "code" },
+					{ "path": "tests/breakout.rs", "sha256": "a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2", "size_bytes": 244, "viewer": "code" },
+					{ "path": "manifest.json", "sha256": "d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b", "size_bytes": 2048, "viewer": "json" },
+					{ "path": "publication.json", "sha256": "c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6", "size_bytes": 184, "viewer": "json" }
+				],
+				"file_count": 4,
+				"size_bytes": 3288,
+				"history": [
+					{ "label": "v1.0.0", "created_at": "2026-05-02T10:00:00+00:00", "note": "root" },
+					{ "label": "v3.1.0", "created_at": "2026-07-15T09:30:00+00:00", "note": "from v1.0.0" },
+					{ "label": "v3.2.0", "created_at": "2026-09-08T17:16:00+00:00", "note": "from v3.1.0" }
+				],
+				"preview": {
+					"type": "strategy",
+					"entrypoint": "src/lib.rs",
+					"symbol": "SPY",
+					"exit_criteria": [
+						{ "falsifier_id": "f1", "observable": "signal", "condition": "lt", "threshold": 0.0, "description": "Flatten when the breakout band closes below zero." },
+						{ "falsifier_id": "f2", "observable": "drawdown", "condition": "gt", "threshold": 0.12, "description": "Halt entries above 12% peak drawdown." }
+					],
+					"limitations": ["equities only", "no overnight gaps"],
+					"signals": null
+				}
+			},
+			{
+				"id": "study:breakout_thresholds",
+				"kind": "study",
+				"title": "breakout_thresholds",
+				"subtitle": "studies/breakout_thresholds",
+				"description": "",
+				"status": "committed",
+				"version": "e5a7c9e1b3d5f7a9c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63",
+				"artifact_path": "studies/breakout_thresholds",
+				"created_at": "2026-06-19T14:02:00+00:00",
+				"updated_at": "2026-08-30T11:45:00+00:00",
+				"git_commit": "9c1e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a",
+				"digests": {
+					"source_sha256": "5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a",
+					"bundle_sha256": "e5a7c9e1b3d5f7a9c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63",
+					"manifest_sha256": "1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c"
+				},
+				"inputs": [{ "data_type": "bars", "symbols": ["SPY"], "interval": "1min" }],
+				"files": [
+					{ "path": "program.rs", "sha256": "5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a", "size_bytes": 1486, "viewer": "code" },
+					{ "path": "manifest.json", "sha256": "1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c", "size_bytes": 412, "viewer": "json" }
+				],
+				"file_count": 2,
+				"size_bytes": 1898,
+				"history": [
+					{ "label": "9c1e7a5b2d", "created_at": "2026-06-19T14:02:00+00:00", "note": "revision" },
+					{ "label": "b2d4f63f9c", "created_at": "2026-08-30T11:45:00+00:00", "note": "revision" }
+				],
+				"preview": {
+					"type": "study",
+					"window": { "start": "2025-01-01T00:00:00Z", "end": "2026-01-01T00:00:00Z" },
+					"indicator_ids": ["rsi_value"],
+					"metrics": []
+				}
+			},
+			{
+				"id": "indicator:rsi_value",
+				"kind": "indicator",
+				"title": "rsi_value",
+				"subtitle": "indicators/rsi_value",
+				"description": "",
+				"status": "committed",
+				"version": "7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1",
+				"artifact_path": "indicators/rsi_value",
+				"created_at": "2026-06-18T09:12:00+00:00",
+				"updated_at": "2026-06-18T09:12:00+00:00",
+				"git_commit": "e7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6",
+				"digests": {
+					"source_sha256": "48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d",
+					"bundle_sha256": "7a5b2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1",
+					"manifest_sha256": "c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f0"
+				},
+				"inputs": [{ "data_type": "bars", "symbols": ["SPY"], "interval": "1min" }],
+				"files": [
+					{ "path": "program.rs", "sha256": "48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d", "size_bytes": 642, "viewer": "code" },
+					{ "path": "manifest.json", "sha256": "c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f0", "size_bytes": 318, "viewer": "json" }
+				],
+				"file_count": 2,
+				"size_bytes": 960,
+				"history": [
+					{ "label": "e7a5b2d48f", "created_at": "2026-06-18T09:12:00+00:00", "note": "revision" }
+				],
+				"preview": {
+					"type": "indicator",
+					"value_series": null,
+					"used_by": [
+						{ "id": "study:breakout_thresholds", "kind": "study", "title": "breakout_thresholds" }
+					]
+				}
+			}
+		],
+		"sources": { "strategies": "ok", "studies": "ok", "indicators": "ok" }
+	},
+	"beta-quant": {
+		"workspace_id": "beta-quant",
+		"items": [
+			{
+				"id": "strategy:term-carry",
+				"kind": "strategy",
+				"title": "Term Structure Carry",
+				"subtitle": "term-carry · TLT",
+				"description": "First-pass carry draft over term structure slope.",
+				"status": "draft",
+				"version": "0.1.0",
+				"artifact_path": "strategies/term-carry/0.1.0",
+				"created_at": "2026-09-07T08:41:00+00:00",
+				"updated_at": "2026-09-07T08:41:00+00:00",
+				"git_commit": "2d48f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d",
+				"digests": {
+					"source_sha256": "6c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f0",
+					"bundle_sha256": "9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c",
+					"manifest_sha256": "e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1"
+				},
+				"inputs": [{ "data_type": "trade", "symbols": ["TLT"], "interval": null }],
+				"files": [
+					{ "path": "src/lib.rs", "sha256": "6c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f0", "size_bytes": 934, "viewer": "code" },
+					{ "path": "tests/carry.rs", "sha256": "d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5", "size_bytes": 208, "viewer": "code" },
+					{ "path": "manifest.json", "sha256": "e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1", "size_bytes": 1980, "viewer": "json" },
+					{ "path": "publication.json", "sha256": "f06c9a1e3b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48", "size_bytes": 184, "viewer": "json" }
+				],
+				"file_count": 4,
+				"size_bytes": 3306,
+				"history": [
+					{ "label": "v0.1.0", "created_at": "2026-09-07T08:41:00+00:00", "note": "root" }
+				],
+				"preview": {
+					"type": "strategy",
+					"entrypoint": "src/lib.rs",
+					"symbol": "TLT",
+					"exit_criteria": [
+						{ "falsifier_id": "carry-slope", "observable": "slope", "condition": "lte", "threshold": 0.0, "description": "Exit when the term slope inverts." }
+					],
+					"limitations": ["single instrument"],
+					"signals": null
+				}
+			},
+			{
+				"id": "study:carry_fit",
+				"kind": "study",
+				"title": "carry_fit",
+				"subtitle": "studies/carry_fit",
+				"description": "",
+				"status": "committed",
+				"version": "b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e",
+				"artifact_path": "studies/carry_fit",
+				"created_at": "2026-09-07T09:20:00+00:00",
+				"updated_at": "2026-09-07T09:20:00+00:00",
+				"git_commit": "4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7",
+				"digests": {
+					"source_sha256": "9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f",
+					"bundle_sha256": "b5d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e",
+					"manifest_sha256": "a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9"
+				},
+				"inputs": [{ "data_type": "trade", "symbols": ["TLT"], "interval": null }],
+				"files": [
+					{ "path": "program.rs", "sha256": "9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f", "size_bytes": 1230, "viewer": "code" },
+					{ "path": "manifest.json", "sha256": "a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9", "size_bytes": 386, "viewer": "json" }
+				],
+				"file_count": 2,
+				"size_bytes": 1616,
+				"history": [
+					{ "label": "4e6b8d0f2a", "created_at": "2026-09-07T09:20:00+00:00", "note": "revision" }
+				],
+				"preview": {
+					"type": "study",
+					"window": { "start": "2025-03-01T00:00:00Z", "end": "2026-03-01T00:00:00Z" },
+					"indicator_ids": ["carry_curve"],
+					"metrics": []
+				}
+			},
+			{
+				"id": "indicator:carry_curve",
+				"kind": "indicator",
+				"title": "carry_curve",
+				"subtitle": "indicators/carry_curve",
+				"description": "",
+				"status": "committed",
+				"version": "d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5",
+				"artifact_path": "indicators/carry_curve",
+				"created_at": "2026-09-07T09:10:00+00:00",
+				"updated_at": "2026-09-07T09:10:00+00:00",
+				"git_commit": "c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7",
+				"digests": {
+					"source_sha256": "2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a",
+					"bundle_sha256": "d7f9a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5",
+					"manifest_sha256": "4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c"
+				},
+				"inputs": [{ "data_type": "trade", "symbols": ["TLT"], "interval": null }],
+				"files": [
+					{ "path": "program.rs", "sha256": "2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a", "size_bytes": 588, "viewer": "code" },
+					{ "path": "manifest.json", "sha256": "4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f63f9c1e7a5b2d48f06c9a1e3b5d7f9a2c", "size_bytes": 302, "viewer": "json" }
+				],
+				"file_count": 2,
+				"size_bytes": 890,
+				"history": [
+					{ "label": "c4e6b8d0f2", "created_at": "2026-09-07T09:10:00+00:00", "note": "revision" }
+				],
+				"preview": {
+					"type": "indicator",
+					"value_series": null,
+					"used_by": [
+						{ "id": "study:carry_fit", "kind": "study", "title": "carry_fit" }
+					]
+				}
+			}
+		],
+		"sources": { "strategies": "ok", "studies": "ok", "indicators": "ok" }
+	}
+}

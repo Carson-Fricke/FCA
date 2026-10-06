@@ -28,8 +28,6 @@ dist/
 *.egg
 *.egg-info/
 pip-wheel-metadata/
-zig-out/
-.zig-cache/
 
 # PyO3 bridge cdylib built in place by setuptools-rust (harness._rust)
 src/harness/_rust*.pyd

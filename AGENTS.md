@@ -41,6 +41,12 @@ integration verification.
   the first integration run. If a suite hangs or times out, isolate the test
   with a hard timeout instead of rerunning the unchanged suite.
 - Do not start work beyond the scope the user approved.
+- Treat superseded behavior as something to remove, not preserve, unless the
+  user explicitly requests preservation. Do not infer a compatibility requirement
+  from old documents, persisted formats, existing callers, or tests. Within the
+  approved scope, remove obsolete paths and update affected callers, tests, and
+  active documentation; do not invent adapters, aliases, fallbacks, migrations,
+  or interfaces solely to keep superseded behavior or an outdated test working.
 - Do not rewrite historical verification records solely because later tasks
   change the repository-wide test count.
 - Use `ruff` for all lint and format checks and `ty` for all type checks. Do not

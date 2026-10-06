@@ -86,7 +86,7 @@ def _id_factory() -> Callable[[str], str]:
     return lambda prefix: f"{prefix}-{next(counter)}"
 
 
-def _legacy_model() -> dict[str, object]:
+def _inline_model() -> dict[str, object]:
     return {
         "modelId": "momentum-model",
         "version": "1.0.0",
@@ -129,22 +129,24 @@ def _legacy_model() -> dict[str, object]:
             "symbols": ["SPY"],
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-03-01T00:00:00Z",
-            "interval": "1min",
+            "subscriptions": [
+                {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}
+            ],
         },
     }
 
 
 def _model() -> dict[str, object]:
-    legacy = _legacy_model()
+    inline = _inline_model()
     return {
         "workspaceId": WORKSPACE,
         "kind": "study",
         "programId": "momentum-model",
         "gitCommit": "a" * 40,
         "version": "b" * 64,
-        "description": legacy["description"],
-        "outputs": legacy["outputs"],
-        "tests": legacy["tests"],
+        "description": inline["description"],
+        "outputs": inline["outputs"],
+        "tests": inline["tests"],
     }
 
 
@@ -152,15 +154,15 @@ class FakePrograms:
     """Committed snapshot fixture for reference-based workflow tests."""
 
     def load(self, workspace_id, kind, program_id, commit=None):
-        legacy = _legacy_model()
+        inline = _inline_model()
         return {
             "workspaceId": workspace_id,
             "kind": kind,
             "programId": program_id,
             "gitCommit": commit or "c" * 40,
             "version": "b" * 64,
-            "source": legacy["source"],
-            "configuration": legacy["harnessConfiguration"],
+            "source": inline["source"],
+            "configuration": inline["harnessConfiguration"],
             "sourceSha256": "d" * 64,
             "bundleSha256": "b" * 64,
             "files": {"program.rs": "d" * 64},
@@ -278,7 +280,11 @@ def _design_envelope(
         "version": "1.0.0",
         "files": {"strategy.py": "from harness.strategy import Strategy\n"},
         "tests": {"test_strategy.py": "def test_strategy():\n    assert True\n"},
-        "harnessConfiguration": {"seed": 7, "symbols": ["SPY"]},
+        "harnessConfiguration": {
+            "seed": 7,
+            "symbols": ["SPY"],
+            "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}],
+        },
         "exitCriteria": [
             {
                 "falsifierId": "f1",

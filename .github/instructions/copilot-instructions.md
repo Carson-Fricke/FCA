@@ -8,6 +8,19 @@ applyTo: "**"
 
 Use Python 3.12 with uv, Ruff, ty, and pytest. Do not use MyPy.
 
+## Remove Superseded Behavior
+
+- Remove superseded behavior within the approved scope unless the user explicitly
+  requests preservation. There is no implicit "legacy" compatibility requirement.
+- Old documentation, persisted formats, existing callers, and tests do not authorize
+  preservation. Update affected callers and active documentation instead of adding
+  compatibility adapters, aliases, fallbacks, or migration paths.
+- Tests must verify the approved current contract. Remove or replace tests whose
+  requirements are superseded; do not introduce production interfaces solely to
+  satisfy their setup. Retain coverage of current behavior and genuine regressions.
+- If removal exposes a scope or data-impact decision that needs authorization,
+  surface it to the user rather than silently preserving behavior or deleting data.
+
 ## Required Tooling
 
 - Lint and format with `ruff` only. Do not introduce or use `flake8`,
@@ -16,11 +29,6 @@ Use Python 3.12 with uv, Ruff, ty, and pytest. Do not use MyPy.
   - Format check: `uv run --extra dev ruff format --check <paths>`
 - Type-check with `ty` only. Do not use `mypy`, `pyright`, or `pyre`.
   - Type check: `uv run --extra dev ty check <paths>`
-- Build and test the native core with the pinned Zig toolchain (0.16.0).
-  Zig gates run in CI alongside Ruff and ty and fail on violations exactly
-  like the Python gates do.
-  - Format check: `zig fmt --check .`
-  - Build and test: `zig build test`
 - Do not add a parallel MyPy configuration, lint configuration, or type-check
   configuration to `pyproject.toml`.
 - If a check appears to require another tool, stop and surface it as an
@@ -44,8 +52,6 @@ environment setup.
 | Focused Ruff format check | `uv run --extra dev ruff format --check <paths>` |
 | Type check | `uv run --extra dev ty check` |
 | Focused type check | `uv run --extra dev ty check <paths>` |
-| Zig format check | `zig fmt --check .` |
-| Zig build and native core tests | `zig build test` |
 | Full test suite (integration owner) | `uv run --extra dev pytest -p no:cacheprovider` |
 | Focused tests | `uv run --extra dev pytest -p no:cacheprovider <paths>` |
 | Build a wheel for packaging checks | See the wheel build command below |

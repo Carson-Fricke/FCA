@@ -135,6 +135,20 @@ function compareEntries(a: ScopeEntry, b: ScopeEntry): number {
 	return a.order - b.order;
 }
 
+/** The canonical result payload of one durable session message. */
+function canonicalResult(message: ChatMessage): Record<string, unknown> | null {
+	const result = message.data?.sessionMessage?.content.result;
+	return result && typeof result === 'object' && !Array.isArray(result) ? result : null;
+}
+
+/** The canonical call identity: model correlation first, runtime result second. */
+function canonicalCallId(message: ChatMessage): string | null {
+	const correlation = message.data?.sessionMessage?.content.correlation;
+	if (correlation?.request_id) return correlation.request_id;
+	const runtime = canonicalResult(message)?.toolCallId;
+	return typeof runtime === 'string' ? runtime : null;
+}
+
 export interface BuildNodeEntriesOptions {
 	/** Node-scoped chat messages the agent received (already filtered). */
 	messages: ChatMessage[];
@@ -157,35 +171,34 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 			calls.set(message.data.toolCallId, { message, tool: message.data.tool, arguments: message.data.arguments });
 			continue;
 		}
-		if (message.role !== 'assistant' || !Array.isArray(message.data?.toolCalls)) continue;
-		for (const raw of message.data.toolCalls) {
-			if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' ||
-				!raw.function || typeof raw.function.name !== 'string') continue;
-			calls.set(raw.id, { message, tool: raw.function.name, arguments: raw.function.arguments });
+		if (message.role !== 'assistant') continue;
+		for (const request of message.data?.sessionMessage?.content.requests ?? []) {
+			calls.set(request.id, { message, tool: request.name, arguments: request.arguments });
 		}
 	}
 	const completed = new Set<string>();
 	const projected: ChatMessage[] = [];
 	for (const [index, message] of unique.entries()) {
 		if (message.role === 'tool' && message.data?.toolActivity === 'started') continue;
+		const canonical = canonicalResult(message);
 		const correlation = message.data?.sessionMessage?.content.correlation;
-		const callId = typeof message.data?.toolCallId === 'string' ? message.data.toolCallId
-			: message.tool_result?.callId ?? correlation?.request_id ?? null;
-		const datums = message.data?.datums;
+		const callId = message.tool_result?.callId ?? canonicalCallId(message);
+		const datums = canonical?.datums;
 		if (Array.isArray(datums)) {
 			if (callId) completed.add(callId);
 			const call = callId ? calls.get(callId) : undefined;
 			// These identities belong only to rendering; the aggregate remains one durable arrival.
 			for (const [datumIndex, datum] of datums.entries()) {
+				const card = datum as ToolResult;
 				projected.push({ ...message, seq: order.get(message.message_id),
 					message_id: `${message.message_id}:datum:${datumIndex}`, role: 'tool',
-					tool_result: { ...datum, callId, tool: message.tool_result?.tool ?? correlation?.tool_name ?? call?.tool ?? null,
-						arguments: message.data?.arguments ?? call?.arguments,
-						startedAt: typeof message.data?.startedAt === 'string' ? message.data.startedAt :
+					tool_result: { ...card, callId,
+						tool: message.tool_result?.tool ?? correlation?.tool_name ?? call?.tool ?? null,
+						arguments: canonical?.arguments ?? call?.arguments,
+						startedAt: typeof canonical?.startedAt === 'string' ? canonical.startedAt :
 							typeof call?.message.data?.startedAt === 'string' ? call.message.data.startedAt : undefined,
-						durationMs: typeof message.data?.durationMs === 'number' ? message.data.durationMs : undefined,
-						reused: typeof message.data?.reused === 'boolean' ? message.data.reused : undefined,
-						requestState: datum.datumType === 'operator_question'
+						durationMs: typeof canonical?.durationMs === 'number' ? canonical.durationMs : undefined,
+						requestState: card.datumType === 'operator_question'
 							? unique.slice(index + 1).some((later) => later.role === 'user') ? 'answered' : terminal ? 'resolved' : 'waiting'
 							: undefined } });
 			}
@@ -215,10 +228,9 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 			result = {
 				...result,
 				callId: callId ?? null,
-				arguments: message.data?.arguments ?? result.arguments ?? (callId ? calls.get(callId)?.arguments : undefined),
-				durationMs: typeof message.data?.durationMs === 'number' ? message.data.durationMs : result.durationMs,
-				reused: typeof message.data?.reused === 'boolean' ? message.data.reused : result.reused,
-				startedAt: typeof message.data?.startedAt === 'string' ? message.data.startedAt :
+				arguments: canonical?.arguments ?? result.arguments ?? (callId ? calls.get(callId)?.arguments : undefined),
+				durationMs: typeof canonical?.durationMs === 'number' ? canonical.durationMs : result.durationMs,
+				startedAt: typeof canonical?.startedAt === 'string' ? canonical.startedAt :
 					result.startedAt ?? (typeof startedAt === 'string' ? startedAt : undefined)
 			};
 			if (result.datumType === 'operator_question') {
@@ -236,7 +248,6 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 		const outcome = notice?.data?.status === 'interrupted' ? 'interrupted' : terminal || notice ? 'unknown_outcome' : undefined;
 		projected.push({
 			...call.message, seq: order.get(call.message.message_id), message_id: call.message.role === 'tool' ? call.message.message_id : `pending:${callId}`, role: 'tool', body: '',
-			data: { ...call.message.data, toolCallId: callId },
 			tool_result: { tool: call.tool, callId, pending: !outcome, outcome, arguments: call.arguments,
 				startedAt: typeof call.message.data?.startedAt === 'string' ? call.message.data.startedAt : undefined,
 				ok: false, summary: '', structured: {}, text: '', failure: outcome ? {
@@ -262,8 +273,8 @@ export function buildNodeEntries({
 }: BuildNodeEntriesOptions): ScopeEntry[] {
 	const entries: ScopeEntry[] = [];
 	const resultIds = new Set(messages.flatMap((message) => {
-		const id = message.data?.toolCallId ?? message.tool_result?.callId ?? message.data?.sessionMessage?.content.correlation?.request_id;
-		return (message.tool_result || Array.isArray(message.data?.datums) || message.role === 'tool') &&
+		const id = message.tool_result?.callId ?? canonicalCallId(message);
+		return (message.tool_result || Array.isArray(canonicalResult(message)?.datums) || message.role === 'tool') &&
 			message.data?.toolActivity !== 'started' && typeof id === 'string' ? [id] : [];
 	}));
 	const uniqueEvents = [...new Map(events.map((event) => [event.eventId, event])).values()];
@@ -371,11 +382,12 @@ export function threadActivity(messages: ChatMessage[], events: ExecutionEvent[]
 	const entries = buildNodeEntries({ messages, events, terminal });
 	const latest = entries.findLast((entry) => entry.kind === 'assistant' ||
 		(entry.kind === 'message' && (entry.message.role === 'user' ||
-			(entry.message.role === 'assistant' && !!entry.message.body && !entry.message.data?.toolCalls))));
+			(entry.message.role === 'assistant' && !!entry.message.body &&
+				!entry.message.data?.sessionMessage?.content.requests?.length))));
 	const accepted = entries.find((entry) => entry.id === acceptedId);
 	const replied = accepted && entries.some((entry) => entry.order > accepted.order &&
 		(entry.kind === 'assistant' || (entry.kind === 'message' && entry.message.role === 'assistant' &&
-			!!entry.message.body && !entry.message.data?.toolCalls)));
+			!!entry.message.body && !entry.message.data?.sessionMessage?.content.requests?.length)));
 	return {
 		pending: !terminal && ((latest?.kind === 'message' && latest.message.role === 'user') ||
 			entries.some((entry) => entry.kind === 'message' && entry.message.tool_result?.pending)),

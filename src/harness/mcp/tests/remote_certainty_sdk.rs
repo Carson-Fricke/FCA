@@ -86,7 +86,9 @@ fn remote_mutation_loss_is_unknown_and_server_rejections_keep_detail_and_certain
         context.remote_transport = Some(Arc::new(Transport { response }));
         let server = mcp::create_server(context).unwrap();
         let result = server.handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-            "name": "run_backtest", "arguments": {"config": {"shell": "backtest", "run_id": "certainty"}}
+            "name": "run_backtest", "arguments": {"config": {"shell": "backtest", "run_id": "certainty",
+                "data": {"symbols": ["SPY"],
+                    "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}]}}}
         }})).unwrap();
         assert_eq!(result["result"]["isError"], true);
         assert_eq!(

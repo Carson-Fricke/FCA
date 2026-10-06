@@ -28,8 +28,8 @@ from ._support import (
     FakePrograms,
     _discovery_envelope,
     _hypothesis_envelope,
+    _inline_model,
     _kit,
-    _legacy_model,
     _model,
     _node_record,
     _phase_node_id,
@@ -52,7 +52,7 @@ def test_resolution_uses_accepted_commit_even_when_latest_changes() -> None:
         Programs(), WORKSPACE, StudyProgramReference.from_document(_model())
     )
     assert calls == ["a" * 40]
-    assert model.source == _legacy_model()["source"]
+    assert model.source == _inline_model()["source"]
     assert model.version == "b" * 64
     with pytest.raises(ResearchModelError, match="another workspace"):
         resolve_study_reference(
@@ -222,7 +222,7 @@ def test_reference_rebuild_is_io_free_and_historical_inline_is_replay_only(
     reference_state = rebuild_state(WORKSPACE, request.execution_id, transitions)
     assert reference_state.draft is not None
     assert isinstance(reference_state.draft.model, StudyProgramReference)
-    historical = {**_hypothesis_envelope(), "model": _legacy_model()}
+    historical = {**_hypothesis_envelope(), "model": _inline_model()}
     old_transition = replace(
         transitions[-1],
         from_phase="hypothesis_creation",
@@ -233,7 +233,7 @@ def test_reference_rebuild_is_io_free_and_historical_inline_is_replay_only(
     )
     assert historical_state.draft is not None
     assert isinstance(historical_state.draft.model, ResearchModel)
-    assert historical_state.draft.model.source == str(_legacy_model()["source"]).strip()
+    assert historical_state.draft.model.source == str(_inline_model()["source"]).strip()
     with pytest.raises(FalsificationComposeError):
         _draft_from_contract(historical)
 
@@ -326,7 +326,7 @@ def test_trials_executor_does_not_decode_unaccepted_inline_contract(
     kit = _kit(tmp_path, payloads=[], results=[])
     request = _request(kit)
     state = kit.workflow._reconstruct_state(request)
-    inline = {**_hypothesis_envelope(), "model": _legacy_model()}
+    inline = {**_hypothesis_envelope(), "model": _inline_model()}
     with pytest.raises(FalsificationComposeError):
         run_falsification_trials(
             cast(DevelopmentEngine, kit.workflow),

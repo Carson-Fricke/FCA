@@ -167,10 +167,6 @@ export interface ModelOutput {
 	activityKind: 'model_output';
 	invocationId?: string | null;
 	subAgentId?: string | null;
-	toolCallId?: string | null;
-	toolCalls?: {
-		[k: string]: unknown;
-	}[];
 	[k: string]: unknown;
 }
 export interface RuntimeTool {

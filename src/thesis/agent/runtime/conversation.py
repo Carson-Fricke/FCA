@@ -716,21 +716,8 @@ class Conversations:
         result = content.result
         if result is not None:
             detached = content.as_dict()["result"]
-            if isinstance(detached, Mapping):
-                for name in (
-                    "datums",
-                    "invocationId",
-                    "startedAt",
-                    "durationMs",
-                    "arguments",
-                ):
-                    if name in detached:
-                        payload[name] = detached[name]
-            correlation = content.correlation
-            if correlation is not None:
-                payload["toolCallId"] = correlation.request_id
-                payload["tool"] = correlation.tool_name
             if tool_result is None:
+                correlation = content.correlation
                 primary_type = content.source
                 raw_datums = (
                     detached.get("datums") if isinstance(detached, Mapping) else None
@@ -1304,14 +1291,6 @@ class Conversations:
         if turn.message.direction != "outgoing":
             return ()
         content = turn.message.content
-        calls = tuple(
-            {
-                "id": request.id,
-                "type": "function",
-                "function": {"name": request.name, "arguments": request.arguments},
-            }
-            for request in content.requests
-        )
         activity_call_id = (content.result or {}).get("toolCallId")
         reasoning = (content.result or {}).get("reasoning")
         root = context.sub_agent_id is None
@@ -1322,12 +1301,7 @@ class Conversations:
                 activity_call_id if isinstance(activity_call_id, str) else None,
             )
             if activity is not None
-            else ModelOutput(
-                context.sub_agent_id,
-                turn.invocation_id,
-                None,
-                calls,
-            )
+            else ModelOutput(context.sub_agent_id, turn.invocation_id)
         )
         data = {"turn": "assistant", **activity_data(metadata)}
         if activity is None:
@@ -1434,6 +1408,7 @@ class Conversations:
                 startedAt=started_at.isoformat(),
                 durationMs=int((time.monotonic() - started) * 1000),
                 arguments=dict(arguments),
+                toolCallId=call_id,
             )
             self.deliver_session_message(
                 Anchor(context.workspace_id, context.chat_id, context.sub_agent_id),
@@ -1444,7 +1419,6 @@ class Conversations:
                 ),
                 actor_id=context.actor_id,
                 body=result.text or f"{tool} result",
-                data={"tool": tool, "toolCallId": call_id, "toolActivity": "finished"},
                 tool_result=tool_result_payload(
                     call_id=call_id,
                     tool=tool,

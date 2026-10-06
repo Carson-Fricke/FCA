@@ -243,7 +243,7 @@ def test_listing_reports_committed_ids_versions_and_compact_configuration(
     assert alpha["bundleSha256"] == first["version"]
     assert alpha["sourceSha256"] == first["sourceSha256"]
     assert alpha["gitCommit"] == listing["gitCommit"]
-    assert alpha["interval"] is None
+    assert alpha["interval"] == "1min"
     assert alpha["symbols"] == ["SPY"]
     assert alpha["indicatorIds"] == []
     indicators = cast(
@@ -319,7 +319,6 @@ def test_validation_dependencies_and_unrelated_commits(
         configuration={
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-01-02T00:00:00Z",
-            "interval": "1min",
             "subscriptions": CONFIG["subscriptions"],
         },
     )
@@ -392,7 +391,6 @@ def test_indicator_wrapper_transitive_dependencies_and_cycles(
         configuration={
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-01-02T00:00:00Z",
-            "interval": "1min",
             "subscriptions": CONFIG["subscriptions"],
         },
     )
@@ -1068,7 +1066,7 @@ def test_latest_committed_source_configuration_and_both_symbol_scopes(
             {"data_type": "bars", "symbols": ["MSFT", "AAPL"], "interval": "1d"},
             {"data_type": "quote", "symbols": ["MSFT"]},
         ],
-        "data": {"requiredSymbols": ["MSFT", "AAPL"], "interval": "1d"},
+        "data": {"requiredSymbols": ["MSFT", "AAPL"]},
     }
     updated_source = service.template_source("study", config)
     updated = service.update(
@@ -1088,7 +1086,11 @@ def test_latest_committed_source_configuration_and_both_symbol_scopes(
     document = cast(dict[str, object], harness.calls[-1][1]["config"])
     instance = cast(list[dict[str, object]], document["strategy_instances"])[0]
     assert receipt["version"] == validated["version"] == updated["version"]
-    assert document["symbols"] == instance["symbols"] == ["AAPL", "MSFT"]
+    assert (
+        cast(dict[str, object], document["data"])["symbols"]
+        == instance["symbols"]
+        == ["AAPL", "MSFT"]
+    )
     assert cast(dict[str, object], instance["parameters"])["source"] == updated_source
     assert document["data"] == {
         "symbols": ["AAPL", "MSFT"],
@@ -1191,10 +1193,10 @@ def test_run_configuration_matches_native_authored_document_semantics(
     assert not {
         "subscriptions",
         "interval",
+        "symbols",
         "requiredSymbols",
         "required_symbols",
     }.intersection(document)
-    assert document["symbols"] == ["SPY"]
     assert document["data"] == {
         "snapshot_id": "pinned-data",
         "fingerprint": "b" * 64,
@@ -1213,7 +1215,7 @@ def test_run_configuration_matches_native_authored_document_semantics(
     service.run("workspace-one", "study", "ticks")
     tick_document = cast(dict[str, object], harness.calls[-1][1]["config"])
     assert "bar_interval" not in cast(dict[str, object], tick_document["data"])
-    assert tick_document["symbols"] == ["MSFT"]
+    assert cast(dict[str, object], tick_document["data"])["symbols"] == ["MSFT"]
 
 
 def test_existing_provider_and_raw_client_injection(
@@ -1672,7 +1674,7 @@ def test_native_study_validation_and_run_document_compile(
             "start": run_document["start"],
             "end": run_document["end"],
             "subscriptions": data["subscriptions"],
-            "symbols": run_document["symbols"],
+            "symbols": data["symbols"],
         },
     }
     requests = [

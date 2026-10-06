@@ -1,13 +1,12 @@
-"""Immutable runtime activity metadata and the single legacy wire decoder."""
+"""Immutable runtime activity metadata and its trusted wire codec."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Annotated, ClassVar, Literal, cast
 
-from pydantic import ConfigDict, Field, PlainSerializer, TypeAdapter
+from pydantic import ConfigDict, Field, TypeAdapter
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import JsonSchemaValue
 
@@ -25,22 +24,6 @@ _ACTIVITY_CONFIG = ConfigDict(
 )
 
 
-def _tool_calls_wire(
-    calls: tuple[Mapping[str, object], ...],
-) -> list[dict[str, object]]:
-    return [
-        {
-            **dict(call),
-            **(
-                {"function": dict(cast(Mapping[str, object], call["function"]))}
-                if isinstance(call.get("function"), Mapping)
-                else {}
-            ),
-        }
-        for call in calls
-    ]
-
-
 @dataclass(frozen=True, slots=True)
 class ExternalInput:
     __pydantic_config__: ClassVar[ConfigDict] = _ACTIVITY_CONFIG
@@ -53,35 +36,7 @@ class ModelOutput:
     __pydantic_config__: ClassVar[ConfigDict] = _ACTIVITY_CONFIG
     sub_agent_id: str | None = None
     invocation_id: str | None = None
-    tool_call_id: str | None = None
-    tool_calls: Annotated[
-        tuple[Mapping[str, object], ...],
-        PlainSerializer(_tool_calls_wire, return_type=list[dict[str, object]]),
-    ] = ()
     kind: Literal["model_output"] = "model_output"
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "tool_calls",
-            tuple(
-                MappingProxyType(
-                    {
-                        **dict(call),
-                        **(
-                            {
-                                "function": MappingProxyType(
-                                    dict(cast(Mapping[str, object], call["function"]))
-                                )
-                            }
-                            if isinstance(call.get("function"), Mapping)
-                            else {}
-                        ),
-                    }
-                )
-                for call in self.tool_calls
-            ),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +82,7 @@ def _text(value: object) -> str | None:
 
 
 def decode_activity(message: ChatMessage) -> Activity:
-    """Normalize persisted legacy metadata without branching in consumers."""
+    """Decode trusted runtime activity metadata without branching in consumers."""
     data = message.data or {}
     anchor = _text(data.get("subAgentId"))
     stage = data.get("toolActivity")
@@ -146,15 +101,8 @@ def decode_activity(message: ChatMessage) -> Activity:
         discriminator == "model_output"
         or invocation
         or message.role is MessageRole.ASSISTANT
-        or (data.get("toolCallId") and not data.get("deliveryKey"))
     ):
-        raw = data.get("toolCalls")
-        calls = (
-            tuple(item for item in raw if isinstance(item, Mapping))
-            if isinstance(raw, list | tuple)
-            else ()
-        )
-        return ModelOutput(anchor, invocation, _text(data.get("toolCallId")), calls)
+        return ModelOutput(anchor, invocation)
     key = _text(data.get("deliveryKey"))
     if discriminator == "delivery" or key or message.role is MessageRole.TOOL:
         return Delivery(anchor, key)
@@ -162,8 +110,8 @@ def decode_activity(message: ChatMessage) -> Activity:
 
 
 def activity_data(activity: Activity) -> dict[str, object]:
-    """Encode the existing timeline wire format from typed trusted metadata."""
-    data = cast(
+    """Encode the timeline activity wire from typed trusted metadata."""
+    return cast(
         dict[str, object],
         RUNTIME_ACTIVITY_ADAPTER.dump_python(
             activity,
@@ -172,12 +120,6 @@ def activity_data(activity: Activity) -> dict[str, object]:
             fallback=lambda value: dict(value) if isinstance(value, Mapping) else value,
         ),
     )
-    if isinstance(activity, ModelOutput):
-        if activity.tool_call_id is None:
-            data.pop("toolCallId")
-        if not activity.tool_calls:
-            data.pop("toolCalls")
-    return data
 
 
 def owns_anchor(message: ChatMessage, sub_agent_id: str | None) -> bool:
